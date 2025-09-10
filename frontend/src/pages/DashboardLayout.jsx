@@ -1,0 +1,68 @@
+import React, { useState, useEffect } from "react";
+import { Outlet } from "react-router-dom";
+import { Menu } from "lucide-react";
+import Sidebar from "../components/Sidebar";
+import SettingsSidebar from "../components/SettingsSidebar";
+
+function DashboardLayout() {
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [dateTime, setDateTime] = useState(new Date());
+
+  // Update date/time every second
+  useEffect(() => {
+    const timer = setInterval(() => setDateTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <div className="flex h-screen w-screen overflow-hidden bg-gray-100">
+      {/* Main Sidebar */}
+      <Sidebar
+        isOpen={isSidebarOpen}
+        toggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+        openSettingsSidebar={() => setIsSettingsOpen(true)}
+      />
+
+      {/* Settings Sidebar (slides beside main sidebar) */}
+      {isSettingsOpen && (
+        <SettingsSidebar onClose={() => setIsSettingsOpen(false)} />
+      )}
+
+      {/* Main content */}
+      <div className="flex flex-col flex-1">
+        {/* Top bar */}
+        <header className="flex items-center justify-between bg-white shadow px-4 py-2">
+          <button onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
+            <Menu className="w-6 h-6" />
+          </button>
+
+          {/* Center: Title */}
+          <h1 className="font-bold text-xl">CRM Dashboard</h1>
+
+          {/* Right: Date + User */}
+          <div className="flex items-center gap-6">
+            {/* Date & Time */}
+            <div className="text-gray-700 font-medium animate-pulse">
+              {dateTime.toLocaleDateString()} {dateTime.toLocaleTimeString()}
+            </div>
+
+            {/* User Avatar */}
+            <img
+              src="https://i.pravatar.cc/40"
+              alt="user"
+              className="rounded-full w-8 h-8"
+            />
+          </div>
+        </header>
+
+        {/* Page Outlet */}
+        <main className="flex-1 overflow-y-auto p-4">
+          <Outlet />
+        </main>
+      </div>
+    </div>
+  );
+}
+
+export default DashboardLayout;

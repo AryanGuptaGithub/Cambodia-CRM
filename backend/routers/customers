@@ -1,0 +1,84 @@
+const express = require("express");
+const router = express.Router();
+const Customer = require("../models/customer");
+
+router.get("/customers", async (req, res) => {
+  try {
+    const customers = await Customer.find();
+    res.json(customers);
+  } catch (err) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+
+router.get("/customers/:id", async (req, res) => {
+  try {
+    const customer = await Customer.findById(req.params.id);
+    if (!customer) return res.status(404).json({ message: "Customer not found" });
+    res.json(customer);
+  } catch (err) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.post("/customers", async (req, res) => {
+  try {
+    const newCustomer = new Customer(req.body);
+    const savedCustomer = await newCustomer.save();
+    res.status(201).json(savedCustomer);
+  } catch (err) {
+    res.status(400).json({ message: "Invalid data", error: err.message });
+  }
+});
+
+router.put("/customers/:id", async (req, res) => {
+  try {
+    const updatedCustomer = await Customer.findByIdAndUpdate(
+      req.params.id,
+      req.body,
+      { new: true, runValidators: true }
+    );
+    if (!updatedCustomer) return res.status(404).json({ message: "Customer not found" });
+    res.json(updatedCustomer);
+  } catch (err) {
+    res.status(400).json({ message: "Invalid data", error: err.message });
+  }
+});
+
+router.delete("/customers/:id", async (req, res) => {
+  try {
+    const deletedCustomer = await Customer.findByIdAndDelete(req.params.id);
+    if (!deletedCustomer) return res.status(404).json({ message: "Customer not found" });
+    res.json({ message: "Customer deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Import customers from Excel
+router.post('/customers/import', async (req, res) => {
+  try {
+    const customers = req.body;
+    console.log('values of customers, customers', customers);
+
+    if (!Array.isArray(customers)) {
+      return res.status(400).json({ message: "Invalid data format. Expected an array of customers." });
+    }
+
+    for (const customer of customers) {
+      if (!customer.name || !customer.phone || !customer.email || !customer.warehouse) {
+        return res.status(400).json({ message: "Missing required fields in one or more records." });
+      }
+
+      await Customer.create(customer);
+    }
+
+    res.status(200).json({ message: "Customers imported successfully." });
+  } catch (err) {
+    console.error("Import error:", err);
+    res.status(500).json({ message: "Failed to import customers." });
+  }
+});
+
+module.exports = router;
