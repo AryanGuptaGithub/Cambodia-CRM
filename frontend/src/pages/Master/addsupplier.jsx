@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 const AddSupplier = () => {
+  const backendUrl = "http://localhost:3001";
   const navigate = useNavigate();
   const [form, setForm] = useState({
     warehouse: "",
@@ -42,13 +43,36 @@ const AddSupplier = () => {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
     e.preventDefault();
-    if (validate()) {
-      console.log("Submitting supplier:", form);
-      navigate("/masterlayout/supplier");
+
+    if (!validate()) return;
+
+    try {
+      const response = await fetch(`${backendUrl}/api/Supplier`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to add customer");
+      }
+
+      alert("Suppiler added successfully!");
+      navigate("/masterlayout/customer");
+    } catch (error) {
+      alert(error.message);
     }
   };
+
+  // const handleSubmit = (e) => {
+  //   e.preventDefault();
+  //   if (validate()) {
+  //     console.log("Submitting supplier:", form);
+  //     navigate("/masterlayout/supplier");
+  //   }
+  // };
 
   const handleChange = (e) => {
     const { name, value, files } = e.target;

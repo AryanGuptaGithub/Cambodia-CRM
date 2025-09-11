@@ -71,11 +71,12 @@ import AddSupplier from './pages/Master/addsupplier';
 import AddCustomer from './pages/Master/addcustomer';
 import StockTransferForm from './pages/StockTransferForm';
 import AddProductForm from './pages/ProductManager/addProduct';
+import { Toaster } from "react-hot-toast";
 
 function App ()  {
   return (
     <>
-
+         <Toaster position="bottom-right" reverseOrder={false} />
         <Routes>
           <Route path="/login " element={<Login />} />
           <Route path="/" element={<DashboardLayout />}>
