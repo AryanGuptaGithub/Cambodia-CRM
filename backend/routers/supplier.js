@@ -2,17 +2,18 @@ const express = require("express");
 const router = express.Router();
 const Supplier = require("../models/supplier");
 
-router.get("/customers", async (req, res) => {
+router.get("/suppliers", async (req, res) => {
   try {
+    console.log('values of req', req);
     const supplier = await Supplier.find();
+    console.log('values of supplier', supplier);
     res.json(supplier);
   } catch (err) {
     res.status(500).json({ message: "Server error" });
   }
 });
 
-
-router.get("/customers/:id", async (req, res) => {
+router.get("/suppliers/:id", async (req, res) => {
   try {
     const supplier = await Supplier.findById(req.params.id);
     if (!supplier) return res.status(404).json({ message: "Supplier not found" });
@@ -22,7 +23,7 @@ router.get("/customers/:id", async (req, res) => {
   }
 });
 
-router.post("/customers", async (req, res) => {
+router.post("/suppliers", async (req, res) => {
   try {
     const newSupplier = new Supplier(req.body);
     const savedSupplier = await newSupplier.save();
@@ -32,7 +33,7 @@ router.post("/customers", async (req, res) => {
   }
 });
 
-router.put("/customers/:id", async (req, res) => {
+router.put("/suppliers/:id", async (req, res) => {
   try {
     const updatedSupplier = await Supplier.findByIdAndUpdate(
       req.params.id,
@@ -46,7 +47,7 @@ router.put("/customers/:id", async (req, res) => {
   }
 });
 
-router.delete("/customers/:id", async (req, res) => {
+router.delete("/suppliers/:id", async (req, res) => {
   try {
     const deletedSupplier = await Supplier.findByIdAndDelete(req.params.id);
     if (!deletedSupplier) return res.status(404).json({ message: "Supplier not found" });
@@ -56,12 +57,12 @@ router.delete("/customers/:id", async (req, res) => {
   }
 });
 
-router.delete("/customers", async (req, res) => {
+router.delete("/suppliers", async (req, res) => {
   try {
     const { ids } = req.body;
 
     if (!Array.isArray(ids) || ids.length === 0) {
-      return res.status(400).json({ message: "No customer IDs provided" });
+      return res.status(400).json({ message: "No Suppiler IDs provided" });
     }
 
     const result = await Supplier.deleteMany({ _id: { $in: ids } });
@@ -77,7 +78,7 @@ router.delete("/customers", async (req, res) => {
 
 
 // Import customers from Excel
-router.post('/customers/import', async (req, res) => {
+router.post('/suppliers/import', async (req, res) => {
   try {
     const suppilers = req.body;
     if (!Array.isArray(suppilers)) {
@@ -89,7 +90,7 @@ router.post('/customers/import', async (req, res) => {
         return res.status(400).json({ message: "Missing required fields in one or more records." });
       }
 
-      await Supplier.create(customer);
+      await Supplier.create(suppiler);
     }
 
     res.status(200).json({ message: "Supplier imported successfully." });

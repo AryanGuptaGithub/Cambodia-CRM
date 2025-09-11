@@ -4,6 +4,7 @@ const dotenv = require("dotenv");
 const cors = require("cors");
 const connectDB = require("./utils/db");
 const customerRoutes = require('./routers/customers');
+const suppilerRoutes = require('./routers/supplier');
 
 
 dotenv.config(); // Load environment variables
@@ -22,7 +23,8 @@ connectDB(process.env.MONGODB_URI);
 app.use(express.json());
 
 // Routes
-app.use("/api", customerRoutes); 
+app.use("/api", customerRoutes);
+app.use("/api", suppilerRoutes); 
 
 // Server listener
 app.listen(PORT, () => {

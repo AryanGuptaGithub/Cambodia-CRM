@@ -1,154 +1,183 @@
-import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  UserPlus,
-  Upload,
-  Search,
-  Eye,
-  Edit,
-  Trash2,
-  X,
-} from "lucide-react";
+import { UserPlus, Upload, Search, Eye, Edit, Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import axios from "axios";
+import { confirmDialog } from "../../utils/confirmationDialog";
+import { showToast } from "../../utils/toast";
+import * as XLSX from "xlsx";
+
+const backendUrl = "http://localhost:3001";
+const suppliersPerPage = 5;
 
 const Supplier = () => {
   const navigate = useNavigate();
-  const [search, setSearch] = useState("");
-  const [activeTab, setActiveTab] = useState("All");
- const [suppliers, setSuppliers] = useState([
-  {
-    id: 1,
-    name: "Mihir Patel",
-    email: "mihir@example.com",
-    createdAt: "2025-08-01",
-    balance: 1200,
-    status: "To Collect",
-    enabled: true,
-  },
-  {
-    id: 2,
-    name: "Ananya Sharma",
-    email: "ananya@example.com",
-    createdAt: "2025-08-03",
-    balance: -800,
-    status: "To Pay",
-    enabled: false,
-  },
-  {
-    id: 3,
-    name: "Ravi Kumar",
-    email: "ravi@example.com",
-    createdAt: "2025-08-10",
-    balance: 500,
-    status: "To Collect",
-    enabled: true,
-  },
-  {
-    id: 4,
-    name: "Neha Mehta",
-    email: "neha@example.com",
-    createdAt: "2025-08-12",
-    balance: -300,
-    status: "To Pay",
-    enabled: false,
-  },
-  {
-    id: 5,
-    name: "Arjun Verma",
-    email: "arjun@example.com",
-    createdAt: "2025-08-14",
-    balance: 2500,
-    status: "To Collect",
-    enabled: true,
-  },
-  {
-    id: 6,
-    name: "Sneha Joshi",
-    email: "sneha@example.com",
-    createdAt: "2025-08-15",
-    balance: -1500,
-    status: "To Pay",
-    enabled: true,
-  },
-  {
-    id: 7,
-    name: "Rahul Desai",
-    email: "rahul@example.com",
-    createdAt: "2025-08-16",
-    balance: 0,
-    status: "To Collect",
-    enabled: false,
-  },
-  {
-    id: 8,
-    name: "Kritika Nair",
-    email: "kritika@example.com",
-    createdAt: "2025-08-17",
-    balance: 800,
-    status: "To Collect",
-    enabled: true,
-  },
-  {
-    id: 9,
-    name: "Vikas Malhotra",
-    email: "vikas@example.com",
-    createdAt: "2025-08-18",
-    balance: -600,
-    status: "To Pay",
-    enabled: true,
-  },
-  {
-    id: 10,
-    name: "Ishita Roy",
-    email: "ishita@example.com",
-    createdAt: "2025-08-20",
-    balance: 100,
-    status: "To Collect",
-    enabled: false,
-  },
-]);
+
+  const [supplier, setSupplier] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   const [selected, setSelected] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
-const suppliersPerPage = 5; // Show 5 suppliers per page
 
-  // Popup state
+  const [activeTab, setActiveTab] = useState("All");
+  const [search, setSearch] = useState("");
+
   const [showImportModal, setShowImportModal] = useState(false);
-  const [file, setFile] = useState(null);
+  const [parsedData, setParsedData] = useState([]);
 
-  // Handle checkbox selection
+  // Fetch suppliers
+  useEffect(() => {
+    const fetchSuppliers = async () => {
+      try {
+        const response = await fetch(`${backendUrl}/api/suppliers`);
+        if (!response.ok) throw new Error("Failed to fetch suppliers");
+        const data = await response.json();
+        setSupplier(data);
+      } catch (err) {
+        setError(err.message || "Something went wrong");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchSuppliers();
+  }, []);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, search]);
+
+  // Filtered + searched + tabbed suppliers
+  const filteredSuppliers = useMemo(() => {
+    return supplier.filter((s) => {
+      const matchesTab =
+        activeTab === "All" ||
+        (activeTab === "To Collect" && s.status === "To Collect") ||
+        (activeTab === "To Pay" && s.status === "To Pay");
+
+      const matchesSearch =
+        s.name.toLowerCase().includes(search.toLowerCase()) ||
+        s.email.toLowerCase().includes(search.toLowerCase());
+
+      return matchesTab && matchesSearch;
+    });
+  }, [supplier, activeTab, search]);
+
+  // Pagination logic
+  const totalPages = Math.ceil(filteredSuppliers.length / suppliersPerPage);
+  const currentSuppliers = filteredSuppliers.slice(
+    (currentPage - 1) * suppliersPerPage,
+    currentPage * suppliersPerPage
+  );
+
+  // Select/unselect supplier
   const toggleSelect = (id) => {
     setSelected((prev) =>
       prev.includes(id) ? prev.filter((sid) => sid !== id) : [...prev, id]
     );
   };
 
-  const handleDeleteSelected = () => {
-    setSuppliers((prev) => prev.filter((s) => !selected.includes(s.id)));
-    setSelected([]);
+  const toggleSelectAll = (checked) => {
+    setSelected(checked ? currentSuppliers.map((s) => s._id) : []);
   };
 
-  // Filter by search
-  const filteredSuppliers = suppliers.filter(
-    (s) =>
-      s.name.toLowerCase().includes(search.toLowerCase()) ||
-      s.email.toLowerCase().includes(search.toLowerCase())
-  );
+  // Delete selected
+  const handleDeleteSelected = async () => {
+    const confirm = await confirmDialog({
+      text: `Are you sure you want to delete ${selected.length} suppliers?`,
+      icon: "warning",
+      confirmButtonText: "Yes, delete",
+      cancelButtonText: "Cancel",
+    });
 
-const filteredByTab = filteredSuppliers.filter((s) => {
-  if (activeTab === "To Collect") return s.status === "To Collect";
-  if (activeTab === "To Pay") return s.status === "To Pay";
-  return true;
-});
+    if (confirm.isConfirmed) {
+      try {
+        const res = await axios.delete(`${backendUrl}/api/suppliers`, {
+          data: { ids: selected },
+        });
 
-const indexOfLastSupplier = currentPage * suppliersPerPage;
-const indexOfFirstSupplier = indexOfLastSupplier - suppliersPerPage;
-const currentSuppliers = filteredByTab.slice(indexOfFirstSupplier, indexOfLastSupplier);
-const totalPages = Math.ceil(filteredByTab.length / suppliersPerPage);
+        if (res.status === 200) {
+          showToast("success", "Suppliers deleted successfully");
+          const refreshed = await fetch(`${backendUrl}/api/suppliers`);
+          const updated = await refreshed.json();
+          setSupplier(updated);
+          setSelected([]);
+        }
+      } catch (err) {
+        showToast("error", "Failed to delete suppliers.");
+      }
+    } else {
+      setSelected([]); // uncheck all if user cancels
+    }
+  };
 
-// At the bottom of Supplier component
-useEffect(() => {
-  setCurrentPage(1);
-}, [activeTab, search]);
+  // Delete one
+  const deleteSupplier = async (supplier) => {
+    const confirm = await confirmDialog({
+      text: `Are you sure you want to delete ${supplier.name}?`,
+      icon: "warning",
+      confirmButtonText: "Yes, delete",
+      cancelButtonText: "Cancel",
+    });
+
+    if (confirm.isConfirmed) {
+      try {
+        const res = await axios.delete(
+          `${backendUrl}/api/suppliers/${supplier._id}`
+        );
+
+        if (res.status === 200) {
+          showToast("success", "Supplier deleted");
+          const refreshed = await fetch(`${backendUrl}/api/suppliers`);
+          const updated = await refreshed.json();
+          setSupplier(updated);
+        }
+      } catch (err) {
+        showToast("error", "Failed to delete supplier.");
+      }
+    }
+  };
+
+  // Handle file upload
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const data = new Uint8Array(evt.target.result);
+      const workbook = XLSX.read(data, { type: "array" });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const jsonData = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+      setParsedData(jsonData);
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  // Import suppliers
+  const handleImport = async () => {
+    if (parsedData.length === 0) {
+      showToast("warning", "Please upload a file first");
+      return;
+    }
+
+    try {
+      const res = await axios.post(`${backendUrl}/api/suppliers/import`, parsedData);
+      if (res.status === 200) {
+        showToast("success", "Suppliers imported successfully");
+        setShowImportModal(false);
+        const refreshed = await fetch(`${backendUrl}/api/suppliers`);
+        const updated = await refreshed.json();
+        setSupplier(updated);
+      }
+    } catch (err) {
+      showToast("error", "Import failed");
+    }
+  };
+
+  if (loading) return <p>Loading...</p>;
+  if (error) return <p className="text-red-500">{error}</p>;
 
   return (
     <div className="p-6">
@@ -170,7 +199,7 @@ useEffect(() => {
           </button>
           <button
             onClick={() => setShowImportModal(true)}
-             className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md"
+            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md"
           >
             <Upload size={18} /> Import CSV
           </button>
@@ -219,27 +248,31 @@ useEffect(() => {
 
       {/* Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-        <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden">
+        <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center">
           <thead className="bg-gray-100 text-gray-700">
             <tr>
               <th className="p-3">
                 <input
                   type="checkbox"
-              checked={selected.length === currentSuppliers.length && currentSuppliers.length > 0}
-
+                  checked={
+                    selected.length === currentSuppliers.length &&
+                    currentSuppliers.length > 0
+                  }
                   onChange={(e) =>
                     setSelected(
-                      e.target.checked ? displayedSuppliers.map((s) => s.id) : []
+                      e.target.checked
+                        ? displayedSuppliers.map((s) => s.id)
+                        : []
                     )
                   }
                 />
               </th>
-              <th className="p-3 text-left">Name</th>
-              <th className="p-3 text-left">Email</th>
-              <th className="p-3 text-left">Created At</th>
-              <th className="p-3 text-left">Balance</th>
-              <th className="p-3 text-left">Enabled</th>
-              <th className="p-3 text-center">Action</th>
+              <th className="p-3">Name</th>
+              <th className="p-3">Email</th>
+              <th className="p-3">Created At</th>
+              <th className="p-3">Balance</th>
+              <th className="p-3">Enabled</th>
+              <th className="p-3">Action</th>
             </tr>
           </thead>
           <tbody>
@@ -301,38 +334,41 @@ useEffect(() => {
         </table>
 
         {/* Pagination */}
-<div className="mt-4 flex justify-center gap-2">
-  <button
-    onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-    disabled={currentPage === 1}
-    className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
-  >
-    Prev
-  </button>
+        <div className="mt-4 flex justify-start gap-2 p-5">
+          <button
+            onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+            disabled={currentPage === 1}
+            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
+          >
+            Prev
+          </button>
 
-  {Array.from({ length: totalPages }, (_, index) => index + 1).map((page) => (
-    <button
-      key={page}
-      onClick={() => setCurrentPage(page)}
-      className={`px-3 py-1 rounded ${
-        currentPage === page
-          ? "bg-indigo-600 text-white"
-          : "bg-gray-200 hover:bg-gray-300"
-      }`}
-    >
-      {page}
-    </button>
-  ))}
+          {Array.from({ length: totalPages }, (_, index) => index + 1).map(
+            (page) => (
+              <button
+                key={page}
+                onClick={() => setCurrentPage(page)}
+                className={`px-3 py-1 rounded ${
+                  currentPage === page
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 hover:bg-gray-300"
+                }`}
+              >
+                {page}
+              </button>
+            )
+          )}
 
-  <button
-    onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
-    disabled={currentPage === totalPages}
-    className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
-  >
-    Next
-  </button>
-</div>
-
+          <button
+            onClick={() =>
+              setCurrentPage((prev) => Math.min(prev + 1, totalPages))
+            }
+            disabled={currentPage === totalPages}
+            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
+          >
+            Next
+          </button>
+        </div>
       </div>
 
       {/* Import CSV Modal */}

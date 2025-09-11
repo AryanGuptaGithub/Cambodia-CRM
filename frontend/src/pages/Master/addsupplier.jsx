@@ -49,12 +49,12 @@ const AddSupplier = () => {
     if (!validate()) return;
 
     try {
-      const response = await fetch(`${backendUrl}/api/Supplier`, {
+      const response = await fetch(`${backendUrl}/api/suppliers`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
-
+      console.log('values of  res', response);
       if (!response.ok) {
         throw new Error("Failed to add customer");
       }
