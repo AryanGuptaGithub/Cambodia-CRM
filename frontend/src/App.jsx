@@ -72,10 +72,12 @@ import AddCustomer from './pages/Master/addcustomer';
 import StockTransferForm from './pages/StockTransferForm';
 import AddProductForm from './pages/ProductManager/addProduct';
 import { Toaster } from "react-hot-toast";
+import TopTabs from './pages/Utility/TopTabs';
 
 function App ()  {
   return (
-    <>
+    <>   
+     <TopTabs />
          <Toaster position="bottom-right" reverseOrder={false} />
         <Routes>
           <Route path="/login " element={<Login />} />
