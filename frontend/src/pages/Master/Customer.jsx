@@ -347,7 +347,7 @@ const handleImport = async () => {
                       checked={selected.includes(customer._id)}
                       onChange={() => toggleSelect(customer)}
                     />
-                    <span class="capitalize">{customer.name}</span>
+                    <span className="capitalize">{customer.name}</span>
                   </div>
                 </td>
                 <td className="p-3">{customer.email}</td>

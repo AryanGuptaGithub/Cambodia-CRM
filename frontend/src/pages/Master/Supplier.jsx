@@ -220,14 +220,7 @@ const Supplier = () => {
   if (error) return <p className="text-red-500">{error}</p>;
 
   return (
-    <div className="p-6">
-      {/* Breadcrumb */}
-      <div className="text-sm text-gray-500 mb-4">
-        Dashboard <span className="mx-2">{">"}</span> Master{" "}
-        <span className="mx-2">{">"}</span>{" "}
-        <span className="font-semibold text-gray-700">Supplier</span>
-      </div>
-
+    <div className="p-6">  
       {/* Top bar */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
         <div className="flex gap-3 flex-wrap">
