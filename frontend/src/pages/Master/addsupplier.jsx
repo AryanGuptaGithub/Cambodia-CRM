@@ -48,13 +48,13 @@ const AddSupplier = () => {
     e.preventDefault();
 
     if (!validate()) return;
-    
+
     try {
       const response = await fetch(`${backendUrl}/api/suppliers`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
-      });
+      }); 
 
       const data = await response.json();
 
@@ -65,7 +65,7 @@ const AddSupplier = () => {
       showToast("success", data.message);
       navigate("/masterlayout/customer");
     } catch (error) {
-      showToast("error", error.message); 
+      showToast("error", error.message);
     }
   };
 

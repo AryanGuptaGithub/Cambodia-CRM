@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { showToast } from "../../utils/toast";
 
 const AddCustomer = () => {
   const backendUrl = "http://localhost:3001";
@@ -55,14 +56,17 @@ const AddCustomer = () => {
         body: JSON.stringify(form),
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        throw new Error("Failed to add customer");
+        showToast("error", data.message || "Something went wrong");
+        return;
       }
 
-      alert("Customer added successfully!");
+      showToast("success", data.message || "Customer added successfully");
       navigate("/masterlayout/customer");
     } catch (error) {
-      alert(error.message);
+      showToast("error", error.message || "Network error");
     }
   };
 

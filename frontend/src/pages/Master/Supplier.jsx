@@ -5,6 +5,7 @@ import axios from "axios";
 import { confirmDialog } from "../../utils/confirmationDialog";
 import { showToast } from "../../utils/toast";
 import * as XLSX from "xlsx";
+import {formatDateToReadable} from '../../utils/dateUtil';
 
 const backendUrl = "http://localhost:3001";
 const suppliersPerPage = 5;
@@ -111,7 +112,7 @@ const Supplier = () => {
   // Delete selected
   const handleDeleteSelected = async () => {
     const confirm = await confirmDialog({
-      text: `Are you sure you want to delete ${selected.length} suppliers?`,
+      text: `Are you sure you want to delete <b>${selected.length}</b> suppliers?`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
@@ -141,7 +142,7 @@ const Supplier = () => {
   // Delete one
   const deleteSupplier = async (supplier) => {
     const confirm = await confirmDialog({
-      text: `Are you sure you want to delete ${supplier.name}?`,
+      text: `Are you sure you want to delete <b>${supplier.name}</b>?`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
@@ -154,13 +155,13 @@ const Supplier = () => {
         );
 
         if (res.status === 200) {
-          showToast("success", `Suppiler ${supplier.name} delete successfully`);
+          showToast("success", res.data.message);
           const refreshed = await fetch(`${backendUrl}/api/suppliers`);
           const updated = await refreshed.json();
           setSupplier(updated);
         }
       } catch (err) {
-        showToast("error", "Failed to delete supplier.");
+        showToast("error", error.message);
       }
     }
   };
@@ -310,7 +311,7 @@ const Supplier = () => {
                 </td>
                 <td className="p-3">{supplier.name}</td>
                 <td className="p-3">{supplier.email}</td>
-                <td className="p-3">{supplier.createdAt}</td>
+                <td className="p-3">{formatDateToReadable(supplier.createdAt)}</td>
                 <td
                   className={`p-3 font-medium ${
                     supplier.balance < 0 ? "text-red-600" : "text-green-600"

@@ -6,6 +6,7 @@ import axios from "axios";
 import SampleCSVDownload from "../../excels/SampleCSVDownload";
 import { showToast } from "../../utils/toast";
 import { confirmDialog } from "../../utils/confirmationDialog";
+import {formatDateToReadable} from '../../utils/dateUtil';
 
 const backendUrl = "http://localhost:3001";
 const customersPerPage = 5;
@@ -103,25 +104,15 @@ const Customer = () => {
   };
 
   const toggleSelectAll = (checked) => {
-    if (checked) {
-      const allSelected = currentCustomers.map((c) => ({
-        id: c._id,
-        name: c.name,
-      }));
-      setSelected(allSelected);
-    } else {
-      setSelected([]);
-    }
+    setSelected(checked ? currentCustomers.map((s) => s._id) : []);
   };
-
   const handleDeleteSelected = async () => {
-        console.log('valkues of allSelected 118', selected);
     const confirm = await confirmDialog({
-      text: `Are you sure you want to delete ${selected.length} customers`,
+      text: `Are you sure you want to delete <b>${selected.length}</b> customers`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
-      selected
+      selected,
     });
 
     if (confirm.isConfirmed) {
@@ -164,11 +155,10 @@ const Customer = () => {
     if (!customer._id) return;
     const confirmDelete = await confirmDialog({
       title: "Delete",
-      text: `Are you sure you want to delete ${customer.name}?`,
+      text: `Are you sure you want to delete <b>${customer.name}</b>?`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
-      
     });
 
     if (confirmDelete.isConfirmed) {
@@ -180,7 +170,7 @@ const Customer = () => {
         if (res.status === 200) {
           showToast(
             "success",
-            `Customer ${customer.name} deleted successfully`
+            `Customer <b>${customer.name}</b> deleted successfully`
           );
           const updated = await axios.get(`${backendUrl}/api/customers`);
           setCustomers(updated.data);
@@ -209,28 +199,41 @@ const Customer = () => {
   };
 
   // Import parsed customers to backend
-  const handleImport = async () => {
-    if (parsedData.length === 0) {
-      showToast("warning", "Please upload a valid file first");
-      return;
+const handleImport = async () => {
+  if (parsedData.length === 0) {
+    showToast("warning", "Please upload a valid file first");
+    return;
+  }
+
+  try {
+    const res = await axios.post(`${backendUrl}/api/customers/import`, parsedData);
+
+    // If import is successful
+    if (res.status === 200) {
+      showToast("success", res.data.message || "Customers imported successfully!");
+      setShowImportModal(false);
+
+      // Refresh customer list
+      const updated = await fetch(`${backendUrl}/api/customers`);
+      setCustomers(await updated.json());
     }
-    try {
-      const res = await axios.post(
-        `${backendUrl}/api/customers/import`,
-        parsedData
-      );
-      if (res.status === 200) {
-        showToast("success", "Customers imported successfully!");
-        setShowImportModal(false);
-        // Reload customers after import
-        const updated = await fetch(`${backendUrl}/api/customers`);
-        setCustomers(await updated.json());
-      }
-    } catch (err) {
-      console.error(err);
-      showToast("error", "Failed to import customers.");
+  } catch (err) {
+    console.error("Import error:", err);
+
+    // Handle backend validation errors (400) and server errors (500)
+    if (err.response) {
+      const { message } = err.response.data;
+
+      // Optional: sanitize HTML tags from message (if needed)
+      const cleanMessage = message.replace(/<[^>]+>/g, '');
+
+      showToast("error", cleanMessage || "Failed to import customers.");
+    } else {
+      showToast("error", "Network error. Please try again.");
     }
-  };
+  }
+};
+
 
   // Update customer on backend
   const handleUpdateCustomer = async (e) => {
@@ -349,7 +352,7 @@ const Customer = () => {
                 </td>
                 <td className="p-3">{customer.email}</td>
                 <td className="p-3">{customer.warehouse}</td>
-                <td className="p-3">{customer.createdAt}</td>
+                <td className="p-3">{formatDateToReadable(customer.createdAt)}</td>
                 <td
                   className={`p-3 font-medium ${
                     customer.type == "pay" ? "text-red-600" : "text-green-600"

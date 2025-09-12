@@ -31,32 +31,30 @@ router.post("/suppliers", async (req, res) => {
     const newSupplier = new Supplier(req.body);
     const savedSupplier = await newSupplier.save();
 
-    console.log("values of savedSupplier", savedSupplier);
-
     res.status(201).json({
-      message: `Supplier ${savedSupplier.name} created successfully`,
-      Ok: true,
+      message: `Supplier <b>${savedSupplier.name}</b> created successfully`,
+      ok: true,
     });
   } catch (err) {
+
     if (err.code === 11000) {
-      const duplicateField = Object.keys(err.keyPattern)[0]; // e.g., "email"
-      const duplicateValue = err.keyValue[duplicateField];   // e.g., "test@example.com"
+      const duplicateField = Object.keys(err.keyPattern)[0]; 
+      const duplicateValue = err.keyValue[duplicateField];  
 
       return res.status(400).json({
-        message: `A supplier with this ${duplicateField} ${duplicateValue} already exists.`,
+        message: `A supplier with this ${duplicateField} <b style="color:#EF4444">${duplicateValue}</b> already exists.`,
         field: duplicateField,
-        Ok: false,
+        ok: false,
       });
     }
 
     res.status(400).json({
       message: "Invalid data provided",
       error: err.message,
-      Ok: false,
+      ok: false,
     });
   }
 });
-
 
 router.put("/suppliers/:id", async (req, res) => {
   try {
@@ -76,11 +74,15 @@ router.put("/suppliers/:id", async (req, res) => {
 router.delete("/suppliers/:id", async (req, res) => {
   try {
     const deletedSupplier = await Supplier.findByIdAndDelete(req.params.id);
+
     if (!deletedSupplier)
       return res.status(404).json({ message: "Supplier not found" });
-    res.json({ message: "Supplier deleted successfully" });
+    res.json({
+      message: `Supplier <b>${deletedSupplier.name}</b> deleted successfully`,
+      Ok: true,
+    });
   } catch (err) {
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Server error", Ok: false });
   }
 });
 
