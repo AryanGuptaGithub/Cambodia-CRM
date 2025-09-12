@@ -5,7 +5,7 @@ const cors = require("cors");
 const connectDB = require("./utils/db");
 const customerRoutes = require('./routers/customers');
 const suppilerRoutes = require('./routers/supplier');
-
+const authRoutes = require('./routers/authRoutes'); 
 
 dotenv.config(); // Load environment variables
 
@@ -40,7 +40,7 @@ app.use(express.json());
 // Routes
 app.use("/api", customerRoutes);
 app.use("/api", suppilerRoutes); 
-
+app.use("/api", authRoutes);
 // Server listener
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
