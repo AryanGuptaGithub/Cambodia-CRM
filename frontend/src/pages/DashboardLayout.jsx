@@ -3,12 +3,16 @@ import { Outlet } from "react-router-dom";
 import { Menu } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import SettingsSidebar from "../components/SettingsSidebar";
-
+import { useNavigate } from 'react-router-dom';
 function DashboardLayout() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [dateTime, setDateTime] = useState(new Date());
+  const navigate = useNavigate();
 
+  const handleClick = () => {
+    navigate('/login'); // ✅ Navigate to login page
+  };
   // Update date/time every second
   useEffect(() => {
     const timer = setInterval(() => setDateTime(new Date()), 1000);
@@ -48,11 +52,13 @@ function DashboardLayout() {
             </div>
 
             {/* User Avatar */}
-            <img
+           <button onClick={handleClick}>
+             <img
               src="https://i.pravatar.cc/40"
               alt="user"
               className="rounded-full w-8 h-8"
             />
+           </button>
           </div>
         </header>
 
