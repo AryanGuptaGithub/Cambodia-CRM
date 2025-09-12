@@ -72,8 +72,8 @@ const Supplier = () => {
     return supplier.filter((s) => {
       const matchesTab =
         activeTab === "All" ||
-        (activeTab === "To Collect" && s.status === "To Collect") ||
-        (activeTab === "To Pay" && s.status === "To Pay");
+        (activeTab === "To Collect" && s.type === "pay") ||
+        (activeTab === "To Pay" && s.type === "receive");
 
       const matchesSearch =
         s.name.toLowerCase().includes(search.toLowerCase()) ||
