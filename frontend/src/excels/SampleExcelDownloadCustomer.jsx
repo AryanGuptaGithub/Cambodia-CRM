@@ -1,7 +1,7 @@
 import React from "react";
 import ExcelJS from "exceljs";
 
-const SampleExcelDownload = () => {
+const SampleExcelDownloadCustomer = () => {
 
   const generateExcel = async () => {
     const workbook = new ExcelJS.Workbook();
@@ -101,4 +101,4 @@ const SampleExcelDownload = () => {
   );
 };
 
-export default SampleExcelDownload;
+export default SampleExcelDownloadCustomer;

@@ -2,6 +2,31 @@ const express = require("express");
 const router = express.Router();
 const Supplier = require("../models/supplier");
 
+// ✅ Utility: Common error handler
+const handleServerError = (res, err, message = "Server error", code = 500) => {
+  console.error("❌ [ERROR]:", err);
+  res.status(code).json({ message, error: err.message || err });
+};
+
+// ✅ Utility: Duplicate key error handler
+const handleDuplicateError = (res, err) => {
+  let duplicateField = "field";
+  let duplicateValue = "value";
+
+  try {
+    duplicateField = Object.keys(err.keyPattern || {})[0];
+    duplicateValue = err.keyValue?.[duplicateField] || "Unknown";
+  } catch (parseErr) {
+    console.error("❌ Error parsing duplicate key info:", parseErr);
+  }
+
+  return res.status(400).json({
+    message: `A customer with this ${duplicateField} <b style="color:#EF4444">${duplicateValue}</b> already exists.`,
+    field: duplicateField,
+    ok: false,
+  });
+};
+
 router.get("/suppliers", async (req, res) => {
   try {
     const supplier = await Supplier.find();
