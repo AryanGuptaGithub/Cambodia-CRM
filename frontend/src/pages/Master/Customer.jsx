@@ -88,25 +88,40 @@ const Customer = () => {
   );
 
   // Select/unselect a customer by id
-  const toggleSelect = (id) => {
+  const toggleSelect = (customer) => {
     setSelected((prev) => {
-      const updatedSelection = prev.includes(id)
-        ? prev.filter((sid) => sid !== id)
-        : [...prev, id];
-      return updatedSelection;
+      const exists = prev.some((c) => c.id === customer.id);
+
+      if (exists) {
+        // Remove if already selected
+        return prev.filter((c) => c.id !== customer.id);
+      } else {
+        // Add new selection
+        return [...prev, { id: customer.id, name: customer.name }];
+      }
     });
   };
 
   const toggleSelectAll = (checked) => {
-    setSelected(checked ? currentCustomers.map((c) => c._id) : []);
+    if (checked) {
+      const allSelected = currentCustomers.map((c) => ({
+        id: c._id,
+        name: c.name,
+      }));
+      setSelected(allSelected);
+    } else {
+      setSelected([]);
+    }
   };
 
   const handleDeleteSelected = async () => {
+        console.log('valkues of allSelected 118', selected);
     const confirm = await confirmDialog({
       text: `Are you sure you want to delete ${selected.length} customers`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
+      selected
     });
 
     if (confirm.isConfirmed) {
@@ -153,6 +168,7 @@ const Customer = () => {
       icon: "warning",
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
+      
     });
 
     if (confirmDelete.isConfirmed) {
@@ -326,7 +342,7 @@ const Customer = () => {
                     <input
                       type="checkbox"
                       checked={selected.includes(customer._id)}
-                      onChange={() => toggleSelect(customer._id)}
+                      onChange={() => toggleSelect(customer)}
                     />
                     <span>{customer.name}</span>
                   </div>

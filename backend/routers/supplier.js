@@ -4,9 +4,7 @@ const Supplier = require("../models/supplier");
 
 router.get("/suppliers", async (req, res) => {
   try {
-    console.log('values of req', req);
     const supplier = await Supplier.find();
-    console.log('values of supplier', supplier);
     res.json(supplier);
   } catch (err) {
     res.status(500).json({ message: "Server error" });
@@ -16,7 +14,8 @@ router.get("/suppliers", async (req, res) => {
 router.get("/suppliers/:id", async (req, res) => {
   try {
     const supplier = await Supplier.findById(req.params.id);
-    if (!supplier) return res.status(404).json({ message: "Supplier not found" });
+    if (!supplier)
+      return res.status(404).json({ message: "Supplier not found" });
     res.json(supplier);
   } catch (err) {
     res.status(500).json({ message: "Server error" });
@@ -25,13 +24,39 @@ router.get("/suppliers/:id", async (req, res) => {
 
 router.post("/suppliers", async (req, res) => {
   try {
+    req.body.openingBalance = Number(req.body.openingBalance) || 0;
+    req.body.creditPeriod = Number(req.body.creditPeriod) || 0;
+    req.body.creditLimit = Number(req.body.creditLimit) || 0;
+
     const newSupplier = new Supplier(req.body);
     const savedSupplier = await newSupplier.save();
-    res.status(201).json(savedSupplier);
+
+    console.log("values of savedSupplier", savedSupplier);
+
+    res.status(201).json({
+      message: `Supplier ${savedSupplier.name} created successfully`,
+      Ok: true,
+    });
   } catch (err) {
-    res.status(400).json({ message: "Invalid data", error: err.message });
+    if (err.code === 11000) {
+      const duplicateField = Object.keys(err.keyPattern)[0]; // e.g., "email"
+      const duplicateValue = err.keyValue[duplicateField];   // e.g., "test@example.com"
+
+      return res.status(400).json({
+        message: `A supplier with this ${duplicateField} ${duplicateValue} already exists.`,
+        field: duplicateField,
+        Ok: false,
+      });
+    }
+
+    res.status(400).json({
+      message: "Invalid data provided",
+      error: err.message,
+      Ok: false,
+    });
   }
 });
+
 
 router.put("/suppliers/:id", async (req, res) => {
   try {
@@ -40,7 +65,8 @@ router.put("/suppliers/:id", async (req, res) => {
       req.body,
       { new: true, runValidators: true }
     );
-    if (!updatedSupplier) return res.status(404).json({ message: "Supplier not found" });
+    if (!updatedSupplier)
+      return res.status(404).json({ message: "Supplier not found" });
     res.json(updatedSupplier);
   } catch (err) {
     res.status(400).json({ message: "Invalid data", error: err.message });
@@ -50,7 +76,8 @@ router.put("/suppliers/:id", async (req, res) => {
 router.delete("/suppliers/:id", async (req, res) => {
   try {
     const deletedSupplier = await Supplier.findByIdAndDelete(req.params.id);
-    if (!deletedSupplier) return res.status(404).json({ message: "Supplier not found" });
+    if (!deletedSupplier)
+      return res.status(404).json({ message: "Supplier not found" });
     res.json({ message: "Supplier deleted successfully" });
   } catch (err) {
     res.status(500).json({ message: "Server error" });
@@ -76,18 +103,28 @@ router.delete("/suppliers", async (req, res) => {
   }
 });
 
-
 // Import customers from Excel
-router.post('/suppliers/import', async (req, res) => {
+router.post("/suppliers/import", async (req, res) => {
   try {
     const suppilers = req.body;
     if (!Array.isArray(suppilers)) {
-      return res.status(400).json({ message: "Invalid data format. Expected an array of customers." });
+      return res
+        .status(400)
+        .json({
+          message: "Invalid data format. Expected an array of customers.",
+        });
     }
 
     for (const suppiler of suppilers) {
-      if (!suppiler.name || !suppiler.phone || !suppiler.email || !suppiler.warehouse) {
-        return res.status(400).json({ message: "Missing required fields in one or more records." });
+      if (
+        !suppiler.name ||
+        !suppiler.phone ||
+        !suppiler.email ||
+        !suppiler.warehouse
+      ) {
+        return res
+          .status(400)
+          .json({ message: "Missing required fields in one or more records." });
       }
 
       await Supplier.create(suppiler);
