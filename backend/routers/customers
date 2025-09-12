@@ -2,47 +2,65 @@ const express = require("express");
 const router = express.Router();
 const Customer = require("../models/customer");
 
+// ✅ Utility: Common error handler
+const handleServerError = (res, err, message = "Server error", code = 500) => {
+  console.error("❌ [ERROR]:", err);
+  res.status(code).json({ message, error: err.message || err });
+};
+
+// ✅ Utility: Duplicate key error handler
+const handleDuplicateError = (res, err) => {
+  let duplicateField = "field";
+  let duplicateValue = "value";
+
+  try {
+    duplicateField = Object.keys(err.keyPattern || {})[0];
+    duplicateValue = err.keyValue?.[duplicateField] || "Unknown";
+  } catch (parseErr) {
+    console.error("❌ Error parsing duplicate key info:", parseErr);
+  }
+
+  return res.status(400).json({
+    message: `A customer with this ${duplicateField} <b style="color:#EF4444">${duplicateValue}</b> already exists.`,
+    field: duplicateField,
+    ok: false,
+  });
+};
+
+// ✅ GET all customers
 router.get("/customers", async (req, res) => {
   try {
     const customers = await Customer.find();
     res.json(customers);
   } catch (err) {
-    res.status(500).json({ message: "Server error" });
+    handleServerError(res, err);
   }
 });
 
+// ✅ GET customer by ID
 router.get("/customers/:id", async (req, res) => {
   try {
     const customer = await Customer.findById(req.params.id);
-    if (!customer)
+    if (!customer) {
       return res.status(404).json({ message: "Customer not found" });
+    }
     res.json(customer);
   } catch (err) {
-    res.status(500).json({ message: "Server error" });
+    handleServerError(res, err);
   }
 });
 
+// ✅ POST create new customer
 router.post("/customers", async (req, res) => {
   try {
     const newCustomer = new Customer(req.body);
     const savedCustomer = await newCustomer.save();
-
     res.status(201).json({
       message: `Customer <b>${savedCustomer.name}</b> created successfully`,
       ok: true,
     });
   } catch (err) {
-    if (err.code === 11000) {
-      const duplicateField = Object.keys(err.keyPattern)[0];
-      const duplicateValue = err.keyValue[duplicateField];
-
-      return res.status(400).json({
-        message: `A customer with this ${duplicateField} <b style="color:#EF4444">${duplicateValue}</b> already exists.`,
-        field: duplicateField,
-        ok: false,
-      });
-    }
-
+    if (err.code === 11000) return handleDuplicateError(res, err);
     res.status(400).json({
       message: "Invalid data provided",
       error: err.message,
@@ -51,6 +69,7 @@ router.post("/customers", async (req, res) => {
   }
 });
 
+// ✅ PUT update customer
 router.put("/customers/:id", async (req, res) => {
   try {
     const updatedCustomer = await Customer.findByIdAndUpdate(
@@ -58,25 +77,29 @@ router.put("/customers/:id", async (req, res) => {
       req.body,
       { new: true, runValidators: true }
     );
-    if (!updatedCustomer)
+    if (!updatedCustomer) {
       return res.status(404).json({ message: "Customer not found" });
+    }
     res.json(updatedCustomer);
   } catch (err) {
     res.status(400).json({ message: "Invalid data", error: err.message });
   }
 });
 
+// ✅ DELETE single customer
 router.delete("/customers/:id", async (req, res) => {
   try {
     const deletedCustomer = await Customer.findByIdAndDelete(req.params.id);
-    if (!deletedCustomer)
+    if (!deletedCustomer) {
       return res.status(404).json({ message: "Customer not found" });
+    }
     res.json({ message: "Customer deleted successfully" });
   } catch (err) {
-    res.status(500).json({ message: "Server error" });
+    handleServerError(res, err);
   }
 });
 
+// ✅ DELETE multiple customers
 router.delete("/customers", async (req, res) => {
   try {
     const { ids } = req.body;
@@ -91,85 +114,47 @@ router.delete("/customers", async (req, res) => {
       message: `${result.deletedCount} customer(s) deleted successfully`,
     });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Server error" });
+    handleServerError(res, err);
   }
 });
 
-// Import customers from Excel
-// Import customers from Excel
+// ✅ POST import customers (bulk)
 router.post("/customers/import", async (req, res) => {
   try {
     const customers = req.body;
-    console.log("📦 [IMPORT] Payload received:", customers);
-
-    // Validate that the input is an array
+  
     if (!Array.isArray(customers)) {
-      console.log("❌ [IMPORT] Invalid payload format — expected an array.");
       return res.status(400).json({
         message: "Invalid data format. Expected an array of customers.",
       });
     }
 
     for (const customer of customers) {
-
-      // Validate required fields
       if (
         !customer.name ||
         !customer.phone ||
         !customer.email ||
         !customer.warehouse
       ) {
-        console.log("❌ [IMPORT] Missing required fields:", customer);
         return res.status(400).json({
           message: "Missing required fields in one or more records.",
         });
       }
 
-      // Try to create the customer
       try {
-        console.log("📤 [IMPORT] Attempting to create customer:", customer.email);
         await Customer.create(customer);
-        console.log("✅ [IMPORT] Customer created:", customer.email);
       } catch (err) {
-        console.error("⚠️ [IMPORT] Error creating customer:", err);
-
-        // Handle MongoDB duplicate key error
-        if (err.code === 11000) {
-          let duplicateField = "field";
-          let duplicateValue = "value";
-
-          try {
-            duplicateField = Object.keys(err.keyPattern || {})[0];
-            duplicateValue = err.keyValue?.[duplicateField] || "Unknown";
-            console.warn(`⚠️ [IMPORT] Duplicate key detected — ${duplicateField}: ${duplicateValue}`);
-          } catch (parseErr) {
-            console.error("❌ [IMPORT] Error parsing duplicate field info:", parseErr);
-          }
-
-          return res.status(400).json({
-            message: `A customer with this ${duplicateField} <b style="color:#EF4444">${duplicateValue}</b> already exists.`,
-            field: duplicateField,
-            ok: false,
-          });
-        }
-
-        // Other validation or database errors
-        console.error("❌ [IMPORT] Validation/database error:", err.message);
+        if (err.code === 11000) return handleDuplicateError(res, err);
         return res.status(400).json({
-          message: "Invalid data provided.",
+          message: "Invalid data provided",
           error: err.message,
           ok: false,
         });
       }
     }
-
-    console.log("🎉 [IMPORT] All customers imported successfully.");
     res.status(200).json({ message: "Customers imported successfully." });
-
   } catch (err) {
-    console.error("🔥 [IMPORT] Unexpected server error:", err);
-    res.status(500).json({ message: "Failed to import customers." });
+    handleServerError(res, err, "Failed to import customers");
   }
 });
 

@@ -347,11 +347,11 @@ const handleImport = async () => {
                       checked={selected.includes(customer._id)}
                       onChange={() => toggleSelect(customer)}
                     />
-                    <span>{customer.name}</span>
+                    <span class="capitalize">{customer.name}</span>
                   </div>
                 </td>
                 <td className="p-3">{customer.email}</td>
-                <td className="p-3">{customer.warehouse}</td>
+                <td className="p-3 capitalize">{customer.warehouse}</td>
                 <td className="p-3">{formatDateToReadable(customer.createdAt)}</td>
                 <td
                   className={`p-3 font-medium ${
@@ -433,7 +433,7 @@ const handleImport = async () => {
             </button>
 
             <h2 className="text-lg font-semibold text-gray-800 mb-4">
-              Import Supplier
+              Import Customer
             </h2>
 
             {/* Sample CSV link */}
@@ -462,7 +462,7 @@ const handleImport = async () => {
                 onClick={handleImport}
                 className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg"
               >
-                Create
+                Upload
               </button>
             </div>
           </div>
@@ -512,7 +512,7 @@ const handleImport = async () => {
                   type="text"
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  className="w-full border px-3 py-2 rounded-lg"
+                  className="w-full border px-3 py-2 rounded-lg capitalize"
                 />
               </div>
 
@@ -544,7 +544,7 @@ const handleImport = async () => {
                   onChange={(e) =>
                     setForm({ ...form, warehouse: e.target.value })
                   }
-                  className="w-full border px-3 py-2 rounded-lg"
+                  className="w-full border px-3 py-2 rounded-lg capitalize"
                 />
               </div>
 
@@ -697,7 +697,7 @@ const handleImport = async () => {
                 <label className="block text-sm font-medium text-gray-600">
                   Name
                 </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
                   {form.name}
                 </p>
               </div>
@@ -724,7 +724,7 @@ const handleImport = async () => {
                 <label className="block text-sm font-medium text-gray-600">
                   Warehouse
                 </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
                   {form.warehouse}
                 </p>
               </div>

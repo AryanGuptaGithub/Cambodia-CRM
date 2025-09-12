@@ -8,7 +8,7 @@ import CashandBank from './pages/CashandBank';
 import Login from './pages/Login';
 import Graph from './pages/graph';
 import MasterLayout from './pages/MasterLayout';
-import Customer from './pages/Master/Customer';
+import Customer from './pages/Master/Customer/Customer';
 import Supplier from './pages/Master/Supplier';
 import ProductManagerLayout from './pages/ProductManagerLayout';
 import Brands from './pages/ProductManager/Brands';
