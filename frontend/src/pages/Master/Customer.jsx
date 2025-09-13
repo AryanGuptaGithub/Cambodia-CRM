@@ -8,7 +8,7 @@ import { showToast } from "../../utils/toast";
 import { confirmDialog } from "../../utils/confirmationDialog";
 import {formatDateToReadable} from '../../utils/dateUtil';
 
-const backendUrl = "http://localhost:3001";
+const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const customersPerPage = 5;
 
 const Customer = () => {

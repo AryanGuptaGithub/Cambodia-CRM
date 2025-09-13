@@ -2,8 +2,8 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { showToast } from "../../utils/toast";
 
+const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const AddSupplier = () => {
-  const backendUrl = "http://localhost:3001";
   const navigate = useNavigate();
   const [form, setForm] = useState({
     warehouse: "",

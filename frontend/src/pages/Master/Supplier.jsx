@@ -8,7 +8,7 @@ import * as XLSX from "xlsx";
 import {formatDateToReadable} from '../../utils/dateUtil';
 import SampleExcelDownloadSupplier from '../../excels/SampleExcelDownloadSuppiler';
 
-const backendUrl = "http://localhost:3001";
+const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const suppliersPerPage = 5;
 
 const Supplier = () => {

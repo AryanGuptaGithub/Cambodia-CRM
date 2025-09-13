@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const Supplier = require("../models/supplier");
+const Supplier = require("../../models/master/supplier");
 
 // ✅ Utility: Handle standard errors
 const handleServerError = (res, err, message = "Server error", code = 500) => {

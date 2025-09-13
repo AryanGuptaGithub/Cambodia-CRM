@@ -3,8 +3,9 @@ const express = require("express");
 const dotenv = require("dotenv");
 const cors = require("cors");
 const connectDB = require("./utils/db");
-const customerRoutes = require('./routers/customers');
-const suppilerRoutes = require('./routers/supplier');
+const customerRoutes = require('./routers/master/customers');
+const suppilerRoutes = require('./routers/master/supplier');
+const brands = require('./routers/projectManager/brands');
 
 
 dotenv.config(); // Load environment variables
@@ -25,6 +26,7 @@ app.use(express.json());
 // Routes
 app.use("/api", customerRoutes);
 app.use("/api", suppilerRoutes); 
+app.use("/api", brands);
 
 // Server listener
 app.listen(PORT, () => {

@@ -229,7 +229,7 @@ const StocjAdjustment = () => {
         title="Add New Adjustment"
         onCancel={() => setModalVisible(false)}
         footer={null}
-        destroyOnClose
+        destroyOnHidden 
       >
         <Form form={form} layout="vertical" onFinish={handleModalSubmit}>
           <Form.Item
