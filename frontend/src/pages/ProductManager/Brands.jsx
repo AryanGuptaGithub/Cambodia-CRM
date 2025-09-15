@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Search, Plus, Upload, Edit, X, Trash2 } from "lucide-react";
 import JSZip from "jszip";
+import SampleExcelDownloadBrands from "../../excels/tSampleExcelDownloadBrands";
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
 const Brands = () => {
@@ -62,73 +63,69 @@ const Brands = () => {
 const selectedAllBrands = (checked)=>{
   console.log('values of check', checked);
 }
-// const handleZipAndUpload = async (event) => {
-//   const files = event.target.files;
-//   if (!files.length) return;
 
-//   setUploading(true);
+const imageFiles = [];
+const fileZipUpload = async (e /* File or Blob */) => {
+  const file = e.target.files[0];
+  const jszip = new JSZip();
+  const zip = await jszip.loadAsync(file);
 
-//   try {
-//     const zip = new JSZip();
-
-//     const zipBlob = await zip.generateAsync({ type: "blob" });
-
-//     const formData = new FormData();
-//     formData.append("photosZip", zipBlob); // 👈 give name
-
-//     const response = await fetch(`${backendUrl}/api/upload-brands`, {
-//       method: "POST",
-//       body: formData,
-//     });
-
-//     const data = await response.json();
-
-//     if (response.ok) {
-//       alert("Upload successful!");
-//       console.log("Uploaded URLs:", data.uploadedUrls); // optional: list of image URLs
-//     } else {
-//       console.error("Upload error:", data);
-//       alert("Upload failed.");
-//     }
-//   } catch (err) {
-//     console.error("Error zipping or uploading:", err);
-//     alert("An error occurred.");
-//   } finally {
-//     setUploading(false);
-//   }
-// };
-
-const handleZipAndUpload = async (event) => {
-  const files = event.target.files;
-  if (!files.length) {
-    console.error("No files selected");
-    return;
+  for (const [filename, zipEntry] of Object.entries(zip.files)) {
+    if (!zipEntry.dir) {
+      const ext = filename.split('.').pop().toLowerCase();
+      if (["jpg", "jpeg", "png", "webp"].includes(ext)) {
+        const blob = await zipEntry.async("blob");
+        imageFiles.push({ filename, blob });
+      } else {
+        alert("Folder is found but folders is not allowed");
+      }
+    }
   }
+};
 
-  console.log("Files selected:", files.length);
+const handleZipAndUpload = async () => {
+  // Ensure imageFiles is defined and contains the files to be zipped
+  console.log('Values of imageFiles:', imageFiles);
 
+  // Initialize JSZip
   const zip = new JSZip();
-  const folder = zip.folder("images");
 
-  Array.from(files).forEach((file, index) => {
-    console.log("Adding file to zip:", file.name, file.size);
-    folder.file(file.name || `image-${index + 1}.jpg`, file);
+  // Add each image file to the zip
+  imageFiles.forEach((file, index) => {
+    zip.file(file.filename || `image-${index + 1}.jpg`, file.blob);
   });
 
+  // Generate the zip file as a Blob
+  console.log("🕐 Generating zip blob...");
   const zipBlob = await zip.generateAsync({ type: "blob" });
-  console.log("Zip blob generated, size:", zipBlob.size);
+  console.log("📦 Zip blob generated; size:", zipBlob.size, "bytes");
 
+  // Prepare FormData for upload
   const formData = new FormData();
+  console.log("➕ Appending zip blob to FormData");
   formData.append("photosZip", zipBlob, "brand-images.zip");
+  console.log("📑 FormData now has photosZip field");
 
+  // Send the zip file to the backend
+  console.log("🚀 Sending fetch request to backend:", `${backendUrl}/api/upload-brands`);
   const response = await fetch(`${backendUrl}/api/upload-brands`, {
     method: "POST",
     body: formData,
   });
 
+  // Handle the response
+  console.log("📝 Fetch completed, response received");
   const data = await response.json();
-  console.log("Response:", data);
+  console.log("📬 Response JSON:", data);
+
+  if (!response.ok) {
+    console.error("❌ Upload failed:", data);
+  } else {
+    console.log("✅ Upload successful:", data);
+  }
 };
+
+
 
 
   return (
@@ -289,13 +286,7 @@ const handleZipAndUpload = async (event) => {
             </h2>
 
             {/* Sample CSV link */}
-            <a
-              href="/sample.csv"
-              download
-              className="text-blue-600 hover:underline text-sm mb-4 block"
-            >
-              Click here to download Sample CSV file
-            </a>
+            <SampleExcelDownloadBrands />
 
             {/* File Upload */}
             <div className="mb-6">
@@ -303,7 +294,7 @@ const handleZipAndUpload = async (event) => {
               <input
                 type="file"
                 accept=".zip"
-                onChange={handleZipAndUpload}
+                onChange={(e)=>fileZipUpload(e)}
                 className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
                 name="photosZip"
               />
@@ -318,9 +309,7 @@ const handleZipAndUpload = async (event) => {
                 Cancel
               </button>
               <button
-                onClick={() => {
-                  setShowImportModal(false);
-                }}
+                onClick={handleZipAndUpload}
                 className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg"
               >
                 Create
@@ -421,11 +410,7 @@ const handleZipAndUpload = async (event) => {
                 Cancel
               </button>
               <button
-                onClick={() => {
-                  console.log("Creating brand:", newBrand);
-                  // Optional: add validation before continuing
-                  setShowAddBrandModal(false);
-                }}
+                onClick={handleZipAndUpload}
                 className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg"
               >
                 Create
