@@ -72,14 +72,14 @@ import AddCustomer from "./pages/Master/addcustomer";
 import StockTransferForm from "./pages/StockTransferForm";
 import AddProductForm from "./pages/ProductManager/addProduct";
 import { Toaster } from "react-hot-toast";
-
+import ProtectedRoute from "./components/ProtectedRoute";
 function App() {
   return (
     <>
       <Toaster position="bottom-right" reverseOrder={false} />
       <Routes>
       <Route path="/login" index element={<Login/>}/>
-        <Route path="/" element={<DashboardLayout />}>
+        <Route path="/" element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
           <Route path="/graph" element={<Graph />} />
           <Route path="/onlineorder" element={<OnlineOrders />} />
           <Route path="/staffmember" element={<StaffMember />} />

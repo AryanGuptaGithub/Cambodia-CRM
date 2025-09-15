@@ -1,4 +1,5 @@
-const mongoose = require("mongoose");
+// models/Brand.js
+import mongoose from "mongoose";
 
 const brandSchema = new mongoose.Schema(
   {
@@ -6,9 +7,10 @@ const brandSchema = new mongoose.Schema(
     brandUrl: { type: String },
   },
   {
-    timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' }
+    timestamps: { createdAt: "createdAt", updatedAt: "updatedAt" },
   }
 );
 
-module.exports = mongoose.model("Brand", brandSchema);
+const Brand = mongoose.model("Brand", brandSchema);
 
+export default Brand;  // ✅ ESM export

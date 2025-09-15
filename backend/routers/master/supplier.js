@@ -1,6 +1,8 @@
-const express = require("express");
+// routers/master/supplier.js
+import express from "express";
+import Supplier from "../../models/master/supplier.js";
+
 const router = express.Router();
-const Supplier = require("../../models/master/supplier");
 
 // ✅ Utility: Handle standard errors
 const handleServerError = (res, err, message = "Server error", code = 500) => {
@@ -147,4 +149,4 @@ router.post("/suppliers/import", async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

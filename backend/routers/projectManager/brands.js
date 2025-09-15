@@ -1,13 +1,15 @@
-const express = require("express");
-const router = express.Router();
-const multer = require("multer");
-const path = require("path");
-const unzipper = require("unzipper");
-const { Readable } = require("stream");
-const xlsxLib = require('xlsx');
+// routers/projectManager/brands.js
+import express from "express";
+import multer from "multer";
+import path from "path";
+import unzipper from "unzipper";
+import { Readable } from "stream";
+import xlsxLib from "xlsx";
 
-const Brand = require("../../models/projectManger/brands");
-const { uploadCompanyLogo } = require("../../utils/cloudinary");
+import Brand from "../../models/projectManger/brands.js";
+import { uploadCompanyLogo } from "../../utils/cloudinary.js";
+
+const router = express.Router();
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -94,4 +96,4 @@ router.post(
 );
 
 
-module.exports = router;
+export default router; // ✅ ESM export

@@ -1,10 +1,11 @@
-const mongoose = require("mongoose");
+// models/master/customer.js
+import mongoose from "mongoose";
 
 const customerSchema = new mongoose.Schema({
   warehouse: { type: String, required: true },
   name: { type: String, required: true },
   phone: { type: String, required: true },
-    email: {
+  email: {
     type: String,
     required: true,
     lowercase: true,
@@ -18,8 +19,8 @@ const customerSchema = new mongoose.Schema({
   type: { type: String, enum: ["receive", "pay"], default: "receive" },
   creditPeriod: { type: Number },
   creditLimit: { type: Number },
-  profileImage: { type: String }, // If you're storing image URLs
-  createdAt: { type: Date, default: Date.now }
+  profileImage: { type: String }, // Storing image URLs
+  createdAt: { type: Date, default: Date.now },
 });
 
-module.exports = mongoose.model("Customer", customerSchema);
+export default mongoose.model("Customer", customerSchema);

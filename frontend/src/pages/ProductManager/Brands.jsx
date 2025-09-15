@@ -27,6 +27,8 @@ const Brands = () => {
   const [selectedIds, setSelectedIds] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
+  const uploadEnabled =
+    excelFile !== null && zipImageFiles.length > 0 && !uploading;
 
   const handleDelete = (id) => {
     const confirmed = window.confirm(
@@ -314,12 +316,25 @@ const Brands = () => {
       </div>
 
       {showImportModal && (
-        <div className="fixed inset-0 bg-transparent bg-opacity-30 flex justify-center items-center z-50">
-          <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
-            {/* Close */}
+        <div className="fixed inset-0 bg-tranparent bg-opacity-30 flex justify-center items-center z-50">
+          {/* Overlay spinner when uploading */}
+          {uploading && (
+            <div className="absolute inset-0 bg-transparent bg-opacity-50 z-40 flex items-center justify-center">
+              <span className="text-gray-700 text-lg font-medium">
+                Uploading...
+              </span>
+            </div>
+          )}
+
+          <div
+            className={`bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative z-50 ${
+              uploading ? "pointer-events-none opacity-70" : ""
+            }`}
+          >
             <button
               onClick={() => setShowImportModal(false)}
               className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
+              disabled={uploading}
             >
               <X size={20} />
             </button>
@@ -328,43 +343,57 @@ const Brands = () => {
               Import Brands
             </h2>
 
-            {/* Sample CSV link */}
             <SampleExcelDownloadBrands />
 
-            {/* File Upload */}
             <div className="mb-6">
               <label className="block text-gray-700 mb-2">Excel File</label>
               <input
                 type="file"
                 accept=".xlsx,.xls"
-                onChange={(e) => handleExcelUpload(e)}
+                onChange={handleExcelUpload}
                 className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
                 name="excelFile"
+                disabled={uploading}
               />
+              {excelFile && (
+                <p className="mt-2 text-sm text-gray-600">
+                  Selected: {excelFile.name}
+                </p>
+              )}
             </div>
+
             <div className="mb-6">
               <label className="block text-gray-700 mb-2">Zip File</label>
               <input
                 type="file"
                 accept=".zip"
-                onChange={(e) => fileZipUpload(e)}
+                onChange={fileZipUpload}
                 className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
                 name="photosZip"
+                disabled={uploading}
               />
+              {zipImageFiles.length > 0 && (
+                <p className="mt-2 text-sm text-gray-600">
+                  {zipImageFiles.length} image
+                  {zipImageFiles.length > 1 ? "s" : ""} selected
+                </p>
+              )}
             </div>
 
-            {/* Buttons */}
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => setShowImportModal(false)}
                 className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg"
+                disabled={uploading}
               >
                 Cancel
               </button>
               <button
                 onClick={handleExcelAndZipUpload}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg"
-                disabled={uploading}
+                className={`bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg ${
+                  !uploadEnabled ? "opacity-50 cursor-not-allowed" : ""
+                }`}
+                disabled={!uploadEnabled}
               >
                 {uploading ? "Uploading..." : "Upload"}
               </button>

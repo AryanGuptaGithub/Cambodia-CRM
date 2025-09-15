@@ -1,14 +1,41 @@
-const express = require('express');
+// routes/auth.js
+import express from "express";
+import User from "../models/User.js";
+import jwt from "jsonwebtoken";
+import dotenv from "dotenv";
+
+dotenv.config();
+
 const router = express.Router();
-const { login } = require('../controllers/authController');
-const protect = require('../middleware/authMiddleware');
 
-// Public login route
-router.post('/login', login);
+router.post("/login", async (req, res) => {
+  try {
+    console.log("📥 Body received:", req.body); // <-- Check if body exists
+    const { username, password } = req.body;
 
-// Example protected route
-router.get('/dashboard', protect, (req, res) => {
-  res.json({ message: `Welcome, user ID: ${req.user.id}` });
+    if (!username || !password)
+      return res.status(400).json({ message: "Username & password required" });
+
+    const user = await User.findOne({ username });
+    console.log("🔑 User found:", user);
+
+    if (!user) return res.status(401).json({ message: "Invalid credentials" });
+
+    const isMatch = await user.comparePassword(password);
+    console.log("🔐 Password match:", isMatch);
+
+    if (!isMatch) return res.status(401).json({ message: "Invalid credentials" });
+
+    const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
+      expiresIn: "1h",
+    });
+
+    res.json({ token, role: user.role });
+  } catch (error) {
+    console.error("❌ Login error:", error);
+    res.status(500).json({ message: error.message || "Server error" });
+  }
 });
 
-module.exports = router;
+
+export default router;  // ✅ ESM export
