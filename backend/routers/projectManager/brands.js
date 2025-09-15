@@ -4,80 +4,94 @@ const multer = require("multer");
 const path = require("path");
 const unzipper = require("unzipper");
 const { Readable } = require("stream");
+const xlsxLib = require('xlsx');
 
 const Brand = require("../../models/projectManger/brands");
 const { uploadCompanyLogo } = require("../../utils/cloudinary");
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-async function processZipBufferSkipNested(buffer, results) {
-  const zipStream = Readable.from(buffer).pipe(unzipper.Parse({ forceStream: true }));
+router.post(
+  "/upload-brands",
+  upload.fields([
+    { name: "excelFile", maxCount: 1 },
+    { name: "images", maxCount: 20 },  // adjust maxCount as needed
+  ]),
+  async (req, res) => {
+    try {
+      if (!req.files || !req.files.excelFile || req.files.excelFile.length === 0) {
+        return res.status(400).json({ error: "Excel file is required" });
+      }
 
-  for await (const entry of zipStream) {
-    const entryPath = entry.path;
-    const fileName = path.basename(entryPath);
-    const ext = path.extname(fileName).toLowerCase();
+      const excelFile = req.files.excelFile[0];
+      const results = [];
 
-    if (entry.type === "Directory" || !fileName || ext === ".zip") {
-      entry.autodrain();
-      continue;
+      // Parse Excel
+      const workbook = xlsxLib.read(excelFile.buffer, { type: "buffer" });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = xlsxLib.utils.sheet_to_json(sheet);
+    
+      // Save each row's brandName & brandSlug from excel
+      for (const row of rows) {
+        if (row.brandName && row.brandSlug) {
+          const doc = new Brand({
+            brandName: row.brandName,
+            brandSlug: row.brandSlug,
+          });
+          await doc.save();
+          console.log("✅ Saved from Excel:", row.brandName, row.brandSlug);
+          results.push({ brandName: row.brandName, brandSlug: row.brandSlug });
+        } else {
+          console.log("⚠️ Skipping Excel row, missing fields:", row);
+        }
+      }
+
+      // Process image blobs if any
+      if (req.files.images && req.files.images.length > 0) {
+        for (const imgFile of req.files.images) {
+          const fileName = imgFile.originalname;
+          const ext = path.extname(fileName).toLowerCase();
+
+          if (![".jpg", ".jpeg", ".png", ".webp"].includes(ext)) {
+            continue;
+          }
+
+          const uploadRes = await uploadCompanyLogo({
+            buffer: imgFile.buffer,
+            originalname: fileName,
+          });
+
+          if (!uploadRes?.secure_url) {
+            console.log("⚠️ Image upload failed for:", fileName);
+            continue;
+          }
+
+          const brandUrl = uploadRes.secure_url;
+          const brandName = path.parse(fileName).name;
+
+          // optionally, you might want to link this image to a brand from excel
+          const brandDoc = new Brand({ brandName, brandUrl });
+          await brandDoc.save();
+          console.log("✅ Saved image brand:", brandName);
+
+          results.push({ brandName, brandUrl });
+        }
+      } else {
+        console.log("ℹ️ No image files uploaded");
+      }
+
+      return res.json({
+        success: true,
+        message: "Excel and images processed",
+        count: results.length,
+        brands: results,
+      });
+    } catch (err) {
+      console.error("❌ Upload error:", err);
+      return res.status(500).json({ error: err.message });
     }
-
-    if (![".jpg", ".jpeg", ".png", ".webp"].includes(ext)) {
-      entry.autodrain();
-      continue;
-    }
-
-    const chunks = [];
-    for await (const chunk of entry) {
-      chunks.push(chunk);
-    }
-
-    const imgBuffer = Buffer.concat(chunks);
-    if (!imgBuffer.length) {
-      entry.autodrain();
-      continue;
-    }
-
-    const uploadRes = await uploadCompanyLogo({
-      buffer: imgBuffer,
-      originalname: fileName,
-    });
-
-    if (!uploadRes?.secure_url) {
-      entry.autodrain();
-      continue;
-    }
-
-    const brandUrl = uploadRes.secure_url;
-    const brandName = path.parse(fileName).name;
-    const brandDoc = new Brand({ brandName, brandUrl });
-    await brandDoc.save();
-
-    results.push({ brandName, brandUrl });
   }
-}
+);
 
-router.post("/upload-brands", upload.single("photosZip"), async (req, res) => {
-  try {
-    const zipFile = req.file;
-    if (!zipFile || !zipFile.buffer) {
-      return res.status(400).json({ error: "ZIP file is required and must be valid" });
-    }
-
-    const results = [];
-    await processZipBufferSkipNested(zipFile.buffer, results);
-
-    return res.json({
-      success: true,
-      message: "Processed ZIP (skipped nested ZIPs and unsupported files).",
-      count: results.length,
-      brands: results,
-    });
-  } catch (err) {
-    console.error("Upload error:", err);
-    return res.status(500).json({ error: err.message });
-  }
-});
 
 module.exports = router;

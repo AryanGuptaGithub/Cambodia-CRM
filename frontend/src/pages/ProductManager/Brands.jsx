@@ -1,7 +1,10 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Search, Plus, Upload, Edit, X, Trash2 } from "lucide-react";
 import JSZip from "jszip";
 import SampleExcelDownloadBrands from "../../excels/tSampleExcelDownloadBrands";
+import * as XLSX from "xlsx";
+import { showToast } from "../../utils/toast";
+
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
 const Brands = () => {
@@ -13,26 +16,17 @@ const Brands = () => {
   });
 
   const [showImportModal, setShowImportModal] = useState(false);
-  const [file, setFile] = useState(null);
   const [brands, setBrands] = useState();
   const [searchTerm, setSearchTerm] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadedUrl, setUploadedUrl] = useState("");
+  const [excelFile, setExcelFile] = useState(null);
+  const [excelFileRowCount, setExcelFileRowCount] = useState(null);
+  const [zipImageFiles, setZipImageFiles] = useState([]);
 
   const [selectedIds, setSelectedIds] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
-  // const filteredBrands = brands.filter((brand) =>
-  //   brand.name.toLowerCase().includes(searchTerm.toLowerCase())
-  // );
-
-  // const indexOfLastItem = currentPage * itemsPerPage;
-  // const indexOfFirstItem = indexOfLastItem - itemsPerPage;
-  // const paginatedBrands = filteredBrands.slice(
-  //   indexOfFirstItem,
-  //   indexOfLastItem
-  // );
-  // const totalPages = Math.ceil(filteredBrands.length / itemsPerPage);
 
   const handleDelete = (id) => {
     const confirmed = window.confirm(
@@ -60,73 +54,122 @@ const Brands = () => {
     );
   };
 
-const selectedAllBrands = (checked)=>{
-  console.log('values of check', checked);
-}
+  const selectedAllBrands = (checked) => {
+    console.log("values of check", checked);
+  };
 
-const imageFiles = [];
-const fileZipUpload = async (e /* File or Blob */) => {
-  const file = e.target.files[0];
-  const jszip = new JSZip();
-  const zip = await jszip.loadAsync(file);
+  const fileZipUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
 
-  for (const [filename, zipEntry] of Object.entries(zip.files)) {
-    if (!zipEntry.dir) {
-      const ext = filename.split('.').pop().toLowerCase();
-      if (["jpg", "jpeg", "png", "webp"].includes(ext)) {
-        const blob = await zipEntry.async("blob");
-        imageFiles.push({ filename, blob });
-      } else {
-        alert("Folder is found but folders is not allowed");
+    const ext = file.name.split(".").pop().toLowerCase();
+    if (ext !== "zip") {
+      const confirm = await confirmDialog({
+        text: `Please upload a ZIP file`,
+        icon: "warning",
+        confirmButtonText: "OK",
+        cancelButtonText: "Cancel",
+      });
+
+      if (!confirm.isConfirmed) {
+        return;
       }
     }
-  }
-};
 
-const handleZipAndUpload = async () => {
-  // Ensure imageFiles is defined and contains the files to be zipped
-  console.log('Values of imageFiles:', imageFiles);
+    try {
+      const jszip = new JSZip();
+      const zip = await jszip.loadAsync(file);
+      const images = [];
 
-  // Initialize JSZip
-  const zip = new JSZip();
+      for (const [filename, zipEntry] of Object.entries(zip.files)) {
+        if (!zipEntry.dir) {
+          const fileExt = filename.split(".").pop().toLowerCase();
+          if (["jpg", "jpeg", "png", "webp"].includes(fileExt)) {
+            const blob = await zipEntry.async("blob");
+            images.push({ filename, blob });
+          }
+        }
+      }
+      setZipImageFiles(images);
+    } catch (err) {
+      showToast("warning", "There was an error processing the ZIP file");
+    }
+  };
 
-  // Add each image file to the zip
-  imageFiles.forEach((file, index) => {
-    zip.file(file.filename || `image-${index + 1}.jpg`, file.blob);
-  });
+  const handleExcelUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const ext = file.name.split(".").pop().toLowerCase();
+    if (!["xlsx", "xls"].includes(ext)) {
+      showToast("warning", "Please upload a valid Excel file");
+      return;
+    }
+    setExcelFile(file);
+    const data = await file.arrayBuffer();
+    const workbook = XLSX.read(data, { type: "array" });
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const allRows = XLSX.utils.sheet_to_json(worksheet, {
+      header: 1,
+      defval: "",
+    });
 
-  // Generate the zip file as a Blob
-  console.log("🕐 Generating zip blob...");
-  const zipBlob = await zip.generateAsync({ type: "blob" });
-  console.log("📦 Zip blob generated; size:", zipBlob.size, "bytes");
+    const rowsWithoutHeader = allRows.slice(1);
+    const filteredRows = rowsWithoutHeader.filter((row) => {
+      return row.some((cell) => {
+        if (typeof cell === "string") {
+          return cell.trim() !== "";
+        }
+        return cell != null && cell !== "";
+      });
+    });
+    setExcelFileRowCount(filteredRows);
+  };
 
-  // Prepare FormData for upload
-  const formData = new FormData();
-  console.log("➕ Appending zip blob to FormData");
-  formData.append("photosZip", zipBlob, "brand-images.zip");
-  console.log("📑 FormData now has photosZip field");
+  useEffect(() => {
+    if (excelFileRowCount?.length && zipImageFiles?.length > 0) {
+      if (excelFileRowCount?.length != zipImageFiles?.length) {
+        showToast(
+          "warning",
+          `Excel rows: ${excelFileRowCount?.length}, Images in ZIP: ${zipImageFiles?.length}. These numbers do not match`
+        );
+      }
+      return;
+    }
+  }, [excelFileRowCount, zipImageFiles]);
 
-  // Send the zip file to the backend
-  console.log("🚀 Sending fetch request to backend:", `${backendUrl}/api/upload-brands`);
-  const response = await fetch(`${backendUrl}/api/upload-brands`, {
-    method: "POST",
-    body: formData,
-  });
+  const handleExcelAndZipUpload = async () => {
+    if (!excelFile) {
+      showToast("warning", `Please select an Excel file`);
+      return;
+    }
+    if (zipImageFiles.length === 0) {
+      showToast("warning", `Please select a ZIP file containing images`);
+      return;
+    }
+    setUploading(true);
 
-  // Handle the response
-  console.log("📝 Fetch completed, response received");
-  const data = await response.json();
-  console.log("📬 Response JSON:", data);
+    const formData = new FormData();
+    formData.append("excelFile", excelFile);
+    zipImageFiles.forEach((imgObj, idx) => {
+      formData.append("images", imgObj.blob, imgObj.filename);
+    });
 
-  if (!response.ok) {
-    console.error("❌ Upload failed:", data);
-  } else {
-    console.log("✅ Upload successful:", data);
-  }
-};
-
-
-
+    try {
+      const response = await fetch(`${backendUrl}/api/upload-brands`, {
+        method: "POST",
+        body: formData,
+      });
+      const data = await response.json();
+      if (response.ok) {
+        showToast("success", data.message);
+      }
+    } catch (err) {
+      showToast("warning", err);
+    } finally {
+      setUploading(false);
+    }
+  };
 
   return (
     <div className="max-w-8xl p-6 bg-white rounded-xl shadow">
@@ -290,11 +333,21 @@ const handleZipAndUpload = async () => {
 
             {/* File Upload */}
             <div className="mb-6">
-              <label className="block text-gray-700 mb-2">File</label>
+              <label className="block text-gray-700 mb-2">Excel File</label>
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={(e) => handleExcelUpload(e)}
+                className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
+                name="excelFile"
+              />
+            </div>
+            <div className="mb-6">
+              <label className="block text-gray-700 mb-2">Zip File</label>
               <input
                 type="file"
                 accept=".zip"
-                onChange={(e)=>fileZipUpload(e)}
+                onChange={(e) => fileZipUpload(e)}
                 className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
                 name="photosZip"
               />
@@ -309,10 +362,11 @@ const handleZipAndUpload = async () => {
                 Cancel
               </button>
               <button
-                onClick={handleZipAndUpload}
+                onClick={handleExcelAndZipUpload}
                 className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg"
+                disabled={uploading}
               >
-                Create
+                {uploading ? "Uploading..." : "Upload"}
               </button>
             </div>
           </div>

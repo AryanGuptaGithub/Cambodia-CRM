@@ -2,26 +2,19 @@ require("dotenv").config();
 const cloudinary = require("cloudinary").v2;
 const streamifier = require("streamifier");
 
-console.log("🔧 Loading Cloudinary configuration...");
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
-console.log("✅ Cloudinary configured successfully");
 
 function uploadCompanyLogo(file, publicId = null) {
   console.log("📤 Called uploadCompanyLogo");
 
   return new Promise((resolve, reject) => {
-    if (!file) {
-      console.warn("⚠️ No file provided for upload");
-      return resolve(null);
-    }
-
-    console.log("📄 File original name:", file.originalname);
+    if (!file) return resolve(null);
+  
     const filename = publicId || file.originalname.split(".")[0];
-    console.log("📝 Resolved public_id:", filename);
 
     const uploadOptions = {
       folder: "company",          // Folder name in Cloudinary
@@ -32,25 +25,16 @@ function uploadCompanyLogo(file, publicId = null) {
       unique_filename: false      // Don't add random strings
     };
 
-    console.log("⚙️ Upload options:", uploadOptions);
-
     const uploadStream = cloudinary.uploader.upload_stream(
       uploadOptions,
       (error, result) => {
         if (error) {
-          console.error("❌ Cloudinary upload error:", error);
           return reject(error);
         }
-
-        console.log("✅ Cloudinary upload successful!");
-        console.log("🔗 Uploaded URL:", result.secure_url);
-        console.log("📦 Full result:", result);
-
         resolve(result);
       }
     );
 
-    console.log("📤 Starting stream upload to Cloudinary...");
     const readStream = streamifier.createReadStream(file.buffer);
 
     readStream.on("data", (chunk) => {

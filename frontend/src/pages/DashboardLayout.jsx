@@ -42,7 +42,7 @@ function DashboardLayout() {
           </button>
 
           {/* Center: Title */}
-          <h1 className="font-bold text-xl">CRM Dashboard</h1>
+          <h1 className="font-bold text-xl">CRM Cambodia Dashboard</h1>
 
           {/* Right: Date + User */}
           <div className="flex items-center gap-6">
