@@ -1,4 +1,5 @@
-const mongoose = require('mongoose');
+// models/master/supplier.js
+import mongoose from 'mongoose';
 
 const supplierSchema = new mongoose.Schema({
   warehouse: {
@@ -62,4 +63,4 @@ const supplierSchema = new mongoose.Schema({
   timestamps: true, // adds createdAt and updatedAt
 });
 
-module.exports = mongoose.model('Supplier', supplierSchema);
+export default mongoose.model('Supplier', supplierSchema);

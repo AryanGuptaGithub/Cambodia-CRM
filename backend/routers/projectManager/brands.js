@@ -1,13 +1,14 @@
-const express = require("express");
+// routers/projectManager/brands.js
+import express from "express";
+import multer from "multer";
+import path from "path";
+import unzipper from "unzipper";
+import { Readable } from "stream";
+
+import Brand from "../../models/projectManger/brands.js";
+import { uploadCompanyLogo } from "../../utils/cloudinary.js";
+
 const router = express.Router();
-const multer = require("multer");
-const path = require("path");
-const unzipper = require("unzipper");
-const { Readable } = require("stream");
-
-const Brand = require("../../models/projectManger/brands");
-const { uploadCompanyLogo } = require("../../utils/cloudinary");
-
 const upload = multer({ storage: multer.memoryStorage() });
 
 async function processZipBufferSkipNested(buffer, results) {
@@ -80,4 +81,4 @@ router.post("/upload-brands", upload.single("photosZip"), async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router; // ✅ ESM export

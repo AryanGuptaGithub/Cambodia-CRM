@@ -1,6 +1,9 @@
-require("dotenv").config();
-const cloudinary = require("cloudinary").v2;
-const streamifier = require("streamifier");
+// utils/cloudinary.js
+import dotenv from "dotenv";
+import { v2 as cloudinary } from "cloudinary";
+import streamifier from "streamifier";
+
+dotenv.config();
 
 console.log("🔧 Loading Cloudinary configuration...");
 cloudinary.config({
@@ -10,7 +13,7 @@ cloudinary.config({
 });
 console.log("✅ Cloudinary configured successfully");
 
-function uploadCompanyLogo(file, publicId = null) {
+export function uploadCompanyLogo(file, publicId = null) {
   console.log("📤 Called uploadCompanyLogo");
 
   return new Promise((resolve, reject) => {
@@ -70,7 +73,4 @@ function uploadCompanyLogo(file, publicId = null) {
   });
 }
 
-module.exports = {
-  cloudinary,
-  uploadCompanyLogo,
-};
+export { cloudinary };

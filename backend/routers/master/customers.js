@@ -1,6 +1,8 @@
-const express = require("express");
+// routers/master/customers.js
+import express from "express";
+import Customer from "../../models/master/customer.js";
+
 const router = express.Router();
-const Customer = require("../../models/master/customer");
 
 // ✅ Utility: Common error handler
 const handleServerError = (res, err, message = "Server error", code = 500) => {
@@ -122,7 +124,7 @@ router.delete("/customers", async (req, res) => {
 router.post("/customers/import", async (req, res) => {
   try {
     const customers = req.body;
-  
+
     if (!Array.isArray(customers)) {
       return res.status(400).json({
         message: "Invalid data format. Expected an array of customers.",
@@ -130,12 +132,7 @@ router.post("/customers/import", async (req, res) => {
     }
 
     for (const customer of customers) {
-      if (
-        !customer.name ||
-        !customer.phone ||
-        !customer.email ||
-        !customer.warehouse
-      ) {
+      if (!customer.name || !customer.phone || !customer.email || !customer.warehouse) {
         return res.status(400).json({
           message: "Missing required fields in one or more records.",
         });
@@ -152,10 +149,11 @@ router.post("/customers/import", async (req, res) => {
         });
       }
     }
+
     res.status(200).json({ message: "Customers imported successfully." });
   } catch (err) {
     handleServerError(res, err, "Failed to import customers");
   }
 });
 
-module.exports = router;
+export default router;

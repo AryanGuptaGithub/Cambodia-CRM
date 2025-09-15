@@ -8,23 +8,43 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const navigate = useNavigate();
+  const backendUrl = import.meta.env.VITE_BACKEND_URL;
+  const handleLogin = async (e) => {
+  e.preventDefault();
 
-  const handleLogin = (e) => {
-    e.preventDefault();
-    if (!username || !password) {
-      setError('Username and password are required');
+  if (!username || !password) {
+    setError("Username and password are required");
+    return;
+  }
+
+  try {
+    const res = await fetch(`${backendUrl}/api/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      setError(data.message || "Login failed");
       return;
     }
 
-    const fakeToken = 'pharma_secure_token_123';
-    localStorage.setItem('token', fakeToken);
-    navigate('/dashboard');
-  };
+    // Save token + role in localStorage
+    localStorage.setItem("token", data.token);
+    localStorage.setItem("role", data.role);
+
+    navigate("/");
+  } catch (err) {
+    setError("Something went wrong. Please try again.");
+  }
+};
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#c9d6ff] via-[#e2e2e2] to-[#fdfbfb]">
       {/* Decorative Blobs */}
-      <div className="absolute top-10 left-10 w-40 h-40 bg-cyan-300 opacity-30 rounded-full blur-3xl animate-pulse" />
+      <div className="absolute top-10 left-10 w-80 h-80 bg-cyan-300 opacity-30 rounded-full blur-3xl animate-pulse" />
       <div className="absolute bottom-20 right-10 w-52 h-52 bg-blue-400 opacity-30 rounded-full blur-2xl animate-pulse" />
       <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 w-72 h-72 bg-purple-300 opacity-20 rounded-full blur-3xl animate-pulse" />
 
