@@ -17,7 +17,7 @@ router.post(
   "/upload-brands",
   upload.fields([
     { name: "excelFile", maxCount: 1 },
-    { name: "images", maxCount: 20 },  // adjust maxCount as needed
+    { name: "images", maxCount: 20 },
   ]),
   async (req, res) => {
     try {
@@ -26,37 +26,50 @@ router.post(
       }
 
       const excelFile = req.files.excelFile[0];
-      const results = [];
-
-      // Parse Excel
       const workbook = xlsxLib.read(excelFile.buffer, { type: "buffer" });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows = xlsxLib.utils.sheet_to_json(sheet);
-    
-      // Save each row's brandName & brandSlug from excel
+      const rows = xlsxLib.utils.sheet_to_json(sheet, { defval: "" });
+
+      const excelBrandMap = new Map(); 
       for (const row of rows) {
-        if (row.brandName && row.brandSlug) {
-          const doc = new Brand({
-            brandName: row.brandName,
-            brandSlug: row.brandSlug,
-          });
-          await doc.save();
-          console.log("✅ Saved from Excel:", row.brandName, row.brandSlug);
-          results.push({ brandName: row.brandName, brandSlug: row.brandSlug });
-        } else {
-          console.log("⚠️ Skipping Excel row, missing fields:", row);
+        let brandNameRaw = row["Brand Name"] || row["brandName"] || row["brand_name"] || row["brand name"];
+        let brandSlugRaw = row["Brand Slug"] || row["brandSlug"] || row["brand_slug"] || row["brand slug"];
+
+        if (!brandNameRaw || !brandSlugRaw) {
+          continue;
         }
+
+        const brandNameNorm = brandNameRaw.toString().trim();
+        const brandSlugNorm = brandSlugRaw.toString().trim();
+        const normKey = brandNameNorm.toLowerCase();
+
+        excelBrandMap.set(normKey, {
+          brandName: brandNameNorm,
+          brandSlug: brandSlugNorm,
+        });
       }
 
-      // Process image blobs if any
+      const results = [];
+      const mismatches = [];
+
       if (req.files.images && req.files.images.length > 0) {
         for (const imgFile of req.files.images) {
           const fileName = imgFile.originalname;
           const ext = path.extname(fileName).toLowerCase();
+          const baseName = path.basename(fileName, ext);
 
           if (![".jpg", ".jpeg", ".png", ".webp"].includes(ext)) {
             continue;
           }
+
+          const normImgName = baseName.toString().trim().toLowerCase();
+
+          if (!excelBrandMap.has(normImgName)) {
+            mismatches.push({ imageFile: fileName, reason: "No matching Excel brand name" });
+            continue;
+          }
+
+          const { brandName, brandSlug } = excelBrandMap.get(normImgName);
 
           const uploadRes = await uploadCompanyLogo({
             buffer: imgFile.buffer,
@@ -64,30 +77,33 @@ router.post(
           });
 
           if (!uploadRes?.secure_url) {
-            console.log("⚠️ Image upload failed for:", fileName);
+            mismatches.push({ imageFile: fileName, reason: "Upload failed" });
             continue;
           }
 
           const brandUrl = uploadRes.secure_url;
-          const brandName = path.parse(fileName).name;
 
-          // optionally, you might want to link this image to a brand from excel
-          const brandDoc = new Brand({ brandName, brandUrl });
+          const brandDoc = new Brand({
+            brandName,
+            brandSlug,
+            brandUrl,
+          });
           await brandDoc.save();
-          console.log("✅ Saved image brand:", brandName);
 
-          results.push({ brandName, brandUrl });
+          results.push({ brandName, brandSlug, brandUrl, imageFile: fileName });
+
+          excelBrandMap.delete(normImgName);
         }
-      } else {
-        console.log("ℹ️ No image files uploaded");
-      }
+      } 
 
       return res.json({
         success: true,
         message: "Excel and images processed",
-        count: results.length,
-        brands: results,
+        matches: results.length,
+        mismatches,
+        processed: results,
       });
+
     } catch (err) {
       console.error("❌ Upload error:", err);
       return res.status(500).json({ error: err.message });
@@ -95,5 +111,20 @@ router.post(
   }
 );
 
+
+
+router.get("/brands", async (req, res) => {
+  try {
+    const brands = await Brand.find();  // Fetch all documents
+    return res.json({
+      success: true,
+      count: brands.length,
+      brands: brands
+    });
+  } catch (err) {
+    console.error("❌ Fetch all brands error:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 export default router; // ✅ ESM export

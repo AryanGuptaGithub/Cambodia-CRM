@@ -16,24 +16,50 @@ const Brands = () => {
   });
 
   const [showImportModal, setShowImportModal] = useState(false);
-  const [brands, setBrands] = useState();
+  const [brands, setBrands] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadedUrl, setUploadedUrl] = useState("");
   const [excelFile, setExcelFile] = useState(null);
-  const [excelFileRowCount, setExcelFileRowCount] = useState(null);
+  const [excelFileRowCount, setExcelFileRowCount] = useState([]);
   const [zipImageFiles, setZipImageFiles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   const [selectedIds, setSelectedIds] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 5;
+  const customersPerPage = 6;
+
   const uploadEnabled =
     excelFile !== null && zipImageFiles.length > 0 && !uploading;
 
+  // Fetch initial brands
+  useEffect(() => {
+    const fetchBrands = async () => {
+      try {
+        const response = await fetch(`${backendUrl}/api/brands`);
+        if (!response.ok) throw new Error("Failed to fetch brands");
+        const data = await response.json();
+        console.log('avlues of data.brands', data);
+        setBrands(data.brands);
+      } catch (err) {
+        setError(err.message || "Something went wrong");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchBrands();
+  }, []);
+
+  // Pagination logic
+  const totalPages = Math.ceil(brands.length / customersPerPage);
+  const currentBrands = Array.isArray(brands)
+  ? brands.slice((currentPage - 1) * customersPerPage, currentPage * customersPerPage)
+  : [];
+
   const handleDelete = (id) => {
-    const confirmed = window.confirm(
-      "Are you sure you want to delete this brand?"
-    );
+    const confirmed = window.confirm("Are you sure you want to delete this brand?");
     if (confirmed) {
       setBrands((prev) => prev.filter((b) => b.id !== id));
       setSelectedIds((prev) => prev.filter((sid) => sid !== id));
@@ -41,9 +67,7 @@ const Brands = () => {
   };
 
   const handleBulkDelete = () => {
-    const confirmed = window.confirm(
-      "Are you sure you want to delete selected brands?"
-    );
+    const confirmed = window.confirm("Are you sure you want to delete selected brands?");
     if (confirmed) {
       setBrands((prev) => prev.filter((b) => !selectedIds.includes(b.id)));
       setSelectedIds([]);
@@ -57,7 +81,12 @@ const Brands = () => {
   };
 
   const selectedAllBrands = (checked) => {
-    console.log("values of check", checked);
+    if (checked) {
+      const ids = currentBrands.map((b) => b.id);
+      setSelectedIds(ids);
+    } else {
+      setSelectedIds([]);
+    }
   };
 
   const fileZipUpload = async (e) => {
@@ -67,15 +96,13 @@ const Brands = () => {
     const ext = file.name.split(".").pop().toLowerCase();
     if (ext !== "zip") {
       const confirm = await confirmDialog({
-        text: `Please upload a ZIP file`,
+        text: "Please upload a ZIP file",
         icon: "warning",
         confirmButtonText: "OK",
         cancelButtonText: "Cancel",
       });
 
-      if (!confirm.isConfirmed) {
-        return;
-      }
+      if (!confirm.isConfirmed) return;
     }
 
     try {
@@ -101,12 +128,15 @@ const Brands = () => {
   const handleExcelUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+
     const ext = file.name.split(".").pop().toLowerCase();
     if (!["xlsx", "xls"].includes(ext)) {
       showToast("warning", "Please upload a valid Excel file");
       return;
     }
+
     setExcelFile(file);
+
     const data = await file.arrayBuffer();
     const workbook = XLSX.read(data, { type: "array" });
     const sheetName = workbook.SheetNames[0];
@@ -117,43 +147,39 @@ const Brands = () => {
     });
 
     const rowsWithoutHeader = allRows.slice(1);
-    const filteredRows = rowsWithoutHeader.filter((row) => {
-      return row.some((cell) => {
-        if (typeof cell === "string") {
-          return cell.trim() !== "";
-        }
-        return cell != null && cell !== "";
-      });
-    });
+    const filteredRows = rowsWithoutHeader.filter((row) =>
+      row.some((cell) => (typeof cell === "string" ? cell.trim() !== "" : cell != null))
+    );
     setExcelFileRowCount(filteredRows);
   };
 
+  // Validation check for Excel vs ZIP count mismatch
   useEffect(() => {
-    if (excelFileRowCount?.length && zipImageFiles?.length > 0) {
-      if (excelFileRowCount?.length != zipImageFiles?.length) {
+    if (excelFileRowCount.length > 0 && zipImageFiles.length > 0) {
+      if (excelFileRowCount.length !== zipImageFiles.length) {
         showToast(
           "warning",
-          `Excel rows: ${excelFileRowCount?.length}, Images in ZIP: ${zipImageFiles?.length}. These numbers do not match`
+          `Excel rows: ${excelFileRowCount.length}, Images in ZIP: ${zipImageFiles.length}. These numbers do not match.`
         );
       }
-      return;
     }
   }, [excelFileRowCount, zipImageFiles]);
 
   const handleExcelAndZipUpload = async () => {
     if (!excelFile) {
-      showToast("warning", `Please select an Excel file`);
+      showToast("warning", "Please select an Excel file");
       return;
     }
     if (zipImageFiles.length === 0) {
-      showToast("warning", `Please select a ZIP file containing images`);
+      showToast("warning", "Please select a ZIP file containing images");
       return;
     }
+
     setUploading(true);
 
     const formData = new FormData();
     formData.append("excelFile", excelFile);
-    zipImageFiles.forEach((imgObj, idx) => {
+    zipImageFiles.forEach((imgObj) => {
       formData.append("images", imgObj.blob, imgObj.filename);
     });
 
@@ -162,12 +188,22 @@ const Brands = () => {
         method: "POST",
         body: formData,
       });
+
       const data = await response.json();
+
       if (response.ok) {
         showToast("success", data.message);
+        setShowImportModal(false);
+
+        // Refresh the brand list
+        const res = await fetch(`${backendUrl}/api/brands`);
+        const updated = await res.json();
+        setBrands(updated);
+      } else {
+        showToast("warning", data.message || "Upload failed");
       }
     } catch (err) {
-      showToast("warning", err);
+      showToast("warning", err.message || "Upload failed");
     } finally {
       setUploading(false);
     }
@@ -224,10 +260,7 @@ const Brands = () => {
               <th className="px-4 py-3 w-10">
                 <input
                   type="checkbox"
-                  // checked={
-                  //   paginatedBrands.length > 0 &&
-                  //   selectedIds.length === filteredBrands.length
-                  // }
+                  checked={selectedIds.length === currentBrands?.length}
                   onChange={selectedAllBrands}
                 />
               </th>
@@ -237,27 +270,27 @@ const Brands = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {/* {filteredBrands.length === 0 ? (
+            {currentBrands?.length === 0 ? (
               <tr>
                 <td colSpan="4" className="text-center py-6 text-gray-500">
                   No brands found.
                 </td>
               </tr>
             ) : (
-              filteredBrands.map((brand) => (
-                <tr key={brand.id}>
+              currentBrands.map((brand) => (
+                <tr key={brand._id}>
                   <td className="px-4 py-3">
                     <input
                       type="checkbox"
-                      checked={selectedIds.includes(brand.id)}
-                      onChange={() => handleSelect(brand.id)}
+                      checked={selectedIds.includes(brand._id)}
+                      onChange={() => handleSelect(brand._id)}
                     />
                   </td>
-                  <td className="px-4 py-3">{brand.name}</td>
+                  <td className="px-4 py-3">{brand.brandName}</td>
                   <td className="px-4 py-3">
                     <img
-                      src={brand.logo}
-                      alt={brand.name}
+                      src={brand.brandUrl}
+                      alt={brand.brandName}
                       className="h-8 w-auto"
                     />
                   </td>
@@ -266,7 +299,7 @@ const Brands = () => {
                       <Edit size={18} />
                     </button>
                     <button
-                      onClick={() => handleDelete(brand.id)}
+                      onClick={() => handleDelete(brand._id)}
                       className="text-red-600 hover:text-red-800"
                     >
                       <Trash2 size={18} />
@@ -274,7 +307,7 @@ const Brands = () => {
                   </td>
                 </tr>
               ))
-            )} */}
+            )}
           </tbody>
         </table>
         {/* Pagination Controls */}
