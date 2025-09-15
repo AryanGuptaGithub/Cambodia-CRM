@@ -62,45 +62,72 @@ const Brands = () => {
 const selectedAllBrands = (checked)=>{
   console.log('values of check', checked);
 }
+// const handleZipAndUpload = async (event) => {
+//   const files = event.target.files;
+//   if (!files.length) return;
+
+//   setUploading(true);
+
+//   try {
+//     const zip = new JSZip();
+
+//     const zipBlob = await zip.generateAsync({ type: "blob" });
+
+//     const formData = new FormData();
+//     formData.append("photosZip", zipBlob); // 👈 give name
+
+//     const response = await fetch(`${backendUrl}/api/upload-brands`, {
+//       method: "POST",
+//       body: formData,
+//     });
+
+//     const data = await response.json();
+
+//     if (response.ok) {
+//       alert("Upload successful!");
+//       console.log("Uploaded URLs:", data.uploadedUrls); // optional: list of image URLs
+//     } else {
+//       console.error("Upload error:", data);
+//       alert("Upload failed.");
+//     }
+//   } catch (err) {
+//     console.error("Error zipping or uploading:", err);
+//     alert("An error occurred.");
+//   } finally {
+//     setUploading(false);
+//   }
+// };
+
 const handleZipAndUpload = async (event) => {
   const files = event.target.files;
-  if (!files.length) return;
-
-  setUploading(true);
-
-  try {
-    const zip = new JSZip();
-    const folder = zip.folder("images");
-
-    Array.from(files).forEach((file, index) => {
-      folder.file(file.name || `image-${index + 1}.jpg`, file);
-    });
-
-    const zipBlob = await zip.generateAsync({ type: "blob" });
-
-    const formData = new FormData();
-    formData.append("zipFile", zipBlob, "brand-images.zip"); // 👈 give name
-
-    const response = await fetch(`${backendUrl}/api/upload-brands`, {
-      method: "POST",
-      body: formData,
-    });
-
-    const data = await response.json();
-
-    if (response.ok) {
-      alert("Upload successful!");
-      console.log("Uploaded URLs:", data.uploadedUrls); // optional: list of image URLs
-    } else {
-      console.error("Upload error:", data);
-      alert("Upload failed.");
-    }
-  } catch (err) {
-    console.error("Error zipping or uploading:", err);
-    alert("An error occurred.");
-  } finally {
-    setUploading(false);
+  if (!files.length) {
+    console.error("No files selected");
+    return;
   }
+
+  console.log("Files selected:", files.length);
+
+  const zip = new JSZip();
+  const folder = zip.folder("images");
+
+  Array.from(files).forEach((file, index) => {
+    console.log("Adding file to zip:", file.name, file.size);
+    folder.file(file.name || `image-${index + 1}.jpg`, file);
+  });
+
+  const zipBlob = await zip.generateAsync({ type: "blob" });
+  console.log("Zip blob generated, size:", zipBlob.size);
+
+  const formData = new FormData();
+  formData.append("photosZip", zipBlob, "brand-images.zip");
+
+  const response = await fetch(`${backendUrl}/api/upload-brands`, {
+    method: "POST",
+    body: formData,
+  });
+
+  const data = await response.json();
+  console.log("Response:", data);
 };
 
 

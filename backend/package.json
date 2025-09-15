@@ -19,6 +19,7 @@
     "express": "^5.1.0",
     "mongoose": "^8.18.1",
     "multer": "^2.0.2",
+    "multer-zip": "^1.2.0",
     "streamifier": "^0.1.1",
     "unzipper": "^0.12.3",
     "xlsx": "^0.18.5"

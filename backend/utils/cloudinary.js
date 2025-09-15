@@ -1,49 +1,76 @@
 require("dotenv").config();
 const cloudinary = require("cloudinary").v2;
-const multer = require("multer");
 const streamifier = require("streamifier");
 
+console.log("🔧 Loading Cloudinary configuration...");
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
+console.log("✅ Cloudinary configured successfully");
 
-const upload = multer({ storage: multer.memoryStorage() });
+function uploadCompanyLogo(file, publicId = null) {
+  console.log("📤 Called uploadCompanyLogo");
 
-function uploadCompanyLogo(file, fixedPublicId = "company/logo", oldPublicId = null) {
   return new Promise((resolve, reject) => {
-    if (!file) return resolve(null);
+    if (!file) {
+      console.warn("⚠️ No file provided for upload");
+      return resolve(null);
+    }
+
+    console.log("📄 File original name:", file.originalname);
+    const filename = publicId || file.originalname.split(".")[0];
+    console.log("📝 Resolved public_id:", filename);
+
+    const uploadOptions = {
+      folder: "company",          // Folder name in Cloudinary
+      public_id: filename,        // Public ID (file name or custom)
+      overwrite: true,            // Replace if exists
+      resource_type: "image",     // It's an image
+      use_filename: true,         // Use original filename
+      unique_filename: false      // Don't add random strings
+    };
+
+    console.log("⚙️ Upload options:", uploadOptions);
 
     const uploadStream = cloudinary.uploader.upload_stream(
-      {
-        folder: "company",          
-        public_id: fixedPublicId,   
-        overwrite: true,
-        resource_type: "image",
-        use_filename: true,
-        unique_filename: false,
-      },
-      async (error, result) => {
-        if (error) return reject(error);
-
-        if (oldPublicId && oldPublicId !== fixedPublicId) {
-          try {
-            await cloudinary.uploader.destroy(oldPublicId);
-          } catch (err) {
-            console.warn("Error deleting old logo:", err.message);
-          }
+      uploadOptions,
+      (error, result) => {
+        if (error) {
+          console.error("❌ Cloudinary upload error:", error);
+          return reject(error);
         }
+
+        console.log("✅ Cloudinary upload successful!");
+        console.log("🔗 Uploaded URL:", result.secure_url);
+        console.log("📦 Full result:", result);
 
         resolve(result);
       }
     );
 
-    streamifier.createReadStream(file.buffer).pipe(uploadStream);
+    console.log("📤 Starting stream upload to Cloudinary...");
+    const readStream = streamifier.createReadStream(file.buffer);
+
+    readStream.on("data", (chunk) => {
+      console.log(`📦 Streaming chunk (${chunk.length} bytes)...`);
+    });
+
+    readStream.on("end", () => {
+      console.log("🏁 Finished streaming to Cloudinary.");
+    });
+
+    readStream.on("error", (err) => {
+      console.error("💥 Read stream error:", err);
+      reject(err);
+    });
+
+    readStream.pipe(uploadStream);
   });
 }
 
 module.exports = {
-  upload,           
-  uploadCompanyLogo, 
+  cloudinary,
+  uploadCompanyLogo,
 };
