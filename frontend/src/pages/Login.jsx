@@ -58,9 +58,9 @@ const Login = () => {
        {/* Logo / Image Container */}
   <div className="w-28 h-28 mx-auto mb-6 relative group">
     <img
-      src="/logo.png" // replace with your image path
+      src="/mainlogo.png" // replace with your image path
       alt="Nezal HealthCare Logo"
-      className="w-full h-full object-contain rounded-full shadow-lg transition-transform duration-300 group-hover:scale-110 group-hover:rotate-3"
+      className="w-full h-full object-cover rounded-2xl shadow-lg transition-transform duration-300 group-hover:scale-110 group-hover:rotate-3"
     />
     <div className="absolute inset-0 rounded-full bg-cyan-500/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300 blur-lg"></div>
   </div>
