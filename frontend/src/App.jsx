@@ -78,7 +78,7 @@ function App() {
     <>
       <Toaster position="bottom-right" reverseOrder={false} />
       <Routes>
-        <Route path="/login " element={<Login />} />
+      <Route path="/login" index element={<Login/>}/>
         <Route path="/" element={<DashboardLayout />}>
           <Route path="/graph" element={<Graph />} />
           <Route path="/onlineorder" element={<OnlineOrders />} />

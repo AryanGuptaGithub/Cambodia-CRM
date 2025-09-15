@@ -33,6 +33,62 @@ import {
   Coins,
 } from "lucide-react";
 
+const masterPaths = [
+  "/masterlayout/customer",
+  "/masterlayout/supplier",
+];
+const purchasePaths = [
+  "/purchaselayout/purchase",
+  "/purchaselayout/crnote",
+  "/purchaselayout/purchaseout",
+];
+
+const productPaths = [
+  "/productmanagerlayout/brands",
+  "/productmanagerlayout/categories",
+  "/productmanagerlayout/product",
+  "/productmanagerlayout/variation",
+  "/productmanagerlayout/printbarcode",
+];
+
+const hrmPaths = [
+  "/hrmlayout/dashboard",
+  "/hrmlayout/holidays",
+  "/hrmlayout/leaves",
+  "/hrmlayout/attendance",
+  "/hrmlayout/payroll",
+  "/hrmlayout/hrmsetting",
+];
+
+const salesPaths = [
+  "/salelayout/sale",
+  "/salelayout/salereturn",
+  "/salelayout/payment",
+  "/salelayout/quotation",
+];
+
+const expensePaths = [
+  "/expenselayout/expensecategories",
+  "/expenselayout/expenses",
+];
+
+const reportPaths = [
+  "/reportlayout/payment",
+  "/reportlayout/salesummary",
+  "/reportlayout/stocksummary",
+  "/reportlayout/productsalessummary",
+  "/reportlayout/stockalert",
+  "/reportlayout/expensereport",
+  "/reportlayout/userreport",
+  "/reportlayout/ratelist",
+  "/reportlayout/profitloss",
+];
+
+const utilityPaths = [
+  "/utilitylayout/productcard",
+  "/utilitylayout/frontsettings",
+];
+
 function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
   const location = useLocation();
 
