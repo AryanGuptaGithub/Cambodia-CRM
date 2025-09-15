@@ -98,6 +98,11 @@ const isDropdownActive = (paths) => paths.some((path) => location.pathname.start
   const toggleMenu = (menu) => {
     setOpenMenus((prev) => ({ ...prev, [menu]: !prev[menu] }));
   };
+ const isActive = (path) => location.pathname === path;
+ const isChildActive = (paths) => paths.some((p) => location.pathname.startsWith(p)); 
+ const handleParentClick = (parentKey) => {
+    setActiveParent((prev) => (prev === parentKey ? null : parentKey));
+  };
 
   return (
     <div
@@ -124,121 +129,158 @@ const isDropdownActive = (paths) => paths.some((path) => location.pathname.start
 </Link>
 
         {/* Master Dropdown */}
-        <div>
-        <button
-  className={`flex items-center justify-between w-full p-2 rounded-md hover:bg-gray-700 ${
-   openMenus.master ? "bg-gray-700 shadow-md" : ""
-  }`}
-  onClick={() => toggleMenu("master")}
->
-  <span className="flex items-center gap-3">
-    <Users className="w-5 h-5" />
-    {isOpen && "Master"}
-  </span>
-  {isOpen && (
-    <ChevronDown
-      className={`w-4 h-4 transform transition-transform ${
-    openMenus.master ? "rotate-180" : ""
-      }`}
-    />
-  )}
-</button>
-        {openMenus.master && isOpen && (
-  <div className="ml-6 mt-1 space-y-1">
-    <Link
-      to="/masterlayout/customer"
-      className={`flex items-center gap-3 p-2 rounded hover:bg-gray-700 ${
-        isActivePath("/masterlayout/customer") ? "bg-gray-700 shadow-md" : ""
-      }`}
-    >
-      <Users className="w-4 h-4" />
-      <span className="mx-auto">Customers</span>
-    </Link>
-    <Link
-      to="/masterlayout/supplier"
-      className={`flex items-center gap-3 p-2 rounded hover:bg-gray-700 ${
-        isActivePath("/masterlayout/supplier") ? "bg-gray-700 shadow-md" : ""
-      }`}
-    >
-      <Truck className="w-4 h-4" />
-      <span className="mx-auto">Suppliers</span>
-    </Link>
-  </div>
-)}
-        </div>
+            <div>
+              <button
+                onClick={() => toggleMenu("master")}
+                className={`
+                  flex items-center justify-between w-full p-2 rounded-md transition-all duration-150
+                  ${
+                    isChildActive([
+                      "/masterlayout/customer",
+                      "/masterlayout/supplier"
+                    ])
+                      ? "bg-blue-300 text-gray-900 shadow-lg"   
+                      : "hover:bg-gray-700 text-gray-200"        
+                  }
+                `}
+              >
+                <span className="flex items-center gap-3">
+                  <Users className="w-5 h-5" />
+                  {isOpen && "Master"}
+                </span>
+                {isOpen && (
+                  <ChevronDown
+                    className={`w-4 h-4 transform transition-transform ${
+                      openMenus.master ? "rotate-180" : ""
+                    }`}
+                  />
+                )}
+            </button>
+              {openMenus.master && isOpen && (
+                <div className="ml-6 mt-1 space-y-1">
+                  <Link
+                    to="/masterlayout/customer"
+                    className={`
+                      flex items-center gap-3 p-2 rounded-md transition-all duration-150
+                      ${
+                        isActive("/masterlayout/customer")
+                          ? "bg-gray-500 text-white shadow-md"   
+                          : "hover:bg-gray-600 text-gray-200"      
+                      }
+                    `}
+                  >
+                    <Users className="w-4 h-4" />
+                    {isOpen && <span className="mx-auto">Customers</span>}
+                  </Link>
+                    
+                  <Link
+                    to="/masterlayout/supplier"
+                    className={`
+                      flex items-center gap-3 p-2 rounded-md transition-all duration-150
+                      ${
+                        isActive("/masterlayout/supplier")
+                          ? "bg-gray-500 text-white shadow-md"
+                          : "hover:bg-gray-600 text-gray-200"
+                      }
+                    `}
+                  >
+                    <Truck className="w-4 h-4" />
+                    {isOpen && <span className="mx-auto">Suppliers</span>}
+                  </Link>
+                </div>
+              )}
+          </div>
 
         {/* Products Dropdown */}
-<div>
-  <button
-    className={`flex items-center justify-between w-full p-2 rounded-md hover:bg-gray-700 ${
-      openMenus.products ? "bg-gray-700 shadow-md" : ""
-    }`}
-    onClick={() => toggleMenu("products")}
-  >
-    <span className="flex items-center gap-3">
-      <Package className="w-5 h-5" />
-      {isOpen && "Product Manager"}
-    </span>
-    {isOpen && (
-      <ChevronDown
-        className={`w-4 h-4 transform transition-transform ${
-          openMenus.products ? "rotate-180" : ""
-        }`}
-      />
-    )}
-  </button>
-
-  {openMenus.products && isOpen && (
-    <div className="ml-6 mt-1 space-y-1">
-      <Link
-        to="/productmanagerlayout/brands"
-        className={`flex items-center gap-3 p-2 rounded hover:bg-gray-700 ${
-          isActivePath("/productmanagerlayout/brands") ? "bg-gray-700 shadow-md" : ""
-        }`}
-      >
-        <Tags className="w-4 h-4" />
-        <span className="mx-auto">Brands</span>
-      </Link>
-      <Link
-        to="/productmanagerlayout/categories"
-        className={`flex items-center gap-3 p-2 rounded hover:bg-gray-700 ${
-          isActivePath("/productmanagerlayout/categories") ? "bg-gray-700 shadow-md" : ""
-        }`}
-      >
-        <Layers className="w-4 h-4" />
-        <span className="mx-auto">Categories</span>
-      </Link>
-      <Link
-        to="/productmanagerlayout/product"
-        className={`flex items-center gap-3 p-2 rounded hover:bg-gray-700 ${
-          isActivePath("/productmanagerlayout/product") ? "bg-gray-700 shadow-md" : ""
-        }`}
-      >
-        <Boxes className="w-4 h-4" />
-        <span className="mx-auto">Products</span>
-      </Link>
-      <Link
-        to="/productmanagerlayout/variation"
-        className={`flex items-center gap-3 p-2 rounded hover:bg-gray-700 ${
-          isActivePath("/productmanagerlayout/variation") ? "bg-gray-700 shadow-md" : ""
-        }`}
-      >
-        <ClipboardList className="w-4 h-4" />
-        <span className="mx-auto">Variations</span>
-      </Link>
-      <Link
-        to="/productmanagerlayout/printbarcode"
-        className={`flex items-center gap-3 p-2 rounded hover:bg-gray-700 ${
-          isActivePath("/productmanagerlayout/printbarcode") ? "bg-gray-700 shadow-md" : ""
-        }`}
-      >
-        <Barcode className="w-4 h-4" />
-        <span className="mx-auto">Print Barcode</span>
-      </Link>
-    </div>
-  )}
-</div>
-
+        <div>
+          <button
+            onClick={() => toggleMenu("products")}
+            className={`
+                  flex items-center justify-between w-full p-2 rounded-md transition-all duration-150
+                  ${
+                    isChildActive([
+                      "/productmanagerlayout/brands",
+                      "/productmanagerlayout/categories",
+                      "/productmanagerlayout/variation",
+                      "/productmanagerlayout/product"
+                    ])
+                      ? "bg-blue-300 text-gray-900 shadow-lg"   
+                      : "hover:bg-gray-700 text-gray-200"        
+                  }
+                `}
+          >
+            <span className="flex items-center gap-7">
+              <Package className="w-5 h-5" />
+              {isOpen && "Product Manager"}
+            </span>
+            {isOpen && (
+              <ChevronDown
+                className={`w-4 h-4 transform transition-transform ${
+                  openMenus.products ? "rotate-180" : ""
+                }`}
+              />
+            )}
+          </button>
+          {openMenus.products && isOpen && (
+            <div className="ml-6 mt-1 space-y-1">
+              <Link to="/productmanagerlayout/brands" className={`
+                      flex items-center gap-3 p-2 rounded-md transition-all duration-150
+                      ${
+                        isActive("/productmanagerlayout/brands")
+                          ? "bg-gray-500 text-white shadow-md"   
+                          : "hover:bg-gray-600 text-gray-200"      
+                      }
+                    `}>
+                <Tags className="w-4 h-4" />
+                <span className="mx-auto">Brands</span>
+              </Link>
+              <Link to="/productmanagerlayout/categories" className={`
+                      flex items-center gap-3 p-2 rounded-md transition-all duration-150
+                      ${
+                        isActive("/productmanagerlayout/categories")
+                          ? "bg-gray-500 text-white shadow-md"   
+                          : "hover:bg-gray-600 text-gray-200"      
+                      }
+                    `}>
+                <Layers className="w-4 h-4" />
+                <span className="mx-auto">Categories</span>
+              </Link>
+              <Link to="/productmanagerlayout/product" className={`
+                      flex items-center gap-3 p-2 rounded-md transition-all duration-150
+                      ${
+                        isActive("/productmanagerlayout/product")
+                          ? "bg-gray-500 text-white shadow-md"   
+                          : "hover:bg-gray-600 text-gray-200"      
+                      }
+                    `}>
+                <Boxes className="w-4 h-4" />
+                <span className="mx-auto">Products</span>
+              </Link>
+              <Link to="/productmanagerlayout/variation" className={`
+                      flex items-center gap-3 p-2 rounded-md transition-all duration-150
+                      ${
+                        isActive("/productmanagerlayout/variation")
+                          ? "bg-gray-500 text-white shadow-md"   
+                          : "hover:bg-gray-600 text-gray-200"      
+                      }
+                    `}>
+                <ClipboardList className="w-4 h-4" />
+                <span className="mx-auto">Variations</span>
+              </Link>
+              <Link to="/productmanagerlayout/printbarcode" className={`
+                      flex items-center gap-3 p-2 rounded-md transition-all duration-150
+                      ${
+                        isActive("/productmanagerlayout/printbarcode")
+                          ? "bg-gray-500 text-white shadow-md"   
+                          : "hover:bg-gray-600 text-gray-200"      
+                      }
+                    `}>
+                <Barcode className="w-4 h-4" />
+                <span className="mx-auto">Print Barcode</span>
+              </Link>
+            </div>
+          )}
+        </div>
 
         {/* Purchases */}
      <div>

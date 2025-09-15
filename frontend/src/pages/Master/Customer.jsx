@@ -3,7 +3,7 @@ import { Eye, Edit, Trash2, UserPlus, Upload, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import axios from "axios";
-import SampleCSVDownload from "../../excels/SampleCSVDownload";
+import SampleExcelDownloadCustomer from "../../excels/SampleExcelDownloadCustomer";
 import { showToast } from "../../utils/toast";
 import { confirmDialog } from "../../utils/confirmationDialog";
 import {formatDateToReadable} from '../../utils/dateUtil';
@@ -347,7 +347,7 @@ const handleImport = async () => {
                       checked={selected.includes(customer._id)}
                       onChange={() => toggleSelect(customer)}
                     />
-                    <span class="capitalize">{customer.name}</span>
+                    <span className="capitalize">{customer.name}</span>
                   </div>
                 </td>
                 <td className="p-3">{customer.email}</td>
@@ -437,7 +437,7 @@ const handleImport = async () => {
             </h2>
 
             {/* Sample CSV link */}
-            <SampleCSVDownload />
+            <SampleExcelDownloadCustomer />
 
             {/* File Upload */}
             <div className="mb-6">

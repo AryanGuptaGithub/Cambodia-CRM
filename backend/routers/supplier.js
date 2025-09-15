@@ -2,33 +2,60 @@ const express = require("express");
 const router = express.Router();
 const Supplier = require("../models/supplier");
 
-router.get("/suppliers", async (req, res) => {
+// ✅ Utility: Handle standard errors
+const handleServerError = (res, err, message = "Server error", code = 500) => {
+  console.error("❌ [ERROR]:", err);
+  res.status(code).json({ message, error: err.message || err });
+};
+
+// ✅ Utility: Handle duplicate key error
+const handleDuplicateError = (res, err, entity = "supplier") => {
+  const field = Object.keys(err.keyPattern || {})[0] || "field";
+  const value = err.keyValue?.[field] || "unknown";
+  return res.status(400).json({
+    message: `A ${entity} with this ${field} <b style="color:#EF4444">${value}</b> already exists.`,
+    field,
+    ok: false,
+  });
+};
+
+// ✅ Utility: Validate required fields
+const validateRequiredFields = (obj, required = []) => {
+  return required.every((key) => obj[key] !== undefined && obj[key] !== "");
+};
+
+// ✅ Route: Get all suppliers
+router.get("/suppliers", async (_, res) => {
   try {
-    const supplier = await Supplier.find();
-    res.json(supplier);
+    const suppliers = await Supplier.find();
+    res.json(suppliers);
   } catch (err) {
-    res.status(500).json({ message: "Server error" });
+    handleServerError(res, err);
   }
 });
 
+// ✅ Route: Get supplier by ID
 router.get("/suppliers/:id", async (req, res) => {
   try {
     const supplier = await Supplier.findById(req.params.id);
-    if (!supplier)
-      return res.status(404).json({ message: "Supplier not found" });
+    if (!supplier) return res.status(404).json({ message: "Supplier not found" });
     res.json(supplier);
   } catch (err) {
-    res.status(500).json({ message: "Server error" });
+    handleServerError(res, err);
   }
 });
 
+// ✅ Route: Create supplier
 router.post("/suppliers", async (req, res) => {
   try {
-    req.body.openingBalance = Number(req.body.openingBalance) || 0;
-    req.body.creditPeriod = Number(req.body.creditPeriod) || 0;
-    req.body.creditLimit = Number(req.body.creditLimit) || 0;
+    const payload = {
+      ...req.body,
+      openingBalance: Number(req.body.openingBalance) || 0,
+      creditPeriod: Number(req.body.creditPeriod) || 0,
+      creditLimit: Number(req.body.creditLimit) || 0,
+    };
 
-    const newSupplier = new Supplier(req.body);
+    const newSupplier = new Supplier(payload);
     const savedSupplier = await newSupplier.save();
 
     res.status(201).json({
@@ -36,106 +63,87 @@ router.post("/suppliers", async (req, res) => {
       ok: true,
     });
   } catch (err) {
-
-    if (err.code === 11000) {
-      const duplicateField = Object.keys(err.keyPattern)[0]; 
-      const duplicateValue = err.keyValue[duplicateField];  
-
-      return res.status(400).json({
-        message: `A supplier with this ${duplicateField} <b style="color:#EF4444">${duplicateValue}</b> already exists.`,
-        field: duplicateField,
-        ok: false,
-      });
-    }
-
-    res.status(400).json({
-      message: "Invalid data provided",
-      error: err.message,
-      ok: false,
-    });
+    if (err.code === 11000) return handleDuplicateError(res, err, "supplier");
+    res.status(400).json({ message: "Invalid data provided", error: err.message, ok: false });
   }
 });
 
+// ✅ Route: Update supplier
 router.put("/suppliers/:id", async (req, res) => {
   try {
-    const updatedSupplier = await Supplier.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true, runValidators: true }
-    );
-    if (!updatedSupplier)
-      return res.status(404).json({ message: "Supplier not found" });
+    const updatedSupplier = await Supplier.findByIdAndUpdate(req.params.id, req.body, {
+      new: true,
+      runValidators: true,
+    });
+
+    if (!updatedSupplier) return res.status(404).json({ message: "Supplier not found" });
+
     res.json(updatedSupplier);
   } catch (err) {
     res.status(400).json({ message: "Invalid data", error: err.message });
   }
 });
 
+// ✅ Route: Delete one supplier
 router.delete("/suppliers/:id", async (req, res) => {
   try {
-    const deletedSupplier = await Supplier.findByIdAndDelete(req.params.id);
+    const deleted = await Supplier.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ message: "Supplier not found" });
 
-    if (!deletedSupplier)
-      return res.status(404).json({ message: "Supplier not found" });
     res.json({
-      message: `Supplier <b>${deletedSupplier.name}</b> deleted successfully`,
-      Ok: true,
+      message: `Supplier <b>${deleted.name}</b> deleted successfully`,
+      ok: true,
     });
   } catch (err) {
-    res.status(500).json({ message: "Server error", Ok: false });
+    handleServerError(res, err);
   }
 });
 
+// ✅ Route: Bulk delete suppliers
 router.delete("/suppliers", async (req, res) => {
   try {
     const { ids } = req.body;
-
     if (!Array.isArray(ids) || ids.length === 0) {
-      return res.status(400).json({ message: "No Suppiler IDs provided" });
+      return res.status(400).json({ message: "No supplier IDs provided" });
     }
 
     const result = await Supplier.deleteMany({ _id: { $in: ids } });
 
     res.json({
-      message: `${result.deletedCount} Supplier(s) deleted successfully`,
+      message: `${result.deletedCount} supplier(s) deleted successfully`,
+      ok: true,
     });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Server error" });
+    handleServerError(res, err);
   }
 });
 
-// Import customers from Excel
+// ✅ Route: Import suppliers (Excel)
 router.post("/suppliers/import", async (req, res) => {
   try {
-    const suppilers = req.body;
-    if (!Array.isArray(suppilers)) {
-      return res
-        .status(400)
-        .json({
-          message: "Invalid data format. Expected an array of customers.",
-        });
+    const suppliers = req.body;
+    if (!Array.isArray(suppliers)) {
+      return res.status(400).json({
+        message: "Invalid data format. Expected an array of suppliers.",
+      });
     }
 
-    for (const suppiler of suppilers) {
-      if (
-        !suppiler.name ||
-        !suppiler.phone ||
-        !suppiler.email ||
-        !suppiler.warehouse
-      ) {
-        return res
-          .status(400)
-          .json({ message: "Missing required fields in one or more records." });
+    const requiredFields = ["name", "phone", "email", "warehouse"];
+
+    for (const supplier of suppliers) {
+      if (!validateRequiredFields(supplier, requiredFields)) {
+        return res.status(400).json({
+          message: "Missing required fields in one or more records.",
+        });
       }
 
-      await Supplier.create(suppiler);
+      await Supplier.create(supplier);
     }
 
-    res.status(200).json({ message: "Supplier imported successfully." });
+    res.status(200).json({ message: "Supplier(s) imported successfully." });
   } catch (err) {
-    console.error("Import error:", err);
-    res.status(500).json({ message: "Failed to import supplier." });
+    if (err.code === 11000) return handleDuplicateError(res, err, "supplier");
+    handleServerError(res, err, "Failed to import suppliers.");
   }
 });
 

@@ -6,6 +6,7 @@ import { confirmDialog } from "../../utils/confirmationDialog";
 import { showToast } from "../../utils/toast";
 import * as XLSX from "xlsx";
 import {formatDateToReadable} from '../../utils/dateUtil';
+import SampleExcelDownloadSupplier from '../../excels/SampleExcelDownloadSuppiler';
 
 const backendUrl = "http://localhost:3001";
 const suppliersPerPage = 5;
@@ -71,8 +72,8 @@ const Supplier = () => {
     return supplier.filter((s) => {
       const matchesTab =
         activeTab === "All" ||
-        (activeTab === "To Collect" && s.status === "To Collect") ||
-        (activeTab === "To Pay" && s.status === "To Pay");
+        (activeTab === "To Collect" && s.type === "pay") ||
+        (activeTab === "To Pay" && s.type === "receive");
 
       const matchesSearch =
         s.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -166,7 +167,6 @@ const Supplier = () => {
     }
   };
 
-  // Handle file upload
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -175,49 +175,52 @@ const Supplier = () => {
     reader.onload = (evt) => {
       const data = new Uint8Array(evt.target.result);
       const workbook = XLSX.read(data, { type: "array" });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const jsonData = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
       setParsedData(jsonData);
     };
     reader.readAsArrayBuffer(file);
   };
 
-  // Import suppliers
+  // Send parsed suppliers to backend
   const handleImport = async () => {
+    console.log('valuse of parsedData', parsedData);
     if (parsedData.length === 0) {
-      showToast("warning", "Please upload a file first");
+      showToast("warning", "Please upload a valid file first");
       return;
     }
 
     try {
-      const res = await axios.post(
-        `${backendUrl}/api/suppliers/import`,
-        parsedData
-      );
+      const res = await axios.post(`${backendUrl}/api/suppliers/import`, parsedData);
+
       if (res.status === 200) {
-        showToast("success", "Suppliers imported successfully");
+        showToast("success", res.data.message || "Suppliers imported successfully!");
         setShowImportModal(false);
-        const refreshed = await fetch(`${backendUrl}/api/suppliers`);
-        const updated = await refreshed.json();
-        setSupplier(updated);
+
+        // Refresh supplier list
+        const updated = await fetch(`${backendUrl}/api/suppliers`);
+        setSupplier(await updated.json());
       }
     } catch (err) {
-      showToast("error", "Import failed");
+      console.error("Import error:", err);
+
+      if (err.response) {
+        const { message } = err.response.data;
+        const cleanMessage = message.replace(/<[^>]+>/g, '');
+
+        showToast("error", cleanMessage || "Failed to import suppliers.");
+      } else {
+        showToast("error", "Network error. Please try again.");
+      }
     }
-  };
+  };;
 
   if (loading) return <p>Loading...</p>;
   if (error) return <p className="text-red-500">{error}</p>;
 
   return (
-    <div className="p-6">
-      {/* Breadcrumb */}
-      <div className="text-sm text-gray-500 mb-4">
-        Dashboard <span className="mx-2">{">"}</span> Master{" "}
-        <span className="mx-2">{">"}</span>{" "}
-        <span className="font-semibold text-gray-700">Supplier</span>
-      </div>
-
+    <div className="p-6">  
       {/* Top bar */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
         <div className="flex gap-3 flex-wrap">
@@ -309,17 +312,17 @@ const Supplier = () => {
                     onChange={() => toggleSelect(supplier._id)}
                   />
                 </td>
-                <td className="p-3">{supplier.name}</td>
+                <td className="p-3 capitalize">{supplier.name}</td>
                 <td className="p-3">{supplier.email}</td>
                 <td className="p-3">{formatDateToReadable(supplier.createdAt)}</td>
                 <td
                   className={`p-3 font-medium ${
-                    supplier.balance < 0 ? "text-red-600" : "text-green-600"
+                    supplier.openingBalance < 0 ? "text-red-600" : "text-green-600"
                   }`}
                 >
-                  {supplier.balance < 0
-                    ? `₹${Math.abs(supplier.balance)}`
-                    : `₹${supplier.balance}`}
+                  {supplier.openingBalance < 0
+                    ? `₹${Math.abs(supplier.openingBalance)}`
+                    : `₹${supplier.openingBalance}`}
                 </td>
                 <td className="p-3">
                   <button
@@ -421,13 +424,7 @@ const Supplier = () => {
             </h2>
 
             {/* Sample CSV link */}
-            <a
-              href="/sample.csv"
-              download
-              className="text-blue-600 hover:underline text-sm mb-4 block"
-            >
-              Click here to download Sample CSV file
-            </a>
+           <SampleExcelDownloadSupplier />
 
             {/* File Upload */}
             <div className="mb-6">
@@ -435,7 +432,7 @@ const Supplier = () => {
               <input
                 type="file"
                 accept=".csv, .xlsx"
-                onChange={(e) => setFile(e.target.files[0])}
+                onChange={handleFileUpload}
                 className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
               />
             </div>
@@ -449,10 +446,7 @@ const Supplier = () => {
                 Cancel
               </button>
               <button
-                onClick={() => {
-                  console.log("Uploaded File:", file);
-                  setShowImportModal(false);
-                }}
+                onClick={handleImport}
                 className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg"
               >
                 Create
@@ -481,7 +475,7 @@ const Supplier = () => {
                 <label className="block text-sm font-medium text-gray-600">
                   Name
                 </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
                   {form.name}
                 </p>
               </div>
@@ -508,7 +502,7 @@ const Supplier = () => {
                 <label className="block text-sm font-medium text-gray-600">
                   Warehouse
                 </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
                   {form.warehouse}
                 </p>
               </div>
