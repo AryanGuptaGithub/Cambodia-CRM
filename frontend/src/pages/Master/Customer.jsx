@@ -7,6 +7,8 @@ import SampleExcelDownloadCustomer from "../../excels/SampleExcelDownloadCustome
 import { showToast } from "../../utils/toast";
 import { confirmDialog } from "../../utils/confirmationDialog";
 import { formatDateToReadable } from "../../utils/dateUtil";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const customersPerPage = 10;
@@ -25,6 +27,7 @@ const Customer = () => {
   const [selectedTab, setSelectedTab] = useState("All");
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [isUploading, setIsUploading] = useState(false);
 
   const [form, setForm] = useState({
     warehouse: "",
@@ -83,27 +86,27 @@ const Customer = () => {
 
   // Pagination calculations
   const totalPages = Math.ceil(filteredCustomers.length / customersPerPage);
-const visiblePages = getVisiblePages(currentPage, totalPages);
+  const visiblePages = getVisiblePages(currentPage, totalPages);
   const currentCustomers = filteredCustomers.slice(
     (currentPage - 1) * customersPerPage,
     currentPage * customersPerPage
   );
 
   function getVisiblePages(currentPage, totalPages) {
-  if (totalPages <= 5) {
-    return Array.from({ length: totalPages }, (_, i) => i + 1);
-  }
+    if (totalPages <= 5) {
+      return Array.from({ length: totalPages }, (_, i) => i + 1);
+    }
 
-  if (currentPage <= 3) {
-    return [1, 2, 3, '...', totalPages];
-  }
+    if (currentPage <= 3) {
+      return [1, 2, 3, "...", totalPages];
+    }
 
-  if (currentPage >= totalPages - 2) {
-    return [1, '...', totalPages - 2, totalPages - 1, totalPages];
-  }
+    if (currentPage >= totalPages - 2) {
+      return [1, "...", totalPages - 2, totalPages - 1, totalPages];
+    }
 
-  return [1, '...', currentPage, '...', totalPages];
-}
+    return [1, "...", currentPage, "...", totalPages];
+  }
 
   // Select/unselect a customer by id
   const toggleSelect = (customer) => {
@@ -290,9 +293,9 @@ const visiblePages = getVisiblePages(currentPage, totalPages);
       showToast("warning", "Please upload a valid file first");
       return;
     }
+    setIsUploading(true);
 
     try {
-      console.log("values of parsedData", parsedData);
       const res = await axios.post(
         `${backendUrl}/api/customers/import`,
         parsedData
@@ -324,6 +327,8 @@ const visiblePages = getVisiblePages(currentPage, totalPages);
       } else {
         showToast("error", "Network error. Please try again.");
       }
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -381,7 +386,7 @@ const visiblePages = getVisiblePages(currentPage, totalPages);
           type="text"
           placeholder="Search..."
           value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
+          onChange={(e) => setSearchTerm(e.target.value.trim())}
           className="border px-3 py-2 rounded-lg shadow-sm"
         />
       </div>
@@ -410,14 +415,16 @@ const visiblePages = getVisiblePages(currentPage, totalPages);
             <tr>
               <th className="p-3">
                 <div className="flex items-center gap-4">
-                  <input
-                    type="checkbox"
-                    checked={
-                      selected.length === currentCustomers.length &&
-                      currentCustomers.length > 0
-                    }
-                    onChange={(e) => toggleSelectAll(e.target.checked)}
-                  />
+                  {currentCustomers.length > 0 && (
+                    <input
+                      type="checkbox"
+                      checked={
+                        selected.length === currentCustomers.length &&
+                        currentCustomers.length > 0
+                      }
+                      onChange={(e) => toggleSelectAll(e.target.checked)}
+                    />
+                  )}
                   <span>Name</span>
                 </div>
               </th>
@@ -431,136 +438,93 @@ const visiblePages = getVisiblePages(currentPage, totalPages);
             </tr>
           </thead>
           <tbody>
-            {currentCustomers.map((customer) => (
-              <tr key={customer._id} className="border-b hover:bg-gray-50">
-                <td className="p-3">
-                  <div className="flex items-center gap-4">
-                    <input
-                      type="checkbox"
-                      checked={selected.some((s) => s.id === customer._id)}
-                      onChange={() => toggleSelect(customer)}
-                    />
-                    <span className="capitalize">{customer.name}</span>
-                  </div>
-                </td>
-                <td className="p-3">{customer.typeOfBusiness}</td>
-                <td className="p-3 capitalize">{customer.medicalRepName}</td>
-
-                <td className="p-3 capitalize">{customer.address}</td>
-                <td className="p-3 capitalize">{customer.zone}</td>
-                <td className="p-3 capitalize">{customer.location}</td>
-                <td className="p-3">{formatDateToReadable(customer.date)}</td>
-                {/* <td
-                  className={`p-3 font-medium ${
-                    customer.type == "pay" ? "text-red-600" : "text-green-600"
-                  }`}
-                >
-                  {customer.openingBalance < 0
-                    ? `₹${Math.abs(customer.openingBalance)}`
-                    : `₹${customer.openingBalance}`}
-                </td> */}
-                {/* <td className="p-3">{customer.status}</td> */}
-                <td className="p-3 flex items-center justify-center gap-3">
-                  <button className="text-blue-600 hover:text-blue-800">
-                    <Eye onClick={() => handleView(customer)} size={18} />
-                  </button>
-                  <button className="text-green-600 hover:text-green-800">
-                    <Edit onClick={() => editCustomer(customer)} size={18} />
-                  </button>
-                  <button
-                    onClick={() => deleteCustomer(customer)}
-                    className="text-red-600 hover:text-red-800"
-                  >
-                    <Trash2 size={18} />
-                  </button>
+            {currentCustomers.length > 0 ? (
+              currentCustomers.map((customer) => (
+                <tr key={customer._id} className="border-b hover:bg-gray-50">
+                  <td className="p-3">
+                    <div className="flex items-center gap-4">
+                      <input
+                        type="checkbox"
+                        checked={selected.some((s) => s.id === customer._id)}
+                        onChange={() => toggleSelect(customer)}
+                      />
+                      <span className="capitalize">{customer.name}</span>
+                    </div>
+                  </td>
+                  <td className="p-3">{customer.typeOfBusiness}</td>
+                  <td className="p-3 capitalize">{customer.medicalRepName}</td>
+                  <td className="p-3 capitalize">{customer.address}</td>
+                  <td className="p-3 capitalize">{customer.zone}</td>
+                  <td className="p-3 capitalize">{customer.location}</td>
+                  <td className="p-3">{formatDateToReadable(customer.date)}</td>
+                  <td className="p-3 flex items-center justify-center gap-3">
+                    <button className="text-blue-600 hover:text-blue-800">
+                      <Eye onClick={() => handleView(customer)} size={18} />
+                    </button>
+                    <button className="text-green-600 hover:text-green-800">
+                      <Edit onClick={() => editCustomer(customer)} size={18} />
+                    </button>
+                    <button
+                      onClick={() => deleteCustomer(customer)}
+                      className="text-red-600 hover:text-red-800"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={8} className="p-3 text-center">
+                  No customer records found
                 </td>
               </tr>
-            ))}
+            )}
           </tbody>
         </table>
-
-        {/* Pagination */}
-        {/* <div className="mt-4 p-5 flex justify-start gap-2">
-          <button
-            onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-            disabled={currentPage === 1}
-            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
-          >
-            Prev
-          </button>
-
-          {Array.from({ length: totalPages }, (_, index) => index + 1).map(
-            (page) => (
-              <button
-                key={page}
-                onClick={() => setCurrentPage(page)}
-                className={`px-3 py-1 rounded ${
-                  currentPage === page
-                    ? "bg-indigo-600 text-white"
-                    : "bg-gray-200 hover:bg-gray-300"
-                }`}
-              >
-                {page}
-              </button>
-            )
-          )}
-
-          <button
-            onClick={() =>
-              setCurrentPage((prev) => Math.min(prev + 1, totalPages))
-            }
-            disabled={currentPage === totalPages}
-            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
-          >
-            Next
-          </button>
-        </div> */}
-      <div className="mt-4 p-5 flex justify-start gap-2">
-  {/* Prev Button */}
-  <button
-    onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-    disabled={currentPage === 1}
-    className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
-  >
-    Prev
-  </button>
-
-  {/* Page Buttons */}
-  {visiblePages.map((page, idx) =>
-    page === "..." ? (
-      <span
-        key={`ellipsis-${idx}`}
-        className="px-3 py-1 text-gray-500 select-none"
-      >
-        ...
-      </span>
-    ) : (
-      <button
-        key={page}
-        onClick={() => setCurrentPage(page)}
-        className={`px-3 py-1 rounded w-10 text-center transition ${
-          currentPage === page
-            ? "bg-indigo-600 text-white"
-            : "bg-gray-200 hover:bg-gray-300"
-        }`}
-      >
-        {page}
-      </button>
-    )
-  )}
-
-  {/* Next Button */}
-  <button
-    onClick={() => {
-      setCurrentPage((prev) => Math.min(prev + 1, totalPages));
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }}
-    disabled={currentPage === totalPages}
-    className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
-  >
-    Next
-  </button>
-</div>
+        {currentCustomers.length > 0 && (
+          <div className="mt-4 p-5 flex justify-start gap-2">
+            <button
+              onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
+            >
+              Prev
+            </button>
+            {visiblePages.map((page, idx) =>
+              page === "..." ? (
+                <span
+                  key={`ellipsis-${idx}`}
+                  className="px-3 py-1 text-gray-500 select-none"
+                >
+                  ...
+                </span>
+              ) : (
+                <button
+                  key={page}
+                  onClick={() => setCurrentPage(page)}
+                  className={`px-3 py-1 rounded w-10 text-center transition ${
+                    currentPage === page
+                      ? "bg-indigo-600 text-white"
+                      : "bg-gray-200 hover:bg-gray-300"
+                  }`}
+                >
+                  {page}
+                </button>
+              )
+            )}
+            <button
+              onClick={() => {
+                setCurrentPage((prev) => Math.min(prev + 1, totalPages));
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }}
+              disabled={currentPage === totalPages}
+              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        )}
       </div>
 
       {/* CSV Upload Modal */}
@@ -571,6 +535,7 @@ const visiblePages = getVisiblePages(currentPage, totalPages);
             <button
               onClick={() => setShowImportModal(false)}
               className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
+              disabled={isUploading}
             >
               <X size={20} />
             </button>
@@ -579,9 +544,6 @@ const visiblePages = getVisiblePages(currentPage, totalPages);
               Import Customer
             </h2>
 
-            {/* Sample CSV link */}
-
-            {/* File Upload */}
             <div className="mb-6">
               <label className="block text-gray-700 mb-2">File</label>
               <input
@@ -592,19 +554,28 @@ const visiblePages = getVisiblePages(currentPage, totalPages);
               />
             </div>
 
-            {/* Buttons */}
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => setShowImportModal(false)}
-                className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg"
+                disabled={isUploading}
+                className={`px-5 py-2 rounded-lg ${
+                  isUploading
+                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                    : "bg-gray-300 hover:bg-gray-400 text-gray-700"
+                }`}
               >
                 Cancel
               </button>
               <button
                 onClick={handleImport}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg"
+                disabled={isUploading}
+                className={`px-5 py-2 rounded-lg ${
+                  isUploading
+                    ? "bg-blue-400 text-white cursor-not-allowed"
+                    : "bg-blue-600 hover:bg-blue-700 text-white"
+                }`}
               >
-                Upload
+                {isUploading ? "Uploading…" : "Upload"}
               </button>
             </div>
           </div>
@@ -762,124 +733,14 @@ const visiblePages = getVisiblePages(currentPage, totalPages);
               </div>
 
               <div>
-                <label className="block text-sm font-medium">Email</label>
-                <input
-                  type="email"
-                  value={form.email}
-                  onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  className="w-full border px-3 py-2 rounded-lg"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">Phone</label>
-                <input
-                  type="text"
-                  value={form.phone}
-                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                  className="w-full border px-3 py-2 rounded-lg"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">Warehouse</label>
-                <input
-                  type="text"
-                  value={form.warehouse}
-                  onChange={(e) =>
-                    setForm({ ...form, warehouse: e.target.value })
+                <label className="block text-sm font-medium">Date</label>
+                <DatePicker
+                  selected={form.date ? new Date(form.date) : null}
+                  onChange={(date) =>
+                    date ? setForm({ ...form, date: date.toISOString() }) : null
                   }
-                  className="w-full border px-3 py-2 rounded-lg capitalize"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">Tax Number</label>
-                <input
-                  type="text"
-                  value={form.taxNumber}
-                  onChange={(e) =>
-                    setForm({ ...form, taxNumber: e.target.value })
-                  }
-                  className="w-full border px-3 py-2 rounded-lg"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">
-                  Opening Balance
-                </label>
-                <input
-                  type="number"
-                  value={form.openingBalance}
-                  onChange={(e) =>
-                    setForm({ ...form, openingBalance: e.target.value })
-                  }
-                  className="w-full border px-3 py-2 rounded-lg"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">Type</label>
-                <select
-                  value={form.type}
-                  onChange={(e) => setForm({ ...form, type: e.target.value })}
-                  className="w-full border px-3 py-2 rounded-lg"
-                >
-                  <option value="">Select</option>
-                  <option value="pay">To Pay</option>
-                  <option value="receive">To Collect</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">
-                  Credit Period
-                </label>
-                <input
-                  type="number"
-                  value={form.creditPeriod}
-                  onChange={(e) =>
-                    setForm({ ...form, creditPeriod: e.target.value })
-                  }
-                  className="w-full border px-3 py-2 rounded-lg"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">
-                  Credit Limit
-                </label>
-                <input
-                  type="number"
-                  value={form.creditLimit}
-                  onChange={(e) =>
-                    setForm({ ...form, creditLimit: e.target.value })
-                  }
-                  className="w-full border px-3 py-2 rounded-lg"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">Status</label>
-                <select
-                  value={form.status}
-                  onChange={(e) => setForm({ ...form, status: e.target.value })}
-                  className="w-full border px-3 py-2 rounded-lg"
-                >
-                  <option value="enabled">Enabled</option>
-                  <option value="disabled">Disabled</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">Password</label>
-                <input
-                  type="password"
-                  value={form.password}
-                  onChange={(e) =>
-                    setForm({ ...form, password: e.target.value })
-                  }
+                  dateFormat="yyyy-MM-dd"
+                  placeholderText="Select a date"
                   className="w-full border px-3 py-2 rounded-lg"
                 />
               </div>
