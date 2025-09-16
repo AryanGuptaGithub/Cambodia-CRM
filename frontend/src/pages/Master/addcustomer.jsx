@@ -1,8 +1,9 @@
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useState, useEffect } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import { showToast } from "../../utils/toast";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
+
 const initialFormState = {
   customerCode: "",
   date: "",
@@ -18,13 +19,19 @@ const initialFormState = {
 
 const AddCustomer = () => {
   const navigate = useNavigate();
-  const [form, setForm] = useState(initialFormState);
+  const location = useLocation();
+  const { customerCode } = location.state || {};
+
+  const [form, setForm] = useState({
+    ...initialFormState,
+    customerCode: customerCode || "", // Set the customerCode if passed
+  });
+
   const [errors, setErrors] = useState({});
+
   const validate = () => {
     const newErrors = {};
 
-    if (!form.customerCode)
-      newErrors.customerCode = "Customer Code is required";
     if (!form.date) newErrors.date = "Date is required";
     if (!form.medicalRepName)
       newErrors.medicalRepName = "Medical Representative Name is required";
@@ -36,7 +43,6 @@ const AddCustomer = () => {
     if (!form.address) newErrors.address = "Customer Address is required";
     if (!form.zone) newErrors.zone = "Zone is required";
     if (!form.location) newErrors.location = "Location is required";
-    // remark is optional
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -80,7 +86,8 @@ const AddCustomer = () => {
     name,
     type = "text",
     placeholder = "",
-    required = false
+    required = false,
+    disabled = false
   ) => (
     <div>
       <label className="text-sm font-medium text-gray-700">{label}</label>
@@ -91,6 +98,7 @@ const AddCustomer = () => {
         onChange={handleChange}
         placeholder={placeholder}
         className="w-full border rounded-md px-3 py-2"
+        disabled={disabled}
       />
       {errors[name] && <p className="text-red-500 text-sm">{errors[name]}</p>}
     </div>
@@ -119,14 +127,11 @@ const AddCustomer = () => {
               onChange={handleChange}
               className="mt-2 text-sm"
             />
-            {/* <div className="md:col-span-2 mb-6">
-              {renderInput("Date", "date", "date")}
-            </div> */}
           </div>
 
           {/* Customer Form */}
           <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
-            {renderInput("Customer Code", "customerCode")}
+            {renderInput("Customer Code", "customerCode", "text", "", false, true)}
             {renderInput("Date", "date", "date")}
             {renderInput("Medical Representative Name", "medicalRepName")}
             {renderInput("Customer Name in English", "name")}
@@ -136,8 +141,6 @@ const AddCustomer = () => {
             {renderInput("Zone", "zone")}
             {renderInput("Location", "location")}
             {renderInput("Remark", "remark")}
-
-            {/* You can add any other controls or buttons here if needed */}
           </div>
         </div>
 

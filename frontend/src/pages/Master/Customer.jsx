@@ -26,6 +26,7 @@ const Customer = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [isUploading, setIsUploading] = useState(false);
+  const [nextCustomerCode, setNextCustomerCode] = useState(null)
 
   const [form, setForm] = useState({
     customerCode: "",
@@ -51,7 +52,10 @@ const Customer = () => {
         const response = await fetch(`${backendUrl}/api/customers`);
         if (!response.ok) throw new Error("Failed to fetch customers");
         const data = await response.json();
-        setCustomers(data);
+        setCustomers(data.customers);
+        if (data.nextCustomerCode) {
+          setNextCustomerCode(data.nextCustomerCode);
+        }
       } catch (err) {
         setError(err.message || "Something went wrong");
       } finally {
@@ -351,7 +355,7 @@ const Customer = () => {
       <div className="flex justify-between items-center mb-4">
         <div className="flex gap-3">
           <button
-            onClick={() => navigate("/masterlayout/customer/new")}
+           onClick={() => navigate("/masterlayout/customer/new", { state: { customerCode: nextCustomerCode } })}
             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md"
           >
             <UserPlus size={18} /> Add New Customer

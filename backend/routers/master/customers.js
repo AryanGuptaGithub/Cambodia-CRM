@@ -30,10 +30,50 @@ const handleDuplicateError = (res, err) => {
 };
 
 // ✅ GET all customers
+// router.get("/customers", async (req, res) => {
+//   try {
+//     const customers = await Customer.find();
+//     res.json(customers);
+//   } catch (err) {
+//     handleServerError(res, err);
+//   }
+// });
+
+// Assuming Express & Mongoose
 router.get("/customers", async (req, res) => {
   try {
     const customers = await Customer.find();
-    res.json(customers);
+
+    const agg = await Customer.aggregate([
+      {
+        $project: {
+          customerCodeNumeric: {
+            $convert: {
+              input: { $trim: { input: "$customerCode" } }, // trim whitespace
+              to: "int",
+              onError: 0,
+              onNull: 0
+            }
+          }
+        }
+      },
+      {
+        $sort: { customerCodeNumeric: -1 }
+      },
+      {
+        $limit: 1
+      }
+    ]);
+
+    let nextCode = 1;
+    if (agg.length > 0 && typeof agg[0].customerCodeNumeric === "number") {
+      nextCode = agg[0].customerCodeNumeric + 1;
+    }
+
+    res.json({
+      customers,
+      nextCustomerCode: nextCode.toString()
+    });
   } catch (err) {
     handleServerError(res, err);
   }
