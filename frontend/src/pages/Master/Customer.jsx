@@ -83,11 +83,27 @@ const Customer = () => {
 
   // Pagination calculations
   const totalPages = Math.ceil(filteredCustomers.length / customersPerPage);
-
+const visiblePages = getVisiblePages(currentPage, totalPages);
   const currentCustomers = filteredCustomers.slice(
     (currentPage - 1) * customersPerPage,
     currentPage * customersPerPage
   );
+
+  function getVisiblePages(currentPage, totalPages) {
+  if (totalPages <= 5) {
+    return Array.from({ length: totalPages }, (_, i) => i + 1);
+  }
+
+  if (currentPage <= 3) {
+    return [1, 2, 3, '...', totalPages];
+  }
+
+  if (currentPage >= totalPages - 2) {
+    return [1, '...', totalPages - 2, totalPages - 1, totalPages];
+  }
+
+  return [1, '...', currentPage, '...', totalPages];
+}
 
   // Select/unselect a customer by id
   const toggleSelect = (customer) => {
@@ -499,46 +515,52 @@ const Customer = () => {
             Next
           </button>
         </div> */}
-        <div className="mt-4 p-5 flex justify-start gap-2">
-          {/* Prev Button */}
-          <button
-            onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-            disabled={currentPage === 1}
-            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
-          >
-            Prev
-          </button>
+      <div className="mt-4 p-5 flex justify-start gap-2">
+  {/* Prev Button */}
+  <button
+    onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+    disabled={currentPage === 1}
+    className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
+  >
+    Prev
+  </button>
 
-          {/* Render only first 5 pages */}
-          {Array.from(
-            { length: Math.min(totalPages, 5) },
-            (_, index) => index + 1
-          ).map((page) => (
-            <button
-              key={page}
-              onClick={() => setCurrentPage(page)}
-              className={`px-3 py-1 rounded ${
-                currentPage === page
-                  ? "bg-indigo-600 text-white"
-                  : "bg-gray-200 hover:bg-gray-300"
-              }`}
-            >
-              {page}
-            </button>
-          ))}
+  {/* Page Buttons */}
+  {visiblePages.map((page, idx) =>
+    page === "..." ? (
+      <span
+        key={`ellipsis-${idx}`}
+        className="px-3 py-1 text-gray-500 select-none"
+      >
+        ...
+      </span>
+    ) : (
+      <button
+        key={page}
+        onClick={() => setCurrentPage(page)}
+        className={`px-3 py-1 rounded w-10 text-center transition ${
+          currentPage === page
+            ? "bg-indigo-600 text-white"
+            : "bg-gray-200 hover:bg-gray-300"
+        }`}
+      >
+        {page}
+      </button>
+    )
+  )}
 
-          {/* Next Button */}
-          <button
-            onClick={() => {
-              setCurrentPage((prev) => Math.min(prev + 1, totalPages));
-              window.scrollTo({ top: 0, behavior: "smooth" });
-            }}
-            disabled={currentPage === totalPages}
-            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
-          >
-            Next
-          </button>
-        </div>
+  {/* Next Button */}
+  <button
+    onClick={() => {
+      setCurrentPage((prev) => Math.min(prev + 1, totalPages));
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }}
+    disabled={currentPage === totalPages}
+    className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
+  >
+    Next
+  </button>
+</div>
       </div>
 
       {/* CSV Upload Modal */}
