@@ -23,17 +23,15 @@ const Customer = () => {
   const [selected, setSelected] = useState([]);
   const [showImportModal, setShowImportModal] = useState(false);
   const [parsedData, setParsedData] = useState([]);
-
-  const [selectedTab, setSelectedTab] = useState("All");
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [isUploading, setIsUploading] = useState(false);
 
   const [form, setForm] = useState({
     customerCode: "",
-    date: "", 
+    date: "",
     medicalRepName: "",
-    name: "", 
+    name: "",
     typeOfBusiness: "",
     customerNumber: "",
     address: "",
@@ -47,7 +45,6 @@ const Customer = () => {
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 
-  // Fetch customers from backend
   useEffect(() => {
     (async () => {
       try {
@@ -63,25 +60,21 @@ const Customer = () => {
     })();
   }, []);
 
-  // Reset page when filters change
-  useEffect(() => setCurrentPage(1), [searchTerm, selectedTab]);
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm]);
 
-  // Memoized filtered customers based on tab and search
-  const filteredCustomers = useMemo(() => {
-    return customers.filter((c) => {
-      const matchesTab =
-        selectedTab === "All" ||
-        (selectedTab === "To Pay" && c.type === "pay") ||
-        (selectedTab === "To Collect" && c.type === "receive");
-
-      const matchesSearch =
-        c?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        c?.email?.toLowerCase().includes(searchTerm.toLowerCase());
-
-      return matchesTab && matchesSearch;
-    });
-  }, [customers, selectedTab, searchTerm]);
-
+  const filteredCustomers = customers.filter(
+    (r) =>
+      r.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.typeOfBusiness.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.medicalRepName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.address.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.zone.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.location.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.date.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+  
   // Pagination calculations
   const totalPages = Math.ceil(filteredCustomers.length / customersPerPage);
   const visiblePages = getVisiblePages(currentPage, totalPages);
@@ -389,24 +382,6 @@ const Customer = () => {
         />
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-4 mb-4">
-        {["All", "To Pay", "To Collect"].map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setSelectedTab(tab)}
-            className={`px-4 py-2 rounded-lg ${
-              selectedTab === tab
-                ? "bg-indigo-600 text-white"
-                : "bg-gray-200 text-gray-700"
-            }`}
-          >
-            {tab}
-          </button>
-        ))}
-      </div>
-
-      {/* Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center">
           <thead className="bg-gray-100 text-gray-700">
@@ -752,26 +727,7 @@ const Customer = () => {
                 Cancel
               </button>
               <button
-                onClick={async (e) => {
-                  e.preventDefault();
-                  try {
-                    const res = await axios.put(
-                      `${backendUrl}/api/customers/${form._id}`,
-                      form
-                    );
-                    if (res.status === 200) {
-                      showToast("success", "Customer updated successfully");
-                      setIsEditModalOpen(false);
-                      const updated = await fetch(
-                        `${backendUrl}/api/customers`
-                      );
-                      setCustomers(await updated.json());
-                    }
-                  } catch (err) {
-                    console.error("Update error:", err);
-                    showToast("error", "Failed to update customer.");
-                  }
-                }}
+                onClick={handleUpdateCustomer}
                 className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg"
               >
                 Save Changes

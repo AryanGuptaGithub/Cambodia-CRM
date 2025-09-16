@@ -61,7 +61,7 @@ const handleLogout = () => {
     {/* Logout Button */}
     <button
       onClick={handleLogout}
-      className="text-gray-700 hover:text-red-600 transition"
+      className="text-gray-700 hover:text-red-600 transition cursor-pointer"
       title="Logout"
     >
       <LogOut className="w-5 h-5" />
