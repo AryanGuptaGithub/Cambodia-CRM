@@ -30,18 +30,16 @@ const Customer = () => {
   const [isUploading, setIsUploading] = useState(false);
 
   const [form, setForm] = useState({
-    warehouse: "",
-    name: "",
-    phone: "",
-    email: "",
-    status: "enabled",
-    password: "",
-    taxNumber: "",
-    openingBalance: "",
-    type: "",
-    creditPeriod: "",
-    creditLimit: "",
-    profileImage: null,
+    customerCode: "",
+    date: "", 
+    medicalRepName: "",
+    name: "", 
+    typeOfBusiness: "",
+    customerNumber: "",
+    address: "",
+    zone: "",
+    location: "",
+    remark: "",
     _id: null,
   });
 
@@ -386,7 +384,7 @@ const Customer = () => {
           type="text"
           placeholder="Search..."
           value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value.trim())}
+          onChange={(e) => setSearchTerm(e.target.value)}
           className="border px-3 py-2 rounded-lg shadow-sm"
         />
       </div>
