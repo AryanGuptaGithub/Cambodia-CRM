@@ -6,10 +6,10 @@ import axios from "axios";
 import SampleExcelDownloadCustomer from "../../excels/SampleExcelDownloadCustomer";
 import { showToast } from "../../utils/toast";
 import { confirmDialog } from "../../utils/confirmationDialog";
-import {formatDateToReadable} from '../../utils/dateUtil';
+import { formatDateToReadable } from "../../utils/dateUtil";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
-const customersPerPage = 5;
+const customersPerPage = 10;
 
 const Customer = () => {
   const navigate = useNavigate();
@@ -74,8 +74,8 @@ const Customer = () => {
         (selectedTab === "To Collect" && c.type === "receive");
 
       const matchesSearch =
-        c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        c.email.toLowerCase().includes(searchTerm.toLowerCase());
+        c?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        c?.email?.toLowerCase().includes(searchTerm.toLowerCase());
 
       return matchesTab && matchesSearch;
     });
@@ -83,6 +83,7 @@ const Customer = () => {
 
   // Pagination calculations
   const totalPages = Math.ceil(filteredCustomers.length / customersPerPage);
+
   const currentCustomers = filteredCustomers.slice(
     (currentPage - 1) * customersPerPage,
     currentPage * customersPerPage
@@ -95,17 +96,26 @@ const Customer = () => {
 
       if (exists) {
         // Remove if already selected
-        return prev.filter((c) => c.id !== customer.id);
+        return prev.filter((c) => c.id !== customer._id);
       } else {
         // Add new selection
-        return [...prev, { id: customer.id, name: customer.name }];
+        return [...prev, { id: customer._id, name: customer.name }];
       }
     });
   };
 
   const toggleSelectAll = (checked) => {
-    setSelected(checked ? currentCustomers.map((s) => s._id) : []);
+    if (checked) {
+      const allSelected = currentCustomers.map((s) => ({
+        id: s._id,
+        name: s.name,
+      }));
+      setSelected(allSelected);
+    } else {
+      setSelected([]);
+    }
   };
+
   const handleDeleteSelected = async () => {
     const confirm = await confirmDialog({
       text: `Are you sure you want to delete <b>${selected.length}</b> customers`,
@@ -187,53 +197,119 @@ const Customer = () => {
     if (!file) return;
 
     const reader = new FileReader();
+
     reader.onload = (evt) => {
       const data = new Uint8Array(evt.target.result);
       const workbook = XLSX.read(data, { type: "array" });
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
-      const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
-      setParsedData(jsonData);
+
+      const rows = XLSX.utils.sheet_to_json(worksheet, {
+        header: 1,
+        defval: "",
+      });
+
+      if (rows.length === 0) {
+        console.warn("Excel file is empty");
+        return;
+      }
+
+      const HEADER_ROW_INDEX = 3;
+      const rawHeaders = rows[HEADER_ROW_INDEX];
+
+      const headersMap = {};
+      rawHeaders.forEach((header, index) => {
+        if (!header) return;
+        const cleaned = header.toString().trim().toLowerCase();
+        headersMap[index] = cleaned;
+      });
+
+      // ✅ Data starts from index 4 (i.e., 5th row in Excel)
+      const dataRows = rows.slice(HEADER_ROW_INDEX + 1);
+
+      const mappedData = dataRows
+        .map((row, rowIndex) => {
+          const item = {};
+
+          Object.entries(headersMap).forEach(([index, key]) => {
+            item[key] = row[index] || "";
+          });
+
+          return {
+            customerCode: item["customer code"],
+            date: parseExcelDate(item["date"]),
+            medicalRepName: item["medical representative name"],
+            name: item["customer name in english"],
+            typeOfBusiness: item["types of business"],
+            customerNumber: item["customer number"],
+            address: item["customer address"],
+            zone: item["zone"],
+            location: item["location"],
+            remark: item["remark"],
+          };
+        })
+        .filter((entry) => entry.customerCode); // ✅ Only rows with data
+      setParsedData(mappedData);
     };
+
     reader.readAsArrayBuffer(file);
   };
 
+  // 🔁 Convert Excel serial date or string to JS Date (helper)
+  const parseExcelDate = (value) => {
+    if (!value) return null;
+
+    if (typeof value === "number") {
+      const jsDate = new Date(Math.round((value - 25569) * 86400 * 1000));
+      return jsDate.toISOString(); // Or keep as Date object
+    }
+
+    const parsed = new Date(value);
+    return isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  };
+
   // Import parsed customers to backend
-const handleImport = async () => {
-  if (parsedData.length === 0) {
-    showToast("warning", "Please upload a valid file first");
-    return;
-  }
-
-  try {
-    const res = await axios.post(`${backendUrl}/api/customers/import`, parsedData);
-
-    // If import is successful
-    if (res.status === 200) {
-      showToast("success", res.data.message || "Customers imported successfully!");
-      setShowImportModal(false);
-
-      // Refresh customer list
-      const updated = await fetch(`${backendUrl}/api/customers`);
-      setCustomers(await updated.json());
+  const handleImport = async () => {
+    if (parsedData.length === 0) {
+      showToast("warning", "Please upload a valid file first");
+      return;
     }
-  } catch (err) {
-    console.error("Import error:", err);
 
-    // Handle backend validation errors (400) and server errors (500)
-    if (err.response) {
-      const { message } = err.response.data;
+    try {
+      console.log("values of parsedData", parsedData);
+      const res = await axios.post(
+        `${backendUrl}/api/customers/import`,
+        parsedData
+      );
 
-      // Optional: sanitize HTML tags from message (if needed)
-      const cleanMessage = message.replace(/<[^>]+>/g, '');
+      // If import is successful
+      if (res.status === 200) {
+        showToast(
+          "success",
+          res.data.message || "Customers imported successfully!"
+        );
+        setShowImportModal(false);
 
-      showToast("error", cleanMessage || "Failed to import customers.");
-    } else {
-      showToast("error", "Network error. Please try again.");
+        // Refresh customer list
+        const updated = await fetch(`${backendUrl}/api/customers`);
+        setCustomers(await updated.json());
+      }
+    } catch (err) {
+      console.error("Import error:", err);
+
+      // Handle backend validation errors (400) and server errors (500)
+      if (err.response) {
+        const { message } = err.response.data;
+
+        // Optional: sanitize HTML tags from message (if needed)
+        const cleanMessage = message.replace(/<[^>]+>/g, "");
+
+        showToast("error", cleanMessage || "Failed to import customers.");
+      } else {
+        showToast("error", "Network error. Please try again.");
+      }
     }
-  }
-};
-
+  };
 
   // Update customer on backend
   const handleUpdateCustomer = async (e) => {
@@ -329,11 +405,12 @@ const handleImport = async () => {
                   <span>Name</span>
                 </div>
               </th>
-              <th className="p-3">Email</th>
-              <th className="p-3">WareHouse</th>
+              <th className="p-3">Business</th>
+              <th className="p-3">medicalRepName</th>
+              <th className="p-3">Address</th>
+              <th className="p-3">Zone</th>
+              <th className="p-3">Location</th>
               <th className="p-3">Created At</th>
-              <th className="p-3">Balance</th>
-              <th className="p-3">Status</th>
               <th className="p-3">Action</th>
             </tr>
           </thead>
@@ -344,16 +421,22 @@ const handleImport = async () => {
                   <div className="flex items-center gap-4">
                     <input
                       type="checkbox"
-                      checked={selected.includes(customer._id)}
+                      checked={selected.some((s) => s.id === customer._id)}
                       onChange={() => toggleSelect(customer)}
                     />
                     <span className="capitalize">{customer.name}</span>
                   </div>
                 </td>
-                <td className="p-3">{customer.email}</td>
-                <td className="p-3 capitalize">{customer.warehouse}</td>
-                <td className="p-3">{formatDateToReadable(customer.createdAt)}</td>
-                <td
+                <td className="p-3">{customer.typeOfBusiness}</td>
+                <td className="p-3 capitalize">{customer.medicalRepName}</td>
+                
+                <td className="p-3 capitalize">{customer.address}</td>
+                <td className="p-3 capitalize">{customer.zone}</td>
+                <td className="p-3 capitalize">{customer.location}</td>
+                <td className="p-3">
+                  {formatDateToReadable(customer.date)}
+                </td>
+                {/* <td
                   className={`p-3 font-medium ${
                     customer.type == "pay" ? "text-red-600" : "text-green-600"
                   }`}
@@ -361,8 +444,8 @@ const handleImport = async () => {
                   {customer.openingBalance < 0
                     ? `₹${Math.abs(customer.openingBalance)}`
                     : `₹${customer.openingBalance}`}
-                </td>
-                <td className="p-3">{customer.status}</td>
+                </td> */}
+                {/* <td className="p-3">{customer.status}</td> */}
                 <td className="p-3 flex items-center justify-center gap-3">
                   <button className="text-blue-600 hover:text-blue-800">
                     <Eye onClick={() => handleView(customer)} size={18} />
@@ -383,7 +466,7 @@ const handleImport = async () => {
         </table>
 
         {/* Pagination */}
-        <div className="mt-4 p-5 flex justify-start gap-2">
+        {/* <div className="mt-4 p-5 flex justify-start gap-2">
           <button
             onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
             disabled={currentPage === 1}
@@ -417,6 +500,46 @@ const handleImport = async () => {
           >
             Next
           </button>
+        </div> */}
+        <div className="mt-4 p-5 flex justify-start gap-2">
+          {/* Prev Button */}
+          <button
+            onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+            disabled={currentPage === 1}
+            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
+          >
+            Prev
+          </button>
+
+          {/* Render only first 5 pages */}
+          {Array.from(
+            { length: Math.min(totalPages, 5) },
+            (_, index) => index + 1
+          ).map((page) => (
+            <button
+              key={page}
+              onClick={() => setCurrentPage(page)}
+              className={`px-3 py-1 rounded ${
+                currentPage === page
+                  ? "bg-indigo-600 text-white"
+                  : "bg-gray-200 hover:bg-gray-300"
+              }`}
+            >
+              {page}
+            </button>
+          ))}
+
+          {/* Next Button */}
+          <button
+            onClick={() => {
+              setCurrentPage((prev) => Math.min(prev + 1, totalPages));
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+            disabled={currentPage === totalPages}
+            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
+          >
+            Next
+          </button>
         </div>
       </div>
 
@@ -437,7 +560,6 @@ const handleImport = async () => {
             </h2>
 
             {/* Sample CSV link */}
-            <SampleExcelDownloadCustomer />
 
             {/* File Upload */}
             <div className="mb-6">

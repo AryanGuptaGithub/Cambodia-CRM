@@ -3,6 +3,7 @@ import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
 import connectDB from "./utils/db.js";
+import bodyParser  from "body-parser";
 
 import customerRoutes from "./routers/master/customers.js";
 import suppilerRoutes from "./routers/master/supplier.js";
@@ -12,6 +13,8 @@ import authRoutes from "./routers/authRoutes.js";
 dotenv.config(); // Load environment variables
 
 const app = express();
+app.use(bodyParser.json({ limit: "10mb" }));  
+app.use(bodyParser.urlencoded({ extended: true, limit: "10mb" }));
 const PORT = process.env.PORT || 3000;
 
 const allowedOrigins = [

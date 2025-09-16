@@ -12,8 +12,6 @@ cloudinary.config({
 });
 
 export function uploadCompanyLogo(file, publicId = null) {
-  console.log("📤 Called uploadCompanyLogo");
-
   return new Promise((resolve, reject) => {
     if (!file) return resolve(null);
   
@@ -41,11 +39,9 @@ export function uploadCompanyLogo(file, publicId = null) {
     const readStream = streamifier.createReadStream(file.buffer);
 
     readStream.on("data", (chunk) => {
-      console.log(`📦 Streaming chunk (${chunk.length} bytes)...`);
     });
 
     readStream.on("end", () => {
-      console.log("🏁 Finished streaming to Cloudinary.");
     });
 
     readStream.on("error", (err) => {

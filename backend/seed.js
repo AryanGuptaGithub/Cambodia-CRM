@@ -13,7 +13,6 @@ const MONGO_URI = process.env.MONGODB_URI;
 async function connectDB(uri) {
   try {
     await mongoose.connect(uri); // no need for useNewUrlParser or useUnifiedTopology
-    console.log("✅ MongoDB connected for seeding");
   } catch (err) {
     console.error("❌ MongoDB connection failed:", err);
     process.exit(1);
@@ -26,8 +25,6 @@ async function seedUsers() {
 
   try {
     await User.deleteMany({});
-    console.log("🧹 Users collection cleared");
-
     const users = [
       { username: "superadmin", password: "123456", role: "super-admin" },
       { username: "admin", password: "123456", role: "admin" },
@@ -36,10 +33,8 @@ async function seedUsers() {
     for (const u of users) {
       const user = new User(u);
       await user.save();
-      console.log(`✅ User created: ${u.username}`);
     }
 
-    console.log("🎉 All users seeded successfully");
     process.exit(0);
   } catch (err) {
     console.error("❌ Seeding failed:", err);

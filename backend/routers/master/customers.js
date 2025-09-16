@@ -104,8 +104,9 @@ router.delete("/customers/:id", async (req, res) => {
 // ✅ DELETE multiple customers
 router.delete("/customers", async (req, res) => {
   try {
-    const { ids } = req.body;
-
+    
+    const ids = req.body.ids.map((item) => item.id)
+    console.log('values of ids', ids);
     if (!Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ message: "No customer IDs provided" });
     }
@@ -124,6 +125,7 @@ router.delete("/customers", async (req, res) => {
 router.post("/customers/import", async (req, res) => {
   try {
     const customers = req.body;
+    console.log('values of customers', customers);
 
     if (!Array.isArray(customers)) {
       return res.status(400).json({
@@ -132,16 +134,17 @@ router.post("/customers/import", async (req, res) => {
     }
 
     for (const customer of customers) {
-      if (!customer.name || !customer.phone || !customer.email || !customer.warehouse) {
-        return res.status(400).json({
-          message: "Missing required fields in one or more records.",
-        });
-      }
+      // if (!customer.name || !customer.phone || !customer.email || !customer.warehouse) {
+      //   return res.status(400).json({
+      //     message: "Missing required fields in one or more records.",
+      //   });
+      // }
 
       try {
         await Customer.create(customer);
       } catch (err) {
-        if (err.code === 11000) return handleDuplicateError(res, err);
+        console.log('values of error', err);
+        // if (err.code === 11000) return handleDuplicateError(res, err);
         return res.status(400).json({
           message: "Invalid data provided",
           error: err.message,
