@@ -429,13 +429,11 @@ const Customer = () => {
                 </td>
                 <td className="p-3">{customer.typeOfBusiness}</td>
                 <td className="p-3 capitalize">{customer.medicalRepName}</td>
-                
+
                 <td className="p-3 capitalize">{customer.address}</td>
                 <td className="p-3 capitalize">{customer.zone}</td>
                 <td className="p-3 capitalize">{customer.location}</td>
-                <td className="p-3">
-                  {formatDateToReadable(customer.date)}
-                </td>
+                <td className="p-3">{formatDateToReadable(customer.date)}</td>
                 {/* <td
                   className={`p-3 font-medium ${
                     customer.type == "pay" ? "text-red-600" : "text-green-600"
@@ -617,7 +615,6 @@ const Customer = () => {
                   if (res.status === 200) {
                     showToast("success", "Customer updated successfully");
                     setIsEditModalOpen(false);
-                    // Refresh customers list
                     const updated = await fetch(`${backendUrl}/api/customers`);
                     setCustomers(await updated.json());
                   }
@@ -628,6 +625,110 @@ const Customer = () => {
               }}
               className="grid grid-cols-1 md:grid-cols-2 gap-4"
             >
+              {/* New fields similar to View Modal */}
+              <div>
+                <label className="block text-sm font-medium">
+                  Customer Code
+                </label>
+                <input
+                  type="text"
+                  value={form.customerCode}
+                  onChange={(e) =>
+                    setForm({ ...form, customerCode: e.target.value })
+                  }
+                  className="w-full border px-3 py-2 rounded-lg capitalize"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium">
+                  Customer Number
+                </label>
+                <input
+                  type="text"
+                  value={form.customerNumber}
+                  onChange={(e) =>
+                    setForm({ ...form, customerNumber: e.target.value })
+                  }
+                  className="w-full border px-3 py-2 rounded-lg capitalize"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium">
+                  Customer Remark
+                </label>
+                <input
+                  type="text"
+                  value={form.remark}
+                  onChange={(e) => setForm({ ...form, remark: e.target.value })}
+                  className="w-full border px-3 py-2 rounded-lg capitalize"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium">
+                  Type of Business
+                </label>
+                <input
+                  type="text"
+                  value={form.typeOfBusiness}
+                  onChange={(e) =>
+                    setForm({ ...form, typeOfBusiness: e.target.value })
+                  }
+                  className="w-full border px-3 py-2 rounded-lg capitalize"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium">
+                  Medical Rep Name
+                </label>
+                <input
+                  type="text"
+                  value={form.medicalRepName}
+                  onChange={(e) =>
+                    setForm({ ...form, medicalRepName: e.target.value })
+                  }
+                  className="w-full border px-3 py-2 rounded-lg capitalize"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium">Address</label>
+                <input
+                  type="text"
+                  value={form.address}
+                  onChange={(e) =>
+                    setForm({ ...form, address: e.target.value })
+                  }
+                  className="w-full border px-3 py-2 rounded-lg capitalize"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium">Zone</label>
+                <input
+                  type="text"
+                  value={form.zone}
+                  onChange={(e) => setForm({ ...form, zone: e.target.value })}
+                  className="w-full border px-3 py-2 rounded-lg capitalize"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium">Location</label>
+                <input
+                  type="text"
+                  value={form.location}
+                  onChange={(e) =>
+                    setForm({ ...form, location: e.target.value })
+                  }
+                  className="w-full border px-3 py-2 rounded-lg capitalize"
+                />
+              </div>
+
+              {/* Existing Fields */}
               <div>
                 <label className="block text-sm font-medium">Name</label>
                 <input
@@ -760,8 +861,6 @@ const Customer = () => {
                   className="w-full border px-3 py-2 rounded-lg"
                 />
               </div>
-
-              {/* Profile Image - you can add file upload here if needed */}
             </form>
 
             <div className="mt-6 flex justify-end gap-3">
@@ -800,6 +899,7 @@ const Customer = () => {
           </div>
         </div>
       )}
+
       {isViewModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-30 flex justify-center items-center z-50">
           <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
@@ -815,6 +915,15 @@ const Customer = () => {
             </h2>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Existing fields */}
+              <div>
+                <label className="block text-sm font-medium text-gray-600">
+                  Customer Code
+                </label>
+                <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                  {form.customerCode}
+                </p>
+              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-600">
                   Name
@@ -823,85 +932,75 @@ const Customer = () => {
                   {form.name}
                 </p>
               </div>
-
               <div>
                 <label className="block text-sm font-medium text-gray-600">
-                  Email
-                </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                  {form.email}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-600">
-                  Phone
-                </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                  {form.phone}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-600">
-                  Warehouse
+                  Customer Number
                 </label>
                 <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                  {form.warehouse}
+                  {form.customerNumber}
                 </p>
               </div>
-
               <div>
                 <label className="block text-sm font-medium text-gray-600">
-                  Tax Number
-                </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                  {form.taxNumber}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-600">
-                  Opening Balance
-                </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                  {form.openingBalance}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-600">
-                  Type
+                  Customer Remark
                 </label>
                 <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                  {form.type}
+                  {form.remark?.trim() ? form.remark : "No Remarks"}
                 </p>
               </div>
 
+              {/* New fields from the table */}
               <div>
                 <label className="block text-sm font-medium text-gray-600">
-                  Credit Period
-                </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                  {form.creditPeriod}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-600">
-                  Credit Limit
-                </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                  {form.creditLimit}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-600">
-                  Status
+                  Type of Business
                 </label>
                 <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                  {form.status}
+                  {form.typeOfBusiness}
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-600">
+                  Medical Rep Name
+                </label>
+                <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                  {form.medicalRepName}
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-600">
+                  Address
+                </label>
+                <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                  {form.address}
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-600">
+                  Zone
+                </label>
+                <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                  {form.zone}
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-600">
+                  Location
+                </label>
+                <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                  {form.location}
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-600">
+                  Date
+                </label>
+                <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                  {formatDateToReadable(form.date)}
                 </p>
               </div>
             </div>
