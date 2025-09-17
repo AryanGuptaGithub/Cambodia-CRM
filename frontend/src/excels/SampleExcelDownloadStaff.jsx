@@ -1,7 +1,7 @@
 import React from "react";
 import ExcelJS from "exceljs";
 
-const SampleExcelDownloadMR = () => {
+const SampleExcelDownloadStaff = () => {
   const generateExcel = async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("List");
@@ -9,7 +9,7 @@ const SampleExcelDownloadMR = () => {
     // Merge and center "List" across A1:C1
     worksheet.mergeCells("A1:C1");
     const titleCell = worksheet.getCell("A1");
-    titleCell.value = "Supplier List";
+    titleCell.value = "MR List";
     titleCell.font = { bold: true, size: 14 };
     titleCell.alignment = { horizontal: "center", vertical: "middle" };
     worksheet.getRow(1).height = 20;
@@ -78,4 +78,4 @@ const SampleExcelDownloadMR = () => {
   );
 };
 
-export default SampleExcelDownloadMR;
+export default SampleExcelDownloadStaff;

@@ -11,7 +11,8 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
-const customersPerPage = 10;
+const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
+const customersPerPage = 8;
 
 const Customer = () => {
   const navigate = useNavigate();
@@ -26,7 +27,8 @@ const Customer = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [isUploading, setIsUploading] = useState(false);
-  const [nextCustomerCode, setNextCustomerCode] = useState(null)
+  const [nextCustomerCode, setNextCustomerCode] = useState(null);
+  const [enaledCustomer, setEnabledCustomer] = useState(true);
 
   const [form, setForm] = useState({
     customerCode: "",
@@ -78,7 +80,7 @@ const Customer = () => {
       r.location.toLowerCase().includes(searchTerm.toLowerCase()) ||
       r.date.toLowerCase().includes(searchTerm.toLowerCase())
   );
-  
+
   // Pagination calculations
   const totalPages = Math.ceil(filteredCustomers.length / customersPerPage);
   const visiblePages = getVisiblePages(currentPage, totalPages);
@@ -150,9 +152,8 @@ const Customer = () => {
           // Refresh customer list
           const updated = await fetch(`${backendUrl}/api/customers`);
           const data = await updated.json();
-          setCustomers(data);
-
-          // Clear selection
+          setCustomers(data.customers);
+          setNextCustomerCode(data.nextCustomerCode);
           setSelected([]);
         }
       } catch (error) {
@@ -228,9 +229,8 @@ const Customer = () => {
         return;
       }
 
-      const HEADER_ROW_INDEX = 3;
+      const HEADER_ROW_INDEX = 2;
       const rawHeaders = rows[HEADER_ROW_INDEX];
-
       const headersMap = {};
       rawHeaders.forEach((header, index) => {
         if (!header) return;
@@ -303,10 +303,10 @@ const Customer = () => {
           res.data.message || "Customers imported successfully!"
         );
         setShowImportModal(false);
-
-        // Refresh customer list
-        const updated = await fetch(`${backendUrl}/api/customers`);
-        setCustomers(await updated.json());
+        const response = await fetch(`${backendUrl}/api/customers`);
+        const data = await response.json();
+        setCustomers(data.customers);
+        setNextCustomerCode(data.nextCustomerCode);
       }
     } catch (err) {
       console.error("Import error:", err);
@@ -347,6 +347,31 @@ const Customer = () => {
     }
   };
 
+  const handlerEnabledCustomer = async (id) => {
+    try {
+
+      const customer = customers.find((c) => c._id === id);
+      if (!customer) return;
+      const updatedCustomer = { ...customer, enabled: !customer.enabled };
+      const response = await fetch(`${backendUrl}/api/customers/${id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ enabled: updatedCustomer.enabled }),
+      });
+
+      if (!response.ok) throw new Error("Failed to update customer");
+
+      const data = await response.json();
+      setCustomers((prev) =>
+        prev.map((c) => (c._id === id ? { ...c, enabled: data.enabled } : c))
+      );
+    } catch (err) {
+      console.error("Error updating customer:", err);
+    }
+  };
+
   if (loading) return <p>Loading...</p>;
   if (error) return <p className="text-red-500">{error}</p>;
 
@@ -355,7 +380,11 @@ const Customer = () => {
       <div className="flex justify-between items-center mb-4">
         <div className="flex gap-3">
           <button
-           onClick={() => navigate("/masterlayout/customer/new", { state: { customerCode: nextCustomerCode } })}
+            onClick={() =>
+              navigate("/masterlayout/customer/new", {
+                state: { customerCode: nextCustomerCode },
+              })
+            }
             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md"
           >
             <UserPlus size={18} /> Add New Customer
@@ -376,14 +405,22 @@ const Customer = () => {
             </button>
           )}
         </div>
+        <div className="flex justify-between items-center mb-4 gap-8">
+          <p className="text-lg font-semibold text-gray-700">
+            Total Count:{" "}
+            <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+              {filteredCustomers.length}
+            </span>
+          </p>
 
-        <input
-          type="text"
-          placeholder="Search..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="border px-3 py-2 rounded-lg shadow-sm"
-        />
+          <input
+            type="text"
+            placeholder="Search..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="border px-4 py-2 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+          />
+        </div>
       </div>
 
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
@@ -411,6 +448,7 @@ const Customer = () => {
               <th className="p-3">Zone</th>
               <th className="p-3">Location</th>
               <th className="p-3">Created At</th>
+              <th className="p-3">Status</th>
               <th className="p-3">Action</th>
             </tr>
           </thead>
@@ -434,6 +472,19 @@ const Customer = () => {
                   <td className="p-3 capitalize">{customer.zone}</td>
                   <td className="p-3 capitalize">{customer.location}</td>
                   <td className="p-3">{formatDateToReadable(customer.date)}</td>
+                  <td>
+                    <button
+                      onClick={() => handlerEnabledCustomer(customer._id)}
+                      className={`px-3 py-1 rounded-full text-sm ${
+                        customer.enabled
+                          ? "bg-green-100 text-green-600"
+                          : "bg-gray-200 text-gray-600"
+                      }`}
+                    >
+                      {customer.enabled ? "Enabled" : "Disabled"}
+                    </button>
+                  </td>
+
                   <td className="p-3 flex items-center justify-center gap-3">
                     <button className="text-blue-600 hover:text-blue-800">
                       <Eye onClick={() => handleView(customer)} size={18} />
@@ -520,7 +571,7 @@ const Customer = () => {
             <h2 className="text-lg font-semibold text-gray-800 mb-4">
               Import Customer
             </h2>
-
+            {isSampleFile && <SampleExcelDownloadCustomer />}
             <div className="mb-6">
               <label className="block text-gray-700 mb-2">File</label>
               <input
@@ -597,7 +648,7 @@ const Customer = () => {
             >
               {/* New fields similar to View Modal */}
               <div>
-                <label className="block text-sm font-medium">
+                <label className="block text-sm font-medium text-gray-700">
                   Customer Code
                 </label>
                 <input
@@ -606,7 +657,8 @@ const Customer = () => {
                   onChange={(e) =>
                     setForm({ ...form, customerCode: e.target.value })
                   }
-                  className="w-full border px-3 py-2 rounded-lg capitalize"
+                  className="w-full border px-3 py-2 rounded-lg bg-gray-100 text-gray-500 cursor-not-allowed"
+                  disabled
                 />
               </div>
 

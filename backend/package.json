@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "",
   "main": "server.js",
-    "type": "module",
+  "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js",
@@ -21,6 +21,7 @@
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.18.1",
+    "mongoose-auto-increment-plugin": "^1.0.2",
     "multer": "^2.0.2",
     "multer-zip": "^1.2.0",
     "streamifier": "^0.1.1",

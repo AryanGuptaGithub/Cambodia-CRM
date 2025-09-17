@@ -2,90 +2,95 @@ import React from "react";
 import ExcelJS from "exceljs";
 
 const SampleExcelDownloadCustomer = () => {
-
   const generateExcel = async () => {
     const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet("Sample Data");
+    const worksheet = workbook.addWorksheet("Customer List");
 
-    // Set columns with fixed widths
+    // ===== Title Row (Row 1) =====
+    worksheet.mergeCells("A1:J1");
+    const titleCell = worksheet.getCell("A1");
+    titleCell.value = "HEALTHCARE SOUTH EAST ASIA";
+    titleCell.font = { bold: true, size: 16 };
+    titleCell.alignment = { vertical: "middle", horizontal: "center" };
+    worksheet.getRow(1).height = 25;
+
+    // ===== Subtitle Row (Row 2) =====
+    worksheet.mergeCells("A2:J2");
+    const subtitleCell = worksheet.getCell("A2");
+    subtitleCell.value = "Customer List";
+    subtitleCell.font = { bold: true, size: 14 };
+    subtitleCell.alignment = { vertical: "middle", horizontal: "center" };
+    worksheet.getRow(2).height = 20;
+
+    // ===== Define Column Structure =====
     worksheet.columns = [
-      { header: "warehouse", key: "warehouse", width: 15 },
-      { header: "name", key: "name", width: 20 },
-      { header: "phone", key: "phone", width: 15 },
-      { header: "email", key: "email", width: 25 },
-      { header: "status", key: "status", width: 12 },    // dropdown column
-      { header: "password", key: "password", width: 15 },
-      { header: "taxNumber", key: "taxNumber", width: 15 },
-      { header: "openingBalance", key: "openingBalance", width: 18 },
-      { header: "type", key: "type", width: 12 },         // dropdown column
-      { header: "creditPeriod", key: "creditPeriod", width: 15 },
-      { header: "creditLimit", key: "creditLimit", width: 15 },
+      { key: "customerCode", width: 18 },
+      { key: "date", width: 15 },
+      { key: "medicalRep", width: 28 },
+      { key: "customerName", width: 30 },
+      { key: "businessType", width: 22 },
+      { key: "customerNumber", width: 20 },
+      { key: "customerAddress", width: 55 },
+      { key: "zone", width: 18 },
+      { key: "location", width: 20 },
+      { key: "remark", width: 25 },
     ];
 
-    // Center and style header row
-    const headerRow = worksheet.getRow(1);
-    headerRow.height = 20; // optional height
-    headerRow.font = { bold: true };
-    headerRow.alignment = { vertical: "middle", horizontal: "center" };
-    headerRow.eachCell((cell) => {
-      cell.alignment = { vertical: "middle", horizontal: "center" };
-    });
+    worksheet.getRow(3).values = [
+      "Customer Code",
+      "Date",
+      "Medical Representative Name",
+      "Customer Name in English",
+      "Types of Business",
+      "Customer Number",
+      "Customer Address",
+      "Zone",
+      "Location",
+      "Remark",
+    ];
+    worksheet.getRow(3).font = { bold: true };
+    worksheet.getRow(3).alignment = { vertical: "middle", horizontal: "center" };
+    worksheet.getRow(3).height = 20;
+    worksheet.getColumn(2).numFmt = "d-mmm-yy"; // Date column (B)
 
-    // Add one empty data row
-    worksheet.addRow({
-      warehouse: "",
-      name: "",
-      phone: "",
-      email: "",
-      status: "",
-      password: "",
-      taxNumber: "",
-      openingBalance: "",
-      type: "",
-      creditPeriod: "",
-      creditLimit: "",
-    });
-
-    // Data validation for 'status' (column 5, E)
+    // ===== Dropdown for "Types of Business" (Column E) =====
     worksheet.getColumn(5).eachCell((cell, rowNumber) => {
-      if (rowNumber === 1) return;
-
+      if (rowNumber <= 3) return;
       cell.dataValidation = {
         type: "list",
         allowBlank: true,
-        formulae: ['"enabled,disabled"'],
+        formulae: ['"Retail,Clinic,Hospital,Pharmacy"'],
         showErrorMessage: true,
         errorStyle: "warning",
         errorTitle: "Invalid input",
-        error: "Please select from the dropdown list",
+        error: "Choose from the list.",
       };
     });
 
-    // Data validation for 'type' (column 9, I)
-    worksheet.getColumn(9).eachCell((cell, rowNumber) => {
-      if (rowNumber === 1) return;
-
+    // ===== Dropdown for "Zone" (Column H) =====
+    worksheet.getColumn(8).eachCell((cell, rowNumber) => {
+      if (rowNumber <= 3) return;
       cell.dataValidation = {
         type: "list",
         allowBlank: true,
-        formulae: ['"pay,receive"'],
+        formulae: ['"Olympic,Borverl,Other"'],
         showErrorMessage: true,
         errorStyle: "warning",
         errorTitle: "Invalid input",
-        error: "Please select from the dropdown list",
+        error: "Choose from the list.",
       };
     });
 
-    // Generate buffer and create download link
+    // ===== Export File =====
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });
-    const url = URL.createObjectURL(blob);
 
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = "sample.xlsx";
+    link.download = "customer_list_sample.xlsx";
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -96,7 +101,7 @@ const SampleExcelDownloadCustomer = () => {
       onClick={generateExcel}
       className="text-blue-600 hover:underline text-sm mb-4 block"
     >
-      Click here to download Sample Excel file
+      Click here to download Customer List Sample Excel
     </button>
   );
 };

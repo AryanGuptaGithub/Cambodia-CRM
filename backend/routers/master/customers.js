@@ -29,17 +29,6 @@ const handleDuplicateError = (res, err) => {
   });
 };
 
-// ✅ GET all customers
-// router.get("/customers", async (req, res) => {
-//   try {
-//     const customers = await Customer.find();
-//     res.json(customers);
-//   } catch (err) {
-//     handleServerError(res, err);
-//   }
-// });
-
-// Assuming Express & Mongoose
 router.get("/customers", async (req, res) => {
   try {
     const customers = await Customer.find();
@@ -49,7 +38,7 @@ router.get("/customers", async (req, res) => {
         $project: {
           customerCodeNumeric: {
             $convert: {
-              input: { $trim: { input: "$customerCode" } }, // trim whitespace
+              input: { $trim: { input: "$customerCode" } }, 
               to: "int",
               onError: 0,
               onNull: 0
@@ -69,7 +58,7 @@ router.get("/customers", async (req, res) => {
     if (agg.length > 0 && typeof agg[0].customerCodeNumeric === "number") {
       nextCode = agg[0].customerCodeNumeric + 1;
     }
-
+    
     res.json({
       customers,
       nextCustomerCode: nextCode.toString()

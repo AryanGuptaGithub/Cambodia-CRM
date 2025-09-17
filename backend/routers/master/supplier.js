@@ -2,6 +2,7 @@
 import express from "express";
 import Supplier from "../../models/master/supplier.js";
 
+
 const router = express.Router();
 
 // ✅ Utility: Handle standard errors
@@ -120,7 +121,6 @@ router.delete("/suppliers", async (req, res) => {
   }
 });
 
-// ✅ Route: Import suppliers (Excel)
 router.post("/suppliers/import", async (req, res) => {
   try {
     const suppliers = req.body;
@@ -130,23 +130,43 @@ router.post("/suppliers/import", async (req, res) => {
       });
     }
 
-    const requiredFields = ["name", "phone", "email", "warehouse"];
+    // Required fields only mrName and teamName now
+    const requiredFields = ["mrName", "teamName"];
 
     for (const supplier of suppliers) {
-      if (!validateRequiredFields(supplier, requiredFields)) {
-        return res.status(400).json({
-          message: "Missing required fields in one or more records.",
-        });
+      for (const field of requiredFields) {
+        if (
+          !supplier.hasOwnProperty(field) ||
+          supplier[field] === undefined ||
+          supplier[field] === null ||
+          supplier[field] === ""
+        ) {
+          return res.status(400).json({
+            message: `Missing required field '${field}' in one or more records.`,
+          });
+        }
       }
 
-      await Supplier.create(supplier);
+      // Map input to schema fields
+      const supplierData = {
+        medicalRepName: supplier.mrName,
+        name: supplier.teamName,  // assuming teamName goes into "name" field
+      };
+      const existingSupplier = await Supplier.findOne({
+        medicalRepName: supplierData.medicalRepName,
+        name: supplierData.name,
+      });
+
+      if (!existingSupplier) {
+        await Supplier.create(supplierData);
+      }
     }
 
     res.status(200).json({ message: "Supplier(s) imported successfully." });
   } catch (err) {
-    if (err.code === 11000) return handleDuplicateError(res, err, "supplier");
-    handleServerError(res, err, "Failed to import suppliers.");
+      console.log('values of err', err);
   }
 });
+
 
 export default router;

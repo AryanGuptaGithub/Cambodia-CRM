@@ -9,6 +9,7 @@ import customerRoutes from "./routers/master/customers.js";
 import suppilerRoutes from "./routers/master/supplier.js";
 import Brand from "./routers/projectManager/brands.js"
 import authRoutes from "./routers/authRoutes.js";
+import staff from "./routers/staffMember/staff.js";
 
 dotenv.config(); // Load environment variables
 
@@ -51,6 +52,7 @@ app.use("/api", customerRoutes);
 app.use("/api", suppilerRoutes);
 app.use("/api", Brand);
 app.use("/api", authRoutes);
+app.use("/api", staff);
 
 // Server listener
 app.listen(PORT, () => {
