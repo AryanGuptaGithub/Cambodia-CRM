@@ -12,6 +12,7 @@ import "react-datepicker/dist/react-datepicker.css";
 import ReactDOM from "react-dom";
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
+
 const customersPerPage = 8;
 
 const Customer = () => {
@@ -107,13 +108,13 @@ const Customer = () => {
   // Select/unselect a customer by id
   const toggleSelect = (customer) => {
     setSelected((prev) => {
-      const exists = prev.some((c) => c.id === customer.id);
+      const exists = prev.some((c) => c.id === customer._id);
 
       if (exists) {
-        // Remove if already selected
+        // If already selected, remove it
         return prev.filter((c) => c.id !== customer._id);
       } else {
-        // Add new selection
+        // If not selected, add it
         return [...prev, { id: customer._id, name: customer.name }];
       }
     });
@@ -288,6 +289,7 @@ const Customer = () => {
 
   // Import parsed customers to backend
   const handleImport = async () => {
+    console.log('values of parsedData', parsedData);
     if (parsedData.length === 0) {
       showToast("warning", "Please upload a valid file first");
       return;
@@ -393,20 +395,20 @@ const Customer = () => {
                 state: { customerCode: nextCustomerCode },
               })
             }
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md"
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
           >
             <UserPlus size={18} /> Add New Customer
           </button>
 
           <button
             onClick={() => setShowImportModal(true)}
-            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md"
+            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
           >
             <Upload size={18} /> Import CSV
           </button>
           {selected.length > 0 && (
             <button
-              className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md"
+              className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
               onClick={() => handleDeleteSelected()}
             >
               <Trash2 size={18} /> Delete
@@ -469,7 +471,7 @@ const Customer = () => {
                       <input
                         type="checkbox"
                         checked={selected.some((s) => s.id === customer._id)}
-                        onChange={() => toggleSelect(customer)}
+                        onChange={() => toggleSelect(customer)} // Toggle on click
                       />
                       <span className="capitalize">{customer.name}</span>
                     </div>
@@ -483,7 +485,7 @@ const Customer = () => {
                   <td>
                     <button
                       onClick={() => handlerEnabledCustomer(customer._id)}
-                      className={`px-3 py-1 rounded-full text-sm ${
+                      className={`px-3 py-1 rounded-full text-sm cursor-pointer ${
                         customer.enabled
                           ? "bg-green-100 text-green-600"
                           : "bg-gray-200 text-gray-600"
@@ -494,15 +496,15 @@ const Customer = () => {
                   </td>
 
                   <td className="p-3 flex items-center justify-center gap-3">
-                    <button className="text-blue-600 hover:text-blue-800">
+                    <button className="text-blue-600 hover:text-blue-800 cursor-pointer">
                       <Eye onClick={() => handleView(customer)} size={18} />
                     </button>
-                    <button className="text-green-600 hover:text-green-800">
+                    <button className="text-green-600 hover:text-green-800 cursor-pointer">
                       <Edit onClick={() => editCustomer(customer)} size={18} />
                     </button>
                     <button
                       onClick={() => deleteCustomer(customer)}
-                      className="text-red-600 hover:text-red-800"
+                      className="text-red-600 hover:text-red-800 cursor-pointer"
                     >
                       <Trash2 size={18} />
                     </button>
@@ -637,7 +639,7 @@ const Customer = () => {
             <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
               <button
                 onClick={() => setIsEditModalOpen(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
               >
                 <X size={20} />
               </button>
@@ -805,13 +807,13 @@ const Customer = () => {
               <div className="mt-6 flex justify-end gap-3">
                 <button
                   onClick={() => setIsEditModalOpen(false)}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg"
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleUpdateCustomer}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg cursor-pointer"
                 >
                   Save Changes
                 </button>
@@ -832,7 +834,7 @@ const Customer = () => {
             <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
               <button
                 onClick={() => setIsViewModalOpen(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
               >
                 <X size={20} />
               </button>
@@ -935,7 +937,7 @@ const Customer = () => {
               <div className="mt-6 flex justify-end">
                 <button
                   onClick={() => setIsViewModalOpen(false)}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg"
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
                 >
                   Close
                 </button>
