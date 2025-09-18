@@ -484,7 +484,7 @@ const Customer = () => {
 
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center">
-          <thead className="bg-gray-100 text-gray-700">
+          <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
               <th className="p-3">
                 <div className="flex items-center gap-4">
@@ -582,7 +582,7 @@ const Customer = () => {
               page === "..." ? (
                 <span
                   key={`ellipsis-${idx}`}
-                  className="px-3 py-1 text-gray-500 select-none"
+                  className="px-3 py-1 text-gray-500 select-none cursor-pointer"
                 >
                   ...
                 </span>

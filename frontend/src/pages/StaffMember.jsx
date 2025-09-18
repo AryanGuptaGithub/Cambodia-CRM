@@ -257,17 +257,38 @@ const StaffMember = () => {
         defval: "",
       });
 
-      const HEADER_ROW_INDEX = 2;
-      const rawHeaders = rows[HEADER_ROW_INDEX] || [];
-      const headersMap = rawHeaders.reduce((acc, header, i) => {
-        if (header) {
-          acc[i] = header.toString().trim().toLowerCase();
+      let headerRowIndex = -1;
+      let headersMap = {};
+
+      // Find the row that contains headers (case-insensitive)
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const normalizedRow = row.map((cell) =>
+          cell.toString().trim().toLowerCase()
+        );
+
+        if (
+          normalizedRow.includes("no") &&
+          normalizedRow.includes("mr name") &&
+          normalizedRow.includes("team")
+        ) {
+          headerRowIndex = i;
+          headersMap = normalizedRow.reduce((acc, header, index) => {
+            acc[index] = header;
+            return acc;
+          }, {});
+          break;
         }
-        return acc;
-      }, {});
+      }
+
+      if (headerRowIndex === -1) {
+        console.error("Header row not found.");
+        showToast("error", "Header row not found in Excel file.");
+        return;
+      }
 
       const mappedData = rows
-        .slice(HEADER_ROW_INDEX + 1)
+        .slice(headerRowIndex + 1)
         .map((row) => {
           const item = {};
           Object.entries(headersMap).forEach(([index, key]) => {
@@ -280,7 +301,7 @@ const StaffMember = () => {
             teamName: item["team"],
           };
         })
-        .filter((entry) => entry.no);
+        .filter((entry) => entry.no); // Optional: filter out empty rows
 
       setParsedData(mappedData);
     };
@@ -406,7 +427,6 @@ const StaffMember = () => {
 
   return (
     <div className="p-6">
- 
       <div className="flex justify-between items-center mb-4">
         <div className="flex gap-3">
           <button
@@ -451,26 +471,28 @@ const StaffMember = () => {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-4 mb-4">
-        {["All", "Enabled", "Disabled"].map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setSelectedTab(tab)}
-            className={`px-4 py-2 rounded-lg cursor-pointer ${
-              selectedTab === tab
-                ? "bg-indigo-600 text-white"
-                : "bg-gray-200 text-gray-700"
-            }`}
-          >
-            {tab}
-          </button>
-        ))}
-      </div>
+      {staff.length > 0 && (
+        <div className="flex gap-4 mb-4">
+          {["All", "Enabled", "Disabled"].map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setSelectedTab(tab)}
+              className={`px-4 py-2 rounded-lg cursor-pointer ${
+                selectedTab === tab
+                  ? "bg-indigo-600 text-white"
+                  : "bg-gray-200 text-gray-700"
+              }`}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Table */}
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow-sm text-center">
-          <thead className="bg-gray-100 text-gray-700">
+          <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
               <th className="p-3">
                 <div className="flex items-center gap-4">
@@ -805,62 +827,68 @@ const StaffMember = () => {
             document.body
           )}
 
-        {showImportModal && (
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
-              {/* Close */}
-              <button
-                onClick={() => setShowImportModal(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
-                disabled={isUploading}
-              >
-                <X size={20} />
-              </button>
-
-              <h2 className="text-lg font-semibold text-gray-800 mb-4">
-                Import Staff
-              </h2>
-              <SampleExcelDownloadStaff />
-
-              {/* File Upload */}
-              <div className="mb-6">
-                <label className="block text-gray-700 mb-2">File</label>
-                <input
-                  type="file"
-                  accept=".csv, .xlsx"
-                  onChange={handleFileUpload}
-                  className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
-                />
-              </div>
-
-              {/* Buttons */}
-              <div className="flex justify-end gap-3">
+        {showImportModal &&
+          ReactDOM.createPortal(
+            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+              <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                onClick={() => setIsOpen(false)}
+              />
+              <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
+                {/* Close */}
                 <button
                   onClick={() => setShowImportModal(false)}
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
                   disabled={isUploading}
-                  className={`px-5 py-2 rounded-lg ${
-                    isUploading
-                      ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                      : "bg-gray-300 hover:bg-gray-400 text-gray-700"
-                  }`}
                 >
-                  Cancel
+                  <X size={20} />
                 </button>
-                <button
-                  onClick={handleImport}
-                  disabled={isUploading}
-                  className={`px-5 py-2 rounded-lg ${
-                    isUploading
-                      ? "bg-blue-400 text-white cursor-not-allowed"
-                      : "bg-blue-600 hover:bg-blue-700 text-white"
-                  }`}
-                >
-                  {isUploading ? "Uploading…" : "Upload"}
-                </button>
+
+                <h2 className="text-lg font-semibold text-gray-800 mb-4">
+                  Import Staff
+                </h2>
+                <SampleExcelDownloadStaff />
+
+                {/* File Upload */}
+                <div className="mb-6">
+                  <label className="block text-gray-700 mb-2">File</label>
+                  <input
+                    type="file"
+                    accept=".csv, .xlsx"
+                    onChange={handleFileUpload}
+                    className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
+                  />
+                </div>
+
+                {/* Buttons */}
+                <div className="flex justify-end gap-3">
+                  <button
+                    onClick={() => setShowImportModal(false)}
+                    disabled={isUploading}
+                    className={`px-5 py-2 rounded-lg ${
+                      isUploading
+                        ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                        : "bg-gray-300 hover:bg-gray-400 text-gray-700"
+                    }`}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleImport}
+                    disabled={isUploading}
+                    className={`px-5 py-2 rounded-lg ${
+                      isUploading
+                        ? "bg-blue-400 text-white cursor-not-allowed"
+                        : "bg-blue-600 hover:bg-blue-700 text-white"
+                    }`}
+                  >
+                    {isUploading ? "Uploading…" : "Upload"}
+                  </button>
+                </div>
               </div>
-            </div>
-          </div>
-        )}
+            </div>,
+            document.body
+          )}
       </div>
     </div>
   );
