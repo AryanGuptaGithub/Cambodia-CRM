@@ -28,7 +28,6 @@ const Customer = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [isUploading, setIsUploading] = useState(false);
   const [nextCustomerCode, setNextCustomerCode] = useState(null);
-  const [enaledCustomer, setEnabledCustomer] = useState(true);
 
   const [form, setForm] = useState({
     customerCode: "",
@@ -144,13 +143,13 @@ const Customer = () => {
     if (confirm.isConfirmed) {
       try {
         const res = await axios.delete(`${backendUrl}/api/customers`, {
-          data: { ids: selected }, // send IDs in request body
+          data: { ids: selected },
         });
 
         if (res.status === 200) {
           showToast("success", "Selected customers deleted successfully");
-          // Refresh customer list
           const updated = await fetch(`${backendUrl}/api/customers`);
+          console.log("valueso f updated", updated);
           const data = await updated.json();
           setCustomers(data.customers);
           setNextCustomerCode(data.nextCustomerCode);
@@ -191,16 +190,20 @@ const Customer = () => {
         const res = await axios.delete(
           `${backendUrl}/api/customers/${customer._id}`
         );
-
+   
         if (res.status === 200) {
           showToast(
             "success",
             `Customer <b>${customer.name}</b> deleted successfully`
           );
           const updated = await axios.get(`${backendUrl}/api/customers`);
-          setCustomers(updated.data);
+          const customers = updated.data.customers;
+          setCustomers(customers);
+          setNextCustomerCode(updated.data.nextCustomerCode);
+          setSelected([]);
         }
       } catch (error) {
+        console.log('values of error', error);
         showToast("error", "Failed to delete customer.");
       }
     }
@@ -349,7 +352,6 @@ const Customer = () => {
 
   const handlerEnabledCustomer = async (id) => {
     try {
-
       const customer = customers.find((c) => c._id === id);
       if (!customer) return;
       const updatedCustomer = { ...customer, enabled: !customer.enabled };
@@ -909,7 +911,7 @@ const Customer = () => {
           </div>
         </div>
       )}
-
+      
       {showDeleteModal && selected && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
           <div className="bg-white p-6 rounded-xl shadow-xl max-w-md w-full">

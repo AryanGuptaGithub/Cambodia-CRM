@@ -3,6 +3,11 @@ import staffSchema from "../../models/staffMember/staff.js";
 
 const router = express.Router();
 
+const handleServerError = (res, err, message = "Server error", code = 500) => {
+  console.error("❌ [ERROR]:", err);
+  res.status(code).json({ message, error: err.message || err });
+};
+
 router.get("/staffs", async (_, res) => {
   try {
     const staff = await staffSchema.find();
@@ -41,30 +46,29 @@ router.post("/staffs", async (req, res) => {
     });
   } catch (err) {
     if (err.code === 11000) return handleDuplicateError(res, err, "supplier");
-    res
-      .status(400)
-      .json({
-        message: "Invalid data provided",
-        error: err.message,
-        ok: false,
-      });
+    res.status(400).json({
+      message: "Invalid data provided",
+      error: err.message,
+      ok: false,
+    });
   }
 });
 
 // ✅ Route: Update supplier
-router.put("/staffs/:id", async (req, res) => {
+router.put("/staff/:id", async (req, res) => {
   try {
     const updatedStaff = await staffSchema.findByIdAndUpdate(
       req.params.id,
       req.body,
       {
-        new: true,
-        runValidators: true,
+        new: true, // Return the updated document
+        runValidators: true, // Enforce schema validation
       }
     );
 
-    if (!updatedStaff)
-      return res.status(404).json({ message: "Supplier not found" });
+    if (!updatedStaff) {
+      return res.status(404).json({ message: "Staff not found" });
+    }
 
     res.json(updatedStaff);
   } catch (err) {
@@ -73,24 +77,9 @@ router.put("/staffs/:id", async (req, res) => {
 });
 
 // ✅ Route: Delete one supplier
-router.delete("/staffs/:id", async (req, res) => {
-  try {
-    const deleted = await staffSchema.findByIdAndDelete(req.params.id);
-    if (!deleted) return res.status(404).json({ message: "Staff not found" });
-
-    res.json({
-      message: `Staff <b>${deleted.name}</b> deleted successfully`,
-      ok: true,
-    });
-  } catch (err) {
-    handleServerError(res, err);
-  }
-});
-
-// ✅ Route: Bulk delete suppliers
 router.delete("/staffs", async (req, res) => {
+  const ids = req.body;
   try {
-    const { ids } = req.body;
     if (!Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ message: "No staff IDs provided" });
     }
@@ -98,10 +87,29 @@ router.delete("/staffs", async (req, res) => {
     const result = await staffSchema.deleteMany({ _id: { $in: ids } });
 
     res.json({
-      message: `${result.deletedCount} staffs(s) deleted successfully`,
+      message: `${result.deletedCount} staff(s) deleted successfully`,
+    });
+  } catch (err) {
+    console.error("❌ Error deleting staff:", err);
+    handleServerError(res, err);
+  }
+});
+
+// ✅ DELETE /staff/:id — delete one staff by ID
+router.delete("/staff/:id", async (req, res) => {
+  try {
+    const deleted = await staffSchema.findByIdAndDelete(req.params.id);
+
+    if (!deleted) {
+      return res.status(404).json({ message: "Staff not found" });
+    }
+
+    res.json({
+      message: `Staff <b>${deleted.name}</b> deleted successfully`,
       ok: true,
     });
   } catch (err) {
+    console.error("🔴 Error deleting single staff:", err);
     handleServerError(res, err);
   }
 });
@@ -135,7 +143,7 @@ router.post("/staffs/import", async (req, res) => {
         medicalRepName: staff.mrName,
         teamName: staff.teamName,
       };
-      
+
       const existingSupplier = await staffSchema.findOne({
         medicalRepName: staffData.medicalRepName,
         name: staffData.name,
