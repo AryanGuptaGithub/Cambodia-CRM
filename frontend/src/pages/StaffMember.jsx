@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from "react";
-import { Eye, Edit, Trash2, UserPlus, Upload, X } from "lucide-react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { Eye, Edit, Trash2, UserPlus, Upload, X, Rss } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { confirmDialog } from "../utils/confirmationDialog";
@@ -13,20 +13,29 @@ import "react-datepicker/dist/react-datepicker.css";
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
 const StaffMember = () => {
-  const [staff, setStaff] = useState([]);
-  const [selected, setSelected] = useState([]);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [selectedTab, setSelectedTab] = useState("All");
   const [currentPage, setCurrentPage] = useState(1);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [showImportModal, setShowImportModal] = useState(false);
-  const [parsedData, setParsedData] = useState([]);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const staffPerPage = 8;
 
+  // Filters
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedTab, setSelectedTab] = useState("All");
+
+  // UI modals
+  const [modals, setModals] = useState({
+    import: false,
+    edit: false,
+    view: false,
+    delete: false,
+  });
+
+  // Staff Data
+  const [staff, setStaff] = useState([]);
+  const [allTeams, setAllTeams] = useState([]);
+  const [parsedData, setParsedData] = useState([]);
+  const [selected, setSelected] = useState([]);
+  const [isUploading, setIsUploading] = useState(false);
+
+  // Form State
   const [form, setForm] = useState({
     medicalRepName: "",
     teamName: "",
@@ -34,6 +43,13 @@ const StaffMember = () => {
     enabled: "",
     _id: null,
   });
+
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
 
   useEffect(() => {
     const fetchStaffs = async () => {
@@ -49,206 +65,233 @@ const StaffMember = () => {
       }
     };
 
+    const fetchTeams = async () => {
+      try {
+        const res = await axios.get(`${backendUrl}/api/staff/teams`);
+        setAllTeams(res.data.map((t) => t.trim()).filter(Boolean));
+      } catch (err) {
+        console.error("Error loading teams:", err);
+      }
+    };
+
     fetchStaffs();
+    fetchTeams();
   }, []);
 
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, selectedTab]);
+
+  const fetchTeams = async () => {
+    try {
+      const res = await axios.get(`${backendUrl}/api/staff/teams`);
+      setAllTeams(res.data.map((t) => t.trim()).filter(Boolean));
+    } catch (err) {
+      console.error("Error loading teams:", err);
+    }
+  };
+
   const filteredStaff = useMemo(() => {
+    const lowerSearch = searchTerm.toLowerCase();
+
     return staff.filter((s) => {
       const matchesTab =
         selectedTab === "All" ||
         (selectedTab === "Enabled" && s.enabled === true) ||
         (selectedTab === "Disabled" && s.enabled === false);
 
-      const repMatch = s.medicalRepName
-        .toLowerCase()
-        .includes(searchTerm.toLowerCase());
-      const teamMatch = s.teamName
-        .toLowerCase()
-        .includes(searchTerm.toLowerCase());
+      const repMatch = s.medicalRepName?.toLowerCase().includes(lowerSearch);
+      const teamMatch = s.teamName?.toLowerCase().includes(lowerSearch);
 
-      const matchesRepOrTeam = repMatch || teamMatch;
-
-      return matchesTab && matchesRepOrTeam;
+      return matchesTab && (repMatch || teamMatch);
     });
   }, [staff, selectedTab, searchTerm]);
 
-  const totalPages = Math.ceil(filteredStaff.length / staffPerPage);
-  const visiblePages = getVisiblePages(currentPage, totalPages);
-  const startIndex = (currentPage - 1) * staffPerPage;
-  const endIndex = currentPage * staffPerPage;
-  const currentStaff = filteredStaff.slice(startIndex, endIndex);
-  function getVisiblePages(currentPage, totalPages) {
-    if (totalPages <= 5) {
-      return Array.from({ length: totalPages }, (_, i) => i + 1);
-    }
+  const teamSuggestions = useMemo(() => {
+    if (!form.teamName) return [];
+    return allTeams.filter((team) =>
+      team.toLowerCase().includes(form.teamName.toLowerCase())
+    );
+  }, [form.teamName, allTeams]);
 
-    if (currentPage <= 3) {
-      return [1, 2, 3, "...", totalPages];
-    }
+  const totalPages = useMemo(
+    () => Math.ceil(filteredStaff.length / staffPerPage),
+    [filteredStaff.length, staffPerPage]
+  );
 
-    if (currentPage >= totalPages - 2) {
+  const currentStaff = useMemo(() => {
+    const startIndex = (currentPage - 1) * staffPerPage;
+    return filteredStaff.slice(startIndex, startIndex + staffPerPage);
+  }, [filteredStaff, currentPage, staffPerPage]);
+
+  const visiblePages = useMemo(() => {
+    if (totalPages <= 5) return [...Array(totalPages).keys()].map((i) => i + 1);
+
+    if (currentPage <= 3) return [1, 2, 3, "...", totalPages];
+    if (currentPage >= totalPages - 2)
       return [1, "...", totalPages - 2, totalPages - 1, totalPages];
-    }
 
     return [1, "...", currentPage, "...", totalPages];
-  }
+  }, [currentPage, totalPages]);
 
-  const toggleSelect = (staff) => {
-    setSelected((prev) => {
-      const exists = prev.some((c) => c.id === staff.id);
+  // Select / Deselect a single staff
+  const toggleSelect = useCallback((staff) => {
+    setSelected((prev) =>
+      prev.some((c) => c.id === staff._id)
+        ? prev.filter((c) => c.id !== staff._id)
+        : [...prev, { id: staff._id, name: staff.medicalRepName }]
+    );
+  }, []);
 
-      if (exists) {
-        return prev.filter((c) => c.id !== staff.id);
-      } else {
-        return [...prev, { id: staff._id, name: staff.medicalRepName }];
-      }
-    });
-  };
+  // Select / Deselect all visible staff
+  const toggleSelectAll = useCallback(
+    (checked) => {
+      setSelected(
+        checked
+          ? currentStaff.map((s) => ({
+              id: s._id,
+              name: s.medicalRepName,
+              team: s.teamName,
+            }))
+          : []
+      );
+    },
+    [currentStaff]
+  );
 
-  const toggleSelectAll = (checked) => {
-    if (checked) {
-      const allSelected = currentStaff.map((s) => ({
-        id: s._id,
-        name: s.medicalRepName,
-        team: s.teamName,
-      }));
-      setSelected(allSelected);
-    } else {
-      setSelected([]);
-    }
-  };
-
-  const handleView = (staff) => {
+  // View handler
+  const handleView = useCallback((staff) => {
     setForm(staff);
     setIsViewModalOpen(true);
-  };
+  }, []);
 
-  const handleEdit = (staff) => {
+  // Edit handler
+  const handleEdit = useCallback((staff) => {
     setForm(staff);
     setIsEditModalOpen(true);
+  }, []);
+
+  // ⏬ Common fetch function to refresh staff data
+  const refreshStaffList = async () => {
+    const res = await fetch(`${backendUrl}/api/staffs`);
+    const data = await res.json();
+    setStaff(data);
+    setSelected([]);
   };
 
-  const deleteSelectedStaff = async () => {
+  // ✅ Generic delete handler for single or multiple staff
+  const handleDelete = async ({
+    staffIds = [],
+    staffName = "",
+    isBulk = false,
+  }) => {
     const confirm = await confirmDialog({
-      text: `Are you sure you want to delete ${
-        selected.length === 1
-          ? `<b>${selected[0].name}</b>`
-          : `<b>${selected.length}</b> staff members`
-      }?`,
-      icon: "warning",
-      confirmButtonText: "Yes, delete",
-      cancelButtonText: "Cancel",
-      selected,
-    });
-
-    if (confirm.isConfirmed) {
-      const staffIdList = selected.map((s) => s.id);
-      try {
-        const res = await axios.delete(`${backendUrl}/api/staffs`, {
-          data: staffIdList, // send IDs in request body
-        });
-
-        if (res.status === 200) {
-          showToast("success", res.data.message);
-          const refreshed = await fetch(`${backendUrl}/api/staffs`);
-          const updated = await refreshed.json();
-          setStaff(updated);
-          setSelected([]);
-        }
-      } catch (err) {
-        showToast("error", error.message);
-      }
-    } else {
-      setSelected([]);
-    }
-  };
-
-  const deleteStaff = async (staff) => {
-    if (!staff._id) return;
-    const confirmDelete = await confirmDialog({
       title: "Delete",
-      text: `Are you sure you want to delete <b>${staff.medicalRepName}</b>?`,
+      text: isBulk
+        ? `Are you sure you want to delete <b>${staffIds.length}</b> staff member(s)?`
+        : `Are you sure you want to delete <b>${staffName}</b>?`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
     });
 
-    if (confirmDelete.isConfirmed) {
-      try {
-        const res = await axios.delete(`${backendUrl}/api/staff/${staff._id}`);
-        console.log('values of res', res);
-        if (res.status === 200) {
-          showToast(
-            "success",
-            `Staff <b>${staff.medicalRepName}</b> deleted successfully`
-          );
-          const refreshed = await fetch(`${backendUrl}/api/staffs`);
-          const updated = await refreshed.json();
-          setStaff(updated);
-          setSelected([]);
-        }
-      } catch (error) {
-        showToast("error", "Failed to delete customer.");
-      }
-    } else {
+    if (!confirm.isConfirmed) {
       setSelected([]);
+      return;
+    }
+
+    try {
+      const endpoint = isBulk
+        ? `${backendUrl}/api/staffs`
+        : `${backendUrl}/api/staff/${staffIds[0]}`;
+
+      const config = isBulk ? { data: staffIds } : undefined;
+      const res = await axios.delete(endpoint, config);
+
+      if (res.status === 200) {
+        const message = isBulk
+          ? res.data.message
+          : `Staff <b>${staffName}</b> deleted successfully`;
+
+        showToast("success", message);
+        await refreshStaffList();
+        await fetchTeams();
+        console.log("values of ---", allTeams);
+      }
+    } catch (err) {
+      showToast("error", err?.message || "Failed to delete staff.");
     }
   };
 
+  // ✅ Bulk delete
+  const deleteSelectedStaff = async () => {
+    const staffIds = selected.map((s) => s.id);
+    await handleDelete({ staffIds, isBulk: true });
+  };
+
+  // ✅ Single delete
+  const deleteStaff = async (staff) => {
+    if (!staff?._id) return;
+    await handleDelete({
+      staffIds: [staff._id],
+      staffName: staff.medicalRepName,
+      isBulk: false,
+    });
+  };
+
+  // ✅ File upload handler
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
+    if (!file) return;
+
     const reader = new FileReader();
 
     reader.onload = (evt) => {
       const data = new Uint8Array(evt.target.result);
       const workbook = XLSX.read(data, { type: "array" });
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(worksheet, {
         header: 1,
         defval: "",
       });
 
       const HEADER_ROW_INDEX = 2;
-      const rawHeaders = rows[HEADER_ROW_INDEX];
-      const headersMap = {};
-      rawHeaders.forEach((header, index) => {
-        if (!header) return;
-        const cleaned = header.toString().trim().toLowerCase();
-        headersMap[index] = cleaned;
-      });
-      const dataRows = rows.slice(HEADER_ROW_INDEX + 1);
-      const mappedData = dataRows
-        .map((row, rowIndex) => {
+      const rawHeaders = rows[HEADER_ROW_INDEX] || [];
+      const headersMap = rawHeaders.reduce((acc, header, i) => {
+        if (header) {
+          acc[i] = header.toString().trim().toLowerCase();
+        }
+        return acc;
+      }, {});
+
+      const mappedData = rows
+        .slice(HEADER_ROW_INDEX + 1)
+        .map((row) => {
           const item = {};
           Object.entries(headersMap).forEach(([index, key]) => {
             item[key] = row[index] || "";
           });
 
-          const mappedRow = {
+          return {
             no: item["no"],
             mrName: item["mr name"],
             teamName: item["team"],
           };
-
-          return mappedRow;
         })
         .filter((entry) => entry.no);
+
       setParsedData(mappedData);
     };
 
     reader.readAsArrayBuffer(file);
   };
 
+  // ✅ Import staff
   const handleImport = async () => {
-    if (!parsedData || parsedData.length === 0) {
-      showToast("warning", "Please upload a valid file first");
-      return;
+    if (!parsedData.length) {
+      return showToast("warning", "Please upload a valid file first");
     }
-
+    setIsUploading(true);
     try {
       const res = await axios.post(
         `${backendUrl}/api/staffs/import`,
@@ -261,71 +304,102 @@ const StaffMember = () => {
           res.data.message || "Staff imported successfully!"
         );
         setShowImportModal(false);
-
-        const updated = await fetch(`${backendUrl}/api/staffs`);
-        const updatedData = await updated.json();
-        setStaff(updatedData);
+        await refreshStaffList();
+        await fetchTeams();
       }
     } catch (err) {
-      console.error("Import error:", err);
-
-      if (err.response) {
-        const { message } = err.response.data;
-        const cleanMessage = message.replace(/<[^>]+>/g, "");
-        showToast("error", cleanMessage || "Failed to import suppliers.");
-      } else {
-        showToast("error", "Network error. Please try again.");
-      }
+      const cleanMessage =
+        err?.response?.data?.message?.replace(/<[^>]+>/g, "") ||
+        "Failed to import staff.";
+      showToast("error", cleanMessage);
+    } finally {
+      setIsUploading(false);
     }
   };
 
+  // ✅ Toggle staff enabled/disabled
   const handlerEnabledStaff = async (id) => {
+    const staffMember = staff.find((c) => c._id === id);
+    if (!staffMember) return;
+
     try {
-      const staffMember = staff.find((c) => c._id === id);
-
-      if (!staffMember) {
-        return;
-      }
-
-      const updatedStaff = { ...staffMember, enabled: !staffMember.enabled };
-      const url = `${backendUrl}/api/staff/${id}`;
-
-      const response = await fetch(url, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ enabled: updatedStaff.enabled }),
+      const res = await axios.put(`${backendUrl}/api/staff/${id}`, {
+        enabled: !staffMember.enabled,
       });
-      console.log('values ofres', response);
-      if (!response.ok) {
-        throw new Error("Failed to update staff");
-      }
 
-      const data = await response.json();
-      setStaff((prev) =>
-        prev.map((c) => (c._id === id ? { ...c, enabled: data.enabled } : c))
-      );
+      if (res.status === 200) {
+        setStaff((prev) =>
+          prev.map((c) =>
+            c._id === id ? { ...c, enabled: res.data.enabled } : c
+          )
+        );
+      }
     } catch (err) {
-      console.log("Caught error:", err);
+      showToast("error", "Failed to update staff status.");
     }
   };
-    const updateStaff = async (e) => {
+
+  const updateStaff = async (e) => {
     e.preventDefault();
+    if (!form._id) return;
+
     try {
-      const res = await axios.put(
-        `${backendUrl}/api/staff/${form._id}`,
-        form
-      );
+      const res = await axios.put(`${backendUrl}/api/staff/${form._id}`, form);
+
       if (res.status === 200) {
         showToast("success", "Staff updated successfully");
         setIsEditModalOpen(false);
-        const updated = await fetch(`${backendUrl}/api/staffs`);
-        setStaff(await updated.json());
+        await refreshStaffList();
+        await fetchTeams();
       }
     } catch (err) {
       showToast("error", "Failed to update staff.");
     }
+  };
+
+  useEffect(() => {
+    setHighlightedIndex(-1); // Reset highlight on new suggestions
+  }, [teamSuggestions]);
+
+  const handleChange = (e) => {
+    const value = e.target.value;
+    setForm((prev) => ({ ...prev, teamName: value }));
+    setShowSuggestions(true);
+  };
+
+  const handleKeyDown = (e) => {
+    if (!showSuggestions || teamSuggestions.length === 0) return;
+
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        setHighlightedIndex((prev) =>
+          prev < teamSuggestions.length - 1 ? prev + 1 : 0
+        );
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        setHighlightedIndex((prev) =>
+          prev > 0 ? prev - 1 : teamSuggestions.length - 1
+        );
+        break;
+      case "Enter":
+        e.preventDefault();
+        if (highlightedIndex >= 0) {
+          handleSelect(teamSuggestions[highlightedIndex]);
+        }
+        break;
+      case "Escape":
+        setShowSuggestions(false);
+        break;
+      default:
+        break;
+    }
+  };
+
+  const handleSelect = (team) => {
+    setForm((prev) => ({ ...prev, teamName: team }));
+    setShowSuggestions(false);
   };
 
   return (
@@ -339,10 +413,7 @@ const StaffMember = () => {
       {/* Top Bar */}
       <div className="flex justify-between items-center mb-4">
         <div className="flex gap-3">
-          <button
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md"
-            // You can add navigation here
-          >
+          <button className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md">
             <UserPlus size={18} /> Add New Staff Member
           </button>
 
@@ -593,7 +664,8 @@ const StaffMember = () => {
         )}
         {isEditModalOpen && (
           <div className="fixed inset-0 bg-black bg-opacity-30 flex justify-center items-center z-50">
-            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative max-h-screen">
+            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative max-h-screen overflow-y-auto">
+              {/* Close Button */}
               <button
                 onClick={() => setIsEditModalOpen(false)}
                 className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
@@ -601,10 +673,12 @@ const StaffMember = () => {
                 <X size={20} />
               </button>
 
+              {/* Header */}
               <h2 className="text-xl font-semibold text-gray-800 mb-4">
                 Edit Staff
               </h2>
 
+              {/* Form Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* MR Name */}
                 <div>
@@ -621,21 +695,48 @@ const StaffMember = () => {
                   />
                 </div>
 
-                {/* Team */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Team
+                {/* Team Name + Suggestions */}
+                <div className="relative">
+                  <label className="block text-sm font-medium text-gray-600 mb-1">
+                    Team Name
                   </label>
                   <input
                     type="text"
                     value={form.teamName}
-                    onChange={(e) =>
-                      setForm({ ...form, teamName: e.target.value })
-                    }
+                    onChange={handleChange}
+                    onKeyDown={handleKeyDown}
                     className="w-full border px-3 py-2 rounded-lg"
+                    placeholder="Type or select a team"
+                    autoComplete="off"
+                    onBlur={() =>
+                      setTimeout(() => setShowSuggestions(false), 150)
+                    } // to allow click before hiding
                   />
+
+                  {showSuggestions && teamSuggestions.length > 0 && (
+                    <ul className="absolute z-10 bg-white border w-full max-h-40 overflow-y-auto mt-1 rounded shadow">
+                      {teamSuggestions.map((team, index) => (
+                        <li
+                          key={index}
+                          onMouseDown={() => handleSelect(team)} // still keep mouse support
+                          className={`px-4 py-2 cursor-pointer ${
+                            highlightedIndex === index
+                              ? "bg-blue-100"
+                              : "hover:bg-gray-100"
+                          } ${
+                            index !== teamSuggestions.length - 1
+                              ? "border-b"
+                              : ""
+                          }`}
+                        >
+                          {team}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
-                {/* Date Picker (Editable - changes createdAt) */}
+
+                {/* Created At */}
                 <div>
                   <label className="block text-sm font-medium text-gray-600">
                     Created At
@@ -653,6 +754,7 @@ const StaffMember = () => {
                   />
                 </div>
 
+                {/* Status */}
                 <div>
                   <label className="block text-sm font-medium text-gray-600">
                     Status
@@ -670,6 +772,7 @@ const StaffMember = () => {
                 </div>
               </div>
 
+              {/* Footer Buttons */}
               <div className="mt-6 flex justify-end gap-2">
                 <button
                   onClick={() => setIsEditModalOpen(false)}
@@ -677,7 +780,6 @@ const StaffMember = () => {
                 >
                   Cancel
                 </button>
-
                 <button
                   onClick={updateStaff}
                   className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg"
@@ -696,12 +798,13 @@ const StaffMember = () => {
               <button
                 onClick={() => setShowImportModal(false)}
                 className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
+                disabled={isUploading}
               >
                 <X size={20} />
               </button>
 
               <h2 className="text-lg font-semibold text-gray-800 mb-4">
-                Import Supplier
+                Import Staff
               </h2>
               <SampleExcelDownloadStaff />
 
@@ -720,21 +823,30 @@ const StaffMember = () => {
               <div className="flex justify-end gap-3">
                 <button
                   onClick={() => setShowImportModal(false)}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg"
+                  disabled={isUploading}
+                  className={`px-5 py-2 rounded-lg ${
+                    isUploading
+                      ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                      : "bg-gray-300 hover:bg-gray-400 text-gray-700"
+                  }`}
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleImport}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg"
+                  disabled={isUploading}
+                  className={`px-5 py-2 rounded-lg ${
+                    isUploading
+                      ? "bg-blue-400 text-white cursor-not-allowed"
+                      : "bg-blue-600 hover:bg-blue-700 text-white"
+                  }`}
                 >
-                  Create
+                   {isUploading ? "Uploading…" : "Upload"}
                 </button>
               </div>
             </div>
           </div>
         )}
-        
       </div>
     </div>
   );

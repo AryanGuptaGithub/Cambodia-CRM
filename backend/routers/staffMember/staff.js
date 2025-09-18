@@ -17,6 +17,22 @@ router.get("/staffs", async (_, res) => {
   }
 });
 
+router.get("/staff/teams", async (_, res) => {
+  try {
+    const staff = await staffSchema.find({}, "teamName"); 
+    console.log("values of staff", staff);
+    const teams = [
+      ...new Set(staff.map((s) => s.teamName?.trim()).filter(Boolean))
+    ];
+
+    console.log('values of teams', teams);
+    res.json(teams);
+  } catch (err) {
+    handleServerError(res, err);
+  }
+});
+
+
 router.get("/staffs/:id", async (req, res) => {
   try {
     const staff = await staffSchema.findById(req.params.id);
