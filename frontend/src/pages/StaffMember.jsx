@@ -406,13 +406,7 @@ const StaffMember = () => {
 
   return (
     <div className="p-6">
-      {/* Breadcrumb */}
-      <div className="mb-4 text-gray-600 text-sm">
-        Dashboard <span className="mx-2">{">"}</span>
-        Staff Members
-      </div>
-
-      {/* Top Bar */}
+ 
       <div className="flex justify-between items-center mb-4">
         <div className="flex gap-3">
           <button
@@ -517,7 +511,7 @@ const StaffMember = () => {
                 <td>
                   <button
                     onClick={() => handlerEnabledStaff(staff._id)}
-                    className={`px-3 py-1 rounded-full text-sm ${
+                    className={`px-3 py-1 rounded-full text-sm cursor-pointer ${
                       staff.enabled
                         ? "bg-green-100 text-green-600"
                         : "bg-gray-200 text-gray-600"
@@ -529,20 +523,20 @@ const StaffMember = () => {
                 <td className="p-3 flex items-center justify-center gap-3">
                   <button
                     onClick={() => handleView(staff)}
-                    className="text-blue-600 hover:text-blue-800"
+                    className="text-blue-600 hover:text-blue-800 cursor-pointer"
                     title="View"
                   >
                     <Eye size={18} />
                   </button>
                   <button
                     onClick={() => handleEdit(staff)}
-                    className="text-green-600 hover:text-green-800"
+                    className="text-green-600 hover:text-green-800 cursor-pointer"
                     title="Edit"
                   >
                     <Edit size={18} />
                   </button>
                   <button
-                    className="text-red-600 hover:text-red-800"
+                    className="text-red-600 hover:text-red-800 cursor-pointer"
                     title="Delete"
                     onClick={() => deleteStaff(staff)}
                   >
