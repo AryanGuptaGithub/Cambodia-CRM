@@ -73,6 +73,9 @@ import StockTransferForm from "./pages/StockTransferForm";
 import AddProductForm from "./pages/ProductManager/addProduct";
 import { Toaster } from "react-hot-toast";
 import ProtectedRoute from "./components/ProtectedRoute";
+import AddStaffMember from "./pages/AddStaffMember";
+import StaffMemberLayout from "./pages/Utility/StaffMemberLayout";
+
 function App() {
   return (
     <>
@@ -94,9 +97,11 @@ function App() {
           <Route path="/stocktransferform" element={<StockTransferForm />} />
           <Route path="/cashandbank" element={<CashandBank />} />
 
-          <Route path="staffmember" element={<StaffMember />}>
-            {/* <Route path="new" element={<NewStaffMember />} /> */}
+          <Route path="/staffmemberLayout" element={<StaffMemberLayout />}>
+            <Route path="staffmember" element={<StaffMember />} />{" "}
+            <Route path="staffmember/add" element={<AddStaffMember />} />
           </Route>
+
           <Route path="masterlayout" element={<MasterLayout />}>
             <Route path="customer" element={<Customer />} />
             <Route path="supplier" element={<Supplier />} />

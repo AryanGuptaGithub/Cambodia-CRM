@@ -24,7 +24,6 @@ router.get("/staff/teams", async (_, res) => {
       ...new Set(staff.map((s) => s.teamName?.trim()).filter(Boolean))
     ];
 
-    console.log('values of teams', teams);
     res.json(teams);
   } catch (err) {
     handleServerError(res, err);
@@ -45,22 +44,30 @@ router.get("/staffs/:id", async (req, res) => {
 // ✅ Route: Create supplier
 router.post("/staffs", async (req, res) => {
   try {
-    const payload = {
-      ...req.body,
-      openingBalance: Number(req.body.openingBalance) || 0,
-      creditPeriod: Number(req.body.creditPeriod) || 0,
-      creditLimit: Number(req.body.creditLimit) || 0,
-    };
+    const { medicalRepName } = req.body;
 
-    const newStaff = new staffSchema(payload);
+    // Check if staff with this medicalRepName already exists
+    const existingStaff = await staffSchema.findOne({ medicalRepName });
+
+    if (existingStaff) {
+      return res.status(409).json({
+        message: `Staff member with name <b>${medicalRepName}</b> already exists.`,
+        ok: false,
+      });
+    }
+
+    const newStaff = new staffSchema({
+      ...req.body,
+      enabled: true, // set default enabled if you want
+    });
+
     const savedStaff = await newStaff.save();
 
     res.status(201).json({
-      message: `Supplier <b>${savedStaff.name}</b> created successfully`,
+      message: `Staff member <b> ${savedStaff.medicalRepName}</b> created successfully`,
       ok: true,
     });
   } catch (err) {
-    if (err.code === 11000) return handleDuplicateError(res, err, "supplier");
     res.status(400).json({
       message: "Invalid data provided",
       error: err.message,

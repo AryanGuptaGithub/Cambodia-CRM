@@ -568,7 +568,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
           )}
         </div>
 
-        <Link to="/staffmember" className={getLinkClass("/staffmember")}>
+        <Link to="/staffmemberLayout/staffmember" className={getLinkClass("/staffmemberLayout")}>
           <UserCog className="w-5 h-5" />
           {isOpen && <span className="mx-auto">Staff Members</span>}
         </Link>
