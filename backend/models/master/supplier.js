@@ -1,66 +1,28 @@
-// models/master/supplier.js
 import mongoose from 'mongoose';
 
 const supplierSchema = new mongoose.Schema({
-  warehouse: {
-    type: String,
-    required: true,
-    trim: true,
-  },
   name: {
     type: String,
     required: true,
     trim: true,
   },
-  phone: {
-    type: String,
-    required: true,
-    trim: true,
-  },
-  email: {
-    type: String,
-    required: true,
-    lowercase: true,
-    trim: true,
-    unique: true,
-  },
-  status: {
-    type: String,
-    enum: ['enabled', 'disabled'],
-    default: 'enabled',
-  },
-  password: {
-    type: String,
-    required: true,
-    minlength: 6,
-  },
-  taxNumber: {
+  address: {
     type: String,
     trim: true,
   },
-  openingBalance: {
-    type: Number,
-    default: 0,
+  siteRegistrationDate: {
+    type: Date,
   },
-  type: {
-    type: String,
-    enum: ['pay', 'receive'],
-    default: 'receive',
+  siteRegistrationExpiryDate: {
+    type: Date,
   },
-  creditPeriod: {
-    type: Number,
-    default: 0,
-  },
-  creditLimit: {
-    type: Number,
-    default: 0,
-  },
-  profileImage: {
-    type: String, // URL or filename
-    default: null,
+  enabled: {
+    type: Boolean,
+    default: true, 
   },
 }, {
-  timestamps: true, // adds createdAt and updatedAt
+  timestamps: true, 
 });
 
 export default mongoose.model('Supplier', supplierSchema);
+

@@ -121,17 +121,30 @@ router.delete("/suppliers", async (req, res) => {
   }
 });
 
+const excelDateToJSDate = (excelSerial) => {
+  const epoch = new Date(1899, 11, 30); // Excel epoch
+  return new Date(epoch.getTime() + excelSerial * 86400000);
+};
+
 router.post("/suppliers/import", async (req, res) => {
   try {
     const suppliers = req.body;
+
     if (!Array.isArray(suppliers)) {
       return res.status(400).json({
         message: "Invalid data format. Expected an array of suppliers.",
       });
     }
 
-    // Required fields only mrName and teamName now
-    const requiredFields = ["mrName", "teamName"];
+    const requiredFields = [
+      "sr no",
+      "product name",
+      "address",
+      "site registration date",
+      "site registration expiry date",
+    ];
+
+    const results = [];
 
     for (const supplier of suppliers) {
       for (const field of requiredFields) {
@@ -141,32 +154,56 @@ router.post("/suppliers/import", async (req, res) => {
           supplier[field] === null ||
           supplier[field] === ""
         ) {
-          return res.status(400).json({
-            message: `Missing required field '${field}' in one or more records.`,
+          results.push({
+            supplier: supplier["product name"] || "Unknown",
+            status: "failed",
+            message: `Missing required field '${field}'.`,
           });
+          continue;
         }
       }
 
-      // Map input to schema fields
-      const supplierData = {
-        medicalRepName: supplier.mrName,
-        name: supplier.teamName,  // assuming teamName goes into "name" field
+      const mappedSupplier = {
+        srNo: supplier["sr no"],
+        name: supplier["product name"],
+        address: supplier["address"],
+        siteRegistrationDate: excelDateToJSDate(supplier["site registration date"]),
+        siteRegistrationExpiryDate: excelDateToJSDate(supplier["site registration expiry date"]),
       };
-      const existingSupplier = await Supplier.findOne({
-        medicalRepName: supplierData.medicalRepName,
-        name: supplierData.name,
+
+      // Check for duplicates
+      const exists = await Supplier.findOne({
+        name: mappedSupplier.name,
+        address: mappedSupplier.address,
       });
 
-      if (!existingSupplier) {
-        await Supplier.create(supplierData);
+      if (exists) {
+        results.push({
+          supplier: mappedSupplier.name,
+          status: "skipped",
+          message: `Supplier "${mappedSupplier.name}" already exists.`,
+        });
+      } else {
+        await Supplier.create(mappedSupplier);
+        results.push({
+          supplier: mappedSupplier.name,
+          status: "created",
+          message: `Supplier "${mappedSupplier.name}" imported successfully.`,
+        });
       }
     }
 
-    res.status(200).json({ message: "Supplier(s) imported successfully." });
+    return res.status(200).json({
+      message: "Import completed.",
+      results,
+    });
   } catch (err) {
-      console.log('values of err', err);
+    console.error("Import error:", err);
+    return res.status(500).json({
+      message: "Server error while importing suppliers.",
+      error: err.message,
+    });
   }
 });
-
 
 export default router;

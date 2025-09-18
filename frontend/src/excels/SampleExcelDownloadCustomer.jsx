@@ -99,7 +99,7 @@ const SampleExcelDownloadCustomer = () => {
   return (
     <button
       onClick={generateExcel}
-      className="text-blue-600 hover:underline text-sm mb-4 block"
+      className="text-blue-600 hover:text text-sm mb-4 block cursor-pointer"
     >
       Click here to download Customer List Sample Excel
     </button>

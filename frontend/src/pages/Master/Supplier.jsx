@@ -1,15 +1,18 @@
 import { useNavigate } from "react-router-dom";
 import { UserPlus, Upload, Search, Eye, Edit, Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import axios from "axios";
 import { confirmDialog } from "../../utils/confirmationDialog";
 import { showToast } from "../../utils/toast";
 import * as XLSX from "xlsx";
-import {formatDateToReadable} from '../../utils/dateUtil';
-import SampleExcelDownloadSupplier from '../../excels/SampleExcelDownloadSuppiler';
+import { formatDateToReadable } from "../../utils/dateUtil";
+import SampleExcelDownloadSupplier from "../../excels/SampleExcelDownloadSuppiler";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
+import ReactDOM from "react-dom";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
-const suppliersPerPage = 5;
+const suppliersPerPage = 9;
 
 const Supplier = () => {
   const navigate = useNavigate();
@@ -28,20 +31,13 @@ const Supplier = () => {
   const [parsedData, setParsedData] = useState([]);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
- 
+
   const [form, setForm] = useState({
-    warehouse: "",
     name: "",
-    phone: "",
-    email: "",
-    status: "enabled",
-    password: "",
-    taxNumber: "",
-    openingBalance: "",
-    type: "receive",
-    creditPeriod: "",
-    creditLimit: "",
-    profileImage: null,
+    address: "",
+    siteRegistrationDate: "",
+    siteRegistrationExpiryDate: "",
+    enabled: "",
   });
 
   // Fetch suppliers
@@ -67,19 +63,27 @@ const Supplier = () => {
     setCurrentPage(1);
   }, [activeTab, search]);
 
-  // Filtered + searched + tabbed suppliers
   const filteredSuppliers = useMemo(() => {
+    const lowerSearch = search.toLowerCase();
+
     return supplier.filter((s) => {
       const matchesTab =
         activeTab === "All" ||
-        (activeTab === "To Collect" && s.type === "pay") ||
-        (activeTab === "To Pay" && s.type === "receive");
+        (activeTab === "Enabled" && s.enabled === true) ||
+        (activeTab === "Disabled" && s.enabled === false);
 
-      const matchesSearch =
-        s.name.toLowerCase().includes(search.toLowerCase()) ||
-        s.email.toLowerCase().includes(search.toLowerCase());
+      const nameMatch = s.name?.toLowerCase().includes(lowerSearch);
+      const addressMatch = s.address?.toLowerCase().includes(lowerSearch);
+      const siteMatch = formatDateToReadable(s.siteRegistrationDate)
+        ?.toLowerCase()
+        .includes(lowerSearch);
+      const ExpiryMatch = formatDateToReadable(s.siteRegistrationExpiryDate)
+        ?.toLowerCase()
+        .includes(lowerSearch);
 
-      return matchesTab && matchesSearch;
+      return (
+        matchesTab && (nameMatch || addressMatch || siteMatch || ExpiryMatch)
+      );
     });
   }, [supplier, activeTab, search]);
 
@@ -90,16 +94,27 @@ const Supplier = () => {
     currentPage * suppliersPerPage
   );
 
-  // Select/unselect supplier
-  const toggleSelect = (id) => {
-    setSelected((prev) =>
-      prev.includes(id) ? prev.filter((sid) => sid !== id) : [...prev, id]
+    const toggleSelect = useCallback((staff) => {
+      setSelected((prev) =>
+        prev.some((c) => c.id === staff._id)
+          ? prev.filter((c) => c.id !== staff._id)
+          : [...prev, { id: staff._id }]
+      );
+    }, []);
+  
+    // Select / Deselect all visible staff
+    const toggleSelectAll = useCallback(
+      (checked) => {
+        setSelected(
+          checked
+            ? currentSuppliers.map((s) => ({
+                id: s._id
+              }))
+            : []
+        );
+      },
+      [currentSuppliers]
     );
-  };
-
-  const toggleSelectAll = (checked) => {
-    setSelected(checked ? currentSuppliers.map((s) => s._id) : []);
-  };
 
   const handleView = (supplier) => {
     setForm(supplier);
@@ -167,35 +182,85 @@ const Supplier = () => {
     }
   };
 
+  const EXPECTED_HEADERS = [
+    "sr no",
+    "product name",
+    "address",
+    "site registration date",
+    "site registration expiry date",
+  ];
+
+  const normalizeHeader = (header) => header?.toString().trim().toLowerCase();
+
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
+
     reader.onload = (evt) => {
       const data = new Uint8Array(evt.target.result);
       const workbook = XLSX.read(data, { type: "array" });
+
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
-      const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
-      setParsedData(jsonData);
+
+      const allRows = XLSX.utils.sheet_to_json(worksheet, {
+        header: 1,
+        defval: "",
+      });
+
+      let headerRowIndex = -1;
+      for (let i = 0; i < allRows.length; i++) {
+        const row = allRows[i].map(normalizeHeader);
+        const isMatch = EXPECTED_HEADERS.every((header) =>
+          row.includes(header)
+        );
+        if (isMatch) {
+          headerRowIndex = i;
+          break;
+        }
+      }
+
+      if (headerRowIndex === -1) {
+        alert("Required headers not found in the file.");
+        return;
+      }
+
+      const headers = allRows[headerRowIndex];
+      const dataRows = allRows.slice(headerRowIndex + 1);
+
+      const parsedData = dataRows.map((row) => {
+        const obj = {};
+        headers.forEach((header, idx) => {
+          obj[normalizeHeader(header)] = row[idx];
+        });
+        return obj;
+      });
+
+      setParsedData(parsedData);
     };
+
     reader.readAsArrayBuffer(file);
   };
 
-  // Send parsed suppliers to backend
   const handleImport = async () => {
-    console.log('valuse of parsedData', parsedData);
     if (parsedData.length === 0) {
-      showToast("warning", "Please upload a valid file first");
+      showToast("warning", "Excel File is Empty");
       return;
     }
 
     try {
-      const res = await axios.post(`${backendUrl}/api/suppliers/import`, parsedData);
+      const res = await axios.post(
+        `${backendUrl}/api/suppliers/import`,
+        parsedData
+      );
 
       if (res.status === 200) {
-        showToast("success", res.data.message || "Suppliers imported successfully!");
+        showToast(
+          "success",
+          res.data.message || "Suppliers imported successfully!"
+        );
         setShowImportModal(false);
 
         // Refresh supplier list
@@ -207,39 +272,39 @@ const Supplier = () => {
 
       if (err.response) {
         const { message } = err.response.data;
-        const cleanMessage = message.replace(/<[^>]+>/g, '');
+        const cleanMessage = message.replace(/<[^>]+>/g, "");
 
         showToast("error", cleanMessage || "Failed to import suppliers.");
       } else {
         showToast("error", "Network error. Please try again.");
       }
     }
-  };;
+  };
 
   if (loading) return <p>Loading...</p>;
   if (error) return <p className="text-red-500">{error}</p>;
 
   return (
-    <div className="p-6">  
+    <div className="p-6">
       {/* Top bar */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
         <div className="flex gap-3 flex-wrap">
           <button
             onClick={() => navigate("/masterlayout/supplier/new")}
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md"
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
           >
             <UserPlus size={18} /> Add New Supplier
           </button>
           <button
             onClick={() => setShowImportModal(true)}
-            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md"
+            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
           >
             <Upload size={18} /> Import CSV
           </button>
           {selected.length > 0 && (
             <button
               onClick={handleDeleteSelected}
-              className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md"
+              className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
             >
               <Trash2 size={18} /> Delete
             </button>
@@ -263,21 +328,23 @@ const Supplier = () => {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-3 mb-6">
-        {["All", "To Collect", "To Pay"].map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 rounded-xl shadow-md ${
-              activeTab === tab
-                ? "bg-indigo-600 text-white"
-                : "bg-gray-200 hover:bg-gray-300"
-            }`}
-          >
-            {tab}
-          </button>
-        ))}
-      </div>
+      {supplier.length > 0 && (
+        <div className="flex gap-4 mb-4">
+          {["All", "Enabled", "Disabled"].map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-4 py-2 rounded-lg cursor-pointer ${
+                activeTab === tab
+                  ? "bg-indigo-600 text-white"
+                  : "bg-gray-200 text-gray-700"
+              }`}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
@@ -285,19 +352,23 @@ const Supplier = () => {
           <thead className="bg-gray-100 text-gray-700">
             <tr>
               <th className="p-3">
-                <input
-                  type="checkbox"
-                  checked={
-                    selected.length === currentSuppliers.length &&
-                    currentSuppliers.length > 0
-                  }
-                  onChange={(e) => toggleSelectAll(e.target.checked)}
-                />
+                <div className="flex items-center gap-4">
+                  {currentSuppliers.length > 0 && (
+                    <input
+                      type="checkbox"
+                      checked={
+                        selected.length === currentSuppliers.length &&
+                        currentSuppliers.length > 0
+                      }
+                      onChange={(e) => toggleSelectAll(e.target.checked)}
+                    />
+                  )}
+                  <span>Product Name</span>
+                </div>
               </th>
-              <th className="p-3">Name</th>
-              <th className="p-3">Email</th>
-              <th className="p-3">Created At</th>
-              <th className="p-3">Balance</th>
+              <th className="p-3">Address</th>
+              <th className="p-3">Site Registration Date</th>
+              <th className="p-3">Site Registration Expiry Date</th>
               <th className="p-3">Enabled</th>
               <th className="p-3">Action</th>
             </tr>
@@ -305,24 +376,22 @@ const Supplier = () => {
           <tbody>
             {currentSuppliers.map((supplier) => (
               <tr key={supplier._id} className="border-b hover:bg-gray-50">
-                <td className="p-3 text-center">
-                  <input
-                    type="checkbox"
-                    checked={selected.includes(supplier._id)}
-                    onChange={() => toggleSelect(supplier._id)}
-                  />
+                <td className="p-3">
+                  <div className="flex items-center gap-4">
+                    <input
+                      type="checkbox"
+                      checked={selected.some((s) => s.id === supplier._id)}
+                      onChange={() => toggleSelect(supplier)} // Toggle on click
+                    />
+                    <span className="capitalize">{supplier.name}</span>
+                  </div>
                 </td>
-                <td className="p-3 capitalize">{supplier.name}</td>
-                <td className="p-3">{supplier.email}</td>
-                <td className="p-3">{formatDateToReadable(supplier.createdAt)}</td>
-                <td
-                  className={`p-3 font-medium ${
-                    supplier.openingBalance < 0 ? "text-red-600" : "text-green-600"
-                  }`}
-                >
-                  {supplier.openingBalance < 0
-                    ? `₹${Math.abs(supplier.openingBalance)}`
-                    : `₹${supplier.openingBalance}`}
+                <td className="p-3">{supplier.address}</td>
+                <td className="p-3">
+                  {formatDateToReadable(supplier.siteRegistrationDate)}
+                </td>
+                <td className="p-3">
+                  {formatDateToReadable(supplier.siteRegistrationExpiryDate)}
                 </td>
                 <td className="p-3">
                   <button
@@ -335,7 +404,7 @@ const Supplier = () => {
                         )
                       )
                     }
-                    className={`px-3 py-1 rounded-full text-sm ${
+                    className={`px-3 py-1 rounded-full text-sm cursor-pointer ${
                       supplier.enabled
                         ? "bg-green-100 text-green-600"
                         : "bg-gray-200 text-gray-600"
@@ -347,19 +416,19 @@ const Supplier = () => {
                 <td className="p-3 flex items-center justify-center gap-3">
                   <button
                     onClick={() => handleView(supplier)}
-                    className="text-blue-600 hover:text-blue-800"
+                    className="text-blue-600 hover:text-blue-800 cursor-pointer"
                   >
                     <Eye size={18} />
                   </button>
                   <button
                     onClick={() => handleEdit(supplier)}
-                    className="text-green-600 hover:text-green-800"
+                    className="text-green-600 hover:text-green-800 cursor-pointer"
                   >
                     <Edit size={18} />
                   </button>
                   <button
                     onClick={() => deleteSupplier(supplier)}
-                    className="text-red-600 hover:text-red-800"
+                    className="text-red-600 hover:text-red-800 cursor-pointer"
                   >
                     <Trash2 size={18} />
                   </button>
@@ -374,7 +443,7 @@ const Supplier = () => {
           <button
             onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
             disabled={currentPage === 1}
-            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
+            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
           >
             Prev
           </button>
@@ -384,7 +453,7 @@ const Supplier = () => {
               <button
                 key={page}
                 onClick={() => setCurrentPage(page)}
-                className={`px-3 py-1 rounded ${
+                className={`px-3 py-1 rounded cursor-pointer ${
                   currentPage === page
                     ? "bg-indigo-600 text-white"
                     : "bg-gray-200 hover:bg-gray-300"
@@ -400,7 +469,7 @@ const Supplier = () => {
               setCurrentPage((prev) => Math.min(prev + 1, totalPages))
             }
             disabled={currentPage === totalPages}
-            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
+            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
           >
             Next
           </button>
@@ -408,352 +477,157 @@ const Supplier = () => {
       </div>
 
       {/* Import CSV Modal */}
-      {showImportModal && (
-        <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-          <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
-            {/* Close */}
-            <button
-              onClick={() => setShowImportModal(false)}
-              className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
-            >
-              <X size={20} />
-            </button>
-
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">
-              Import Supplier
-            </h2>
-
-            {/* Sample CSV link */}
-           <SampleExcelDownloadSupplier />
-
-            {/* File Upload */}
-            <div className="mb-6">
-              <label className="block text-gray-700 mb-2">File</label>
-              <input
-                type="file"
-                accept=".csv, .xlsx"
-                onChange={handleFileUpload}
-                className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
-              />
-            </div>
-
-            {/* Buttons */}
-            <div className="flex justify-end gap-3">
+      {showImportModal &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setIsOpen(false)}
+            />
+            <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
+              {/* Close */}
               <button
                 onClick={() => setShowImportModal(false)}
-                className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg"
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
               >
-                Cancel
+                <X size={20} />
               </button>
-              <button
-                onClick={handleImport}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg"
-              >
-                Create
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {isViewModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex justify-center items-center z-50">
-          <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
-            {/* Close Button */}
-            <button
-              onClick={() => setIsViewModalOpen(false)}
-              className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
-            >
-              <X size={20} />
-            </button>
 
-            <h2 className="text-xl font-semibold text-gray-800 mb-4">
-              View Supplier
-            </h2>
+              <h2 className="text-lg font-semibold text-gray-800 mb-4">
+                Import Supplier
+              </h2>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-600">
-                  Name
-                </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                  {form.name}
-                </p>
+              {/* Sample CSV link */}
+              <SampleExcelDownloadSupplier />
+
+              {/* File Upload */}
+              <div className="mb-6">
+                <label className="block text-gray-700 mb-2">File</label>
+                <input
+                  type="file"
+                  accept=".csv, .xlsx"
+                  onChange={handleFileUpload}
+                  className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
+                />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-600">
-                  Email
-                </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                  {form.email}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-600">
-                  Phone
-                </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                  {form.phone}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-600">
-                  Warehouse
-                </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                  {form.warehouse}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-600">
-                  Tax Number
-                </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                  {form.taxNumber}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-600">
-                  Opening Balance
-                </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                  ₹{form.openingBalance}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-600">
-                  Type
-                </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                  {form.type}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-600">
-                  Credit Period
-                </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                  {form.creditPeriod} days
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-600">
-                  Credit Limit
-                </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                  ₹{form.creditLimit}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-600">
-                  Status
-                </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                  {form.status}
-                </p>
+              {/* Buttons */}
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setShowImportModal(false)}
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleImport}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+                >
+                  Upload
+                </button>
               </div>
             </div>
-
-            <div className="mt-6 flex justify-end">
+          </div>,
+          document.body
+        )}
+      {isViewModalOpen &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setIsOpen(false)}
+            />
+            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+              {/* Close Button */}
               <button
                 onClick={() => setIsViewModalOpen(false)}
-                className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg"
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
               >
-                Close
+                <X size={20} />
               </button>
+
+              <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                View Supplier
+              </h2>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Product Name
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {form.name}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Address
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {form.address}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Site Registration Date
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {formatDateToReadable(form.siteRegistrationDate)}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Site Registration Expiry Date
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {formatDateToReadable(form.siteRegistrationExpiryDate)}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-600"></label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {form.enabled == true ? "enabled" : "disabled"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-6 flex justify-end">
+                <button
+                  onClick={() => setIsViewModalOpen(false)}
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
             </div>
-          </div>
-        </div>
-      )}
-      {isEditModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex justify-center items-center z-50">
-          <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
-            {/* Close Button */}
-            <button
-              onClick={() => setIsEditModalOpen(false)}
-              className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
-            >
-              <X size={20} />
-            </button>
-
-            <h2 className="text-xl font-semibold text-gray-800 mb-4">
-              Edit Supplier
-            </h2>
-
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                try {
-                  const res = await axios.put(
-                    `${backendUrl}/api/suppliers/${form._id}`,
-                    form
-                  );
-                  if (res.status === 200) {
-                    showToast("success", "Supplier updated successfully");
-                    setIsEditModalOpen(false);
-
-                    const updated = await fetch(`${backendUrl}/api/suppliers`);
-                    setSupplier(await updated.json()); // Replace with setCustomers if needed
-                  }
-                } catch (err) {
-                  console.error("Update error:", err);
-                  showToast("error", "Failed to update supplier.");
-                }
-              }}
-              className="grid grid-cols-1 md:grid-cols-2 gap-4"
-            >
-              <div>
-                <label className="block text-sm font-medium">Name</label>
-                <input
-                  type="text"
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  className="w-full border px-3 py-2 rounded-lg"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">Email</label>
-                <input
-                  type="email"
-                  value={form.email}
-                  onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  className="w-full border px-3 py-2 rounded-lg"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">Phone</label>
-                <input
-                  type="text"
-                  value={form.phone}
-                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                  className="w-full border px-3 py-2 rounded-lg"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">Warehouse</label>
-                <input
-                  type="text"
-                  value={form.warehouse}
-                  onChange={(e) =>
-                    setForm({ ...form, warehouse: e.target.value })
-                  }
-                  className="w-full border px-3 py-2 rounded-lg"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">Tax Number</label>
-                <input
-                  type="text"
-                  value={form.taxNumber}
-                  onChange={(e) =>
-                    setForm({ ...form, taxNumber: e.target.value })
-                  }
-                  className="w-full border px-3 py-2 rounded-lg"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">
-                  Opening Balance
-                </label>
-                <input
-                  type="number"
-                  value={form.openingBalance}
-                  onChange={(e) =>
-                    setForm({ ...form, openingBalance: e.target.value })
-                  }
-                  className="w-full border px-3 py-2 rounded-lg"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">Type</label>
-                <select
-                  value={form.type}
-                  onChange={(e) => setForm({ ...form, type: e.target.value })}
-                  className="w-full border px-3 py-2 rounded-lg capitalize"
-                >
-                  <option value="">Select</option>
-                  <option value="pay">To Pay</option>
-                  <option value="receive">To Collect</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">
-                  Credit Period
-                </label>
-                <input
-                  type="number"
-                  value={form.creditPeriod}
-                  onChange={(e) =>
-                    setForm({ ...form, creditPeriod: e.target.value })
-                  }
-                  className="w-full border px-3 py-2 rounded-lg"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">
-                  Credit Limit
-                </label>
-                <input
-                  type="number"
-                  value={form.creditLimit}
-                  onChange={(e) =>
-                    setForm({ ...form, creditLimit: e.target.value })
-                  }
-                  className="w-full border px-3 py-2 rounded-lg"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">Status</label>
-                <select
-                  value={form.status}
-                  onChange={(e) => setForm({ ...form, status: e.target.value })}
-                  className="w-full border px-3 py-2 rounded-lg capitalize"
-                >
-                  <option value="enabled">Enabled</option>
-                  <option value="disabled">Disabled</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">Password</label>
-                <input
-                  type="password"
-                  value={form.password}
-                  onChange={(e) =>
-                    setForm({ ...form, password: e.target.value })
-                  }
-                  className="w-full border px-3 py-2 rounded-lg"
-                />
-              </div>
-            </form>
-
-            {/* Buttons */}
-            <div className="mt-6 flex justify-end gap-3">
+          </div>,
+          document.body
+        )}
+      {isEditModalOpen &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setIsOpen(false)}
+            />
+            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative max-h-screen">
+              {/* Close Button */}
               <button
                 onClick={() => setIsEditModalOpen(false)}
-                className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg"
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
               >
-                Cancel
+                <X size={20} />
               </button>
-              <button
-                onClick={async (e) => {
+
+              <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                Edit Supplier
+              </h2>
+
+              <form
+                onSubmit={async (e) => {
                   e.preventDefault();
                   try {
                     const res = await axios.put(
@@ -767,21 +641,137 @@ const Supplier = () => {
                       const updated = await fetch(
                         `${backendUrl}/api/suppliers`
                       );
-                      setSupplier(await updated.json());
+                      setSupplier(await updated.json()); // Replace with setCustomers if needed
                     }
                   } catch (err) {
                     console.error("Update error:", err);
                     showToast("error", "Failed to update supplier.");
                   }
                 }}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg"
+                className="grid grid-cols-1 md:grid-cols-2 gap-4"
               >
-                Save Changes
-              </button>
+                <div>
+                  <label className="block text-sm font-medium">
+                    Product Name
+                  </label>
+                  <input
+                    type="text"
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    className="w-full border px-3 py-2 rounded-lg"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium">Address</label>
+                  <input
+                    type="email"
+                    value={form.address}
+                    onChange={(e) =>
+                      setForm({ ...form, address: e.target.value })
+                    }
+                    className="w-full border px-3 py-2 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">
+                    Site Registration Date
+                  </label>
+                  <DatePicker
+                    selected={
+                      form.siteRegistrationDate
+                        ? new Date(form.siteRegistrationDate)
+                        : null
+                    }
+                    onChange={(date) =>
+                      date
+                        ? setForm({
+                            ...form,
+                            siteRegistrationDate: date.toISOString(),
+                          })
+                        : null
+                    }
+                    dateFormat="yyyy-MM-dd"
+                    placeholderText="Select expiry date"
+                    className="w-full border px-3 py-2 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">
+                    Site Registration Expiry Date
+                  </label>
+                  <DatePicker
+                    selected={
+                      form.siteRegistrationExpiryDate
+                        ? new Date(form.siteRegistrationExpiryDate)
+                        : null
+                    }
+                    onChange={(date) =>
+                      date
+                        ? setForm({
+                            ...form,
+                            siteRegistrationExpiryDate: date.toISOString(),
+                          })
+                        : null
+                    }
+                    dateFormat="yyyy-MM-dd"
+                    placeholderText="Select expiry date"
+                    className="w-full border px-3 py-2 rounded-lg"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium">Status</label>
+                  <select
+                    value={form.type}
+                    onChange={(e) => setForm({ ...form, type: e.target.value })}
+                    className="w-full border px-3 py-2 rounded-lg capitalize"
+                  >
+                    <option value="true">Enabled</option>
+                    <option value="false">Disabled</option>
+                  </select>
+                </div>
+              </form>
+
+              {/* Buttons */}
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  onClick={() => setIsEditModalOpen(false)}
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    try {
+                      const res = await axios.put(
+                        `${backendUrl}/api/suppliers/${form._id}`,
+                        form
+                      );
+                      if (res.status === 200) {
+                        showToast("success", "Supplier updated successfully");
+                        setIsEditModalOpen(false);
+
+                        const updated = await fetch(
+                          `${backendUrl}/api/suppliers`
+                        );
+                        setSupplier(await updated.json());
+                      }
+                    } catch (err) {
+                      console.error("Update error:", err);
+                      showToast("error", "Failed to update supplier.");
+                    }
+                  }}
+                  className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+                >
+                  Update
+                </button>
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body
+        )}
     </div>
   );
 };
