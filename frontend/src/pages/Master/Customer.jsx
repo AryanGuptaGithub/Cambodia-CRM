@@ -9,7 +9,7 @@ import { confirmDialog } from "../../utils/confirmationDialog";
 import { formatDateToReadable } from "../../utils/dateUtil";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
-
+import ReactDOM from "react-dom"
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 const customersPerPage = 8;
@@ -558,8 +558,15 @@ const Customer = () => {
       </div>
 
       {/* CSV Upload Modal */}
-      {showImportModal && (
+      {showImportModal &&   ReactDOM.createPortal(
+        
+             
         <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+           {/* Background Overlay */}
+                <div
+                    className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                    onClick={() => setIsOpen(false)}
+                  />
           <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
             {/* Close */}
             <button
@@ -609,12 +616,18 @@ const Customer = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Edit Customer Modal */}
-      {isEditModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex justify-center items-center z-50">
+      {isEditModalOpen &&  ReactDOM.createPortal(
+        <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+           {/* Background Overlay */}
+                <div
+                    className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                    onClick={() => setIsOpen(false)}
+                  />
           <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
             <button
               onClick={() => setIsEditModalOpen(false)}
@@ -792,11 +805,17 @@ const Customer = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {isViewModalOpen && (
+      {isViewModalOpen && ReactDOM.createPortal(
         <div className="fixed inset-0 bg-black bg-opacity-30 flex justify-center items-center z-50">
+               {/* Background Overlay */}
+                <div
+                    className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                    onClick={() => setIsOpen(false)}
+                  />
           <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
             <button
               onClick={() => setIsViewModalOpen(false)}
@@ -909,11 +928,17 @@ const Customer = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
       
-      {showDeleteModal && selected && (
+      {showDeleteModal && selected && ReactDOM.createPortal(
         <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
+           {/* Background Overlay */}
+                <div
+                    className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                    onClick={() => setIsOpen(false)}
+                  />
           <div className="bg-white p-6 rounded-xl shadow-xl max-w-md w-full">
             <h2 className="text-lg font-semibold mb-4 text-gray-800">
               Delete Customer
@@ -936,7 +961,8 @@ const Customer = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
