@@ -78,16 +78,25 @@ function App() {
     <>
       <Toaster position="bottom-right" reverseOrder={false} />
       <Routes>
-      <Route path="/login" index element={<Login/>}/>
-        <Route path="/" element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
+        <Route path="/login" index element={<Login />} />
+        <Route
+          path="/"
+          element={
+            <ProtectedRoute>
+              <DashboardLayout />
+            </ProtectedRoute>
+          }
+        >
           <Route path="/graph" element={<Graph />} />
           <Route path="/onlineorder" element={<OnlineOrders />} />
-          <Route path="/staffmember" element={<StaffMember />} />
           <Route path="/stockadjustment" element={<StocjAdjustment />} />
           <Route path="/stocktransfer" element={<StockTransfer />} />
           <Route path="/stocktransferform" element={<StockTransferForm />} />
           <Route path="/cashandbank" element={<CashandBank />} />
 
+          <Route path="staffmember" element={<StaffMember />}>
+            <Route path="new" element={<NewStaffMember />} />
+          </Route>
           <Route path="masterlayout" element={<MasterLayout />}>
             <Route path="customer" element={<Customer />} />
             <Route path="supplier" element={<Supplier />} />
