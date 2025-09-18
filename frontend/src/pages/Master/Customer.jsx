@@ -9,7 +9,7 @@ import { confirmDialog } from "../../utils/confirmationDialog";
 import { formatDateToReadable } from "../../utils/dateUtil";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
-import ReactDOM from "react-dom"
+import ReactDOM from "react-dom";
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 const customersPerPage = 8;
@@ -45,7 +45,7 @@ const Customer = () => {
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -149,7 +149,6 @@ const Customer = () => {
         if (res.status === 200) {
           showToast("success", "Selected customers deleted successfully");
           const updated = await fetch(`${backendUrl}/api/customers`);
-          console.log("valueso f updated", updated);
           const data = await updated.json();
           setCustomers(data.customers);
           setNextCustomerCode(data.nextCustomerCode);
@@ -166,12 +165,14 @@ const Customer = () => {
   // Open edit modal with selected customer data
   const editCustomer = (customer) => {
     setForm({ ...customer });
+    setIsOpen(true);
     setIsEditModalOpen(true);
   };
 
   // Open view modal with selected customer data
   const handleView = (customer) => {
     setForm({ ...customer });
+    setIsOpen(true);
     setIsViewModalOpen(true);
   };
 
@@ -190,7 +191,7 @@ const Customer = () => {
         const res = await axios.delete(
           `${backendUrl}/api/customers/${customer._id}`
         );
-   
+
         if (res.status === 200) {
           showToast(
             "success",
@@ -203,7 +204,7 @@ const Customer = () => {
           setSelected([]);
         }
       } catch (error) {
-        console.log('values of error', error);
+        console.log("values of error", error);
         showToast("error", "Failed to delete customer.");
       }
     }
@@ -339,10 +340,15 @@ const Customer = () => {
         form
       );
       if (res.status === 200) {
-        showToast("success", "Customer updated successfully");
+        showToast(
+          "success",
+          `Customer <b>${form.name}</b> updated successfully`
+        );
         setIsEditModalOpen(false);
         const updated = await fetch(`${backendUrl}/api/customers`);
-        setCustomers(await updated.json());
+        const data = await updated.json();
+        setCustomers(data.customers);
+        setNextCustomerCode(data.nextCustomerCode);
       }
     } catch (err) {
       console.error("Update error:", err);
@@ -558,412 +564,386 @@ const Customer = () => {
       </div>
 
       {/* CSV Upload Modal */}
-      {showImportModal &&   ReactDOM.createPortal(
-        
-             
-        <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-           {/* Background Overlay */}
-                <div
-                    className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                    onClick={() => setIsOpen(false)}
-                  />
-          <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
-            {/* Close */}
-            <button
-              onClick={() => setShowImportModal(false)}
-              className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
-              disabled={isUploading}
-            >
-              <X size={20} />
-            </button>
-
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">
-              Import Customer
-            </h2>
-            {isSampleFile && <SampleExcelDownloadCustomer />}
-            <div className="mb-6">
-              <label className="block text-gray-700 mb-2">File</label>
-              <input
-                type="file"
-                accept=".csv, .xlsx"
-                onChange={handleFileUpload}
-                className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
-              />
-            </div>
-
-            <div className="flex justify-end gap-3">
+      {showImportModal &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            {/* Background Overlay */}
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setIsOpen(false)}
+            />
+            <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
+              {/* Close */}
               <button
                 onClick={() => setShowImportModal(false)}
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
                 disabled={isUploading}
-                className={`px-5 py-2 rounded-lg ${
-                  isUploading
-                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                    : "bg-gray-300 hover:bg-gray-400 text-gray-700"
-                }`}
               >
-                Cancel
+                <X size={20} />
               </button>
-              <button
-                onClick={handleImport}
-                disabled={isUploading}
-                className={`px-5 py-2 rounded-lg ${
-                  isUploading
-                    ? "bg-blue-400 text-white cursor-not-allowed"
-                    : "bg-blue-600 hover:bg-blue-700 text-white"
-                }`}
-              >
-                {isUploading ? "Uploading…" : "Upload"}
-              </button>
+
+              <h2 className="text-lg font-semibold text-gray-800 mb-4">
+                Import Customer
+              </h2>
+              {isSampleFile && <SampleExcelDownloadCustomer />}
+              <div className="mb-6">
+                <label className="block text-gray-700 mb-2">File</label>
+                <input
+                  type="file"
+                  accept=".csv, .xlsx"
+                  onChange={handleFileUpload}
+                  className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setShowImportModal(false)}
+                  disabled={isUploading}
+                  className={`px-5 py-2 rounded-lg ${
+                    isUploading
+                      ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                      : "bg-gray-300 hover:bg-gray-400 text-gray-700"
+                  }`}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleImport}
+                  disabled={isUploading}
+                  className={`px-5 py-2 rounded-lg ${
+                    isUploading
+                      ? "bg-blue-400 text-white cursor-not-allowed"
+                      : "bg-blue-600 hover:bg-blue-700 text-white"
+                  }`}
+                >
+                  {isUploading ? "Uploading…" : "Upload"}
+                </button>
+              </div>
             </div>
-          </div>
-        </div>,
-        document.body
-      )}
+          </div>,
+          document.body
+        )}
 
       {/* Edit Customer Modal */}
-      {isEditModalOpen &&  ReactDOM.createPortal(
-        <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-           {/* Background Overlay */}
-                <div
-                    className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                    onClick={() => setIsOpen(false)}
-                  />
-          <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
-            <button
-              onClick={() => setIsEditModalOpen(false)}
-              className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
-            >
-              <X size={20} />
-            </button>
-
-            <h2 className="text-xl font-semibold text-gray-800 mb-4">
-              Edit Customer
-            </h2>
-
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                try {
-                  const res = await axios.put(
-                    `${backendUrl}/api/customers/${form._id}`,
-                    form
-                  );
-                  if (res.status === 200) {
-                    showToast("success", "Customer updated successfully");
-                    setIsEditModalOpen(false);
-                    const updated = await fetch(`${backendUrl}/api/customers`);
-                    setCustomers(await updated.json());
-                  }
-                } catch (err) {
-                  console.error("Update error:", err);
-                  showToast("error", "Failed to update customer.");
-                }
-              }}
-              className="grid grid-cols-1 md:grid-cols-2 gap-4"
-            >
-              {/* New fields similar to View Modal */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Customer Code
-                </label>
-                <input
-                  type="text"
-                  value={form.customerCode}
-                  onChange={(e) =>
-                    setForm({ ...form, customerCode: e.target.value })
-                  }
-                  className="w-full border px-3 py-2 rounded-lg bg-gray-100 text-gray-500 cursor-not-allowed"
-                  disabled
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">
-                  Customer Number
-                </label>
-                <input
-                  type="text"
-                  value={form.customerNumber}
-                  onChange={(e) =>
-                    setForm({ ...form, customerNumber: e.target.value })
-                  }
-                  className="w-full border px-3 py-2 rounded-lg capitalize"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">
-                  Customer Remark
-                </label>
-                <input
-                  type="text"
-                  value={form.remark}
-                  onChange={(e) => setForm({ ...form, remark: e.target.value })}
-                  className="w-full border px-3 py-2 rounded-lg capitalize"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">
-                  Type of Business
-                </label>
-                <input
-                  type="text"
-                  value={form.typeOfBusiness}
-                  onChange={(e) =>
-                    setForm({ ...form, typeOfBusiness: e.target.value })
-                  }
-                  className="w-full border px-3 py-2 rounded-lg capitalize"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">
-                  Medical Rep Name
-                </label>
-                <input
-                  type="text"
-                  value={form.medicalRepName}
-                  onChange={(e) =>
-                    setForm({ ...form, medicalRepName: e.target.value })
-                  }
-                  className="w-full border px-3 py-2 rounded-lg capitalize"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">Address</label>
-                <input
-                  type="text"
-                  value={form.address}
-                  onChange={(e) =>
-                    setForm({ ...form, address: e.target.value })
-                  }
-                  className="w-full border px-3 py-2 rounded-lg capitalize"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">Zone</label>
-                <input
-                  type="text"
-                  value={form.zone}
-                  onChange={(e) => setForm({ ...form, zone: e.target.value })}
-                  className="w-full border px-3 py-2 rounded-lg capitalize"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">Location</label>
-                <input
-                  type="text"
-                  value={form.location}
-                  onChange={(e) =>
-                    setForm({ ...form, location: e.target.value })
-                  }
-                  className="w-full border px-3 py-2 rounded-lg capitalize"
-                />
-              </div>
-
-              {/* Existing Fields */}
-              <div>
-                <label className="block text-sm font-medium">Name</label>
-                <input
-                  type="text"
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  className="w-full border px-3 py-2 rounded-lg capitalize"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium">Date</label>
-                <DatePicker
-                  selected={form.date ? new Date(form.date) : null}
-                  onChange={(date) =>
-                    date ? setForm({ ...form, date: date.toISOString() }) : null
-                  }
-                  dateFormat="yyyy-MM-dd"
-                  placeholderText="Select a date"
-                  className="w-full border px-3 py-2 rounded-lg"
-                />
-              </div>
-            </form>
-
-            <div className="mt-6 flex justify-end gap-3">
+      {isEditModalOpen &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            {/* Background Overlay */}
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setIsOpen(false)}
+            />
+            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
               <button
                 onClick={() => setIsEditModalOpen(false)}
-                className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg"
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
               >
-                Cancel
+                <X size={20} />
               </button>
-              <button
-                onClick={handleUpdateCustomer}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg"
-              >
-                Save Changes
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
 
-      {isViewModalOpen && ReactDOM.createPortal(
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex justify-center items-center z-50">
-               {/* Background Overlay */}
-                <div
-                    className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                    onClick={() => setIsOpen(false)}
+              <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                Edit Customer
+              </h2>
+
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  try {
+                    const res = await axios.put(
+                      `${backendUrl}/api/customers/${form._id}`,
+                      form
+                    );
+                    if (res.status === 200) {
+                      showToast("success", "Customer updated successfully");
+                      setIsEditModalOpen(false);
+                      const updated = await fetch(
+                        `${backendUrl}/api/customers`
+                      );
+                      setCustomers(await updated.json());
+                    }
+                  } catch (err) {
+                    console.error("Update error:", err);
+                    showToast("error", "Failed to update customer.");
+                  }
+                }}
+                className="grid grid-cols-1 md:grid-cols-2 gap-4"
+              >
+                {/* New fields similar to View Modal */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Customer Code
+                  </label>
+                  <input
+                    type="text"
+                    value={form.customerCode}
+                    onChange={(e) =>
+                      setForm({ ...form, customerCode: e.target.value })
+                    }
+                    className="w-full border px-3 py-2 rounded-lg bg-gray-100 text-gray-500 cursor-not-allowed"
+                    disabled
                   />
-          <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
-            <button
-              onClick={() => setIsViewModalOpen(false)}
-              className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
-            >
-              <X size={20} />
-            </button>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">Name</label>
+                  <input
+                    type="text"
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    className="w-full border px-3 py-2 rounded-lg capitalize"
+                  />
+                </div>
 
-            <h2 className="text-xl font-semibold text-gray-800 mb-4">
-              View Customer
-            </h2>
+                <div>
+                  <label className="block text-sm font-medium">
+                    Customer Number
+                  </label>
+                  <input
+                    type="text"
+                    value={form.customerNumber}
+                    onChange={(e) =>
+                      setForm({ ...form, customerNumber: e.target.value })
+                    }
+                    className="w-full border px-3 py-2 rounded-lg capitalize"
+                  />
+                </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Existing fields */}
-              <div>
-                <label className="block text-sm font-medium text-gray-600">
-                  Customer Code
-                </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                  {form.customerCode}
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-600">
-                  Name
-                </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                  {form.name}
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-600">
-                  Customer Number
-                </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                  {form.customerNumber}
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-600">
-                  Customer Remark
-                </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                  {form.remark?.trim() ? form.remark : "No Remarks"}
-                </p>
-              </div>
+                <div>
+                  <label className="block text-sm font-medium">
+                    Customer Remark
+                  </label>
+                  <input
+                    type="text"
+                    value={form.remark}
+                    onChange={(e) =>
+                      setForm({ ...form, remark: e.target.value })
+                    }
+                    className="w-full border px-3 py-2 rounded-lg capitalize"
+                  />
+                </div>
 
-              {/* New fields from the table */}
-              <div>
-                <label className="block text-sm font-medium text-gray-600">
-                  Type of Business
-                </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                  {form.typeOfBusiness}
-                </p>
-              </div>
+                <div>
+                  <label className="block text-sm font-medium">
+                    Type of Business
+                  </label>
+                  <input
+                    type="text"
+                    value={form.typeOfBusiness}
+                    onChange={(e) =>
+                      setForm({ ...form, typeOfBusiness: e.target.value })
+                    }
+                    className="w-full border px-3 py-2 rounded-lg capitalize"
+                  />
+                </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-600">
-                  Medical Rep Name
-                </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                  {form.medicalRepName}
-                </p>
-              </div>
+                <div>
+                  <label className="block text-sm font-medium">
+                    Medical Rep Name
+                  </label>
+                  <input
+                    type="text"
+                    value={form.medicalRepName}
+                    onChange={(e) =>
+                      setForm({ ...form, medicalRepName: e.target.value })
+                    }
+                    className="w-full border px-3 py-2 rounded-lg capitalize"
+                  />
+                </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-600">
-                  Address
-                </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                  {form.address}
-                </p>
-              </div>
+                <div>
+                  <label className="block text-sm font-medium">Address</label>
+                  <input
+                    type="text"
+                    value={form.address}
+                    onChange={(e) =>
+                      setForm({ ...form, address: e.target.value })
+                    }
+                    className="w-full border px-3 py-2 rounded-lg capitalize"
+                  />
+                </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-600">
-                  Zone
-                </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                  {form.zone}
-                </p>
-              </div>
+                <div>
+                  <label className="block text-sm font-medium">Zone</label>
+                  <input
+                    type="text"
+                    value={form.zone}
+                    onChange={(e) => setForm({ ...form, zone: e.target.value })}
+                    className="w-full border px-3 py-2 rounded-lg capitalize"
+                  />
+                </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-600">
-                  Location
-                </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                  {form.location}
-                </p>
-              </div>
+                <div>
+                  <label className="block text-sm font-medium">Location</label>
+                  <input
+                    type="text"
+                    value={form.location}
+                    onChange={(e) =>
+                      setForm({ ...form, location: e.target.value })
+                    }
+                    className="w-full border px-3 py-2 rounded-lg capitalize"
+                  />
+                </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-600">
-                  Date
-                </label>
-                <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                  {formatDateToReadable(form.date)}
-                </p>
+                {/* Existing Fields */}
+
+                <div>
+                  <label className="block text-sm font-medium">Date</label>
+                  <DatePicker
+                    selected={form.date ? new Date(form.date) : null}
+                    onChange={(date) =>
+                      date
+                        ? setForm({ ...form, date: date.toISOString() })
+                        : null
+                    }
+                    dateFormat="yyyy-MM-dd"
+                    placeholderText="Select a date"
+                    className="w-full border px-3 py-2 rounded-lg"
+                  />
+                </div>
+              </form>
+
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  onClick={() => setIsEditModalOpen(false)}
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleUpdateCustomer}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg"
+                >
+                  Save Changes
+                </button>
               </div>
             </div>
+          </div>,
+          document.body
+        )}
 
-            <div className="mt-6 flex justify-end">
+      {isViewModalOpen &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            {/* Background Overlay */}
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setIsOpen(false)}
+            />
+            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
               <button
                 onClick={() => setIsViewModalOpen(false)}
-                className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg"
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
               >
-                Close
+                <X size={20} />
               </button>
+
+              <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                View Customer
+              </h2>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Existing fields */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Customer Code
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {form.customerCode}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Name
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {form.name}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Customer Number
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {form.customerNumber}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Customer Remark
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {form.remark?.trim() ? form.remark : "No Remarks"}
+                  </p>
+                </div>
+
+                {/* New fields from the table */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Type of Business
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {form.typeOfBusiness}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Medical Rep Name
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {form.medicalRepName}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Address
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {form.address}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Zone
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {form.zone}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Location
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {form.location}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Date
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {formatDateToReadable(form.date)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-6 flex justify-end">
+                <button
+                  onClick={() => setIsViewModalOpen(false)}
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg"
+                >
+                  Close
+                </button>
+              </div>
             </div>
-          </div>
-        </div>,
-        document.body
-      )}
-      
-      {showDeleteModal && selected && ReactDOM.createPortal(
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
-           {/* Background Overlay */}
-                <div
-                    className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                    onClick={() => setIsOpen(false)}
-                  />
-          <div className="bg-white p-6 rounded-xl shadow-xl max-w-md w-full">
-            <h2 className="text-lg font-semibold mb-4 text-gray-800">
-              Delete Customer
-            </h2>
-            <p className="text-gray-600">
-              Are you sure you want to delete <strong>{selected.name}</strong>?
-            </p>
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                onClick={() => setShowDeleteModal(false)}
-                className="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmDelete}
-                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

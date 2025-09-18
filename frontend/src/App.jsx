@@ -95,7 +95,7 @@ function App() {
           <Route path="/cashandbank" element={<CashandBank />} />
 
           <Route path="staffmember" element={<StaffMember />}>
-            <Route path="new" element={<NewStaffMember />} />
+            {/* <Route path="new" element={<NewStaffMember />} /> */}
           </Route>
           <Route path="masterlayout" element={<MasterLayout />}>
             <Route path="customer" element={<Customer />} />

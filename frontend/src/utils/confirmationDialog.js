@@ -35,9 +35,9 @@ export const confirmDialog = async ({
     customClass: {
       popup: "w-64 p-6 rounded-lg bg-white shadow-lg",
       confirmButton:
-        "bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded mr-2",
+        "bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded mr-2 cursor-pointer",
       cancelButton:
-        "bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 px-4 rounded",
+        "bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 px-4 rounded cursor-pointer",
     },
     buttonsStyling: false,
   });
