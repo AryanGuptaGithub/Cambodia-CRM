@@ -44,9 +44,7 @@ router.get("/staffs/:id", async (req, res) => {
 // ✅ Route: Create supplier
 router.post("/staffs", async (req, res) => {
   try {
-    const { medicalRepName } = req.body;
-
-    // Check if staff with this medicalRepName already exists
+    const { medicalRepName, enabled } = req.body;
     const existingStaff = await staffSchema.findOne({ medicalRepName });
 
     if (existingStaff) {
@@ -55,16 +53,17 @@ router.post("/staffs", async (req, res) => {
         ok: false,
       });
     }
+    const isEnabled = enabled === "enabled";
 
     const newStaff = new staffSchema({
       ...req.body,
-      enabled: true, // set default enabled if you want
+      enabled: isEnabled, // <-- boolean value
     });
 
     const savedStaff = await newStaff.save();
 
     res.status(201).json({
-      message: `Staff member <b> ${savedStaff.medicalRepName}</b> created successfully`,
+      message: `Staff member <b>${savedStaff.medicalRepName}</b> created successfully`,
       ok: true,
     });
   } catch (err) {
