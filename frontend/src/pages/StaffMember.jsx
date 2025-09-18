@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { Eye, Edit, Trash2, UserPlus, Upload, X, Rss } from "lucide-react";
+import { Eye, Edit, Trash2, UserPlus, Upload, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { confirmDialog } from "../utils/confirmationDialog";
@@ -13,6 +13,7 @@ import "react-datepicker/dist/react-datepicker.css";
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
 const StaffMember = () => {
+  const navigate = useNavigate();
   const [currentPage, setCurrentPage] = useState(1);
   const staffPerPage = 8;
 
@@ -413,7 +414,10 @@ const StaffMember = () => {
       {/* Top Bar */}
       <div className="flex justify-between items-center mb-4">
         <div className="flex gap-3">
-          <button className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md">
+          <button
+            onClick={() => navigate("/masterlayout/customer/new")}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md"
+          >
             <UserPlus size={18} /> Add New Staff Member
           </button>
 
@@ -841,7 +845,7 @@ const StaffMember = () => {
                       : "bg-blue-600 hover:bg-blue-700 text-white"
                   }`}
                 >
-                   {isUploading ? "Uploading…" : "Upload"}
+                  {isUploading ? "Uploading…" : "Upload"}
                 </button>
               </div>
             </div>
