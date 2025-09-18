@@ -205,7 +205,6 @@ const Customer = () => {
           setSelected([]);
         }
       } catch (error) {
-        console.log("values of error", error);
         showToast("error", "Failed to delete customer.");
       }
     }
@@ -230,26 +229,75 @@ const Customer = () => {
       });
 
       if (rows.length === 0) {
-        console.warn("Excel file is empty");
+        showToast("warning", "Excel file is empty");
         return;
       }
 
-      const HEADER_ROW_INDEX = 2;
-      const rawHeaders = rows[HEADER_ROW_INDEX];
+      // ✅ Expected headers
+      const requiredHeaders = [
+        "customer code",
+        "date",
+        "medical representative name",
+        "customer name in english",
+        "types of business",
+        "customer number",
+        "customer address",
+        "zone",
+        "location",
+        "remark",
+      ];
+
+      let headerRowIndex = -1;
+      let matchedHeaders = [];
+
+      // ✅ Find header row (first 10 rows max)
+      for (let i = 0; i < Math.min(rows.length, 10); i++) {
+        const row = rows[i].map((cell) =>
+          cell?.toString().trim().toLowerCase()
+        );
+        const matched = requiredHeaders.filter((header) =>
+          row.includes(header)
+        );
+        if (matched.length >= 5) {
+          headerRowIndex = i;
+          matchedHeaders = matched;
+          break;
+        }
+      }
+
+      // ❌ If required headers not found
+      if (
+        headerRowIndex === -1 ||
+        matchedHeaders.length < requiredHeaders.length
+      ) {
+        const missingHeaders = requiredHeaders.filter(
+          (header) => !matchedHeaders.includes(header)
+        );
+        const errorMsg = `❌ Required headers not found in Excel file:\n\n${missingHeaders.join(
+          ", "
+        )}`;
+        showToast("error", errorMsg);
+        return;
+      }
+
+      // ✅ Map header keys to column indexes
+      const rawHeaders = rows[headerRowIndex];
       const headersMap = {};
       rawHeaders.forEach((header, index) => {
         if (!header) return;
         const cleaned = header.toString().trim().toLowerCase();
         headersMap[index] = cleaned;
       });
-
-      // ✅ Data starts from index 4 (i.e., 5th row in Excel)
-      const dataRows = rows.slice(HEADER_ROW_INDEX + 1);
+      // ✅ Parse data rows
+      const dataRows = rows.slice(headerRowIndex + 1);
+      if (dataRows.length == 0) {
+        showToast("warning", "Excel file is empty");
+        return;
+      }
 
       const mappedData = dataRows
         .map((row, rowIndex) => {
           const item = {};
-
           Object.entries(headersMap).forEach(([index, key]) => {
             item[key] = row[index] || "";
           });
@@ -267,14 +315,16 @@ const Customer = () => {
             remark: item["remark"],
           };
         })
-        .filter((entry) => entry.customerCode); // ✅ Only rows with data
+        .filter((entry, index) => {
+          const keep = !!entry.customerCode;
+          return keep;
+        });
       setParsedData(mappedData);
     };
 
     reader.readAsArrayBuffer(file);
   };
 
-  // 🔁 Convert Excel serial date or string to JS Date (helper)
   const parseExcelDate = (value) => {
     if (!value) return null;
 
@@ -289,7 +339,6 @@ const Customer = () => {
 
   // Import parsed customers to backend
   const handleImport = async () => {
-    console.log('values of parsedData', parsedData);
     if (parsedData.length === 0) {
       showToast("warning", "Please upload a valid file first");
       return;
@@ -525,7 +574,7 @@ const Customer = () => {
             <button
               onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
               disabled={currentPage === 1}
-              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
+              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
             >
               Prev
             </button>
@@ -541,7 +590,7 @@ const Customer = () => {
                 <button
                   key={page}
                   onClick={() => setCurrentPage(page)}
-                  className={`px-3 py-1 rounded w-10 text-center transition ${
+                  className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer${
                     currentPage === page
                       ? "bg-indigo-600 text-white"
                       : "bg-gray-200 hover:bg-gray-300"
@@ -557,7 +606,7 @@ const Customer = () => {
                 window.scrollTo({ top: 0, behavior: "smooth" });
               }}
               disabled={currentPage === totalPages}
-              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
+              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
             >
               Next
             </button>

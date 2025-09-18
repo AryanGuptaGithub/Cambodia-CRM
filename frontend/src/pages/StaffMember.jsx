@@ -417,13 +417,13 @@ const StaffMember = () => {
         <div className="flex gap-3">
           <button
             onClick={() => navigate("/masterlayout/customer/new")}
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md"
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
           >
             <UserPlus size={18} /> Add New Staff Member
           </button>
 
           <button
-            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md"
+            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
             onClick={() => setShowImportModal(true)}
           >
             <Upload size={18} /> Import Staff Members
@@ -432,7 +432,7 @@ const StaffMember = () => {
           {selected.length > 0 && (
             <button
               onClick={() => deleteSelectedStaff()}
-              className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md"
+              className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
             >
               <Trash2 size={18} /> Delete
             </button>
@@ -462,7 +462,7 @@ const StaffMember = () => {
           <button
             key={tab}
             onClick={() => setSelectedTab(tab)}
-            className={`px-4 py-2 rounded-lg ${
+            className={`px-4 py-2 rounded-lg cursor-pointer ${
               selectedTab === tab
                 ? "bg-indigo-600 text-white"
                 : "bg-gray-200 text-gray-700"
@@ -565,7 +565,7 @@ const StaffMember = () => {
             <button
               onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
               disabled={currentPage === 1}
-              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
+              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer" 
             >
               Prev
             </button>
@@ -581,7 +581,7 @@ const StaffMember = () => {
                 <button
                   key={page}
                   onClick={() => setCurrentPage(page)}
-                  className={`px-3 py-1 rounded w-10 text-center transition ${
+                  className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
                     currentPage === page
                       ? "bg-indigo-600 text-white"
                       : "bg-gray-200 hover:bg-gray-300"
@@ -597,7 +597,7 @@ const StaffMember = () => {
                 window.scrollTo({ top: 0, behavior: "smooth" });
               }}
               disabled={currentPage === totalPages}
-              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
+              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
             >
               Next
             </button>
@@ -614,7 +614,7 @@ const StaffMember = () => {
               <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
                 <button
                   onClick={() => setIsViewModalOpen(false)}
-                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
                 >
                   <X size={20} />
                 </button>
@@ -665,7 +665,7 @@ const StaffMember = () => {
                 <div className="mt-6 flex justify-end">
                   <button
                     onClick={() => setIsViewModalOpen(false)}
-                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg"
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
                   >
                     Close
                   </button>
@@ -685,7 +685,7 @@ const StaffMember = () => {
                 {/* Close Button */}
                 <button
                   onClick={() => setIsEditModalOpen(false)}
-                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
                 >
                   <X size={20} />
                 </button>
@@ -795,13 +795,13 @@ const StaffMember = () => {
                 <div className="mt-6 flex justify-end gap-2">
                   <button
                     onClick={() => setIsEditModalOpen(false)}
-                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg"
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={updateStaff}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg"
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg cursor-pointer"
                   >
                     Update
                   </button>
