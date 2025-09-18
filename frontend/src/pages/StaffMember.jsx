@@ -9,6 +9,7 @@ import SampleExcelDownloadStaff from "../excels/SampleExcelDownloadStaff";
 import { formatDateToReadable } from "../utils/dateUtil";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
+import ReactDOM from "react-dom";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -602,198 +603,213 @@ const StaffMember = () => {
             </button>
           </div>
         )}
-        {isViewModalOpen && (
-          <div className="fixed inset-0 bg-black bg-opacity-30 flex justify-center items-center z-50">
-            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
-              <button
-                onClick={() => setIsViewModalOpen(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
-              >
-                <X size={20} />
-              </button>
+        {isViewModalOpen &&
+          ReactDOM.createPortal(
+            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+              <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                onClick={() => setIsOpen(false)}
+              />
 
-              <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                View Staff
-              </h2>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    MR Name
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.medicalRepName || "--"}
-                  </p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Team
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.teamName || "--"}
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Created At
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {form.createdAt
-                      ? formatDateToReadable(form.createdAt)
-                      : "--"}
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Status
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.enabled ? "Enabled" : "Disabled"}
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-6 flex justify-end">
+              <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
                 <button
                   onClick={() => setIsViewModalOpen(false)}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg"
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
                 >
-                  Close
+                  <X size={20} />
                 </button>
-              </div>
-            </div>
-          </div>
-        )}
-        {isEditModalOpen && (
-          <div className="fixed inset-0 bg-black bg-opacity-30 flex justify-center items-center z-50">
-            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative max-h-screen overflow-y-auto">
-              {/* Close Button */}
-              <button
-                onClick={() => setIsEditModalOpen(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
-              >
-                <X size={20} />
-              </button>
 
-              {/* Header */}
-              <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                Edit Staff
-              </h2>
+                <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                  View Staff
+                </h2>
 
-              {/* Form Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* MR Name */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    MR Name
-                  </label>
-                  <input
-                    type="text"
-                    value={form.medicalRepName}
-                    onChange={(e) =>
-                      setForm({ ...form, medicalRepName: e.target.value })
-                    }
-                    className="w-full border px-3 py-2 rounded-lg"
-                  />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      MR Name
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                      {form.medicalRepName || "--"}
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Team Name
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                      {form.teamName || "--"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Created At
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                      {form.createdAt
+                        ? formatDateToReadable(form.createdAt)
+                        : "--"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Status
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                      {form.enabled ? "Enabled" : "Disabled"}
+                    </p>
+                  </div>
                 </div>
 
-                {/* Team Name + Suggestions */}
-                <div className="relative">
-                  <label className="block text-sm font-medium text-gray-600 mb-1">
-                    Team Name
-                  </label>
-                  <input
-                    type="text"
-                    value={form.teamName}
-                    onChange={handleChange}
-                    onKeyDown={handleKeyDown}
-                    className="w-full border px-3 py-2 rounded-lg"
-                    placeholder="Type or select a team"
-                    autoComplete="off"
-                    onBlur={() =>
-                      setTimeout(() => setShowSuggestions(false), 150)
-                    } // to allow click before hiding
-                  />
-
-                  {showSuggestions && teamSuggestions.length > 0 && (
-                    <ul className="absolute z-10 bg-white border w-full max-h-40 overflow-y-auto mt-1 rounded shadow">
-                      {teamSuggestions.map((team, index) => (
-                        <li
-                          key={index}
-                          onMouseDown={() => handleSelect(team)} // still keep mouse support
-                          className={`px-4 py-2 cursor-pointer ${
-                            highlightedIndex === index
-                              ? "bg-blue-100"
-                              : "hover:bg-gray-100"
-                          } ${
-                            index !== teamSuggestions.length - 1
-                              ? "border-b"
-                              : ""
-                          }`}
-                        >
-                          {team}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-
-                {/* Created At */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Created At
-                  </label>
-                  <DatePicker
-                    selected={form.createdAt ? new Date(form.createdAt) : null}
-                    onChange={(date) =>
-                      date
-                        ? setForm({ ...form, createdAt: date.toISOString() })
-                        : null
-                    }
-                    dateFormat="yyyy-MM-dd"
-                    placeholderText="Select a date"
-                    className="w-full border px-3 py-2 rounded-lg"
-                  />
-                </div>
-
-                {/* Status */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Status
-                  </label>
-                  <select
-                    value={form.enabled}
-                    onChange={(e) =>
-                      setForm({ ...form, enabled: e.target.value === "true" })
-                    }
-                    className="w-full border px-3 py-2 rounded-lg"
+                <div className="mt-6 flex justify-end">
+                  <button
+                    onClick={() => setIsViewModalOpen(false)}
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg"
                   >
-                    <option value="true">Enabled</option>
-                    <option value="false">Disabled</option>
-                  </select>
+                    Close
+                  </button>
                 </div>
               </div>
-
-              {/* Footer Buttons */}
-              <div className="mt-6 flex justify-end gap-2">
+            </div>,
+            document.body
+          )}
+        {isEditModalOpen &&
+          ReactDOM.createPortal(
+            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+              <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                onClick={() => setIsOpen(false)}
+              />
+              <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative max-h-screen overflow-y-auto">
+                {/* Close Button */}
                 <button
                   onClick={() => setIsEditModalOpen(false)}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg"
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
                 >
-                  Cancel
+                  <X size={20} />
                 </button>
-                <button
-                  onClick={updateStaff}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg"
-                >
-                  Update
-                </button>
+
+                {/* Header */}
+                <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                  Edit Staff
+                </h2>
+
+                {/* Form Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* MR Name */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      MR Name
+                    </label>
+                    <input
+                      type="text"
+                      value={form.medicalRepName}
+                      onChange={(e) =>
+                        setForm({ ...form, medicalRepName: e.target.value })
+                      }
+                      className="w-full border px-3 py-2 rounded-lg"
+                    />
+                  </div>
+
+                  {/* Team Name + Suggestions */}
+                  <div className="relative">
+                    <label className="block text-sm font-medium text-gray-600 mb-1">
+                      Team Name
+                    </label>
+                    <input
+                      type="text"
+                      value={form.teamName}
+                      onChange={handleChange}
+                      onKeyDown={handleKeyDown}
+                      className="w-full border px-3 py-2 rounded-lg"
+                      placeholder="Type or select a team"
+                      autoComplete="off"
+                      onBlur={() =>
+                        setTimeout(() => setShowSuggestions(false), 150)
+                      } // to allow click before hiding
+                    />
+
+                    {showSuggestions && teamSuggestions.length > 0 && (
+                      <ul className="absolute z-10 bg-white border w-full max-h-40 overflow-y-auto mt-1 rounded shadow">
+                        {teamSuggestions.map((team, index) => (
+                          <li
+                            key={index}
+                            onMouseDown={() => handleSelect(team)} // still keep mouse support
+                            className={`px-4 py-2 cursor-pointer ${
+                              highlightedIndex === index
+                                ? "bg-blue-100"
+                                : "hover:bg-gray-100"
+                            } ${
+                              index !== teamSuggestions.length - 1
+                                ? "border-b"
+                                : ""
+                            }`}
+                          >
+                            {team}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
+                  {/* Created At */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Created At
+                    </label>
+                    <DatePicker
+                      selected={
+                        form.createdAt ? new Date(form.createdAt) : null
+                      }
+                      onChange={(date) =>
+                        date
+                          ? setForm({ ...form, createdAt: date.toISOString() })
+                          : null
+                      }
+                      dateFormat="yyyy-MM-dd"
+                      placeholderText="Select a date"
+                      className="w-full border px-3 py-2 rounded-lg"
+                    />
+                  </div>
+
+                  {/* Status */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Status
+                    </label>
+                    <select
+                      value={form.enabled}
+                      onChange={(e) =>
+                        setForm({ ...form, enabled: e.target.value === "true" })
+                      }
+                      className="w-full border px-3 py-2 rounded-lg"
+                    >
+                      <option value="true">Enabled</option>
+                      <option value="false">Disabled</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Footer Buttons */}
+                <div className="mt-6 flex justify-end gap-2">
+                  <button
+                    onClick={() => setIsEditModalOpen(false)}
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={updateStaff}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg"
+                  >
+                    Update
+                  </button>
+                </div>
               </div>
-            </div>
-          </div>
-        )}
+            </div>,
+            document.body
+          )}
 
         {showImportModal && (
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">

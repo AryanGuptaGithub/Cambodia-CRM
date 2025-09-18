@@ -19,7 +19,6 @@ export const confirmDialog = async ({
   };
 
   const icon = iconMap[iconName] || iconMap.default;
-
   return await Swal.fire({
     icon: null,
     html: `
@@ -31,6 +30,8 @@ export const confirmDialog = async ({
     showCancelButton: true,
     confirmButtonText,
     cancelButtonText,
+     allowOutsideClick: false,   // ✅ prevent click outside
+    allowEscapeKey: false,  
     customClass: {
       popup: "w-64 p-6 rounded-lg bg-white shadow-lg",
       confirmButton:
