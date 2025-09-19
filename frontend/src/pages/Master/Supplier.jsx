@@ -94,27 +94,27 @@ const Supplier = () => {
     currentPage * suppliersPerPage
   );
 
-    const toggleSelect = useCallback((staff) => {
-      setSelected((prev) =>
-        prev.some((c) => c.id === staff._id)
-          ? prev.filter((c) => c.id !== staff._id)
-          : [...prev, { id: staff._id }]
-      );
-    }, []);
-  
-    // Select / Deselect all visible staff
-    const toggleSelectAll = useCallback(
-      (checked) => {
-        setSelected(
-          checked
-            ? currentSuppliers.map((s) => ({
-                id: s._id
-              }))
-            : []
-        );
-      },
-      [currentSuppliers]
+  const toggleSelect = useCallback((staff) => {
+    setSelected((prev) =>
+      prev.some((c) => c.id === staff._id)
+        ? prev.filter((c) => c.id !== staff._id)
+        : [...prev, { id: staff._id }]
     );
+  }, []);
+
+  // Select / Deselect all visible staff
+  const toggleSelectAll = useCallback(
+    (checked) => {
+      setSelected(
+        checked
+          ? currentSuppliers.map((s) => ({
+              id: s._id,
+            }))
+          : []
+      );
+    },
+    [currentSuppliers]
+  );
 
   const handleView = (supplier) => {
     setForm(supplier);
@@ -281,14 +281,36 @@ const Supplier = () => {
     }
   };
 
+  const handlerEnabledSupplier = async (id) => {
+    const selectedSupplier = supplier.find((c) => c._id === id);
+    if (!selectedSupplier) return;
+
+    try {
+      const res = await axios.put(`${backendUrl}/api/suppliers/${id}`, {
+        enabled: !selectedSupplier.enabled,
+      });
+
+      if (res.status === 200) {
+        setSupplier((prev) =>
+          prev.map((c) =>
+            c._id === id ? { ...c, enabled: res.data.enabled } : c
+          )
+        );
+      }
+    } catch (err) {
+      console.error(err);
+      showToast("error", "Failed to update supplier status.");
+    }
+  };
+
   if (loading) return <p>Loading...</p>;
   if (error) return <p className="text-red-500">{error}</p>;
 
   return (
     <div className="p-6">
       {/* Top bar */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
-        <div className="flex gap-3 flex-wrap">
+      <div className="flex justify-between items-center mb-4">
+        <div className="flex gap-3">
           <button
             onClick={() => navigate("/masterlayout/supplier/new")}
             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
@@ -310,46 +332,54 @@ const Supplier = () => {
             </button>
           )}
         </div>
+      </div>
 
-        {/* Search */}
-        <div className="relative w-full md:w-64">
-          <Search
-            size={18}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"
-          />
+      {/* Tabs */}
+      <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
+        {/* Tabs (conditionally rendered) */}
+        {supplier.length > 0 ? (
+          <div className="flex gap-4">
+            {["All", "Enabled", "Disabled"].map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`px-4 py-2 rounded-lg cursor-pointer ${
+                  activeTab === tab
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 text-gray-700"
+                }`}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div></div>
+        )}
+
+        {/* Total Count & Search (always visible) */}
+        <div className="flex items-center gap-8">
+          <p className="text-lg font-semibold text-gray-700">
+            Total Count:{" "}
+            <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+              {filteredSuppliers.length}
+            </span>
+          </p>
+
           <input
             type="text"
-            placeholder="Search supplier..."
+            placeholder="Search..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border rounded-xl focus:ring-2 focus:ring-indigo-400"
+            className="border px-4 py-2 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
           />
         </div>
       </div>
 
-      {/* Tabs */}
-      {supplier.length > 0 && (
-        <div className="flex gap-4 mb-4">
-          {["All", "Enabled", "Disabled"].map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`px-4 py-2 rounded-lg cursor-pointer ${
-                activeTab === tab
-                  ? "bg-indigo-600 text-white"
-                  : "bg-gray-200 text-gray-700"
-              }`}
-            >
-              {tab}
-            </button>
-          ))}
-        </div>
-      )}
-
       {/* Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center">
-          <thead className="bg-gray-100 text-gray-700">
+          <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
               <th className="p-3">
                 <div className="flex items-center gap-4">
@@ -395,15 +425,7 @@ const Supplier = () => {
                 </td>
                 <td className="p-3">
                   <button
-                    onClick={() =>
-                      setSupplier((prev) =>
-                        prev.map((s) =>
-                          s.id === supplier.id
-                            ? { ...s, enabled: !s.enabled }
-                            : s
-                        )
-                      )
-                    }
+                    onClick={() => handlerEnabledSupplier(supplier._id)}
                     className={`px-3 py-1 rounded-full text-sm cursor-pointer ${
                       supplier.enabled
                         ? "bg-green-100 text-green-600"
@@ -435,45 +457,53 @@ const Supplier = () => {
                 </td>
               </tr>
             ))}
+            {supplier.length === 0 && (
+              <tr>
+                <td colSpan={6} className="text-center p-6 text-gray-500">
+                  No Supplier found.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
 
-        {/* Pagination */}
-        <div className="mt-4 flex justify-start gap-2 p-5">
-          <button
-            onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-            disabled={currentPage === 1}
-            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-          >
-            Prev
-          </button>
+        {supplier.length > 0 && (
+          <div className="mt-4 flex justify-start gap-2 p-5">
+            <button
+              onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+            >
+              Prev
+            </button>
 
-          {Array.from({ length: totalPages }, (_, index) => index + 1).map(
-            (page) => (
-              <button
-                key={page}
-                onClick={() => setCurrentPage(page)}
-                className={`px-3 py-1 rounded cursor-pointer ${
-                  currentPage === page
-                    ? "bg-indigo-600 text-white"
-                    : "bg-gray-200 hover:bg-gray-300"
-                }`}
-              >
-                {page}
-              </button>
-            )
-          )}
+            {Array.from({ length: totalPages }, (_, index) => index + 1).map(
+              (page) => (
+                <button
+                  key={page}
+                  onClick={() => setCurrentPage(page)}
+                  className={`px-3 py-1 rounded cursor-pointer ${
+                    currentPage === page
+                      ? "bg-indigo-600 text-white"
+                      : "bg-gray-200 hover:bg-gray-300"
+                  }`}
+                >
+                  {page}
+                </button>
+              )
+            )}
 
-          <button
-            onClick={() =>
-              setCurrentPage((prev) => Math.min(prev + 1, totalPages))
-            }
-            disabled={currentPage === totalPages}
-            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-          >
-            Next
-          </button>
-        </div>
+            <button
+              onClick={() =>
+                setCurrentPage((prev) => Math.min(prev + 1, totalPages))
+              }
+              disabled={currentPage === totalPages}
+              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+            >
+              Next
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Import CSV Modal */}

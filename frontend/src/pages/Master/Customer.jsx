@@ -590,7 +590,7 @@ const Customer = () => {
                 <button
                   key={page}
                   onClick={() => setCurrentPage(page)}
-                  className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer${
+                  className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
                     currentPage === page
                       ? "bg-indigo-600 text-white"
                       : "bg-gray-200 hover:bg-gray-300"

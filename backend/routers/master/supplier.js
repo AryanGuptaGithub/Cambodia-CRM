@@ -51,23 +51,49 @@ router.get("/suppliers/:id", async (req, res) => {
 // ✅ Route: Create supplier
 router.post("/suppliers", async (req, res) => {
   try {
+    const { name, address, siteRegistrationDate, siteRegistrationExpiryDate, enabled } = req.body;
+    const enabledValue = enabled === "enabled" ? true: false; 
+
+    // Validate required fields
+    if (!name || !address || !siteRegistrationDate || !siteRegistrationExpiryDate || !enabled) {
+      return res.status(400).json({ message: "All fields are required." });
+    }
+
+    // Prepare the payload
     const payload = {
-      ...req.body,
-      openingBalance: Number(req.body.openingBalance) || 0,
-      creditPeriod: Number(req.body.creditPeriod) || 0,
-      creditLimit: Number(req.body.creditLimit) || 0,
+      name,
+      address,
+      siteRegistrationDate,
+      siteRegistrationExpiryDate,
+      enabledValue,
     };
 
     const newSupplier = new Supplier(payload);
     const savedSupplier = await newSupplier.save();
 
     res.status(201).json({
-      message: `Supplier <b>${savedSupplier.name}</b> created successfully`,
+      message: `Supplier ${savedSupplier.name} created successfully`,
       ok: true,
     });
   } catch (err) {
-    if (err.code === 11000) return handleDuplicateError(res, err, "supplier");
-    res.status(400).json({ message: "Invalid data provided", error: err.message, ok: false });
+
+    if (err.code === 11000) {
+      return res.status(409).json({
+        message: "Duplicate key error",
+        error: err.message,
+        ok: false,
+      });
+    }
+    if (err.name === "ValidationError") {
+      const errors = Object.values(err.errors).map((e) => ({
+        path: e.path,
+        message: e.message,
+      }));
+      return res.status(400).json({ errors });
+    }
+
+    console.error(err);
+    res.status(500).json({ message: "Internal Server Error", ok: false });
   }
 });
 

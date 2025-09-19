@@ -452,7 +452,30 @@ const StaffMember = () => {
             </button>
           )}
         </div>
-        <div className="flex justify-between items-center mb-4 gap-8">
+      </div>
+
+      <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
+        {staff.length > 0 ? (
+          <div className="flex gap-4">
+            {["All", "Enabled", "Disabled"].map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setSelectedTab(tab)}
+                className={`px-4 py-2 rounded-lg cursor-pointer ${
+                  selectedTab === tab
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 text-gray-700"
+                }`}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div></div>
+        )}
+
+        <div className="flex items-center gap-8">
           <p className="text-lg font-semibold text-gray-700">
             Total Count:{" "}
             <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
@@ -469,25 +492,6 @@ const StaffMember = () => {
           />
         </div>
       </div>
-
-      {/* Tabs */}
-      {staff.length > 0 && (
-        <div className="flex gap-4 mb-4">
-          {["All", "Enabled", "Disabled"].map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setSelectedTab(tab)}
-              className={`px-4 py-2 rounded-lg cursor-pointer ${
-                selectedTab === tab
-                  ? "bg-indigo-600 text-white"
-                  : "bg-gray-200 text-gray-700"
-              }`}
-            >
-              {tab}
-            </button>
-          ))}
-        </div>
-      )}
 
       {/* Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
