@@ -142,5 +142,44 @@ router.delete("/products", async (req, res) => {
   }
 });
 
+router.post("/product/add", async (req, res) => {
+  try {
+    const {
+      productName,
+      type,
+      packing,
+      qtyPerBox,
+      qtyPerCarton,
+      supplierName,
+      drugLicense,
+      licenseValidityDate,
+      remarks,
+    } = req.body;
+
+    if (
+      !productName || !type || !packing 
+    ) {
+      return res.status(400).json({ message: "Please fill all required fields." });
+    }
+
+    const newProduct = new Product({
+      productName,
+      type,
+      packing,
+      qtyPerBox,
+      qtyPerCarton,
+      supplierName,
+      drugLicense,
+      licenseValidityDate,
+      remarks,
+    });
+
+    const savedProduct = await newProduct.save();
+    return res.status(201).json({ message: `Product <b>${productName}</b> added successfully`, product: savedProduct });
+  } catch (error) {
+    console.error("Error adding product:", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+});
 
 export default router;

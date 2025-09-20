@@ -66,6 +66,7 @@ const Product = () => {
         ?.toLowerCase()
         .includes(lowerSearch);
 
+      const typeMatch = product.type?.toLowerCase().includes(lowerSearch);
       const licenseDateFormatted = product.licenseValidityDate
         ? formatDateToReadable(
             new Date(product.licenseValidityDate),
@@ -77,7 +78,11 @@ const Product = () => {
 
       return (
         matchesType &&
-        (nameMatch || supplierMatch || licenseMatch || licenseDateMatch)
+        (nameMatch ||
+          supplierMatch ||
+          licenseMatch ||
+          licenseDateMatch ||
+          typeMatch)
       );
     });
   }, [products, searchTerm, selectedTab]);
@@ -136,6 +141,10 @@ const Product = () => {
     try {
       const response = await fetch(`${backendUrl}/api/products`);
       const data = await response.json();
+      const uniqueTypes = Array.from(
+        new Set(data.map((item) => item.type.toLowerCase()))
+      );
+      setTypes(["All", ...uniqueTypes]);
       setProducts(data);
       setSelected([]);
     } catch (err) {
@@ -433,7 +442,7 @@ const Product = () => {
             type="text"
             placeholder="Search..."
             value={searchTerm}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => setSearchTerm(e.target.value)}
             className="border px-4 py-2 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
           />
         </div>
@@ -535,40 +544,41 @@ const Product = () => {
           </tbody>
         </table>
 
-        {/* Pagination */}
-        <div className="mt-4 p-5 flex justify-start gap-2">
-          <button
-            onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-            disabled={currentPage === 1}
-            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-          >
-            Prev
-          </button>
-
-          {visiblePages.map((page) => (
+        {currentProducts.length > 0 && (
+          <div className="mt-4 p-5 flex justify-start gap-2">
             <button
-              key={page}
-              onClick={() => setCurrentPage(page)}
-              className={`px-3 py-1 rounded cursor-pointer ${
-                currentPage === page
-                  ? "bg-indigo-600 text-white"
-                  : "bg-gray-200 hover:bg-gray-300"
-              }`}
+              onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
             >
-              {page}
+              Prev
             </button>
-          ))}
 
-          <button
-            onClick={() =>
-              setCurrentPage((prev) => Math.min(prev + 1, totalPages))
-            }
-            disabled={currentPage === totalPages}
-            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-          >
-            Next
-          </button>
-        </div>
+            {visiblePages.map((page) => (
+              <button
+                key={page}
+                onClick={() => setCurrentPage(page)}
+                className={`px-3 py-1 rounded cursor-pointer ${
+                  currentPage === page
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 hover:bg-gray-300"
+                }`}
+              >
+                {page}
+              </button>
+            ))}
+
+            <button
+              onClick={() =>
+                setCurrentPage((prev) => Math.min(prev + 1, totalPages))
+              }
+              disabled={currentPage === totalPages}
+              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+            >
+              Next
+            </button>
+          </div>
+        )}
       </div>
       {showImportModal &&
         ReactDOM.createPortal(
@@ -627,7 +637,7 @@ const Product = () => {
             {/* Backdrop */}
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsViewModalOpen(false)}
+              onClick={() => setIsOpen(false)}
             />
 
             {/* Modal Content */}
@@ -677,7 +687,7 @@ const Product = () => {
                     Qty per Box
                   </label>
                   <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {form.qtyPerBox}
+                    {form.qtyPerBox || "--"}
                   </p>
                 </div>
 
@@ -686,7 +696,7 @@ const Product = () => {
                     Qty per Carton
                   </label>
                   <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {form.qtyPerCarton}
+                    {form.qtyPerCarton || "--"}
                   </p>
                 </div>
 
@@ -695,7 +705,7 @@ const Product = () => {
                     Supplier Name
                   </label>
                   <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {capitalizeFirstLetter(form.supplierName)}
+                    {capitalizeFirstLetter(form.supplierName) || "--"}
                   </p>
                 </div>
 
@@ -704,7 +714,7 @@ const Product = () => {
                     Drug License
                   </label>
                   <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {form.drugLicense}
+                    {form.drugLicense || "--"}
                   </p>
                 </div>
 
@@ -747,7 +757,7 @@ const Product = () => {
             {/* Backdrop */}
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsEditModalOpen(false)}
+              onClick={() => setIsOpen(false)}
             />
 
             {/* Modal Box */}
@@ -765,28 +775,7 @@ const Product = () => {
               </h2>
 
               {/* Form */}
-              <form
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  try {
-                    const res = await axios.put(
-                      `${backendUrl}/api/products/${form._id}`,
-                      form
-                    );
-                    if (res.status === 200) {
-                      showToast("success", "Product updated successfully");
-                      setIsEditModalOpen(false);
-
-                      const updated = await fetch(`${backendUrl}/api/products`);
-                      setProducts(await updated.json());
-                    }
-                  } catch (err) {
-                    console.error("Update error:", err);
-                    showToast("error", "Failed to update product.");
-                  }
-                }}
-                className="grid grid-cols-1 md:grid-cols-2 gap-4"
-              >
+              <form className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Fields */}
                 <div>
                   <label className="block text-sm font-medium">

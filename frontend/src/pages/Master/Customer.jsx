@@ -398,7 +398,6 @@ const Customer = () => {
         setNextCustomerCode(data.nextCustomerCode);
       }
     } catch (err) {
-      console.error("Update error:", err);
       showToast("error", "Failed to update customer.");
     }
   };
