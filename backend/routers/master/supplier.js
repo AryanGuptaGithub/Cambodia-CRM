@@ -1,7 +1,7 @@
 // routers/master/supplier.js
 import express from "express";
 import Supplier from "../../models/master/supplier.js";
-
+import mongoose from "mongoose";
 
 const router = express.Router();
 
@@ -128,22 +128,30 @@ router.delete("/suppliers/:id", async (req, res) => {
   }
 });
 
-// ✅ Route: Bulk delete suppliers
 router.delete("/suppliers", async (req, res) => {
   try {
-    const { ids } = req.body;
-    if (!Array.isArray(ids) || ids.length === 0) {
-      return res.status(400).json({ message: "No supplier IDs provided" });
+    const idObjects = req.body.ids;
+    if (!Array.isArray(idObjects) || idObjects.length === 0) {
+      return res.status(400).json({ message: "No supplier IDs provided", ok: false });
     }
 
-    const result = await Supplier.deleteMany({ _id: { $in: ids } });
+    const stringIds = idObjects.map(obj => obj.id);
+    const validIds = stringIds.filter(id => mongoose.Types.ObjectId.isValid(id));
 
+    if (validIds.length !== stringIds.length) {
+      return res.status(400).json({
+        message: "One or more supplier IDs are invalid",
+        ok: false,
+      });
+    }
+
+    const result = await Supplier.deleteMany({ _id: { $in: validIds } });
     res.json({
       message: `${result.deletedCount} supplier(s) deleted successfully`,
       ok: true,
     });
   } catch (err) {
-    handleServerError(res, err);
+    handleServerError(res, err); 
   }
 });
 
@@ -181,7 +189,7 @@ router.post("/suppliers/import", async (req, res) => {
           supplier[field] === ""
         ) {
           results.push({
-            supplier: supplier["product name"] || "Unknown",
+            supplier: supplier["product name"],
             status: "failed",
             message: `Missing required field '${field}'.`,
           });
@@ -220,7 +228,7 @@ router.post("/suppliers/import", async (req, res) => {
     }
 
     return res.status(200).json({
-      message: "Import completed.",
+      message: `Supplier <b> ${suppliers.length}</b> imported successfully.`,
       results,
     });
   } catch (err) {

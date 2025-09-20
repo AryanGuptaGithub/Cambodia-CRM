@@ -12,6 +12,7 @@ import "react-datepicker/dist/react-datepicker.css";
 import ReactDOM from "react-dom";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
+const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
 const StaffMember = () => {
   const navigate = useNavigate();
@@ -520,8 +521,16 @@ const StaffMember = () => {
             </tr>
           </thead>
           <tbody>
-            {currentStaff.map((staff) => (
-              <tr key={staff._id} className="border-b hover:bg-gray-50">
+            {currentStaff.map((staff, index) => (
+              <tr
+                key={staff._id}
+                className={`hover:bg-gray-50 ${
+                  (index + 1) % staffPerPage === 0 ||
+                  index + 1 === currentStaff.length
+                    ? ""
+                    : "border-b"
+                }`}
+              >
                 <td className="p-3">
                   <div className="flex items-center gap-4">
                     <input
@@ -842,7 +851,7 @@ const StaffMember = () => {
                 {/* Close */}
                 <button
                   onClick={() => setShowImportModal(false)}
-                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
                   disabled={isUploading}
                 >
                   <X size={20} />
@@ -851,7 +860,7 @@ const StaffMember = () => {
                 <h2 className="text-lg font-semibold text-gray-800 mb-4">
                   Import Staff
                 </h2>
-                <SampleExcelDownloadStaff />
+                {isSampleFile && <SampleExcelDownloadStaff />}
 
                 {/* File Upload */}
                 <div className="mb-6">
@@ -869,7 +878,7 @@ const StaffMember = () => {
                   <button
                     onClick={() => setShowImportModal(false)}
                     disabled={isUploading}
-                    className={`px-5 py-2 rounded-lg ${
+                    className={`px-5 py-2 rounded-lg cursor-pointer ${
                       isUploading
                         ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                         : "bg-gray-300 hover:bg-gray-400 text-gray-700"
@@ -880,7 +889,7 @@ const StaffMember = () => {
                   <button
                     onClick={handleImport}
                     disabled={isUploading}
-                    className={`px-5 py-2 rounded-lg ${
+                    className={`px-5 py-2 rounded-lg cursor-pointer ${
                       isUploading
                         ? "bg-blue-400 text-white cursor-not-allowed"
                         : "bg-blue-600 hover:bg-blue-700 text-white"

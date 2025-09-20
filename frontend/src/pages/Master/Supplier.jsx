@@ -6,12 +6,14 @@ import { confirmDialog } from "../../utils/confirmationDialog";
 import { showToast } from "../../utils/toast";
 import * as XLSX from "xlsx";
 import { formatDateToReadable } from "../../utils/dateUtil";
+import { useVisiblePages } from "../../utils/useVisiblePages";
 import SampleExcelDownloadSupplier from "../../excels/SampleExcelDownloadSuppiler";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import ReactDOM from "react-dom";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
+const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 const suppliersPerPage = 9;
 
 const Supplier = () => {
@@ -31,6 +33,7 @@ const Supplier = () => {
   const [parsedData, setParsedData] = useState([]);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
 
   const [form, setForm] = useState({
     name: "",
@@ -249,7 +252,7 @@ const Supplier = () => {
       showToast("warning", "Excel File is Empty");
       return;
     }
-
+    setIsUploading(true);
     try {
       const res = await axios.post(
         `${backendUrl}/api/suppliers/import`,
@@ -262,8 +265,6 @@ const Supplier = () => {
           res.data.message || "Suppliers imported successfully!"
         );
         setShowImportModal(false);
-
-        // Refresh supplier list
         const updated = await fetch(`${backendUrl}/api/suppliers`);
         setSupplier(await updated.json());
       }
@@ -278,6 +279,8 @@ const Supplier = () => {
       } else {
         showToast("error", "Network error. Please try again.");
       }
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -378,7 +381,7 @@ const Supplier = () => {
 
       {/* Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-        <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center">
+        <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
               <th className="p-3">
@@ -404,8 +407,16 @@ const Supplier = () => {
             </tr>
           </thead>
           <tbody>
-            {currentSuppliers.map((supplier) => (
-              <tr key={supplier._id} className="border-b hover:bg-gray-50">
+            {currentSuppliers.map((supplier, index) => (
+              <tr
+                key={supplier._id}
+                className={`hover:bg-gray-50 ${
+                  (index + 1) % suppliersPerPage === 0 ||
+                  index + 1 === currentSuppliers.length
+                    ? ""
+                    : "border-b"
+                }`}
+              >
                 <td className="p-3">
                   <div className="flex items-center gap-4">
                     <input
@@ -457,7 +468,7 @@ const Supplier = () => {
                 </td>
               </tr>
             ))}
-            {supplier.length === 0 && (
+            {currentSuppliers.length === 0 && (
               <tr>
                 <td colSpan={6} className="text-center p-6 text-gray-500">
                   No Supplier found.
@@ -467,7 +478,7 @@ const Supplier = () => {
           </tbody>
         </table>
 
-        {supplier.length > 0 && (
+        {currentSuppliers.length > 0 && (
           <div className="mt-4 flex justify-start gap-2 p-5">
             <button
               onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
@@ -519,6 +530,7 @@ const Supplier = () => {
               <button
                 onClick={() => setShowImportModal(false)}
                 className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                disabled={isUploading}
               >
                 <X size={20} />
               </button>
@@ -527,8 +539,7 @@ const Supplier = () => {
                 Import Supplier
               </h2>
 
-              {/* Sample CSV link */}
-              <SampleExcelDownloadSupplier />
+              {isSampleFile && <SampleExcelDownloadSupplier />}
 
               {/* File Upload */}
               <div className="mb-6">
@@ -546,14 +557,16 @@ const Supplier = () => {
                 <button
                   onClick={() => setShowImportModal(false)}
                   className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  disabled={isUploading}
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleImport}
                   className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+                  disabled={isUploading}
                 >
-                  Upload
+                  {isUploading ? "Uploading…" : "Upload"}
                 </button>
               </div>
             </div>

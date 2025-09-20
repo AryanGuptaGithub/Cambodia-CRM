@@ -13,7 +13,7 @@ import ReactDOM from "react-dom";
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
-const customersPerPage = 8;
+const customersPerPage = 7;
 
 const Customer = () => {
   const navigate = useNavigate();
@@ -365,12 +365,8 @@ const Customer = () => {
       }
     } catch (err) {
       console.error("Import error:", err);
-
-      // Handle backend validation errors (400) and server errors (500)
       if (err.response) {
         const { message } = err.response.data;
-
-        // Optional: sanitize HTML tags from message (if needed)
         const cleanMessage = message.replace(/<[^>]+>/g, "");
 
         showToast("error", cleanMessage || "Failed to import customers.");
@@ -483,7 +479,7 @@ const Customer = () => {
       </div>
 
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-        <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center">
+        <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
               <th className="p-3">
@@ -513,8 +509,16 @@ const Customer = () => {
           </thead>
           <tbody>
             {currentCustomers.length > 0 ? (
-              currentCustomers.map((customer) => (
-                <tr key={customer._id} className="border-b hover:bg-gray-50">
+              currentCustomers.map((customer, index) => (
+                <tr
+                  key={customer._id}
+                  className={`hover:bg-gray-50 ${
+                    (index + 1) % customersPerPage === 0 ||
+                    index + 1 === currentCustomers.length
+                      ? ""
+                      : "border-b"
+                  }`}
+                >
                   <td className="p-3">
                     <div className="flex items-center gap-4">
                       <input
@@ -627,7 +631,7 @@ const Customer = () => {
               {/* Close */}
               <button
                 onClick={() => setShowImportModal(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
                 disabled={isUploading}
               >
                 <X size={20} />
@@ -651,7 +655,7 @@ const Customer = () => {
                 <button
                   onClick={() => setShowImportModal(false)}
                   disabled={isUploading}
-                  className={`px-5 py-2 rounded-lg ${
+                  className={`px-5 py-2 rounded-lg cursor-pointer ${
                     isUploading
                       ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                       : "bg-gray-300 hover:bg-gray-400 text-gray-700"
@@ -662,7 +666,7 @@ const Customer = () => {
                 <button
                   onClick={handleImport}
                   disabled={isUploading}
-                  className={`px-5 py-2 rounded-lg ${
+                  className={`px-5 py-2 rounded-lg cursor-pointer ${
                     isUploading
                       ? "bg-blue-400 text-white cursor-not-allowed"
                       : "bg-blue-600 hover:bg-blue-700 text-white"
@@ -862,9 +866,9 @@ const Customer = () => {
                 </button>
                 <button
                   onClick={handleUpdateCustomer}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+                  className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
                 >
-                  Save Changes
+                  Update
                 </button>
               </div>
             </div>

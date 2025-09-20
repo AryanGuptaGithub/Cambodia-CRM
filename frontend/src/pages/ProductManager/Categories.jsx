@@ -1,21 +1,26 @@
 import React, { useState } from "react";
 import { Search, Plus, Upload, Edit, Trash2, X } from "lucide-react";
+import parenteralLogo from "../../../public/categories/parenteral.jpg";
+import liquidLogo from "../../../public/categories/liquid.jpg";
+import solidLogo from "../../../public/categories/solid.jpg";
+import  ("../ProductManager/categories.css");
+import SampleExcelDownloadProduct from "../../excels/SampleExcelDownloadProduct";
 
 const initialCategories = [
   {
     id: 1,
-    name: "Electronics",
-    logo: "https://cdn-icons-png.flaticon.com/512/1041/1041916.png",
+    name: "Parenteral",
+    logo: parenteralLogo,
   },
   {
     id: 2,
-    name: "Furniture",
-    logo: "https://cdn-icons-png.flaticon.com/512/2202/2202112.png",
+    name: "Liquid",
+    logo: liquidLogo,
   },
   {
     id: 3,
-    name: "Clothing",
-    logo: "https://cdn-icons-png.flaticon.com/512/892/892458.png",
+    name: "Solid",
+    logo: solidLogo,
   },
 ];
 
@@ -37,7 +42,10 @@ const Categories = () => {
 
   const indexOfLastItem = currentPage * itemsPerPage;
   const indexOfFirstItem = indexOfLastItem - itemsPerPage;
-  const paginatedCategories = filteredCategories.slice(indexOfFirstItem, indexOfLastItem);
+  const paginatedCategories = filteredCategories.slice(
+    indexOfFirstItem,
+    indexOfLastItem
+  );
   const totalPages = Math.ceil(filteredCategories.length / itemsPerPage);
 
   const handleDelete = (id) => {
@@ -118,7 +126,10 @@ const Categories = () => {
               <th className="px-4 py-3 w-10">
                 <input
                   type="checkbox"
-                  checked={selectedIds.length === filteredCategories.length && filteredCategories.length > 0}
+                  checked={
+                    selectedIds.length === filteredCategories.length &&
+                    filteredCategories.length > 0
+                  }
                   onChange={handleSelectAll}
                 />
               </th>
@@ -146,7 +157,10 @@ const Categories = () => {
                   </td>
                   <td className="px-4 py-3">{category.name}</td>
                   <td className="px-4 py-3">
-                    <img src={category.logo} alt={category.name} className="h-8 w-auto" />
+                    <img className="h-8 category-width"
+                      src={category.logo}
+                      alt={category.name}
+                    />
                   </td>
                   <td className="px-4 py-3 flex gap-3">
                     <button className="text-indigo-600 hover:text-indigo-800">
@@ -192,7 +206,9 @@ const Categories = () => {
           </div>
 
           <button
-            onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+            onClick={() =>
+              setCurrentPage((prev) => Math.min(prev + 1, totalPages))
+            }
             disabled={currentPage === totalPages}
             className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 disabled:opacity-50"
           >
@@ -212,13 +228,7 @@ const Categories = () => {
               <X size={20} />
             </button>
             <h2 className="text-lg font-semibold mb-4">Import Categories</h2>
-            <a
-              href="/sample.csv"
-              download
-              className="text-blue-600 hover:underline text-sm mb-4 block"
-            >
-              Download Sample CSV
-            </a>
+         
             <input
               type="file"
               accept=".csv, .xlsx"
@@ -264,7 +274,9 @@ const Categories = () => {
                 <input
                   type="text"
                   value={newCategory.name}
-                  onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })}
+                  onChange={(e) =>
+                    setNewCategory({ ...newCategory, name: e.target.value })
+                  }
                   className="w-full border rounded-md px-3 py-2"
                 />
               </div>
@@ -272,7 +284,10 @@ const Categories = () => {
               <div>
                 <label className="block text-sm mb-1">Category Logo</label>
                 <div className="w-20 h-20 border border-dashed rounded-lg flex items-center justify-center cursor-pointer bg-gray-50">
-                  <label htmlFor="categoryLogoUpload" className="cursor-pointer text-3xl text-gray-400">
+                  <label
+                    htmlFor="categoryLogoUpload"
+                    className="cursor-pointer text-3xl text-gray-400"
+                  >
                     {newCategory.image ? (
                       <img
                         src={URL.createObjectURL(newCategory.image)}
@@ -288,7 +303,10 @@ const Categories = () => {
                     type="file"
                     accept="image/*"
                     onChange={(e) =>
-                      setNewCategory({ ...newCategory, image: e.target.files[0] })
+                      setNewCategory({
+                        ...newCategory,
+                        image: e.target.files[0],
+                      })
                     }
                     className="hidden"
                   />

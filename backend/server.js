@@ -7,7 +7,8 @@ import bodyParser  from "body-parser";
 
 import customerRoutes from "./routers/master/customers.js";
 import suppilerRoutes from "./routers/master/supplier.js";
-import Brand from "./routers/projectManager/brands.js"
+import brand from "./routers/projectManager/brands.js";
+import product from "./routers/projectManager/product.js";
 import authRoutes from "./routers/authRoutes.js";
 import staff from "./routers/staffMember/staff.js";
 
@@ -50,7 +51,8 @@ app.use(express.json());
 // Routes
 app.use("/api", customerRoutes);
 app.use("/api", suppilerRoutes);
-app.use("/api", Brand);
+app.use("/api", brand);
+app.use("/api", product);
 app.use("/api", authRoutes);
 app.use("/api", staff);
 
