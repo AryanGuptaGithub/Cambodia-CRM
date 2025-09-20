@@ -14,6 +14,9 @@ const initialFormState = {
   drugLicense: "",
   licenseValidityDate: "",
   remarks: "",
+  sellingPrice: "",
+  lc: "",
+  taxSellingPrice: "",
 };
 
 const AddProduct = () => {
@@ -26,7 +29,6 @@ const AddProduct = () => {
     if (!form.productName) newErrors.productName = "Product name is required";
     if (!form.type) newErrors.type = "Type is required";
     if (!form.packing) newErrors.packing = "Packing is required";
-
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -38,13 +40,19 @@ const AddProduct = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-
     if (!validate()) return;
+
+    const payload = {
+      ...form,
+      sellingPrice: Number(form.sellingPrice),
+      taxSellingPrice: Number(form.taxSellingPrice),
+    };
+
     try {
       const response = await fetch(`${backendUrl}/api/product/add`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify(payload),
       });
 
       const data = await response.json();
@@ -53,8 +61,8 @@ const AddProduct = () => {
         showToast("error", data.message || "Something went wrong");
         return;
       }
-      
-      showToast("success", data.message);
+
+      showToast("success", data.message || "Product added successfully");
       navigate("/productmanagerlayout/product");
     } catch (error) {
       showToast("error", error.message || "Network error");
@@ -97,13 +105,15 @@ const AddProduct = () => {
           {renderInput("Drug License", "drugLicense")}
           {renderInput("License Validity Date", "licenseValidityDate", "date")}
           {renderInput("Remarks", "remarks")}
+          {renderInput("Selling Price (USD)", "sellingPrice", "number")}
+          {renderInput("LC", "lc")}
+          {renderInput("Tax Selling Price (USD)", "taxSellingPrice", "number")}
         </div>
 
         <div className="flex justify-end mt-8 gap-4">
           <button
             type="submit"
-            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg shadow cursor-pointer"
-            onClick={handleSubmit}
+            className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg shadow cursor-pointer"
           >
             Submit
           </button>

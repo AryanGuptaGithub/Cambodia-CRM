@@ -153,6 +153,7 @@ const Product = () => {
   };
 
   const handleProductImport = async () => {
+  
     if (parsedData.length === 0) {
       showToast("warning", "Please upload a valid file first");
       return;
@@ -207,6 +208,9 @@ const Product = () => {
         "product name",
         "type",
         "packing",
+        "selling price (usd)",
+        "lc",
+        "tax selling price (usd)",
         "qty per box",
         "qty per carton",
         "supplier name",
@@ -218,7 +222,6 @@ const Product = () => {
       let headerRowIndex = -1;
       let foundHeaders = [];
 
-      // Find header row among the first few rows
       for (let i = 0; i < Math.min(rows.length, 10); i++) {
         const row = rows[i].map((cell) =>
           (cell || "").toString().trim().toLowerCase()
@@ -232,7 +235,6 @@ const Product = () => {
       }
 
       if (headerRowIndex === -1) {
-        // find which headers are missing
         const errorRow = rows
           .find((_, i) => i < 10)
           .map((cell) => (cell || "").toString().trim().toLowerCase());
@@ -244,7 +246,6 @@ const Product = () => {
         return;
       }
 
-      // map header names to columns
       const rawHeaders = rows[headerRowIndex];
       const headersMap = {};
       rawHeaders.forEach((headerText, colIndex) => {
@@ -255,7 +256,6 @@ const Product = () => {
         }
       });
 
-      // now parse data rows
       const dataRows = rows.slice(headerRowIndex + 1);
 
       if (dataRows.length === 0) {
@@ -274,6 +274,9 @@ const Product = () => {
             productName: item["product name"],
             type: item["type"],
             packing: item["packing"],
+            sellingPrice: item["selling price (usd)"],
+            lc: item["lc"],
+            taxSellingPrice: item["tax selling price (usd)"],
             qtyPerBox: item["qty per box"],
             qtyPerCarton: item["qty per carton"],
             supplierName: item["supplier name"],
@@ -283,11 +286,11 @@ const Product = () => {
             remarks: item["remarks"],
           };
         })
-        .filter((entry) => entry.no !== "" && entry.productName !== "");
+        .filter((entry) => entry.productName !== "");
 
       setParsedData(mappedData);
     };
-
+    
     reader.readAsArrayBuffer(file);
   };
 
@@ -628,7 +631,7 @@ const Product = () => {
           </div>,
           document.body
         )}
-        
+
       {isViewModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">

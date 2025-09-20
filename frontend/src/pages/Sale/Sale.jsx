@@ -1,5 +1,10 @@
-import React, { useState } from "react";
-import { UserPlus, Trash2, Edit } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { UserPlus, Trash2, Edit, Upload, X } from "lucide-react";
+import ReactDOM from "react-dom";
+import SampleExcelDownloadSale from "../../excels/SampleExcelDownloadSale";
+import { handleAxiosError } from "../../utils/errorHandler";
+import * as XLSX from "xlsx";
+import { showToast } from "../../utils/toast";
 
 const salesData = [
   {
@@ -64,6 +69,8 @@ const salesData = [
   },
   // Add more if needed
 ];
+const backendUrl = import.meta.env.VITE_BACKEND_URL;
+const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
 const Sales = () => {
   const [sales, setSales] = useState(salesData);
@@ -71,11 +78,12 @@ const Sales = () => {
   const [selected, setSelected] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState("");
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+   const [parsedData, setParsedData] = useState([]);
   const salesPerPage = 10;
 
-  // Filter sales based on tab and search term
   const filteredSales = sales.filter((s) => {
-    // Filter by tab
     const matchesTab =
       selectedTab === "All Sales"
         ? true
@@ -84,8 +92,6 @@ const Sales = () => {
         : s.paymentStatus === "Unpaid";
 
     if (!matchesTab) return false;
-
-    // Filter by search term (invoiceNo, customerName, salesStatus)
     if (searchTerm.trim() === "") return true;
 
     const lowerSearch = searchTerm.toLowerCase();
@@ -136,6 +142,175 @@ const Sales = () => {
     setSelected([]);
     setCurrentPage(1);
   };
+  const handleProductImport = async () => {
+    console.log('values of parsedData', parsedData);
+    if (parsedData.length === 0) {
+      showToast("warning", "Please upload a valid file first");
+      return;
+    }
+    setIsUploading(true);
+
+    try {
+      const res = await axios.post(`${backendUrl}/api/sale/import`, parsedData);
+
+      if (res.status === 200) {
+        showToast(
+          "success",
+          res.data.message || "Sale Summary imported successfully!"
+        );
+        setShowImportModal(false);
+        fetchProducts();
+      }
+    } catch (err) {
+      handleAxiosError(err, showToast);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+
+    reader.onload = (evt) => {
+      const data = new Uint8Array(evt.target.result);
+      const workbook = XLSX.read(data, { type: "array" });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+
+      const rows = XLSX.utils.sheet_to_json(worksheet, {
+        header: 1,
+        defval: "",
+      });
+
+      if (rows.length === 0) {
+        showToast("warning", "Excel file is empty");
+        return;
+      }
+
+      const requiredHeaders = [
+        "no",
+        "recording date",
+        "invoice #",
+        "invoice date",
+        "mr name",
+        "customer code",
+        "product name",
+        "sales qty",
+        "bonus qty",
+        "total qty",
+        "selling price (usd)",
+        "amount (usd)",
+        "discount (usd)",
+        "net selling amount (usd)",
+        "average unit price (usd)",
+        "prof/los",
+        "credit (days)",
+        "due date",
+        "delivery date",
+        "payment status",
+        "remark",
+      ];
+
+      let headerRowIndex = -1;
+      for (let i = 0; i < Math.min(rows.length, 10); i++) {
+        const row = rows[i].map((cell) =>
+          (cell || "").toString().trim().toLowerCase()
+        );
+        const matched = requiredHeaders.filter((hdr) => row.includes(hdr));
+        if (matched.length === requiredHeaders.length) {
+          headerRowIndex = i;
+          break;
+        }
+      }
+
+      if (headerRowIndex === -1) {
+        // find which headers are missing
+        const errorRow = rows
+          .find((_, i) => i < 10)
+          .map((cell) => (cell || "").toString().trim().toLowerCase());
+        const missing = requiredHeaders.filter(
+          (hdr) => !errorRow.includes(hdr)
+        );
+        const errorMsg = `❌ Required headers missing: ${missing.join(", ")}`;
+        showToast("error", errorMsg);
+        return;
+      }
+
+      const rawHeaders = rows[headerRowIndex];
+      const headersMap = {};
+      rawHeaders.forEach((headerText, colIndex) => {
+        if (!headerText) return;
+        const cleaned = headerText.toString().trim().toLowerCase();
+        if (requiredHeaders.includes(cleaned)) {
+          headersMap[colIndex] = cleaned;
+        }
+      });
+
+      const dataRows = rows.slice(headerRowIndex + 1);
+
+      if (dataRows.length === 0) {
+        showToast("warning", "No data rows in file");
+        return;
+      }
+
+      const mappedData = dataRows
+        .map((row, rowIndex) => {
+          const item = {};
+          Object.entries(headersMap).forEach(([colIndex, key]) => {
+            item[key] = row[colIndex] || "";
+          });
+
+          return {
+            recordingDate: item["recording date"],
+            invoiceNumber: item["invoice #"],
+            invoiceDate: item["invoice date"],
+            mrName: item["mr name"],
+            customerCode: item["customer code"],
+            productName: item["product name"],
+            salesQty: item["sales qty"],
+            bonusQty: item["bonus qty"],
+            totalQty: item["total qty"],
+            sellingPrice: item["selling price (usd)"],
+            amount: item["amount (usd)"],
+            discount: item["discount (usd)"],
+            netSellingAmount: item["net selling amount (usd)"],
+            averageUnitPrice: item["average unit price (usd)"],
+            profitLoss: item["prof/los"], // watch spelling carefully
+            creditDays: item["credit (days)"],
+            dueDate: item["due date"],
+            deliveryDate: item["delivery date"],
+            paymentStatus: item["payment status"],
+            remark: item["remark"],
+          };
+        })
+        .filter((entry) => entry.productName !== "");
+
+      setParsedData(mappedData);
+    };
+
+    reader.readAsArrayBuffer(file);
+  };
+  
+  const fetchSaleSummaries = async () => {
+    try {
+      const res = await fetch(`${backendUrl}/api/sale/summaries`);
+      if (!res.ok) {
+        throw new Error("Failed to fetch sale summaries");
+      }
+      const data = await res.json();
+      setSales(data);
+    } catch (error) {
+      console.error("Fetch error:", error);
+      showToast("error", error.message || "Error fetching sale summaries");
+    }
+  };
+
+  useEffect(() => {
+    fetchSaleSummaries();
+  }, []);
 
   return (
     <div className="p-6">
@@ -147,6 +322,12 @@ const Sales = () => {
             onClick={() => alert("Add new sales clicked")}
           >
             <UserPlus size={18} /> Add New Sales
+          </button>
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="flex items-center gap-2 bg-gray-200 text-gray-800 px-4 py-2 rounded-md hover:bg-gray-300 cursor-pointer"
+          >
+            <Upload size={18} /> Import Product
           </button>
 
           {selected.length > 0 && (
@@ -188,6 +369,58 @@ const Sales = () => {
           </button>
         ))}
       </div>
+
+      {showImportModal &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setIsOpen(false)}
+            />
+            <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
+              <button
+                onClick={() => setShowImportModal(false)}
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                disabled={isUploading}
+              >
+                <X size={20} />
+              </button>
+              <h2 className="text-lg font-semibold mb-4">Import Products</h2>
+              {isSampleFile && <SampleExcelDownloadSale />}
+              <input
+                type="file"
+                accept=".csv, .xlsx"
+                onChange={handleFileUpload}
+                className="block w-full border rounded-lg px-3 py-2 mb-6"
+              />
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setShowImportModal(false)}
+                  disabled={isUploading}
+                  className={`px-5 py-2 rounded-lg cursor-pointer ${
+                    isUploading
+                      ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                      : "bg-gray-300 hover:bg-gray-400 text-gray-700"
+                  }`}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleProductImport}
+                  disabled={isUploading}
+                  className={`px-5 py-2 rounded-lg cursor-pointer ${
+                    isUploading
+                      ? "bg-blue-400 text-white cursor-not-allowed"
+                      : "bg-blue-600 hover:bg-blue-700 text-white"
+                  }`}
+                >
+                  {isUploading ? "Uploading…" : "Upload"}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
 
       {/* Table */}
       <div className="overflow-x-auto">

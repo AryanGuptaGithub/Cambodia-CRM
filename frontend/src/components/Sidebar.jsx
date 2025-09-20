@@ -229,7 +229,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
 
           {activeParentMenu === "products" && isOpen && (
             <div className="ml-6 mt-1 space-y-1">
-              <Link
+              {/* <Link
                 to="/productmanagerlayout/brands"
                 className={getChildLinkClass("/productmanagerlayout/brands")}
                 onClick={() => setActiveParentMenu(activeParentMenu)}
@@ -247,7 +247,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               >
                 <Layers className="w-4 h-4" />
                 <span className="mx-auto">Categories</span>
-              </Link>
+              </Link> */}
 
               <Link
                 to="/productmanagerlayout/product"

@@ -1,66 +1,141 @@
-import React, { useState } from "react";
-import { Search, Plus, Upload, Edit, Trash2, X } from "lucide-react";
-const initialCategories = [];
+import React, { useState, useEffect, useMemo } from "react";
+import { Eye, X, Edit } from "lucide-react";
+import { formatDateToReadable } from "../../utils/dateUtil";
+import { getVisiblePages } from "../../utils/useVisiblePages";
+import ReactDOM from "react-dom";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
+
+const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
 function PriceList() {
-  const [categories, setCategories] = useState(initialCategories);
+  const [priceList, setPriceList] = useState([]);
+  const [types, setTypes] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedIds, setSelectedIds] = useState([]);
+  const [selectedTab, setSelectedTab] = useState("All");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
+
   const [currentPage, setCurrentPage] = useState(1);
-  const [showImportModal, setShowImportModal] = useState(false);
-  const [showAddCategoryModal, setShowAddCategoryModal] = useState(false);
-  const [newCategory, setNewCategory] = useState({ name: "", image: null });
-  const [file, setFile] = useState(null);
+  const priceListPerPage = 9;
 
-  const itemsPerPage = 5;
+  const [form, setForm] = useState({
+    productName: "",
+    sellingPrice: "",
+    lc: "",
+    taxSellingPrice: "",
+    type: "",
+    drugLicense: "",
+    licenseValidityDate: "",
+  });
 
-  const filteredCategories = categories.filter((category) =>
-    category.name.toLowerCase().includes(searchTerm.toLowerCase())
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        const response = await fetch(`${backendUrl}/api/pricelist`);
+        if (!response.ok) throw new Error("Failed to fetch products");
+        const data = await response.json();
+        const uniqueTypes = Array.from(
+          new Set(data.map((item) => item.type.toLowerCase()))
+        );
+        setTypes(["All", ...uniqueTypes]);
+        setPriceList(data);
+      } catch (err) {
+        setError(err.message || "Something went wrong");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const filteredPriceList = useMemo(() => {
+    setCurrentPage(1);
+    const lowerSearch = searchTerm.toLowerCase();
+    return priceList.filter((product) => {
+      const matchesType =
+        selectedTab.toLowerCase() === "all" ||
+        product.type?.toLowerCase() === selectedTab.toLowerCase();
+
+      const licenseDateFormatted = product.licenseValidityDate
+        ? formatDateToReadable(
+            new Date(product.licenseValidityDate),
+            "dd/MM/yyyy"
+          ).toLowerCase()
+        : "";
+
+      const fieldsToSearch = [
+        product.productName,
+        product.sellingPrice,
+        product.lc,
+        product.taxSellingPrice,
+        product.type,
+        product.drugLicense,
+        licenseDateFormatted,
+      ];
+
+      const matchesSearch = fieldsToSearch.some((field) =>
+        String(field || "")
+          .toLowerCase()
+          .includes(lowerSearch)
+      );
+
+      return matchesType && matchesSearch;
+    });
+  }, [priceList, searchTerm, selectedTab]);
+
+  console.log('values of filteredPriceList', filteredPriceList);
+  const totalPages = Math.ceil(filteredPriceList.length / priceListPerPage);
+  const visiblePages = getVisiblePages(currentPage, totalPages);
+  const currentPriceList = filteredPriceList.slice(
+    (currentPage - 1) * priceListPerPage,
+    currentPage * priceListPerPage
   );
 
-  const indexOfLastItem = currentPage * itemsPerPage;
-  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
-  const paginatedCategories = filteredCategories.slice(
-    indexOfFirstItem,
-    indexOfLastItem
-  );
-  const totalPages = Math.ceil(filteredCategories.length / itemsPerPage);
+  function capitalizeFirstLetter(str) {
+    if (!str) return "";
+    str = str.toString(); // ensure it's a string
+    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+  }
 
-  const handleDelete = (id) => {
-    const confirmed = window.confirm("Delete this category?");
-    if (confirmed) {
-      setCategories((prev) => prev.filter((c) => c.id !== id));
-      setSelectedIds((prev) => prev.filter((sid) => sid !== id));
-    }
+  const handleView = (priceList) => {
+    setForm(priceList);
+    setIsViewModalOpen(true);
   };
 
-  const handleBulkDelete = () => {
-    const confirmed = window.confirm("Delete selected categories?");
-    if (confirmed) {
-      setCategories((prev) => prev.filter((c) => !selectedIds.includes(c.id)));
-      setSelectedIds([]);
-    }
+  const handleEdit = (priceList) => {
+    setForm(priceList);
+    setIsEditModalOpen(true);
   };
 
-  const handleSelect = (id) => {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((sid) => sid !== id) : [...prev, id]
-    );
-  };
+  const handleProductUpdate = async (e) => {
+    e.preventDefault();
 
-  const handleSelectAll = () => {
-    const allFilteredIds = filteredCategories.map((c) => c.id);
-    if (selectedIds.length === allFilteredIds.length) {
-      setSelectedIds([]);
-    } else {
-      setSelectedIds(allFilteredIds);
+    try {
+      const res = await axios.put(
+        `${backendUrl}/api/pricelist/${form._id}`,
+        form
+      );
+
+      if (res.status === 200) {
+        showToast("success", "Product updated successfully");
+        setIsEditModalOpen(false);
+        fetchProducts();
+      }
+    } catch (err) {
+      console.error("Update error:", err);
+      showToast("error", "Failed to update product.");
     }
   };
 
   return (
     <div className="max-w-8xl p-6 bg-white rounded-xl shadow">
+      {/* Tabs + Search + Count */}
       <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
-        {products.length > 0 ? (
+        {priceList.length > 0 && (
           <div className="flex gap-4">
             {types.map((tab) => (
               <button
@@ -76,15 +151,13 @@ function PriceList() {
               </button>
             ))}
           </div>
-        ) : (
-          <div></div>
         )}
 
         <div className="flex items-center gap-8">
           <p className="text-lg font-semibold text-gray-700">
             Total Count:{" "}
             <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-              {filteredProducts.length}
+              {filteredPriceList.length}
             </span>
           </p>
 
@@ -98,93 +171,62 @@ function PriceList() {
         </div>
       </div>
 
+      {/* Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
           <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
-              <th className="p-3">
-                <div className="flex items-center gap-4">
-                  {currentProducts.length > 0 && (
-                    <input
-                      type="checkbox"
-                      checked={
-                        selected.length === currentProducts.length &&
-                        currentProducts.length > 0
-                      }
-                      onChange={(e) => toggleSelectAll(e.target.checked)}
-                    />
-                  )}
-                  <span>Product Name</span>
-                </div>
-              </th>
-              <th className="p-3">Product Type</th>
-              <th className="p-3">Packing</th>
-              <th className="p-3">Quantity Per Box</th>
-              <th className="p-3">Supplier</th>
+              <th className="p-3">Product Name</th>
+              <th className="p-3">Type</th>
+              <th className="p-3">Selling Price (USD)</th>
+              <th className="p-3">LC</th>
+              <th className="p-3">Tax Selling Price (USD)</th>
               <th className="p-3">Drug License</th>
               <th className="p-3">License Validity</th>
               <th className="p-3">Action</th>
             </tr>
           </thead>
           <tbody>
-            {currentProducts.length === 0 ? (
+            {currentPriceList.length === 0 ? (
               <tr>
-                <td colSpan={9} className="p-4 text-center text-gray-500">
-                  No products found.
+                <td colSpan={8} className="p-4 text-center text-gray-500">
+                  No priceList found.
                 </td>
               </tr>
             ) : (
-              currentProducts.map((product, index) => (
+              currentPriceList.map((priceList, index) => (
                 <tr
-                  key={product._id}
+                  key={priceList._id}
                   className={`hover:bg-gray-50 ${
-                    (index + 1) % productsPerPage === 0 ||
-                    index + 1 === currentProducts.length
+                    (index + 1) % priceListPerPage === 0 ||
+                    index + 1 === currentPriceList.length
                       ? ""
                       : "border-b"
                   }`}
-                >
+                > <td className="p-3">{capitalizeFirstLetter(priceList.productName) || "--"}</td>
+                  <td className="p-3">{priceList.type || "--"}</td>
+                  <td className="p-3">{priceList.sellingPrice ?? "--"}</td>
+                  <td className="p-3">{priceList.lc ?? "--"}</td>
+                  <td className="p-3">{priceList.taxSellingPrice ?? "--"}</td>
+                  <td className="p-3">{priceList.drugLicense || "--"}</td>
                   <td className="p-3">
-                    <div className="flex items-center gap-4">
-                      <input
-                        type="checkbox"
-                        checked={selected.some((s) => s.id === product._id)}
-                        onChange={() => toggleSelect(product)} // Toggle on click
-                      />
-                      <span> {capitalizeFirstLetter(product.productName)}</span>
-                    </div>
+                    {formatDateToReadable(priceList.licenseValidityDate) || "--"}
                   </td>
-                  <td className="p-3">{product.type}</td>
-                  <td className="p-3">{product.packing}</td>
-                  <td className="p-3">{product.qtyPerBox}</td>
-                  <td className="p-3">
-                    {capitalizeFirstLetter(product.supplierName) || "--"}
-                  </td>
-                  <td className="p-3">{product.drugLicense || "--"} </td>
-                  <td className="p-3">
-                    {formatDateToReadable(product.licenseValidityDate) || "--"}
-                  </td>
+
                   <td className="p-3 flex items-center justify-center gap-3">
                     <button
                       className="text-blue-600 hover:text-blue-800 cursor-pointer"
-                      onClick={() => handleView(product)}
+                      onClick={() => handleView(priceList)}
                       title="View"
                     >
                       <Eye size={18} />
                     </button>
                     <button
                       className="text-green-600 hover:text-green-800 cursor-pointer"
-                      onClick={() => handleEdit(product)}
+                      onClick={() => handleEdit(priceList)}
                       title="Edit"
                     >
                       <Edit size={18} />
-                    </button>
-                    <button
-                      className="text-red-600 hover:text-red-800 cursor-pointer"
-                      onClick={() => deleteProduct(product)}
-                      title="Delete"
-                    >
-                      <Trash2 size={18} />
                     </button>
                   </td>
                 </tr>
@@ -193,7 +235,7 @@ function PriceList() {
           </tbody>
         </table>
 
-        {currentProducts.length > 0 && (
+        {currentPriceList.length > 0 && (
           <div className="mt-4 p-5 flex justify-start gap-2">
             <button
               onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
@@ -229,186 +271,9 @@ function PriceList() {
           </div>
         )}
       </div>
-
-      {/* Add Category Modal */}
-      {showAddCategoryModal && (
-        <div className="fixed inset-0 bg-transparent bg-opacity-30 flex justify-center items-center z-50">
-          <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
-            <button
-              onClick={() => setShowAddCategoryModal(false)}
-              className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
-            >
-              <X size={20} />
-            </button>
-            <h2 className="text-lg font-semibold mb-4">Add New Variation</h2>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm mb-1">Name</label>
-                <input
-                  type="text"
-                  value={newCategory.name}
-                  onChange={(e) =>
-                    setNewCategory({ ...newCategory, name: e.target.value })
-                  }
-                  className="w-full border rounded-md px-3 py-2"
-                />
-                <label className="block text-sm mb-1">Value</label>
-                <input
-                  type="text"
-                  value={newCategory.name}
-                  onChange={(e) =>
-                    setNewCategory({ ...newCategory, name: e.target.value })
-                  }
-                  className="w-full border rounded-md px-3 py-2"
-                />
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-3 mt-6">
-              <button
-                onClick={() => setShowAddCategoryModal(false)}
-                className="bg-white border border-gray-300 text-gray-700 px-5 py-2 rounded-lg hover:bg-gray-100"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  console.log("Creating Variation:", newCategory);
-                  setShowAddCategoryModal(false);
-                }}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg"
-              >
-                Create
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {isViewModalOpen &&
-        ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            {/* Backdrop */}
-            <div
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsOpen(false)}
-            />
-
-            {/* Modal Content */}
-            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
-              {/* Close Button */}
-              <button
-                onClick={() => setIsViewModalOpen(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-              >
-                <X size={20} />
-              </button>
-
-              <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                View Product
-              </h2>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Product Name
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {capitalizeFirstLetter(form.productName)}
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Type
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.type}
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Packing
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.packing}
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Qty per Box
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {form.qtyPerBox || "--"}
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Qty per Carton
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {form.qtyPerCarton || "--"}
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Supplier Name
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {capitalizeFirstLetter(form.supplierName) || "--"}
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Drug License
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {form.drugLicense || "--"}
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    License Validity Date
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {form.licenseValidityDate
-                      ? formatDateToReadable(form.licenseValidityDate)
-                      : "N/A"}
-                  </p>
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-600">
-                    Remarks
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {form.remarks || "—"}
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-6 flex justify-end">
-                <button
-                  onClick={() => setIsViewModalOpen(false)}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>,
-          document.body
-        )}
       {isEditModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            {/* Backdrop */}
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={() => setIsOpen(false)}
@@ -425,19 +290,18 @@ function PriceList() {
               </button>
 
               <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                Edit Product
+                Edit PriceList
               </h2>
 
-              {/* Form */}
+              {/* Form Fields */}
               <form className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Fields */}
                 <div>
                   <label className="block text-sm font-medium">
                     Product Name
                   </label>
                   <input
                     type="text"
-                    value={capitalizeFirstLetter(form.productName)}
+                    value={form.productName}
                     onChange={(e) =>
                       setForm({ ...form, productName: e.target.value })
                     }
@@ -456,54 +320,38 @@ function PriceList() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium">Packing</label>
-                  <input
-                    type="text"
-                    value={form.packing}
-                    onChange={(e) =>
-                      setForm({ ...form, packing: e.target.value })
-                    }
-                    className="w-full border px-3 py-2 rounded-lg"
-                  />
-                </div>
-
-                <div>
                   <label className="block text-sm font-medium">
-                    Qty per Box
+                    Selling Price (USD)
                   </label>
                   <input
                     type="number"
-                    value={form.qtyPerBox}
+                    value={form.sellingPrice}
                     onChange={(e) =>
-                      setForm({ ...form, qtyPerBox: e.target.value })
+                      setForm({ ...form, sellingPrice: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg"
                   />
                 </div>
 
                 <div>
+                  <label className="block text-sm font-medium">LC</label>
+                  <input
+                    type="number"
+                    value={form.lc}
+                    onChange={(e) => setForm({ ...form, lc: e.target.value })}
+                    className="w-full border px-3 py-2 rounded-lg"
+                  />
+                </div>
+
+                <div>
                   <label className="block text-sm font-medium">
-                    Qty per Carton
+                    Tax Selling Price (USD)
                   </label>
                   <input
                     type="number"
-                    value={form.qtyPerCarton}
+                    value={form.taxSellingPrice}
                     onChange={(e) =>
-                      setForm({ ...form, qtyPerCarton: e.target.value })
-                    }
-                    className="w-full border px-3 py-2 rounded-lg"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium">
-                    Supplier Name
-                  </label>
-                  <input
-                    type="text"
-                    value={capitalizeFirstLetter(form.supplierName)}
-                    onChange={(e) =>
-                      setForm({ ...form, supplierName: e.target.value })
+                      setForm({ ...form, taxSellingPrice: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg"
                   />
@@ -546,17 +394,6 @@ function PriceList() {
                     className="w-full border px-3 py-2 rounded-lg"
                   />
                 </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium">Remarks</label>
-                  <textarea
-                    value={form.remarks}
-                    onChange={(e) =>
-                      setForm({ ...form, remarks: e.target.value })
-                    }
-                    className="w-full border px-3 py-2 rounded-lg"
-                  />
-                </div>
               </form>
 
               {/* Buttons */}
@@ -572,6 +409,119 @@ function PriceList() {
                   className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
                 >
                   Update
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+      {isViewModalOpen &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            {/* Backdrop */}
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setIsOpen(false)}
+            />
+
+            {/* Modal Content */}
+            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+              {/* Close Button */}
+              <button
+                onClick={() => setIsViewModalOpen(false)}
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+
+              <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                View PriceList
+              </h2>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Product Name */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Product Name
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {capitalizeFirstLetter(form.productName) || "--"}
+                  </p>
+                </div>
+
+                {/* Type */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Type
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {form.type || "--"}
+                  </p>
+                </div>
+
+                {/* Selling Price (USD) */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Selling Price (USD)
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {form.sellingPrice != null && form.sellingPrice !== ""
+                      ? form.sellingPrice
+                      : "--"}
+                  </p>
+                </div>
+
+                {/* LC */}
+                <div>
+                  <label className="block text-sm font.medium text-gray-600">
+                    LC
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {form.lc != null && form.lc !== "" ? form.lc : "--"}
+                  </p>
+                </div>
+
+                {/* Tax Selling Price (USD) */}
+                <div>
+                  <label className="block text.sm font-medium text-gray-600">
+                    Tax Selling Price (USD)
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {form.taxSellingPrice != null && form.taxSellingPrice !== ""
+                      ? form.taxSellingPrice
+                      : "--"}
+                  </p>
+                </div>
+
+                {/* Drug License */}
+                <div>
+                  <label className="block text-sm font.medium text-gray-600">
+                    Drug License
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {form.drugLicense || "--"}
+                  </p>
+                </div>
+
+                {/* License Validity Date */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    License Validity Date
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {form.licenseValidityDate
+                      ? formatDateToReadable(form.licenseValidityDate)
+                      : "--"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-6 flex justify-end">
+                <button
+                  onClick={() => setIsViewModalOpen(false)}
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                >
+                  Close
                 </button>
               </div>
             </div>

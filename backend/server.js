@@ -11,6 +11,8 @@ import brand from "./routers/projectManager/brands.js";
 import product from "./routers/projectManager/product.js";
 import authRoutes from "./routers/authRoutes.js";
 import staff from "./routers/staffMember/staff.js";
+import priceList from "./routers/projectManager/pricelist.js";
+import SaleSummary from "./models/sale/saleSummary.js";
 
 dotenv.config(); // Load environment variables
 
@@ -55,6 +57,8 @@ app.use("/api", brand);
 app.use("/api", product);
 app.use("/api", authRoutes);
 app.use("/api", staff);
+app.use("/api", priceList);
+app.use('/api', SaleSummary);
 
 // Server listener
 app.listen(PORT, () => {
