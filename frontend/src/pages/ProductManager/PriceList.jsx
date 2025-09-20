@@ -1,411 +1,64 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { UserPlus, Upload, Trash2, Eye, X, Edit } from "lucide-react";
-import { useNavigate } from "react-router-dom";
-import SampleExcelDownloadProduct from "../../excels/SampleExcelDownloadProduct";
-import { handleAxiosError } from "../../utils/errorHandler";
-import * as XLSX from "xlsx";
-import axios from "axios";
-import { showToast } from "../../utils/toast";
-import ReactDOM from "react-dom";
-import { formatDateToReadable } from "../../utils/dateUtil";
-import { getVisiblePages } from "../../utils/useVisiblePages";
-import DatePicker from "react-datepicker";
-import "react-datepicker/dist/react-datepicker.css";
-import { confirmDialog } from "../../utils/confirmationDialog";
+import React, { useState } from "react";
+import { Search, Plus, Upload, Edit, Trash2, X } from "lucide-react";
+const initialCategories = [];
 
-const backendUrl = import.meta.env.VITE_BACKEND_URL;
-const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
-
-const Product = () => {
-  const navigate = useNavigate();
-  const [products, setProducts] = useState([]);
-  const [selectedTab, setSelectedTab] = useState("All");
+function PriceList() {
+  const [categories, setCategories] = useState(initialCategories);
   const [searchTerm, setSearchTerm] = useState("");
-  const [selected, setSelected] = useState([]);
+  const [selectedIds, setSelectedIds] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [showImportModal, setShowImportModal] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [isOpen, setIsOpen] = useState(false);
-  const [parsedData, setParsedData] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [types, setTypes] = useState([]);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [showAddCategoryModal, setShowAddCategoryModal] = useState(false);
+  const [newCategory, setNewCategory] = useState({ name: "", image: null });
+  const [file, setFile] = useState(null);
 
-  const productsPerPage = 9;
+  const itemsPerPage = 5;
 
-  const [form, setForm] = useState({
-    productName: "",
-    type: "",
-    packing: "",
-    qtyPerBox: "",
-    qtyPerCarton: "",
-    supplierName: "",
-    drugLicense: "",
-    licenseValidityDate: "",
-    remarks: "",
-  });
-
-  // Filter products by tab and search term
-  const filteredProducts = useMemo(() => {
-    setCurrentPage(1);
-    const lowerSearch = searchTerm.toLowerCase();
-
-    return products.filter((product) => {
-      const matchesType =
-        selectedTab.toLowerCase() === "all" ||
-        product.type?.toLowerCase() === selectedTab.toLowerCase();
-
-      const nameMatch = product.productName
-        ?.toLowerCase()
-        .includes(lowerSearch);
-      const supplierMatch = product.supplierName
-        ?.toLowerCase()
-        .includes(lowerSearch);
-      const licenseMatch = product.drugLicense
-        ?.toLowerCase()
-        .includes(lowerSearch);
-
-      const typeMatch = product.type?.toLowerCase().includes(lowerSearch);
-      const licenseDateFormatted = product.licenseValidityDate
-        ? formatDateToReadable(
-            new Date(product.licenseValidityDate),
-            "dd/MM/yyyy"
-          ).toLowerCase()
-        : "";
-
-      const licenseDateMatch = licenseDateFormatted.includes(lowerSearch);
-
-      return (
-        matchesType &&
-        (nameMatch ||
-          supplierMatch ||
-          licenseMatch ||
-          licenseDateMatch ||
-          typeMatch)
-      );
-    });
-  }, [products, searchTerm, selectedTab]);
-
-  // Pagination logic
-  const totalPages = Math.ceil(filteredProducts.length / productsPerPage);
-  const visiblePages = getVisiblePages(currentPage, totalPages);
-  const currentProducts = filteredProducts.slice(
-    (currentPage - 1) * productsPerPage,
-    currentPage * productsPerPage
+  const filteredCategories = categories.filter((category) =>
+    category.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const response = await fetch(`${backendUrl}/api/products`);
-        if (!response.ok) throw new Error("Failed to fetch products");
-        const data = await response.json();
-        const uniqueTypes = Array.from(
-          new Set(data.map((item) => item.type.toLowerCase()))
-        );
-        setTypes(["All", ...uniqueTypes]);
-        setProducts(data);
-      } catch (err) {
-        setError(err.message || "Something went wrong");
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const paginatedCategories = filteredCategories.slice(
+    indexOfFirstItem,
+    indexOfLastItem
+  );
+  const totalPages = Math.ceil(filteredCategories.length / itemsPerPage);
 
-  const toggleSelect = useCallback((product) => {
-    setSelected((prev) =>
-      prev.some((c) => c.id === product._id)
-        ? prev.filter((c) => c.id !== product._id)
-        : [...prev, { id: product._id }]
+  const handleDelete = (id) => {
+    const confirmed = window.confirm("Delete this category?");
+    if (confirmed) {
+      setCategories((prev) => prev.filter((c) => c.id !== id));
+      setSelectedIds((prev) => prev.filter((sid) => sid !== id));
+    }
+  };
+
+  const handleBulkDelete = () => {
+    const confirmed = window.confirm("Delete selected categories?");
+    if (confirmed) {
+      setCategories((prev) => prev.filter((c) => !selectedIds.includes(c.id)));
+      setSelectedIds([]);
+    }
+  };
+
+  const handleSelect = (id) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((sid) => sid !== id) : [...prev, id]
     );
-  }, []);
-
-  // Select / Deselect all visible staff
-  const toggleSelectAll = useCallback(
-    (checked) => {
-      setSelected(
-        checked
-          ? currentProducts.map((product) => ({
-              id: product._id,
-            }))
-          : []
-      );
-    },
-    [currentProducts]
-  );
-
-  // Handle delete selected products
-  const fetchProducts = async () => {
-    try {
-      const response = await fetch(`${backendUrl}/api/products`);
-      const data = await response.json();
-      const uniqueTypes = Array.from(
-        new Set(data.map((item) => item.type.toLowerCase()))
-      );
-      setTypes(["All", ...uniqueTypes]);
-      setProducts(data);
-      setSelected([]);
-    } catch (err) {
-      handleError(err);
-    }
   };
 
-  const handleProductImport = async () => {
-    if (parsedData.length === 0) {
-      showToast("warning", "Please upload a valid file first");
-      return;
-    }
-    setIsUploading(true);
-
-    try {
-      const res = await axios.post(
-        `${backendUrl}/api/product/import`,
-        parsedData
-      );
-
-      if (res.status === 200) {
-        showToast(
-          "success",
-          res.data.message || "Product imported successfully!"
-        );
-        setShowImportModal(false);
-        fetchProducts();
-      }
-    } catch (err) {
-      handleAxiosError(err, showToast);
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
-  const handleFileUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-
-    reader.onload = (evt) => {
-      const data = new Uint8Array(evt.target.result);
-      const workbook = XLSX.read(data, { type: "array" });
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
-
-      const rows = XLSX.utils.sheet_to_json(worksheet, {
-        header: 1,
-        defval: "",
-      });
-
-      if (rows.length === 0) {
-        showToast("warning", "Excel file is empty");
-        return;
-      }
-
-      const requiredHeaders = [
-        "no",
-        "product name",
-        "type",
-        "packing",
-        "qty per box",
-        "qty per carton",
-        "supplier name",
-        "drug registration license #",
-        "drug registration license validity date",
-        "remarks",
-      ];
-
-      let headerRowIndex = -1;
-      let foundHeaders = [];
-
-      // Find header row among the first few rows
-      for (let i = 0; i < Math.min(rows.length, 10); i++) {
-        const row = rows[i].map((cell) =>
-          (cell || "").toString().trim().toLowerCase()
-        );
-        const matched = requiredHeaders.filter((hdr) => row.includes(hdr));
-        if (matched.length === requiredHeaders.length) {
-          headerRowIndex = i;
-          foundHeaders = matched;
-          break;
-        }
-      }
-
-      if (headerRowIndex === -1) {
-        // find which headers are missing
-        const errorRow = rows
-          .find((_, i) => i < 10)
-          .map((cell) => (cell || "").toString().trim().toLowerCase());
-        const missing = requiredHeaders.filter(
-          (hdr) => !errorRow.includes(hdr)
-        );
-        const errorMsg = `❌ Required headers missing: ${missing.join(", ")}`;
-        showToast("error", errorMsg);
-        return;
-      }
-
-      // map header names to columns
-      const rawHeaders = rows[headerRowIndex];
-      const headersMap = {};
-      rawHeaders.forEach((headerText, colIndex) => {
-        if (!headerText) return;
-        const cleaned = headerText.toString().trim().toLowerCase();
-        if (requiredHeaders.includes(cleaned)) {
-          headersMap[colIndex] = cleaned;
-        }
-      });
-
-      // now parse data rows
-      const dataRows = rows.slice(headerRowIndex + 1);
-
-      if (dataRows.length === 0) {
-        showToast("warning", "No data rows in file");
-        return;
-      }
-
-      const mappedData = dataRows
-        .map((row, rowIndex) => {
-          const item = {};
-          Object.entries(headersMap).forEach(([colIndex, key]) => {
-            item[key] = row[colIndex] || "";
-          });
-
-          return {
-            productName: item["product name"],
-            type: item["type"],
-            packing: item["packing"],
-            qtyPerBox: item["qty per box"],
-            qtyPerCarton: item["qty per carton"],
-            supplierName: item["supplier name"],
-            drugLicense: item["drug registration license #"],
-            licenseValidityDate:
-              item["drug registration license validity date"],
-            remarks: item["remarks"],
-          };
-        })
-        .filter((entry) => entry.no !== "" && entry.productName !== "");
-
-      setParsedData(mappedData);
-    };
-
-    reader.readAsArrayBuffer(file);
-  };
-
-  function capitalizeFirstLetter(str) {
-    if (!str) return "";
-    str = str.toString(); // ensure it's a string
-    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
-  }
-  const handleView = (product) => {
-    setForm(product);
-    setIsViewModalOpen(true);
-  };
-
-  const handleEdit = (product) => {
-    setForm(product);
-    setIsEditModalOpen(true);
-  };
-  // Delete selected
-  const handleDeleteSelected = async () => {
-    const confirm = await confirmDialog({
-      text: `Are you sure you want to delete <b>${selected.length}</b> product?`,
-      icon: "warning",
-      confirmButtonText: "Yes, delete",
-      cancelButtonText: "Cancel",
-    });
-
-    if (confirm.isConfirmed) {
-      try {
-        const res = await axios.delete(`${backendUrl}/api/products`, {
-          data: { ids: selected },
-        });
-
-        if (res.status === 200) {
-          showToast("success", res.data.message);
-          fetchProducts();
-        }
-      } catch (err) {
-        showToast("error", "Failed to delete products.");
-      }
+  const handleSelectAll = () => {
+    const allFilteredIds = filteredCategories.map((c) => c.id);
+    if (selectedIds.length === allFilteredIds.length) {
+      setSelectedIds([]);
     } else {
-      setSelected([]); // uncheck all if user cancels
-    }
-  };
-
-  // Delete one
-  const deleteProduct = async (product) => {
-    const confirm = await confirmDialog({
-      text: `Are you sure you want to delete <b>${product.productName}</b>?`,
-      icon: "warning",
-      confirmButtonText: "Yes, delete",
-      cancelButtonText: "Cancel",
-    });
-
-    if (confirm.isConfirmed) {
-      try {
-        const res = await axios.delete(
-          `${backendUrl}/api/product/${product._id}`
-        );
-
-        if (res.status === 200) {
-          showToast("success", res.data.message);
-          fetchProducts();
-        }
-      } catch (error) {
-        showToast("error", error.message);
-      }
-    }
-  };
-
-  const handleProductUpdate = async (e) => {
-    e.preventDefault();
-
-    try {
-      const res = await axios.put(
-        `${backendUrl}/api/products/${form._id}`,
-        form
-      );
-
-      if (res.status === 200) {
-        showToast("success", "Product updated successfully");
-        setIsEditModalOpen(false);
-        fetchProducts();
-      }
-    } catch (err) {
-      console.error("Update error:", err);
-      showToast("error", "Failed to update product.");
+      setSelectedIds(allFilteredIds);
     }
   };
 
   return (
-    <div className="p-6">
-      <div className="flex justify-between items-center mb-4">
-        <div className="flex gap-3">
-          <button
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-            onClick={() => navigate("/productmanagerlayout/addproduct")}
-          >
-            <UserPlus size={18} /> Add New Product
-          </button>
-
-          <button
-            onClick={() => setShowImportModal(true)}
-            className="flex items-center gap-2 bg-gray-200 text-gray-800 px-4 py-2 rounded-md hover:bg-gray-300 cursor-pointer"
-          >
-            <Upload size={18} /> Import Product
-          </button>
-
-          {selected.length > 0 && (
-            <button
-              className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-              onClick={handleDeleteSelected}
-            >
-              <Trash2 size={18} /> Delete
-            </button>
-          )}
-        </div>
-      </div>
-
+    <div className="max-w-8xl p-6 bg-white rounded-xl shadow">
       <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
         {products.length > 0 ? (
           <div className="flex gap-4">
@@ -445,7 +98,6 @@ const Product = () => {
         </div>
       </div>
 
-      {/* Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
           <thead className="bg-gray-100 text-gray-700 border-b">
@@ -577,58 +229,62 @@ const Product = () => {
           </div>
         )}
       </div>
-      {showImportModal &&
-        ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            <div
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsOpen(false)}
-            />
-            <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
-              <button
-                onClick={() => setShowImportModal(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-                disabled={isUploading}
-              >
-                <X size={20} />
-              </button>
-              <h2 className="text-lg font-semibold mb-4">Import Products</h2>
-              {isSampleFile && <SampleExcelDownloadProduct />}
-              <input
-                type="file"
-                accept=".csv, .xlsx"
-                onChange={handleFileUpload}
-                className="block w-full border rounded-lg px-3 py-2 mb-6"
-              />
-              <div className="flex justify-end gap-3">
-                <button
-                  onClick={() => setShowImportModal(false)}
-                  disabled={isUploading}
-                  className={`px-5 py-2 rounded-lg cursor-pointer ${
-                    isUploading
-                      ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                      : "bg-gray-300 hover:bg-gray-400 text-gray-700"
-                  }`}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleProductImport}
-                  disabled={isUploading}
-                  className={`px-5 py-2 rounded-lg cursor-pointer ${
-                    isUploading
-                      ? "bg-blue-400 text-white cursor-not-allowed"
-                      : "bg-blue-600 hover:bg-blue-700 text-white"
-                  }`}
-                >
-                  {isUploading ? "Uploading…" : "Upload"}
-                </button>
+
+      {/* Add Category Modal */}
+      {showAddCategoryModal && (
+        <div className="fixed inset-0 bg-transparent bg-opacity-30 flex justify-center items-center z-50">
+          <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
+            <button
+              onClick={() => setShowAddCategoryModal(false)}
+              className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
+            >
+              <X size={20} />
+            </button>
+            <h2 className="text-lg font-semibold mb-4">Add New Variation</h2>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm mb-1">Name</label>
+                <input
+                  type="text"
+                  value={newCategory.name}
+                  onChange={(e) =>
+                    setNewCategory({ ...newCategory, name: e.target.value })
+                  }
+                  className="w-full border rounded-md px-3 py-2"
+                />
+                <label className="block text-sm mb-1">Value</label>
+                <input
+                  type="text"
+                  value={newCategory.name}
+                  onChange={(e) =>
+                    setNewCategory({ ...newCategory, name: e.target.value })
+                  }
+                  className="w-full border rounded-md px-3 py-2"
+                />
               </div>
             </div>
-          </div>,
-          document.body
-        )}
-        
+
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => setShowAddCategoryModal(false)}
+                className="bg-white border border-gray-300 text-gray-700 px-5 py-2 rounded-lg hover:bg-gray-100"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  console.log("Creating Variation:", newCategory);
+                  setShowAddCategoryModal(false);
+                }}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg"
+              >
+                Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {isViewModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -924,6 +580,6 @@ const Product = () => {
         )}
     </div>
   );
-};
+}
 
-export default Product;
+export default PriceList;

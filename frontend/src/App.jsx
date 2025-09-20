@@ -13,7 +13,7 @@ import Supplier from "./pages/Master/Supplier";
 import ProductManagerLayout from "./pages/ProductManagerLayout";
 import Brands from "./pages/ProductManager/Brands";
 import Categories from "./pages/ProductManager/Categories";
-import Variation from "./pages/ProductManager/Variation";
+import PriceList from "./pages/ProductManager/PriceList";
 import Product from "./pages/ProductManager/Product";
 import PrintBarCode from "./pages/ProductManager/PrintBarCode";
 import PurchaseLayout from "./pages/PurchaseLayout";
@@ -115,8 +115,8 @@ function App() {
               element={<Categories />}
             />
             <Route
-              path="/productmanagerlayout/variation"
-              element={<Variation />}
+              path="/productmanagerlayout/pricelist"
+              element={<PriceList />}
             />
             <Route path="/productmanagerlayout/product" element={<Product />} />
             <Route

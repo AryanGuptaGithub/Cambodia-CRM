@@ -47,7 +47,7 @@ const productPaths = [
   "/productmanagerlayout/brands",
   "/productmanagerlayout/categories",
   "/productmanagerlayout/product",
-  "/productmanagerlayout/variation",
+  "/productmanagerlayout/pricelist",
   "/productmanagerlayout/printbarcode",
 ];
 
@@ -259,12 +259,12 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               </Link>
 
               <Link
-                to="/productmanagerlayout/variation"
-                className={getChildLinkClass("/productmanagerlayout/variation")}
+                to="/productmanagerlayout/pricelist"
+                className={getChildLinkClass("/productmanagerlayout/pricelist")}
                 onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <ClipboardList className="w-4 h-4" />
-                <span className="mx-auto">Variations</span>
+                <span className="mx-auto">Price List</span>
               </Link>
 
               <Link
