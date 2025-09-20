@@ -48,6 +48,7 @@ const Product = () => {
 
   // Filter products by tab and search term
   const filteredProducts = useMemo(() => {
+    setCurrentPage(1);
     const lowerSearch = searchTerm.toLowerCase();
 
     return products.filter((product) => {
@@ -82,7 +83,6 @@ const Product = () => {
   }, [products, searchTerm, selectedTab]);
 
   // Pagination logic
-  getVisiblePages;
   const totalPages = Math.ceil(filteredProducts.length / productsPerPage);
   const visiblePages = getVisiblePages(currentPage, totalPages);
   const currentProducts = filteredProducts.slice(
