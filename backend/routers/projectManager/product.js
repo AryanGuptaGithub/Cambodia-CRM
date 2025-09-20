@@ -1,4 +1,5 @@
 import express from "express";
+import mongoose from 'mongoose';
 const router = express.Router();
 import Product from "../../models/projectManger/product.js";
 
@@ -90,7 +91,7 @@ router.put("/products/:id", async (req, res) => {
   }
 });
 
-router.delete("/products/:id", async (req, res) => {
+router.delete("/product/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -106,5 +107,40 @@ router.delete("/products/:id", async (req, res) => {
     res.status(500).json({ message: "Server error." });
   }
 });
+
+router.delete("/products", async (req, res) => {
+  try {
+    let { ids } = req.body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res
+        .status(400)
+        .json({ message: "No IDs provided for deletion." });
+    }
+
+    if (typeof ids[0] === "object" && ids[0]?.id) {
+      ids = ids.map((item) => item.id);
+    }
+
+    const objectIds = ids.map((id) => {
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        throw new Error(`Invalid ObjectId: ${id}`);
+      }
+      return new mongoose.Types.ObjectId(id);
+    });
+
+    const result = await Product.deleteMany({ _id: { $in: objectIds } });
+
+    return res.status(200).json({
+      message: `${result.deletedCount} product(s) deleted successfully.`,
+    });
+  } catch (error) {
+    console.error("Bulk delete error:", error);
+    return res
+      .status(500)
+      .json({ message: "Server error while deleting products." });
+  }
+});
+
 
 export default router;

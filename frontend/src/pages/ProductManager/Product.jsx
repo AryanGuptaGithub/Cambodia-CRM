@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { UserPlus, Upload, Trash2, Eye, X, Edit } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import SampleExcelDownloadProduct from "../../excels/SampleExcelDownloadProduct";
@@ -109,21 +109,27 @@ const Product = () => {
     })();
   }, []);
 
-  // Handle checkbox toggle
-  const toggleSelect = (id) => {
+  const toggleSelect = useCallback((product) => {
     setSelected((prev) =>
-      prev.includes(id) ? prev.filter((sid) => sid !== id) : [...prev, id]
+      prev.some((c) => c.id === product._id)
+        ? prev.filter((c) => c.id !== product._id)
+        : [...prev, { id: product._id }]
     );
-  };
+  }, []);
 
-  // Handle select all checkbox
-  const toggleSelectAll = (checked) => {
-    if (checked) {
-      setSelected(currentProducts.map((p) => p.id));
-    } else {
-      setSelected([]);
-    }
-  };
+  // Select / Deselect all visible staff
+  const toggleSelectAll = useCallback(
+    (checked) => {
+      setSelected(
+        checked
+          ? currentProducts.map((product) => ({
+              id: product._id,
+            }))
+          : []
+      );
+    },
+    [currentProducts]
+  );
 
   // Handle delete selected products
   const fetchProducts = async () => {
@@ -131,6 +137,7 @@ const Product = () => {
       const response = await fetch(`${backendUrl}/api/products`);
       const data = await response.json();
       setProducts(data);
+      setSelected([]);
     } catch (err) {
       handleError(err);
     }
@@ -292,7 +299,7 @@ const Product = () => {
   // Delete selected
   const handleDeleteSelected = async () => {
     const confirm = await confirmDialog({
-      text: `Are you sure you want to delete <b>${selected.length}</b> suppliers?`,
+      text: `Are you sure you want to delete <b>${selected.length}</b> product?`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
@@ -300,19 +307,16 @@ const Product = () => {
 
     if (confirm.isConfirmed) {
       try {
-        const res = await axios.delete(`${backendUrl}/api/suppliers`, {
+        const res = await axios.delete(`${backendUrl}/api/products`, {
           data: { ids: selected },
         });
 
         if (res.status === 200) {
-          showToast("success", "Suppliers  deleted successfully");
-          const refreshed = await fetch(`${backendUrl}/api/suppliers`);
-          const updated = await refreshed.json();
-          setSupplier(updated);
-          setSelected([]);
+          showToast("success", res.data.message);
+          fetchProducts();
         }
       } catch (err) {
-        showToast("error", "Failed to delete suppliers.");
+        showToast("error", "Failed to delete products.");
       }
     } else {
       setSelected([]); // uncheck all if user cancels
@@ -331,7 +335,7 @@ const Product = () => {
     if (confirm.isConfirmed) {
       try {
         const res = await axios.delete(
-          `${backendUrl}/api/products/${product._id}`
+          `${backendUrl}/api/product/${product._id}`
         );
 
         if (res.status === 200) {
