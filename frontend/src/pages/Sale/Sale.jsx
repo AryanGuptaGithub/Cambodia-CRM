@@ -10,6 +10,7 @@ import { formatDateToReadable } from "../../utils/dateUtil";
 import { getVisiblePages } from "../../utils/useVisiblePages";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
+import { confirmDialog } from "../../utils/confirmationDialog";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
@@ -395,11 +396,12 @@ const Sales = () => {
     }
   };
 
-  const deleteSale = async (customer) => {
-    if (!customer._id) return;
+  const deleteSale = async (sale) => {
+    console.log('values of sate', sale);
+    if (!sale._id) return;
     const confirmDelete = await confirmDialog({
       title: "Delete",
-      text: `Are you sure you want to delete <b>${customer.name}</b>?`,
+      text: `Are you sure you want to delete <b>${sale.invoiceNumber}</b>?`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
@@ -408,21 +410,18 @@ const Sales = () => {
     if (confirmDelete.isConfirmed) {
       try {
         const res = await axios.delete(
-          `${backendUrl}/api/customers/${customer._id}`
+          `${backendUrl}/api/sales/${sale._id}`
         );
-
+        console.log('values of res', res);
         if (res.status === 200) {
           showToast(
             "success",
-            `Customer <b>${customer.name}</b> deleted successfully`
+            `Customer <b>${sale.invoiceNumber}</b> deleted successfully`
           );
-          const updated = await axios.get(`${backendUrl}/api/customers`);
-          const customers = updated.data.customers;
-          setCustomers(customers);
-          setNextCustomerCode(updated.data.nextCustomerCode);
-          setSelected([]);
+         fetchSaleSummaries();
         }
       } catch (error) {
+        console.log('values of error', error);
         showToast("error", "Failed to delete customer.");
       }
     }
@@ -653,20 +652,7 @@ const Sales = () => {
                       </button>
                       <button
                         className="text-red-600 hover:text-red-800 cursor-pointer"
-                        onClick={() => {
-                          if (
-                            window.confirm(
-                              `Are you sure you want to delete sale ${sale.invoiceNo}?`
-                            )
-                          ) {
-                            setSales((prev) =>
-                              prev.filter((s) => s.id !== sale.id)
-                            );
-                            setSelected((prev) =>
-                              prev.filter((id) => id !== sale.id)
-                            );
-                          }
-                        }}
+                        onClick={()=> deleteSale(sale)}
                         title="Delete"
                       >
                         <Trash2 size={18} />

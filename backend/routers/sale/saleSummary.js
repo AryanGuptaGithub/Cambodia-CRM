@@ -198,4 +198,21 @@ router.put("/sales/:id", async (req, res) => {
   }
 });
 
+router.delete("/sales/:id", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const deletedSale = await SaleSummary.findByIdAndDelete(id);
+
+    if (!deletedSale) {
+      return res.status(404).json({ error: "Sales record not found." });
+    }
+
+    res.status(200).json({ message: "Sales record deleted successfully." });
+  } catch (err) {
+    console.error("Error deleting sale:", err);
+    res.status(500).json({ error: "Failed to delete sales record." });
+  }
+});
+
 export default router;
