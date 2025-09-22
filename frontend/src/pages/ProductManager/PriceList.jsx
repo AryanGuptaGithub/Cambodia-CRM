@@ -87,7 +87,6 @@ function PriceList() {
     });
   }, [priceList, searchTerm, selectedTab]);
 
-  console.log('values of filteredPriceList', filteredPriceList);
   const totalPages = Math.ceil(filteredPriceList.length / priceListPerPage);
   const visiblePages = getVisiblePages(currentPage, totalPages);
   const currentPriceList = filteredPriceList.slice(

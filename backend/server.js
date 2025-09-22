@@ -12,7 +12,7 @@ import product from "./routers/projectManager/product.js";
 import authRoutes from "./routers/authRoutes.js";
 import staff from "./routers/staffMember/staff.js";
 import priceList from "./routers/projectManager/pricelist.js";
-import SaleSummary from "./models/sale/saleSummary.js";
+import SaleSummary from "./routers/sale/saleSummary.js";
 
 dotenv.config(); // Load environment variables
 
