@@ -62,4 +62,3 @@ const saleSummarySchema = new Schema(
 
 const SaleSummary = mongoose.model("SaleSummary", saleSummarySchema);
 export default SaleSummary;
-

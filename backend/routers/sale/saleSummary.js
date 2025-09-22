@@ -177,4 +177,25 @@ router.get("/sales", async (req, res) => {
   }
 });
 
+router.put("/sales/:id", async (req, res) => {
+  const { id } = req.params;
+  console.log("values of id", id);
+
+  try {
+    const updatedSale = await SaleSummary.findByIdAndUpdate(id, req.body, {
+      new: true,
+      runValidators: true,
+    });
+
+    if (!updatedSale) {
+      return res.status(404).json({ error: "Sales record not found." });
+    }
+
+    res.status(200).json(updatedSale);
+  } catch (err) {
+    console.error("Error updating sale:", err);
+    res.status(500).json({ error: "Failed to update sales record." });
+  }
+});
+
 export default router;
