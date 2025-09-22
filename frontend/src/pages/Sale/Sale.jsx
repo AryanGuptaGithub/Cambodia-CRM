@@ -73,38 +73,53 @@ const Sales = () => {
 
   // ✅ Filter sales based on tab and search
   const filteredSales = useMemo(() => {
-    const lowerSearch = searchTerm.toLowerCase();
+    const lowerSearch = searchTerm.trim().toLowerCase();
+    const selectedTabLower = selectedTab.toLowerCase();
 
-    return sales.filter((s) => {
-      setCurrentPage(1);
-      const paymentStatus = s.paymentStatus?.toLowerCase();
-      const matchesType =
-        selectedTab.toLowerCase() === "all" ||
-        s.paymentStatus?.toLowerCase() === selectedTab.toLowerCase();
+    const shouldInclude = (sale) => {
+      const paymentStatus = sale.paymentStatus?.toLowerCase() || "pending";
 
-      const normalizedPayment = paymentStatus?.toLowerCase() || "pending";
-      const matchesTab =
-        selectedTab.toLowerCase() === "all"
-          ? true
-          : selectedTab.toLowerCase() === "paid"
-          ? normalizedPayment === "paid"
-          : normalizedPayment === "pending";
+      // Filter by tab
+      if (selectedTabLower !== "all" && selectedTabLower !== paymentStatus) {
+        return false;
+      }
 
-      // Final check
-      if (!matchesType || !matchesTab) return false;
+      // If no search term, include after tab filter
+      if (!lowerSearch) return true;
 
-      if (searchTerm.trim() === "") return true;
-      return (
-        s.invoiceNumber.includes(lowerSearch) ||
-        s.customerInfo?.name?.toLowerCase().includes(lowerSearch) ||
-        s.salesStatus?.toLowerCase().includes(lowerSearch) ||
-        s.paymentMode?.toLowerCase().includes(lowerSearch) ||
-        s.remarks?.toLowerCase().includes(lowerSearch) ||
-        formatDateToReadable(new Date(s.deliveryDate), "dd/MM/yyyy")
-          .toLowerCase()
-          .includes(lowerSearch)
+      // Precompute searchable fields
+      const fieldsToSearch = [
+        sale.invoiceNumber,
+        sale.customerInfo?.name,
+        sale.productName,
+        sale.mrName,
+        sale.remarks,
+        sale.salesQty?.toString(),
+        sale.sellingPrice?.toString(),
+        sale.amount?.toString(),
+        sale.discount?.toString(),
+        sale.bonusQty?.toString(),
+        sale.netSellingAmount?.toString(),
+        sale.averageUnitPrice?.toString(),
+        sale.profitLoss?.toString(),
+        sale.creditDays?.toString(),
+        sale.recordingDate
+          ? formatDateToReadable(new Date(sale.recordingDate), "dd/MM/yyyy")
+          : "",
+        sale.dueDate
+          ? formatDateToReadable(new Date(sale.dueDate), "dd/MM/yyyy")
+          : "",
+        sale.deliveryDate
+          ? formatDateToReadable(new Date(sale.deliveryDate), "dd/MM/yyyy")
+          : "",
+      ];
+
+      return fieldsToSearch.some((field) =>
+        field?.toString().toLowerCase().includes(lowerSearch)
       );
-    });
+    };
+
+    return sales.filter(shouldInclude);
   }, [sales, searchTerm, selectedTab]);
 
   const toggleItem = (id) => {
@@ -537,8 +552,9 @@ const Sales = () => {
                         .map((item) => (
                           <td key={item.id} className="p-3">
                             {item.dbName === "recordingDate" ||
-                            item.dbName === "deliveryDate" ||  item.dbName === "dueDate"
-                              ? formatDateToReadable(sale[item.dbName])|| "--"
+                            item.dbName === "deliveryDate" ||
+                            item.dbName === "dueDate"
+                              ? formatDateToReadable(sale[item.dbName]) || "--"
                               : sale[item.dbName] || "--"}
                           </td>
                         ))}
