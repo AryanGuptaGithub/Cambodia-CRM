@@ -10,6 +10,7 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { confirmDialog } from "../../utils/confirmationDialog";
 import { formatDateToReadable } from "../../utils/dateUtil";
+import { useNavigate } from "react-router-dom";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
@@ -17,6 +18,7 @@ const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 const dailySamplePerPage = 10;
 
 const DailySample = () => {
+  const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [selected, setSelected] = useState([]);
@@ -352,15 +354,15 @@ const DailySample = () => {
         {/* Left: Action Buttons */}
         <div className="flex flex-wrap gap-3">
           <button
-            onClick={() => navigate("/masterlayout/customer/new")}
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md"
+            onClick={() => navigate("/reportlayout/dailysample/new")}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
           >
-            <UserPlus size={18} /> Add New Customer
+            <UserPlus size={18} /> Add New Daily Sample 
           </button>
 
           <button
             onClick={() => setShowImportModal(true)}
-            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md"
+            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
           >
             <Upload size={18} /> Import CSV
           </button>

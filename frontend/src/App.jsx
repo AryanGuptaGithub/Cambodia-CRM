@@ -76,7 +76,7 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import AddStaffMember from "./pages/AddStaffMember";
 import StaffMemberLayout from "./pages/Utility/StaffMemberLayout";
 import AddSale from "./pages/Sale/AddSale";
-
+import AddDailySampleReport from "./pages/Reports/AddDailySample";
 function App() {
   return (
     <>
@@ -140,7 +140,7 @@ function App() {
           <Route path="/salelayout" element={<SaleLayout />}>
             <Route path="/salelayout/sale" element={<Sale />} />
             <Route path="/salelayout/sale/new" element={<AddSale />} />
-            
+
             <Route path="/salelayout/salereturn" element={<SaleReturn />} />
             <Route path="/salelayout/payment" element={<PaymentSale />} />
             <Route path="/salelayout/quotation" element={<Quotation />} />
@@ -153,25 +153,23 @@ function App() {
             />
           </Route>
           <Route path="/reportlayout" element={<ReportsLayout />}>
-            <Route path="/reportlayout/payment" element={<PaymentReports />} />
+            <Route path="payment" element={<PaymentReports />} />
+            <Route path="expensereport" element={<ExpenseReport />} />
             <Route
-              path="/reportlayout/expensereport"
-              element={<ExpenseReport />}
-            />
-            <Route
-              path="/reportlayout/productsalessummary"
+              path="productsalessummary"
               element={<ProductSalesSummary />}
             />
-            <Route path="/reportlayout/stockalert" element={<StockAlert />} />
-            <Route
-              path="/reportlayout/dailysample"
-              element={<DailySample />}
-            />
-            <Route path="/reportlayout/ratelist" element={<RateList />} />
-            <Route path="/reportlayout/profitloss" element={<ProfitLoss />} />
-            <Route path="/reportlayout/salesummary" element={<SaleSummary />} />
-            <Route path="/reportlayout/userreport" element={<UserReport />} />
+            <Route path="stockalert" element={<StockAlert />} />
+            <Route path="dailysample" element={<DailySample />}>
+              <Route path="new" element={<AddDailySampleReport />} />
+            </Route>
+           
+            <Route path="ratelist" element={<RateList />} />
+            <Route path="profitloss" element={<ProfitLoss />} />
+            <Route path="salesummary" element={<SaleSummary />} />
+            <Route path="userreport" element={<UserReport />} />
           </Route>
+
           <Route path="/utilitylayout" element={<UtilityLayout />}>
             <Route path="frontsettings" element={<FrontSettings />} />
             <Route path="productcard" element={<ProductCard />} />
