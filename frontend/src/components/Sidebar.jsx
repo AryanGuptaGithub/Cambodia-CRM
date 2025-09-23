@@ -75,7 +75,7 @@ const expensePaths = [
 const reportPaths = [
   "/reportlayout/payment",
   "/reportlayout/salesummary",
-  "/reportlayout/stocksummary",
+  "/reportlayout/dailysample",
   "/reportlayout/productsalessummary",
   "/reportlayout/stockalert",
   "/reportlayout/expensereport",
@@ -369,7 +369,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                 <span className="mx-auto">Sale</span>
               </Link>
 
-              {/* <Link
+               <Link
                 to="/salelayout/salereturn"
                 className={getChildLinkClass("/salelayout/salereturn")}
                 onClick={() => setActiveParentMenu(activeParentMenu)}
@@ -394,7 +394,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               >
                 <ClipboardList className="w-4 h-4" />
                 <span className="mx-auto">Quotation</span>
-              </Link> */}
+              </Link> 
             </div>
           )}
         </div>
@@ -466,7 +466,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
             className={getDropdownButtonClass("reports", [
               "/reportlayout/payment",
               "/reportlayout/salesummary",
-              "/reportlayout/stocksummary",
+              "/reportlayout/dailysample",
               "/reportlayout/productsalessummary",
               "/reportlayout/stockalert",
               "/reportlayout/expensereport",
@@ -507,12 +507,12 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                 <span className="mx-auto">Sale Summary</span>
               </Link>
               <Link
-                to="/reportlayout/stocksummary"
-                className={getChildLinkClass("/reportlayout/stocksummary")}
+                to="/reportlayout/dailysample"
+                className={getChildLinkClass("/reportlayout/dailysample")}
                 onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <Boxes className="w-4 h-4" />
-                <span className="mx-auto">Stock Summary</span>
+                <span className="mx-auto">Daily Sample</span>
               </Link>
               <Link
                 to="/reportlayout/productsalessummary"

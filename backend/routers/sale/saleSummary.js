@@ -132,7 +132,7 @@ router.post("/sale/import", async (req, res) => {
     const inserted = await SaleSummary.insertMany(validDocs);
 
     return res.status(200).json({
-      message: `✅ ${inserted.length} sale summary records imported successfully.`,
+      message: `<b>${inserted.length}</b> sale summary records imported successfully.`,
       insertedCount: inserted.length,
       skippedCount: skippedRows.length,
       skippedRows,
@@ -212,6 +212,48 @@ router.delete("/sales/:id", async (req, res) => {
   } catch (err) {
     console.error("Error deleting sale:", err);
     res.status(500).json({ error: "Failed to delete sales record." });
+  }
+});
+
+router.delete("/sales", async (req, res) => {
+  try {
+    let { ids } = req.body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: "No sale IDs provided." });
+    }
+
+    if (typeof ids[0] === "object" && ids[0]?.id) {
+      ids = ids.map((item) => item.id);
+    }
+
+    const result = await SaleSummary.deleteMany({ _id: { $in: ids } });
+
+    return res.status(200).json({
+      message: `${result.deletedCount} sale(s) deleted successfully.`,
+    });
+  } catch (error) {
+    console.error("Error deleting sales:", error);
+    return res.status(500).json({ error: "Internal server error." });
+  }
+});
+
+router.post("/sales", async (req, res) => {
+  try {
+    const newSaleData = req.body;
+    const newSale = new SaleSummary(newSaleData);
+    const savedSale = await newSale.save();
+
+    res.status(201).json({
+      message: "Sale added successfully",
+      sale: savedSale,
+    });
+  } catch (error) {
+    if (error.name === "ValidationError") {
+      return res.status(400).json({ error: error.message });
+    }
+
+    res.status(500).json({ error: "Failed to add new sale" });
   }
 });
 

@@ -13,7 +13,7 @@ const ReportsLayout = () => {
          <div className="flex items-center text-sm text-gray-600 font-medium">
            <span>Dashboard</span>
            <ChevronRight className="w-4 h-4 mx-1" />
-           <span>Sales</span>
+           <span>Report</span>
            <ChevronRight className="w-4 h-4 mx-1" />
            <span className="capitalize text-gray-900">{current}</span>
          </div>

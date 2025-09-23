@@ -12,7 +12,9 @@ import product from "./routers/projectManager/product.js";
 import authRoutes from "./routers/authRoutes.js";
 import staff from "./routers/staffMember/staff.js";
 import priceList from "./routers/projectManager/pricelist.js";
-import SaleSummary from "./routers/sale/saleSummary.js";
+import saleSummary from "./routers/sale/saleSummary.js";
+import payments from "./routers/reports/payments.js";
+import dailySample from "./routers/reports/dailysample.js";
 
 dotenv.config(); // Load environment variables
 
@@ -58,7 +60,9 @@ app.use("/api", product);
 app.use("/api", authRoutes);
 app.use("/api", staff);
 app.use("/api", priceList);
-app.use('/api', SaleSummary);
+app.use('/api', saleSummary);
+app.use('/api', payments);
+app.use('/api', dailySample);
 
 // Server listener
 app.listen(PORT, () => {

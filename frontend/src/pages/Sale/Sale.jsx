@@ -11,11 +11,13 @@ import { getVisiblePages } from "../../utils/useVisiblePages";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { confirmDialog } from "../../utils/confirmationDialog";
+import { useNavigate } from "react-router-dom";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
 const Sales = () => {
+  const navigate = useNavigate();
   const [sales, setSales] = useState([]);
   const [selectedTab, setSelectedTab] = useState("All");
   const [selected, setSelected] = useState([]);
@@ -340,6 +342,7 @@ const Sales = () => {
 
     reader.readAsArrayBuffer(file);
   };
+
   const handleProductImport = async () => {
     if (parsedData.length === 0) {
       showToast("warning", "Please upload a valid file first");
@@ -383,21 +386,17 @@ const Sales = () => {
 
     try {
       const res = await axios.put(`${backendUrl}/api/sales/${sale._id}`, sale);
-      console.log("values of res", res);
-
       if (res.status === 200) {
         showToast("success", "Sales record updated successfully");
         setIsEditModalOpen(false);
         fetchSaleSummaries();
       }
     } catch (err) {
-      console.error("Update error:", err);
       showToast("error", "Failed to update sales record.");
     }
   };
 
   const deleteSale = async (sale) => {
-    console.log('values of sate', sale);
     if (!sale._id) return;
     const confirmDelete = await confirmDialog({
       title: "Delete",
@@ -409,54 +408,70 @@ const Sales = () => {
 
     if (confirmDelete.isConfirmed) {
       try {
-        const res = await axios.delete(
-          `${backendUrl}/api/sales/${sale._id}`
-        );
-        console.log('values of res', res);
+        const res = await axios.delete(`${backendUrl}/api/sales/${sale._id}`);
         if (res.status === 200) {
           showToast(
             "success",
             `Customer <b>${sale.invoiceNumber}</b> deleted successfully`
           );
-         fetchSaleSummaries();
+          fetchSaleSummaries();
         }
       } catch (error) {
-        console.log('values of error', error);
+        console.log("values of error", error);
         showToast("error", "Failed to delete customer.");
       }
     }
   };
 
-    const handleDeleteSelected = async () => {
-      const confirm = await confirmDialog({
-        text: `Are you sure you want to delete <b>${selected.length}</b> sales`,
-        icon: "warning",
-        confirmButtonText: "Yes, delete",
-        cancelButtonText: "Cancel",
-        selected,
-      });
-  
-      if (confirm.isConfirmed) {
-        try {
-          const res = await axios.delete(`${backendUrl}/api/customers`, {
-            data: { ids: selected },
-          });
-  
-          if (res.status === 200) {
-            showToast("success", "Selected customers deleted successfully");
-            const updated = await fetch(`${backendUrl}/api/customers`);
-            const data = await updated.json();
-            setCustomers(data.customers);
-            setNextCustomerCode(data.nextCustomerCode);
-            setSelected([]);
-          }
-        } catch (error) {
-          showToast("error", "Failed to delete selected customers.");
+  const handleDeleteSelected = async () => {
+    const confirm = await confirmDialog({
+      text: `Are you sure you want to delete <b>${selected.length}</b> sales`,
+      icon: "warning",
+      confirmButtonText: "Yes, delete",
+      cancelButtonText: "Cancel",
+      selected,
+    });
+
+    if (confirm.isConfirmed) {
+      try {
+        const res = await axios.delete(`${backendUrl}/api/sales`, {
+          data: { ids: selected },
+        });
+
+        console.log("values of res", res);
+        if (res.status === 200) {
+          showToast("success", "Selected Sales deleted successfully");
+          fetchSaleSummaries();
+          setSelected([]);
         }
-      } else {
-        setSelected([]);
+      } catch (error) {
+        showToast("error", "Failed to delete selected customers.");
       }
-    };
+    } else {
+      setSelected([]);
+    }
+  };
+
+  const toggleSelect = (sale) => {
+    setSelected((prev) => {
+      const exists = prev.some((c) => c.id === sale._id);
+
+      if (exists) {
+        return prev.filter((c) => c.id !== sale._id);
+      } else {
+        return [...prev, { id: sale._id }];
+      }
+    });
+  };
+
+  const toggleSelectAll = (checked) => {
+    if (checked) {
+      const allSelected = currentSales.map((s) => ({ id: s._id }));
+      setSelected(allSelected);
+    } else {
+      setSelected([]);
+    }
+  };
 
   return (
     <div className="p-6">
@@ -465,7 +480,7 @@ const Sales = () => {
         <div className="flex gap-3 items-center">
           <button
             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-            onClick={() => alert("Add new sales clicked")}
+            onClick={() => navigate("/salelayout/sale/new")}
           >
             <UserPlus size={18} /> Add New Sales
           </button>
@@ -546,21 +561,26 @@ const Sales = () => {
         </div>
       </div>
       <div className="container">
-        <div className="overflow-x-hidden md:overflow-x-auto whitespace-nowrap">
-          <table className="w-full border-collapse bg-white rounded-2xl shadow text-center">
-            <thead className="bg-gray-100 text-gray-700">
+        <div className="overflow-x-hidden md:overflow-x-auto whitespace-nowrap shadow">
+          <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
+            <thead className="bg-gray-100 text-gray-700 border-b">
               <tr>
-                <th className="p-3 text-center">
-                  <input
-                    type="checkbox"
-                    checked={
-                      selected.length === currentSales.length &&
-                      currentSales.length > 0
-                    }
-                    onChange={(e) => toggleSelectAll(e.target.checked)}
-                  />
+                <th className="p-3">
+                  <div className="flex items-center gap-4">
+                    {currentSales.length > 0 && (
+                      <input
+                        type="checkbox"
+                        aria-label="Select all sales"
+                        checked={
+                          selected.length === currentSales.length &&
+                          currentSales.length > 0
+                        }
+                        onChange={(e) => toggleSelectAll(e.target.checked)}
+                      />
+                    )}
+                    <span>Invoice No</span>
+                  </div>
                 </th>
-                <th className="p-3">Invoice No</th>
                 <th className="p-3">Invoice Date</th>
                 <th className="p-3">Product Name</th>
                 <th className="p-3">MR Name</th>
@@ -583,7 +603,7 @@ const Sales = () => {
               {currentSales.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="p-4 text-center text-gray-500">
-                    No sales found.
+                    No Sales found.
                   </td>
                 </tr>
               ) : (
@@ -597,14 +617,16 @@ const Sales = () => {
                         : "border-b"
                     }`}
                   >
-                    <td className="p-3 text-center">
-                      <input
-                        type="checkbox"
-                        checked={selected.includes(sale.id)}
-                        onChange={() => toggleSelect(sale.id)}
-                      />
+                    <td className="p-3">
+                      <div className="flex items-center gap-4">
+                        <input
+                          type="checkbox"
+                          checked={selected.some((s) => s.id === sale._id)}
+                          onChange={() => toggleSelect(sale)}
+                        />
+                        <span className="capitalize">{sale.invoiceNumber}</span>
+                      </div>
                     </td>
-                    <td className="p-3">{sale.invoiceNumber}</td>
                     <td className="p-3">
                       {formatDateToReadable(sale.invoiceDate)}
                     </td>
@@ -619,7 +641,6 @@ const Sales = () => {
                     </td>
                     <td className="p-3">{Math.ceil(sale.salesQty)}</td>
                     <td className="p-3">{Math.ceil(sale.sellingPrice)}</td>
-
                     {/* Dynamically selected extra columns */}
                     {hideRowList
                       .filter((item) => selectedItems.includes(item.id))
@@ -634,7 +655,6 @@ const Sales = () => {
                             : sale[item.dbName] ?? "--"}
                         </td>
                       ))}
-
                     <td className="p-3">{Math.ceil(sale.amount)}</td>
                     <td className="p-3">
                       {capitalizeFirstLetter(sale.paymentStatus)}
@@ -652,7 +672,7 @@ const Sales = () => {
                       </button>
                       <button
                         className="text-red-600 hover:text-red-800 cursor-pointer"
-                        onClick={()=> deleteSale(sale)}
+                        onClick={() => deleteSale(sale)}
                         title="Delete"
                       >
                         <Trash2 size={18} />
@@ -779,10 +799,10 @@ const Sales = () => {
       {/* ✅ COLUMN SELECT MODAL FIX */}
       {isModalOpen &&
         ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-black/60 flex justify-center items-center z-50">
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
             <div
-              className="absolute inset-0"
-              onClick={() => setIsModalOpen(false)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setIsOpen(false)}
             />
             <div
               className="relative bg-white p-6 rounded shadow-lg max-w-xl w-full z-10"
@@ -811,20 +831,20 @@ const Sales = () => {
               <div className="mt-6 flex justify-between items-center">
                 <button
                   onClick={handleReset}
-                  className="px-4 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200"
+                  className="px-4 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200 cursor-pointer"
                 >
                   Reset
                 </button>
                 <div className="flex gap-2">
                   <button
                     onClick={() => setIsModalOpen(false)}
-                    className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
+                    className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 cursor-pointer"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleSave}
-                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 cursor-pointer"
                   >
                     Save
                   </button>

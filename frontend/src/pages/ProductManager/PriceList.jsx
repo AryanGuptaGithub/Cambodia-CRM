@@ -131,19 +131,18 @@ function PriceList() {
   };
 
   return (
-    <div className="max-w-8xl p-6 bg-white rounded-xl shadow">
-      {/* Tabs + Search + Count */}
-      <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
+    <div className="max-w-8xl p-6 bg-white rounded-xl">
+      <div className="flex flex-wrap items-center gap-4 mb-4">
         {priceList.length > 0 && (
-          <div className="flex gap-4">
+          <div className="flex gap-4 flex-wrap">
             {types.map((tab) => (
               <button
                 key={tab}
                 onClick={() => setSelectedTab(tab)}
-                className={`px-4 py-2 rounded-lg cursor-pointer ${
+                className={`px-4 py-2 rounded-lg cursor-pointer transition ${
                   selectedTab === tab
                     ? "bg-indigo-600 text-white"
-                    : "bg-gray-200 text-gray-700"
+                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
                 }`}
               >
                 {capitalizeFirstLetter(tab)}
@@ -152,10 +151,11 @@ function PriceList() {
           </div>
         )}
 
-        <div className="flex items-center gap-8">
-          <p className="text-lg font-semibold text-gray-700">
+        {/* Right-aligned Total Count & Search */}
+        <div className="flex items-center gap-6 ml-auto">
+          <p className="text-sm md:text-base font-semibold text-gray-700 whitespace-nowrap">
             Total Count:{" "}
-            <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+            <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs md:text-sm font-medium shadow-sm">
               {filteredPriceList.length}
             </span>
           </p>
@@ -165,7 +165,7 @@ function PriceList() {
             placeholder="Search..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="border px-4 py-2 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+            className="border px-3 py-2 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
           />
         </div>
       </div>
@@ -202,16 +202,20 @@ function PriceList() {
                       ? ""
                       : "border-b"
                   }`}
-                > <td className="p-3">{capitalizeFirstLetter(priceList.productName) || "--"}</td>
+                >
+                  {" "}
+                  <td className="p-3">
+                    {capitalizeFirstLetter(priceList.productName) || "--"}
+                  </td>
                   <td className="p-3">{priceList.type || "--"}</td>
                   <td className="p-3">{priceList.sellingPrice ?? "--"}</td>
                   <td className="p-3">{priceList.lc ?? "--"}</td>
                   <td className="p-3">{priceList.taxSellingPrice ?? "--"}</td>
                   <td className="p-3">{priceList.drugLicense || "--"}</td>
                   <td className="p-3">
-                    {formatDateToReadable(priceList.licenseValidityDate) || "--"}
+                    {formatDateToReadable(priceList.licenseValidityDate) ||
+                      "--"}
                   </td>
-
                   <td className="p-3 flex items-center justify-center gap-3">
                     <button
                       className="text-blue-600 hover:text-blue-800 cursor-pointer"

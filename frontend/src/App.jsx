@@ -32,7 +32,7 @@ import ReportsLayout from "./pages/ReportsLayout";
 import ExpenseReport from "./pages/Reports/ExpenseReport";
 import ProductSalesSummary from "./pages/Reports/ProductSalesSummary";
 import StockAlert from "./pages/Reports/StockAlert";
-import StockSummary from "./pages/Reports/StockSummary";
+import DailySample from "./pages/Reports/DailySample";
 import RateList from "./pages/Reports/RateList";
 import ProfitLoss from "./pages/Reports/ProfitLoss";
 import SaleSummary from "./pages/Reports/SaleSummary";
@@ -75,6 +75,7 @@ import { Toaster } from "react-hot-toast";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AddStaffMember from "./pages/AddStaffMember";
 import StaffMemberLayout from "./pages/Utility/StaffMemberLayout";
+import AddSale from "./pages/Sale/AddSale";
 
 function App() {
   return (
@@ -138,6 +139,8 @@ function App() {
           </Route>
           <Route path="/salelayout" element={<SaleLayout />}>
             <Route path="/salelayout/sale" element={<Sale />} />
+            <Route path="/salelayout/sale/new" element={<AddSale />} />
+            
             <Route path="/salelayout/salereturn" element={<SaleReturn />} />
             <Route path="/salelayout/payment" element={<PaymentSale />} />
             <Route path="/salelayout/quotation" element={<Quotation />} />
@@ -161,8 +164,8 @@ function App() {
             />
             <Route path="/reportlayout/stockalert" element={<StockAlert />} />
             <Route
-              path="/reportlayout/stocksummary"
-              element={<StockSummary />}
+              path="/reportlayout/dailysample"
+              element={<DailySample />}
             />
             <Route path="/reportlayout/ratelist" element={<RateList />} />
             <Route path="/reportlayout/profitloss" element={<ProfitLoss />} />
