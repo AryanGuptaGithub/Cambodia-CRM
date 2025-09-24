@@ -219,7 +219,6 @@ const StaffMember = () => {
         showToast("success", message);
         await refreshStaffList();
         await fetchTeams();
-        console.log("values of ---", allTeams);
       }
     } catch (err) {
       showToast("error", err?.message || "Failed to delete staff.");

@@ -54,7 +54,7 @@ const AddSupplier = () => {
         body: JSON.stringify(form),
       });
       const data = await res.json();
-      console.log('value of data', data);
+    
       if (!res.ok) throw new Error(data.message || "Failed to add supplier");
       showToast("success", data.message || "Supplier added");
       navigate("/masterlayout/supplier");

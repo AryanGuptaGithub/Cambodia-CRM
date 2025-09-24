@@ -129,4 +129,52 @@ router.delete("/dailysample", async (req, res) => {
   }
 });
 
+router.post("/dailysample", async (req, res) => {
+  try {
+    const {
+      requestNumber,
+      date,
+      mrName,
+      description,
+      productName,
+      qtyBigBox = 0,
+      qtySmallBox = 0,
+      totalQty = 0,
+      qtyPerBox = 0,
+      remark,
+    } = req.body;
+
+    // Optional: Validate values (e.g., non-negative numbers)
+    if (qtyBigBox < 0 || qtySmallBox < 0 || totalQty < 0 || qtyPerBox < 0) {
+      return res
+        .status(400)
+        .json({ message: "Quantities must be 0 or greater" });
+    }
+
+    // Create and save the report
+    const report = new DailySampleReport({
+      requestNumber,
+      date,
+      mrName,
+      description,
+      productName,
+      qtyBigBox,
+      qtySmallBox,
+      totalQty,
+      qtyPerBox,
+      remark,
+    });
+
+    await report.save();
+
+    res.status(201).json({
+      message: `Daily sample report <b>${report.productName} - ${report.mrName}</b> added successfully`,
+      data: report,
+    });
+  } catch (error) {
+    console.error("Error saving daily sample report:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 export default router;

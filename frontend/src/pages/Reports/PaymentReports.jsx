@@ -36,7 +36,6 @@ const PaymentReports = () => {
   const fetchPaymentReports = async () => {
     try {
       const res = await fetch(`${backendUrl}/api/payments-reports`);
-      console.log('values of res', res);
       if (!res.ok) throw new Error("Failed to fetch payment reports");
 
       const data = await res.json();
@@ -241,7 +240,6 @@ const PaymentReports = () => {
       setIsUploading(false);
     }
   };
-     console.log('values of filteredPaymentReport', filteredPaymentReport);
 
   return (
     <div className="p-6">

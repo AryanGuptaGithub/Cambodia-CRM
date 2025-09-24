@@ -107,8 +107,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
       setActiveParentMenu("expense");
     }else if (location.pathname.startsWith("/reportlayout")) {
       setActiveParentMenu("reports");
-    }else if (location.pathname.startsWith("/reportlayout")) {
-      setActiveParentMenu("reports");
     }else if (location.pathname.startsWith("/utilitylayout")) {
       setActiveParentMenu("utility");
     }else if (location.pathname.startsWith("/hrmlayout")) {

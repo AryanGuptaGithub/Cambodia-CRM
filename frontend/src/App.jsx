@@ -152,7 +152,8 @@ function App() {
               element={<ExpenseCategory />}
             />
           </Route>
-          <Route path="/reportlayout" element={<ReportsLayout />}>
+
+          <Route path="reportlayout" element={<ReportsLayout />}>
             <Route path="payment" element={<PaymentReports />} />
             <Route path="expensereport" element={<ExpenseReport />} />
             <Route
@@ -160,10 +161,10 @@ function App() {
               element={<ProductSalesSummary />}
             />
             <Route path="stockalert" element={<StockAlert />} />
-            <Route path="dailysample" element={<DailySample />}>
-              <Route path="new" element={<AddDailySampleReport />} />
-            </Route>
-           
+
+            <Route path="dailysample" element={<DailySample />} />
+            <Route path="dailysample/new" element={<AddDailySampleReport />} />
+
             <Route path="ratelist" element={<RateList />} />
             <Route path="profitloss" element={<ProfitLoss />} />
             <Route path="salesummary" element={<SaleSummary />} />

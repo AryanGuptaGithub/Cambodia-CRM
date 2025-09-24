@@ -10,7 +10,7 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { confirmDialog } from "../../utils/confirmationDialog";
 import { formatDateToReadable } from "../../utils/dateUtil";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Outlet } from "react-router-dom";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
@@ -347,6 +347,12 @@ const DailySample = () => {
       setSelected([]);
     }
   };
+  
+  function capitalizeFirstLetter(str) {
+    if (!str) return "";
+    str = str.toString(); // ensure it's a string
+    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+  }
 
   return (
     <div className="p-6">
@@ -357,7 +363,7 @@ const DailySample = () => {
             onClick={() => navigate("/reportlayout/dailysample/new")}
             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
           >
-            <UserPlus size={18} /> Add New Daily Sample 
+          <UserPlus size={18} /> Add New Daily Sample
           </button>
 
           <button
@@ -455,12 +461,12 @@ const DailySample = () => {
                           checked={selected.some((s) => s.id === item._id)}
                           onChange={() => toggleSelect(item)}
                         />
-                        <span className="capitalize">{item.productName}</span>
+                        <span>{capitalizeFirstLetter(item.productName)}</span>
                       </div>
                     </td>
                     <td className="p-3">{item.requestNumber}</td>
-                    <td className="p-3">{item.mrName}</td>
-                    <td className="p-3">{item.description}</td>
+                    <td className="p-3">{capitalizeFirstLetter(item.mrName)}</td>
+                    <td className="p-3">{capitalizeFirstLetter(item.description)}</td>
                     <td className="p-3">{item.qtyBigBox}</td>
                     <td className="p-3">{item.qtySmallBox}</td>
                     <td className="p-3">{item.qtySmallBox}</td>
@@ -931,6 +937,7 @@ const DailySample = () => {
           </div>,
           document.body
         )}
+      <Outlet />
     </div>
   );
 };

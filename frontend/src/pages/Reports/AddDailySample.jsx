@@ -25,14 +25,18 @@ const AddDailySampleReport = () => {
   const validate = () => {
     const newErrors = {};
 
-    if (!form.requestNumber) newErrors.requestNumber = "Request Number is required";
+    if (!form.requestNumber)
+      newErrors.requestNumber = "Request Number is required";
     if (!form.date) newErrors.date = "Date is required";
     if (!form.mrName) newErrors.mrName = "MR Name is required";
     if (!form.productName) newErrors.productName = "Product Name is required";
     if (form.qtyBigBox < 0) newErrors.qtyBigBox = "Quantity must be 0 or more";
-    if (form.qtySmallBox < 0) newErrors.qtySmallBox = "Quantity must be 0 or more";
-    if (form.totalQty < 0) newErrors.totalQty = "Total Quantity must be 0 or more";
-    if (form.qtyPerBox < 0) newErrors.qtyPerBox = "Qty per Box must be 0 or more";
+    if (form.qtySmallBox < 0)
+      newErrors.qtySmallBox = "Quantity must be 0 or more";
+    if (form.totalQty < 0)
+      newErrors.totalQty = "Total Quantity must be 0 or more";
+    if (form.qtyPerBox < 0)
+      newErrors.qtyPerBox = "Qty per Box must be 0 or more";
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -64,8 +68,11 @@ const AddDailySampleReport = () => {
         return;
       }
 
-      showToast("success", data.message || "Daily sample report added successfully");
-      navigate("/masterlayout/dailysample"); // Change route if needed
+      showToast(
+        "success",
+        data.message || `Daily sample report <b>${dailySampleData.productName} - ${dailySampleData.mrName}</b> added successfully`
+      );
+      navigate("/reportlayout/dailysample");
     } catch (error) {
       showToast("error", error.message || "Network error");
     }
@@ -89,6 +96,7 @@ const AddDailySampleReport = () => {
         placeholder={placeholder}
         className="w-full border rounded-md px-3 py-2"
         disabled={disabled}
+        min={type === "number" ? 0 : undefined}
       />
       {errors[name] && <p className="text-red-500 text-sm">{errors[name]}</p>}
     </div>
@@ -117,14 +125,14 @@ const AddDailySampleReport = () => {
         <div className="flex justify-end mt-8 gap-4">
           <button
             type="submit"
-            className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg shadow"
+            className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg shadow cursor-pointer"
           >
             Add
           </button>
           <button
             type="button"
-            onClick={() => navigate("/masterlayout/dailysample")}
-            className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-6 py-2 rounded-lg"
+            onClick={() => navigate("/reportlayout/dailysample")}
+            className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-6 py-2 rounded-lg cursor-pointer"
           >
             Cancel
           </button>

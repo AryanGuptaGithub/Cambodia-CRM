@@ -417,7 +417,6 @@ const Sales = () => {
           fetchSaleSummaries();
         }
       } catch (error) {
-        console.log("values of error", error);
         showToast("error", "Failed to delete customer.");
       }
     }
@@ -438,7 +437,6 @@ const Sales = () => {
           data: { ids: selected },
         });
 
-        console.log("values of res", res);
         if (res.status === 200) {
           showToast("success", "Selected Sales deleted successfully");
           fetchSaleSummaries();
