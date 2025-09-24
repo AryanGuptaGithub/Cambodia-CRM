@@ -160,7 +160,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 overflow-y-hidden px-2 py-4 space-y-2">
+      <nav className="flex-1 px-2 py-4 space-y-2">
         {/* Dashboard */}
         <Link to="/" className={getLinkClass("/")}>
           <Home className="w-5 h-5" />
