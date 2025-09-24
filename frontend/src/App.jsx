@@ -77,6 +77,7 @@ import AddStaffMember from "./pages/AddStaffMember";
 import StaffMemberLayout from "./pages/Utility/StaffMemberLayout";
 import AddSale from "./pages/Sale/AddSale";
 import AddDailySampleReport from "./pages/Reports/AddDailySample";
+import AddNewPurchase from "./pages/Purchase/addNewPurchase";
 function App() {
   return (
     <>
@@ -130,12 +131,10 @@ function App() {
             />
           </Route>
           <Route path="/purchaselayout" element={<PurchaseLayout />}>
-            <Route path="/purchaselayout/purchase" element={<Purchase />} />
-            <Route path="/purchaselayout/crnote" element={<CrNote />} />
-            <Route
-              path="/purchaselayout/purchaseout"
-              element={<PurchaseOut />}
-            />
+            <Route path="purchase" element={<Purchase />} />
+            <Route path="purchase/new" element={<AddNewPurchase />} />
+            <Route path="crnote" element={<CrNote />} />
+            <Route path="purchaseout" element={<PurchaseOut />} />
           </Route>
           <Route path="/salelayout" element={<SaleLayout />}>
             <Route path="/salelayout/sale" element={<Sale />} />

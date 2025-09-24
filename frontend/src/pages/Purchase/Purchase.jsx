@@ -61,6 +61,7 @@ const requiredHeaders = [
 ];
 
 function Purchase() {
+  const navigate = useNavigate();
   const [purchases, setPurchases] = useState([]);
   const [selectedTab, setSelectedTab] = useState("All");
   const [selected, setSelected] = useState([]);
@@ -381,8 +382,6 @@ function Purchase() {
     });
   };
 
-
-
   const formatNumber = (num) => {
     if (typeof num === "number") {
       return num.toLocaleString(undefined, {
@@ -435,7 +434,7 @@ function Purchase() {
       showToast("error", "Failed to update product.");
     }
   };
-    const toggleSelectAll = useCallback(
+  const toggleSelectAll = useCallback(
     (checked) => {
       setSelected(
         checked
@@ -454,8 +453,8 @@ function Purchase() {
       <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
         <div className="flex gap-3 items-center">
           <button
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md"
-            onClick={() => alert("Add new purchase clicked")}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+            onClick={() => navigate("/purchaselayout/purchase/new")}
           >
             <UserPlus size={18} /> Add New Purchase
           </button>

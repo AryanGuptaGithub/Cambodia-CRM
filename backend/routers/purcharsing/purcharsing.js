@@ -102,5 +102,45 @@ router.delete("/purchase", async (req, res) => {
   }
 });
 
+router.post("/purchase", async (req, res) => {
+  try {
+    const formData = req.body;
+    if (!formData.invoiceNumber || !formData.productName) {
+      return res
+        .status(400)
+        .json({ message: "Invoice number and product name are required." });
+    }
+
+    // Create new purchase document
+    const newPurchase = new purchaseInventory({
+      invoiceNumber: formData.invoiceNumber,
+      invoiceDate: formData.invoiceDate || null,
+      deliveryNumber: formData.deliveryNumber,
+      receivedDate: formData.receivedDate || null,
+      expiredDate: formData.expiredDate || null,
+      productName: formData.productName,
+      type: formData.type,
+      packing: formData.packing,
+      qtyMain: formData.qtyMain,
+      qty: formData.qty,
+      unitPrice: formData.unitPrice,
+      amount: formData.amount,
+      otherExpenses: formData.otherExpenses,
+      totalAmount: formData.totalAmount,
+      unitCost: formData.unitCost,
+      remark: formData.remark,
+    });
+
+    await newPurchase.save();
+
+    res.status(201).json({
+      message: `Purchase <b>${formData.productName}-${formData.invoiceNumber}</b> added successfully`,
+      purchase: newPurchase,
+    });
+  } catch (error) {
+    console.error("Error adding purchase:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
 
 export default router;
