@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Search, UserPlus, Upload, X, Eye, Edit, Trash2 } from "lucide-react";
 import SampleExcelDownloadDailySample from "../../excels/SampleExcelDownloadDailySample";
 import ReactDOM from "react-dom";
@@ -30,6 +30,7 @@ const DailySample = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+  const inputRef = useRef(null);
 
   const [form, setForm] = useState({
     _id: "",
@@ -347,12 +348,22 @@ const DailySample = () => {
       setSelected([]);
     }
   };
-  
+
   function capitalizeFirstLetter(str) {
     if (!str) return "";
     str = str.toString(); // ensure it's a string
     return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
   }
+
+  const handleIconClick = () => {
+    if (inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.classList.add("highlight");
+      setTimeout(() => {
+        inputRef.current.classList.remove("highlight");
+      }, 1000);
+    }
+  };
 
   return (
     <div className="p-6">
@@ -363,7 +374,7 @@ const DailySample = () => {
             onClick={() => navigate("/reportlayout/dailysample/new")}
             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
           >
-          <UserPlus size={18} /> Add New Daily Sample
+            <UserPlus size={18} /> Add New Daily Sample
           </button>
 
           <button
@@ -396,10 +407,12 @@ const DailySample = () => {
           {/* Search Input */}
           <div className="relative w-full md:w-72">
             <Search
-              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
+              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
               size={16}
+              onClick={handleIconClick}
             />
             <input
+              ref={inputRef}
               type="text"
               placeholder="Search by Product, Item Code or Brand"
               value={searchTerm}
@@ -465,8 +478,12 @@ const DailySample = () => {
                       </div>
                     </td>
                     <td className="p-3">{item.requestNumber}</td>
-                    <td className="p-3">{capitalizeFirstLetter(item.mrName)}</td>
-                    <td className="p-3">{capitalizeFirstLetter(item.description)}</td>
+                    <td className="p-3">
+                      {capitalizeFirstLetter(item.mrName)}
+                    </td>
+                    <td className="p-3">
+                      {capitalizeFirstLetter(item.description)}
+                    </td>
                     <td className="p-3">{item.qtyBigBox}</td>
                     <td className="p-3">{item.qtySmallBox}</td>
                     <td className="p-3">{item.qtySmallBox}</td>

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from "react";
-import { Eye, X, Edit } from "lucide-react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import { Eye, X, Edit, Search } from "lucide-react";
 import { formatDateToReadable } from "../../utils/dateUtil";
 import { getVisiblePages } from "../../utils/useVisiblePages";
 import ReactDOM from "react-dom";
@@ -18,6 +18,7 @@ function PriceList() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+  const inputRef = useRef(null);
 
   const [currentPage, setCurrentPage] = useState(1);
   const priceListPerPage = 9;
@@ -130,6 +131,16 @@ function PriceList() {
     }
   };
 
+  const handleIconClick = () => {
+    if (inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.classList.add("highlight");
+      setTimeout(() => {
+        inputRef.current.classList.remove("highlight");
+      }, 1000);
+    }
+  };
+
   return (
     <div className="max-w-8xl p-6 bg-white rounded-xl">
       <div className="flex flex-wrap items-center gap-4 mb-4">
@@ -160,13 +171,24 @@ function PriceList() {
             </span>
           </p>
 
-          <input
-            type="text"
-            placeholder="Search..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="border px-3 py-2 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-          />
+          <div className="relative w-full md:w-72">
+            <Search
+              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+              size={16}
+              onClick={handleIconClick}
+            />
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Search..."
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+            />
+          </div>
         </div>
       </div>
 

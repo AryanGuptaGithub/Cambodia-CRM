@@ -1,5 +1,11 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { UserPlus, Trash2, Edit, Upload, X, Eye } from "lucide-react";
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from "react";
+import { UserPlus, Trash2, Edit, Upload, X, Eye, Search } from "lucide-react";
 import ReactDOM from "react-dom";
 import SampleExcelDownloadSale from "../../excels/SampleExcelDownloadSale";
 import { handleAxiosError } from "../../utils/errorHandler";
@@ -33,6 +39,7 @@ const Sales = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+  const inputRef = useRef(null);
 
   const salesPerPage = 9;
 
@@ -109,7 +116,7 @@ const Sales = () => {
 
   function capitalizeFirstLetter(str) {
     if (!str) return "";
-    str = str.toString(); // ensure it's a string
+    str = str.toString();
     return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
   }
 
@@ -222,11 +229,6 @@ const Sales = () => {
     setSelectedItems([]);
     setIsModalOpen(false);
   }, []);
-
-  const handleSearchChange = (e) => {
-    setSearchTerm(e.target.value);
-    setSelected([]);
-  };
 
   // Render loading
   if (loading) {
@@ -471,6 +473,16 @@ const Sales = () => {
     }
   };
 
+  const handleIconClick = () => {
+    if (inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.classList.add("highlight");
+      setTimeout(() => {
+        inputRef.current.classList.remove("highlight");
+      }, 1000);
+    }
+  };
+
   return (
     <div className="p-6">
       {/* ✅ FIXED: Closed missing </div> */}
@@ -485,7 +497,7 @@ const Sales = () => {
 
           <button
             onClick={() => setShowImportModal(true)}
-            className="flex items-center gap-2 bg-gray-200 text-gray-800 px-4 py-2 rounded-md hover:bg-gray-300 cursor-pointer"
+            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
           >
             <Upload size={18} /> Import Product
           </button>
@@ -548,14 +560,24 @@ const Sales = () => {
               {filteredSales.length}
             </span>
           </p>
-
-          <input
-            type="text"
-            placeholder="Search invoice, customer, status..."
-            value={searchTerm}
-            onChange={handleSearchChange}
-            className="border px-4 py-2 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-          />
+          <div className="relative w-full md:w-72">
+            <Search
+              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+              size={16}
+              onClick={handleIconClick}
+            />
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Search invoice, customer, status..."
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+            />
+          </div>
         </div>
       </div>
       <div className="container">

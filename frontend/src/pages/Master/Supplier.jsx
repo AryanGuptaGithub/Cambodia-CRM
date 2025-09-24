@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { UserPlus, Upload, Search, Eye, Edit, Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import axios from "axios";
 import { confirmDialog } from "../../utils/confirmationDialog";
 import { showToast } from "../../utils/toast";
@@ -34,6 +34,7 @@ const Supplier = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const inputRef = useRef(null);
 
   const [form, setForm] = useState({
     name: "",
@@ -306,6 +307,15 @@ const Supplier = () => {
     }
   };
 
+  const handleIconClick = () => {
+    if (inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.classList.add("highlight");
+      setTimeout(() => {
+        inputRef.current.classList.remove("highlight");
+      }, 1000);
+    }
+  };
   if (loading) return <p>Loading...</p>;
   if (error) return <p className="text-red-500">{error}</p>;
 
@@ -369,13 +379,24 @@ const Supplier = () => {
             </span>
           </p>
 
-          <input
-            type="text"
-            placeholder="Search..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="border px-4 py-2 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-          />
+          <div className="relative w-full md:w-72">
+            <Search
+              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+              size={16}
+              onClick={handleIconClick}
+            />
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Search..."
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+            />
+          </div>
         </div>
       </div>
 
