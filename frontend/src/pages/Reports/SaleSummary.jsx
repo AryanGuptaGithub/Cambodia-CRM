@@ -11,6 +11,7 @@ import { getVisiblePages } from "../../utils/useVisiblePages";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { confirmDialog } from "../../utils/confirmationDialog";
+import PiChartDatePicker from "../../utils/PiChartDatePicker";
 
 const saleSummaryPerPage = 9;
 
@@ -55,6 +56,10 @@ const SaleSummary = () => {
       return (
         product.productName?.toLowerCase().includes(search) ||
         product.salesQuantity?.toString().includes(search) ||
+        product.totalQuantity?.toString().includes(search) ||
+        product.value?.toString().includes(search) ||
+        product.value?.toString().includes(search) ||
+        item.totalDayQuantity?.toString().includes(search) ||
         product.bonusQuantity?.toString().includes(search)
       );
     });
@@ -132,10 +137,10 @@ const SaleSummary = () => {
       const res = await axios.delete(`${backendUrl}/api/dailysummary`, {
         data: { ids: selected },
       });
-   
+
       if (res.status === 200) {
         showToast("success", res.data.message);
-        await fetchDailySummary(); 
+        await fetchDailySummary();
       } else {
         showToast("error", "Failed to delete selected summary reports.");
       }
@@ -455,7 +460,8 @@ const SaleSummary = () => {
       <div className="flex justify-between items-center mb-4">
         <div className="flex gap-3">
           <button
-            onClick={() => navigate("/masterlayout/customer/new")}
+            // onClick={() => navigate("/reportlayout/salesummary/new")}
+            onClick={()=>alert("Work on it")}
             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
           >
             <UserPlus size={18} /> Add New Summary Reports
