@@ -520,7 +520,7 @@ const Product = () => {
                       <input
                         type="checkbox"
                         checked={selected.some((s) => s.id === product._id)}
-                        onChange={() => toggleSelect(product)} // Toggle on click
+                        onChange={() => toggleSelect(product)} 
                       />
                       <span> {capitalizeFirstLetter(product.productName)}</span>
                     </div>

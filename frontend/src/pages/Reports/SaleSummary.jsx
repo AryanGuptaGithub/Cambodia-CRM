@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect } from "react";
-import { Search, UserPlus, Upload, X } from "lucide-react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
+import { Search, UserPlus, Upload, X, Eye, Edit, Trash2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import SampleExcelDownloadDailySummaryReport from "../../excels/SampleExcelDownloadDailySummary";
 import ReactDOM from "react-dom";
@@ -7,6 +7,10 @@ import * as XLSX from "xlsx";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
 import { formatDateToReadable } from "../../utils/dateUtil";
+import { getVisiblePages } from "../../utils/useVisiblePages";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
+import { confirmDialog } from "../../utils/confirmationDialog";
 
 const saleSummaryPerPage = 9;
 
@@ -25,47 +29,67 @@ const SaleSummary = () => {
   const inputRef = useRef(null);
   const navigate = useNavigate();
 
+  const [form, setForm] = useState({
+    productName: "",
+    salesQuantity: 0,
+    bonusQuantity: 0,
+    totalQuantity: 0,
+    value: 0,
+    date: "",
+    dailySummaryReportsId: "",
+    totalDayQuantity: 0,
+    _id: "",
+  });
+
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
   const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
-  console.log("✅ values of dailySummaries", dailySummaries);
-
-  // Convert search term to lowercase once for efficiency
   const search = searchTerm.toLowerCase();
 
-  // Filter daily summaries based on matching products
-  const filteredDailySummaries = dailySummaries
-    .map((item) => {
-      // Filter products within each daily summary item
-      const filteredProducts = item.products.filter((product) => {
-        return (
-          product.productName?.toLowerCase().includes(search) ||
-          product.salesQuantity?.toString().includes(search) ||
-          product.bonusQuantity?.toString().includes(search)
-        );
-      });
+  // Step 1: Flatten filtered products with parent metadata
+  const allFilteredProducts = dailySummaries.flatMap((item) => {
+    const entryDate = new Date(item.date).toLocaleDateString("en-GB");
+    const isDateMatch = entryDate.includes(search);
 
-      // If any product matches, return a new item with filtered products
-      if (filteredProducts.length > 0) {
-        return {
-          ...item,
-          products: filteredProducts,
-        };
-      }
+    const filteredProducts = item.products.filter((product) => {
+      return (
+        product.productName?.toLowerCase().includes(search) ||
+        product.salesQuantity?.toString().includes(search) ||
+        product.bonusQuantity?.toString().includes(search)
+      );
+    });
 
-      // Otherwise, exclude the item
-      return null;
-    })
-    .filter(Boolean); // Remove nulls from non-matching items
-  const totalPages = Math.ceil(
-    filteredDailySummaries.length / saleSummaryPerPage
-  );
+    // If date matches, include all products
+    if (isDateMatch) {
+      return item.products.map((product) => ({
+        ...product,
+        date: item.date,
+        totalDayQuantity: item.totalDayQuantity,
+        dailySummaryReportsId: item._id,
+      }));
+    }
 
-  const currentDailySummaries = filteredDailySummaries.slice(
+    // If some products match, include only those
+    if (filteredProducts.length > 0) {
+      return filteredProducts.map((product) => ({
+        ...product,
+        date: item.date,
+        totalDayQuantity: item.totalDayQuantity,
+        dailySummaryReportsId: item._id,
+      }));
+    }
+
+    // Else, return nothing
+    return [];
+  });
+
+  // Step 2: Paginate the flattened product list
+  const totalPages = Math.ceil(allFilteredProducts.length / saleSummaryPerPage);
+  const visiblePages = getVisiblePages(currentPage, totalPages);
+  const currentDailySummaries = allFilteredProducts.slice(
     (currentPage - 1) * saleSummaryPerPage,
     currentPage * saleSummaryPerPage
   );
-  console.log('valueso f currentDailySummaries', currentDailySummaries);
 
   const fetchDailySummary = async () => {
     try {
@@ -90,33 +114,34 @@ const SaleSummary = () => {
   }, []);
 
   const handleDeleteSelected = async () => {
+    if (selected.length === 0) return;
+
     const confirm = await confirmDialog({
-      text: `Are you sure you want to delete <b>${selected.length}</b> customers`,
+      text: `Are you sure you want to delete <b>${selected.length}</b> sale summary report(s)?`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
-      selected,
     });
 
-    if (confirm.isConfirmed) {
-      try {
-        const res = await axios.delete(`${backendUrl}/api/customers`, {
-          data: { ids: selected },
-        });
-
-        if (res.status === 200) {
-          showToast("success", "Selected customers deleted successfully");
-          const updated = await fetch(`${backendUrl}/api/customers`);
-          const data = await updated.json();
-          setCustomers(data.customers);
-          setNextCustomerCode(data.nextCustomerCode);
-          setSelected([]);
-        }
-      } catch (error) {
-        showToast("error", "Failed to delete selected customers.");
-      }
-    } else {
+    if (!confirm.isConfirmed) {
       setSelected([]);
+      return;
+    }
+
+    try {
+      const res = await axios.delete(`${backendUrl}/api/dailysummary`, {
+        data: { ids: selected },
+      });
+   
+      if (res.status === 200) {
+        showToast("success", res.data.message);
+        await fetchDailySummary(); 
+      } else {
+        showToast("error", "Failed to delete selected summary reports.");
+      }
+    } catch (error) {
+      console.error("Delete error:", error);
+      showToast("error", "Failed to delete selected summary reports.");
     }
   };
 
@@ -267,7 +292,6 @@ const SaleSummary = () => {
   };
 
   const handleImport = async () => {
-    console.log("values of parse", parsedData);
     if (parsedData.length === 0) {
       showToast("warning", "Please upload a valid file first");
       return;
@@ -319,6 +343,113 @@ const SaleSummary = () => {
     return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
   }
 
+  const editSaleSammaryReports = (product, date) => {
+    setForm({
+      productName: product.productName || "",
+      salesQuantity: product.salesQuantity || 0,
+      bonusQuantity: product.bonusQuantity || 0,
+      totalQuantity: product.totalQuantity || 0,
+      value: product.value || 0,
+      date: date || "",
+      dailySummaryReportsId: product.dailySummaryReportsId || "", // summary _id
+      totalDayQuantity: product.totalDayQuantity || 0,
+      _id: product._id || "",
+    });
+
+    setIsOpen(true);
+    setIsEditModalOpen(true);
+  };
+
+  // Open view modal with selected customer data
+  const handleSaleSammaryReports = (product, date) => {
+    setForm({ ...product });
+    setIsOpen(true);
+    setIsViewModalOpen(true);
+  };
+
+  const deleteSaleSammaryReports = async (product, date) => {
+    if (!product._id) return;
+    const confirmDelete = await confirmDialog({
+      title: "Delete",
+      text: `Are you sure you want to delete sale Summary Reports <b>${product.productName}-${date}</b>?`,
+      icon: "warning",
+      confirmButtonText: "Yes, delete",
+      cancelButtonText: "Cancel",
+    });
+
+    if (confirmDelete.isConfirmed) {
+      try {
+        const res = await axios.delete(
+          `${backendUrl}/api/dailysummary/${product.dailySummaryReportsId}/${product._id}`
+        );
+
+        if (res.status === 200) {
+          showToast(
+            "success",
+            `Sale Summary <b>${product.productName}-${date}</b> deleted successfully`
+          );
+          fetchDailySummary();
+        }
+      } catch (error) {
+        showToast("error", "Failed to delete customer.");
+      }
+    }
+  };
+
+  const handleUpdateDailySummaryReports = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await axios.put(
+        `${backendUrl}/api/dailysummary/${form.dailySummaryReportsId}/${form._id} `,
+        form
+      );
+      if (res.status === 200) {
+        showToast(
+          "success",
+          `Report for <b>${form.productName}</b> updated successfully`
+        );
+        setIsEditModalOpen(false);
+        fetchDailySummary();
+      }
+    } catch (err) {
+      showToast("error", "Failed to update daily summary report.");
+      console.error("Update error:", err);
+    }
+  };
+
+  // For individual selection
+  const toggleSelect = (product) => {
+    setSelected((prev) => {
+      const exists = prev.some((c) => c.id === product._id);
+
+      if (exists) {
+        // Remove if already selected
+        return prev.filter((c) => c.id !== product._id);
+      } else {
+        // Add new selection
+        return [
+          ...prev,
+          { id: product._id, saleSummaryId: product.dailySummaryReportsId },
+        ];
+      }
+    });
+  };
+
+  // For select/deselect all
+  const toggleSelectAll = useCallback(
+    (checked) => {
+      setSelected(
+        checked
+          ? currentDailySummaries.map((product) => ({
+              id: product._id,
+              saleSummaryId: product.dailySummaryReportsId,
+            }))
+          : []
+      );
+    },
+    [currentDailySummaries]
+  );
+
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-4">
@@ -349,7 +480,7 @@ const SaleSummary = () => {
           <p className="text-lg font-semibold text-gray-700">
             Total Count:{" "}
             <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-              {filteredDailySummaries.length}
+              {allFilteredProducts.length}
             </span>
           </p>
           <div className="relative w-full md:w-72">
@@ -399,61 +530,74 @@ const SaleSummary = () => {
               <th className="p-3">Date</th>
               <th className="p-3">Amount</th>
               <th className="p-3">Total Day Quantity</th>
+              <th className="p-3">Action</th>
             </tr>
           </thead>
           <tbody>
             {currentDailySummaries.length > 0 ? (
-              currentDailySummaries
-                .map((item) => {
-                  const entryDate = formatDateToReadable(item.date);
-                  return item.products.map((product, index) => {
-                    console.log("values of product", product);
-                    const isSelected = selected.some(
-                      (s) =>
-                        s.productName === product.productName &&
-                        s.date === item.date
-                    );
+              currentDailySummaries.map((product, index) => {
+                const entryDate = formatDateToReadable(product.date);
+                const isSelected = selected.some((s) => s._id === product._id);
 
-                    return (
-                      <tr
-                        key={`${item._id}-${index}`}
-                        className={`hover:bg-gray-50 ${
-                          (index + 1) % saleSummaryPerPage === 0 ||
-                          index + 1 === currentDailySummaries.length
-                            ? ""
-                            : "border-b"
-                        } text-sm`}
+                return (
+                  <tr
+                    key={`${product.productName}-${index}`}
+                    className={`hover:bg-gray-50 ${
+                      (index + 1) % saleSummaryPerPage === 0 ||
+                      index + 1 === currentDailySummaries.length
+                        ? ""
+                        : "border-b"
+                    }`}
+                  >
+                    <td className="p-3">
+                      <div className="flex items-center gap-4">
+                        <input
+                          type="checkbox"
+                          checked={selected.some((s) => s.id === product._id)}
+                          onChange={() => toggleSelect(product)}
+                        />
+                        <span>
+                          {capitalizeFirstLetter(product.productName)}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="p-3">{product.salesQuantity}</td>
+                    <td className="p-3">{product.bonusQuantity}</td>
+                    <td className="p-3">{product.totalQuantity}</td>
+                    <td className="p-3">{entryDate}</td>
+                    <td className="p-3 font-medium">
+                      {product.value?.toFixed(2)}
+                    </td>
+                    <td className="p-3">{product.totalDayQuantity}</td>
+                    <td className="p-3 flex items-center justify-center gap-3">
+                      <button className="text-blue-600 hover:text-blue-800 cursor-pointer">
+                        <Eye
+                          onClick={() =>
+                            handleSaleSammaryReports(product, entryDate)
+                          }
+                          size={18}
+                        />
+                      </button>
+                      <button className="text-green-600 hover:text-green-800 cursor-pointer">
+                        <Edit
+                          onClick={() =>
+                            editSaleSammaryReports(product, entryDate)
+                          }
+                          size={18}
+                        />
+                      </button>
+                      <button
+                        onClick={() =>
+                          deleteSaleSammaryReports(product, entryDate)
+                        }
+                        className="text-red-600 hover:text-red-800 cursor-pointer"
                       >
-                        <td className="p-3">
-                          <div className="flex items-center gap-4">
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={() =>
-                                toggleSelect({
-                                  ...product,
-                                  date: item.date,
-                                })
-                              }
-                            />
-                            <span>
-                              {capitalizeFirstLetter(product.productName)}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="p-3">{product.salesQuantity}</td>
-                        <td className="p-3">{product.bonusQuantity}</td>
-                        <td className="p-3">{product.totalQuantity}</td>
-                        <td className="p-3">{entryDate}</td>
-                        <td className="p-3 font-medium">
-                          ₹{product.value?.toFixed(2)}
-                        </td>
-                        <td className="p-3">{item.totalDayQuantity}</td>
-                      </tr>
-                    );
-                  });
-                })
-                .flat()
+                        <Trash2 size={18} />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
             ) : (
               <tr>
                 <td colSpan="7" className="text-center py-4 text-gray-500">
@@ -465,36 +609,49 @@ const SaleSummary = () => {
         </table>
       </div>
 
-      {/* Pagination */}
-      <div className="mt-4 flex justify-center gap-2 text-sm">
-        <button
-          onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-          disabled={currentPage === 1}
-          className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
-        >
-          Prev
-        </button>
-        {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+      {currentDailySummaries.length > 0 && (
+        <div className="mt-4 p-5 flex justify-start gap-2">
           <button
-            key={page}
-            onClick={() => setCurrentPage(page)}
-            className={`px-3 py-1 rounded ${
-              currentPage === page
-                ? "bg-indigo-600 text-white"
-                : "bg-gray-200 hover:bg-gray-300"
-            }`}
+            onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+            disabled={currentPage === 1}
+            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
           >
-            {page}
+            Prev
           </button>
-        ))}
-        <button
-          onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-          disabled={currentPage === totalPages}
-          className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
-        >
-          Next
-        </button>
-      </div>
+          {visiblePages.map((page, idx) =>
+            page === "..." ? (
+              <span
+                key={`ellipsis-${idx}`}
+                className="px-3 py-1 text-gray-500 select-none cursor-pointer"
+              >
+                ...
+              </span>
+            ) : (
+              <button
+                key={page}
+                onClick={() => setCurrentPage(page)}
+                className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
+                  currentPage === page
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 hover:bg-gray-300"
+                }`}
+              >
+                {page}
+              </button>
+            )
+          )}
+          <button
+            onClick={() => {
+              setCurrentPage((prev) => Math.min(prev + 1, totalPages));
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+            disabled={currentPage === totalPages}
+            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+          >
+            Next
+          </button>
+        </div>
+      )}
       {showImportModal &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -549,6 +706,283 @@ const SaleSummary = () => {
                   }`}
                 >
                   {isUploading ? "Uploading…" : "Upload"}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+      {isEditModalOpen &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setIsEditModalOpen(false)}
+            />
+            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+              <button
+                onClick={() => setIsEditModalOpen(false)}
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+
+              <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                Edit Sale Summary
+              </h2>
+
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  try {
+                    const res = await axios.put(
+                      `${backendUrl}/api/sales-summary/${form._id}`,
+                      form
+                    );
+                    if (res.status === 200) {
+                      showToast(
+                        "success",
+                        "Sales summary updated successfully"
+                      );
+                      setIsEditModalOpen(false);
+                      await fetchAndSetData(); // Your function to refresh data
+                    }
+                  } catch (err) {
+                    console.error("Update error:", err);
+                    showToast("error", "Failed to update sales summary.");
+                  }
+                }}
+                className="grid grid-cols-1 md:grid-cols-2 gap-4"
+              >
+                <div>
+                  <label className="block text-sm font-medium">
+                    Product Name
+                  </label>
+                  <input
+                    type="text"
+                    value={form.productName}
+                    onChange={(e) =>
+                      setForm({ ...form, productName: e.target.value })
+                    }
+                    className="w-full border px-3 py-2 rounded-lg capitalize"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium">
+                    Sales Quantity
+                  </label>
+                  <input
+                    type="number"
+                    value={form.salesQuantity}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        salesQuantity: parseInt(e.target.value) || 0,
+                      })
+                    }
+                    className="w-full border px-3 py-2 rounded-lg"
+                    required
+                    min={0}
+                    step="1"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">
+                    Bonus Quantity
+                  </label>
+                  <input
+                    type="text"
+                    value={form.bonusQuantity}
+                    onChange={(e) => {
+                      const value = e.target.value;
+
+                      // Allow only numeric strings (optional: allow empty string)
+                      if (/^\d*$/.test(value)) {
+                        setForm({ ...form, bonusQuantity: value });
+                      }
+                    }}
+                    className="w-full border px-3 py-2 rounded-lg"
+                    required
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium">
+                    Total Quantity
+                  </label>
+                  <input
+                    type="number"
+                    value={form.totalQuantity}
+                    onChange={(e) =>
+                      setForm({ ...form, totalQuantity: +e.target.value })
+                    }
+                    className="w-full border px-3 py-2 rounded-lg"
+                    required
+                    min={0}
+                    step="1"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium">Amount</label>
+                  <input
+                    type="number"
+                    value={form.value}
+                    onChange={(e) =>
+                      setForm({ ...form, value: +e.target.value })
+                    }
+                    className="w-full border px-3 py-2 rounded-lg"
+                    required
+                    min={0}
+                    step="1"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium">Date</label>
+                  <DatePicker
+                    selected={form.date ? new Date(form.date) : null}
+                    onChange={(date) =>
+                      date
+                        ? setForm({ ...form, date: date.toISOString() })
+                        : null
+                    }
+                    dateFormat="yyyy-MM-dd"
+                    placeholderText="Select a date"
+                    className="w-full border px-3 py-2 rounded-lg"
+                    required
+                  />
+                </div>
+                {/* 
+                <div>
+                  <label className="block text-sm font-medium">
+                    Total Day Quantity
+                  </label>
+                  <input
+                    type="number"
+                    value={form.totalDayQuantity}
+                    className="w-full border px-3 py-2 rounded-lg"
+                    disabled
+                  />
+                </div> */}
+              </form>
+
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  onClick={() => setIsEditModalOpen(false)}
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  form="edit-sales-summary"
+                  className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+                  onClick={handleUpdateDailySummaryReports}
+                >
+                  Update
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+      {isViewModalOpen &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            {/* Background Overlay */}
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setIsViewModalOpen(false)}
+            />
+
+            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+              <button
+                onClick={() => setIsViewModalOpen(false)}
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+
+              <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                View Sales Summary
+              </h2>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Product Name
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {form.productName}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Sales Quantity
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {form.salesQuantity}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Bonus Quantity
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {form.bonusQuantity}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Total Quantity
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {form.totalQuantity}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Amount
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {form.value?.toFixed(2)}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Date
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {formatDateToReadable(form.date)}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Total Day Quantity
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {form.totalDayQuantity}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-6 flex justify-end">
+                <button
+                  onClick={() => setIsViewModalOpen(false)}
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                >
+                  Close
                 </button>
               </div>
             </div>

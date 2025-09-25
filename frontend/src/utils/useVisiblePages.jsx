@@ -18,9 +18,10 @@ export function getVisiblePages(currentPage, totalPages) {
   return [1, '...', currentPage, '...', totalPages];
 }
 
-// Optional: a custom hook that uses useMemo and the above function
+
 export function useVisiblePages(currentPage, totalPages) {
   return useMemo(() => {
     return getVisiblePages(currentPage, totalPages);
   }, [currentPage, totalPages]);
 }
+
