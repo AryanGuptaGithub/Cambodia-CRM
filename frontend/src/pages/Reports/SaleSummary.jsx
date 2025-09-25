@@ -1,112 +1,14 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Search, UserPlus, Upload, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import SampleExcelDownloadDailySummaryReport from "../../excels/SampleExcelDownloadDailySummary";
 import ReactDOM from "react-dom";
+import * as XLSX from "xlsx";
+import axios from "axios";
+import { showToast } from "../../utils/toast";
+import { formatDateToReadable } from "../../utils/dateUtil";
 
-const saleData = [
-  {
-    id: 1,
-    orderDate: "2025-08-20",
-    invoiceNumber: "INV001",
-    clientName: "Acme Corp",
-    amount: 1200,
-    paymentStatus: "Paid",
-    createdBy: "John Doe",
-  },
-  {
-    id: 2,
-    orderDate: "2025-08-21",
-    invoiceNumber: "INV002",
-    clientName: "Beta Ltd",
-    amount: 850,
-    paymentStatus: "Unpaid",
-    createdBy: "Jane Smith",
-  },
-  {
-    id: 3,
-    orderDate: "2025-08-22",
-    invoiceNumber: "INV003",
-    clientName: "Gamma Inc",
-    amount: 1500,
-    paymentStatus: "Paid",
-    createdBy: "Tom White",
-  },
-  {
-    id: 4,
-    orderDate: "2025-08-23",
-    invoiceNumber: "INV004",
-    clientName: "Delta LLC",
-    amount: 970,
-    paymentStatus: "Unpaid",
-    createdBy: "Alice Brown",
-  },
-  {
-    id: 5,
-    orderDate: "2025-08-24",
-    invoiceNumber: "INV005",
-    clientName: "Omega Pvt Ltd",
-    amount: 1900,
-    paymentStatus: "Paid",
-    createdBy: "Sarah King",
-  },
-  {
-    id: 6,
-    orderDate: "2025-08-25",
-    invoiceNumber: "INV006",
-    clientName: "Zeta Corp",
-    amount: 1300,
-    paymentStatus: "Unpaid",
-    createdBy: "Clark Kent",
-  },
-  {
-    id: 7,
-    orderDate: "2025-08-26",
-    invoiceNumber: "INV007",
-    clientName: "Theta Enterprises",
-    amount: 2100,
-    paymentStatus: "Paid",
-    createdBy: "Diana Prince",
-  },
-  {
-    id: 8,
-    orderDate: "2025-08-27",
-    invoiceNumber: "INV008",
-    clientName: "Lambda Group",
-    amount: 750,
-    paymentStatus: "Paid",
-    createdBy: "Bruce Wayne",
-  },
-  {
-    id: 9,
-    orderDate: "2025-08-28",
-    invoiceNumber: "INV009",
-    clientName: "Sigma Holdings",
-    amount: 1000,
-    paymentStatus: "Unpaid",
-    createdBy: "Peter Parker",
-  },
-  {
-    id: 10,
-    orderDate: "2025-08-29",
-    invoiceNumber: "INV010",
-    clientName: "Epsilon Ltd",
-    amount: 1150,
-    paymentStatus: "Paid",
-    createdBy: "Tony Stark",
-  },
-  {
-    id: 11,
-    orderDate: "2025-08-30",
-    invoiceNumber: "INV011",
-    clientName: "Omega Traders",
-    amount: 980,
-    paymentStatus: "Unpaid",
-    createdBy: "Steve Rogers",
-  },
-];
-
-const ITEMS_PER_PAGE = 10;
+const saleSummaryPerPage = 9;
 
 const SaleSummary = () => {
   const [searchTerm, setSearchTerm] = useState("");
@@ -114,6 +16,8 @@ const SaleSummary = () => {
   const [selected, setSelected] = useState([]);
   const [showImportModal, setShowImportModal] = useState(false);
   const [parsedData, setParsedData] = useState([]);
+  const [dailySummaries, setDailySummaries] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
@@ -124,17 +28,66 @@ const SaleSummary = () => {
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
   const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
-  const filteredData = saleData.filter(
-    (item) =>
-      item.invoiceNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.clientName.toLowerCase().includes(searchTerm.toLowerCase())
+  console.log("✅ values of dailySummaries", dailySummaries);
+
+  // Convert search term to lowercase once for efficiency
+  const search = searchTerm.toLowerCase();
+
+  // Filter daily summaries based on matching products
+  const filteredDailySummaries = dailySummaries
+    .map((item) => {
+      // Filter products within each daily summary item
+      const filteredProducts = item.products.filter((product) => {
+        return (
+          product.productName?.toLowerCase().includes(search) ||
+          product.salesQuantity?.toString().includes(search) ||
+          product.bonusQuantity?.toString().includes(search)
+        );
+      });
+
+      // If any product matches, return a new item with filtered products
+      if (filteredProducts.length > 0) {
+        return {
+          ...item,
+          products: filteredProducts,
+        };
+      }
+
+      // Otherwise, exclude the item
+      return null;
+    })
+    .filter(Boolean); // Remove nulls from non-matching items
+  const totalPages = Math.ceil(
+    filteredDailySummaries.length / saleSummaryPerPage
   );
 
-  const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
-  const paginatedData = filteredData.slice(
-    (currentPage - 1) * ITEMS_PER_PAGE,
-    currentPage * ITEMS_PER_PAGE
+  const currentDailySummaries = filteredDailySummaries.slice(
+    (currentPage - 1) * saleSummaryPerPage,
+    currentPage * saleSummaryPerPage
   );
+  console.log('valueso f currentDailySummaries', currentDailySummaries);
+
+  const fetchDailySummary = async () => {
+    try {
+      setIsLoading(true);
+      const response = await fetch(`${backendUrl}/api/dailysummary`);
+      if (!response.ok) throw new Error("Failed to fetch daily summaries.");
+
+      const data = await response.json();
+      setDailySummaries(data);
+      setSelected([]); // Clear any selection
+    } catch (err) {
+      console.error("Fetch error:", err);
+      alert("Error fetching daily summaries");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // ✅ useEffect to load on component mount
+  useEffect(() => {
+    fetchDailySummary();
+  }, []);
 
   const handleDeleteSelected = async () => {
     const confirm = await confirmDialog({
@@ -189,111 +142,132 @@ const SaleSummary = () => {
         return;
       }
 
-      // ✅ Expected headers
-      const requiredHeaders = [
-        "customer code",
-        "date",
-        "medical representative name",
-        "customer name in english",
-        "types of business",
-        "customer number",
-        "customer address",
-        "zone",
-        "location",
-        "remark",
-      ];
+      // ✅ Find header row that contains 'product name'
+      const headerRowIndex = rows.findIndex((row) =>
+        row.some(
+          (cell) => typeof cell === "string" && /product\s*name/i.test(cell)
+        )
+      );
 
-      let headerRowIndex = -1;
-      let matchedHeaders = [];
-
-      // ✅ Find header row (first 10 rows max)
-      for (let i = 0; i < Math.min(rows.length, 10); i++) {
-        const row = rows[i].map((cell) =>
-          cell?.toString().trim().toLowerCase()
-        );
-        const matched = requiredHeaders.filter((header) =>
-          row.includes(header)
-        );
-        if (matched.length >= 5) {
-          headerRowIndex = i;
-          matchedHeaders = matched;
-          break;
-        }
-      }
-
-      // ❌ If required headers not found
-      if (
-        headerRowIndex === -1 ||
-        matchedHeaders.length < requiredHeaders.length
-      ) {
-        const missingHeaders = requiredHeaders.filter(
-          (header) => !matchedHeaders.includes(header)
-        );
-        const errorMsg = `❌ Required headers not found in Excel file:\n\n${missingHeaders.join(
-          ", "
-        )}`;
-        showToast("error", errorMsg);
+      if (headerRowIndex === -1) {
+        showToast("error", "Header row not found (missing 'Product Name')");
         return;
       }
 
-      // ✅ Map header keys to column indexes
-      const rawHeaders = rows[headerRowIndex];
-      const headersMap = {};
-      rawHeaders.forEach((header, index) => {
-        if (!header) return;
-        const cleaned = header.toString().trim().toLowerCase();
-        headersMap[index] = cleaned;
-      });
-      // ✅ Parse data rows
+      const headerRow = rows[headerRowIndex];
       const dataRows = rows.slice(headerRowIndex + 1);
-      if (dataRows.length == 0) {
-        showToast("warning", "Excel file is empty");
+
+      // ✅ Map column indexes
+      const headersMap = {};
+      const dateColumnIndexes = [];
+
+      headerRow.forEach((header, index) => {
+        const headerText = header?.toString().trim().toLowerCase();
+
+        if (!headerText) return;
+
+        if (
+          headerText === "product name" ||
+          headerText === "sale quantity" ||
+          headerText === "bonus quantity" ||
+          headerText === "total quantity"
+        ) {
+          headersMap[headerText] = index;
+        } else {
+          // Try to parse as a date column (e.g., "30 Sep 2024", "31-Oct-2024", etc.)
+          const parsedDate = parseDateFromHeader(headerText);
+          if (parsedDate) {
+            dateColumnIndexes.push({
+              index,
+              raw: header,
+              isoDate: parsedDate.toISOString(),
+            });
+          }
+        }
+      });
+
+      if (!headersMap["product name"]) {
+        showToast("error", "Missing required column: 'Product Name'");
         return;
       }
 
-      const mappedData = dataRows
-        .map((row, rowIndex) => {
-          const item = {};
-          Object.entries(headersMap).forEach(([index, key]) => {
-            item[key] = row[index] || "";
-          });
+      if (dateColumnIndexes.length === 0) {
+        showToast("error", "No date columns found in the Excel header");
+        return;
+      }
 
-          return {
-            customerCode: item["customer code"],
-            date: parseExcelDate(item["date"]),
-            medicalRepName: item["medical representative name"],
-            name: item["customer name in english"],
-            typeOfBusiness: item["types of business"],
-            customerNumber: item["customer number"],
-            address: item["customer address"],
-            zone: item["zone"],
-            location: item["location"],
-            remark: item["remark"],
-          };
-        })
-        .filter((entry, index) => {
-          const keep = !!entry.customerCode;
-          return keep;
+      // ✅ Now process each date column individually
+      const parsedPayloads = [];
+
+      dateColumnIndexes.forEach(({ index: dateColIndex, isoDate }) => {
+        const products = [];
+        let totalDayQuantity = 0;
+
+        dataRows.forEach((row) => {
+          const productName = row[headersMap["product name"]]
+            ?.toString()
+            .trim();
+          if (!productName) return;
+
+          const salesQuantity = Number(row[headersMap["sale quantity"]]) || 0;
+          const bonusQuantity = Number(row[headersMap["bonus quantity"]]) || 0;
+          const totalQuantity = Number(row[headersMap["total quantity"]]) || 0;
+          const value = Number(row[dateColIndex]) || 0;
+
+          // Include only if at least one field is > 0
+          if (
+            salesQuantity > 0 ||
+            bonusQuantity > 0 ||
+            totalQuantity > 0 ||
+            value > 0
+          ) {
+            products.push({
+              productName,
+              salesQuantity,
+              bonusQuantity,
+              totalQuantity,
+              value,
+            });
+            totalDayQuantity += value;
+          }
         });
-      setParsedData(mappedData);
+
+        if (products.length > 0) {
+          parsedPayloads.push({
+            date: isoDate,
+            products,
+            totalDayQuantity,
+          });
+        }
+      });
+
+      if (parsedPayloads.length === 0) {
+        showToast("info", "No valid data found for any date column");
+        return;
+      }
+
+      setParsedData(parsedPayloads);
     };
 
     reader.readAsArrayBuffer(file);
   };
-  const parseExcelDate = (value) => {
-    if (!value) return null;
 
-    if (typeof value === "number") {
-      const jsDate = new Date(Math.round((value - 25569) * 86400 * 1000));
-      return jsDate.toISOString(); // Or keep as Date object
+  // ✅ Helper to parse header cell like "30 Sep 2024", "31-Oct-2024", etc.
+  const parseDateFromHeader = (text) => {
+    if (!text) return null;
+
+    const normalized = text.toString().trim().replace(/[-]/g, " ");
+    const parsed = new Date(normalized);
+
+    if (!isNaN(parsed.getTime())) {
+      return new Date(parsed.setHours(0, 0, 0, 0));
     }
 
-    const parsed = new Date(value);
-    return isNaN(parsed.getTime()) ? null : parsed.toISOString();
+    return null;
   };
 
-  // Import parsed customers to backend
   const handleImport = async () => {
+    console.log("values of parse", parsedData);
     if (parsedData.length === 0) {
       showToast("warning", "Please upload a valid file first");
       return;
@@ -302,21 +276,17 @@ const SaleSummary = () => {
 
     try {
       const res = await axios.post(
-        `${backendUrl}/api/customers/import`,
+        `${backendUrl}/api/dailysummary/import`,
         parsedData
       );
 
-      // If import is successful
       if (res.status === 200) {
         showToast(
           "success",
-          res.data.message || "Customers imported successfully!"
+          res.data.message || "daily summary reports imported successfully!"
         );
         setShowImportModal(false);
-        const response = await fetch(`${backendUrl}/api/customers`);
-        const data = await response.json();
-        setCustomers(data.customers);
-        setNextCustomerCode(data.nextCustomerCode);
+        fetchDailySummary();
       }
     } catch (err) {
       console.error("Import error:", err);
@@ -342,6 +312,12 @@ const SaleSummary = () => {
       }, 1000);
     }
   };
+
+  function capitalizeFirstLetter(str) {
+    if (!str) return "";
+    str = str.toString(); // ensure it's a string
+    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+  }
 
   return (
     <div className="p-6">
@@ -373,7 +349,7 @@ const SaleSummary = () => {
           <p className="text-lg font-semibold text-gray-700">
             Total Count:{" "}
             <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-              {filteredData.length}
+              {filteredDailySummaries.length}
             </span>
           </p>
           <div className="relative w-full md:w-72">
@@ -398,43 +374,89 @@ const SaleSummary = () => {
       </div>
 
       {/* Table */}
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse bg-white rounded-xl overflow-hidden">
-          <thead className="bg-gray-100 text-gray-700 text-sm">
+      <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
+        <table className="w-full border-collapse bg-white rounded-xl overflow-hidden text-center">
+          <thead className="bg-gray-100 text-gray-700 text-sm border-b">
             <tr>
-              <th className="p-3 text-left">Order Date</th>
-              <th className="p-3 text-left">Invoice Number</th>
-              <th className="p-3 text-left">Client Name</th>
-              <th className="p-3 text-left">Amount</th>
-              <th className="p-3 text-left">Payment Status</th>
-              <th className="p-3 text-left">Created By</th>
+              <th className="p-3">
+                <div className="flex items-center gap-4">
+                  {currentDailySummaries.length > 0 && (
+                    <input
+                      type="checkbox"
+                      checked={
+                        selected.length === currentDailySummaries.length &&
+                        currentDailySummaries.length > 0
+                      }
+                      onChange={(e) => toggleSelectAll(e.target.checked)}
+                    />
+                  )}
+                  <span>Product Name</span>
+                </div>
+              </th>
+              <th className="p-3">Sales Quantity</th>
+              <th className="p-3">Bonus Quantity</th>
+              <th className="p-3">Total Quantity</th>
+              <th className="p-3">Date</th>
+              <th className="p-3">Amount</th>
+              <th className="p-3">Total Day Quantity</th>
             </tr>
           </thead>
           <tbody>
-            {paginatedData.length > 0 ? (
-              paginatedData.map((item) => (
-                <tr key={item.id} className="border-b hover:bg-gray-50 text-sm">
-                  <td className="p-3">{item.orderDate}</td>
-                  <td className="p-3">{item.invoiceNumber}</td>
-                  <td className="p-3">{item.clientName}</td>
-                  <td className="p-3 font-medium">₹{item.amount.toFixed(2)}</td>
-                  <td className="p-3">
-                    <span
-                      className={`px-2 py-1 text-xs rounded-full font-semibold ${
-                        item.paymentStatus === "Paid"
-                          ? "bg-green-100 text-green-700"
-                          : "bg-red-100 text-red-600"
-                      }`}
-                    >
-                      {item.paymentStatus}
-                    </span>
-                  </td>
-                  <td className="p-3">{item.createdBy}</td>
-                </tr>
-              ))
+            {currentDailySummaries.length > 0 ? (
+              currentDailySummaries
+                .map((item) => {
+                  const entryDate = formatDateToReadable(item.date);
+                  return item.products.map((product, index) => {
+                    console.log("values of product", product);
+                    const isSelected = selected.some(
+                      (s) =>
+                        s.productName === product.productName &&
+                        s.date === item.date
+                    );
+
+                    return (
+                      <tr
+                        key={`${item._id}-${index}`}
+                        className={`hover:bg-gray-50 ${
+                          (index + 1) % saleSummaryPerPage === 0 ||
+                          index + 1 === currentDailySummaries.length
+                            ? ""
+                            : "border-b"
+                        } text-sm`}
+                      >
+                        <td className="p-3">
+                          <div className="flex items-center gap-4">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() =>
+                                toggleSelect({
+                                  ...product,
+                                  date: item.date,
+                                })
+                              }
+                            />
+                            <span>
+                              {capitalizeFirstLetter(product.productName)}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="p-3">{product.salesQuantity}</td>
+                        <td className="p-3">{product.bonusQuantity}</td>
+                        <td className="p-3">{product.totalQuantity}</td>
+                        <td className="p-3">{entryDate}</td>
+                        <td className="p-3 font-medium">
+                          ₹{product.value?.toFixed(2)}
+                        </td>
+                        <td className="p-3">{item.totalDayQuantity}</td>
+                      </tr>
+                    );
+                  });
+                })
+                .flat()
             ) : (
               <tr>
-                <td colSpan="6" className="text-center py-4 text-gray-500">
+                <td colSpan="7" className="text-center py-4 text-gray-500">
                   No sales found.
                 </td>
               </tr>
