@@ -28,6 +28,98 @@ const SaleSummary = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const inputRef = useRef(null);
+  const pickerRef = useRef(null);
+  const [isSelectingStart, setIsSelectingStart] = useState(true);
+  const [startDate, setStartDate] = useState(null);
+  const [endDate, setEndDate] = useState(null);
+
+  // API call effect
+  useEffect(() => {
+    if (startDate && endDate) {
+      const fetchData = async () => {
+        try {
+          const response = await fetch(
+            `${backendUrl}/api/dailysummary/byDate?start=${startDate.toISOString()}&end=${endDate.toISOString()}`
+          );
+          const data = await response.json();
+          console.log("avlues of data 46", data);
+          setDailySummaries(data);
+        } catch (error) {
+          console.error("API call failed:", error);
+        }
+      };
+
+      fetchData();
+    }
+  }, [startDate, endDate]);
+  const positionFlatpickrCalendar = () => {
+    setTimeout(() => {
+      const calendar = document.querySelector(".flatpickr-calendar");
+      const icon = document.getElementById("calendarTrigger");
+
+      if (!calendar || !icon) return;
+
+      const iconRect = icon.getBoundingClientRect();
+      const scrollTop =
+        window.pageYOffset || document.documentElement.scrollTop;
+      const scrollLeft =
+        window.pageXOffset || document.documentElement.scrollLeft;
+      const calendarWidth = calendar.offsetWidth;
+      const windowWidth = window.innerWidth;
+
+      let left = iconRect.left + scrollLeft - calendarWidth;
+      if (left < 10) left = 10;
+      if (left + calendarWidth > windowWidth) {
+        left = windowWidth - calendarWidth - 10;
+      }
+
+      const top = iconRect.bottom + scrollTop + 12;
+
+      calendar.style.position = "absolute";
+      calendar.style.top = `${top}px`;
+      calendar.style.left = `${left}px`;
+      calendar.style.right = "auto";
+
+      if (!calendar.querySelector(".custom-footer")) {
+        const footer = document.createElement("div");
+        footer.className =
+          "custom-footer flex justify-between p-2 border-t border-gray-300 bg-gray-100";
+
+        const btnClasses =
+          "px-3 py-1 text-xs rounded border border-gray-300 hover:bg-gray-200 cursor-pointer";
+
+        const todayBtn = document.createElement("button");
+        todayBtn.textContent = "Today";
+        todayBtn.className = btnClasses;
+
+        const resetBtn = document.createElement("button");
+        resetBtn.textContent = "Reset";
+        resetBtn.className = btnClasses;
+
+        todayBtn.onclick = () => {
+          const today = new Date();
+          pickerRef.current.flatpickr.setDate(today, true);
+          setStartDate(today);
+          setEndDate(today);
+          setIsSelectingStart(false);
+          pickerRef.current.flatpickr.close();
+        };
+
+        resetBtn.onclick = () => {
+          pickerRef.current.flatpickr.clear();
+          setStartDate(null);
+          setEndDate(null);
+          setIsSelectingStart(true);
+          pickerRef.current.flatpickr.close();
+        };
+
+        footer.appendChild(todayBtn);
+        footer.appendChild(resetBtn);
+        calendar.appendChild(footer);
+      }
+    }, 0);
+  };
+
   const navigate = useNavigate();
 
   const [form, setForm] = useState({
@@ -104,7 +196,7 @@ const SaleSummary = () => {
 
       const data = await response.json();
       setDailySummaries(data);
-      setSelected([]); // Clear any selection
+      setSelected([]);
     } catch (err) {
       console.error("Fetch error:", err);
       alert("Error fetching daily summaries");
@@ -454,10 +546,6 @@ const SaleSummary = () => {
     },
     [currentDailySummaries]
   );
-  // const handleDatesReady = (startDate, endDate) => {
-  //   console.log("Dates are ready:", startDate, endDate);
-  //   mainLogic(startDate, endDate);
-  // };
 
   return (
     <div className="p-6">
@@ -513,8 +601,7 @@ const SaleSummary = () => {
           </div>
         </div>
       </div>
-       <PiChartDatePicker />
-      
+      <PiChartDatePicker setDailySummaries={setDailySummaries} />
 
       {/* Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">

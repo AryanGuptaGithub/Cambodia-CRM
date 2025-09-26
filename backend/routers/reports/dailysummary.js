@@ -216,4 +216,35 @@ router.delete("/dailysummary", async (req, res) => {
   }
 });
 
+router.get("/dailysummary/byDate", async (req, res) => {
+  try {
+    const { start, end } = req.query;
+
+    // Validate dates
+    if (!start || !end) {
+      return res.status(400).json({ message: "Missing start or end date." });
+    }
+
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+
+    if (isNaN(startDate) || isNaN(endDate)) {
+      return res.status(400).json({ message: "Invalid date format." });
+    }
+
+    endDate.setHours(23, 59, 59, 999);
+    const summaries = await DailySummary.find({
+      date: {
+        $gte: startDate,
+        $lte: endDate,
+      },
+    }).sort({ date: -1 });
+    console.log('values of su', summaries);
+    res.status(200).json(summaries);
+  } catch (err) {
+    console.error("Error fetching daily summaries by date:", err);
+    res.status(500).json({ message: "Failed to fetch daily summaries." });
+  }
+});
+
 export default router;

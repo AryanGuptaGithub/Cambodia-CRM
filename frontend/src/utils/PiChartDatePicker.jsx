@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useRef, useState, useEffect } from "react";
 import Flatpickr from "react-flatpickr";
 import "flatpickr/dist/themes/material_green.css";
 
@@ -9,17 +9,14 @@ const formatDate = (date, type) =>
     year: "numeric",
   }) || `Enter ${type} Date`;
 
-const PiChartDatePicker = () => {
-  const pickerRef = useRef(null);
-  const [isSelectingStart, setIsSelectingStart] = useState(true);
+const backendUrl = import.meta.env.VITE_BACKEND_URL;
+
+const PiChartDatePicker = ({ setDailySummaries }) => {
   const [startDate, setStartDate] = useState(null);
   const [endDate, setEndDate] = useState(null);
-
-  const handleIconClick = () => {
-    if (pickerRef.current?.flatpickr) {
-      pickerRef.current.flatpickr.open();
-    }
-  };
+  const [isSelectingStart, setIsSelectingStart] = useState(true);
+  const inputRef = useRef(null);
+  const pickerRef = useRef(null);
 
   const handleDateChange = ([selected]) => {
     if (isSelectingStart) {
@@ -30,7 +27,29 @@ const PiChartDatePicker = () => {
       setIsSelectingStart(true);
     }
   };
+  useEffect(() => {
+    if (startDate && endDate) {
+      const fetchData = async () => {
+        try {
+          const response = await fetch(
+            `${backendUrl}/api/dailysummary/byDate?start=${startDate.toISOString()}&end=${endDate.toISOString()}`
+          );
+          const data = await response.json();
+          console.log("avlues of data 46", data);
+          setDailySummaries(data);
+        } catch (error) {
+          console.error("API call failed:", error);
+        }
+      };
 
+      fetchData();
+    }
+  }, [startDate, endDate]);
+  const handleIconCalendarClick = () => {
+    if (pickerRef.current?.flatpickr) {
+      pickerRef.current.flatpickr.open();
+    }
+  };
   const positionFlatpickrCalendar = () => {
     setTimeout(() => {
       const calendar = document.querySelector(".flatpickr-calendar");
@@ -39,8 +58,10 @@ const PiChartDatePicker = () => {
       if (!calendar || !icon) return;
 
       const iconRect = icon.getBoundingClientRect();
-      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-      const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+      const scrollTop =
+        window.pageYOffset || document.documentElement.scrollTop;
+      const scrollLeft =
+        window.pageXOffset || document.documentElement.scrollLeft;
       const calendarWidth = calendar.offsetWidth;
       const windowWidth = window.innerWidth;
 
@@ -59,7 +80,8 @@ const PiChartDatePicker = () => {
 
       if (!calendar.querySelector(".custom-footer")) {
         const footer = document.createElement("div");
-        footer.className = "custom-footer flex justify-between p-2 border-t border-gray-300 bg-gray-100";
+        footer.className =
+          "custom-footer flex justify-between p-2 border-t border-gray-300 bg-gray-100";
 
         const btnClasses =
           "px-3 py-1 text-xs rounded border border-gray-300 hover:bg-gray-200 cursor-pointer";
@@ -133,7 +155,7 @@ const PiChartDatePicker = () => {
       {/* Calendar Icon */}
       <div
         id="calendarTrigger"
-        onClick={handleIconClick}
+        onClick={handleIconCalendarClick}
         className="text-2xl cursor-pointer select-none mt-2 hover:text-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 rounded"
         role="button"
         tabIndex={0}
@@ -141,7 +163,7 @@ const PiChartDatePicker = () => {
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            handleIconClick();
+            handleIconCalendarClick();
           }
         }}
       >
