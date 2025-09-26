@@ -11,12 +11,12 @@ const formatDate = (date, type) =>
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-const PiChartDatePicker = ({ setDailySummaries  }) => {
+const PiChartDatePicker = ({ setDailySummariesDateWise }) => {
   const [startDate, setStartDate] = useState(null);
   const [endDate, setEndDate] = useState(null);
   const [isSelectingStart, setIsSelectingStart] = useState(true);
   const pickerRef = useRef(null);
-  const lastClickedRef = useRef(null); // 💡 Track clicked element to position calendar
+  const lastClickedRef = useRef(null);
 
   const handleDateChange = ([selected]) => {
     if (isSelectingStart) {
@@ -28,6 +28,7 @@ const PiChartDatePicker = ({ setDailySummaries  }) => {
     }
   };
 
+  // Fetch data when both dates are selected
   useEffect(() => {
     if (startDate && endDate) {
       const fetchData = async () => {
@@ -36,7 +37,7 @@ const PiChartDatePicker = ({ setDailySummaries  }) => {
             `${backendUrl}/api/dailysummary/byDate?start=${startDate.toISOString()}&end=${endDate.toISOString()}`
           );
           const data = await response.json();
-          setDailySummaries(data);
+          setDailySummariesDateWise(data);
         } catch (error) {
           console.error("API call failed:", error);
         }
@@ -62,8 +63,10 @@ const PiChartDatePicker = ({ setDailySummaries  }) => {
       if (!calendar || !target) return;
 
       const rect = target.getBoundingClientRect();
-      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-      const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+      const scrollTop =
+        window.pageYOffset || document.documentElement.scrollTop;
+      const scrollLeft =
+        window.pageXOffset || document.documentElement.scrollLeft;
       const calendarWidth = calendar.offsetWidth;
       const windowWidth = window.innerWidth;
 
@@ -99,10 +102,10 @@ const PiChartDatePicker = ({ setDailySummaries  }) => {
 
         todayBtn.onclick = () => {
           const today = new Date();
-          pickerRef.current.flatpickr.setDate(today, true);
           setStartDate(today);
           setEndDate(today);
           setIsSelectingStart(false);
+          pickerRef.current.flatpickr.setDate(today, true);
           pickerRef.current.flatpickr.close();
         };
 
@@ -142,14 +145,15 @@ const PiChartDatePicker = ({ setDailySummaries  }) => {
           End Date:
         </label>
         <div
-          className="w-40 h-10 flex items-center justify-center border border-gray-300 rounded-md shadow-sm bg-white text-gray-800 text-sm cursor-pointer hover:border-green-500"
+          className="w-40 h-10 flex items-center justify-center border border-gray-300 rounded-md shadow-sm
+           bg-white text-gray-800 text-sm cursor-pointer hover:border-green-500"
           onClick={(e) => openCalendar(e, false)}
         >
           {formatDate(endDate, "end")}
         </div>
       </div>
 
-      {/* Hidden Flatpickr */}
+      {/* Hidden Flatpickr Calendar */}
       <Flatpickr
         ref={pickerRef}
         options={{

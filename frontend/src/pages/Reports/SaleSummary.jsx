@@ -25,6 +25,7 @@ const SaleSummary = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [isViewCombineModalOpen, setIsViewCombineModalOpen] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const inputRef = useRef(null);
@@ -32,7 +33,8 @@ const SaleSummary = () => {
   const [isSelectingStart, setIsSelectingStart] = useState(true);
   const [startDate, setStartDate] = useState(null);
   const [endDate, setEndDate] = useState(null);
-  const [dateWiseFilter, setDateWiseFilter] = useState(false);
+  const [selectedTab, setSelectedTab] = useState("Single");
+  const [dailySummariesDateWise, setDailySummariesDateWise] = useState([]);
 
   // API call effect
   useEffect(() => {
@@ -43,7 +45,6 @@ const SaleSummary = () => {
             `${backendUrl}/api/dailysummary/byDate?start=${startDate.toISOString()}&end=${endDate.toISOString()}`
           );
           const data = await response.json();
-          console.log("avlues of data 46", data);
           setDailySummaries(data);
         } catch (error) {
           console.error("API call failed:", error);
@@ -139,43 +140,70 @@ const SaleSummary = () => {
   const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
   const search = searchTerm.toLowerCase();
+  const isSingleTab = selectedTab.toLowerCase() === "single";
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        let url = `${backendUrl}/api/dailysummary/byDate`;
+
+        if (startDate && endDate) {
+          url += `?start=${startDate.toISOString()}&end=${endDate.toISOString()}`;
+        }
+
+        const response = await fetch(url);
+        const data = await response.json();
+        setDailySummariesDateWise(data);
+      } catch (error) {
+        console.error("API call failed:", error);
+      }
+    };
+
+    if (!isSingleTab) {
+      fetchData();
+    }
+  }, [startDate, endDate, isSingleTab]);
 
   // Step 1: Flatten filtered products with parent metadata
-  console.log("values of dailySummaries", dailySummaries);
-  const allFilteredProducts = dailySummaries.flatMap((item) => {
-    const entryDate = new Date(item.date).toLocaleDateString("en-GB");
-    const isDateMatch = entryDate.includes(search);
+  let allFilteredProducts = [];
 
-    let filteredProducts = [];
+  if (isSingleTab) {
+    allFilteredProducts = dailySummaries.flatMap((item) => {
+      const entryDate = new Date(item.date).toLocaleDateString("en-GB");
 
-
-      filteredProducts = item.products.filter((product) => {
-        const searchTerm = search.toLowerCase();
+      const filteredProducts = item.products.filter((product) => {
         return (
           product.productName?.toLowerCase().includes(searchTerm) ||
           product.salesQuantity?.toString().includes(searchTerm) ||
           product.totalQuantity?.toString().includes(searchTerm) ||
           product.value?.toString().includes(searchTerm) ||
+          product.bonusQuantity?.toString().includes(searchTerm) ||
           item.totalDayQuantity?.toString().includes(searchTerm) ||
-          product.bonusQuantity?.toString().includes(searchTerm)
+          entryDate.includes(searchTerm)
         );
       });
-   
 
-    if (filteredProducts.length > 0) {
       return filteredProducts.map((product) => ({
         ...product,
         date: item.date,
         totalDayQuantity: item.totalDayQuantity,
         dailySummaryReportsId: item._id,
       }));
-    }
+    });
+  } else {
+    allFilteredProducts = dailySummariesDateWise.filter((item) => {
+      return (
+        item.productName?.toLowerCase().includes(searchTerm) ||
+        item.salesQuantity?.toString().includes(searchTerm) ||
+        item.bonusQuantity?.toString().includes(searchTerm) ||
+        item.amount?.toString().includes(searchTerm) ||
+        item.totalQuantity?.toString().includes(searchTerm) ||
+        item.totalDayQuantity?.toString().includes(searchTerm)
+      );
+    });
+  }
 
-    // Nothing matched
-    return [];
-  });
-
-  // Step 2: Paginate the flattened product list
+  // ✅ Pagination
   const totalPages = Math.ceil(allFilteredProducts.length / saleSummaryPerPage);
   const visiblePages = getVisiblePages(currentPage, totalPages);
   const currentDailySummaries = allFilteredProducts.slice(
@@ -452,6 +480,21 @@ const SaleSummary = () => {
     setIsEditModalOpen(true);
   };
 
+    const editCombineSaleSammaryReports = (product) => {
+    setForm({
+      productName: product.productName || "",
+      salesQuantity: product.salesQuantity || 0,
+      bonusQuantity: product.bonusQuantity || 0,
+      totalQuantity: product.totalQuantity || 0,
+      value: product.value || 0,
+      dailySummaryReportsId: product.dailySummaryReportsId || "", // summary _id
+      totalDayQuantity: product.totalDayQuantity || 0,
+      _id: product._id || "",
+    });
+
+    setIsOpen(true);
+    setIsViewCombineModalOpen(true);
+  };
   // Open view modal with selected customer data
   const handleSaleSammaryReports = (product, date) => {
     setForm({ ...product });
@@ -542,13 +585,18 @@ const SaleSummary = () => {
     [currentDailySummaries]
   );
 
+  function capitalizeFirstLetter(str) {
+    if (!str) return "";
+    str = str.toString(); // ensure it's a string
+    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+  }
+
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-1">
         <div className="flex gap-3">
           <button
-            // onClick={() => navigate("/reportlayout/salesummary/new")}
-            onClick={() => alert("Work on it")}
+            onClick={() => navigate("/reportlayout/salesummary/new")}
             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
           >
             <UserPlus size={18} /> Add New Summary Reports
@@ -569,141 +617,260 @@ const SaleSummary = () => {
             </button>
           )}
         </div>
-        <div className="flex justify-between items-center mb-4 gap-8">
-          <p className="text-lg font-semibold text-gray-700">
-            Total Count:{" "}
-            <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-              {allFilteredProducts.length}
-            </span>
-          </p>
-          <div className="relative w-full md:w-72">
-            <Search
-              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-              size={16}
-              onClick={handleIconClick}
-            />
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder="Search..."
-              value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+        {selectedTab.toLowerCase() === "combine" && (
+          <div className="flex items-center gap-8">
+            <p className="text-lg font-semibold text-gray-700">
+              Total Count:{" "}
+              <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+                {allFilteredProducts.length}
+              </span>
+            </p>
+
+            <div className="relative w-full md:w-72">
+              <Search
+                className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                size={16}
+                onClick={handleIconClick}
+              />
+              <input
+                ref={inputRef}
+                type="text"
+                placeholder="Search..."
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
+        <div className="flex gap-4">
+          {["Single", "Combine"].map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setSelectedTab(tab)}
+              className={`px-4 py-2 rounded-lg cursor-pointer ${
+                selectedTab === tab
+                  ? "bg-indigo-600 text-white"
+                  : "bg-gray-200 text-gray-700"
+              }`}
+            >
+              {capitalizeFirstLetter(tab)}
+            </button>
+          ))}
+        </div>
+
+        {selectedTab.toLowerCase() === "single" && (
+          <div className="flex items-center gap-8">
+            <p className="text-lg font-semibold text-gray-700">
+              Total Count:{" "}
+              <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+                {allFilteredProducts.length}
+              </span>
+            </p>
+
+            <div className="relative w-full md:w-72">
+              <Search
+                className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                size={16}
+                onClick={handleIconClick}
+              />
+              <input
+                ref={inputRef}
+                type="text"
+                placeholder="Search..."
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+              />
+            </div>
+          </div>
+        )}
+
+        {selectedTab.toLowerCase() === "combine" && (
+          <div className="w-full md:w-auto">
+            <PiChartDatePicker
+              setDailySummariesDateWise={setDailySummariesDateWise}
             />
           </div>
-        </div>
+        )}
       </div>
-      <PiChartDatePicker
-        setDailySummaries={setDailySummaries}
-      />
 
-      {/* Table */}
-      <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-        <table className="w-full border-collapse bg-white rounded-xl overflow-hidden text-center">
-          <thead className="bg-gray-100 text-gray-700 text-sm border-b">
-            <tr>
-              <th className="p-3">
-                <div className="flex items-center gap-4">
-                  {currentDailySummaries.length > 0 && (
-                    <input
-                      type="checkbox"
-                      checked={
-                        selected.length === currentDailySummaries.length &&
-                        currentDailySummaries.length > 0
-                      }
-                      onChange={(e) => toggleSelectAll(e.target.checked)}
-                    />
-                  )}
-                  <span>Product Name</span>
-                </div>
-              </th>
-              <th className="p-3">Sales Quantity</th>
-              <th className="p-3">Bonus Quantity</th>
-              <th className="p-3">Total Quantity</th>
-              <th className="p-3">Date</th>
-              <th className="p-3">Amount</th>
-              <th className="p-3">Total Day Quantity</th>
-              <th className="p-3">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {currentDailySummaries.length > 0 ? (
-              currentDailySummaries.map((product, index) => {
-                const entryDate = formatDateToReadable(product.date);
-                const isSelected = selected.some((s) => s._id === product._id);
-
-                return (
-                  <tr
-                    key={`${product.productName}-${index}`}
-                    className={`hover:bg-gray-50 ${
-                      (index + 1) % saleSummaryPerPage === 0 ||
-                      index + 1 === currentDailySummaries.length
-                        ? ""
-                        : "border-b"
-                    }`}
-                  >
-                    <td className="p-3">
-                      <div className="flex items-center gap-4">
-                        <input
-                          type="checkbox"
-                          checked={selected.some((s) => s.id === product._id)}
-                          onChange={() => toggleSelect(product)}
-                        />
-                        <span>
-                          {capitalizeFirstLetter(product.productName)}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="p-3">{product.salesQuantity}</td>
-                    <td className="p-3">{product.bonusQuantity}</td>
-                    <td className="p-3">{product.totalQuantity}</td>
-                    <td className="p-3">{entryDate}</td>
-                    <td className="p-3 font-medium">
-                      {product.value?.toFixed(2)}
-                    </td>
-                    <td className="p-3">{product.totalDayQuantity}</td>
-                    <td className="p-3 flex items-center justify-center gap-3">
-                      <button className="text-blue-600 hover:text-blue-800 cursor-pointer">
-                        <Eye
-                          onClick={() =>
-                            handleSaleSammaryReports(product, entryDate)
-                          }
-                          size={18}
-                        />
-                      </button>
-                      <button className="text-green-600 hover:text-green-800 cursor-pointer">
-                        <Edit
-                          onClick={() =>
-                            editSaleSammaryReports(product, entryDate)
-                          }
-                          size={18}
-                        />
-                      </button>
-                      <button
-                        onClick={() =>
-                          deleteSaleSammaryReports(product, entryDate)
-                        }
-                        className="text-red-600 hover:text-red-800 cursor-pointer"
-                      >
-                        <Trash2 size={18} />
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })
-            ) : (
+      {selectedTab.toLowerCase() == "single" && (
+        <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
+          <table className="w-full border-collapse bg-white rounded-xl overflow-hidden text-center">
+            <thead className="bg-gray-100 text-gray-700 text-sm border-b">
               <tr>
-                <td colSpan="7" className="text-center py-4 text-gray-500">
-                  No sales found.
-                </td>
+                <th className="p-3">
+                  <div className="flex items-center gap-4">
+                    {currentDailySummaries.length > 0 && (
+                      <input
+                        type="checkbox"
+                        checked={
+                          selected.length === currentDailySummaries.length &&
+                          currentDailySummaries.length > 0
+                        }
+                        onChange={(e) => toggleSelectAll(e.target.checked)}
+                      />
+                    )}
+                    <span>Product Name</span>
+                  </div>
+                </th>
+                <th className="p-3">Sales Quantity</th>
+                <th className="p-3">Bonus Quantity</th>
+                <th className="p-3">Total Quantity</th>
+                <th className="p-3">Date</th>
+                <th className="p-3">Amount</th>
+                <th className="p-3">Total Day Quantity</th>
+                <th className="p-3">Action</th>
               </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {currentDailySummaries.length > 0 ? (
+                currentDailySummaries.map((product, index) => {
+                  console.log("values of actve", selectedTab);
+                  const entryDate = formatDateToReadable(product.date);
+                  const isSelected = selected.some(
+                    (s) => s._id === product._id
+                  );
+
+                  return (
+                    <tr
+                      key={`${product.productName}-${index}`}
+                      className={`hover:bg-gray-50 ${
+                        (index + 1) % saleSummaryPerPage === 0 ||
+                        index + 1 === currentDailySummaries.length
+                          ? ""
+                          : "border-b"
+                      }`}
+                    >
+                      <td className="p-3">
+                        <div className="flex items-center gap-4">
+                          <input
+                            type="checkbox"
+                            checked={selected.some((s) => s.id === product._id)}
+                            onChange={() => toggleSelect(product)}
+                          />
+                          <span>
+                            {capitalizeFirstLetter(product.productName)}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="p-3">{product.salesQuantity}</td>
+                      <td className="p-3">{product.bonusQuantity}</td>
+                      <td className="p-3">{product.totalQuantity}</td>
+                      <td className="p-3">{entryDate}</td>
+                      <td className="p-3 font-medium">
+                        {product.value?.toFixed(2)}
+                      </td>
+                      <td className="p-3">{product.totalDayQuantity}</td>
+                      <td className="p-3 flex items-center justify-center gap-3">
+                        <button className="text-blue-600 hover:text-blue-800 cursor-pointer">
+                          <Eye
+                            onClick={() =>
+                              handleSaleSammaryReports(product, entryDate)
+                            }
+                            size={18}
+                          />
+                        </button>
+                        <button className="text-green-600 hover:text-green-800 cursor-pointer">
+                          <Edit
+                            onClick={() =>
+                              editSaleSammaryReports(product, entryDate)
+                            }
+                            size={18}
+                          />
+                        </button>
+                        <button
+                          onClick={() =>
+                            deleteSaleSammaryReports(product, entryDate)
+                          }
+                          className="text-red-600 hover:text-red-800 cursor-pointer"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan="7" className="text-center py-4 text-gray-500">
+                    No sales found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {selectedTab.toLowerCase() == "combine" && (
+        <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
+          <table className="w-full border-collapse bg-white rounded-xl overflow-hidden text-center">
+            <thead className="bg-gray-100 text-gray-700 text-sm border-b">
+              <tr>
+                <th className="p-3">Product Name</th>
+                <th className="p-3">Sales Quantity</th>
+                <th className="p-3">Bonus Quantity</th>
+                <th className="p-3">Total Quantity</th>
+                <th className="p-3">Amount</th>
+                <th className="p-3">Views</th>
+              </tr>
+            </thead>
+            <tbody>
+              {currentDailySummaries.length > 0 ? (
+                currentDailySummaries.map((product, index) => {
+                  return (
+                    <tr
+                      key={`${product.productName}-${index}`}
+                      className={`hover:bg-gray-50 ${
+                        (index + 1) % saleSummaryPerPage === 0 ||
+                        index + 1 === currentDailySummaries.length
+                          ? ""
+                          : "border-b"
+                      }`}
+                    >
+                      <td className="p-3">
+                        {capitalizeFirstLetter(product.productName)}
+                      </td>
+                      <td className="p-3">{product.salesQuantity}</td>
+                      <td className="p-3">{product.bonusQuantity}</td>
+                      <td className="p-3">{product.totalQuantity}</td>
+                      <td className="p-3 font-medium">
+                        {product.amount?.toFixed(2)}
+                      </td>
+                      <td className="p-3 flex items-center justify-center gap-3">
+                        <button className="text-blue-600 hover:text-blue-800 cursor-pointer">
+                          <Eye
+                            onClick={() =>
+                              editCombineSaleSammaryReports(product)
+                            }
+                            size={18}
+                          />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan="6" className="text-center py-4 text-gray-500">
+                    No sales found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {currentDailySummaries.length > 0 && (
         <div className="mt-4 p-5 flex justify-start gap-2">
@@ -1076,6 +1243,95 @@ const SaleSummary = () => {
               <div className="mt-6 flex justify-end">
                 <button
                   onClick={() => setIsViewModalOpen(false)}
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+        {isViewCombineModalOpen &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            {/* Background Overlay */}
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setIsOpen(false)}
+            />
+
+            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+              <button
+                onClick={() => setIsViewCombineModalOpen(false)}
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+
+              <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                View Combine Sales Summary
+              </h2>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Product Name
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {form.productName}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Sales Quantity
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {form.salesQuantity}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Bonus Quantity
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {form.bonusQuantity}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Total Quantity
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {form.totalQuantity}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Amount
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {form.value?.toFixed(2)}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Total Day Quantity
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {form.totalDayQuantity}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-6 flex justify-end">
+                <button
+                  onClick={() => setIsViewCombineModalOpen(false)}
                   className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
                 >
                   Close

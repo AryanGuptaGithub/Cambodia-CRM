@@ -78,6 +78,7 @@ import StaffMemberLayout from "./pages/Utility/StaffMemberLayout";
 import AddSale from "./pages/Sale/AddSale";
 import AddDailySampleReport from "./pages/Reports/AddDailySample";
 import AddNewPurchase from "./pages/Purchase/addNewPurchase";
+import AddDailySummaryReports from "./pages/Reports/AddNewSaleSummaryReports";
 function App() {
   return (
     <>
@@ -167,6 +168,8 @@ function App() {
             <Route path="ratelist" element={<RateList />} />
             <Route path="profitloss" element={<ProfitLoss />} />
             <Route path="salesummary" element={<SaleSummary />} />
+            <Route path="salesummary/new" element={<AddDailySummaryReports />} />
+
             <Route path="userreport" element={<UserReport />} />
           </Route>
 
