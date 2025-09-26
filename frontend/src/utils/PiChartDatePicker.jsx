@@ -2,7 +2,6 @@ import React, { useRef, useState } from "react";
 import Flatpickr from "react-flatpickr";
 import "flatpickr/dist/themes/material_green.css";
 
-// Format date to "27 Sept 2025"
 const formatDate = (date, type) =>
   date?.toLocaleDateString("en-GB", {
     day: "2-digit",
@@ -33,17 +32,72 @@ const PiChartDatePicker = () => {
   };
 
   const positionFlatpickrCalendar = () => {
-    const calendar = document.querySelector(".flatpickr-calendar");
-    const trigger = document.getElementById("calendarTrigger");
-    if (calendar && trigger) {
-      const rect = trigger.getBoundingClientRect();
-      calendar.style.top = `${rect.bottom + window.scrollY}px`;
-      calendar.style.left = `${rect.left + window.scrollX}px`;
-    }
+    setTimeout(() => {
+      const calendar = document.querySelector(".flatpickr-calendar");
+      const icon = document.getElementById("calendarTrigger");
+
+      if (!calendar || !icon) return;
+
+      const iconRect = icon.getBoundingClientRect();
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+      const calendarWidth = calendar.offsetWidth;
+      const windowWidth = window.innerWidth;
+
+      let left = iconRect.left + scrollLeft - calendarWidth;
+      if (left < 10) left = 10;
+      if (left + calendarWidth > windowWidth) {
+        left = windowWidth - calendarWidth - 10;
+      }
+
+      const top = iconRect.bottom + scrollTop + 12;
+
+      calendar.style.position = "absolute";
+      calendar.style.top = `${top}px`;
+      calendar.style.left = `${left}px`;
+      calendar.style.right = "auto";
+
+      if (!calendar.querySelector(".custom-footer")) {
+        const footer = document.createElement("div");
+        footer.className = "custom-footer flex justify-between p-2 border-t border-gray-300 bg-gray-100";
+
+        const btnClasses =
+          "px-3 py-1 text-xs rounded border border-gray-300 hover:bg-gray-200 cursor-pointer";
+
+        const todayBtn = document.createElement("button");
+        todayBtn.textContent = "Today";
+        todayBtn.className = btnClasses;
+
+        const resetBtn = document.createElement("button");
+        resetBtn.textContent = "Reset";
+        resetBtn.className = btnClasses;
+
+        todayBtn.onclick = () => {
+          const today = new Date();
+          pickerRef.current.flatpickr.setDate(today, true);
+          setStartDate(today);
+          setEndDate(today);
+          setIsSelectingStart(false);
+          pickerRef.current.flatpickr.close();
+        };
+
+        resetBtn.onclick = () => {
+          pickerRef.current.flatpickr.clear();
+          setStartDate(null);
+          setEndDate(null);
+          setIsSelectingStart(true);
+          pickerRef.current.flatpickr.close();
+        };
+
+        footer.appendChild(todayBtn);
+        footer.appendChild(resetBtn);
+        calendar.appendChild(footer);
+      }
+    }, 0);
   };
 
   return (
-    <div className="calendar-date-filter flex justify-end items-center gap-6 px-6 py-2">
+    <div className="flex justify-end items-center gap-6 px-6 p-1">
       {/* Start Date */}
       <div className="flex flex-col items-start">
         <label
@@ -76,16 +130,24 @@ const PiChartDatePicker = () => {
         </div>
       </div>
 
+      {/* Calendar Icon */}
       <div
         id="calendarTrigger"
         onClick={handleIconClick}
-        className="text-xl cursor-pointer select-none"
-        title={isSelectingStart ? "Select Start Date" : "Select End Date"}
+        className="text-2xl cursor-pointer select-none mt-2 hover:text-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 rounded"
+        role="button"
+        tabIndex={0}
+        aria-label={isSelectingStart ? "Select Start Date" : "Select End Date"}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            handleIconClick();
+          }
+        }}
       >
         📅
       </div>
 
-      {/* Hidden Flatpickr input */}
       <Flatpickr
         ref={pickerRef}
         options={{
@@ -95,7 +157,7 @@ const PiChartDatePicker = () => {
           onOpen: positionFlatpickrCalendar,
           onChange: handleDateChange,
         }}
-        style={{ opacity: 0, pointerEvents: "none" }}
+        style={{ opacity: 0, pointerEvents: "none", position: "absolute" }}
       />
     </div>
   );
