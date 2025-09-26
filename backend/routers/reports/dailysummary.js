@@ -209,7 +209,9 @@ router.delete("/dailysummary", async (req, res) => {
       );
     }
 
-    res.status(200).json({ message: `Selected <b>${ids.length}</b> daily summary reports deleted.` });
+    res.status(200).json({
+      message: `Selected <b>${ids.length}</b> daily summary reports deleted.`,
+    });
   } catch (error) {
     console.error("Deletion error:", error);
     res.status(500).json({ error: "Failed to delete product entries." });
@@ -220,30 +222,59 @@ router.get("/dailysummary/byDate", async (req, res) => {
   try {
     const { start, end } = req.query;
 
-    // Validate dates
     if (!start || !end) {
       return res.status(400).json({ message: "Missing start or end date." });
     }
 
     const startDate = new Date(start);
     const endDate = new Date(end);
-
     if (isNaN(startDate) || isNaN(endDate)) {
       return res.status(400).json({ message: "Invalid date format." });
     }
 
     endDate.setHours(23, 59, 59, 999);
-    const summaries = await DailySummary.find({
-      date: {
-        $gte: startDate,
-        $lte: endDate,
+
+    const results = await DailySummary.aggregate([
+      {
+        $match: {
+          date: {
+            $gte: startDate,
+            $lte: endDate,
+          },
+        },
       },
-    }).sort({ date: -1 });
-    console.log('values of su', summaries);
-    res.status(200).json(summaries);
+      { $unwind: "$products" },
+      {
+        $group: {
+          _id: "$products.productName",
+          salesQuantity: { $sum: "$products.salesQuantity" },
+          bonusQuantity: { $sum: "$products.bonusQuantity" },
+          totalQuantity: { $sum: "$products.totalQuantity" },
+          amount: { $sum: "$products.value" },
+          totalDayQuantity: { $max: "$totalDayQuantity" },
+        },
+      },
+
+      {
+        $project: {
+          _id: 0,
+          productName: "$_id",
+          salesQuantity: 1,
+          bonusQuantity: 1,
+          totalQuantity: 1,
+          amount: 1,
+          totalDayQuantity: 1,
+        },
+      },
+      { $sort: { productName: 1 } },
+    ]);
+
+    return res.status(200).json(results);
   } catch (err) {
-    console.error("Error fetching daily summaries by date:", err);
-    res.status(500).json({ message: "Failed to fetch daily summaries." });
+    console.error("Error fetching aggregated daily summaries:", err);
+    return res.status(500).json({
+      message: "Failed to fetch aggregated daily summaries.",
+    });
   }
 });
 

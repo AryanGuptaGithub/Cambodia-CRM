@@ -11,12 +11,12 @@ const formatDate = (date, type) =>
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-const PiChartDatePicker = ({ setDailySummaries }) => {
+const PiChartDatePicker = ({ setDailySummaries  }) => {
   const [startDate, setStartDate] = useState(null);
   const [endDate, setEndDate] = useState(null);
   const [isSelectingStart, setIsSelectingStart] = useState(true);
-  const inputRef = useRef(null);
   const pickerRef = useRef(null);
+  const lastClickedRef = useRef(null); // 💡 Track clicked element to position calendar
 
   const handleDateChange = ([selected]) => {
     if (isSelectingStart) {
@@ -27,6 +27,7 @@ const PiChartDatePicker = ({ setDailySummaries }) => {
       setIsSelectingStart(true);
     }
   };
+
   useEffect(() => {
     if (startDate && endDate) {
       const fetchData = async () => {
@@ -35,7 +36,6 @@ const PiChartDatePicker = ({ setDailySummaries }) => {
             `${backendUrl}/api/dailysummary/byDate?start=${startDate.toISOString()}&end=${endDate.toISOString()}`
           );
           const data = await response.json();
-          console.log("avlues of data 46", data);
           setDailySummaries(data);
         } catch (error) {
           console.error("API call failed:", error);
@@ -45,39 +45,42 @@ const PiChartDatePicker = ({ setDailySummaries }) => {
       fetchData();
     }
   }, [startDate, endDate]);
-  const handleIconCalendarClick = () => {
+
+  const openCalendar = (e, isStart) => {
+    setIsSelectingStart(isStart);
+    lastClickedRef.current = e.currentTarget;
     if (pickerRef.current?.flatpickr) {
       pickerRef.current.flatpickr.open();
     }
   };
+
   const positionFlatpickrCalendar = () => {
     setTimeout(() => {
       const calendar = document.querySelector(".flatpickr-calendar");
-      const icon = document.getElementById("calendarTrigger");
+      const target = lastClickedRef.current;
 
-      if (!calendar || !icon) return;
+      if (!calendar || !target) return;
 
-      const iconRect = icon.getBoundingClientRect();
-      const scrollTop =
-        window.pageYOffset || document.documentElement.scrollTop;
-      const scrollLeft =
-        window.pageXOffset || document.documentElement.scrollLeft;
+      const rect = target.getBoundingClientRect();
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
       const calendarWidth = calendar.offsetWidth;
       const windowWidth = window.innerWidth;
 
-      let left = iconRect.left + scrollLeft - calendarWidth;
+      let left = rect.left + scrollLeft - calendarWidth;
       if (left < 10) left = 10;
       if (left + calendarWidth > windowWidth) {
         left = windowWidth - calendarWidth - 10;
       }
 
-      const top = iconRect.bottom + scrollTop + 12;
+      const top = rect.bottom + scrollTop + 12;
 
       calendar.style.position = "absolute";
       calendar.style.top = `${top}px`;
       calendar.style.left = `${left}px`;
       calendar.style.right = "auto";
 
+      // Inject footer buttons (Today, Reset) only once
       if (!calendar.querySelector(".custom-footer")) {
         const footer = document.createElement("div");
         footer.className =
@@ -122,15 +125,12 @@ const PiChartDatePicker = ({ setDailySummaries }) => {
     <div className="flex justify-end items-center gap-6 px-6 p-1">
       {/* Start Date */}
       <div className="flex flex-col items-start">
-        <label
-          htmlFor="calendarTrigger"
-          className="text-sm font-semibold text-gray-700 mb-1"
-        >
+        <label className="text-sm font-semibold text-gray-700 mb-1">
           Start Date:
         </label>
         <div
-          id="startDateLabel"
-          className="w-40 h-10 flex items-center justify-center border border-gray-300 rounded-md shadow-sm bg-white text-gray-800 text-sm"
+          className="w-40 h-10 flex items-center justify-center border border-gray-300 rounded-md shadow-sm bg-white text-gray-800 text-sm cursor-pointer hover:border-green-500"
+          onClick={(e) => openCalendar(e, true)}
         >
           {formatDate(startDate, "start")}
         </div>
@@ -138,38 +138,18 @@ const PiChartDatePicker = ({ setDailySummaries }) => {
 
       {/* End Date */}
       <div className="flex flex-col items-start">
-        <label
-          htmlFor="calendarTrigger"
-          className="text-sm font-semibold text-gray-700 mb-1"
-        >
+        <label className="text-sm font-semibold text-gray-700 mb-1">
           End Date:
         </label>
         <div
-          id="endDateLabel"
-          className="w-40 h-10 flex items-center justify-center border border-gray-300 rounded-md shadow-sm bg-white text-gray-800 text-sm"
+          className="w-40 h-10 flex items-center justify-center border border-gray-300 rounded-md shadow-sm bg-white text-gray-800 text-sm cursor-pointer hover:border-green-500"
+          onClick={(e) => openCalendar(e, false)}
         >
           {formatDate(endDate, "end")}
         </div>
       </div>
 
-      {/* Calendar Icon */}
-      <div
-        id="calendarTrigger"
-        onClick={handleIconCalendarClick}
-        className="text-2xl cursor-pointer select-none mt-2 hover:text-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 rounded"
-        role="button"
-        tabIndex={0}
-        aria-label={isSelectingStart ? "Select Start Date" : "Select End Date"}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            handleIconCalendarClick();
-          }
-        }}
-      >
-        📅
-      </div>
-
+      {/* Hidden Flatpickr */}
       <Flatpickr
         ref={pickerRef}
         options={{

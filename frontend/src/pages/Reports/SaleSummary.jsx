@@ -32,6 +32,7 @@ const SaleSummary = () => {
   const [isSelectingStart, setIsSelectingStart] = useState(true);
   const [startDate, setStartDate] = useState(null);
   const [endDate, setEndDate] = useState(null);
+  const [dateWiseFilter, setDateWiseFilter] = useState(false);
 
   // API call effect
   useEffect(() => {
@@ -140,33 +141,27 @@ const SaleSummary = () => {
   const search = searchTerm.toLowerCase();
 
   // Step 1: Flatten filtered products with parent metadata
+  console.log("values of dailySummaries", dailySummaries);
   const allFilteredProducts = dailySummaries.flatMap((item) => {
     const entryDate = new Date(item.date).toLocaleDateString("en-GB");
     const isDateMatch = entryDate.includes(search);
 
-    const filteredProducts = item.products.filter((product) => {
-      return (
-        product.productName?.toLowerCase().includes(search) ||
-        product.salesQuantity?.toString().includes(search) ||
-        product.totalQuantity?.toString().includes(search) ||
-        product.value?.toString().includes(search) ||
-        product.value?.toString().includes(search) ||
-        item.totalDayQuantity?.toString().includes(search) ||
-        product.bonusQuantity?.toString().includes(search)
-      );
-    });
+    let filteredProducts = [];
 
-    // If date matches, include all products
-    if (isDateMatch) {
-      return item.products.map((product) => ({
-        ...product,
-        date: item.date,
-        totalDayQuantity: item.totalDayQuantity,
-        dailySummaryReportsId: item._id,
-      }));
-    }
 
-    // If some products match, include only those
+      filteredProducts = item.products.filter((product) => {
+        const searchTerm = search.toLowerCase();
+        return (
+          product.productName?.toLowerCase().includes(searchTerm) ||
+          product.salesQuantity?.toString().includes(searchTerm) ||
+          product.totalQuantity?.toString().includes(searchTerm) ||
+          product.value?.toString().includes(searchTerm) ||
+          item.totalDayQuantity?.toString().includes(searchTerm) ||
+          product.bonusQuantity?.toString().includes(searchTerm)
+        );
+      });
+   
+
     if (filteredProducts.length > 0) {
       return filteredProducts.map((product) => ({
         ...product,
@@ -176,7 +171,7 @@ const SaleSummary = () => {
       }));
     }
 
-    // Else, return nothing
+    // Nothing matched
     return [];
   });
 
@@ -601,7 +596,9 @@ const SaleSummary = () => {
           </div>
         </div>
       </div>
-      <PiChartDatePicker setDailySummaries={setDailySummaries} />
+      <PiChartDatePicker
+        setDailySummaries={setDailySummaries}
+      />
 
       {/* Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
