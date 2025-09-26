@@ -454,6 +454,10 @@ const SaleSummary = () => {
     },
     [currentDailySummaries]
   );
+  // const handleDatesReady = (startDate, endDate) => {
+  //   console.log("Dates are ready:", startDate, endDate);
+  //   mainLogic(startDate, endDate);
+  // };
 
   return (
     <div className="p-6">
@@ -461,7 +465,7 @@ const SaleSummary = () => {
         <div className="flex gap-3">
           <button
             // onClick={() => navigate("/reportlayout/salesummary/new")}
-            onClick={()=>alert("Work on it")}
+            onClick={() => alert("Work on it")}
             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
           >
             <UserPlus size={18} /> Add New Summary Reports
@@ -509,6 +513,8 @@ const SaleSummary = () => {
           </div>
         </div>
       </div>
+       <PiChartDatePicker />
+      
 
       {/* Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">

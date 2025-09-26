@@ -1,73 +1,101 @@
-import React, { useRef, useEffect, useState } from "react";
+import React, { useRef, useState } from "react";
 import Flatpickr from "react-flatpickr";
-import "flatpickr/dist/themes/material_green.css"; // or any theme
+import "flatpickr/dist/themes/material_green.css";
+
+// Format date to "27 Sept 2025"
+const formatDate = (date, type) =>
+  date?.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }) || `Enter ${type} Date`;
 
 const PiChartDatePicker = () => {
-  const [selectedDates, setSelectedDates] = useState([]);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const pickerRef = useRef();
-  const iconRef = useRef();
+  const pickerRef = useRef(null);
+  const [isSelectingStart, setIsSelectingStart] = useState(true);
+  const [startDate, setStartDate] = useState(null);
+  const [endDate, setEndDate] = useState(null);
 
-  // Your handler function when date range changes
-  const onDateChangeHandler = (dates) => {
-    console.log("Selected range:", dates);
-    // Do something with the date range
+  const handleIconClick = () => {
+    if (pickerRef.current?.flatpickr) {
+      pickerRef.current.flatpickr.open();
+    }
   };
 
-  // Custom positioning & footer logic
-  const positionFlatpickrCalendar = (iconElement) => {
+  const handleDateChange = ([selected]) => {
+    if (isSelectingStart) {
+      setStartDate(selected);
+      setIsSelectingStart(false);
+    } else {
+      setEndDate(selected);
+      setIsSelectingStart(true);
+    }
+  };
+
+  const positionFlatpickrCalendar = () => {
     const calendar = document.querySelector(".flatpickr-calendar");
-    if (calendar && iconElement) {
-      const rect = iconElement.getBoundingClientRect();
+    const trigger = document.getElementById("calendarTrigger");
+    if (calendar && trigger) {
+      const rect = trigger.getBoundingClientRect();
       calendar.style.top = `${rect.bottom + window.scrollY}px`;
       calendar.style.left = `${rect.left + window.scrollX}px`;
     }
   };
 
-  const appendFooter = (fpInstance, startDate, endDate) => {
-    const calendar = document.querySelector(".flatpickr-calendar");
-    if (calendar && !calendar.querySelector(".custom-footer")) {
-      const footer = document.createElement("div");
-      footer.className = "custom-footer";
-      footer.innerHTML = `
-        <div style="padding: 10px; text-align: center;">
-          <strong>From:</strong> ${startDate?.toLocaleDateString() || "-"} <br/>
-          <strong>To:</strong> ${endDate?.toLocaleDateString() || "-"}
-        </div>
-      `;
-      calendar.appendChild(footer);
-    }
-  };
-
   return (
-    <div>
-      <span ref={iconRef}>📅</span>
+    <div className="calendar-date-filter flex justify-end items-center gap-6 px-6 py-2">
+      {/* Start Date */}
+      <div className="flex flex-col items-start">
+        <label
+          htmlFor="calendarTrigger"
+          className="text-sm font-semibold text-gray-700 mb-1"
+        >
+          Start Date:
+        </label>
+        <div
+          id="startDateLabel"
+          className="w-40 h-10 flex items-center justify-center border border-gray-300 rounded-md shadow-sm bg-white text-gray-800 text-sm"
+        >
+          {formatDate(startDate, "start")}
+        </div>
+      </div>
 
+      {/* End Date */}
+      <div className="flex flex-col items-start">
+        <label
+          htmlFor="calendarTrigger"
+          className="text-sm font-semibold text-gray-700 mb-1"
+        >
+          End Date:
+        </label>
+        <div
+          id="endDateLabel"
+          className="w-40 h-10 flex items-center justify-center border border-gray-300 rounded-md shadow-sm bg-white text-gray-800 text-sm"
+        >
+          {formatDate(endDate, "end")}
+        </div>
+      </div>
+
+      <div
+        id="calendarTrigger"
+        onClick={handleIconClick}
+        className="text-xl cursor-pointer select-none"
+        title={isSelectingStart ? "Select Start Date" : "Select End Date"}
+      >
+        📅
+      </div>
+
+      {/* Hidden Flatpickr input */}
       <Flatpickr
         ref={pickerRef}
         options={{
-          mode: "range",
+          mode: "single",
           dateFormat: "d-m-Y",
           clickOpens: false,
-          showMonths: 1,
-          monthSelectorType: "dropdown",
-          onOpen: () => {
-            setTimeout(() => {
-              positionFlatpickrCalendar(iconRef.current);
-              appendFooter(
-                pickerRef.current.flatpickr,
-                selectedDates[0],
-                selectedDates[1]
-              );
-            }, 0);
-          },
-          onChange: (dates) => {
-            setSelectedDates(dates);
-            if (!isSyncing) {
-              onDateChangeHandler(dates);
-            }
-          }
+          onOpen: positionFlatpickrCalendar,
+          onChange: handleDateChange,
         }}
+        style={{ opacity: 0, pointerEvents: "none" }}
       />
     </div>
   );

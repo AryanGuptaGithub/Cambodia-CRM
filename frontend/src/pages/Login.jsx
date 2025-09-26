@@ -35,7 +35,7 @@ const Login = () => {
     localStorage.setItem("token", data.token);
     localStorage.setItem("role", data.role);
 
-    navigate("/");
+    navigate("/graph");
   } catch (err) {
     setError("Something went wrong. Please try again.");
   }
