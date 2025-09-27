@@ -15,7 +15,7 @@ import { getVisiblePages } from "../../utils/useVisiblePages";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { confirmDialog } from "../../utils/confirmationDialog";
-import PiChartDatePicker from "../../utils/PiChartDatePicker";
+import DailyPiChartDatePicker from "../../utils/dailyReportsDatePicker";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
@@ -23,7 +23,8 @@ const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 const AddDailReports = () => {
   const [dailyReports, setDailyReports] = useState([]);
   const [dailyReportsDate, setDailyReportsDate] = useState([]);
-  const [selecteReportTypeTab, setSelectedReportTypeTab] = useState("Multiple");
+  const [selectedReportTypeTab, setSelectedReportTypeTab] =
+    useState("Multiple");
   const [selectedTab, setSelectedTab] = useState("Total Sales");
   const [selected, setSelected] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
@@ -37,6 +38,10 @@ const AddDailReports = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+  const [startDate, setStartDate] = useState(null);
+  const [endDate, setEndDate] = useState(null);
+  const [isSelectingStart, setIsSelectingStart] = useState(true);
+
   const inputRef = useRef(null);
 
   const dailyReportsPerPage = 9;
@@ -59,7 +64,7 @@ const AddDailReports = () => {
 
   // Fetch data on mount
   useEffect(() => {
-    fetchDailyReports();
+    fetchDailyReports(selectedReportTypeTab);
   }, []);
   useEffect(() => {
     fetchSaleType();
@@ -72,24 +77,49 @@ const AddDailReports = () => {
   }
 
   // Fetch function
-  const fetchDailyReports = async (saleType) => {
+  const fetchDailyReports = async (tab, saleType, startDate, endDate) => {
     try {
       setLoading(true);
-      let url = `${backendUrl}/api/dailyReports`;
-      if (saleType) {
-        url += `?saleType=${saleType}`;
-      }
 
-      const res = await fetch(url);
+      const url = new URL(`${backendUrl}/api/dailyReports`);
+      const params = url.searchParams;
+
+      if (tab) params.append("tab", tab);
+      if (saleType) params.append("saleType", saleType);
+      if (startDate instanceof Date && !isNaN(startDate))
+        params.append("startDate", startDate.toISOString());
+      if (endDate instanceof Date && !isNaN(endDate))
+        params.append("endDate", endDate.toISOString());
+
+      const res = await fetch(url.toString());
       if (!res.ok) throw new Error("Failed to fetch sale summaries");
 
       const data = await res.json();
-      const dateRangeSetter = `${formatDateToReadable(
-        data.dateRange.minRecordingDate
-      )} - ${formatDateToReadable(data.dateRange.maxRecordingDate)}`;
 
-      setDailyReports(data.reports);
+      const { minRecordingDate, maxRecordingDate } = data.dateRange || {};
+
+      const dateRangeSetter =
+        minRecordingDate && maxRecordingDate
+          ? formatDateToReadable(minRecordingDate) ===
+            formatDateToReadable(maxRecordingDate)
+            ? formatDateToReadable(minRecordingDate)
+            : `${formatDateToReadable(
+                minRecordingDate
+              )} - ${formatDateToReadable(maxRecordingDate)}`
+          : "";
+      setDailyReports(data.reports || []);
       setDailyReportsDate(dateRangeSetter);
+
+      if (
+        data?.dateRange?.minRecordingDate &&
+        data?.dateRange?.maxRecordingDate
+      ) {
+        const minDate = new Date(data.dateRange.minRecordingDate);
+        const maxDate = new Date(data.dateRange.maxRecordingDate);
+
+        setStartDate(minDate);
+        setEndDate(maxDate);
+      }
     } catch (error) {
       console.error("❌ Fetch error:", error);
       showToast("error", error.message || "Error fetching sale summaries");
@@ -176,11 +206,38 @@ const AddDailReports = () => {
       }, 1000);
     }
   };
+
   const handlerTab = (type) => {
     setSelectedTab(type);
     setCurrentPage(1);
+    setSearchTerm("");
     setSelected([]);
-    fetchDailyReports(type);
+
+    if (
+      startDate &&
+      endDate &&
+      selectedReportTypeTab.toLowerCase() == "single"
+    ) {
+      fetchDailyReports(selectedReportTypeTab, type, startDate, endDate);
+    } else {
+      fetchDailyReports(selectedReportTypeTab, type);
+    }
+  };
+
+  const saleTypeChange = (tab) => {
+    setSelectedReportTypeTab(tab);
+    setCurrentPage(1);
+    setSelectedTab("Total Sales");
+
+    if (tab.toLowerCase() === "single") {
+      if (startDate && endDate) {
+        fetchDailyReports(tab, startDate, endDate);
+      } else {
+        fetchDailyReports(tab);
+      }
+    } else {
+      fetchDailyReports(tab);
+    }
   };
 
   return (
@@ -191,9 +248,9 @@ const AddDailReports = () => {
             {["Multiple", "Single"].map((tab) => (
               <button
                 key={tab}
-                onClick={() => setSelectedReportTypeTab(tab)}
+                onClick={() => saleTypeChange(tab)}
                 className={`px-4 py-2 rounded-lg cursor-pointer ${
-                  selecteReportTypeTab === tab
+                  selectedReportTypeTab === tab
                     ? "bg-indigo-600 text-white"
                     : "bg-gray-200 text-gray-700"
                 }`}
@@ -202,7 +259,7 @@ const AddDailReports = () => {
               </button>
             ))}
           </div>
-          {selecteReportTypeTab.toLowerCase() === "single" && (
+          {selectedReportTypeTab.toLowerCase() === "single" && (
             <div className="flex items-center gap-8">
               <p className="text-lg font-semibold text-gray-700">
                 Total Count:{" "}
@@ -234,28 +291,25 @@ const AddDailReports = () => {
         </div>
 
         <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
-          {dailyReports.length > 0 ? (
-            <div className="flex items-center gap-6">
-              <div className="flex gap-4">
-                {types.map(({ type }) => (
-                  <button
-                    key={type}
-                    onClick={() => handlerTab(type)}
-                    className={`px-4 py-2 rounded-lg cursor-pointer ${
-                      selectedTab === type
-                        ? "bg-indigo-600 text-white"
-                        : "bg-gray-200 text-gray-700"
-                    }`}
-                  >
-                    {capitalizeFirstLetter(type)}
-                  </button>
-                ))}
-              </div>
+          <div className="flex items-center gap-6">
+            <div className="flex gap-4">
+              {types.map(({ type }) => (
+                <button
+                  key={type}
+                  onClick={() => handlerTab(type)}
+                  className={`px-4 py-2 rounded-lg cursor-pointer ${
+                    selectedTab === type
+                      ? "bg-indigo-600 text-white"
+                      : "bg-gray-200 text-gray-700"
+                  }`}
+                >
+                  {capitalizeFirstLetter(type)}
+                </button>
+              ))}
             </div>
-          ) : (
-            <div></div>
-          )}
-          {selecteReportTypeTab.toLowerCase() == "multiple" && (
+          </div>
+
+          {selectedReportTypeTab.toLowerCase() == "multiple" && (
             <div className="flex items-center gap-8">
               <p className="text-lg font-semibold text-gray-700">
                 Total Count:{" "}
@@ -283,9 +337,14 @@ const AddDailReports = () => {
               </div>
             </div>
           )}
-          {selecteReportTypeTab.toLowerCase() === "single" && (
+          {selectedReportTypeTab.toLowerCase() === "single" && (
             <div className="w-full md:w-auto">
-              <PiChartDatePicker />
+              <DailyPiChartDatePicker
+                startDate={startDate}
+                endDate={endDate}
+                setStartDate={setStartDate}
+                setEndDate={setEndDate}
+              />
             </div>
           )}
         </div>
