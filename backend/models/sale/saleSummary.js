@@ -44,14 +44,22 @@ const saleSummarySchema = new Schema(
       set: roundToTwo,
     },
     creditDays: { type: Number, default: null },
-    dueDate: { type: Date, require: false },
-    deliveryDate: { type: Date, require: false },
+    dueDate: { type: Date, required: false },
+    deliveryDate: { type: Date, required: false },
     paidAmount: { type: Number, default: 0 },
     dueAmount: { type: Number, default: 0 },
     paymentStatus: {
       type: String,
       enum: ["paid", "unPaid", "pending", "overdue"],
       default: "pending",
+    },
+    saleType: {
+      type: String,
+      enum: ["Cash Sales", "Credit Sales"],
+      default: function () {
+        return this.paymentStatus === "paid" ? "Cash Sales" : "Credit Sales";
+      },
+      required: true,
     },
     remark: { type: String, default: "" },
   },
@@ -60,5 +68,14 @@ const saleSummarySchema = new Schema(
   }
 );
 
+// Optional: If you want to update saleType automatically on validation (recommended)
+saleSummarySchema.pre("validate", function (next) {
+  if (!this.saleType) {
+    this.saleType = this.paymentStatus === "paid" ? "Cash Sales" : "Credit Sales";
+  }
+  next();
+});
+
 const SaleSummary = mongoose.model("SaleSummary", saleSummarySchema);
+
 export default SaleSummary;

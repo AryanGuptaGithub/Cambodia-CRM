@@ -33,10 +33,7 @@ import {
   Coins,
 } from "lucide-react";
 
-const masterPaths = [
-  "/masterlayout/customer",
-  "/masterlayout/supplier",
-];
+const masterPaths = ["/masterlayout/customer", "/masterlayout/supplier"];
 const purchasePaths = [
   "/purchaselayout/purchase",
   "/purchaselayout/crnote",
@@ -74,6 +71,7 @@ const expensePaths = [
 
 const reportPaths = [
   "/reportlayout/payment",
+  "/reportlayout/dailyreport",
   "/reportlayout/salesummary",
   "/reportlayout/dailysample",
   "/reportlayout/productsalessummary",
@@ -105,15 +103,15 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
       setActiveParentMenu("sales");
     } else if (location.pathname.startsWith("/expenselayout")) {
       setActiveParentMenu("expense");
-    }else if (location.pathname.startsWith("/reportlayout")) {
+    } else if (location.pathname.startsWith("/reportlayout")) {
       setActiveParentMenu("reports");
-    }else if (location.pathname.startsWith("/utilitylayout")) {
+    } else if (location.pathname.startsWith("/utilitylayout")) {
       setActiveParentMenu("utility");
-    }else if (location.pathname.startsWith("/hrmlayout")) {
+    } else if (location.pathname.startsWith("/hrmlayout")) {
       setActiveParentMenu("hrm");
-    }else if (location.pathname.startsWith("/settinglayout")) {
+    } else if (location.pathname.startsWith("/settinglayout")) {
       setActiveParentMenu("hrm");
-    }else{
+    } else {
       setActiveParentMenu(null);
     }
   }, [location.pathname]);
@@ -367,7 +365,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                 <span className="mx-auto">Sale</span>
               </Link>
 
-               <Link
+              <Link
                 to="/salelayout/salereturn"
                 className={getChildLinkClass("/salelayout/salereturn")}
                 onClick={() => setActiveParentMenu(activeParentMenu)}
@@ -392,7 +390,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               >
                 <ClipboardList className="w-4 h-4" />
                 <span className="mx-auto">Quotation</span>
-              </Link> 
+              </Link>
             </div>
           )}
         </div>
@@ -462,6 +460,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
           <button
             onClick={() => toggleMenu("reports")}
             className={getDropdownButtonClass("reports", [
+              "/reportlayout/dailyreport",
               "/reportlayout/payment",
               "/reportlayout/salesummary",
               "/reportlayout/dailysample",
@@ -488,6 +487,14 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
 
           {activeParentMenu === "reports" && isOpen && (
             <div className="ml-6 mt-1 space-y-1">
+              <Link
+                to="/reportlayout/dailyreport"
+                className={getChildLinkClass("/reportlayout/dailyreport")}
+                onClick={() => setActiveParentMenu(activeParentMenu)}
+              >
+                <CreditCard className="w-4 h-4" />
+                <span className="mx-auto">Daily Reports</span>
+              </Link>
               <Link
                 to="/reportlayout/payment"
                 className={getChildLinkClass("/reportlayout/payment")}
@@ -566,7 +573,10 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
           )}
         </div>
 
-        <Link to="/staffmemberLayout/staffmember" className={getLinkClass("/staffmemberLayout")}>
+        <Link
+          to="/staffmemberLayout/staffmember"
+          className={getLinkClass("/staffmemberLayout")}
+        >
           <UserCog className="w-5 h-5" />
           {isOpen && <span className="mx-auto">Staff Members</span>}
         </Link>

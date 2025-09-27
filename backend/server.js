@@ -17,6 +17,7 @@ import payments from "./routers/reports/payments.js";
 import dailySample from "./routers/reports/dailysample.js";
 import purcharse from "./routers/purcharsing/purcharsing.js";
 import dailySummary from "./routers/reports/dailysummary.js";
+import dailyReports from "./routers/reports/dailyReports.js";
 
 dotenv.config(); // Load environment variables
 
@@ -67,6 +68,7 @@ app.use('/api', payments);
 app.use('/api', dailySample);
 app.use('/api', purcharse);
 app.use('/api', dailySummary);
+app.use("/api", dailyReports);
 
 // Server listener
 app.listen(PORT, () => {
