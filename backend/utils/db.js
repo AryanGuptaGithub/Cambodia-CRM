@@ -22,7 +22,6 @@ async function connectDB(uri) {
     });
     isConnected = true;
     console.log("✅ MongoDB connected");
-    
     return mongoose.connection;
   } catch (err) {
     console.error("❌ MongoDB connection error:", err);

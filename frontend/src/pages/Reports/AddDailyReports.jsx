@@ -15,12 +15,15 @@ import { getVisiblePages } from "../../utils/useVisiblePages";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { confirmDialog } from "../../utils/confirmationDialog";
+import PiChartDatePicker from "../../utils/PiChartDatePicker";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
 const AddDailReports = () => {
   const [dailyReports, setDailyReports] = useState([]);
+  const [dailyReportsDate, setDailyReportsDate] = useState([]);
+  const [selecteReportTypeTab, setSelectedReportTypeTab] = useState("Multiple");
   const [selectedTab, setSelectedTab] = useState("Total Sales");
   const [selected, setSelected] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
@@ -81,7 +84,12 @@ const AddDailReports = () => {
       if (!res.ok) throw new Error("Failed to fetch sale summaries");
 
       const data = await res.json();
-      setDailyReports(data);
+      const dateRangeSetter = `${formatDateToReadable(
+        data.dateRange.minRecordingDate
+      )} - ${formatDateToReadable(data.dateRange.maxRecordingDate)}`;
+
+      setDailyReports(data.reports);
+      setDailyReportsDate(dateRangeSetter);
     } catch (error) {
       console.error("❌ Fetch error:", error);
       showToast("error", error.message || "Error fetching sale summaries");
@@ -110,7 +118,6 @@ const AddDailReports = () => {
     const lowerSearch = searchTerm.trim().toLowerCase();
 
     return dailyReports.filter((sale) => {
-    
       if (selectedTab !== "Total Sales" && sale.saleType !== selectedTab) {
         return false;
       }
@@ -174,63 +181,115 @@ const AddDailReports = () => {
     setCurrentPage(1);
     setSelected([]);
     fetchDailyReports(type);
-    console.log('values of dailyReports', dailyReports);
   };
-  const sortedTypes = [...types].sort((a, b) => b.type.localeCompare(a.type));
 
   return (
     <div className="p-6">
-      <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
-        {dailyReports.length > 0 ? (
-          <div className="flex items-center gap-6">
-            <div className="flex gap-4">
-              {sortedTypes.map(({ type }) => (
-                <button
-                  key={type}
-                  onClick={() => handlerTab(type)}
-                  className={`px-4 py-2 rounded-lg cursor-pointer ${
-                    selectedTab === type
-                      ? "bg-indigo-600 text-white"
-                      : "bg-gray-200 text-gray-700"
-                  }`}
-                >
-                  {capitalizeFirstLetter(type)}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div></div>
-        )}
-
-        <div className="flex items-center gap-8">
-          <p className="text-lg font-semibold text-gray-700">
-            Total Count:{" "}
-            <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-              {filteredDailyReports.length}
-            </span>
-          </p>
-          <div className="relative w-full md:w-72">
-            <Search
-              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-              size={16}
-              onClick={handleIconClick}
-            />
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder="Search invoice, customer, status..."
-              value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-            />
-          </div>
-        </div>
-      </div>
       <div className="container">
+        <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
+          <div className="flex gap-4">
+            {["Multiple", "Single"].map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setSelectedReportTypeTab(tab)}
+                className={`px-4 py-2 rounded-lg cursor-pointer ${
+                  selecteReportTypeTab === tab
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 text-gray-700"
+                }`}
+              >
+                {capitalizeFirstLetter(tab)}
+              </button>
+            ))}
+          </div>
+          {selecteReportTypeTab.toLowerCase() === "single" && (
+            <div className="flex items-center gap-8">
+              <p className="text-lg font-semibold text-gray-700">
+                Total Count:{" "}
+                <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+                  {dailyReports.length}
+                </span>
+              </p>
+
+              <div className="relative w-full md:w-72">
+                <Search
+                  className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                  size={16}
+                  onClick={handleIconClick}
+                />
+                <input
+                  ref={inputRef}
+                  type="text"
+                  placeholder="Search..."
+                  value={searchTerm}
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
+          {dailyReports.length > 0 ? (
+            <div className="flex items-center gap-6">
+              <div className="flex gap-4">
+                {types.map(({ type }) => (
+                  <button
+                    key={type}
+                    onClick={() => handlerTab(type)}
+                    className={`px-4 py-2 rounded-lg cursor-pointer ${
+                      selectedTab === type
+                        ? "bg-indigo-600 text-white"
+                        : "bg-gray-200 text-gray-700"
+                    }`}
+                  >
+                    {capitalizeFirstLetter(type)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div></div>
+          )}
+          {selecteReportTypeTab.toLowerCase() == "multiple" && (
+            <div className="flex items-center gap-8">
+              <p className="text-lg font-semibold text-gray-700">
+                Total Count:{" "}
+                <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+                  {filteredDailyReports.length}
+                </span>
+              </p>
+              <div className="relative w-full md:w-72">
+                <Search
+                  className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                  size={16}
+                  onClick={handleIconClick}
+                />
+                <input
+                  ref={inputRef}
+                  type="text"
+                  placeholder="Search invoice, customer, status..."
+                  value={searchTerm}
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+                />
+              </div>
+            </div>
+          )}
+          {selecteReportTypeTab.toLowerCase() === "single" && (
+            <div className="w-full md:w-auto">
+              <PiChartDatePicker />
+            </div>
+          )}
+        </div>
+
         <div className="overflow-x-hidden md:overflow-x-auto whitespace-nowrap shadow">
           <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
             <thead className="bg-gray-100 text-gray-700 border-b">
@@ -271,221 +330,219 @@ const AddDailReports = () => {
                     <td className="p-3">
                       {Number(sale.totalPaidAmount).toFixed(2)}
                     </td>
-                    <td className="p-3">
-                      {capitalizeFirstLetter(sale.paymentStatus)}
-                    </td>
+                    <td className="p-3">{dailyReportsDate}</td>
                   </tr>
                 ))
               )}
             </tbody>
           </table>
         </div>
-      </div>
 
-      {showImportModal &&
-        ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            <div
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsOpen(false)}
-            />
-            <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
-              <button
-                onClick={() => setShowImportModal(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-                disabled={isUploading}
-              >
-                <X size={20} />
-              </button>
-              <h2 className="text-lg font-semibold mb-4">Import Products</h2>
-              {isSampleFile && <SampleExcelDownloadSale />}
-              <input
-                type="file"
-                accept=".csv, .xlsx"
-                onChange={handleFileUpload}
-                className="block w-full border rounded-lg px-3 py-2 mb-6"
+        {showImportModal &&
+          ReactDOM.createPortal(
+            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+              <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                onClick={() => setIsOpen(false)}
               />
-              <div className="flex justify-end gap-3">
+              <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
                 <button
                   onClick={() => setShowImportModal(false)}
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
                   disabled={isUploading}
-                  className={`px-5 py-2 rounded-lg cursor-pointer ${
-                    isUploading
-                      ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                      : "bg-gray-300 hover:bg-gray-400 text-gray-700"
-                  }`}
                 >
-                  Cancel
+                  <X size={20} />
                 </button>
-                <button
-                  onClick={handleProductImport}
-                  disabled={isUploading}
-                  className={`px-5 py-2 rounded-lg cursor-pointer ${
-                    isUploading
-                      ? "bg-blue-400 text-white cursor-not-allowed"
-                      : "bg-blue-600 hover:bg-blue-700 text-white"
-                  }`}
-                >
-                  {isUploading ? "Uploading…" : "Upload"}
-                </button>
+                <h2 className="text-lg font-semibold mb-4">Import Products</h2>
+                {isSampleFile && <SampleExcelDownloadSale />}
+                <input
+                  type="file"
+                  accept=".csv, .xlsx"
+                  onChange={handleFileUpload}
+                  className="block w-full border rounded-lg px-3 py-2 mb-6"
+                />
+                <div className="flex justify-end gap-3">
+                  <button
+                    onClick={() => setShowImportModal(false)}
+                    disabled={isUploading}
+                    className={`px-5 py-2 rounded-lg cursor-pointer ${
+                      isUploading
+                        ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                        : "bg-gray-300 hover:bg-gray-400 text-gray-700"
+                    }`}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleProductImport}
+                    disabled={isUploading}
+                    className={`px-5 py-2 rounded-lg cursor-pointer ${
+                      isUploading
+                        ? "bg-blue-400 text-white cursor-not-allowed"
+                        : "bg-blue-600 hover:bg-blue-700 text-white"
+                    }`}
+                  >
+                    {isUploading ? "Uploading…" : "Upload"}
+                  </button>
+                </div>
               </div>
-            </div>
-          </div>,
-          document.body
-        )}
-
-      {currentDailyReports.length > 0 && (
-        <div className="mt-4 p-5 flex justify-start gap-2">
-          <button
-            onClick={() => {
-              setCurrentPage((prev) => {
-                const prevPage = Math.max(prev - 1, 1);
-                window.scrollTo({ top: 0, behavior: "smooth" });
-                return prevPage;
-              });
-            }}
-            disabled={currentPage === 1}
-            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-          >
-            Prev
-          </button>
-
-          {visiblePages.map((page, idx) =>
-            page === "..." ? (
-              <span
-                key={`sales-ellipsis-${idx}`}
-                className="px-3 py-1 text-gray-500 select-none cursor-pointer"
-              >
-                ...
-              </span>
-            ) : (
-              <button
-                key={page}
-                onClick={() => {
-                  setCurrentPage(page);
-                  window.scrollTo({ top: 0, behavior: "smooth" });
-                }}
-                className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
-                  currentPage === page
-                    ? "bg-indigo-600 text-white"
-                    : "bg-gray-200 hover:bg-gray-300"
-                }`}
-              >
-                {page}
-              </button>
-            )
+            </div>,
+            document.body
           )}
 
-          <button
-            onClick={() => {
-              setCurrentPage((prev) => {
-                const nextPage = Math.min(prev + 1, totalPages);
-                window.scrollTo({ top: 0, behavior: "smooth" });
-                return nextPage;
-              });
-            }}
-            disabled={currentPage === totalPages}
-            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-          >
-            Next
-          </button>
-        </div>
-      )}
+        {currentDailyReports.length > 0 && (
+          <div className="mt-4 p-5 flex justify-start gap-2">
+            <button
+              onClick={() => {
+                setCurrentPage((prev) => {
+                  const prevPage = Math.max(prev - 1, 1);
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                  return prevPage;
+                });
+              }}
+              disabled={currentPage === 1}
+              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+            >
+              Prev
+            </button>
 
-      {isViewModalOpen &&
-        ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            {/* Background Overlay */}
-            <div
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsViewModalOpen(false)}
-            />
+            {visiblePages.map((page, idx) =>
+              page === "..." ? (
+                <span
+                  key={`sales-ellipsis-${idx}`}
+                  className="px-3 py-1 text-gray-500 select-none cursor-pointer"
+                >
+                  ...
+                </span>
+              ) : (
+                <button
+                  key={page}
+                  onClick={() => {
+                    setCurrentPage(page);
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                  }}
+                  className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
+                    currentPage === page
+                      ? "bg-indigo-600 text-white"
+                      : "bg-gray-200 hover:bg-gray-300"
+                  }`}
+                >
+                  {page}
+                </button>
+              )
+            )}
 
-            {/* Modal Content */}
-            <div className="bg-white w-full max-w-3xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
-              <button
+            <button
+              onClick={() => {
+                setCurrentPage((prev) => {
+                  const nextPage = Math.min(prev + 1, totalPages);
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                  return nextPage;
+                });
+              }}
+              disabled={currentPage === totalPages}
+              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+            >
+              Next
+            </button>
+          </div>
+        )}
+
+        {isViewModalOpen &&
+          ReactDOM.createPortal(
+            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+              {/* Background Overlay */}
+              <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
                 onClick={() => setIsViewModalOpen(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-              >
-                <X size={20} />
-              </button>
+              />
 
-              <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                View Sales Record
-              </h2>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[70vh] overflow-y-auto">
-                {/* Fixed fields */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Selected Date
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.recordingDate
-                      ? new Date(form.recordingDate).toLocaleDateString()
-                      : "-"}
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    MR Name
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.mrName || "-"}
-                  </p>
-                </div>
-
-                {/* Numeric Fields */}
-                {[
-                  ["Sales Quantity", "salesQty"],
-                  ["Bonus Quantity", "bonusQty"],
-                  ["Total Quantity", "totalQty"],
-                  ["Paid Amount", "paidAmount"],
-                  ["Due Amount", "dueAmount"],
-                ].map(([label, key]) => (
-                  <div key={key}>
-                    <label className="block text-sm font-medium text-gray-600">
-                      {label}
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                      {form[key] ?? 0}
-                    </p>
-                  </div>
-                ))}
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Payment Status
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.paymentStatus || "-"}
-                  </p>
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-600">
-                    Remark
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.remark || "-"}
-                  </p>
-                </div>
-              </div>
-
-              {/* Footer */}
-              <div className="mt-6 flex justify-end">
+              {/* Modal Content */}
+              <div className="bg-white w-full max-w-3xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
                 <button
                   onClick={() => setIsViewModalOpen(false)}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
                 >
-                  Close
+                  <X size={20} />
                 </button>
+
+                <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                  View Sales Record
+                </h2>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[70vh] overflow-y-auto">
+                  {/* Fixed fields */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Selected Date
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                      {form.recordingDate
+                        ? new Date(form.recordingDate).toLocaleDateString()
+                        : "-"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      MR Name
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                      {form.mrName || "-"}
+                    </p>
+                  </div>
+
+                  {/* Numeric Fields */}
+                  {[
+                    ["Sales Quantity", "salesQty"],
+                    ["Bonus Quantity", "bonusQty"],
+                    ["Total Quantity", "totalQty"],
+                    ["Paid Amount", "paidAmount"],
+                    ["Due Amount", "dueAmount"],
+                  ].map(([label, key]) => (
+                    <div key={key}>
+                      <label className="block text-sm font-medium text-gray-600">
+                        {label}
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                        {form[key] ?? 0}
+                      </p>
+                    </div>
+                  ))}
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Payment Status
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                      {form.paymentStatus || "-"}
+                    </p>
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-600">
+                      Remark
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                      {form.remark || "-"}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Footer */}
+                <div className="mt-6 flex justify-end">
+                  <button
+                    onClick={() => setIsViewModalOpen(false)}
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
-            </div>
-          </div>,
-          document.body
-        )}
+            </div>,
+            document.body
+          )}
+      </div>
     </div>
   );
 };

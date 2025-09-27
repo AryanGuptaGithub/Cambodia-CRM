@@ -125,8 +125,7 @@ const PiChartDatePicker = ({ setDailySummariesDateWise }) => {
   };
 
   return (
-    <div className="flex justify-end items-center gap-6 px-6 p-1">
-      {/* Start Date */}
+    <div className="flex justify-end items-center gap-6 p-1">
       <div className="flex flex-col items-start">
         <label className="text-sm font-semibold text-gray-700 mb-1">
           Start Date:

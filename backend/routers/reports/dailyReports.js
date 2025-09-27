@@ -9,10 +9,12 @@ router.get("/dailyReports", async (req, res) => {
     const { saleType, startDate, endDate } = req.query;
     const matchStage = {};
 
+    // Optional filter: Sale Type
     if (saleType === "Cash Sales" || saleType === "Credit Sales") {
       matchStage.saleType = saleType;
     }
 
+    // Optional filter: recordingDate range
     if (startDate || endDate) {
       matchStage.recordingDate = {};
       if (startDate) {
@@ -20,17 +22,19 @@ router.get("/dailyReports", async (req, res) => {
       }
       if (endDate) {
         const end = new Date(endDate);
-        end.setHours(23, 59, 59, 999);
+        end.setHours(23, 59, 59, 999); // include full end day
         matchStage.recordingDate.$lte = end;
       }
     }
 
-    const pipeline = [];
+    // 🔹 Aggregation for grouped summary
+    const summaryPipeline = [];
 
     if (Object.keys(matchStage).length > 0) {
-      pipeline.push({ $match: matchStage });
+      summaryPipeline.push({ $match: matchStage });
     }
-    pipeline.push({
+
+    summaryPipeline.push({
       $group: {
         _id: {
           mrName: "$mrName",
@@ -44,7 +48,7 @@ router.get("/dailyReports", async (req, res) => {
       },
     });
 
-    pipeline.push({
+    summaryPipeline.push({
       $project: {
         _id: 0,
         mrName: "$_id.mrName",
@@ -57,8 +61,32 @@ router.get("/dailyReports", async (req, res) => {
       },
     });
 
-    const summaryByMrName = await SaleSummary.aggregate(pipeline);
-    res.status(200).json(summaryByMrName);
+    const summaryByMrName = await SaleSummary.aggregate(summaryPipeline);
+
+    // 🔹 Aggregation for min/max recordingDate
+    const dateRangePipeline = [];
+
+    if (Object.keys(matchStage).length > 0) {
+      dateRangePipeline.push({ $match: matchStage });
+    }
+
+    dateRangePipeline.push({
+      $group: {
+        _id: null,
+        minRecordingDate: { $min: "$recordingDate" },
+        maxRecordingDate: { $max: "$recordingDate" },
+      },
+    });
+
+    const dateRangeResult = await SaleSummary.aggregate(dateRangePipeline);
+    const dateRange = dateRangeResult[0] || {
+      minRecordingDate: null,
+      maxRecordingDate: null,
+    };
+    res.status(200).json({
+      reports: summaryByMrName,
+      dateRange,
+    });
   } catch (error) {
     console.error("❌ Error fetching summary by mrName:", error);
     res.status(500).json({ message: "Failed to fetch summary." });
@@ -67,7 +95,10 @@ router.get("/dailyReports", async (req, res) => {
 
 router.get("/dailyReports/types", async (req, res) => {
   try {
-    const types = await SaleType.find({}, { type: 1, _id: 0 });
+    const types = await SaleType.find(
+      {},
+      { type: 1, sequenceNumber: 1, _id: 0 } 
+    ).sort({ sequenceNumber: 1 });
     res.json(types);
   } catch (err) {
     res.status(500).json({ error: err.message });
