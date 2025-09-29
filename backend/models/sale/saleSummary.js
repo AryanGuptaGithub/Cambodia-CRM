@@ -22,7 +22,7 @@ const saleSummarySchema = new Schema(
       required: true,
       set: roundToTwo,
     },
-    amount: { type: Number, required: true },
+    amount: { type: Number, required: true, set: roundToTwo },
     discount: {
       type: Number,
       default: 0,
@@ -38,6 +38,16 @@ const saleSummarySchema = new Schema(
       required: true,
       set: roundToTwo,
     },
+    unitPrice: {
+      type: Number,
+      required: true,
+      set: roundToTwo,
+    },
+    lc: {
+      type: Number,
+      required: true,
+      set: roundToTwo,
+    },
     profitLoss: {
       type: Number,
       default: 0,
@@ -46,20 +56,20 @@ const saleSummarySchema = new Schema(
     creditDays: { type: Number, default: null },
     dueDate: { type: Date, required: false },
     deliveryDate: { type: Date, required: false },
-    paidAmount: { type: Number, default: 0 },
-    dueAmount: { type: Number, default: 0 },
+    paidAmount: { type: Number, default: 0, set: roundToTwo },
+    dueAmount: { type: Number, default: 0, set: roundToTwo },
     paymentStatus: {
       type: String,
-      enum: ["paid", "unPaid", "pending", "overdue"],
-      default: "pending",
-    },
-    saleType: {
-      type: String,
-      enum: ["Cash Sales", "Credit Sales"],
-      default: function () {
-        return this.paymentStatus === "paid" ? "Cash Sales" : "Credit Sales";
-      },
-      required: true,
+      enum: [
+        "Cash",
+        "Credit",
+        "Partial Paid",
+        "Paid",
+        "Unpaid",
+        "Pending",
+        "Overdue",
+      ],
+      default: "Pending",
     },
     remark: { type: String, default: "" },
   },
@@ -67,14 +77,6 @@ const saleSummarySchema = new Schema(
     timestamps: true, // adds createdAt and updatedAt
   }
 );
-
-// Optional: If you want to update saleType automatically on validation (recommended)
-saleSummarySchema.pre("validate", function (next) {
-  if (!this.saleType) {
-    this.saleType = this.paymentStatus === "paid" ? "Cash Sales" : "Credit Sales";
-  }
-  next();
-});
 
 const SaleSummary = mongoose.model("SaleSummary", saleSummarySchema);
 

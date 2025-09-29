@@ -41,6 +41,8 @@ const AddDailReports = () => {
   const [startDate, setStartDate] = useState(null);
   const [endDate, setEndDate] = useState(null);
   const [isSelectingStart, setIsSelectingStart] = useState(true);
+  const [minRecordingDate, setMinRecordingDate] = useState(null);
+  const [maxRecordingDate, setMaxRecordingDate] = useState(null);
 
   const inputRef = useRef(null);
 
@@ -96,7 +98,18 @@ const AddDailReports = () => {
 
       const data = await res.json();
 
-      const { minRecordingDate, maxRecordingDate } = data.dateRange || {};
+      const { minRecordingDate: minDateStr, maxRecordingDate: maxDateStr } =
+        data.dateRange || {};
+
+      if (minDateStr && maxDateStr) {
+        const minDate = new Date(minDateStr);
+        const maxDate = new Date(maxDateStr);
+        setMinRecordingDate(minDate);
+        setMaxRecordingDate(maxDate);
+
+        setStartDate(minDate);
+        setEndDate(maxDate);
+      }
 
       const dateRangeSetter =
         minRecordingDate && maxRecordingDate
@@ -173,6 +186,7 @@ const AddDailReports = () => {
     const start = (currentPage - 1) * dailyReportsPerPage;
     return filteredDailyReports.slice(start, start + dailyReportsPerPage);
   }, [filteredDailyReports, currentPage, dailyReportsPerPage]);
+  console.log('values of currentDailyReports', currentDailyReports);
 
   const totalPages = useMemo(
     () => Math.ceil(filteredDailyReports.length / dailyReportsPerPage),
@@ -344,6 +358,16 @@ const AddDailReports = () => {
                 endDate={endDate}
                 setStartDate={setStartDate}
                 setEndDate={setEndDate}
+                minDate={minRecordingDate}
+                maxDate={maxRecordingDate}
+                onDateChange={(start, end) =>
+                  fetchDailyReports(
+                    selectedReportTypeTab,
+                    selectedTab,
+                    start || startDate,
+                    end || endDate
+                  )
+                }
               />
             </div>
           )}
@@ -354,10 +378,8 @@ const AddDailReports = () => {
             <thead className="bg-gray-100 text-gray-700 border-b">
               <tr>
                 <th className="p-3">MR Name</th>
-                <th className="p-3">Sales Qty</th>
-                <th className="p-3">Bonus Qty</th>
-                <th className="p-3">Total Qty</th>
-                <th className="p-3">Total Paid</th>
+                <th className="p-3">Credits</th>
+                <th className="p-3">Cash</th>
                 <th className="p-3">Date</th>
               </tr>
             </thead>
@@ -383,9 +405,6 @@ const AddDailReports = () => {
                       {capitalizeFirstLetter(sale.mrName)}
                     </td>
 
-                    <td className="p-3">{Math.ceil(sale.totalSalesQty)}</td>
-                    <td className="p-3">{Math.ceil(sale.totalBonusQty)}</td>
-                    <td className="p-3">{Math.ceil(sale.totalQty)}</td>
                     <td className="p-3">
                       {Number(sale.totalPaidAmount).toFixed(2)}
                     </td>

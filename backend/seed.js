@@ -2,14 +2,12 @@
 import mongoose from "mongoose";
 import User from "./models/User.js";
 import dotenv from "dotenv";
+import SaleType from "./models/reports/saleType.js";
 dotenv.config();
 
 const MONGO_URI = process.env.MONGODB_URI;
 
-// MongoDB URI
-// const MONGO_URI = PROCESS.ENV.MONGO_URI;
 
-// Helper to connect to MongoDB
 async function connectDB(uri) {
   try {
     await mongoose.connect(uri); // no need for useNewUrlParser or useUnifiedTopology
@@ -42,4 +40,33 @@ async function seedUsers() {
   }
 }
 
+async function seedSaleTypes() {
+  try {
+    await connectDB(uri);
+
+    const saleTypes = [
+      {
+        type: "Total Sales",
+        sequenceNumber: 1,
+      },
+      {
+        type: "Cash Sales",
+        sequenceNumber: 2,
+      },
+      {
+        type: "Credit Sales",
+        sequenceNumber: 3,
+      },
+    ];
+
+    const result = await SaleType.insertMany(saleTypes);
+    console.log("✅ Inserted SaleTypes:", result);
+  } catch (err) {
+    console.error("❌ Error inserting SaleTypes:", err);
+  } finally {
+    mongoose.disconnect(); // ✅ clean shutdown
+  }
+}
+
+seedSaleTypes();
 seedUsers();

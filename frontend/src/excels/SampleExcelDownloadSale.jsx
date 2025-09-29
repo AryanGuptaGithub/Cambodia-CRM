@@ -7,7 +7,7 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
     const worksheet = workbook.addWorksheet("Sale Summary");
 
     // Title
-    worksheet.mergeCells("A1:U1");
+    worksheet.mergeCells("A1:S1");
     const titleCell = worksheet.getCell("A1");
     titleCell.value = "HEALTHCARE SOUTH EAST ASIA";
     titleCell.font = { bold: true, size: 16 };
@@ -15,7 +15,7 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
     worksheet.getRow(1).height = 25;
 
     // Subtitle
-    worksheet.mergeCells("A2:U2");
+    worksheet.mergeCells("A2:S2");
     const subtitleCell = worksheet.getCell("A2");
     subtitleCell.value = "Sale Summary List";
     subtitleCell.font = { bold: true, size: 14 };
@@ -29,12 +29,11 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
       { key: "invoiceNumber", width: 15 },
       { key: "invoiceDate", width: 15 },
       { key: "mrName", width: 20 },
-      { key: "customerCode", width: 15 },
+      { key: "customerCode", width: 25 },
       { key: "productName", width: 25 },
-      { key: "salesQty", width: 10 },
-      { key: "bonusQty", width: 10 },
-      { key: "totalQty", width: 12 },
-      { key: "sellingPrice", width: 18 },
+      { key: "salesQty", width: 15 },
+      { key: "bonusQty", width: 15 },
+      { key: "sellingPrice", width: 27 },
       { key: "amount", width: 15 },
       { key: "discount", width: 15 },
       { key: "netSellingAmount", width: 25 },
@@ -59,18 +58,16 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
       "Product Name",
       "Sales Qty",
       "Bonus Qty",
-      "Total Qty",
       "Selling Price (USD)",
       "Amount (USD)",
       "Discount (USD)",
-      "Net Selling Amount (USD)",
       "Average Unit Price (USD)",
-      "Prof/Loss",
-      "Credit (Days)",
-      "Due Date",
-      "Delivery Date",
+      "Unit Price",
+      "LC",
+      "Credit Days",
+      "Paid Amount",
       "Payment Status",
-      "Remark",
+      "Remarks",
     ];
     headerRow.font = { bold: true };
     headerRow.alignment = { vertical: "middle", horizontal: "center" };

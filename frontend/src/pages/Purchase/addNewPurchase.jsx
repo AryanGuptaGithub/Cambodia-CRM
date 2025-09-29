@@ -16,13 +16,12 @@ const initialFormState = {
   productName: "",
   type: "",
   packing: "",
-  qtyMain: 0,
-  qty: 0,
-  unitPrice: 0,
-  amount: 0,
-  otherExpenses: 0,
-  totalAmount: 0,
-  unitCost: 0,
+  qtyMain: "",
+  qty: "",
+  unitPrice: "",
+  amount: "",
+  otherExpenses: "",
+  totalAmount: "",
   remark: "",
 };
 
@@ -94,7 +93,6 @@ const AddNewPurchase = () => {
         onChange={handleChange}
         placeholder={placeholder}
         className="w-full border rounded-md px-3 py-2 mt-1"
-        min={type === "number" ? 0 : undefined}
       />
       {errors[name] && (
         <p className="text-red-500 text-sm mt-1">{errors[name]}</p>
@@ -115,13 +113,11 @@ const AddNewPurchase = () => {
           {renderInput("Product Name", "productName")}
           {renderInput("Type", "type")}
           {renderInput("Packing", "packing")}
-          {renderInput("Qty (Main)", "qtyMain", "number")}
-          {renderInput("Qty", "qty", "number")}
-          {renderInput("Unit Price", "unitPrice", "number")}
-          {/* {renderInput("Amount", "amount", "number")} */}
-          {renderInput("Other Expenses", "otherExpenses", "number")}
-          {renderInput("Total Amount", "totalAmount", "number")}
-          {/* {renderInput("Unit Cost", "unitCost", "number")} */}
+          {renderInput("Qty (Main)", "qtyMain")}
+          {renderInput("Qty", "qty")}
+          {renderInput("LC Price", "unitPrice")}
+          {renderInput("Other Expenses", "otherExpenses")}
+          {renderInput("Total Amount", "totalAmount")}
           {renderInput("Remark", "remark")}
         </div>
 

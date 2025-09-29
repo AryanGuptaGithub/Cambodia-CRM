@@ -104,10 +104,11 @@ const AddProduct = () => {
           {renderInput("Supplier Name", "supplierName")}
           {renderInput("Drug License", "drugLicense")}
           {renderInput("License Validity Date", "licenseValidityDate", "date")}
-          {renderInput("Remarks", "remarks")}
-          {renderInput("Selling Price (USD)", "sellingPrice", "number")}
+          {renderInput("Selling Price (USD)", "sellingPrice")}
           {renderInput("LC", "lc")}
-          {renderInput("Tax Selling Price (USD)", "taxSellingPrice", "number")}
+          {renderInput("Pob", "pob")}
+          {renderInput("Tax Selling Price (USD)",)}
+          {renderInput("Remarks", "remarks")}
         </div>
 
         <div className="flex justify-end mt-8 gap-4">

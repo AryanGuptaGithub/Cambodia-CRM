@@ -2,8 +2,9 @@ import React, { useRef, useState } from "react";
 import Flatpickr from "react-flatpickr";
 import "flatpickr/dist/themes/material_green.css";
 
+// Helper: Format date for display
 const formatDate = (date, type) =>
-  date
+  date instanceof Date && !isNaN(date)
     ? date.toLocaleDateString("en-GB", {
         day: "2-digit",
         month: "short",
@@ -16,25 +17,31 @@ const DailyPiChartDatePicker = ({
   endDate,
   setStartDate,
   setEndDate,
-  
+  onDateChange,
+  maxDate,
+  minDate,
 }) => {
   const [isSelectingStart, setIsSelectingStart] = useState(true);
   const pickerRef = useRef(null);
   const lastClickedRef = useRef(null);
 
   const handleDateChange = ([selected]) => {
+    if (!selected) return;
+
     if (isSelectingStart) {
       setStartDate(selected);
       setIsSelectingStart(false);
     } else {
       setEndDate(selected);
       setIsSelectingStart(true);
+      onDateChange?.(startDate, selected); // Pass latest known range
     }
   };
 
   const openCalendar = (e, isStart) => {
     setIsSelectingStart(isStart);
     lastClickedRef.current = e.currentTarget;
+
     if (pickerRef.current?.flatpickr) {
       pickerRef.current.flatpickr.setDate(isStart ? startDate : endDate, false);
       pickerRef.current.flatpickr.open();
@@ -45,58 +52,66 @@ const DailyPiChartDatePicker = ({
     setTimeout(() => {
       const calendar = document.querySelector(".flatpickr-calendar");
       const target = lastClickedRef.current;
-
       if (!calendar || !target) return;
 
       const rect = target.getBoundingClientRect();
-      const scrollTop =
-        window.pageYOffset || document.documentElement.scrollTop;
-      const scrollLeft =
-        window.pageXOffset || document.documentElement.scrollLeft;
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
       const calendarWidth = calendar.offsetWidth;
 
-      let left = rect.left + scrollLeft - calendarWidth;
-      const top = rect.bottom + scrollTop;
-
       calendar.style.position = "absolute";
-      calendar.style.top = `${top}px`;
-      calendar.style.left = `${left}px`;
+      calendar.style.top = `${rect.bottom + scrollTop}px`;
+      calendar.style.left = `${rect.left + scrollLeft - calendarWidth}px`;
       calendar.style.right = "auto";
 
-      if (!calendar.querySelector(".custom-footer")) {
-        const footer = document.createElement("div");
-        footer.className =
-          "custom-footer flex justify-between p-2 border-t border-gray-300 bg-gray-100";
-        const btnClasses =
-          "px-3 py-1 text-xs rounded border border-gray-300 hover:bg-gray-200 cursor-pointer";
+      // Avoid duplicate footer
+      const existingFooter = calendar.querySelector(".custom-footer");
+      if (existingFooter) return;
 
-        const todayBtn = document.createElement("button");
-        todayBtn.textContent = "Today";
-        todayBtn.className = btnClasses;
-        todayBtn.onclick = () => {
-          const today = new Date();
+      const footer = document.createElement("div");
+      footer.className =
+        "custom-footer flex justify-between p-2 border-t border-gray-300 bg-gray-100";
+
+      const btnClasses =
+        "px-3 py-1 text-xs rounded border border-gray-300 hover:bg-gray-200 cursor-pointer";
+
+      // Today button
+      const todayBtn = document.createElement("button");
+      todayBtn.textContent = "Today";
+      todayBtn.className = btnClasses;
+      todayBtn.onclick = () => {
+        const today = new Date();
+        if (isSelectingStart) {
           setStartDate(today);
-          setEndDate(today);
           setIsSelectingStart(false);
-          pickerRef.current.flatpickr.setDate(today, true);
-          pickerRef.current.flatpickr.close();
-        };
-
-        const resetBtn = document.createElement("button");
-        resetBtn.textContent = "Reset";
-        resetBtn.className = btnClasses;
-        resetBtn.onclick = () => {
-          pickerRef.current.flatpickr.clear();
-          setStartDate(null);
-          setEndDate(null);
+        } else {
+          setEndDate(today);
           setIsSelectingStart(true);
-          pickerRef.current.flatpickr.close();
-        };
+          onDateChange?.(startDate, today);
+        }
+        pickerRef.current?.flatpickr.setDate(today, true);
+        pickerRef.current?.flatpickr.close();
+      };
 
-        footer.appendChild(todayBtn);
-        footer.appendChild(resetBtn);
-        calendar.appendChild(footer);
-      }
+      // Reset button
+      const resetBtn = document.createElement("button");
+      resetBtn.textContent = "Reset";
+      resetBtn.className = btnClasses;
+      resetBtn.onclick = () => {
+        const resetStart = minDate || null;
+        const resetEnd = maxDate || null;
+
+        setStartDate(resetStart);
+        setEndDate(resetEnd);
+        setIsSelectingStart(true);
+        pickerRef.current?.flatpickr.clear();
+        pickerRef.current?.flatpickr.close();
+        onDateChange?.(resetStart, resetEnd);
+      };
+
+      footer.appendChild(todayBtn);
+      footer.appendChild(resetBtn);
+      calendar.appendChild(footer);
     }, 0);
   };
 
@@ -132,10 +147,16 @@ const DailyPiChartDatePicker = ({
           mode: "single",
           dateFormat: "d-m-Y",
           clickOpens: false,
+          maxDate: new Date(),
+          disableMobile: true,
           onOpen: positionFlatpickrCalendar,
           onChange: handleDateChange,
         }}
-        style={{ opacity: 0, pointerEvents: "none", position: "absolute" }}
+        style={{
+          opacity: 0,
+          pointerEvents: "none",
+          position: "absolute",
+        }}
       />
     </div>
   );

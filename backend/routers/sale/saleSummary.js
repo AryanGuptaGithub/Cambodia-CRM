@@ -1,5 +1,6 @@
 import express from "express";
 import SaleSummary from "../../models/sale/saleSummary.js";
+import paymentStatus from "../../models/paymentStatus.js";
 const router = express.Router();
 
 // 🔧 Convert Excel serial date to JS Date
@@ -179,7 +180,6 @@ router.get("/sales", async (req, res) => {
 
 router.put("/sales/:id", async (req, res) => {
   const { id } = req.params;
-  console.log("values of id", id);
 
   try {
     const updatedSale = await SaleSummary.findByIdAndUpdate(id, req.body, {
@@ -240,10 +240,11 @@ router.delete("/sales", async (req, res) => {
 
 router.post("/sales", async (req, res) => {
   try {
+    console.log("values of req.body", req.body);
     const newSaleData = req.body;
     const newSale = new SaleSummary(newSaleData);
     const savedSale = await newSale.save();
-
+    console.log("avlues of saveSale", savedSale);
     res.status(201).json({
       message: "Sale added successfully",
       sale: savedSale,
@@ -254,6 +255,16 @@ router.post("/sales", async (req, res) => {
     }
 
     res.status(500).json({ error: "Failed to add new sale" });
+  }
+});
+
+router.get("/sales/payment-status", async (req, res) => {
+  try {
+    const statuses = await paymentStatus.find().sort({ type: 1 });
+    res.status(200).json(statuses);
+  } catch (error) {
+    console.error("❌ Error fetching payment statuses:", error.message);
+    res.status(500).json({ error: "Failed to fetch payment statuses." });
   }
 });
 
