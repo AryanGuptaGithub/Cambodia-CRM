@@ -1,14 +1,10 @@
-import React, {
-  useState,
-  useEffect,
-  useRef,
-  useCallback,
-  useMemo,
-} from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { showToast } from "../../utils/toast";
-
-const backendUrl = import.meta.env.VITE_BACKEND_URL;
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
+import { useInitialSaleData} from "./IntialLoading.jsx"; 
+// import { useInitialSaleData, useApi } from "../../hooks/useSaleData";
 
 // Constants
 const INITIAL_FORM_STATE = {
@@ -36,29 +32,6 @@ const INITIAL_FORM_STATE = {
   dueAmount: "",
   paymentStatus: "",
   remark: "",
-};
-
-// Custom hook for API calls
-const useApi = () => {
-  const fetchData = useCallback(async (endpoint, options = {}) => {
-    try {
-      const response = await fetch(`${backendUrl}${endpoint}`, {
-        headers: { "Content-Type": "application/json" },
-        ...options,
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error(`API Error (${endpoint}):`, error);
-      throw error;
-    }
-  }, []);
-
-  return { fetchData };
 };
 
 // Custom hook for form state management
@@ -347,6 +320,56 @@ const InputField = React.memo(
   )
 );
 
+// DatePicker Field Component
+const DatePickerField = React.memo(({
+  label,
+  name,
+  value,
+  onChange,
+  error,
+  required = false,
+  readOnly = false,
+  placeholder = "Select a date",
+  className = ""
+}) => (
+  <div className="flex flex-col">
+    <label className="text-sm font-medium text-gray-700 mb-1">
+      {label}
+      {required && <span className="text-red-500 ml-1">*</span>}
+    </label>
+    <DatePicker
+      selected={value ? new Date(value) : null}
+      onChange={(date) => {
+        if (date) {
+          const event = {
+            target: {
+              name: name,
+              value: date.toISOString().split('T')[0] // Format as YYYY-MM-DD
+            }
+          };
+          onChange(event);
+        } else {
+          const event = {
+            target: {
+              name: name,
+              value: ""
+            }
+          };
+          onChange(event);
+        }
+      }}
+      dateFormat="yyyy-MM-dd"
+      placeholderText={placeholder}
+      readOnly={readOnly}
+      className={`w-full border rounded-md px-2 py-1 ${
+        error ? "border-red-500" : "border-gray-300"
+      } ${readOnly ? "bg-gray-100" : ""} ${className}`}
+      autoComplete="off"
+    />
+    {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
+  </div>
+));
+
 // Suggestion Input Component
 const SuggestionInput = React.memo(
   ({
@@ -433,40 +456,17 @@ const SuggestionInput = React.memo(
   }
 );
 
-const validateProductName = (value) => {
-  return /^[A-Za-z][A-Za-z0-9]*$/.test(value);
-};
-
 const AddSale = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { customerCode } = location.state || {};
+  const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-  const { fetchData } = useApi();
   const { form, errors, handleChange, validate, updateFormField } =
     useSaleForm(customerCode);
 
-  const [statuses, setStatuses] = useState([]);
-  const [productNames, setProductNames] = useState([]);
-
-  // Fetch data on mount
-  useEffect(() => {
-    const fetchInitialData = async () => {
-      try {
-        const [statusesData, productsData] = await Promise.all([
-          fetchData("/api/sales/payment-status"),
-          fetchData("/api/sales/unique-names"),
-        ]);
-
-        setStatuses(statusesData);
-        setProductNames(productsData.productNames || []);
-      } catch (error) {
-        showToast("error", "Failed to load initial data");
-      }
-    };
-
-    fetchInitialData();
-  }, [fetchData]);
+  // Use your custom hook for initial data
+  const { statuses, productNames, loading } = useInitialSaleData();
 
   // Payment Status Suggestions
   const paymentStatusSuggestions = useSuggestions(
@@ -526,7 +526,7 @@ const AddSale = () => {
     if (!validate()) return;
 
     try {
-      const respData = await fetchData("/api/sales", {
+      const respData = await fetch(`${backendUrl}/api/sales`, {
         method: "POST",
         body: JSON.stringify(form),
       });
@@ -534,55 +534,21 @@ const AddSale = () => {
       showToast("success", respData.message || "Sale added successfully");
       navigate("/salelayout/sale");
     } catch (err) {
+      console.log('Error details:', err);
       showToast("error", err.message || "Error submitting sale");
     }
   };
 
-  // Define form fields in the desired order
-  const formFields = [
-    {
-      label: "Recording Date",
-      name: "recordingDate",
-      type: "date",
-      required: true,
-    },
-    { label: "Invoice Number", name: "invoiceNumber", required: true },
-    {
-      label: "Invoice Date",
-      name: "invoiceDate",
-      type: "date",
-      required: true,
-    },
-    { label: "Medical Representative Name", name: "mrName", required: true },
-    { label: "Customer Code", name: "customerCode", required: true },
-    { label: "Sales Quantity", name: "salesQty", type: "text", required: true },
-    { label: "Bonus Quantity", name: "bonusQty", type: "text" },
-    { label: "Total Quantity", name: "totalQty", readOnly: true },
-    {
-      label: "Selling Price",
-      name: "sellingPrice",
-      type: "text",
-      required: true,
-    },
-    { label: "Amount", name: "amount", readOnly: true },
-    { label: "Discount", name: "discount", type: "text" },
-    { label: "Net Selling Amount", name: "netSellingAmount", readOnly: true },
-    { label: "Average Unit Price", name: "averageUnitPrice", readOnly: true },
-    { label: "LC", name: "lc", type: "text" },
-
-    { label: "Credit Days", name: "creditDays", type: "text" },
-    { label: "Due Date", name: "dueDate", type: "date", readOnly: true },
-    {
-      label: "Delivery Date",
-      name: "deliveryDate",
-      type: "date",
-      readOnly: true,
-    },
-    { label: "Paid Amount", name: "paidAmount", type: "text" },
-    { label: "Due Amount", name: "dueAmount", readOnly: true },
-    { label: "Remark", name: "remark", colSpan: 3 },
-    { label: "Profit / Loss", name: "profitLoss", readOnly: true },
-  ];
+  // Show loading state if needed
+  if (loading) {
+    return (
+      <div className="max-w-5xl mx-auto p-6 bg-white rounded-2xl shadow">
+        <div className="flex justify-center items-center h-32">
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-5xl mx-auto p-6 bg-white rounded-2xl shadow">
@@ -590,24 +556,56 @@ const AddSale = () => {
 
       <form onSubmit={handleSubmit}>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {/* Render fields up to Customer Code */}
-          {formFields.slice(0, 5).map((field) => (
-            <div
-              key={field.name}
-              className={field.colSpan ? `sm:col-span-${field.colSpan}` : ""}
-            >
-              <InputField
-                label={field.label}
-                name={field.name}
-                type={field.type}
-                value={form[field.name]}
-                onChange={enhancedHandleChange}
-                error={errors[field.name]}
-                required={field.required}
-                readOnly={field.readOnly}
-              />
-            </div>
-          ))}
+          {/* DatePicker for Recording Date */}
+          <DatePickerField
+            label="Recording Date"
+            name="recordingDate"
+            value={form.recordingDate}
+            onChange={enhancedHandleChange}
+            error={errors.recordingDate}
+            required={true}
+            placeholder="Select recording date"
+          />
+          
+          <InputField
+            label="Invoice Number"
+            name="invoiceNumber"
+            value={form.invoiceNumber}
+            onChange={enhancedHandleChange}
+            error={errors.invoiceNumber}
+            required={true}
+          />
+          
+          {/* DatePicker for Invoice Date */}
+          <DatePickerField
+            label="Invoice Date"
+            name="invoiceDate"
+            value={form.invoiceDate}
+            onChange={enhancedHandleChange}
+            error={errors.invoiceDate}
+            required={true}
+            placeholder="Select invoice date"
+          />
+          
+          <InputField
+            label="Medical Representative Name"
+            name="mrName"
+            value={form.mrName}
+            onChange={enhancedHandleChange}
+            error={errors.mrName}
+            required={true}
+          />
+          
+          <InputField
+            label="Customer Code"
+            name="customerCode"
+            value={form.customerCode}
+            onChange={enhancedHandleChange}
+            error={errors.customerCode}
+            required={true}
+          />
+
+          {/* Product Name Suggestion - placed after Customer Code */}
           <SuggestionInput
             label="Product Name"
             name="productName"
@@ -644,24 +642,150 @@ const AddSale = () => {
               typeof item === "string" ? item : item.name
             }
           />
-    
-          {formFields.slice(5, 19).map((field) => (
-            <div
-              key={field.name}
-              className={field.colSpan ? `sm:col-span-${field.colSpan}` : ""}
-            >
-              <InputField
-                label={field.label}
-                name={field.name}
-                type={field.type}
-                value={form[field.name]}
-                onChange={enhancedHandleChange}
-                error={errors[field.name]}
-                required={field.required}
-                readOnly={field.readOnly}
-              />
-            </div>
-          ))}{" "}
+
+          {/* Continue with remaining fields in exact order */}
+          <InputField
+            label="Sales Quantity"
+            name="salesQty"
+            type="text"
+            value={form.salesQty}
+            onChange={enhancedHandleChange}
+            error={errors.salesQty}
+            required={true}
+          />
+          
+          <InputField
+            label="Bonus Quantity"
+            name="bonusQty"
+            type="text"
+            value={form.bonusQty}
+            onChange={enhancedHandleChange}
+            error={errors.bonusQty}
+          />
+          
+          <InputField
+            label="Total Quantity"
+            name="totalQty"
+            value={form.totalQty}
+            onChange={enhancedHandleChange}
+            error={errors.totalQty}
+            readOnly={true}
+          />
+          
+          <InputField
+            label="Selling Price"
+            name="sellingPrice"
+            type="text"
+            value={form.sellingPrice}
+            onChange={enhancedHandleChange}
+            error={errors.sellingPrice}
+            required={true}
+          />
+          
+          <InputField
+            label="Amount"
+            name="amount"
+            value={form.amount}
+            onChange={enhancedHandleChange}
+            error={errors.amount}
+            readOnly={true}
+          />
+          
+          <InputField
+            label="Discount"
+            name="discount"
+            type="text"
+            value={form.discount}
+            onChange={enhancedHandleChange}
+            error={errors.discount}
+          />
+          
+          <InputField
+            label="Net Selling Amount"
+            name="netSellingAmount"
+            value={form.netSellingAmount}
+            onChange={enhancedHandleChange}
+            error={errors.netSellingAmount}
+            readOnly={true}
+          />
+          
+          <InputField
+            label="Average Unit Price"
+            name="averageUnitPrice"
+            value={form.averageUnitPrice}
+            onChange={enhancedHandleChange}
+            error={errors.averageUnitPrice}
+            readOnly={true}
+          />
+          
+          <InputField
+            label="LC"
+            name="lc"
+            type="text"
+            value={form.lc}
+            onChange={enhancedHandleChange}
+            error={errors.lc}
+          />
+          
+          <InputField
+            label="Profit / Loss"
+            name="profitLoss"
+            value={form.profitLoss}
+            onChange={enhancedHandleChange}
+            error={errors.profitLoss}
+            readOnly={true}
+          />
+          
+          <InputField
+            label="Credit Days"
+            name="creditDays"
+            type="text"
+            value={form.creditDays}
+            onChange={enhancedHandleChange}
+            error={errors.creditDays}
+          />
+          
+          {/* DatePicker for Due Date (read-only) */}
+          <DatePickerField
+            label="Due Date"
+            name="dueDate"
+            value={form.dueDate}
+            onChange={enhancedHandleChange}
+            error={errors.dueDate}
+            readOnly={true}
+            placeholder="Due date will be calculated"
+          />
+          
+          {/* DatePicker for Delivery Date (read-only) */}
+          <DatePickerField
+            label="Delivery Date"
+            name="deliveryDate"
+            value={form.deliveryDate}
+            onChange={enhancedHandleChange}
+            error={errors.deliveryDate}
+            readOnly={true}
+            placeholder="Delivery date will be set automatically"
+          />
+          
+          <InputField
+            label="Paid Amount"
+            name="paidAmount"
+            type="text"
+            value={form.paidAmount}
+            onChange={enhancedHandleChange}
+            error={errors.paidAmount}
+          />
+          
+          <InputField
+            label="Due Amount"
+            name="dueAmount"
+            value={form.dueAmount}
+            onChange={enhancedHandleChange}
+            error={errors.dueAmount}
+            readOnly={true}
+          />
+
+
           <SuggestionInput
             label="Payment Status"
             name="paymentStatus"
@@ -694,23 +818,17 @@ const AddSale = () => {
             getSuggestionValue={(item) => item.type}
             getSuggestionDisplay={(item) => item.type}
           />
-          {formFields.slice(19).map((field) => (
-            <div
-              key={field.name}
-              className={field.colSpan ? `sm:col-span-${field.colSpan}` : ""}
-            >
-              <InputField
-                label={field.label}
-                name={field.name}
-                type={field.type}
-                value={form[field.name]}
-                onChange={enhancedHandleChange}
-                error={errors[field.name]}
-                required={field.required}
-                readOnly={field.readOnly}
-              />
-            </div>
-          ))}
+
+          {/* Remark field - full width */}
+          <div className="sm:col-span-3">
+            <InputField
+              label="Remark"
+              name="remark"
+              value={form.remark}
+              onChange={enhancedHandleChange}
+              error={errors.remark}
+            />
+          </div>
         </div>
 
         <div className="flex justify-end mt-6 gap-3">
