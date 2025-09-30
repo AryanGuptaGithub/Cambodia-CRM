@@ -34,12 +34,10 @@ async function connectDB(uri) {
 
 async function seedSaleTypes() {
   try {
-    console.log("🌱 Seeding SaleTypes...");
-
+   
     // Check if already seeded (prevent duplicates)
     const existing = await SaleType.countDocuments();
     if (existing > 0) {
-      console.log("⚠️ SaleTypes already seeded. Skipping...");
       return;
     }
 
@@ -50,7 +48,6 @@ async function seedSaleTypes() {
     ];
 
     const result = await SaleType.insertMany(saleTypes);
-    console.log("✅ Inserted SaleTypes:", result);
   } catch (err) {
     console.error("❌ Error inserting SaleTypes:", err);
   }
@@ -58,12 +55,10 @@ async function seedSaleTypes() {
 
 export async function seedPaymentStatuses() {
   try {
-    console.log("🌱 Seeding PaymentStatuses...");
 
     // Check if already seeded (prevent duplicates)
     const existing = await PaymentStatusType.countDocuments();
     if (existing > 0) {
-      console.log("⚠️ PaymentStatuses already seeded. Skipping...");
       return;
     }
 
@@ -74,7 +69,6 @@ export async function seedPaymentStatuses() {
     ];
 
     const result = await PaymentStatusType.insertMany(paymentStatuses);
-    console.log("✅ Inserted PaymentStatuses:", result);
   } catch (err) {
     console.error("❌ Error inserting PaymentStatuses:", err);
   }

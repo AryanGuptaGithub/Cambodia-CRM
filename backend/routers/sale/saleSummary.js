@@ -27,102 +27,91 @@ router.post("/sale/import", async (req, res) => {
     const validDocs = [];
     const skippedRows = [];
 
-    parsedData.forEach((item, index) => {
-      const rowNumber = index + 2; // Excel row (accounts for header)
+    const parseExcelDate = (value) => {
+      if (!value || isNaN(value)) return null;
+      const date = new Date(Math.round((value - 25569) * 86400 * 1000));
+      return isNaN(date.getTime()) ? null : date;
+    };
 
-      const safeDate = (value, fieldName) => {
-        const parsed = excelDateToJSDate(value);
-        if (!parsed || isNaN(parsed.getTime())) {
-          skippedRows.push({
-            row: rowNumber,
-            reason: `Invalid ${fieldName}`,
-            data: item,
-          });
-          return null;
-        }
-        return parsed;
+    parsedData.forEach((item, index) => {
+      const rowNumber = index + 2;
+
+      const invoiceDate = parseExcelDate(Number(item.invoiceDate));
+      const recordingDate = parseExcelDate(Number(item.recordingDate));
+      const deliveryDate = invoiceDate;
+
+      // Credit days to dueDate
+      const creditDays =
+        item.creditDays !== "" ? Number(item.creditDays) : null;
+      const dueDate =
+        creditDays !== null && !isNaN(creditDays)
+          ? new Date(Date.now() + creditDays * 86400000)
+          : null;
+
+      const addSkip = (reason) => {
+        skippedRows.push({ row: rowNumber, reason, data: item });
       };
 
-      const invoiceDate = safeDate(item.invoiceDate, "invoiceDate");
-      const recordingDate = safeDate(item.recordingDate, "recordingDate");
-      const dueDate = safeDate(item.dueDate, "dueDate");
-      const deliveryDate = safeDate(item.deliveryDate, "deliveryDate");
-
-      // ❌ Required field checks
+      // === Validations ===
       if (
         !item.mrName ||
         typeof item.mrName !== "string" ||
         item.mrName.trim() === ""
       ) {
-        skippedRows.push({
-          row: rowNumber,
-          reason: "Missing or invalid 'mrName'",
-          data: item,
-        });
-        return;
+        return addSkip("Missing or invalid 'mrName'");
       }
 
-      if (
-        item.customerCode === undefined ||
-        item.customerCode === null ||
-        item.customerCode === "" ||
-        isNaN(Number(item.customerCode))
-      ) {
-        skippedRows.push({
-          row: rowNumber,
-          reason: "Missing or invalid 'customerCode'",
-          data: item,
-        });
-        return;
+      if (!item.customerCode || isNaN(Number(item.customerCode))) {
+        return addSkip("Missing or invalid 'customerCode'");
       }
 
       if (!invoiceDate) {
-        skippedRows.push({
-          row: rowNumber,
-          reason: "Missing or invalid 'invoiceDate'",
-          data: item,
-        });
-        return;
+        return addSkip("Missing or invalid 'invoiceDate'");
       }
 
-      // Calculate paidAmount and dueAmount based on paymentStatus and netSellingAmount
-      const paymentStatus = item.paymentStatus
-        ? String(item.paymentStatus).toLowerCase()
-        : "pending";
+      // === Conversions and calculations ===
+      const salesQty = Number(item.salesQty) || 0;
+      const bonusQty = Number(item.bonusQty) || 0;
+      const totalQty = salesQty + bonusQty;
+      const sellingPrice = Number(item.sellingPrice) || 0;
+      const discount = Number(item.discount) || 0;
+      const lc = Number(item.lc) || 0;
+      const paidAmount = Number(item.paidAmount) || 0;
 
-      const netSellingAmount = Number(item.netSellingAmount) || 0;
+      const amount = salesQty * sellingPrice;
+      const netSellingAmount = amount - discount;
+      const averageUnitPrice = totalQty > 0 ? netSellingAmount / totalQty : 0;
+      const profitLoss = netSellingAmount - totalQty * lc;
+      const dueAmount = netSellingAmount - paidAmount;
 
-      const paidAmount = paymentStatus === "paid" ? item.amount : 0;
-      const dueAmount = paymentStatus === "pending" ? item.amount : 0;
-
-      // ✅ All checks passed
+      // === Final doc ===
       validDocs.push({
         recordingDate,
-        invoiceNumber: item.invoiceNumber,
+        invoiceNumber: item.invoiceNumber || "",
         invoiceDate,
         mrName: item.mrName.trim(),
         customerCode: Number(item.customerCode),
-        productName: item.productName,
-        salesQty: Number(item.salesQty) || 0,
-        bonusQty: Number(item.bonusQty) || 0,
-        totalQty: Number(item.totalQty) || 0,
-        sellingPrice: Number(item.sellingPrice) || 0,
-        amount: Number(item.amount) || 0,
-        discount: Number(item.discount) || 0,
+        productName: item.productName || "",
+        salesQty,
+        bonusQty,
+        totalQty,
+        sellingPrice,
+        amount,
+        discount,
         netSellingAmount,
-        averageUnitPrice: Number(item.averageUnitPrice) || 0,
-        profitLoss: Number(item.profitLoss) || 0,
-        creditDays: item.creditDays !== "" ? Number(item.creditDays) : null,
+        lc,
+        averageUnitPrice,
+        profitLoss,
+        creditDays,
         dueDate,
         deliveryDate,
-        paymentStatus,
+        paymentStatus: item.paymentStatus || "Pending",
         paidAmount,
         dueAmount,
         remark: item.remark || "",
       });
     });
 
-    // ❌ Nothing valid?
     if (validDocs.length === 0) {
       return res.status(400).json({
         message: "❌ No valid rows to import. Please check required fields.",
@@ -130,7 +119,6 @@ router.post("/sale/import", async (req, res) => {
       });
     }
 
-    // ✅ Insert and respond
     const inserted = await SaleSummary.insertMany(validDocs);
 
     return res.status(200).json({
@@ -282,6 +270,245 @@ router.get("/sales/unique-names", async (req, res) => {
   } catch (error) {
     console.error("Error fetching unique product names:", error);
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.post("/sales/download-sales-excel", async (req, res) => {
+  try {
+    const { salesData = [], customersData = [], startDate, endDate } = req.body;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        message: "Start date and end date are required",
+      });
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    if (start > end) {
+      return res.status(400).json({
+        success: false,
+        message: "Start date cannot be after end date",
+      });
+    }
+
+    // Filter sales data based on date range
+    const filteredSalesData = salesData.filter((sale) => {
+      if (!sale.invoiceDate) return false;
+      const saleDate = new Date(sale.invoiceDate);
+      return saleDate >= start && saleDate <= end;
+    });
+
+    if (filteredSalesData.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No sales data found for the selected date range",
+      });
+    }
+
+    // Create customer lookup map
+    const customerMap = {};
+    customersData.forEach((customer) => {
+      customerMap[customer.customerCode] = customer;
+    });
+
+    // Create workbook and worksheet
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Sale Summary");
+
+    // === Sheet Titles ===
+    worksheet.mergeCells("A1:AB1");
+    const titleCell = worksheet.getCell("A1");
+    titleCell.value = "HEALTHCARE SOUTH EAST ASIA";
+    titleCell.font = { bold: true, size: 16 };
+    titleCell.alignment = { vertical: "middle", horizontal: "center" };
+    worksheet.getRow(1).height = 25;
+
+    worksheet.mergeCells("A2:AB2");
+    const subtitleCell = worksheet.getCell("A2");
+    subtitleCell.value = `Sale Summary List (${startDate} to ${endDate})`;
+    subtitleCell.font = { bold: true, size: 14 };
+    subtitleCell.alignment = { vertical: "middle", horizontal: "center" };
+    worksheet.getRow(2).height = 20;
+
+    // === Define Columns ===
+    worksheet.columns = [
+      { key: "no", width: 5 },
+      { key: "recordingDate", width: 12 },
+      { key: "invoiceNumber", width: 10 },
+      { key: "invoiceDate", width: 12 },
+      { key: "mrName", width: 15 },
+      { key: "customerCode", width: 12 },
+      { key: "customerName", width: 25 },
+      { key: "customerNumber", width: 15 },
+      { key: "address", width: 30 },
+      { key: "zone", width: 15 },
+      { key: "productName", width: 20 },
+      { key: "salesQty", width: 10 },
+      { key: "bonusQty", width: 10 },
+      { key: "totalQty", width: 10 },
+      { key: "sellingPrice", width: 12 },
+      { key: "amount", width: 12 },
+      { key: "discount", width: 10 },
+      { key: "netSellingAmount", width: 15 },
+      { key: "averageUnitPrice", width: 15 },
+      { key: "lc", width: 10 },
+      { key: "profitLoss", width: 12 },
+      { key: "creditDays", width: 10 },
+      { key: "dueDate", width: 12 },
+      { key: "deliveryDate", width: 12 },
+      { key: "paidAmount", width: 12 },
+      { key: "dueAmount", width: 12 },
+      { key: "paymentStatus", width: 15 },
+      { key: "remark", width: 20 },
+    ];
+
+    // === Header Row ===
+    const headerRow = worksheet.getRow(3);
+    headerRow.values = [
+      "No",
+      "Recording Date",
+      "Invoice #",
+      "Invoice Date",
+      "MR Name",
+      "Customer Code",
+      "Customer Name",
+      "Customer Number",
+      "Address",
+      "Zone",
+      "Product Name",
+      "Sales Qty",
+      "Bonus Qty",
+      "Total Qty",
+      "Selling Price",
+      "Amount",
+      "Discount",
+      "Net Amount",
+      "Avg Unit Price",
+      "LC",
+      "Profit/Loss",
+      "Credit Days",
+      "Due Date",
+      "Delivery Date",
+      "Paid Amount",
+      "Due Amount",
+      "Payment Status",
+      "Remarks",
+    ];
+    headerRow.font = { bold: true };
+    headerRow.alignment = { vertical: "middle", horizontal: "center" };
+    headerRow.height = 20;
+
+    // === Format Date Columns ===
+    ["recordingDate", "invoiceDate", "dueDate", "deliveryDate"].forEach(
+      (key) => {
+        const col = worksheet.getColumn(key);
+        if (col) col.numFmt = "dd-mmm-yy";
+      }
+    );
+
+    // === Format Numeric Columns ===
+    [
+      "salesQty",
+      "bonusQty",
+      "totalQty",
+      "sellingPrice",
+      "amount",
+      "discount",
+      "netSellingAmount",
+      "averageUnitPrice",
+      "lc",
+      "profitLoss",
+      "paidAmount",
+      "dueAmount",
+    ].forEach((key) => {
+      const col = worksheet.getColumn(key);
+      if (col) col.numFmt = "#,##0.00";
+    });
+
+    // === Add Data Rows ===
+    filteredSalesData.forEach((sale, index) => {
+      const customer = customerMap[sale.customerCode] || {};
+
+      // Format dates for Excel display
+      const formatDateForDisplay = (dateString) => {
+        if (!dateString) return "";
+        const date = new Date(dateString);
+        if (isNaN(date.getTime())) return "";
+        return date;
+      };
+
+      // Format customer code with leading zeros
+      const formatCustomerCode = (code) => {
+        if (!code) return "";
+        const codeStr = code.toString();
+        return codeStr.padStart(5, "0");
+      };
+
+      const row = worksheet.addRow({
+        no: index + 1,
+        recordingDate: formatDateForDisplay(sale.recordingDate),
+        invoiceNumber: sale.invoiceNumber,
+        invoiceDate: formatDateForDisplay(sale.invoiceDate),
+        mrName: sale.mrName,
+        customerCode: formatCustomerCode(sale.customerCode),
+        customerName: customer.name || "",
+        customerNumber: customer.customerNumber || "",
+        address: customer.address || "",
+        zone: customer.zone || "",
+        productName: sale.productName,
+        salesQty: sale.salesQty,
+        bonusQty: sale.bonusQty,
+        totalQty: sale.totalQty,
+        sellingPrice: sale.sellingPrice,
+        amount: sale.amount,
+        discount: sale.discount,
+        netSellingAmount: sale.netSellingAmount,
+        averageUnitPrice: sale.averageUnitPrice,
+        lc: sale.lc,
+        profitLoss: sale.profitLoss,
+        creditDays: sale.creditDays,
+        dueDate: formatDateForDisplay(sale.dueDate),
+        deliveryDate: formatDateForDisplay(sale.deliveryDate),
+        paidAmount: sale.paidAmount,
+        dueAmount: sale.dueAmount,
+        paymentStatus: sale.paymentStatus,
+        remark: sale.remark,
+      });
+
+      // Apply borders to all cells in the row
+      row.eachCell((cell) => {
+        cell.border = {
+          top: { style: "thin" },
+          left: { style: "thin" },
+          bottom: { style: "thin" },
+          right: { style: "thin" },
+        };
+      });
+    });
+
+    // Set response headers for file download
+    const fileName = `sale_summary_${startDate}_to_${endDate}.xlsx`;
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+
+    // Send the Excel file directly
+    await workbook.xlsx.write(res);
+
+    res.end();
+  } catch (error) {
+    console.error("Error generating Excel file:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to generate Excel file",
+      error: error.message,
+    });
   }
 });
 

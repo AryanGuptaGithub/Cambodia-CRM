@@ -15,6 +15,7 @@
     "axios": "^1.11.0",
     "date-fns": "^4.1.0",
     "exceljs": "^4.4.0",
+    "file-saver": "^2.0.5",
     "jszip": "^3.10.1",
     "lucide-react": "^0.542.0",
     "react": "^19.1.1",
