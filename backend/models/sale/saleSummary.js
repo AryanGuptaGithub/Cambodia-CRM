@@ -38,11 +38,7 @@ const saleSummarySchema = new Schema(
       required: true,
       set: roundToTwo,
     },
-    unitPrice: {
-      type: Number,
-      required: true,
-      set: roundToTwo,
-    },
+
     lc: {
       type: Number,
       required: true,
@@ -64,17 +60,14 @@ const saleSummarySchema = new Schema(
         "Cash",
         "Credit",
         "Partial Paid",
-        "Paid",
-        "Unpaid",
-        "Pending",
         "Overdue",
       ],
-      default: "Pending",
+      default: "Credit",
     },
     remark: { type: String, default: "" },
   },
   {
-    timestamps: true, // adds createdAt and updatedAt
+    timestamps: true, 
   }
 );
 

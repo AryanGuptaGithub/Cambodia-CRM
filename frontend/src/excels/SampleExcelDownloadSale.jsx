@@ -1,4 +1,4 @@
-import React from "react";
+// import React from "react";
 import ExcelJS from "exceljs";
 
 const SampleExcelDownloadSale = ({ data = [] }) => {
@@ -7,7 +7,7 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
     const worksheet = workbook.addWorksheet("Sale Summary");
 
     // Title
-    worksheet.mergeCells("A1:S1");
+    worksheet.mergeCells("A1:R1");
     const titleCell = worksheet.getCell("A1");
     titleCell.value = "HEALTHCARE SOUTH EAST ASIA";
     titleCell.font = { bold: true, size: 16 };
@@ -15,7 +15,7 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
     worksheet.getRow(1).height = 25;
 
     // Subtitle
-    worksheet.mergeCells("A2:S2");
+    worksheet.mergeCells("A2:R2");
     const subtitleCell = worksheet.getCell("A2");
     subtitleCell.value = "Sale Summary List";
     subtitleCell.font = { bold: true, size: 14 };
@@ -34,7 +34,6 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
       { key: "salesQty", width: 15 },
       { key: "bonusQty", width: 15 },
       { key: "sellingPrice", width: 27 },
-      { key: "amount", width: 15 },
       { key: "discount", width: 15 },
       { key: "netSellingAmount", width: 25 },
       { key: "averageUnitPrice", width: 25 },
@@ -46,7 +45,7 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
       { key: "remark", width: 25 },
     ];
 
-    // Set header row manually
+    // Set header row
     const headerRow = worksheet.getRow(3);
     headerRow.values = [
       "No",
@@ -59,13 +58,13 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
       "Sales Qty",
       "Bonus Qty",
       "Selling Price (USD)",
-      "Amount (USD)",
       "Discount (USD)",
+      "Net Selling Amount",
       "Average Unit Price (USD)",
-      "Unit Price",
-      "LC",
+      "Profit / Loss",
       "Credit Days",
-      "Paid Amount",
+      "Due Date",
+      "Delivery Date",
       "Payment Status",
       "Remarks",
     ];
@@ -79,13 +78,27 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
       if (col) col.numFmt = "dd/mm/yyyy";
     });
 
-    // Optional: Add sample data rows
+    // Add sample data rows
     data.forEach((item, index) => {
       worksheet.addRow({
         no: index + 1,
         ...item,
       });
     });
+
+    // Apply dropdown list to "Payment Status" column (18th column, starting from row 4)
+    const paymentStatusColumn = 18; // Column R
+    const startRow = 4;
+    const endRow = data.length + 3 || 100; // fallback to 100 rows if data is empty
+
+    for (let i = startRow; i <= endRow; i++) {
+      worksheet.getCell(i, paymentStatusColumn).dataValidation = {
+        type: "list",
+        allowBlank: true,
+        formulae: ['"Cash,Credit,Partial Paid"'],
+        showDropDown: true,
+      };
+    }
 
     // Export to Excel
     const buffer = await workbook.xlsx.writeBuffer();
@@ -112,4 +125,3 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
 };
 
 export default SampleExcelDownloadSale;
-

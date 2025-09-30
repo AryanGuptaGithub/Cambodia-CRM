@@ -1,6 +1,7 @@
 import express from "express";
 import SaleSummary from "../../models/sale/saleSummary.js";
 import paymentStatus from "../../models/paymentStatus.js";
+import Product from "../../models/projectManger/product.js";
 const router = express.Router();
 
 // 🔧 Convert Excel serial date to JS Date
@@ -240,7 +241,6 @@ router.delete("/sales", async (req, res) => {
 
 router.post("/sales", async (req, res) => {
   try {
-    console.log("values of req.body", req.body);
     const newSaleData = req.body;
     const newSale = new SaleSummary(newSaleData);
     const savedSale = await newSale.save();
@@ -265,6 +265,21 @@ router.get("/sales/payment-status", async (req, res) => {
   } catch (error) {
     console.error("❌ Error fetching payment statuses:", error.message);
     res.status(500).json({ error: "Failed to fetch payment statuses." });
+  }
+});
+
+router.get("/sales/unique-names", async (req, res) => {
+  try {
+    const uniqueNames = await Product.distinct("productName", {
+      productName: { $ne: null },
+    });
+
+    uniqueNames.sort((a, b) => a.localeCompare(b));
+
+    res.status(200).json({ productNames: uniqueNames });
+  } catch (error) {
+    console.error("Error fetching unique product names:", error);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
