@@ -244,12 +244,14 @@ router.post("/sales", async (req, res) => {
     const newSaleData = req.body;
     const newSale = new SaleSummary(newSaleData);
     const savedSale = await newSale.save();
-    console.log("avlues of saveSale", savedSale);
+
     res.status(201).json({
-      message: "Sale added successfully",
+      message: `Sale <b>${newSaleData.productName} - ${newSaleData.invoiceNumber}</b> added successfully`,
       sale: savedSale,
     });
   } catch (error) {
+    console.error("Sale creation error:", error);
+
     if (error.name === "ValidationError") {
       return res.status(400).json({ error: error.message });
     }

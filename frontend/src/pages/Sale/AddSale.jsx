@@ -1,12 +1,16 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+} from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { showToast } from "../../utils/toast";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
-import { useInitialSaleData} from "./IntialLoading.jsx"; 
-// import { useInitialSaleData, useApi } from "../../hooks/useSaleData";
+import { useInitialSaleData } from "./IntialLoading.jsx";
 
-// Constants
 const INITIAL_FORM_STATE = {
   _id: null,
   recordingDate: "",
@@ -321,54 +325,56 @@ const InputField = React.memo(
 );
 
 // DatePicker Field Component
-const DatePickerField = React.memo(({
-  label,
-  name,
-  value,
-  onChange,
-  error,
-  required = false,
-  readOnly = false,
-  placeholder = "Select a date",
-  className = ""
-}) => (
-  <div className="flex flex-col">
-    <label className="text-sm font-medium text-gray-700 mb-1">
-      {label}
-      {required && <span className="text-red-500 ml-1">*</span>}
-    </label>
-    <DatePicker
-      selected={value ? new Date(value) : null}
-      onChange={(date) => {
-        if (date) {
-          const event = {
-            target: {
-              name: name,
-              value: date.toISOString().split('T')[0] // Format as YYYY-MM-DD
-            }
-          };
-          onChange(event);
-        } else {
-          const event = {
-            target: {
-              name: name,
-              value: ""
-            }
-          };
-          onChange(event);
-        }
-      }}
-      dateFormat="yyyy-MM-dd"
-      placeholderText={placeholder}
-      readOnly={readOnly}
-      className={`w-full border rounded-md px-2 py-1 ${
-        error ? "border-red-500" : "border-gray-300"
-      } ${readOnly ? "bg-gray-100" : ""} ${className}`}
-      autoComplete="off"
-    />
-    {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
-  </div>
-));
+const DatePickerField = React.memo(
+  ({
+    label,
+    name,
+    value,
+    onChange,
+    error,
+    required = false,
+    readOnly = false,
+    placeholder = "Select a date",
+    className = "",
+  }) => (
+    <div className="flex flex-col">
+      <label className="text-sm font-medium text-gray-700 mb-1">
+        {label}
+        {required && <span className="text-red-500 ml-1">*</span>}
+      </label>
+      <DatePicker
+        selected={value ? new Date(value) : null}
+        onChange={(date) => {
+          if (date) {
+            const event = {
+              target: {
+                name: name,
+                value: date.toISOString().split("T")[0], // Format as YYYY-MM-DD
+              },
+            };
+            onChange(event);
+          } else {
+            const event = {
+              target: {
+                name: name,
+                value: "",
+              },
+            };
+            onChange(event);
+          }
+        }}
+        dateFormat="yyyy-MM-dd"
+        placeholderText={placeholder}
+        readOnly={readOnly}
+        className={`w-full border rounded-md px-2 py-1 ${
+          error ? "border-red-500" : "border-gray-300"
+        } ${readOnly ? "bg-gray-100" : ""} ${className}`}
+        autoComplete="off"
+      />
+      {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
+    </div>
+  )
+);
 
 // Suggestion Input Component
 const SuggestionInput = React.memo(
@@ -385,10 +391,10 @@ const SuggestionInput = React.memo(
     highlightedIndex,
     inputRef,
     dropdownTop,
-    onKeyDown,
     onSuggestionSelect,
     getSuggestionValue = (item) => item,
     getSuggestionDisplay = (item) => item,
+    setHighlightedIndex, // <-- NEW: Pass this from parent to allow keyboard navigation
   }) => {
     const handleMouseEnter = useCallback(
       (index) => {
@@ -405,6 +411,48 @@ const SuggestionInput = React.memo(
       [onSuggestionSelect, getSuggestionValue]
     );
 
+    const handleKeyDown = useCallback(
+      (e) => {
+        if (!isOpen || suggestions.length === 0) return;
+
+        switch (e.key) {
+          case "ArrowDown":
+            e.preventDefault();
+            setHighlightedIndex((prev) =>
+              prev < suggestions.length - 1 ? prev + 1 : 0
+            );
+            break;
+          case "ArrowUp":
+            e.preventDefault();
+            setHighlightedIndex((prev) =>
+              prev > 0 ? prev - 1 : suggestions.length - 1
+            );
+            break;
+          case "Enter":
+            e.preventDefault();
+            if (
+              highlightedIndex >= 0 &&
+              highlightedIndex < suggestions.length
+            ) {
+              const selectedItem = suggestions[highlightedIndex];
+              const value = getSuggestionValue(selectedItem);
+              onSuggestionSelect && onSuggestionSelect(value);
+            }
+            break;
+          default:
+            break;
+        }
+      },
+      [
+        highlightedIndex,
+        suggestions,
+        isOpen,
+        onSuggestionSelect,
+        getSuggestionValue,
+        setHighlightedIndex,
+      ]
+    );
+
     return (
       <div className="relative flex flex-col">
         <label className="text-sm font-medium text-gray-700 mb-1">
@@ -416,7 +464,7 @@ const SuggestionInput = React.memo(
           name={name}
           value={value}
           onChange={onChange}
-          onKeyDown={onKeyDown}
+          onKeyDown={handleKeyDown}
           onFocus={onFocus}
           onBlur={onBlur}
           className={`border rounded-md px-2 py-1 ${
@@ -435,7 +483,7 @@ const SuggestionInput = React.memo(
           >
             {suggestions.map((item, idx) => (
               <li
-                key={typeof item === "object" ? item._id : idx}
+                key={typeof item === "object" ? item._id ?? idx : idx}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => handleClick(item)}
                 onMouseEnter={() => handleMouseEnter(idx)}
@@ -526,15 +574,24 @@ const AddSale = () => {
     if (!validate()) return;
 
     try {
-      const respData = await fetch(`${backendUrl}/api/sales`, {
+      const response = await fetch(`${backendUrl}/api/sales`, {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify(form),
       });
+
+      const respData = await response.json();
+
+      if (!response.ok) {
+        throw new Error(respData.error || "Something went wrong");
+      }
 
       showToast("success", respData.message || "Sale added successfully");
       navigate("/salelayout/sale");
     } catch (err) {
-      console.log('Error details:', err);
+      console.error("Error submitting sale:", err);
       showToast("error", err.message || "Error submitting sale");
     }
   };
@@ -566,7 +623,7 @@ const AddSale = () => {
             required={true}
             placeholder="Select recording date"
           />
-          
+
           <InputField
             label="Invoice Number"
             name="invoiceNumber"
@@ -575,7 +632,7 @@ const AddSale = () => {
             error={errors.invoiceNumber}
             required={true}
           />
-          
+
           {/* DatePicker for Invoice Date */}
           <DatePickerField
             label="Invoice Date"
@@ -586,7 +643,7 @@ const AddSale = () => {
             required={true}
             placeholder="Select invoice date"
           />
-          
+
           <InputField
             label="Medical Representative Name"
             name="mrName"
@@ -595,7 +652,7 @@ const AddSale = () => {
             error={errors.mrName}
             required={true}
           />
-          
+
           <InputField
             label="Customer Code"
             name="customerCode"
@@ -606,7 +663,7 @@ const AddSale = () => {
           />
 
           {/* Product Name Suggestion - placed after Customer Code */}
-          <SuggestionInput
+          {/* <SuggestionInput
             label="Product Name"
             name="productName"
             value={form.productName}
@@ -641,6 +698,38 @@ const AddSale = () => {
             getSuggestionDisplay={(item) =>
               typeof item === "string" ? item : item.name
             }
+          /> */}
+          <SuggestionInput
+            label="Product Name"
+            name="productName"
+            value={form.productName}
+            onChange={enhancedHandleChange}
+            error={errors.productName}
+            suggestions={productNameSuggestions.filteredItems}
+            isOpen={productNameSuggestions.isOpen}
+            highlightedIndex={productNameSuggestions.highlightedIndex}
+            inputRef={productNameSuggestions.inputRef}
+            dropdownTop={productNameSuggestions.dropdownTop}
+            onFocus={() => productNameSuggestions.setIsOpen(true)}
+            onBlur={() =>
+              setTimeout(() => productNameSuggestions.setIsOpen(false), 150)
+            }
+            onSuggestionSelect={(value, isHighlight) => {
+              if (typeof value === "number" && isHighlight) {
+                handleProductNameHighlight(value, true);
+              } else {
+                productNameSuggestions.selectSuggestion(value, (val) =>
+                  updateFormField("productName", val)
+                );
+              }
+            }}
+            getSuggestionValue={(item) =>
+              typeof item === "string" ? item : item.name
+            }
+            getSuggestionDisplay={(item) =>
+              typeof item === "string" ? item : item.name
+            }
+            setHighlightedIndex={productNameSuggestions.setHighlightedIndex} // ✅ Pass this
           />
 
           {/* Continue with remaining fields in exact order */}
@@ -653,7 +742,7 @@ const AddSale = () => {
             error={errors.salesQty}
             required={true}
           />
-          
+
           <InputField
             label="Bonus Quantity"
             name="bonusQty"
@@ -662,7 +751,7 @@ const AddSale = () => {
             onChange={enhancedHandleChange}
             error={errors.bonusQty}
           />
-          
+
           <InputField
             label="Total Quantity"
             name="totalQty"
@@ -671,7 +760,7 @@ const AddSale = () => {
             error={errors.totalQty}
             readOnly={true}
           />
-          
+
           <InputField
             label="Selling Price"
             name="sellingPrice"
@@ -681,7 +770,7 @@ const AddSale = () => {
             error={errors.sellingPrice}
             required={true}
           />
-          
+
           <InputField
             label="Amount"
             name="amount"
@@ -690,7 +779,7 @@ const AddSale = () => {
             error={errors.amount}
             readOnly={true}
           />
-          
+
           <InputField
             label="Discount"
             name="discount"
@@ -699,7 +788,7 @@ const AddSale = () => {
             onChange={enhancedHandleChange}
             error={errors.discount}
           />
-          
+
           <InputField
             label="Net Selling Amount"
             name="netSellingAmount"
@@ -708,7 +797,7 @@ const AddSale = () => {
             error={errors.netSellingAmount}
             readOnly={true}
           />
-          
+
           <InputField
             label="Average Unit Price"
             name="averageUnitPrice"
@@ -717,7 +806,7 @@ const AddSale = () => {
             error={errors.averageUnitPrice}
             readOnly={true}
           />
-          
+
           <InputField
             label="LC"
             name="lc"
@@ -726,7 +815,7 @@ const AddSale = () => {
             onChange={enhancedHandleChange}
             error={errors.lc}
           />
-          
+
           <InputField
             label="Profit / Loss"
             name="profitLoss"
@@ -735,7 +824,7 @@ const AddSale = () => {
             error={errors.profitLoss}
             readOnly={true}
           />
-          
+
           <InputField
             label="Credit Days"
             name="creditDays"
@@ -744,7 +833,7 @@ const AddSale = () => {
             onChange={enhancedHandleChange}
             error={errors.creditDays}
           />
-          
+
           {/* DatePicker for Due Date (read-only) */}
           <DatePickerField
             label="Due Date"
@@ -755,7 +844,7 @@ const AddSale = () => {
             readOnly={true}
             placeholder="Due date will be calculated"
           />
-          
+
           {/* DatePicker for Delivery Date (read-only) */}
           <DatePickerField
             label="Delivery Date"
@@ -766,7 +855,7 @@ const AddSale = () => {
             readOnly={true}
             placeholder="Delivery date will be set automatically"
           />
-          
+
           <InputField
             label="Paid Amount"
             name="paidAmount"
@@ -775,7 +864,7 @@ const AddSale = () => {
             onChange={enhancedHandleChange}
             error={errors.paidAmount}
           />
-          
+
           <InputField
             label="Due Amount"
             name="dueAmount"
@@ -784,7 +873,6 @@ const AddSale = () => {
             error={errors.dueAmount}
             readOnly={true}
           />
-
 
           <SuggestionInput
             label="Payment Status"
@@ -797,11 +885,6 @@ const AddSale = () => {
             highlightedIndex={paymentStatusSuggestions.highlightedIndex}
             inputRef={paymentStatusSuggestions.inputRef}
             dropdownTop={paymentStatusSuggestions.dropdownTop}
-            onKeyDown={(e) =>
-              paymentStatusSuggestions.handleKeyDown(e, (value) =>
-                updateFormField("paymentStatus", value)
-              )
-            }
             onFocus={() => paymentStatusSuggestions.setIsOpen(true)}
             onBlur={() =>
               setTimeout(() => paymentStatusSuggestions.setIsOpen(false), 150)
@@ -817,6 +900,7 @@ const AddSale = () => {
             }}
             getSuggestionValue={(item) => item.type}
             getSuggestionDisplay={(item) => item.type}
+            setHighlightedIndex={paymentStatusSuggestions.setHighlightedIndex} // ✅ Pass this
           />
 
           {/* Remark field - full width */}
