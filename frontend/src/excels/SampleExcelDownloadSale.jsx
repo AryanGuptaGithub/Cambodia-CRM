@@ -1,4 +1,3 @@
-// import React from "react";
 import ExcelJS from "exceljs";
 
 const SampleExcelDownloadSale = ({ data = [] }) => {
@@ -7,7 +6,10 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
     const worksheet = workbook.addWorksheet("Sale Summary");
 
     // Title
-    worksheet.mergeCells("A1:R1");
+    const paymentStatusOptions = '"Cash,Credit,Partial Paid"';
+    const paymentStatusColumnLetter = "O"; 
+
+    worksheet.mergeCells("A1:P1");
     const titleCell = worksheet.getCell("A1");
     titleCell.value = "HEALTHCARE SOUTH EAST ASIA";
     titleCell.font = { bold: true, size: 16 };
@@ -15,7 +17,7 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
     worksheet.getRow(1).height = 25;
 
     // Subtitle
-    worksheet.mergeCells("A2:R2");
+    worksheet.mergeCells("A2:P2");
     const subtitleCell = worksheet.getCell("A2");
     subtitleCell.value = "Sale Summary List";
     subtitleCell.font = { bold: true, size: 14 };
@@ -35,17 +37,14 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
       { key: "bonusQty", width: 15 },
       { key: "sellingPrice", width: 27 },
       { key: "discount", width: 15 },
-      { key: "netSellingAmount", width: 25 },
-      { key: "averageUnitPrice", width: 25 },
-      { key: "profitLoss", width: 15 },
+      { key: "lc", width: 25 },
       { key: "creditDays", width: 12 },
-      { key: "dueDate", width: 15 },
-      { key: "deliveryDate", width: 15 },
+      { key: "paidAmount", width: 12 },
       { key: "paymentStatus", width: 15 },
       { key: "remark", width: 25 },
     ];
 
-    // Set header row
+    // Header Row
     const headerRow = worksheet.getRow(3);
     headerRow.values = [
       "No",
@@ -59,12 +58,9 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
       "Bonus Qty",
       "Selling Price (USD)",
       "Discount (USD)",
-      "Net Selling Amount",
-      "Average Unit Price (USD)",
-      "Profit / Loss",
+      "LC Price (USD)",
       "Credit Days",
-      "Due Date",
-      "Delivery Date",
+      "Paid Amount",
       "Payment Status",
       "Remarks",
     ];
@@ -73,12 +69,12 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
     worksheet.getRow(3).height = 20;
 
     // Format date columns
-    ["recordingDate", "invoiceDate", "dueDate", "deliveryDate"].forEach((key) => {
+    ["recordingDate", "invoiceDate"].forEach((key) => {
       const col = worksheet.getColumn(key);
       if (col) col.numFmt = "dd/mm/yyyy";
     });
 
-    // Add sample data rows
+    // Add data
     data.forEach((item, index) => {
       worksheet.addRow({
         no: index + 1,
@@ -86,21 +82,21 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
       });
     });
 
-    // Apply dropdown list to "Payment Status" column (18th column, starting from row 4)
-    const paymentStatusColumn = 18; // Column R
+    // Add dropdown to Payment Status column
     const startRow = 4;
-    const endRow = data.length + 3 || 100; // fallback to 100 rows if data is empty
+    const endRow = data.length > 0 ? data.length + 3 : 100; // Fallback to row 100 if no data
 
     for (let i = startRow; i <= endRow; i++) {
-      worksheet.getCell(i, paymentStatusColumn).dataValidation = {
+      const cell = worksheet.getCell(`${paymentStatusColumnLetter}${i}`);
+      cell.dataValidation = {
         type: "list",
         allowBlank: true,
-        formulae: ['"Cash,Credit,Partial Paid"'],
+        formulae: [paymentStatusOptions],
         showDropDown: true,
       };
     }
 
-    // Export to Excel
+    // Export Excel file
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

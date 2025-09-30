@@ -1,229 +1,104 @@
-  import React, { useState, useEffect, useRef } from "react";
-  import { useNavigate, useLocation } from "react-router-dom";
-  import { showToast } from "../../utils/toast";
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+} from "react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { showToast } from "../../utils/toast";
 
-  const backendUrl = import.meta.env.VITE_BACKEND_URL;
+const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-  const initialFormState = {
-    _id: null,
-    recordingDate: "",
-    invoiceNumber: "",
-    invoiceDate: "",
-    mrName: "",
-    customerCode: "",
-    productName: "",
-    salesQty: "",
-    bonusQty: "",
-    totalQty: "",
-    sellingPrice: "",
-    amount: "",
-    discount: "",
-    netSellingAmount: "",
-    averageUnitPrice: "",
-    lc: "",
-    profitLoss: "",
-    creditDays: "",
-    dueDate: "",
-    deliveryDate: "",
-    paidAmount: "",
-    dueAmount: "",
-    paymentStatus: "",
-    remark: "",
-  };
+// Constants
+const INITIAL_FORM_STATE = {
+  _id: null,
+  recordingDate: "",
+  invoiceNumber: "",
+  invoiceDate: "",
+  mrName: "",
+  customerCode: "",
+  productName: "",
+  salesQty: "",
+  bonusQty: "",
+  totalQty: "",
+  sellingPrice: "",
+  amount: "",
+  discount: "",
+  netSellingAmount: "",
+  averageUnitPrice: "",
+  lc: "",
+  profitLoss: "",
+  creditDays: "",
+  dueDate: "",
+  deliveryDate: "",
+  paidAmount: "",
+  dueAmount: "",
+  paymentStatus: "",
+  remark: "",
+};
 
-  const AddSale = () => {
-    const navigate = useNavigate();
-    const location = useLocation();
-    const { customerCode } = location.state || {};
-
-    const [form, setForm] = useState({
-      ...initialFormState,
-      customerCode: customerCode || "",
-    });
-    const [statuses, setStatuses] = useState([]); // for payment status suggestions
-    const [productNames, setProductNames] = useState([]); // for product name suggestions
-    const [errors, setErrors] = useState({});
-
-    // For suggestion dropdowns
-    const [showStatusSuggestions, setShowStatusSuggestions] = useState(false);
-    const [statusHighlightedIndex, setStatusHighlightedIndex] = useState(-1);
-    const statusInputRef = useRef(null);
-    const [statusDropdownTop, setStatusDropdownTop] = useState(0);
-
-    const [showProductSuggestions, setShowProductSuggestions] = useState(false);
-    const [productHighlightedIndex, setProductHighlightedIndex] = useState(-1);
-    const productInputRef = useRef(null);
-    const [productDropdownTop, setProductDropdownTop] = useState(0);
-
-    useEffect(() => {
-      const fetchPaymentStatuses = async () => {
-        try {
-          const res = await fetch(`${backendUrl}/api/sales/payment-status`);
-          if (!res.ok) throw new Error(`Status fetch error ${res.status}`);
-          const data = await res.json();
-          setStatuses(data); // assume array of { _id, type }
-        } catch (err) {
-          console.error("Error fetching statuses:", err);
-        }
-      };
-      fetchPaymentStatuses();
-    }, []);
-
-    useEffect(() => {
-      const fetchProductNames = async () => {
-        try {
-          const res = await fetch(`${backendUrl}/api/sales/unique-names`);
-          if (!res.ok) throw new Error(`Product names fetch error ${res.status}`);
-          const data = await res.json();
-          console.log('values of data',data);
-          setProductNames(data.productNames); 
-        } catch (err) {
-          console.error("Error fetching product names:", err);
-        }
-      };
-      fetchProductNames();
-    }, []);
-
-    // Filtered lists
-    const filteredStatusSuggestions = statuses
-      .filter((st) =>
-        st.type.toLowerCase().startsWith(form.paymentStatus.toLowerCase())
-      )
-      .sort((a, b) => a.type.localeCompare(b.type));
-
-    const filteredProductSuggestions = productNames
-      .filter((pn) => {
-        const name = typeof pn === "string" ? pn : pn.name;
-        return name.toLowerCase().startsWith(form.productName.toLowerCase());
-      })
-      .sort((a, b) => {
-        const na = typeof a === "string" ? a : a.name;
-        const nb = typeof b === "string" ? b : b.name;
-        return na.localeCompare(nb);
+// Custom hook for API calls
+const useApi = () => {
+  const fetchData = useCallback(async (endpoint, options = {}) => {
+    try {
+      const response = await fetch(`${backendUrl}${endpoint}`, {
+        headers: { "Content-Type": "application/json" },
+        ...options,
       });
 
-    // Suggestion handlers for Payment Status
-    const handleStatusKeyDown = (e) => {
-      if (!showStatusSuggestions || filteredStatusSuggestions.length === 0)
-        return;
-      switch (e.key) {
-        case "ArrowDown":
-          e.preventDefault();
-          setStatusHighlightedIndex((prev) =>
-            prev < filteredStatusSuggestions.length - 1 ? prev + 1 : 0
-          );
-          break;
-        case "ArrowUp":
-          e.preventDefault();
-          setStatusHighlightedIndex((prev) =>
-            prev > 0 ? prev - 1 : filteredStatusSuggestions.length - 1
-          );
-          break;
-        case "Enter":
-          e.preventDefault();
-          if (statusHighlightedIndex >= 0) {
-            const sel = filteredStatusSuggestions[statusHighlightedIndex].type;
-            selectStatusSuggestion(sel);
-          }
-          break;
-        case "Escape":
-          setShowStatusSuggestions(false);
-          break;
-        default:
-          break;
-      }
-    };
-
-    const selectStatusSuggestion = (value) => {
-      setForm((prev) => ({ ...prev, paymentStatus: value }));
-      setShowStatusSuggestions(false);
-      setStatusHighlightedIndex(-1);
-    };
-
-    // Suggestion handlers for Product Name
-    const handleProductKeyDown = (e) => {
-      if (!showProductSuggestions || filteredProductSuggestions.length === 0)
-        return;
-      switch (e.key) {
-        case "ArrowDown":
-          e.preventDefault();
-          setProductHighlightedIndex((prev) =>
-            prev < filteredProductSuggestions.length - 1 ? prev + 1 : 0
-          );
-          break;
-        case "ArrowUp":
-          e.preventDefault();
-          setProductHighlightedIndex((prev) =>
-            prev > 0 ? prev - 1 : filteredProductSuggestions.length - 1
-          );
-          break;
-        case "Enter":
-          e.preventDefault();
-          if (productHighlightedIndex >= 0) {
-            const sel =
-              typeof filteredProductSuggestions[productHighlightedIndex] ===
-              "string"
-                ? filteredProductSuggestions[productHighlightedIndex]
-                : filteredProductSuggestions[productHighlightedIndex].name;
-            selectProductSuggestion(sel);
-          }
-          break;
-        case "Escape":
-          setShowProductSuggestions(false);
-          break;
-        default:
-          break;
-      }
-    };
-
-    const selectProductSuggestion = (value) => {
-      setForm((prev) => ({ ...prev, productName: value }));
-      setShowProductSuggestions(false);
-      setProductHighlightedIndex(-1);
-    };
-
-    const handleChange = (e) => {
-      const { name, value } = e.target;
-
-      if (name === "paymentStatus") {
-        setForm((prev) => ({ ...prev, paymentStatus: value }));
-        setShowStatusSuggestions(true);
-        setStatusHighlightedIndex(-1);
-        return;
-      }
-      if (name === "productName") {
-        setForm((prev) => ({ ...prev, productName: value }));
-        setShowProductSuggestions(true);
-        setProductHighlightedIndex(-1);
-        return;
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      let updatedForm = { ...form, [name]: value };
+      return await response.json();
+    } catch (error) {
+      console.error(`API Error (${endpoint}):`, error);
+      throw error;
+    }
+  }, []);
 
-      const parseNumber = (val) => {
-        const num = parseFloat(val);
-        return isNaN(num) ? 0 : num;
-      };
+  return { fetchData };
+};
 
-      // totalQty
+// Custom hook for form state management
+const useSaleForm = (initialCustomerCode = "") => {
+  const [form, setForm] = useState({
+    ...INITIAL_FORM_STATE,
+    customerCode: initialCustomerCode,
+  });
+  const [errors, setErrors] = useState({});
+
+  const parseNumber = useCallback((val) => {
+    const num = parseFloat(val);
+    return isNaN(num) ? 0 : num;
+  }, []);
+
+  const updateFormField = useCallback((name, value) => {
+    setForm((prev) => ({ ...prev, [name]: value }));
+  }, []);
+
+  const calculateDerivedFields = useCallback(
+    (name, value, currentForm) => {
+      const updatedForm = { ...currentForm, [name]: value };
+      const getNum = (field) =>
+        parseNumber(updatedForm[field] || currentForm[field]);
+      const getInt = (field) =>
+        parseInt(updatedForm[field] || currentForm[field] || 0, 10);
+
+      // Calculations
       if (name === "salesQty" || name === "bonusQty") {
         const salesQty =
-          name === "salesQty"
-            ? parseInt(value, 10) || 0
-            : parseInt(form.salesQty, 10) || 0;
+          name === "salesQty" ? parseInt(value, 10) || 0 : getInt("salesQty");
         const bonusQty =
-          name === "bonusQty"
-            ? parseInt(value, 10) || 0
-            : parseInt(form.bonusQty, 10) || 0;
+          name === "bonusQty" ? parseInt(value, 10) || 0 : getInt("bonusQty");
         updatedForm.totalQty = salesQty + bonusQty;
       }
 
-      // deliveryDate default
-      if (name === "invoiceDate" && !form.deliveryDate) {
+      if (name === "invoiceDate" && !currentForm.deliveryDate) {
         updatedForm.deliveryDate = value;
       }
 
-      // creditDays -> dueDate
       if (name === "creditDays") {
         const creditDays = parseInt(value, 10);
         if (!isNaN(creditDays)) {
@@ -235,53 +110,41 @@
         }
       }
 
-      // amount = sellingPrice * salesQty
       if (name === "sellingPrice" || name === "salesQty") {
-        const price = parseFloat(
-          name === "sellingPrice" ? value : form.sellingPrice || "0"
-        );
-        const qty = parseInt(
-          name === "salesQty" ? value : form.salesQty || "0",
-          10
-        );
-        updatedForm.amount =
-          isNaN(price) || isNaN(qty) ? "" : (price * qty).toFixed(2);
+        const price = getNum("sellingPrice");
+        const qty = getInt("salesQty");
+        updatedForm.amount = (price * qty).toFixed(2);
       }
 
-      // netSellingAmount = amount - discount
       if (["amount", "discount", "sellingPrice", "salesQty"].includes(name)) {
-        const amount = parseNumber(
-          name === "amount" ? value : updatedForm.amount || form.amount
-        );
-        const discount = parseNumber(name === "discount" ? value : form.discount);
+        const amount = getNum("amount");
+        const discount = getNum("discount");
         updatedForm.netSellingAmount = (amount - discount).toFixed(2);
       }
 
-      // profitLoss = amount - discount - lc * totalQty
       if (
-        ["amount", "discount", "lc", "totalQty", "salesQty", "bonusQty"].includes(
-          name
-        )
+        [
+          "amount",
+          "discount",
+          "lc",
+          "totalQty",
+          "salesQty",
+          "bonusQty",
+        ].includes(name)
       ) {
-        const amount = parseNumber(updatedForm.amount || form.amount);
-        const discount = parseNumber(updatedForm.discount || form.discount);
-        const lc = parseNumber(updatedForm.lc || form.lc);
-        const totalQty = parseInt(updatedForm.totalQty || form.totalQty || 0, 10);
+        const amount = getNum("amount");
+        const discount = getNum("discount");
+        const lc = getNum("lc");
+        const totalQty = getInt("totalQty");
         updatedForm.profitLoss = (amount - discount - lc * totalQty).toFixed(2);
       }
 
-      // dueAmount
       if (["netSellingAmount", "paidAmount"].includes(name)) {
-        const amount = parseNumber(
-          updatedForm.netSellingAmount || form.netSellingAmount
-        );
-        const paidAmount = parseNumber(
-          name === "paidAmount" ? value : form.paidAmount
-        );
-        updatedForm.dueAmount = (amount - paidAmount).toFixed(2);
+        const netAmount = getNum("netSellingAmount");
+        const paidAmount = getNum("paidAmount");
+        updatedForm.dueAmount = (netAmount - paidAmount).toFixed(2);
       }
 
-      // averageUnitPrice = netSellingAmount / totalQty
       if (
         [
           "netSellingAmount",
@@ -291,290 +154,583 @@
           "sellingPrice",
         ].includes(name)
       ) {
-        const net = parseNumber(
-          updatedForm.netSellingAmount || form.netSellingAmount
-        );
-        const totalQty = parseInt(updatedForm.totalQty || form.totalQty || 0, 10);
+        const net = getNum("netSellingAmount");
+        const totalQty = getInt("totalQty");
         updatedForm.averageUnitPrice =
           totalQty > 0 ? (net / totalQty).toFixed(2) : "";
       }
 
-      setForm(updatedForm);
-    };
+      return updatedForm;
+    },
+    [parseNumber]
+  );
 
-    const validate = () => {
-      const newErrors = {};
-      if (!form.recordingDate)
-        newErrors.recordingDate = "Recording Date is required";
-      if (!form.invoiceNumber)
-        newErrors.invoiceNumber = "Invoice Number is required";
-      if (!form.invoiceDate) newErrors.invoiceDate = "Invoice Date is required";
-      if (!form.mrName) newErrors.mrName = "MR Name is required";
-      if (!form.customerCode)
-        newErrors.customerCode = "Customer Code is required";
-      if (!form.productName) newErrors.productName = "Product Name is required";
-      if (!form.salesQty || Number(form.salesQty) <= 0)
-        newErrors.salesQty = "Sales Quantity must be > 0";
-      if (!form.sellingPrice || Number(form.sellingPrice) <= 0)
-        newErrors.sellingPrice = "Selling Price must be > 0";
-      if (!form.paymentStatus)
-        newErrors.paymentStatus = "Payment Status is required";
+  const handleChange = useCallback(
+    (e) => {
+      const { name, value } = e.target;
 
-      setErrors(newErrors);
-      return Object.keys(newErrors).length === 0;
-    };
-
-    const handleSubmit = async (e) => {
-      e.preventDefault();
-      if (!validate()) return;
-
-      try {
-        const resp = await fetch(`${backendUrl}/api/sales`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(form),
-        });
-        const respData = await resp.json();
-        if (!resp.ok) {
-          showToast("error", respData.message || "Error submitting");
-        } else {
-          showToast("success", respData.message || "Sale added");
-          navigate("/salelayout/sale");
-        }
-      } catch (err) {
-        showToast("error", err.message || "Network error");
+      if (name === "paymentStatus" || name === "productName") {
+        updateFormField(name, value);
+        return;
       }
-    };
 
-    // Positioning dropdowns
-    useEffect(() => {
-      if (showStatusSuggestions && statusInputRef.current) {
-        const h = statusInputRef.current.offsetHeight;
-        setStatusDropdownTop((2*h)-8);
+      setForm((prev) => calculateDerivedFields(name, value, prev));
+    },
+    [updateFormField, calculateDerivedFields]
+  );
+
+  const validate = useCallback(() => {
+    const newErrors = {};
+    const requiredFields = [
+      "recordingDate",
+      "invoiceNumber",
+      "invoiceDate",
+      "mrName",
+      "customerCode",
+      "productName",
+      "paymentStatus",
+    ];
+
+    requiredFields.forEach((field) => {
+      if (!form[field]) {
+        newErrors[field] = `${field.replace(/([A-Z])/g, " $1")} is required`;
       }
-    }, [showStatusSuggestions]);
+    });
 
-    useEffect(() => {
-      if (showProductSuggestions && productInputRef.current) {
-        const h = productInputRef.current.offsetHeight;
-        setProductDropdownTop((2*h)-8);
+    if (!form.salesQty || Number(form.salesQty) <= 0) {
+      newErrors.salesQty = "Sales Quantity must be > 0";
+    }
+
+    if (!form.sellingPrice || Number(form.sellingPrice) <= 0) {
+      newErrors.sellingPrice = "Selling Price must be > 0";
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  }, [form]);
+
+  return {
+    form,
+    errors,
+    handleChange,
+    validate,
+    updateFormField,
+    setErrors,
+  };
+};
+
+// Custom hook for suggestions
+const useSuggestions = (items, filterField = "type", inputValue = "") => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const inputRef = useRef(null);
+  const [dropdownTop, setDropdownTop] = useState(0);
+
+  const filteredItems = useMemo(
+    () =>
+      items
+        .filter((item) => {
+          const fieldValue =
+            typeof item === "string" ? item : item[filterField];
+          return fieldValue.toLowerCase().includes(inputValue.toLowerCase());
+        })
+        .sort((a, b) => {
+          const aVal = typeof a === "string" ? a : a[filterField];
+          const bVal = typeof b === "string" ? b : b[filterField];
+          return aVal.localeCompare(bVal);
+        }),
+    [items, filterField, inputValue]
+  );
+
+  const calculatePosition = useCallback(() => {
+    if (isOpen && inputRef.current) {
+      const height = inputRef.current.offsetHeight;
+      setDropdownTop(2 * height - 8);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    calculatePosition();
+  }, [calculatePosition]);
+
+  const handleKeyDown = useCallback(
+    (e, onSelect) => {
+      if (!isOpen || filteredItems.length === 0) return;
+
+      switch (e.key) {
+        case "ArrowDown":
+          e.preventDefault();
+          setHighlightedIndex((prev) =>
+            prev < filteredItems.length - 1 ? prev + 1 : 0
+          );
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          setHighlightedIndex((prev) =>
+            prev > 0 ? prev - 1 : filteredItems.length - 1
+          );
+          break;
+        case "Enter":
+          e.preventDefault();
+          if (highlightedIndex >= 0) {
+            const selected = filteredItems[highlightedIndex];
+            const value =
+              typeof selected === "string" ? selected : selected[filterField];
+            onSelect(value);
+          }
+          break;
+        case "Escape":
+          setIsOpen(false);
+          break;
+        default:
+          break;
       }
-    }, [showProductSuggestions]);
+    },
+    [isOpen, filteredItems, highlightedIndex, filterField]
+  );
 
-    const renderInput = (
-      label,
-      name,
-      type = "text",
-      placeholder = "",
-      required = false,
-      readOnly = false
-    ) => (
-      <div className="flex flex-col">
-        <label className="text-sm font-medium text-gray-700 mb-1">{label}</label>
-        <input
-          type={type}
-          name={name}
-          value={form[name]}
-          onChange={handleChange}
-          placeholder={placeholder}
-          className="border rounded-md px-2 py-1"
-          autoComplete="off"
-          readOnly={readOnly}
-          tabIndex={readOnly ? -1 : 0}
-        />
-        {errors[name] && (
-          <p className="text-red-500 text-xs mt-0.5">{errors[name]}</p>
-        )}
-      </div>
+  const selectSuggestion = useCallback((value, onSelect) => {
+    onSelect(value);
+    setIsOpen(false);
+    setHighlightedIndex(-1);
+  }, []);
+
+  return {
+    isOpen,
+    setIsOpen,
+    highlightedIndex,
+    setHighlightedIndex,
+    inputRef,
+    dropdownTop,
+    filteredItems,
+    handleKeyDown,
+    selectSuggestion,
+  };
+};
+
+// Reusable Input Component
+const InputField = React.memo(
+  ({
+    label,
+    name,
+    type = "text",
+    value,
+    onChange,
+    error,
+    placeholder = "",
+    required = false,
+    readOnly = false,
+    className = "",
+    ...props
+  }) => (
+    <div className="flex flex-col">
+      <label className="text-sm font-medium text-gray-700 mb-1">
+        {label}
+        {required && <span className="text-red-500 ml-1">*</span>}
+      </label>
+      <input
+        type={type}
+        name={name}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        readOnly={readOnly}
+        className={`border rounded-md px-2 py-1 ${className} ${
+          error ? "border-red-500" : "border-gray-300"
+        } ${readOnly ? "bg-gray-100" : ""}`}
+        autoComplete="off"
+        tabIndex={readOnly ? -1 : 0}
+        {...props}
+      />
+      {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
+    </div>
+  )
+);
+
+// Suggestion Input Component
+const SuggestionInput = React.memo(
+  ({
+    label,
+    name,
+    value,
+    onChange,
+    onFocus,
+    onBlur,
+    error,
+    suggestions,
+    isOpen,
+    highlightedIndex,
+    inputRef,
+    dropdownTop,
+    onKeyDown,
+    onSuggestionSelect,
+    getSuggestionValue = (item) => item,
+    getSuggestionDisplay = (item) => item,
+  }) => {
+    const handleMouseEnter = useCallback(
+      (index) => {
+        onSuggestionSelect && onSuggestionSelect(index, true);
+      },
+      [onSuggestionSelect]
     );
 
-    const renderStatusSuggestionInput = () => (
+    const handleClick = useCallback(
+      (item) => {
+        const value = getSuggestionValue(item);
+        onSuggestionSelect && onSuggestionSelect(value);
+      },
+      [onSuggestionSelect, getSuggestionValue]
+    );
+
+    return (
       <div className="relative flex flex-col">
         <label className="text-sm font-medium text-gray-700 mb-1">
-          Payment Status
+          {label}
         </label>
         <input
-          ref={statusInputRef}
+          ref={inputRef}
           type="text"
-          name="paymentStatus"
-          value={form.paymentStatus}
-          onChange={handleChange}
-          onKeyDown={handleStatusKeyDown}
-          onFocus={() => setShowStatusSuggestions(true)}
-          onBlur={() =>
-            setTimeout(() => {
-              setShowStatusSuggestions(false);
-              setStatusHighlightedIndex(-1);
-            }, 150)
-          }
-          className="border rounded-md px-2 py-1"
+          name={name}
+          value={value}
+          onChange={onChange}
+          onKeyDown={onKeyDown}
+          onFocus={onFocus}
+          onBlur={onBlur}
+          className={`border rounded-md px-2 py-1 ${
+            error ? "border-red-500" : "border-gray-300"
+          }`}
           placeholder="Type to search..."
           autoComplete="off"
           aria-autocomplete="list"
-          aria-expanded={showStatusSuggestions}
+          aria-expanded={isOpen}
           role="combobox"
         />
-        {showStatusSuggestions && filteredStatusSuggestions.length > 0 && (
+        {isOpen && suggestions.length > 0 && (
           <ul
             className="absolute z-10 bg-white border border-gray-300 w-full rounded-md max-h-60 overflow-auto shadow-lg"
-            style={{ top: statusDropdownTop, left: 0, position: "absolute" }}
+            style={{ top: dropdownTop }}
           >
-            {filteredStatusSuggestions.map((st, idx) => (
+            {suggestions.map((item, idx) => (
               <li
-                key={st._id}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  selectStatusSuggestion(st.type);
-                }}
-                onMouseEnter={() => setStatusHighlightedIndex(idx)}
+                key={typeof item === "object" ? item._id : idx}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => handleClick(item)}
+                onMouseEnter={() => handleMouseEnter(idx)}
                 className={`cursor-pointer px-3 py-2 ${
-                  statusHighlightedIndex === idx
+                  highlightedIndex === idx
                     ? "bg-blue-600 text-white"
-                    : "bg-white text-gray-900"
+                    : "bg-white text-gray-900 hover:bg-gray-100"
                 }`}
               >
-                {st.type}
+                {getSuggestionDisplay(item)}
               </li>
             ))}
           </ul>
         )}
-        {errors.paymentStatus && (
-          <p className="text-red-500 text-xs mt-0.5">{errors.paymentStatus}</p>
-        )}
+        {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
       </div>
     );
+  }
+);
 
-    const renderProductSuggestionInput = () => (
-      <div className="relative flex flex-col">
-        <label className="text-sm font-medium text-gray-700 mb-1">
-          Product Name
-        </label>
-        <input
-          ref={productInputRef}
-          type="text"
-          name="productName"
-          value={form.productName}
-          onChange={handleChange}
-          onKeyDown={handleProductKeyDown}
-          onFocus={() => setShowProductSuggestions(true)}
-          onBlur={() =>
-            setTimeout(() => {
-              setShowProductSuggestions(false);
-              setProductHighlightedIndex(-1);
-            }, 150)
-          }
-          className="border rounded-md px-2 py-1"
-          placeholder="Type to search..."
-          autoComplete="off"
-          aria-autocomplete="list"
-          aria-expanded={showProductSuggestions}
-          role="combobox"
-        />
-        {showProductSuggestions && filteredProductSuggestions.length > 0 && (
-          <ul
-            className="absolute z-10 bg-white border border-gray-300 w-full rounded-md max-h-60 overflow-auto shadow-lg"
-            style={{ top: productDropdownTop, left: 0, position: "absolute" }}
-          >
-            {filteredProductSuggestions.map((pn, idx) => {
-              const name = typeof pn === "string" ? pn : pn.name;
-              const id = typeof pn === "object" && pn._id ? pn._id : idx;
-              return (
-                <li
-                  key={id}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    selectProductSuggestion(name);
-                  }}
-                  onMouseEnter={() => setProductHighlightedIndex(idx)}
-                  className={`cursor-pointer px-3 py-2 ${
-                    productHighlightedIndex === idx
-                      ? "bg-blue-600 text-white"
-                      : "bg-white text-gray-900"
-                  }`}
-                >
-                  {name}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        {errors.productName && (
-          <p className="text-red-500 text-xs mt-0.5">{errors.productName}</p>
-        )}
-      </div>
-    );
+const validateProductName = (value) => {
+  return /^[A-Za-z][A-Za-z0-9]*$/.test(value);
+};
 
-    return (
-      <div className="max-w-5xl mx-auto p-6 bg-white rounded-2xl shadow">
-        <h2 className="text-2xl font-bold mb-6 text-gray-800">Add New Sale</h2>
+const AddSale = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { customerCode } = location.state || {};
 
-        <form onSubmit={handleSubmit}>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {renderInput("Recording Date", "recordingDate", "date")}
-            {renderInput("Invoice Number", "invoiceNumber")}
-            {renderInput("Invoice Date", "invoiceDate", "date")}
-            {renderInput("Medical Representative Name", "mrName")}
-            {renderInput("Customer Code", "customerCode")}
-            {renderProductSuggestionInput()}
-            {renderInput("Sales Quantity", "salesQty", "text")}
-            {renderInput("Bonus Quantity", "bonusQty", "text")}
-            {renderInput("Total Quantity", "totalQty", "text", "", false, true)}
-            {renderInput("Selling Price", "sellingPrice", "text")}
-            {renderInput("Amount", "amount", "text", "", false, true)}
-            {renderInput("Discount", "discount", "text")}
-            {renderInput(
-              "Net Selling Amount",
-              "netSellingAmount",
-              "text",
-              "",
-              false,
-              true
-            )}
-            {renderInput(
-              "Average Unit Price",
-              "averageUnitPrice",
-              "text",
-              "",
-              false,
-              true
-            )}
-            {renderInput("LC", "lc", "text")}
-            {renderInput("Profit / Loss", "profitLoss", "text", "", false, true)}
-            {renderInput("Credit Days", "creditDays", "text")}
-            {renderInput("Due Date", "dueDate", "date", "", false, true)}
-            {renderInput(
-              "Delivery Date",
-              "deliveryDate",
-              "date",
-              "",
-              false,
-              true
-            )}
-            {renderInput("Paid Amount", "paidAmount", "text")}
-            {renderInput("Due Amount", "dueAmount", "text", "", false, true)}
+  const { fetchData } = useApi();
+  const { form, errors, handleChange, validate, updateFormField } =
+    useSaleForm(customerCode);
 
-            {renderStatusSuggestionInput()}
-            <div className="sm:col-span-3">{renderInput("Remark", "remark")}</div>
-          </div>
+  const [statuses, setStatuses] = useState([]);
+  const [productNames, setProductNames] = useState([]);
 
-          <div className="flex justify-end mt-6 gap-3">
-            <button
-              type="submit"
-              className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg shadow"
-            >
-              Add
-            </button>
-            <button
-              type="button"
-              onClick={() => navigate("/salelayout/sale")}
-              className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-6 py-2 rounded-lg"
-            >
-              Cancel
-            </button>
-          </div>
-        </form>
-      </div>
-    );
+  // Fetch data on mount
+  useEffect(() => {
+    const fetchInitialData = async () => {
+      try {
+        const [statusesData, productsData] = await Promise.all([
+          fetchData("/api/sales/payment-status"),
+          fetchData("/api/sales/unique-names"),
+        ]);
+
+        setStatuses(statusesData);
+        setProductNames(productsData.productNames || []);
+      } catch (error) {
+        showToast("error", "Failed to load initial data");
+      }
+    };
+
+    fetchInitialData();
+  }, [fetchData]);
+
+  // Payment Status Suggestions
+  const paymentStatusSuggestions = useSuggestions(
+    statuses,
+    "type",
+    form.paymentStatus
+  );
+
+  // Product Name Suggestions
+  const productNameSuggestions = useSuggestions(
+    productNames,
+    "name",
+    form.productName
+  );
+
+  // Enhanced handleChange to handle suggestion opening
+  const enhancedHandleChange = useCallback(
+    (e) => {
+      const { name, value } = e.target;
+
+      handleChange(e);
+
+      // Auto-open suggestions when typing in these fields
+      if (name === "paymentStatus" && value.length > 0) {
+        paymentStatusSuggestions.setIsOpen(true);
+        paymentStatusSuggestions.setHighlightedIndex(-1);
+      }
+      if (name === "productName" && value.length > 0) {
+        productNameSuggestions.setIsOpen(true);
+        productNameSuggestions.setHighlightedIndex(-1);
+      }
+    },
+    [handleChange, paymentStatusSuggestions, productNameSuggestions]
+  );
+
+  // Handle mouse enter for suggestions
+  const handlePaymentStatusHighlight = useCallback(
+    (index, isHighlight) => {
+      if (isHighlight) {
+        paymentStatusSuggestions.setHighlightedIndex(index);
+      }
+    },
+    [paymentStatusSuggestions]
+  );
+
+  const handleProductNameHighlight = useCallback(
+    (index, isHighlight) => {
+      if (isHighlight) {
+        productNameSuggestions.setHighlightedIndex(index);
+      }
+    },
+    [productNameSuggestions]
+  );
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!validate()) return;
+
+    try {
+      const respData = await fetchData("/api/sales", {
+        method: "POST",
+        body: JSON.stringify(form),
+      });
+
+      showToast("success", respData.message || "Sale added successfully");
+      navigate("/salelayout/sale");
+    } catch (err) {
+      showToast("error", err.message || "Error submitting sale");
+    }
   };
 
-  export default AddSale;
+  // Define form fields in the desired order
+  const formFields = [
+    {
+      label: "Recording Date",
+      name: "recordingDate",
+      type: "date",
+      required: true,
+    },
+    { label: "Invoice Number", name: "invoiceNumber", required: true },
+    {
+      label: "Invoice Date",
+      name: "invoiceDate",
+      type: "date",
+      required: true,
+    },
+    { label: "Medical Representative Name", name: "mrName", required: true },
+    { label: "Customer Code", name: "customerCode", required: true },
+    { label: "Sales Quantity", name: "salesQty", type: "text", required: true },
+    { label: "Bonus Quantity", name: "bonusQty", type: "text" },
+    { label: "Total Quantity", name: "totalQty", readOnly: true },
+    {
+      label: "Selling Price",
+      name: "sellingPrice",
+      type: "text",
+      required: true,
+    },
+    { label: "Amount", name: "amount", readOnly: true },
+    { label: "Discount", name: "discount", type: "text" },
+    { label: "Net Selling Amount", name: "netSellingAmount", readOnly: true },
+    { label: "Average Unit Price", name: "averageUnitPrice", readOnly: true },
+    { label: "LC", name: "lc", type: "text" },
+
+    { label: "Credit Days", name: "creditDays", type: "text" },
+    { label: "Due Date", name: "dueDate", type: "date", readOnly: true },
+    {
+      label: "Delivery Date",
+      name: "deliveryDate",
+      type: "date",
+      readOnly: true,
+    },
+    { label: "Paid Amount", name: "paidAmount", type: "text" },
+    { label: "Due Amount", name: "dueAmount", readOnly: true },
+    { label: "Remark", name: "remark", colSpan: 3 },
+    { label: "Profit / Loss", name: "profitLoss", readOnly: true },
+  ];
+
+  return (
+    <div className="max-w-5xl mx-auto p-6 bg-white rounded-2xl shadow">
+      <h2 className="text-2xl font-bold mb-6 text-gray-800">Add New Sale</h2>
+
+      <form onSubmit={handleSubmit}>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {/* Render fields up to Customer Code */}
+          {formFields.slice(0, 5).map((field) => (
+            <div
+              key={field.name}
+              className={field.colSpan ? `sm:col-span-${field.colSpan}` : ""}
+            >
+              <InputField
+                label={field.label}
+                name={field.name}
+                type={field.type}
+                value={form[field.name]}
+                onChange={enhancedHandleChange}
+                error={errors[field.name]}
+                required={field.required}
+                readOnly={field.readOnly}
+              />
+            </div>
+          ))}
+          <SuggestionInput
+            label="Product Name"
+            name="productName"
+            value={form.productName}
+            onChange={enhancedHandleChange}
+            error={errors.productName}
+            suggestions={productNameSuggestions.filteredItems}
+            isOpen={productNameSuggestions.isOpen}
+            highlightedIndex={productNameSuggestions.highlightedIndex}
+            inputRef={productNameSuggestions.inputRef}
+            dropdownTop={productNameSuggestions.dropdownTop}
+            onKeyDown={(e) =>
+              productNameSuggestions.handleKeyDown(e, (value) =>
+                updateFormField("productName", value)
+              )
+            }
+            onFocus={() => productNameSuggestions.setIsOpen(true)}
+            onBlur={() =>
+              setTimeout(() => productNameSuggestions.setIsOpen(false), 150)
+            }
+            onSuggestionSelect={(value, isHighlight) => {
+              if (typeof value === "number" && isHighlight) {
+                handleProductNameHighlight(value, true);
+              } else {
+                productNameSuggestions.selectSuggestion(value, (val) =>
+                  updateFormField("productName", val)
+                );
+              }
+            }}
+            getSuggestionValue={(item) =>
+              typeof item === "string" ? item : item.name
+            }
+            getSuggestionDisplay={(item) =>
+              typeof item === "string" ? item : item.name
+            }
+          />
+    
+          {formFields.slice(5, 19).map((field) => (
+            <div
+              key={field.name}
+              className={field.colSpan ? `sm:col-span-${field.colSpan}` : ""}
+            >
+              <InputField
+                label={field.label}
+                name={field.name}
+                type={field.type}
+                value={form[field.name]}
+                onChange={enhancedHandleChange}
+                error={errors[field.name]}
+                required={field.required}
+                readOnly={field.readOnly}
+              />
+            </div>
+          ))}{" "}
+          <SuggestionInput
+            label="Payment Status"
+            name="paymentStatus"
+            value={form.paymentStatus}
+            onChange={enhancedHandleChange}
+            error={errors.paymentStatus}
+            suggestions={paymentStatusSuggestions.filteredItems}
+            isOpen={paymentStatusSuggestions.isOpen}
+            highlightedIndex={paymentStatusSuggestions.highlightedIndex}
+            inputRef={paymentStatusSuggestions.inputRef}
+            dropdownTop={paymentStatusSuggestions.dropdownTop}
+            onKeyDown={(e) =>
+              paymentStatusSuggestions.handleKeyDown(e, (value) =>
+                updateFormField("paymentStatus", value)
+              )
+            }
+            onFocus={() => paymentStatusSuggestions.setIsOpen(true)}
+            onBlur={() =>
+              setTimeout(() => paymentStatusSuggestions.setIsOpen(false), 150)
+            }
+            onSuggestionSelect={(value, isHighlight) => {
+              if (typeof value === "number" && isHighlight) {
+                handlePaymentStatusHighlight(value, true);
+              } else {
+                paymentStatusSuggestions.selectSuggestion(value, (val) =>
+                  updateFormField("paymentStatus", val)
+                );
+              }
+            }}
+            getSuggestionValue={(item) => item.type}
+            getSuggestionDisplay={(item) => item.type}
+          />
+          {formFields.slice(19).map((field) => (
+            <div
+              key={field.name}
+              className={field.colSpan ? `sm:col-span-${field.colSpan}` : ""}
+            >
+              <InputField
+                label={field.label}
+                name={field.name}
+                type={field.type}
+                value={form[field.name]}
+                onChange={enhancedHandleChange}
+                error={errors[field.name]}
+                required={field.required}
+                readOnly={field.readOnly}
+              />
+            </div>
+          ))}
+        </div>
+
+        <div className="flex justify-end mt-6 gap-3">
+          <button
+            type="submit"
+            className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg shadow transition-colors cursor-pointer"
+          >
+            Add Sale
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate("/salelayout/sale")}
+            className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-6 py-2 rounded-lg transition-colors cursor-pointer"
+          >
+            Cancel
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+};
+
+export default AddSale;
