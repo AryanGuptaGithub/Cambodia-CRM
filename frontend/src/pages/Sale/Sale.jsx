@@ -19,6 +19,7 @@ import "react-datepicker/dist/react-datepicker.css";
 import { confirmDialog } from "../../utils/confirmationDialog";
 import { useNavigate } from "react-router-dom";
 import SaleExcelDownload from "../../excels/download/SaleExcelDownload";
+import { useInitialSaleData } from "./IntialLoading.jsx";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
@@ -34,7 +35,7 @@ const Sales = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [parsedData, setParsedData] = useState([]);
   const [types, setTypes] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingData, setLoadingData] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedItems, setSelectedItems] = useState([]);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -43,6 +44,7 @@ const Sales = () => {
   const [selectedFields, setSelectedFields] = useState([]);
   const [allSelected, setAllSelected] = useState(false);
   const inputRef = useRef(null);
+  const { statuses, productNames, loading } = useInitialSaleData();
 
   const salesPerPage = 9;
 
@@ -167,7 +169,7 @@ const Sales = () => {
       console.error("❌ Fetch error:", error);
       showToast("error", error.message || "Error fetching sale summaries");
     } finally {
-      setLoading(false);
+      setLoadingData(false);
     }
   };
 
@@ -235,7 +237,7 @@ const Sales = () => {
   }, []);
 
   // Render loading
-  if (loading) {
+  if (loadingData) {
     return (
       <div className="fixed inset-0 flex items-center justify-center z-50">
         <div className="text-xl font-medium text-gray-600 flex gap-1">
@@ -247,76 +249,6 @@ const Sales = () => {
       </div>
     );
   }
-  // 🧠 CORRECTED convertDate placed at the top
-  const convertDate = (dateValue) => {
-    if (!dateValue) return "";
-
-    // If it's a number, assume Excel serial number
-    if (typeof dateValue === "number") {
-      const jsDate = new Date(Math.round((dateValue - 25569) * 86400 * 1000));
-      return !isNaN(jsDate.getTime()) ? jsDate.toISOString().split("T")[0] : "";
-    }
-
-    if (typeof dateValue === "string") {
-      const clean = dateValue.trim();
-
-      // Try parsing DD/MM/YYYY or D/M/YYYY format manually
-      const dmYRegex = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/;
-      const match = clean.match(dmYRegex);
-      if (match) {
-        const [, d, m, y] = match;
-        const day = parseInt(d, 10);
-        const month = parseInt(m, 10) - 1;
-        const year = y.length === 2 ? parseInt("20" + y, 10) : parseInt(y, 10);
-        const manualDate = new Date(year, month, day);
-        if (!isNaN(manualDate.getTime())) {
-          return manualDate.toISOString().split("T")[0];
-        }
-      }
-
-      // Try parsing "8-June-2021" or "8 Jun 2021"
-      const monthNames = {
-        jan: 0,
-        feb: 1,
-        mar: 2,
-        apr: 3,
-        may: 4,
-        jun: 5,
-        jul: 6,
-        aug: 7,
-        sep: 8,
-        oct: 9,
-        nov: 10,
-        dec: 11,
-      };
-
-      const monthWordRegex = /^(\d{1,2})[ \-\/]([A-Za-z]+)[ \-\/](\d{2,4})$/;
-      const wordMatch = clean.match(monthWordRegex);
-      if (wordMatch) {
-        const [, dayStr, monthStr, yearStr] = wordMatch;
-        const day = parseInt(dayStr, 10);
-        const month = monthNames[monthStr.toLowerCase().slice(0, 3)];
-        const year =
-          yearStr.length === 2
-            ? parseInt("20" + yearStr, 10)
-            : parseInt(yearStr, 10);
-        if (month !== undefined) {
-          const manualDate = new Date(year, month, day);
-          if (!isNaN(manualDate.getTime())) {
-            return manualDate.toISOString().split("T")[0];
-          }
-        }
-      }
-
-      // Fallback to built-in Date parser
-      const fallbackDate = new Date(clean);
-      if (!isNaN(fallbackDate.getTime())) {
-        return fallbackDate.toISOString().split("T")[0];
-      }
-    }
-
-    return "";
-  };
 
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
@@ -625,6 +557,137 @@ const Sales = () => {
       }, 1000);
     }
   };
+
+  const handleDateChange = (date, fieldName) => {
+    setForm((prev) => {
+      const updatedForm = {
+        ...prev,
+        [fieldName]: date ? date.toISOString().split("T")[0] : "",
+      };
+      if (fieldName === "invoiceDate" && date) {
+        updatedForm.deliveryDate = date.toISOString().split("T")[0];
+      }
+
+      return updatedForm;
+    });
+  };
+
+  const handleChangeEvent = (name, value) => {
+    setForm((prevForm) => {
+      const updatedForm = { ...prevForm, [name]: value };
+
+      const getNum = (field) => {
+        const num = parseFloat(updatedForm[field] || prevForm[field]);
+        return isNaN(num) ? 0 : num;
+      };
+
+      const getInt = (field) => {
+        const num = parseInt(updatedForm[field] || prevForm[field] || 0, 10);
+        return isNaN(num) ? 0 : num;
+      };
+
+      // Sales Qty + Bonus Qty → Total Qty
+      if (name === "salesQty" || name === "bonusQty") {
+        const salesQty =
+          name === "salesQty" ? getInt("salesQty") : getInt("salesQty");
+        const bonusQty =
+          name === "bonusQty" ? getInt("bonusQty") : getInt("bonusQty");
+        updatedForm.totalQty = salesQty + bonusQty;
+      }
+
+      // Invoice Date → Delivery Date
+      if (name === "invoiceDate") {
+        updatedForm.deliveryDate = value;
+      }
+
+      // Credit Days → Due Date
+      if (name === "creditDays") {
+        const creditDays = parseInt(value, 10);
+        if (!isNaN(creditDays)) {
+          const due = new Date();
+          due.setDate(due.getDate() + creditDays);
+          updatedForm.dueDate = due.toISOString().split("T")[0];
+        } else {
+          updatedForm.dueDate = "";
+        }
+      }
+
+      // Amount = sellingPrice * salesQty
+      if (name === "sellingPrice" || name === "salesQty") {
+        const price = getNum("sellingPrice");
+        const qty = getInt("salesQty");
+        updatedForm.amount = (price * qty).toFixed(2);
+      }
+
+      // Net Selling Amount = amount - discount
+      if (["amount", "discount", "sellingPrice", "salesQty"].includes(name)) {
+        const amount = getNum("amount");
+        const discount = getNum("discount");
+        updatedForm.netSellingAmount = (amount - discount).toFixed(2);
+      }
+
+      // Profit / Loss = amount - discount - (lc * totalQty)
+      if (
+        [
+          "amount",
+          "discount",
+          "lc",
+          "totalQty",
+          "salesQty",
+          "bonusQty",
+        ].includes(name)
+      ) {
+        const amount = getNum("amount");
+        const discount = getNum("discount");
+        const lc = getNum("lc");
+        const totalQty = getInt("totalQty");
+        updatedForm.profitLoss = (amount - discount - lc * totalQty).toFixed(2);
+      }
+
+      // Due Amount = netSellingAmount - paidAmount
+      if (["netSellingAmount", "paidAmount"].includes(name)) {
+        const netAmount = getNum("netSellingAmount");
+        const paidAmount = getNum("paidAmount");
+        updatedForm.dueAmount = (netAmount - paidAmount).toFixed(2);
+      }
+
+      // Average Unit Price = netSellingAmount / totalQty
+      if (
+        [
+          "netSellingAmount",
+          "salesQty",
+          "bonusQty",
+          "discount",
+          "sellingPrice",
+        ].includes(name)
+      ) {
+        const net = getNum("netSellingAmount");
+        const totalQty = getInt("totalQty");
+        updatedForm.averageUnitPrice =
+          totalQty > 0 ? (net / totalQty).toFixed(2) : "";
+      }
+
+      return updatedForm;
+    });
+  };
+
+  // let productNameSuggestions;
+  // let paymentStatusSuggestions;
+
+  // if (isEditModalOpen) {
+  //   paymentStatusSuggestions = useSuggestions(
+  //     statuses,
+  //     "type",
+  //     form.paymentStatus
+  //   );
+
+  //   // Product Name Suggestions
+  //   productNameSuggestions = useSuggestions(
+  //     productNames,
+  //     "name",
+  //     form.productName
+  //   );
+  // }
 
   return (
     <div className="p-6">
@@ -1028,7 +1091,6 @@ const Sales = () => {
         {isEditModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-              {/* Background Overlay */}
               <div
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
                 onClick={() => setIsOpen(false)}
@@ -1055,12 +1117,7 @@ const Sales = () => {
                         form.recordingDate ? new Date(form.recordingDate) : null
                       }
                       onChange={(date) =>
-                        date
-                          ? setForm({
-                              ...form,
-                              recordingDate: date.toISOString(),
-                            })
-                          : setForm({ ...form, recordingDate: "" })
+                        handleDateChange(date, "recordingDate")
                       }
                       dateFormat="yyyy-MM-dd"
                       placeholderText="Select a date"
@@ -1074,9 +1131,10 @@ const Sales = () => {
                     </label>
                     <input
                       type="text"
+                      name="invoiceNumber"
                       value={form.invoiceNumber}
                       onChange={(e) =>
-                        setForm({ ...form, invoiceNumber: e.target.value })
+                        handleChangeEvent(e.target.name, e.target.value)
                       }
                       className="w-full border px-3 py-2 rounded-lg capitalize"
                     />
@@ -1090,14 +1148,7 @@ const Sales = () => {
                       selected={
                         form.invoiceDate ? new Date(form.invoiceDate) : null
                       }
-                      onChange={(date) =>
-                        date
-                          ? setForm({
-                              ...form,
-                              invoiceDate: date.toISOString(),
-                            })
-                          : setForm({ ...form, invoiceDate: "" })
-                      }
+                      onChange={(date) => handleDateChange(date, "invoiceDate")}
                       dateFormat="yyyy-MM-dd"
                       placeholderText="Select a date"
                       className="w-full border px-3 py-2 rounded-lg"
@@ -1108,9 +1159,10 @@ const Sales = () => {
                     <label className="block text-sm font-medium">MR Name</label>
                     <input
                       type="text"
+                      name="mrName"
                       value={form.mrName}
                       onChange={(e) =>
-                        setForm({ ...form, mrName: e.target.value })
+                        handleChangeEvent(e.target.name, e.target.value)
                       }
                       className="w-full border px-3 py-2 rounded-lg capitalize"
                     />
@@ -1122,9 +1174,10 @@ const Sales = () => {
                     </label>
                     <input
                       type="text"
+                      name="customerCode"
                       value={form.customerCode}
                       onChange={(e) =>
-                        setForm({ ...form, customerCode: e.target.value })
+                        handleChangeEvent(e.target.name, e.target.value)
                       }
                       className="w-full border px-3 py-2 rounded-lg capitalize"
                     />
@@ -1136,13 +1189,51 @@ const Sales = () => {
                     </label>
                     <input
                       type="text"
+                      name="productName"
                       value={form.productName}
                       onChange={(e) =>
-                        setForm({ ...form, productName: e.target.value })
+                        handleChangeEvent(e.target.name, e.target.value)
                       }
                       className="w-full border px-3 py-2 rounded-lg capitalize"
                     />
                   </div>
+                  {/* <SuggestionInput
+                    label="Product Name"
+                    name="productName"
+                    value={form.productName}
+                    onChange={enhancedHandleChange}
+                    error={errors.productName}
+                    suggestions={productNameSuggestions.filteredItems}
+                    isOpen={productNameSuggestions.isOpen}
+                    highlightedIndex={productNameSuggestions.highlightedIndex}
+                    inputRef={productNameSuggestions.inputRef}
+                    dropdownTop={productNameSuggestions.dropdownTop}
+                    onFocus={() => productNameSuggestions.setIsOpen(true)}
+                    onBlur={() =>
+                      setTimeout(
+                        () => productNameSuggestions.setIsOpen(false),
+                        150
+                      )
+                    }
+                    onSuggestionSelect={(value, isHighlight) => {
+                      if (typeof value === "number" && isHighlight) {
+                        handleProductNameHighlight(value, true);
+                      } else {
+                        productNameSuggestions.selectSuggestion(value, (val) =>
+                          updateFormField("productName", val)
+                        );
+                      }
+                    }}
+                    getSuggestionValue={(item) =>
+                      typeof item === "string" ? item : item.name
+                    }
+                    getSuggestionDisplay={(item) =>
+                      typeof item === "string" ? item : item.name
+                    }
+                    setHighlightedIndex={
+                      productNameSuggestions.setHighlightedIndex
+                    } // ✅ Pass this
+                  /> */}
 
                   {/* Numeric inputs with min=0 */}
                   <div>
@@ -1150,11 +1241,11 @@ const Sales = () => {
                       Sales Quantity
                     </label>
                     <input
-                      type="number"
-                      min="0"
+                      type="text"
+                      name="salesQty"
                       value={form.salesQty}
                       onChange={(e) =>
-                        setForm({ ...form, salesQty: Number(e.target.value) })
+                        handleChangeEvent(e.target.name, e.target.value)
                       }
                       className="w-full border px-3 py-2 rounded-lg"
                     />
@@ -1165,11 +1256,11 @@ const Sales = () => {
                       Bonus Quantity
                     </label>
                     <input
-                      type="number"
-                      min="0"
+                      type="text"
+                      name="bonusQty"
                       value={form.bonusQty}
                       onChange={(e) =>
-                        setForm({ ...form, bonusQty: Number(e.target.value) })
+                        handleChangeEvent(e.target.name, e.target.value)
                       }
                       className="w-full border px-3 py-2 rounded-lg"
                     />
@@ -1180,13 +1271,10 @@ const Sales = () => {
                       Total Quantity
                     </label>
                     <input
-                      type="number"
-                      min="0"
+                      type="text"
                       value={form.totalQty}
-                      onChange={(e) =>
-                        setForm({ ...form, totalQty: Number(e.target.value) })
-                      }
-                      className="w-full border px-3 py-2 rounded-lg"
+                      disabled
+                      className="w-full border px-3 py-2 rounded-lg bg-gray-100"
                     />
                   </div>
 
@@ -1195,15 +1283,11 @@ const Sales = () => {
                       Selling Price
                     </label>
                     <input
-                      type="number"
-                      min="0"
-                      step="0.01"
+                      type="text"
+                      name="sellingPrice"
                       value={form.sellingPrice}
                       onChange={(e) =>
-                        setForm({
-                          ...form,
-                          sellingPrice: Number(e.target.value),
-                        })
+                        handleChangeEvent(e.target.name, e.target.value)
                       }
                       className="w-full border px-3 py-2 rounded-lg"
                     />
@@ -1212,14 +1296,9 @@ const Sales = () => {
                   <div>
                     <label className="block text-sm font-medium">Amount</label>
                     <input
-                      type="number"
-                      min="0"
-                      step="0.01"
+                      type="text"
                       value={form.amount}
-                      onChange={(e) =>
-                        setForm({ ...form, amount: Number(e.target.value) })
-                      }
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
                     />
                   </div>
 
@@ -1228,12 +1307,11 @@ const Sales = () => {
                       Discount
                     </label>
                     <input
-                      type="number"
-                      min="0"
-                      step="0.01"
+                      type="text"
+                      name="discount"
                       value={form.discount}
                       onChange={(e) =>
-                        setForm({ ...form, discount: Number(e.target.value) })
+                        handleChangeEvent(e.target.name, e.target.value)
                       }
                       className="w-full border px-3 py-2 rounded-lg"
                     />
@@ -1244,17 +1322,9 @@ const Sales = () => {
                       Net Selling Amount
                     </label>
                     <input
-                      type="number"
-                      min="0"
-                      step="0.01"
+                      type="text"
                       value={form.netSellingAmount}
-                      onChange={(e) =>
-                        setForm({
-                          ...form,
-                          netSellingAmount: Number(e.target.value),
-                        })
-                      }
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
                     />
                   </div>
 
@@ -1263,17 +1333,9 @@ const Sales = () => {
                       Average Unit Price
                     </label>
                     <input
-                      type="number"
-                      min="0"
-                      step="0.01"
+                      type="text"
                       value={form.averageUnitPrice}
-                      onChange={(e) =>
-                        setForm({
-                          ...form,
-                          averageUnitPrice: Number(e.target.value),
-                        })
-                      }
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
                     />
                   </div>
 
@@ -1282,13 +1344,9 @@ const Sales = () => {
                       Profit / Loss
                     </label>
                     <input
-                      type="number"
-                      step="0.01"
+                      type="text"
                       value={form.profitLoss}
-                      onChange={(e) =>
-                        setForm({ ...form, profitLoss: Number(e.target.value) })
-                      }
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
                     />
                   </div>
 
@@ -1297,11 +1355,11 @@ const Sales = () => {
                       Credit Days
                     </label>
                     <input
-                      type="number"
-                      min="0"
+                      type="text"
+                      name="creditDays"
                       value={form.creditDays}
                       onChange={(e) =>
-                        setForm({ ...form, creditDays: Number(e.target.value) })
+                        handleChangeEvent(e.target.name, e.target.value)
                       }
                       className="w-full border px-3 py-2 rounded-lg"
                     />
@@ -1313,14 +1371,9 @@ const Sales = () => {
                     </label>
                     <DatePicker
                       selected={form.dueDate ? new Date(form.dueDate) : null}
-                      onChange={(date) =>
-                        date
-                          ? setForm({ ...form, dueDate: date.toISOString() })
-                          : setForm({ ...form, dueDate: "" })
-                      }
                       dateFormat="yyyy-MM-dd"
                       placeholderText="Select a date"
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
                     />
                   </div>
 
@@ -1332,17 +1385,10 @@ const Sales = () => {
                       selected={
                         form.deliveryDate ? new Date(form.deliveryDate) : null
                       }
-                      onChange={(date) =>
-                        date
-                          ? setForm({
-                              ...form,
-                              deliveryDate: date.toISOString(),
-                            })
-                          : setForm({ ...form, deliveryDate: "" })
-                      }
                       dateFormat="yyyy-MM-dd"
                       placeholderText="Select a date"
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
+                      disabled
                     />
                   </div>
 
@@ -1351,12 +1397,11 @@ const Sales = () => {
                       Paid Amount
                     </label>
                     <input
-                      type="number"
-                      min="0"
-                      step="0.01"
+                      type="text"
+                      name="paidAmount"
                       value={form.paidAmount}
                       onChange={(e) =>
-                        setForm({ ...form, paidAmount: Number(e.target.value) })
+                        handleChangeEvent(e.target.name, e.target.value)
                       }
                       className="w-full border px-3 py-2 rounded-lg"
                     />
@@ -1367,17 +1412,45 @@ const Sales = () => {
                       Due Amount
                     </label>
                     <input
-                      type="number"
-                      min="0"
-                      step="0.01"
+                      type="text"
                       value={form.dueAmount}
-                      onChange={(e) =>
-                        setForm({ ...form, dueAmount: Number(e.target.value) })
-                      }
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
                     />
                   </div>
-
+                  {/* <SuggestionInput
+                    label="Payment Status"
+                    name="paymentStatus"
+                    value={form.paymentStatus}
+                    onChange={enhancedHandleChange}
+                    error={errors.paymentStatus}
+                    suggestions={paymentStatusSuggestions.filteredItems}
+                    isOpen={paymentStatusSuggestions.isOpen}
+                    highlightedIndex={paymentStatusSuggestions.highlightedIndex}
+                    inputRef={paymentStatusSuggestions.inputRef}
+                    dropdownTop={paymentStatusSuggestions.dropdownTop}
+                    onFocus={() => paymentStatusSuggestions.setIsOpen(true)}
+                    onBlur={() =>
+                      setTimeout(
+                        () => paymentStatusSuggestions.setIsOpen(false),
+                        150
+                      )
+                    }
+                    onSuggestionSelect={(value, isHighlight) => {
+                      if (typeof value === "number" && isHighlight) {
+                        handlePaymentStatusHighlight(value, true);
+                      } else {
+                        paymentStatusSuggestions.selectSuggestion(
+                          value,
+                          (val) => updateFormField("paymentStatus", val)
+                        );
+                      }
+                    }}
+                    getSuggestionValue={(item) => item.type}
+                    getSuggestionDisplay={(item) => item.type}
+                    setHighlightedIndex={
+                      paymentStatusSuggestions.setHighlightedIndex
+                    } // ✅ Pass this
+                  /> */}
                   <div>
                     <label className="block text-sm font-medium">
                       Payment Status
