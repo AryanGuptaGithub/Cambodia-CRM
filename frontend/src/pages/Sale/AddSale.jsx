@@ -661,44 +661,6 @@ const AddSale = () => {
             error={errors.customerCode}
             required={true}
           />
-
-          {/* Product Name Suggestion - placed after Customer Code */}
-          {/* <SuggestionInput
-            label="Product Name"
-            name="productName"
-            value={form.productName}
-            onChange={enhancedHandleChange}
-            error={errors.productName}
-            suggestions={productNameSuggestions.filteredItems}
-            isOpen={productNameSuggestions.isOpen}
-            highlightedIndex={productNameSuggestions.highlightedIndex}
-            inputRef={productNameSuggestions.inputRef}
-            dropdownTop={productNameSuggestions.dropdownTop}
-            onKeyDown={(e) =>
-              productNameSuggestions.handleKeyDown(e, (value) =>
-                updateFormField("productName", value)
-              )
-            }
-            onFocus={() => productNameSuggestions.setIsOpen(true)}
-            onBlur={() =>
-              setTimeout(() => productNameSuggestions.setIsOpen(false), 150)
-            }
-            onSuggestionSelect={(value, isHighlight) => {
-              if (typeof value === "number" && isHighlight) {
-                handleProductNameHighlight(value, true);
-              } else {
-                productNameSuggestions.selectSuggestion(value, (val) =>
-                  updateFormField("productName", val)
-                );
-              }
-            }}
-            getSuggestionValue={(item) =>
-              typeof item === "string" ? item : item.name
-            }
-            getSuggestionDisplay={(item) =>
-              typeof item === "string" ? item : item.name
-            }
-          /> */}
           <SuggestionInput
             label="Product Name"
             name="productName"

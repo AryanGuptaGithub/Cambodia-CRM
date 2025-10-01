@@ -40,6 +40,8 @@ const Sales = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+  const [selectedFields, setSelectedFields] = useState([]);
+  const [allSelected, setAllSelected] = useState(false);
   const inputRef = useRef(null);
 
   const salesPerPage = 9;
@@ -60,6 +62,7 @@ const Sales = () => {
 
   const hideRowList = useMemo(
     () => [
+      { id: 0, name: "All", dbName: "" },
       { id: 1, name: "Recording Date", dbName: "recordingDate" },
       { id: 2, name: "Bonus Qty", dbName: "bonusQty" },
       { id: 3, name: "Selling Price (USD)", dbName: "sellingPrice" },
@@ -74,6 +77,23 @@ const Sales = () => {
     ],
     []
   );
+
+  const toggleItem = (id) => {
+    if (id === 0) {
+      handleSelectAll(); // "All" checkbox toggled
+      return;
+    }
+
+    let updated;
+    if (selectedItems.includes(id)) {
+      updated = selectedItems.filter((itemId) => itemId !== id);
+    } else {
+      updated = [...selectedItems, id];
+    }
+
+    setSelectedItems(updated);
+    setAllSelected(updated.length === hideRowList.length - 1); // Exclude "All"
+  };
 
   const [form, setForm] = useState({
     _id: null,
@@ -117,6 +137,20 @@ const Sales = () => {
     return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
   }
 
+  // 6️⃣ Handle "All" toggle
+  const handleSelectAll = () => {
+    const allIds = hideRowList
+      .filter((item) => item.id !== 0) // Exclude "All"
+      .map((item) => item.id);
+
+    if (allSelected) {
+      setSelectedItems([]);
+      setAllSelected(false);
+    } else {
+      setSelectedItems(allIds);
+      setAllSelected(true);
+    }
+  };
   // Fetch function
   const fetchSaleSummaries = async () => {
     try {
@@ -190,13 +224,6 @@ const Sales = () => {
     }
     return chunks;
   }, [hideRowList]);
-
-  // Handlers
-  const toggleItem = useCallback((id) => {
-    setSelectedItems((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
-    );
-  }, []);
 
   const handleSave = useCallback(() => {
     setIsModalOpen(false);
@@ -725,9 +752,11 @@ const Sales = () => {
                 <th className="p-3">Customer Name</th>
                 <th className="p-3">Sales Qty</th>
                 {hideRowList
-                  .filter((item) => selectedItems.includes(item.id))
+                  .filter(
+                    (item) => item.id !== 0 && selectedItems.includes(item.id)
+                  )
                   .map((item) => (
-                    <th key={item.id} className="p-3">
+                    <th key={item.id} className="p-3 whitespace-nowrap">
                       {item.name}
                     </th>
                   ))}
@@ -777,16 +806,17 @@ const Sales = () => {
                       {capitalizeFirstLetter(sale.customerInfo?.name) || "--"}
                     </td>
                     <td className="p-3">{Math.ceil(sale.salesQty)}</td>
-
-                    {/* Dynamically selected extra columns */}
                     {hideRowList
-                      .filter((item) => selectedItems.includes(item.id))
+                      .filter(
+                        (item) =>
+                          item.id !== 0 && selectedItems.includes(item.id)
+                      )
                       .map((item) => (
-                        <td key={item.id} className="p-3">
+                        <td key={item.id} className="p-3 whitespace-nowrap">
                           {[
                             "recordingDate",
-                            "deliveryDate",
                             "dueDate",
+                            "deliveryDate",
                           ].includes(item.dbName)
                             ? formatDateToReadable(sale[item.dbName]) || "--"
                             : sale[item.dbName] ?? "--"}
@@ -955,7 +985,11 @@ const Sales = () => {
                         >
                           <input
                             type="checkbox"
-                            checked={selectedItems.includes(id)}
+                            checked={
+                              id === 0
+                                ? allSelected
+                                : selectedItems.includes(id)
+                            }
                             onChange={() => toggleItem(id)}
                           />
                           {name}
@@ -964,6 +998,7 @@ const Sales = () => {
                     </div>
                   ))}
                 </div>
+
                 <div className="mt-6 flex justify-between items-center">
                   <button
                     onClick={handleReset}
