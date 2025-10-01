@@ -3,6 +3,10 @@ import ReactDOM from "react-dom";
 import { Download, X } from "lucide-react";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
+import './saleExcelDownload.css';
+import { showToast } from "../../utils/toast";
+import { formatDateToReadable } from "../../utils/dateUtil";
+
 
 const SaleExcelDownload = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -42,7 +46,7 @@ const SaleExcelDownload = () => {
       }
 
       // Send data to backend
-      const response = await fetch(`${backendUrl}/api/download-sales-excel`, {
+      const response = await fetch(`${backendUrl}/api/sales/download-excel`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -52,19 +56,18 @@ const SaleExcelDownload = () => {
           endDate,
         }),
       });
-
+    
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.message || "Failed to download Excel file");
       }
 
-      // Create blob from response and trigger download
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.style.display = "none";
       a.href = url;
-      a.download = `sale_summary_${startDate}_to_${endDate}.xlsx`;
+      a.download = `sale_summary_${formatDateToReadable(startDate)}_to_${formatDateToReadable(endDate)}.xlsx`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -78,12 +81,6 @@ const SaleExcelDownload = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  const showToast = (type, message) => {
-    // Replace this with your actual toast notification implementation
-    console.log(`${type}: ${message}`);
-    alert(`${type.toUpperCase()}: ${message}`);
   };
 
   return (
@@ -114,37 +111,37 @@ const SaleExcelDownload = () => {
               </button>
 
               <h2 className="text-lg font-semibold mb-4">Select Date Range</h2>
-    <div className="space-y-4">
-      {/* Start Date Picker */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">
-          Start Date
-        </label>
-        <DatePicker
-          selected={startDate}
-          onChange={(date) => setStartDate(date)}
-          dateFormat="yyyy-MM-dd"
-          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          disabled={loading}
-          placeholderText="Select start date"
-        />
-      </div>
+              <div className="space-y-4">
+                {/* Start Date Picker */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Start Date
+                  </label>
+                  <DatePicker
+                    selected={startDate}
+                    onChange={(date) => setStartDate(date)}
+                    dateFormat="yyyy-MM-dd"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    disabled={loading}
+                    placeholderText="Select start date"
+                  />
+                </div>
 
-      {/* End Date Picker */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">
-          End Date
-        </label>
-        <DatePicker
-          selected={endDate}
-          onChange={(date) => setEndDate(date)}
-          dateFormat="yyyy-MM-dd"
-          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          disabled={loading}
-          placeholderText="Select end date"
-        />
-      </div>
-    </div>
+                {/* End Date Picker */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    End Date
+                  </label>
+                  <DatePicker
+                    selected={endDate}
+                    onChange={(date) => setEndDate(date)}
+                    dateFormat="yyyy-MM-dd"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    disabled={loading}
+                    placeholderText="Select end date"
+                  />
+                </div>
+              </div>
 
               <div className="flex justify-end gap-3 mt-6">
                 <button

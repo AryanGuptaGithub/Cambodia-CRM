@@ -72,7 +72,7 @@ const useSaleForm = (initialCustomerCode = "") => {
         updatedForm.totalQty = salesQty + bonusQty;
       }
 
-      if (name === "invoiceDate" && !currentForm.deliveryDate) {
+      if (name === "invoiceDate") {
         updatedForm.deliveryDate = value;
       }
 

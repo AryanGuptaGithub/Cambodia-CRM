@@ -2,6 +2,9 @@ import express from "express";
 import SaleSummary from "../../models/sale/saleSummary.js";
 import paymentStatus from "../../models/paymentStatus.js";
 import Product from "../../models/projectManger/product.js";
+import customer from "../../models/master/customer.js";
+import ExcelJS from "exceljs";
+
 const router = express.Router();
 
 // 🔧 Convert Excel serial date to JS Date
@@ -14,6 +17,18 @@ const excelDateToJSDate = (serial) => {
 
   const parsed = new Date(serial);
   return !isNaN(parsed) ? parsed : null;
+};
+
+ const formatDateToReadable = (isoString) => {
+  if (!isoString) return "";
+
+  const date = new Date(isoString);
+
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(date);
 };
 
 router.post("/sale/import", async (req, res) => {
@@ -273,9 +288,9 @@ router.get("/sales/unique-names", async (req, res) => {
   }
 });
 
-router.post("/sales/download-sales-excel", async (req, res) => {
+router.post("/sales/download-excel", async (req, res) => {
   try {
-    const { salesData = [], customersData = [], startDate, endDate } = req.body;
+    const { startDate, endDate } = req.body;
 
     if (!startDate || !endDate) {
       return res.status(400).json({
@@ -287,6 +302,13 @@ router.post("/sales/download-sales-excel", async (req, res) => {
     const start = new Date(startDate);
     const end = new Date(endDate);
 
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid date format",
+      });
+    }
+
     if (start > end) {
       return res.status(400).json({
         success: false,
@@ -294,12 +316,13 @@ router.post("/sales/download-sales-excel", async (req, res) => {
       });
     }
 
-    // Filter sales data based on date range
-    const filteredSalesData = salesData.filter((sale) => {
-      if (!sale.invoiceDate) return false;
-      const saleDate = new Date(sale.invoiceDate);
-      return saleDate >= start && saleDate <= end;
-    });
+    // ✅ Fetch filtered sales data from MongoDB
+    const filteredSalesData = await SaleSummary.find({
+      invoiceDate: {
+        $gte: start,
+        $lte: end,
+      },
+    }).sort({ invoiceDate: 1 });
 
     if (filteredSalesData.length === 0) {
       return res.status(404).json({
@@ -308,13 +331,23 @@ router.post("/sales/download-sales-excel", async (req, res) => {
       });
     }
 
-    // Create customer lookup map
-    const customerMap = {};
-    customersData.forEach((customer) => {
-      customerMap[customer.customerCode] = customer;
+    // ✅ Extract all unique customerCodes
+    const customerCodes = [
+      ...new Set(filteredSalesData.map((sale) => sale.customerCode)),
+    ];
+
+    // ✅ Fetch customer details for those codes
+    const customers = await customer.find({
+      customerCode: { $in: customerCodes },
     });
 
-    // Create workbook and worksheet
+    // ✅ Create lookup map
+    const customerMap = {};
+    customers.forEach((cust) => {
+      customerMap[cust.customerCode] = cust;
+    });
+
+    // ✅ Create Excel Workbook & Sheet
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Sale Summary");
 
@@ -328,7 +361,7 @@ router.post("/sales/download-sales-excel", async (req, res) => {
 
     worksheet.mergeCells("A2:AB2");
     const subtitleCell = worksheet.getCell("A2");
-    subtitleCell.value = `Sale Summary List (${startDate} to ${endDate})`;
+    subtitleCell.value = `Sale Summary List (${formatDateToReadable(startDate)} to ${formatDateToReadable(endDate)})`;
     subtitleCell.font = { bold: true, size: 14 };
     subtitleCell.alignment = { vertical: "middle", horizontal: "center" };
     worksheet.getRow(2).height = 20;
@@ -336,93 +369,52 @@ router.post("/sales/download-sales-excel", async (req, res) => {
     // === Define Columns ===
     worksheet.columns = [
       { key: "no", width: 5 },
-      { key: "recordingDate", width: 12 },
-      { key: "invoiceNumber", width: 10 },
-      { key: "invoiceDate", width: 12 },
-      { key: "mrName", width: 15 },
-      { key: "customerCode", width: 12 },
+      { key: "recordingDate", width: 18 },
+      { key: "invoiceNumber", width: 18 },
+      { key: "invoiceDate", width: 18 },
+      { key: "mrName", width: 18 },
+      { key: "customerCode", width: 18 },
       { key: "customerName", width: 25 },
-      { key: "customerNumber", width: 15 },
-      { key: "address", width: 30 },
-      { key: "zone", width: 15 },
-      { key: "productName", width: 20 },
+      { key: "customerNumber", width: 20 },
+      { key: "address", width: 35 },
+      { key: "zone", width: 25 },
+      { key: "productName", width: 25 },
       { key: "salesQty", width: 10 },
       { key: "bonusQty", width: 10 },
       { key: "totalQty", width: 10 },
       { key: "sellingPrice", width: 12 },
       { key: "amount", width: 12 },
       { key: "discount", width: 10 },
-      { key: "netSellingAmount", width: 15 },
-      { key: "averageUnitPrice", width: 15 },
+      { key: "netSellingAmount", width: 25 },
+      { key: "averageUnitPrice", width: 25 },
       { key: "lc", width: 10 },
-      { key: "profitLoss", width: 12 },
-      { key: "creditDays", width: 10 },
-      { key: "dueDate", width: 12 },
-      { key: "deliveryDate", width: 12 },
-      { key: "paidAmount", width: 12 },
-      { key: "dueAmount", width: 12 },
+      { key: "profitLoss", width: 15 },
+      { key: "creditDays", width: 15 },
+      { key: "dueDate", width: 15 },
+      { key: "deliveryDate", width: 20 },
+      { key: "paidAmount", width: 15 },
+      { key: "dueAmount", width: 15 },
       { key: "paymentStatus", width: 15 },
       { key: "remark", width: 20 },
     ];
 
     // === Header Row ===
     const headerRow = worksheet.getRow(3);
-    headerRow.values = [
-      "No",
-      "Recording Date",
-      "Invoice #",
-      "Invoice Date",
-      "MR Name",
-      "Customer Code",
-      "Customer Name",
-      "Customer Number",
-      "Address",
-      "Zone",
-      "Product Name",
-      "Sales Qty",
-      "Bonus Qty",
-      "Total Qty",
-      "Selling Price",
-      "Amount",
-      "Discount",
-      "Net Amount",
-      "Avg Unit Price",
-      "LC",
-      "Profit/Loss",
-      "Credit Days",
-      "Due Date",
-      "Delivery Date",
-      "Paid Amount",
-      "Due Amount",
-      "Payment Status",
-      "Remarks",
-    ];
+    headerRow.values = worksheet.columns.map((col) => col.key.replace(/([A-Z])/g, " $1").replace(/^./, str => str.toUpperCase()));
     headerRow.font = { bold: true };
     headerRow.alignment = { vertical: "middle", horizontal: "center" };
     headerRow.height = 20;
 
-    // === Format Date Columns ===
-    ["recordingDate", "invoiceDate", "dueDate", "deliveryDate"].forEach(
-      (key) => {
-        const col = worksheet.getColumn(key);
-        if (col) col.numFmt = "dd-mmm-yy";
-      }
-    );
+    // === Format Columns ===
+    ["recordingDate", "invoiceDate", "dueDate", "deliveryDate"].forEach((key) => {
+      const col = worksheet.getColumn(key);
+      if (col) col.numFmt = "dd-mmm-yy";
+    });
 
-    // === Format Numeric Columns ===
     [
-      "salesQty",
-      "bonusQty",
-      "totalQty",
-      "sellingPrice",
-      "amount",
-      "discount",
-      "netSellingAmount",
-      "averageUnitPrice",
-      "lc",
-      "profitLoss",
-      "paidAmount",
-      "dueAmount",
+      "salesQty", "bonusQty", "totalQty", "sellingPrice", "amount",
+      "discount", "netSellingAmount", "averageUnitPrice", "lc",
+      "profitLoss", "paidAmount", "dueAmount"
     ].forEach((key) => {
       const col = worksheet.getColumn(key);
       if (col) col.numFmt = "#,##0.00";
@@ -432,26 +424,20 @@ router.post("/sales/download-sales-excel", async (req, res) => {
     filteredSalesData.forEach((sale, index) => {
       const customer = customerMap[sale.customerCode] || {};
 
-      // Format dates for Excel display
-      const formatDateForDisplay = (dateString) => {
-        if (!dateString) return "";
-        const date = new Date(dateString);
-        if (isNaN(date.getTime())) return "";
-        return date;
+      const formatDate = (dateStr) => {
+        const date = new Date(dateStr);
+        return isNaN(date.getTime()) ? null : date;
       };
 
-      // Format customer code with leading zeros
       const formatCustomerCode = (code) => {
-        if (!code) return "";
-        const codeStr = code.toString();
-        return codeStr.padStart(5, "0");
+        return code ? code.toString().padStart(5, "0") : "";
       };
 
       const row = worksheet.addRow({
         no: index + 1,
-        recordingDate: formatDateForDisplay(sale.recordingDate),
+        recordingDate: formatDate(sale.recordingDate),
         invoiceNumber: sale.invoiceNumber,
-        invoiceDate: formatDateForDisplay(sale.invoiceDate),
+        invoiceDate: formatDate(sale.invoiceDate),
         mrName: sale.mrName,
         customerCode: formatCustomerCode(sale.customerCode),
         customerName: customer.name || "",
@@ -470,15 +456,14 @@ router.post("/sales/download-sales-excel", async (req, res) => {
         lc: sale.lc,
         profitLoss: sale.profitLoss,
         creditDays: sale.creditDays,
-        dueDate: formatDateForDisplay(sale.dueDate),
-        deliveryDate: formatDateForDisplay(sale.deliveryDate),
+        dueDate: formatDate(sale.dueDate),
+        deliveryDate: formatDate(sale.deliveryDate),
         paidAmount: sale.paidAmount,
         dueAmount: sale.dueAmount,
         paymentStatus: sale.paymentStatus,
         remark: sale.remark,
       });
 
-      // Apply borders to all cells in the row
       row.eachCell((cell) => {
         cell.border = {
           top: { style: "thin" },
@@ -489,18 +474,11 @@ router.post("/sales/download-sales-excel", async (req, res) => {
       });
     });
 
-    // Set response headers for file download
-    const fileName = `sale_summary_${startDate}_to_${endDate}.xlsx`;
-
-    res.setHeader(
-      "Content-Type",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    );
+    const fileName = `sale_summary_${formatDateToReadable(startDate)}_to_${formatDateToReadable(endDate)}.xlsx`;
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
 
-    // Send the Excel file directly
     await workbook.xlsx.write(res);
-
     res.end();
   } catch (error) {
     console.error("Error generating Excel file:", error);
@@ -511,5 +489,6 @@ router.post("/sales/download-sales-excel", async (req, res) => {
     });
   }
 });
+
 
 export default router;
