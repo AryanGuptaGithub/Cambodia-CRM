@@ -80,6 +80,8 @@ import AddDailySampleReport from "./pages/Reports/AddDailySample";
 import AddNewPurchase from "./pages/Purchase/addNewPurchase";
 import AddDailySummaryReports from "./pages/Reports/AddNewSaleSummaryReports";
 import AddDailReports from "./pages/Reports/AddDailyReports";
+import AddReturnSale from "./pages/Sale/addSaleReturn";
+
 function App() {
   return (
     <>
@@ -139,12 +141,12 @@ function App() {
             <Route path="purchaseout" element={<PurchaseOut />} />
           </Route>
           <Route path="/salelayout" element={<SaleLayout />}>
-            <Route path="/salelayout/sale" element={<Sale />} />
-            <Route path="/salelayout/sale/new" element={<AddSale />} />
-
-            <Route path="/salelayout/salereturn" element={<SaleReturn />} />
-            <Route path="/salelayout/payment" element={<PaymentSale />} />
-            <Route path="/salelayout/quotation" element={<Quotation />} />
+            <Route path="sale" element={<Sale />} />
+            <Route path="sale/new" element={<AddSale />} />
+            <Route path="salereturn" element={<SaleReturn />} />
+            <Route path="salereturn/new" element={<AddReturnSale />} />
+            <Route path="payment" element={<PaymentSale />} />
+            <Route path="quotation" element={<Quotation />} />
           </Route>
           <Route path="/expenselayout" element={<ExepenseLayout />}>
             <Route path="/expenselayout/expenses" element={<Expenses />} />

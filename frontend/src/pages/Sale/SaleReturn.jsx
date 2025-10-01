@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { UserPlus, Trash2, Edit } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 const saleReturnData = [
   {
@@ -71,6 +72,7 @@ const SaleReturn = () => {
   const [selected, setSelected] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState("");
+   const navigate = useNavigate();
   const returnsPerPage = 10;
 
   // Filter data by tab and search term
@@ -147,7 +149,7 @@ const SaleReturn = () => {
         <div className="flex gap-3 items-center">
           <button
             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md"
-            onClick={() => alert("Add new sales return clicked")}
+            onClick={() => navigate("/salelayout/salereturn/new")}
           >
             <UserPlus size={18} /> Add New Sales Return
           </button>
