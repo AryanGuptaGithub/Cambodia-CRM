@@ -1416,10 +1416,9 @@ const Sales = () => {
                       type="text"
                       name="invoiceNumber"
                       value={form.invoiceNumber}
-                      onChange={(e) =>
-                        handleChangeEvent(e.target.name, e.target.value)
-                      }
+                      onChange={enhancedHandleChange}
                       className="w-full border px-3 py-2 rounded-lg capitalize"
+                      autoComplete="off"
                     />
                   </div>
 
@@ -1446,6 +1445,7 @@ const Sales = () => {
                       value={form.mrName}
                       onChange={enhancedHandleChange}
                       className="w-full border px-3 py-2 rounded-lg capitalize"
+                      autoComplete="off"
                     />
                   </div>
 
@@ -1459,6 +1459,7 @@ const Sales = () => {
                       value={form.customerCode}
                       onChange={enhancedHandleChange}
                       className="w-full border px-3 py-2 rounded-lg capitalize"
+                      autoComplete="off"
                     />
                   </div>
                   <SuggestionInput
@@ -1510,6 +1511,7 @@ const Sales = () => {
                       value={form.salesQty}
                       onChange={enhancedHandleChange}
                       className="w-full border px-3 py-2 rounded-lg"
+                      autoComplete="off"
                     />
                   </div>
 
@@ -1523,6 +1525,7 @@ const Sales = () => {
                       value={form.bonusQty}
                       onChange={enhancedHandleChange}
                       className="w-full border px-3 py-2 rounded-lg"
+                      autoComplete="off"
                     />
                   </div>
 
@@ -1548,6 +1551,7 @@ const Sales = () => {
                       value={form.sellingPrice}
                       onChange={enhancedHandleChange}
                       className="w-full border px-3 py-2 rounded-lg"
+                      autoComplete="off"
                     />
                   </div>
 
@@ -1571,6 +1575,7 @@ const Sales = () => {
                       value={form.discount}
                       onChange={enhancedHandleChange}
                       className="w-full border px-3 py-2 rounded-lg"
+                      autoComplete="off"
                     />
                   </div>
 
@@ -1620,6 +1625,7 @@ const Sales = () => {
                       value={form.creditDays}
                       onChange={enhancedHandleChange}
                       className="w-full border px-3 py-2 rounded-lg"
+                      autoComplete="off"
                     />
                   </div>
 
@@ -1661,6 +1667,7 @@ const Sales = () => {
                       value={form.paidAmount}
                       onChange={enhancedHandleChange}
                       className="w-full border px-3 py-2 rounded-lg"
+                      autoComplete="off"
                     />
                   </div>
 
