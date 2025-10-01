@@ -45,6 +45,131 @@ const Sales = () => {
   const [allSelected, setAllSelected] = useState(false);
   const inputRef = useRef(null);
   const { statuses, productNames, loading } = useInitialSaleData();
+  const [errors, setErrors] = useState({});
+
+  const [form, setForm] = useState({
+    _id: null,
+    recordingDate: "", // Use ISO string or Date object, initially empty string
+    invoiceNumber: "",
+    invoiceDate: "",
+    mrName: "",
+    customerCode: "",
+    productName: "",
+    salesQty: 0,
+    bonusQty: 0,
+    totalQty: 0,
+    sellingPrice: 0.0,
+    amount: 0,
+    discount: 0,
+    netSellingAmount: 0,
+    averageUnitPrice: 0,
+    profitLoss: 0,
+    creditDays: 0,
+    dueDate: "",
+    deliveryDate: "",
+    paidAmount: 0,
+    dueAmount: 0,
+    paymentStatus: "",
+    remark: "",
+  });
+
+  const useSuggestions = (items, filterField = "type", inputValue = "") => {
+    const [isOpen, setIsOpen] = useState(false);
+    const [highlightedIndex, setHighlightedIndex] = useState(-1);
+    const inputRef = useRef(null);
+    const [dropdownTop, setDropdownTop] = useState(0);
+
+    const filteredItems = useMemo(
+      () =>
+        items
+          .filter((item) => {
+            const fieldValue =
+              typeof item === "string" ? item : item[filterField];
+            return fieldValue;
+          })
+          .sort((a, b) => {
+            const aVal = typeof a === "string" ? a : a[filterField];
+            const bVal = typeof b === "string" ? b : b[filterField];
+            return aVal.localeCompare(bVal);
+          }),
+      [items, filterField, inputValue]
+    );
+
+    const calculatePosition = useCallback(() => {
+      if (isOpen && inputRef.current) {
+        const height = inputRef.current.offsetHeight;
+        setDropdownTop(2 * height - 8);
+      }
+    }, [isOpen]);
+
+    useEffect(() => {
+      calculatePosition();
+    }, [calculatePosition]);
+
+    const handleKeyDown = useCallback(
+      (e, onSelect) => {
+        if (!isOpen || filteredItems.length === 0) return;
+
+        switch (e.key) {
+          case "ArrowDown":
+            e.preventDefault();
+            setHighlightedIndex((prev) =>
+              prev < filteredItems.length - 1 ? prev + 1 : 0
+            );
+            break;
+          case "ArrowUp":
+            e.preventDefault();
+            setHighlightedIndex((prev) =>
+              prev > 0 ? prev - 1 : filteredItems.length - 1
+            );
+            break;
+          case "Enter":
+            e.preventDefault();
+            if (highlightedIndex >= 0) {
+              const selected = filteredItems[highlightedIndex];
+              const value =
+                typeof selected === "string" ? selected : selected[filterField];
+              onSelect(value);
+            }
+            break;
+          case "Escape":
+            setIsOpen(false);
+            break;
+          default:
+            break;
+        }
+      },
+      [isOpen, filteredItems, highlightedIndex, filterField]
+    );
+
+    const selectSuggestion = useCallback((value, onSelect) => {
+      onSelect(value);
+      setIsOpen(false);
+      setHighlightedIndex(-1);
+    }, []);
+
+    return {
+      isOpen,
+      setIsOpen,
+      highlightedIndex,
+      setHighlightedIndex,
+      inputRef,
+      dropdownTop,
+      filteredItems,
+      handleKeyDown,
+      selectSuggestion,
+    };
+  };
+  const paymentStatusSuggestions = useSuggestions(
+    statuses,
+    "type",
+    form.paymentStatus
+  );
+  const productNameSuggestions = useSuggestions(
+    productNames,
+    "name",
+    form.productName
+  );
 
   const salesPerPage = 9;
 
@@ -61,6 +186,177 @@ const Sales = () => {
     "credit (days)",
     "payment status",
   ];
+
+  const handlePaymentStatusHighlight = useCallback(
+    (index, isHighlight) => {
+      if (isHighlight) {
+        paymentStatusSuggestions.setHighlightedIndex(index);
+      }
+    },
+    [paymentStatusSuggestions]
+  );
+
+  const handleProductNameHighlight = useCallback(
+    (index, isHighlight) => {
+      if (isHighlight) {
+        productNameSuggestions.setHighlightedIndex(index);
+      }
+    },
+    [productNameSuggestions]
+  );
+
+  const updateFormField = useCallback((name, value) => {
+    setForm((prev) => ({ ...prev, [name]: value }));
+  }, []);
+
+  const handleChangeEvent = (name, value, prevForm) => {
+    const updatedForm = { ...prevForm, [name]: value };
+
+    const getNum = (field) => {
+      const num = parseFloat(updatedForm[field]);
+      return isNaN(num) ? 0 : num;
+    };
+
+    const getInt = (field) => {
+      const num = parseInt(updatedForm[field], 10);
+      return isNaN(num) ? 0 : num;
+    };
+
+    // Total Qty = Sales + Bonus
+    if (["salesQty", "bonusQty"].includes(name)) {
+      updatedForm.totalQty = getInt("salesQty") + getInt("bonusQty");
+    }
+
+    // Delivery Date = Invoice Date
+    if (name === "invoiceDate") {
+      updatedForm.deliveryDate = value;
+    }
+
+    // Due Date = Credit Days
+    if (name === "creditDays") {
+      const creditDays = parseInt(value, 10);
+      if (!isNaN(creditDays)) {
+        const due = new Date();
+        due.setDate(due.getDate() + creditDays);
+        updatedForm.dueDate = due.toISOString().split("T")[0];
+      } else {
+        updatedForm.dueDate = "";
+      }
+    }
+
+    // Amount = sellingPrice * salesQty
+    if (["sellingPrice", "salesQty"].includes(name)) {
+      updatedForm.amount = (
+        getNum("sellingPrice") * getInt("salesQty")
+      ).toFixed(2);
+    }
+
+    // Net Selling Amount = amount - discount
+    if (["amount", "discount", "sellingPrice", "salesQty"].includes(name)) {
+      updatedForm.netSellingAmount = (
+        getNum("amount") - getNum("discount")
+      ).toFixed(2);
+    }
+
+    // Profit / Loss = amount - discount - (lc * totalQty)
+    if (
+      ["amount", "discount", "lc", "totalQty", "salesQty", "bonusQty"].includes(
+        name
+      )
+    ) {
+      updatedForm.profitLoss = (
+        getNum("amount") -
+        getNum("discount") -
+        getNum("lc") * getInt("totalQty")
+      ).toFixed(2);
+    }
+
+    // Due Amount = netSellingAmount - paidAmount
+    if (["netSellingAmount", "paidAmount"].includes(name)) {
+      updatedForm.dueAmount = (
+        getNum("netSellingAmount") - getNum("paidAmount")
+      ).toFixed(2);
+    }
+
+    // Average Unit Price = netSellingAmount / totalQty
+    if (
+      [
+        "netSellingAmount",
+        "salesQty",
+        "bonusQty",
+        "discount",
+        "sellingPrice",
+      ].includes(name)
+    ) {
+      const totalQty = getInt("totalQty");
+      updatedForm.averageUnitPrice =
+        totalQty > 0 ? (getNum("netSellingAmount") / totalQty).toFixed(2) : "";
+    }
+
+    return updatedForm;
+  };
+
+  const enhancedHandleChange = useCallback(
+    (e) => {
+      const { name, value } = e.target;
+
+      // ✅ Actually update the form field
+      if (name === "paymentStatus" || name === "productName") {
+        updateFormField(name, value); // <- This was missing
+      } else {
+        setForm((prev) => handleChangeEvent(name, value, prev));
+      }
+
+      // 🧠 Suggestion logic
+      if (name === "paymentStatus" && value.length > 0) {
+        paymentStatusSuggestions.setIsOpen(true);
+        paymentStatusSuggestions.setHighlightedIndex(-1);
+      }
+
+      if (name === "productName" && value.length > 0) {
+        productNameSuggestions.setIsOpen(true);
+        productNameSuggestions.setHighlightedIndex(-1);
+      }
+    },
+    [
+      updateFormField,
+      handleChangeEvent,
+      paymentStatusSuggestions,
+      productNameSuggestions,
+    ]
+  );
+
+  const handleChange = useCallback(
+    (e) => {
+      const { name, value } = e.target;
+
+      if (name === "paymentStatus" || name === "productName") {
+        updateFormField(name, value);
+        return;
+      }
+
+      setForm((prev) => handleChangeEvent(name, value, prev));
+    },
+    [updateFormField, handleChangeEvent]
+  );
+  // const enhancedHandleChange = useCallback(
+  //   (e) => {
+  //     const { name, value } = e.target;
+
+  //     handleChange(e);
+
+  //     // Auto-open suggestions when typing in these fields
+  //     if (name === "paymentStatus" && value.length > 0) {
+  //       paymentStatusSuggestions.setIsOpen(true);
+  //       paymentStatusSuggestions.setHighlightedIndex(-1);
+  //     }
+  //     if (name === "productName" && value.length > 0) {
+  //       productNameSuggestions.setIsOpen(true);
+  //       productNameSuggestions.setHighlightedIndex(-1);
+  //     }
+  //   },
+  //   [handleChange, paymentStatusSuggestions, productNameSuggestions]
+  // );
 
   const hideRowList = useMemo(
     () => [
@@ -96,32 +392,6 @@ const Sales = () => {
     setSelectedItems(updated);
     setAllSelected(updated.length === hideRowList.length - 1); // Exclude "All"
   };
-
-  const [form, setForm] = useState({
-    _id: null,
-    recordingDate: "", // Use ISO string or Date object, initially empty string
-    invoiceNumber: "",
-    invoiceDate: "",
-    mrName: "",
-    customerCode: "",
-    productName: "",
-    salesQty: 0,
-    bonusQty: 0,
-    totalQty: 0,
-    sellingPrice: 0.0,
-    amount: 0,
-    discount: 0,
-    netSellingAmount: 0,
-    averageUnitPrice: 0,
-    profitLoss: 0,
-    creditDays: 0,
-    dueDate: "",
-    deliveryDate: "",
-    paidAmount: 0,
-    dueAmount: 0,
-    paymentStatus: "",
-    remark: "",
-  });
 
   // Reset page when search or tab changes
   useEffect(() => {
@@ -498,6 +768,9 @@ const Sales = () => {
       }
     }
   };
+  // 🔁 Calculate derived form fields based on field change
+
+  // ✅ Enhanced change handler: opens suggestion dropdowns
 
   const handleDeleteSelected = async () => {
     const confirm = await confirmDialog({
@@ -572,122 +845,132 @@ const Sales = () => {
     });
   };
 
-  const handleChangeEvent = (name, value) => {
-    setForm((prevForm) => {
-      const updatedForm = { ...prevForm, [name]: value };
+  const SuggestionInput = React.memo(
+    ({
+      label,
+      name,
+      value,
+      onChange,
+      onFocus,
+      onBlur,
+      error,
+      suggestions,
+      isOpen,
+      highlightedIndex,
+      inputRef,
+      dropdownTop,
+      onSuggestionSelect,
+      getSuggestionValue = (item) => item,
+      getSuggestionDisplay = (item) => item,
+      setHighlightedIndex, // <-- NEW: Pass this from parent to allow keyboard navigation
+    }) => {
+      const handleMouseEnter = useCallback(
+        (index) => {
+          onSuggestionSelect && onSuggestionSelect(index, true);
+        },
+        [onSuggestionSelect]
+      );
 
-      const getNum = (field) => {
-        const num = parseFloat(updatedForm[field] || prevForm[field]);
-        return isNaN(num) ? 0 : num;
-      };
+      const handleClick = useCallback(
+        (item) => {
+          const value = getSuggestionValue(item);
+          onSuggestionSelect && onSuggestionSelect(value);
+        },
+        [onSuggestionSelect, getSuggestionValue]
+      );
 
-      const getInt = (field) => {
-        const num = parseInt(updatedForm[field] || prevForm[field] || 0, 10);
-        return isNaN(num) ? 0 : num;
-      };
+      const handleKeyDown = useCallback(
+        (e) => {
+          if (!isOpen || suggestions.length === 0) return;
 
-      // Sales Qty + Bonus Qty → Total Qty
-      if (name === "salesQty" || name === "bonusQty") {
-        const salesQty =
-          name === "salesQty" ? getInt("salesQty") : getInt("salesQty");
-        const bonusQty =
-          name === "bonusQty" ? getInt("bonusQty") : getInt("bonusQty");
-        updatedForm.totalQty = salesQty + bonusQty;
-      }
-
-      // Invoice Date → Delivery Date
-      if (name === "invoiceDate") {
-        updatedForm.deliveryDate = value;
-      }
-
-      // Credit Days → Due Date
-      if (name === "creditDays") {
-        const creditDays = parseInt(value, 10);
-        if (!isNaN(creditDays)) {
-          const due = new Date();
-          due.setDate(due.getDate() + creditDays);
-          updatedForm.dueDate = due.toISOString().split("T")[0];
-        } else {
-          updatedForm.dueDate = "";
-        }
-      }
-
-      // Amount = sellingPrice * salesQty
-      if (name === "sellingPrice" || name === "salesQty") {
-        const price = getNum("sellingPrice");
-        const qty = getInt("salesQty");
-        updatedForm.amount = (price * qty).toFixed(2);
-      }
-
-      // Net Selling Amount = amount - discount
-      if (["amount", "discount", "sellingPrice", "salesQty"].includes(name)) {
-        const amount = getNum("amount");
-        const discount = getNum("discount");
-        updatedForm.netSellingAmount = (amount - discount).toFixed(2);
-      }
-
-      // Profit / Loss = amount - discount - (lc * totalQty)
-      if (
+          switch (e.key) {
+            case "ArrowDown":
+              e.preventDefault();
+              setHighlightedIndex((prev) =>
+                prev < suggestions.length - 1 ? prev + 1 : 0
+              );
+              break;
+            case "ArrowUp":
+              e.preventDefault();
+              setHighlightedIndex((prev) =>
+                prev > 0 ? prev - 1 : suggestions.length - 1
+              );
+              break;
+            case "Enter":
+              e.preventDefault();
+              if (
+                highlightedIndex >= 0 &&
+                highlightedIndex < suggestions.length
+              ) {
+                const selectedItem = suggestions[highlightedIndex];
+                const value = getSuggestionValue(selectedItem);
+                onSuggestionSelect && onSuggestionSelect(value);
+              }
+              break;
+            default:
+              break;
+          }
+        },
         [
-          "amount",
-          "discount",
-          "lc",
-          "totalQty",
-          "salesQty",
-          "bonusQty",
-        ].includes(name)
-      ) {
-        const amount = getNum("amount");
-        const discount = getNum("discount");
-        const lc = getNum("lc");
-        const totalQty = getInt("totalQty");
-        updatedForm.profitLoss = (amount - discount - lc * totalQty).toFixed(2);
-      }
+          highlightedIndex,
+          suggestions,
+          isOpen,
+          onSuggestionSelect,
+          getSuggestionValue,
+          setHighlightedIndex,
+        ]
+      );
 
-      // Due Amount = netSellingAmount - paidAmount
-      if (["netSellingAmount", "paidAmount"].includes(name)) {
-        const netAmount = getNum("netSellingAmount");
-        const paidAmount = getNum("paidAmount");
-        updatedForm.dueAmount = (netAmount - paidAmount).toFixed(2);
-      }
-
-      // Average Unit Price = netSellingAmount / totalQty
-      if (
-        [
-          "netSellingAmount",
-          "salesQty",
-          "bonusQty",
-          "discount",
-          "sellingPrice",
-        ].includes(name)
-      ) {
-        const net = getNum("netSellingAmount");
-        const totalQty = getInt("totalQty");
-        updatedForm.averageUnitPrice =
-          totalQty > 0 ? (net / totalQty).toFixed(2) : "";
-      }
-
-      return updatedForm;
-    });
-  };
-
-  // let productNameSuggestions;
-  // let paymentStatusSuggestions;
-
-  // if (isEditModalOpen) {
-  //   paymentStatusSuggestions = useSuggestions(
-  //     statuses,
-  //     "type",
-  //     form.paymentStatus
-  //   );
-
-  //   // Product Name Suggestions
-  //   productNameSuggestions = useSuggestions(
-  //     productNames,
-  //     "name",
-  //     form.productName
-  //   );
-  // }
+      return (
+        <div className="relative flex flex-col">
+          <label className="text-sm font-medium text-gray-700 mb-1">
+            {label}
+          </label>
+          <input
+            ref={inputRef}
+            type="text"
+            name={name}
+            value={value}
+            onChange={onChange}
+            onKeyDown={handleKeyDown}
+            onFocus={onFocus}
+            onBlur={onBlur}
+            className={`border rounded-md px-2 py-1 ${
+              error ? "border-red-500" : "border-gray-300"
+            }`}
+            placeholder="Type to search..."
+            autoComplete="off"
+            aria-autocomplete="list"
+            aria-expanded={isOpen}
+            role="combobox"
+          />
+          {isOpen && suggestions.length > 0 && (
+            <ul
+              className="absolute z-10 bg-white border border-gray-300 w-full rounded-md max-h-60 overflow-auto shadow-lg"
+              style={{ top: dropdownTop }}
+            >
+              {suggestions.map((item, idx) => (
+                <li
+                  key={typeof item === "object" ? item._id ?? idx : idx}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => handleClick(item)}
+                  onMouseEnter={() => handleMouseEnter(idx)}
+                  className={`cursor-pointer px-3 py-2 ${
+                    highlightedIndex === idx
+                      ? "bg-blue-600 text-white"
+                      : "bg-white text-gray-900 hover:bg-gray-100"
+                  }`}
+                >
+                  {getSuggestionDisplay(item)}
+                </li>
+              ))}
+            </ul>
+          )}
+          {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
+        </div>
+      );
+    }
+  );
 
   return (
     <div className="p-6">
@@ -1161,9 +1444,7 @@ const Sales = () => {
                       type="text"
                       name="mrName"
                       value={form.mrName}
-                      onChange={(e) =>
-                        handleChangeEvent(e.target.name, e.target.value)
-                      }
+                      onChange={enhancedHandleChange}
                       className="w-full border px-3 py-2 rounded-lg capitalize"
                     />
                   </div>
@@ -1176,33 +1457,15 @@ const Sales = () => {
                       type="text"
                       name="customerCode"
                       value={form.customerCode}
-                      onChange={(e) =>
-                        handleChangeEvent(e.target.name, e.target.value)
-                      }
+                      onChange={enhancedHandleChange}
                       className="w-full border px-3 py-2 rounded-lg capitalize"
                     />
                   </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Product Name
-                    </label>
-                    <input
-                      type="text"
-                      name="productName"
-                      value={form.productName}
-                      onChange={(e) =>
-                        handleChangeEvent(e.target.name, e.target.value)
-                      }
-                      className="w-full border px-3 py-2 rounded-lg capitalize"
-                    />
-                  </div>
-                  {/* <SuggestionInput
+                  <SuggestionInput
                     label="Product Name"
                     name="productName"
                     value={form.productName}
                     onChange={enhancedHandleChange}
-                    error={errors.productName}
                     suggestions={productNameSuggestions.filteredItems}
                     isOpen={productNameSuggestions.isOpen}
                     highlightedIndex={productNameSuggestions.highlightedIndex}
@@ -1216,6 +1479,7 @@ const Sales = () => {
                       )
                     }
                     onSuggestionSelect={(value, isHighlight) => {
+                      value = Number(value);
                       if (typeof value === "number" && isHighlight) {
                         handleProductNameHighlight(value, true);
                       } else {
@@ -1233,7 +1497,7 @@ const Sales = () => {
                     setHighlightedIndex={
                       productNameSuggestions.setHighlightedIndex
                     } // ✅ Pass this
-                  /> */}
+                  />
 
                   {/* Numeric inputs with min=0 */}
                   <div>
@@ -1244,9 +1508,7 @@ const Sales = () => {
                       type="text"
                       name="salesQty"
                       value={form.salesQty}
-                      onChange={(e) =>
-                        handleChangeEvent(e.target.name, e.target.value)
-                      }
+                      onChange={enhancedHandleChange}
                       className="w-full border px-3 py-2 rounded-lg"
                     />
                   </div>
@@ -1259,9 +1521,7 @@ const Sales = () => {
                       type="text"
                       name="bonusQty"
                       value={form.bonusQty}
-                      onChange={(e) =>
-                        handleChangeEvent(e.target.name, e.target.value)
-                      }
+                      onChange={enhancedHandleChange}
                       className="w-full border px-3 py-2 rounded-lg"
                     />
                   </div>
@@ -1286,9 +1546,7 @@ const Sales = () => {
                       type="text"
                       name="sellingPrice"
                       value={form.sellingPrice}
-                      onChange={(e) =>
-                        handleChangeEvent(e.target.name, e.target.value)
-                      }
+                      onChange={enhancedHandleChange}
                       className="w-full border px-3 py-2 rounded-lg"
                     />
                   </div>
@@ -1297,6 +1555,7 @@ const Sales = () => {
                     <label className="block text-sm font-medium">Amount</label>
                     <input
                       type="text"
+                      disabled
                       value={form.amount}
                       className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
                     />
@@ -1310,9 +1569,7 @@ const Sales = () => {
                       type="text"
                       name="discount"
                       value={form.discount}
-                      onChange={(e) =>
-                        handleChangeEvent(e.target.name, e.target.value)
-                      }
+                      onChange={enhancedHandleChange}
                       className="w-full border px-3 py-2 rounded-lg"
                     />
                   </div>
@@ -1325,6 +1582,7 @@ const Sales = () => {
                       type="text"
                       value={form.netSellingAmount}
                       className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
+                      disabled
                     />
                   </div>
 
@@ -1336,6 +1594,7 @@ const Sales = () => {
                       type="text"
                       value={form.averageUnitPrice}
                       className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
+                      disabled
                     />
                   </div>
 
@@ -1347,6 +1606,7 @@ const Sales = () => {
                       type="text"
                       value={form.profitLoss}
                       className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
+                      disabled
                     />
                   </div>
 
@@ -1358,9 +1618,7 @@ const Sales = () => {
                       type="text"
                       name="creditDays"
                       value={form.creditDays}
-                      onChange={(e) =>
-                        handleChangeEvent(e.target.name, e.target.value)
-                      }
+                      onChange={enhancedHandleChange}
                       className="w-full border px-3 py-2 rounded-lg"
                     />
                   </div>
@@ -1374,6 +1632,7 @@ const Sales = () => {
                       dateFormat="yyyy-MM-dd"
                       placeholderText="Select a date"
                       className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
+                      disabled
                     />
                   </div>
 
@@ -1400,9 +1659,7 @@ const Sales = () => {
                       type="text"
                       name="paidAmount"
                       value={form.paidAmount}
-                      onChange={(e) =>
-                        handleChangeEvent(e.target.name, e.target.value)
-                      }
+                      onChange={enhancedHandleChange}
                       className="w-full border px-3 py-2 rounded-lg"
                     />
                   </div>
@@ -1415,13 +1672,14 @@ const Sales = () => {
                       type="text"
                       value={form.dueAmount}
                       className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
+                      disabled
                     />
                   </div>
-                  {/* <SuggestionInput
+                  <SuggestionInput
                     label="Payment Status"
                     name="paymentStatus"
-                    value={form.paymentStatus}
                     onChange={enhancedHandleChange}
+                    value={form.paymentStatus}
                     error={errors.paymentStatus}
                     suggestions={paymentStatusSuggestions.filteredItems}
                     isOpen={paymentStatusSuggestions.isOpen}
@@ -1450,29 +1708,13 @@ const Sales = () => {
                     setHighlightedIndex={
                       paymentStatusSuggestions.setHighlightedIndex
                     } // ✅ Pass this
-                  /> */}
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Payment Status
-                    </label>
-                    <input
-                      type="text"
-                      value={form.paymentStatus}
-                      onChange={(e) =>
-                        setForm({ ...form, paymentStatus: e.target.value })
-                      }
-                      className="w-full border px-3 py-2 rounded-lg capitalize"
-                    />
-                  </div>
-
+                  />
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium">Remark</label>
                     <input
                       type="text"
                       value={form.remark}
-                      onChange={(e) =>
-                        setForm({ ...form, remark: e.target.value })
-                      }
+                      onChange={enhancedHandleChange}
                       className="w-full border px-3 py-2 rounded-lg capitalize"
                     />
                   </div>
