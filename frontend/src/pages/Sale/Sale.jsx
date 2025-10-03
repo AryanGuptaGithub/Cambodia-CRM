@@ -378,19 +378,29 @@ const Sales = () => {
 
   const toggleItem = (id) => {
     if (id === 0) {
-      handleSelectAll(); // "All" checkbox toggled
-      return;
-    }
-
-    let updated;
-    if (selectedItems.includes(id)) {
-      updated = selectedItems.filter((itemId) => itemId !== id);
+      if (allSelected) {
+        setSelectedItems([]);
+        setAllSelected(false);
+      } else {
+        const allIds = hideRowList
+          .map((item) => item.id)
+          .filter((i) => i !== 0);
+        setSelectedItems(allIds);
+        setAllSelected(true);
+      }
     } else {
-      updated = [...selectedItems, id];
-    }
+      let updatedItems;
+      if (selectedItems.includes(id)) {
+        updatedItems = selectedItems.filter((itemId) => itemId !== id);
+      } else {
+        updatedItems = [...selectedItems, id];
+      }
 
-    setSelectedItems(updated);
-    setAllSelected(updated.length === hideRowList.length - 1); // Exclude "All"
+      setSelectedItems(updatedItems);
+      setAllSelected(
+        updatedItems.length === hideRowList.length - 1 // Exclude ID 0 ("All")
+      );
+    }
   };
 
   // Reset page when search or tab changes
@@ -503,6 +513,13 @@ const Sales = () => {
 
   const handleReset = useCallback(() => {
     setSelectedItems([]);
+    setAllSelected(false);
+    setIsModalOpen(false);
+  }, []);
+
+  const handleCancelEvent = useCallback(() => {
+    setSelectedItems([]);
+    setAllSelected(false);
     setIsModalOpen(false);
   }, []);
 
@@ -996,7 +1013,7 @@ const Sales = () => {
             {selected.length > 0 && (
               <button
                 onClick={handleDeleteSelected}
-                className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md"
+                className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
               >
                 <Trash2 size={18} /> Delete
               </button>
@@ -1036,7 +1053,7 @@ const Sales = () => {
                 }}
                 className="px-4 py-2 bg-blue-600 text-white rounded cursor-pointer"
               >
-                Add More Column
+                Add /Remove Column
               </button>
             </div>
           ) : (
@@ -1223,7 +1240,7 @@ const Sales = () => {
                 />
                 <div className="flex justify-end gap-3">
                   <button
-                    onClick={() => setShowImportModal(false)}
+                    onClick={() => handleCancelEvent}
                     disabled={isUploading}
                     className={`px-5 py-2 rounded-lg cursor-pointer ${
                       isUploading
@@ -1354,7 +1371,7 @@ const Sales = () => {
                   </button>
                   <div className="flex gap-2">
                     <button
-                      onClick={() => setIsModalOpen(false)}
+                      onClick={handleCancelEvent}
                       className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 cursor-pointer"
                     >
                       Cancel

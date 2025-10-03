@@ -18,6 +18,8 @@ const INITIAL_FORM_STATE = {
   invoiceDate: "",
   mrName: "",
   customerCode: "",
+  customerName: "",
+  saleDate:"",
   productName: "",
   salesQty: "",
   returnQuantity: "",
@@ -256,48 +258,6 @@ const SuggestionInput = React.memo(
       [onSuggestionSelect, getSuggestionValue]
     );
 
-    const handleKeyDown = useCallback(
-      (e) => {
-        if (!isOpen || suggestions.length === 0) return;
-
-        switch (e.key) {
-          case "ArrowDown":
-            e.preventDefault();
-            setHighlightedIndex((prev) =>
-              prev < suggestions.length - 1 ? prev + 1 : 0
-            );
-            break;
-          case "ArrowUp":
-            e.preventDefault();
-            setHighlightedIndex((prev) =>
-              prev > 0 ? prev - 1 : suggestions.length - 1
-            );
-            break;
-          case "Enter":
-            e.preventDefault();
-            if (
-              highlightedIndex >= 0 &&
-              highlightedIndex < suggestions.length
-            ) {
-              const selectedItem = suggestions[highlightedIndex];
-              const value = getSuggestionValue(selectedItem);
-              onSuggestionSelect && onSuggestionSelect(value);
-            }
-            break;
-          default:
-            break;
-        }
-      },
-      [
-        highlightedIndex,
-        suggestions,
-        isOpen,
-        onSuggestionSelect,
-        getSuggestionValue,
-        setHighlightedIndex,
-      ]
-    );
-
     return (
       <div className="relative flex flex-col">
         <label className="text-sm font-medium text-gray-700 mb-1">
@@ -309,7 +269,6 @@ const SuggestionInput = React.memo(
           name={name}
           value={value}
           onChange={onChange}
-          onKeyDown={handleKeyDown}
           onFocus={onFocus}
           onBlur={onBlur}
           className={`border rounded-md px-2 py-1 ${
@@ -317,9 +276,6 @@ const SuggestionInput = React.memo(
           }`}
           placeholder="Type to search..."
           autoComplete="off"
-          aria-autocomplete="list"
-          aria-expanded={isOpen}
-          role="combobox"
         />
         {isOpen && suggestions.length > 0 && (
           <ul
@@ -356,9 +312,7 @@ const AddReturnSale = () => {
   const [loadingData, setLoadingData] = useState(true);
   const [form, setForm] = useState(INITIAL_FORM_STATE);
   const [errors, setErrors] = useState({});
-  const [filteredSales, setFilteredSales] = useState([]);
 
-  const { customerCode } = location.state || {};
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
   // Use your custom hook for initial data
@@ -377,21 +331,6 @@ const AddReturnSale = () => {
       const salesQty = getInt("salesQty");
       const returnQty = getInt("returnQuantity");
       updatedForm.usedQty = Math.max(salesQty - returnQty, 0);
-    }
-
-    if (name === "invoiceDate") {
-      updatedForm.deliveryDate = value;
-    }
-
-    if (name === "creditDays") {
-      const creditDays = parseInt(value, 10);
-      if (!isNaN(creditDays)) {
-        const due = new Date();
-        due.setDate(due.getDate() + creditDays);
-        updatedForm.dueDate = due.toISOString().split("T")[0];
-      } else {
-        updatedForm.dueDate = "";
-      }
     }
 
     if (name === "sellingPrice" || name === "salesQty") {
@@ -415,16 +354,6 @@ const AddReturnSale = () => {
       } else {
         updatedForm.usedPrice = "";
       }
-    }
-
-    if (
-      ["amount", "discount", "lc", "salesQty", "returnQuantity"].includes(name)
-    ) {
-      const amount = getNum("amount");
-      const discount = getNum("discount");
-      const lc = getNum("lc");
-      const usedQty = getInt("usedQty");
-      updatedForm.profitLoss = (amount - discount - lc * usedQty).toFixed(2);
     }
 
     if (["netSellingAmount", "paidAmount"].includes(name)) {
@@ -509,7 +438,7 @@ const AddReturnSale = () => {
   // Function to filter sales based on invoiceNumber
   function filterSalesByInvoice(invoiceNum) {
     const matches = sales.filter((sale) => sale.invoiceNumber === invoiceNum);
-    return matches; // this is always an array
+    return matches;
   }
 
   useEffect(() => {
@@ -532,7 +461,7 @@ const AddReturnSale = () => {
       const paidAmount = Number(sale.paidAmount) || 0;
       const usedAmount =
         Number(usedPrice) - Number((discount / sale.salesQty) * usedQty);
-      const dueAmount = usedAmount - paidAmount; // or some logic
+      const dueAmount = usedAmount - paidAmount;
 
       updateFormField("usedQty", usedQty.toString());
       updateFormField("amount", amount.toFixed(2));
@@ -553,11 +482,7 @@ const AddReturnSale = () => {
 
       updateFormField("invoiceNumber", value);
       const fil = filterSalesByInvoice(value);
-
-      if (!Array.isArray(fil)) {
-        console.warn("filterSalesByInvoice did not return an array:", fil);
-        return;
-      }
+      console.log('values of fi', fil);
 
       if (fil.length === 1) {
         const sale = fil[0];
@@ -574,12 +499,14 @@ const AddReturnSale = () => {
         const paidAmount = Number(sale.paidAmount) || 0;
         const usedAmount =
           Number(usedPrice) - Number((discount / sale.salesQty) * usedQty);
-        const dueAmount = usedAmount - paidAmount; // or some logic
+        const dueAmount = usedAmount - paidAmount;
 
         // Update form fields
         updateFormField("invoiceDate", sale.invoiceDate ?? "");
         updateFormField("mrName", sale.mrName ?? "");
         updateFormField("customerCode", sale.customerCode ?? "");
+        updateFormField("customerName", sale.customerInfo.name ?? "");
+        updateFormField("saleDate", sale.invoiceDate ?? "");
         updateFormField("productName", sale.productName ?? "");
         updateFormField("salesQty", salesQty.toString());
         updateFormField("usedQty", usedQty.toString());
@@ -593,15 +520,28 @@ const AddReturnSale = () => {
         updateFormField("dueAmount", dueAmount.toFixed(2));
         updateFormField("remark", sale.remark ?? "");
       }
-      // else: fil length is not 1, so do nothing or handle multiple/no matches
     },
-    [
-      form.invoiceNumber,
-      form.returnQuantity,
-      updateFormField,
-      filterSalesByInvoice,
-    ]
+    [form.invoiceNumber, form.returnQuantity, updateFormField]
   );
+
+  const fetchSaleSummaries = async () => {
+    try {
+      const res = await fetch(`${backendUrl}/api/sales`);
+      if (!res.ok) throw new Error("Failed to fetch sale summaries");
+
+      const data = await res.json();
+      setSales(data);
+    } catch (error) {
+      console.error("Fetch error:", error);
+      showToast("error", error.message || "Error fetching sale summaries");
+    } finally {
+      setLoadingData(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSaleSummaries();
+  }, []);
 
   // Handle suggestion selection for product name
   const handleProductNameSelect = useCallback(
@@ -625,7 +565,6 @@ const AddReturnSale = () => {
       });
 
       const respData = await response.json();
-      console.log("values of respData", respData);
 
       if (!response.ok) {
         throw new Error(respData.error || "Something went wrong");
@@ -692,7 +631,6 @@ const AddReturnSale = () => {
             placeholder="Quantity being returned"
           />
 
-          {/* DatePicker for Invoice Date */}
           <DatePickerField
             label="Invoice Date"
             name="invoiceDate"
@@ -747,7 +685,6 @@ const AddReturnSale = () => {
             setHighlightedIndex={productNameSuggestions.setHighlightedIndex}
           />
 
-          {/* Continue with remaining fields in exact order */}
           <InputField
             label="Sales Quantity"
             name="salesQty"
@@ -772,7 +709,7 @@ const AddReturnSale = () => {
           <InputField
             label="Selling Price"
             name="sellingPrice"
-            type="type"
+            type="text"
             value={form.sellingPrice}
             onChange={enhancedHandleChange}
             error={errors.sellingPrice}
@@ -864,21 +801,16 @@ const AddReturnSale = () => {
             onBlur={() =>
               setTimeout(() => paymentStatusSuggestions.setIsOpen(false), 150)
             }
-            onSuggestionSelect={(value, isHighlight) => {
-              if (typeof value === "number" && isHighlight) {
-                handlePaymentStatusHighlight(value, true);
-              } else {
-                paymentStatusSuggestions.selectSuggestion(value, (val) =>
-                  updateFormField("paymentStatus", val)
-                );
-              }
-            }}
+            onSuggestionSelect={(value) =>
+              paymentStatusSuggestions.selectSuggestion(value, (val) =>
+                updateFormField("paymentStatus", val)
+              )
+            }
             getSuggestionValue={(item) => item.type}
             getSuggestionDisplay={(item) => item.type}
-            setHighlightedIndex={paymentStatusSuggestions.setHighlightedIndex} // ✅ Pass this
+            setHighlightedIndex={paymentStatusSuggestions.setHighlightedIndex}
           />
 
-          {/* Remark field - full width */}
           <div className="sm:col-span-3">
             <InputField
               label="Remark"
