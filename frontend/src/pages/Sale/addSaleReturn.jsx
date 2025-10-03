@@ -362,7 +362,7 @@ const AddReturnSale = () => {
   const [form, setForm] = useState(INITIAL_FORM_STATE);
   const [errors, setErrors] = useState({});
   const [filteredSales, setFilteredSales] = useState([]);
-  
+
   const { customerCode } = location.state || {};
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -370,80 +370,77 @@ const AddReturnSale = () => {
   const { statuses, productNames, loading } = useInitialSaleData();
 
   // Calculate derived fields
-  const calculateDerivedFields = useCallback(
-    (name, value, currentForm) => {
-      const updatedForm = { ...currentForm, [name]: value };
-      const getNum = (field) =>
-        parseNumber(updatedForm[field] || currentForm[field]);
-      const getInt = (field) =>
-        parseInt(updatedForm[field] || currentForm[field] || 0, 10);
+  const calculateDerivedFields = useCallback((name, value, currentForm) => {
+    const updatedForm = { ...currentForm, [name]: value };
+    const getNum = (field) =>
+      parseNumber(updatedForm[field] || currentForm[field]);
+    const getInt = (field) =>
+      parseInt(updatedForm[field] || currentForm[field] || 0, 10);
 
-      // Calculations for Return Sale
-      if (name === "salesQty" || name === "returnQuantity") {
-        const salesQty = getInt("salesQty");
-        const returnQty = getInt("returnQuantity");
-        updatedForm.usedQty = Math.max(salesQty - returnQty, 0);
+    // Calculations for Return Sale
+    if (name === "salesQty" || name === "returnQuantity") {
+      const salesQty = getInt("salesQty");
+      const returnQty = getInt("returnQuantity");
+      updatedForm.usedQty = Math.max(salesQty - returnQty, 0);
+    }
+
+    if (name === "invoiceDate") {
+      updatedForm.deliveryDate = value;
+    }
+
+    if (name === "creditDays") {
+      const creditDays = parseInt(value, 10);
+      if (!isNaN(creditDays)) {
+        const due = new Date();
+        due.setDate(due.getDate() + creditDays);
+        updatedForm.dueDate = due.toISOString().split("T")[0];
+      } else {
+        updatedForm.dueDate = "";
       }
+    }
 
-      if (name === "invoiceDate") {
-        updatedForm.deliveryDate = value;
+    if (name === "sellingPrice" || name === "salesQty") {
+      const price = getNum("sellingPrice");
+      const qty = getInt("salesQty");
+      updatedForm.amount = (price * qty).toFixed(2);
+    }
+
+    if (["amount", "discount", "sellingPrice", "salesQty"].includes(name)) {
+      const amount = getNum("amount");
+      const discount = getNum("discount");
+      updatedForm.netSellingAmount = (amount - discount).toFixed(2);
+    }
+
+    // Calculate Used Price (price for used quantity)
+    if (["netSellingAmount", "salesQty", "returnQuantity"].includes(name)) {
+      const netAmount = getNum("netSellingAmount");
+      const salesQty = getInt("salesQty");
+      if (salesQty > 0) {
+        updatedForm.usedPrice = (netAmount / salesQty).toFixed(2);
+      } else {
+        updatedForm.usedPrice = "";
       }
+    }
 
-      if (name === "creditDays") {
-        const creditDays = parseInt(value, 10);
-        if (!isNaN(creditDays)) {
-          const due = new Date();
-          due.setDate(due.getDate() + creditDays);
-          updatedForm.dueDate = due.toISOString().split("T")[0];
-        } else {
-          updatedForm.dueDate = "";
-        }
-      }
+    if (
+      ["amount", "discount", "lc", "salesQty", "returnQuantity"].includes(name)
+    ) {
+      const amount = getNum("amount");
+      const discount = getNum("discount");
+      const lc = getNum("lc");
+      const usedQty = getInt("usedQty");
+      updatedForm.profitLoss = (amount - discount - lc * usedQty).toFixed(2);
+    }
 
-      if (name === "sellingPrice" || name === "salesQty") {
-        const price = getNum("sellingPrice");
-        const qty = getInt("salesQty");
-        updatedForm.amount = (price * qty).toFixed(2);
-      }
+    if (["netSellingAmount", "paidAmount"].includes(name)) {
+      const netAmount = getNum("netSellingAmount");
+      const paidAmount = getNum("paidAmount");
+      updatedForm.dueAmount = Math.max(netAmount - paidAmount, 0).toFixed(2);
+      updatedForm.balanceAmount = updatedForm.dueAmount;
+    }
 
-      if (["amount", "discount", "sellingPrice", "salesQty"].includes(name)) {
-        const amount = getNum("amount");
-        const discount = getNum("discount");
-        updatedForm.netSellingAmount = (amount - discount).toFixed(2);
-      }
-
-      // Calculate Used Price (price for used quantity)
-      if (["netSellingAmount", "salesQty", "returnQuantity"].includes(name)) {
-        const netAmount = getNum("netSellingAmount");
-        const salesQty = getInt("salesQty");
-        if (salesQty > 0) {
-          updatedForm.usedPrice = (netAmount / salesQty).toFixed(2);
-        } else {
-          updatedForm.usedPrice = "";
-        }
-      }
-
-      if (
-        ["amount", "discount", "lc", "salesQty", "returnQuantity"].includes(name)
-      ) {
-        const amount = getNum("amount");
-        const discount = getNum("discount");
-        const lc = getNum("lc");
-        const usedQty = getInt("usedQty");
-        updatedForm.profitLoss = (amount - discount - lc * usedQty).toFixed(2);
-      }
-
-      if (["netSellingAmount", "paidAmount"].includes(name)) {
-        const netAmount = getNum("netSellingAmount");
-        const paidAmount = getNum("paidAmount");
-        updatedForm.dueAmount = Math.max(netAmount - paidAmount, 0).toFixed(2);
-        updatedForm.balanceAmount = updatedForm.dueAmount;
-      }
-
-      return updatedForm;
-    },
-    []
-  );
+    return updatedForm;
+  }, []);
 
   // Validation function
   const validate = useCallback(() => {
@@ -484,9 +481,12 @@ const AddReturnSale = () => {
   }, [form]);
 
   // Update form field with derived calculations
-  const updateFormField = useCallback((name, value) => {
-    setForm(prev => calculateDerivedFields(name, value, prev));
-  }, [calculateDerivedFields]);
+  const updateFormField = useCallback(
+    (name, value) => {
+      setForm((prev) => calculateDerivedFields(name, value, prev));
+    },
+    [calculateDerivedFields]
+  );
 
   // Enhanced handle change
   const enhancedHandleChange = useCallback(
@@ -512,23 +512,100 @@ const AddReturnSale = () => {
   );
 
   // Function to filter sales based on invoiceNumber
-  const filterSalesByInvoice = useCallback((invoiceNumber) => {
-    if (!invoiceNumber) {
-      setFilteredSales(sales);
-    } else {
-      const filtered = sales.filter((sale) =>
-        sale.invoiceNumber.toLowerCase().includes(invoiceNumber.toLowerCase())
-      );
-      setFilteredSales(filtered);
-    }
-  }, [sales]);
+  function filterSalesByInvoice(invoiceNum) {
+    const matches = sales.filter((sale) => sale.invoiceNumber === invoiceNum);
+    return matches; // this is always an array
+  }
 
-  // Handle invoice number change
-  const handleInvoiceNumberChange = useCallback((e) => {
-    const { value } = e.target;
-    updateFormField("invoiceNumber", value);
-    filterSalesByInvoice(value);
-  }, [updateFormField, filterSalesByInvoice]);
+  useEffect(() => {
+    if (!form.invoiceNumber) return;
+
+    const filtered = filterSalesByInvoice(form.invoiceNumber);
+    if (filtered.length === 1) {
+      const sale = filtered[0];
+
+      const salesQty = Number(sale.salesQty) || 0;
+      const returnQty = Number(form.returnQuantity) || 0;
+      const usedQty = salesQty - returnQty;
+
+      const sellingPrice = Number(sale.sellingPrice) || 0;
+      const amount = sellingPrice * salesQty;
+      const discount = Number(sale.discount) || 0;
+      const netSellingAmount = amount - discount;
+      const usedPrice = usedQty * sellingPrice;
+
+      const paidAmount = Number(sale.paidAmount) || 0;
+      const usedAmount = Number(usedPrice) - Number(discount / sale.salesQty);
+      const dueAmount = usedAmount - paidAmount; // or some logic
+
+      updateFormField("usedQty", usedQty.toString());
+      updateFormField("amount", amount.toFixed(2));
+      updateFormField("netSellingAmount", netSellingAmount.toFixed(2));
+      updateFormField("usedPrice", usedPrice.toFixed(2));
+      updateFormField("usedAmount", usedAmount.toFixed(2));
+      updateFormField("dueAmount", dueAmount.toFixed(2));
+    }
+  }, [form.returnQuantity]);
+
+  const handleInvoiceNumberChange = useCallback(
+    (e) => {
+      const { value } = e.target;
+
+      if (value === form.invoiceNumber) {
+        return;
+      }
+
+      updateFormField("invoiceNumber", value);
+      const fil = filterSalesByInvoice(value);
+      console.log('values of fi', fil);
+      // Make sure fil is defined and is an array
+      if (!Array.isArray(fil)) {
+        console.warn("filterSalesByInvoice did not return an array:", fil);
+        return;
+      }
+
+      if (fil.length === 1) {
+        const sale = fil[0];
+        const salesQty = Number(sale.salesQty) || 0;
+        const returnQty = Number(form.returnQuantity) || 0;
+        const usedQty = salesQty - returnQty;
+
+        const sellingPrice = Number(sale.sellingPrice) || 0;
+        const amount = sellingPrice * salesQty;
+        const discount = Number(sale.discount) || 0;
+        const netSellingAmount = amount - discount;
+        const usedPrice = usedQty * sellingPrice;
+
+        const paidAmount = Number(sale.paidAmount) || 0;
+        const usedAmount = Number(usedPrice) - Number(discount / sale.salesQty);
+        const dueAmount = usedAmount - paidAmount; // or some logic
+
+        // Update form fields
+        updateFormField("invoiceDate", sale.invoiceDate ?? "");
+        updateFormField("mrName", sale.mrName ?? "");
+        updateFormField("customerCode", sale.customerCode ?? "");
+        updateFormField("productName", sale.productName ?? "");
+        updateFormField("salesQty", salesQty.toString());
+        updateFormField("usedQty", usedQty.toString());
+        updateFormField("sellingPrice", sellingPrice.toString());
+        updateFormField("amount", amount.toFixed(2));
+        updateFormField("discount", discount.toString());
+        updateFormField("netSellingAmount", netSellingAmount.toFixed(2));
+        updateFormField("usedPrice", usedPrice.toFixed(2));
+        updateFormField("paidAmount", paidAmount.toString());
+        updateFormField("usedAmount", usedAmount.toFixed(2));
+        updateFormField("dueAmount", dueAmount.toFixed(2));
+        updateFormField("remark", sale.remark ?? "");
+      }
+      // else: fil length is not 1, so do nothing or handle multiple/no matches
+    },
+    [
+      form.invoiceNumber,
+      form.returnQuantity,
+      updateFormField,
+      filterSalesByInvoice,
+    ]
+  );
 
   const fetchSaleSummaries = async () => {
     try {
@@ -551,9 +628,12 @@ const AddReturnSale = () => {
   }, []);
 
   // Handle suggestion selection for product name
-  const handleProductNameSelect = useCallback((value) => {
-    updateFormField("productName", value);
-  }, [updateFormField]);
+  const handleProductNameSelect = useCallback(
+    (value) => {
+      updateFormField("productName", value);
+    },
+    [updateFormField]
+  );
 
   // Handle mouse enter for product name suggestions
   const handleProductNameHighlight = useCallback(
@@ -604,7 +684,7 @@ const AddReturnSale = () => {
       </div>
     );
   }
-console.log('valueso f filteredSales', filteredSales);
+
   return (
     <div className="max-w-5xl mx-auto p-6 bg-white rounded-2xl shadow">
       <h2 className="text-2xl font-bold mb-6 text-gray-800">
@@ -613,7 +693,6 @@ console.log('valueso f filteredSales', filteredSales);
 
       <form onSubmit={handleSubmit}>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {/* DatePicker for Recording Date */}
           <DatePickerField
             label="Recording Date"
             name="recordingDate"
@@ -621,6 +700,7 @@ console.log('valueso f filteredSales', filteredSales);
             onChange={enhancedHandleChange}
             error={errors.recordingDate}
             required={true}
+            autoComplete="off"
             placeholder="Select recording date"
           />
 
@@ -630,7 +710,18 @@ console.log('valueso f filteredSales', filteredSales);
             value={form.invoiceNumber}
             onChange={handleInvoiceNumberChange}
             error={errors.invoiceNumber}
+            autoComplete="off"
             required={true}
+          />
+          <InputField
+            label="Return Quantity"
+            name="returnQuantity"
+            type="text"
+            value={form.returnQuantity}
+            onChange={enhancedHandleChange}
+            error={errors.returnQuantity}
+            required={true}
+            placeholder="Quantity being returned"
           />
 
           {/* DatePicker for Invoice Date */}
@@ -638,9 +729,9 @@ console.log('valueso f filteredSales', filteredSales);
             label="Invoice Date"
             name="invoiceDate"
             value={form.invoiceDate}
-            onChange={enhancedHandleChange}
             error={errors.invoiceDate}
-            placeholder="Select invoice date"
+            readOnly={true}
+            className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
           />
 
           <InputField
@@ -649,7 +740,8 @@ console.log('valueso f filteredSales', filteredSales);
             value={form.mrName}
             onChange={enhancedHandleChange}
             error={errors.mrName}
-            required={true}
+            readOnly={true}
+            className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
           />
 
           <InputField
@@ -658,7 +750,8 @@ console.log('valueso f filteredSales', filteredSales);
             value={form.customerCode}
             onChange={enhancedHandleChange}
             error={errors.customerCode}
-            required={true}
+            readOnly={true}
+            className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
           />
 
           <SuggestionInput
@@ -690,22 +783,12 @@ console.log('valueso f filteredSales', filteredSales);
           <InputField
             label="Sales Quantity"
             name="salesQty"
-            type="number"
+            type="text"
             value={form.salesQty}
             onChange={enhancedHandleChange}
             error={errors.salesQty}
-            placeholder="Original sales quantity"
-          />
-
-          <InputField
-            label="Return Quantity"
-            name="returnQuantity"
-            type="number"
-            value={form.returnQuantity}
-            onChange={enhancedHandleChange}
-            error={errors.returnQuantity}
-            required={true}
-            placeholder="Quantity being returned"
+            readOnly={true}
+            className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
           />
 
           <InputField
@@ -715,18 +798,18 @@ console.log('valueso f filteredSales', filteredSales);
             onChange={enhancedHandleChange}
             error={errors.usedQty}
             readOnly={true}
-            placeholder="Auto-calculated"
+            className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
           />
 
           <InputField
             label="Selling Price"
             name="sellingPrice"
-            type="number"
-            step="0.01"
+            type="type"
             value={form.sellingPrice}
             onChange={enhancedHandleChange}
             error={errors.sellingPrice}
-            required={true}
+            readOnly={true}
+            className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
           />
 
           <InputField
@@ -736,17 +819,18 @@ console.log('valueso f filteredSales', filteredSales);
             onChange={enhancedHandleChange}
             error={errors.amount}
             readOnly={true}
+            className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
           />
 
           <InputField
             label="Discount"
             name="discount"
-            type="number"
-            step="0.01"
+            type="text"
             value={form.discount}
             onChange={enhancedHandleChange}
             error={errors.discount}
-            placeholder="Discount amount"
+            readOnly={true}
+            className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
           />
 
           <InputField
@@ -756,6 +840,7 @@ console.log('valueso f filteredSales', filteredSales);
             onChange={enhancedHandleChange}
             error={errors.netSellingAmount}
             readOnly={true}
+            className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
           />
 
           <InputField
@@ -765,17 +850,17 @@ console.log('valueso f filteredSales', filteredSales);
             onChange={enhancedHandleChange}
             error={errors.usedPrice}
             readOnly={true}
+            className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
           />
 
           <InputField
             label="Paid Amount"
             name="paidAmount"
-            type="number"
-            step="0.01"
+            type="text"
             value={form.paidAmount}
             onChange={enhancedHandleChange}
             error={errors.paidAmount}
-            placeholder="Amount already paid"
+            disabled
           />
 
           <InputField
@@ -785,6 +870,7 @@ console.log('valueso f filteredSales', filteredSales);
             onChange={enhancedHandleChange}
             error={errors.dueAmount}
             readOnly={true}
+            disabled
           />
 
           <InputField
