@@ -46,6 +46,8 @@ const Sales = () => {
   const inputRef = useRef(null);
   const { statuses, productNames, loading } = useInitialSaleData();
   const [errors, setErrors] = useState({});
+  const [activeTab, setActiveTab] = useState("add");
+  const [includePaymentStatus, setIncludePaymentStatus] = useState(false);
 
   const [form, setForm] = useState({
     _id: null,
@@ -1326,7 +1328,7 @@ const Sales = () => {
         )}
 
         {/* ✅ COLUMN SELECT MODAL FIX */}
-        {isModalOpen &&
+        {/* {isModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
               <div
@@ -1350,6 +1352,100 @@ const Sales = () => {
                             type="checkbox"
                             checked={
                               id === 0
+                                ? allSelected
+                                : selectedItems.includes(id)
+                            }
+                            onChange={() => toggleItem(id)}
+                          />
+                          {name}
+                        </label>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-6 flex justify-between items-center">
+                  <button
+                    onClick={handleReset}
+                    className="px-4 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200 cursor-pointer"
+                  >
+                    Reset
+                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleCancelEvent}
+                      className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleSave}
+                      className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 cursor-pointer"
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )} */}
+        {isModalOpen &&
+          ReactDOM.createPortal(
+            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+              <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                onClick={() => setIsOpen(false)}
+              />
+              <div
+                className="relative bg-white p-6 rounded shadow-lg max-w-xl w-full z-10"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h2 className="text-xl font-semibold mb-4">Select Columns</h2>
+
+                <div className="flex w-full gap-2">
+                  <div className="w-1/2">
+                    <button
+                      onClick={() => setActiveTab("add")}
+                      className={`w-full px-4 py-2 font-medium text-center rounded-lg ${
+                        activeTab === "add"
+                          ? "bg-green-600 text-white"
+                          : "bg-gray-200 text-gray-700"
+                      }`}
+                    >
+                      Add
+                    </button>
+                  </div>
+                  <div className="w-1/2">
+                    <button
+                      onClick={() => setActiveTab("remove")}
+                      className={`w-full px-4 py-2 font-medium text-center rounded-lg ${
+                        activeTab === "remove"
+                          ? "bg-red-600 text-white"
+                          : "bg-gray-200 text-gray-700"
+                      }`}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3">
+                  {chunkedItems.map((pair, index) => (
+                    <div key={index} className="flex gap-4">
+                      {pair.map(({ id, name }) => (
+                        <label
+                          key={id}
+                          className="flex items-center gap-2 flex-1 cursor-pointer select-none"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={
+                              activeTab === "add"
+                                ? id === 0
+                                  ? allSelected
+                                  : selectedItems.includes(id)
+                                : id === 0
                                 ? allSelected
                                 : selectedItems.includes(id)
                             }
