@@ -10,14 +10,9 @@ import { showToast } from "../../utils/toast";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { useInitialSaleData } from "./IntialLoading.jsx";
+import { PlusSquare, MinusSquare } from "lucide-react";
 
-const INITIAL_FORM_STATE = {
-  _id: null,
-  recordingDate: "",
-  invoiceNumber: "",
-  invoiceDate: "",
-  mrName: "",
-  customerCode: "",
+const INITIAL_PRODUCT_STATE = {
   productName: "",
   salesQty: "",
   bonusQty: "",
@@ -29,6 +24,15 @@ const INITIAL_FORM_STATE = {
   averageUnitPrice: "",
   lc: "",
   profitLoss: "",
+};
+
+const INITIAL_FORM_STATE = {
+  _id: null,
+  recordingDate: "",
+  invoiceNumber: "",
+  invoiceDate: "",
+  mrName: "",
+  customerCode: "",
   creditDays: "",
   dueDate: "",
   deliveryDate: "",
@@ -36,164 +40,6 @@ const INITIAL_FORM_STATE = {
   dueAmount: "",
   paymentStatus: "",
   remark: "",
-};
-
-// Custom hook for form state management
-const useSaleForm = (initialCustomerCode = "") => {
-  const [form, setForm] = useState({
-    ...INITIAL_FORM_STATE,
-    customerCode: initialCustomerCode,
-  });
-  const [errors, setErrors] = useState({});
-
-  const parseNumber = useCallback((val) => {
-    const num = parseFloat(val);
-    return isNaN(num) ? 0 : num;
-  }, []);
-
-  const updateFormField = useCallback((name, value) => {
-    setForm((prev) => ({ ...prev, [name]: value }));
-  }, []);
-
-  const calculateDerivedFields = useCallback(
-    (name, value, currentForm) => {
-      const updatedForm = { ...currentForm, [name]: value };
-      const getNum = (field) =>
-        parseNumber(updatedForm[field] || currentForm[field]);
-      const getInt = (field) =>
-        parseInt(updatedForm[field] || currentForm[field] || 0, 10);
-
-      // Calculations
-      if (name === "salesQty" || name === "bonusQty") {
-        const salesQty =
-          name === "salesQty" ? parseInt(value, 10) || 0 : getInt("salesQty");
-        const bonusQty =
-          name === "bonusQty" ? parseInt(value, 10) || 0 : getInt("bonusQty");
-        updatedForm.totalQty = salesQty + bonusQty;
-      }
-
-      if (name === "invoiceDate") {
-        updatedForm.deliveryDate = value;
-      }
-
-      if (name === "creditDays") {
-        const creditDays = parseInt(value, 10);
-        if (!isNaN(creditDays)) {
-          const due = new Date();
-          due.setDate(due.getDate() + creditDays);
-          updatedForm.dueDate = due.toISOString().split("T")[0];
-        } else {
-          updatedForm.dueDate = "";
-        }
-      }
-
-      if (name === "sellingPrice" || name === "salesQty") {
-        const price = getNum("sellingPrice");
-        const qty = getInt("salesQty");
-        updatedForm.amount = (price * qty).toFixed(2);
-      }
-
-      if (["amount", "discount", "sellingPrice", "salesQty"].includes(name)) {
-        const amount = getNum("amount");
-        const discount = getNum("discount");
-        updatedForm.netSellingAmount = (amount - discount).toFixed(2);
-      }
-
-      if (
-        [
-          "amount",
-          "discount",
-          "lc",
-          "totalQty",
-          "salesQty",
-          "bonusQty",
-        ].includes(name)
-      ) {
-        const amount = getNum("amount");
-        const discount = getNum("discount");
-        const lc = getNum("lc");
-        const totalQty = getInt("totalQty");
-        updatedForm.profitLoss = (amount - discount - lc * totalQty).toFixed(2);
-      }
-
-      if (["netSellingAmount", "paidAmount"].includes(name)) {
-        const netAmount = getNum("netSellingAmount");
-        const paidAmount = getNum("paidAmount");
-        updatedForm.dueAmount = (netAmount - paidAmount).toFixed(2);
-      }
-
-      if (
-        [
-          "netSellingAmount",
-          "salesQty",
-          "bonusQty",
-          "discount",
-          "sellingPrice",
-        ].includes(name)
-      ) {
-        const net = getNum("netSellingAmount");
-        const totalQty = getInt("totalQty");
-        updatedForm.averageUnitPrice =
-          totalQty > 0 ? (net / totalQty).toFixed(2) : "";
-      }
-
-      return updatedForm;
-    },
-    [parseNumber]
-  );
-
-  const handleChange = useCallback(
-    (e) => {
-      const { name, value } = e.target;
-
-      if (name === "paymentStatus" || name === "productName") {
-        updateFormField(name, value);
-        return;
-      }
-
-      setForm((prev) => calculateDerivedFields(name, value, prev));
-    },
-    [updateFormField, calculateDerivedFields]
-  );
-
-  const validate = useCallback(() => {
-    const newErrors = {};
-    const requiredFields = [
-      "recordingDate",
-      "invoiceNumber",
-      "invoiceDate",
-      "mrName",
-      "customerCode",
-      "productName",
-      "paymentStatus",
-    ];
-
-    requiredFields.forEach((field) => {
-      if (!form[field]) {
-        newErrors[field] = `${field.replace(/([A-Z])/g, " $1")} is required`;
-      }
-    });
-
-    if (!form.salesQty || Number(form.salesQty) <= 0) {
-      newErrors.salesQty = "Sales Quantity must be > 0";
-    }
-
-    if (!form.sellingPrice || Number(form.sellingPrice) <= 0) {
-      newErrors.sellingPrice = "Selling Price must be > 0";
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  }, [form]);
-
-  return {
-    form,
-    errors,
-    handleChange,
-    validate,
-    updateFormField,
-    setErrors,
-  };
 };
 
 // Custom hook for suggestions
@@ -285,6 +131,327 @@ const useSuggestions = (items, filterField = "type", inputValue = "") => {
   };
 };
 
+// Custom hook for product suggestions
+const useProductSuggestions = (products, productNames) => {
+  const [suggestionsList, setSuggestionsList] = useState([]);
+  const inputRefs = useRef([]);
+
+  useEffect(() => {
+    // Initialize suggestions for each product
+    const initialSuggestions = products.map((product, index) => ({
+      isOpen: false,
+      highlightedIndex: -1,
+      dropdownTop: 0,
+    }));
+    setSuggestionsList(initialSuggestions);
+
+    // Initialize refs array
+    inputRefs.current = products.map(
+      (_, i) => inputRefs.current[i] || React.createRef()
+    );
+  }, [products.length]);
+
+  const filteredItems = useMemo(() => {
+    return products.map((product) =>
+      productNames
+        .filter((item) => {
+          const fieldValue = typeof item === "string" ? item : item.name;
+          return fieldValue
+            .toLowerCase()
+            .includes(product.productName.toLowerCase());
+        })
+        .sort((a, b) => {
+          const aVal = typeof a === "string" ? a : a.name;
+          const bVal = typeof b === "string" ? b : b.name;
+          return aVal.localeCompare(bVal);
+        })
+    );
+  }, [products, productNames]);
+
+  const setIsOpen = useCallback((index, isOpen) => {
+    setSuggestionsList((prev) =>
+      prev.map((suggestion, i) =>
+        i === index ? { ...suggestion, isOpen } : suggestion
+      )
+    );
+  }, []);
+
+  const setHighlightedIndex = useCallback((index, highlightedIndex) => {
+    setSuggestionsList((prev) =>
+      prev.map((suggestion, i) =>
+        i === index ? { ...suggestion, highlightedIndex } : suggestion
+      )
+    );
+  }, []);
+
+  const setDropdownTop = useCallback((index) => {
+    const inputRef = inputRefs.current[index];
+    if (inputRef?.current) {
+      const height = inputRef.current.offsetHeight;
+      setSuggestionsList((prev) =>
+        prev.map((suggestion, i) =>
+          i === index
+            ? { ...suggestion, dropdownTop: 2 * height - 8 }
+            : suggestion
+        )
+      );
+    }
+  }, []);
+
+  const handleKeyDown = useCallback(
+    (index, e, onSelect) => {
+      const suggestion = suggestionsList[index];
+      if (!suggestion?.isOpen || filteredItems[index].length === 0) return;
+
+      switch (e.key) {
+        case "ArrowDown":
+          e.preventDefault();
+          setHighlightedIndex(
+            index,
+            suggestion.highlightedIndex < filteredItems[index].length - 1
+              ? suggestion.highlightedIndex + 1
+              : 0
+          );
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          setHighlightedIndex(
+            index,
+            suggestion.highlightedIndex > 0
+              ? suggestion.highlightedIndex - 1
+              : filteredItems[index].length - 1
+          );
+          break;
+        case "Enter":
+          e.preventDefault();
+          if (suggestion.highlightedIndex >= 0) {
+            const selected = filteredItems[index][suggestion.highlightedIndex];
+            const value =
+              typeof selected === "string" ? selected : selected.name;
+            onSelect(value);
+          }
+          break;
+        case "Escape":
+          setIsOpen(index, false);
+          break;
+        default:
+          break;
+      }
+    },
+    [suggestionsList, filteredItems, setHighlightedIndex, setIsOpen]
+  );
+
+  const selectSuggestion = useCallback(
+    (index, value, onSelect) => {
+      onSelect(value);
+      setIsOpen(index, false);
+      setHighlightedIndex(index, -1);
+    },
+    [setIsOpen, setHighlightedIndex]
+  );
+
+  const getInputRef = useCallback((index) => {
+    return inputRefs.current[index];
+  }, []);
+
+  return {
+    suggestionsList,
+    filteredItems,
+    setIsOpen,
+    setHighlightedIndex,
+    setDropdownTop,
+    handleKeyDown,
+    selectSuggestion,
+    getInputRef,
+  };
+};
+
+// Custom hook for form state management
+const useSaleForm = (initialCustomerCode = "") => {
+  const [form, setForm] = useState({
+    ...INITIAL_FORM_STATE,
+    customerCode: initialCustomerCode,
+  });
+  const [products, setProducts] = useState([{ ...INITIAL_PRODUCT_STATE }]);
+  const [errors, setErrors] = useState({});
+
+  const parseNumber = useCallback((val) => {
+    const num = parseFloat(val);
+    return isNaN(num) ? 0 : num;
+  }, []);
+
+  const updateFormField = useCallback((name, value) => {
+    setForm((prev) => ({ ...prev, [name]: value }));
+  }, []);
+
+  // Add new product
+  const addProduct = useCallback(() => {
+    setProducts((prev) => [
+      ...prev,
+      {
+        ...INITIAL_PRODUCT_STATE,
+        totalQty: "0",
+        amount: "0.00",
+        netSellingAmount: "0.00",
+        averageUnitPrice: "0.00",
+        profitLoss: "0.00",
+      },
+    ]);
+  }, []);
+
+  // Remove product
+  const removeProduct = useCallback(
+    (index) => {
+      if (products.length > 1) {
+        setProducts((prev) => prev.filter((_, i) => i !== index));
+      }
+    },
+    [products.length]
+  );
+
+  // Update product field
+  const updateProduct = useCallback((index, field, value) => {
+    setProducts((prev) => {
+      const updatedProducts = [...prev];
+      updatedProducts[index] = { ...updatedProducts[index], [field]: value };
+
+      // Recalculate derived fields for this product
+      return updatedProducts.map((product) => calculateProductFields(product));
+    });
+  }, []);
+
+  // Calculate derived fields for a single product
+  const calculateProductFields = useCallback((product) => {
+    const salesQty = parseInt(product.salesQty) || 0;
+    const bonusQty = parseInt(product.bonusQty) || 0;
+    const sellingPrice = parseFloat(product.sellingPrice) || 0;
+    const discount = parseFloat(product.discount) || 0;
+    const lc = parseFloat(product.lc) || 0;
+
+    const totalQty = salesQty + bonusQty;
+    const amount = (sellingPrice * salesQty).toFixed(2);
+    const netSellingAmount = (parseFloat(amount) - discount).toFixed(2);
+    const averageUnitPrice =
+      totalQty > 0
+        ? (parseFloat(netSellingAmount) / totalQty).toFixed(2)
+        : "0.00";
+    const profitLoss = (parseFloat(netSellingAmount) - lc * totalQty).toFixed(
+      2
+    );
+
+    return {
+      ...product,
+      totalQty: totalQty.toString(),
+      amount,
+      netSellingAmount,
+      averageUnitPrice,
+      profitLoss,
+    };
+  }, []);
+
+  const calculateDerivedFields = useCallback(
+    (name, value, currentForm) => {
+      const updatedForm = { ...currentForm, [name]: value };
+
+      if (name === "invoiceDate") {
+        updatedForm.deliveryDate = value;
+      }
+
+      if (name === "creditDays") {
+        const creditDays = parseInt(value, 10);
+        if (!isNaN(creditDays)) {
+          const due = new Date();
+          due.setDate(due.getDate() + creditDays);
+          updatedForm.dueDate = due.toISOString().split("T")[0];
+        } else {
+          updatedForm.dueDate = "";
+        }
+      }
+
+      if (["netSellingAmount", "paidAmount"].includes(name)) {
+        const netAmount = parseNumber(
+          updatedForm.netSellingAmount || currentForm.netSellingAmount
+        );
+        const paidAmount = parseNumber(
+          updatedForm.paidAmount || currentForm.paidAmount
+        );
+        updatedForm.dueAmount = (netAmount - paidAmount).toFixed(2);
+      }
+
+      return updatedForm;
+    },
+    [parseNumber]
+  );
+
+  const handleChange = useCallback(
+    (e) => {
+      const { name, value } = e.target;
+
+      if (name === "paymentStatus") {
+        updateFormField(name, value);
+        return;
+      }
+
+      setForm((prev) => calculateDerivedFields(name, value, prev));
+    },
+    [updateFormField, calculateDerivedFields]
+  );
+
+  const validate = useCallback(() => {
+    const newErrors = {};
+    const requiredFields = [
+      "recordingDate",
+      "invoiceNumber",
+      "invoiceDate",
+      "mrName",
+      "customerCode",
+      "paymentStatus",
+    ];
+
+    // Validate common fields
+    requiredFields.forEach((field) => {
+      if (!form[field]) {
+        newErrors[field] = `${field.replace(/([A-Z])/g, " $1")} is required`;
+      }
+    });
+
+    // Validate products
+    products.forEach((product, index) => {
+      if (!product.productName) {
+        newErrors[`productName_${index}`] = `Product Name for item ${
+          index + 1
+        } is required`;
+      }
+      if (!product.salesQty || Number(product.salesQty) <= 0) {
+        newErrors[`salesQty_${index}`] = `Sales Quantity for item ${
+          index + 1
+        } must be > 0`;
+      }
+      if (!product.sellingPrice || Number(product.sellingPrice) <= 0) {
+        newErrors[`sellingPrice_${index}`] = `Selling Price for item ${
+          index + 1
+        } must be > 0`;
+      }
+    });
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  }, [form, products]);
+
+  return {
+    form,
+    products,
+    errors,
+    handleChange,
+    validate,
+    updateFormField,
+    addProduct,
+    removeProduct,
+    updateProduct,
+    setErrors,
+  };
+};
+
 // Reusable Input Component
 const InputField = React.memo(
   ({
@@ -349,7 +516,7 @@ const DatePickerField = React.memo(
             const event = {
               target: {
                 name: name,
-                value: date.toISOString().split("T")[0], // Format as YYYY-MM-DD
+                value: date.toISOString().split("T")[0],
               },
             };
             onChange(event);
@@ -394,13 +561,13 @@ const SuggestionInput = React.memo(
     onSuggestionSelect,
     getSuggestionValue = (item) => item,
     getSuggestionDisplay = (item) => item,
-    setHighlightedIndex, // <-- NEW: Pass this from parent to allow keyboard navigation
+    setHighlightedIndex,
   }) => {
     const handleMouseEnter = useCallback(
       (index) => {
-        onSuggestionSelect && onSuggestionSelect(index, true);
+        setHighlightedIndex(index);
       },
-      [onSuggestionSelect]
+      [setHighlightedIndex]
     );
 
     const handleClick = useCallback(
@@ -510,10 +677,18 @@ const AddSale = () => {
   const { customerCode } = location.state || {};
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-  const { form, errors, handleChange, validate, updateFormField } =
-    useSaleForm(customerCode);
+  const {
+    form,
+    products,
+    errors,
+    handleChange,
+    validate,
+    updateFormField,
+    addProduct,
+    removeProduct,
+    updateProduct,
+  } = useSaleForm(customerCode);
 
-  // Use your custom hook for initial data
   const { statuses, productNames, loading } = useInitialSaleData();
 
   // Payment Status Suggestions
@@ -523,12 +698,15 @@ const AddSale = () => {
     form.paymentStatus
   );
 
-  // Product Name Suggestions
+  // Product Name Suggestions for common form
   const productNameSuggestions = useSuggestions(
     productNames,
     "name",
-    form.productName
+    form.productName || ""
   );
+
+  // Product Suggestions using custom hook for product rows
+  const productSuggestions = useProductSuggestions(products, productNames);
 
   // Enhanced handleChange to handle suggestion opening
   const enhancedHandleChange = useCallback(
@@ -542,31 +720,45 @@ const AddSale = () => {
         paymentStatusSuggestions.setIsOpen(true);
         paymentStatusSuggestions.setHighlightedIndex(-1);
       }
-      if (name === "productName" && value.length > 0) {
-        productNameSuggestions.setIsOpen(true);
-        productNameSuggestions.setHighlightedIndex(-1);
+    },
+    [handleChange, paymentStatusSuggestions]
+  );
+
+  // Enhanced product change handler
+  const enhancedProductChange = useCallback(
+    (index, field, value) => {
+      updateProduct(index, field, value);
+
+      // Auto-open product name suggestions when typing
+      if (field === "productName" && value.length > 0) {
+        productSuggestions.setIsOpen(index, true);
+        productSuggestions.setHighlightedIndex(index, -1);
+        productSuggestions.setDropdownTop(index);
       }
     },
-    [handleChange, paymentStatusSuggestions, productNameSuggestions]
+    [updateProduct, productSuggestions]
   );
 
   // Handle mouse enter for suggestions
   const handlePaymentStatusHighlight = useCallback(
-    (index, isHighlight) => {
-      if (isHighlight) {
-        paymentStatusSuggestions.setHighlightedIndex(index);
-      }
+    (index) => {
+      paymentStatusSuggestions.setHighlightedIndex(index);
     },
     [paymentStatusSuggestions]
   );
 
   const handleProductNameHighlight = useCallback(
-    (index, isHighlight) => {
-      if (isHighlight) {
-        productNameSuggestions.setHighlightedIndex(index);
-      }
+    (index) => {
+      productNameSuggestions.setHighlightedIndex(index);
     },
     [productNameSuggestions]
+  );
+
+  const handleProductRowHighlight = useCallback(
+    (productIndex, suggestionIndex) => {
+      productSuggestions.setHighlightedIndex(productIndex, suggestionIndex);
+    },
+    [productSuggestions]
   );
 
   const handleSubmit = async (e) => {
@@ -574,12 +766,49 @@ const AddSale = () => {
     if (!validate()) return;
 
     try {
+      // Filter out empty products (where productName is empty)
+      const validProducts = products.filter(
+        (product) => product.productName.trim() !== ""
+      );
+
+      if (validProducts.length === 0) {
+        showToast("error", "Please add at least one product");
+        return;
+      }
+
+      // Create sales data array with common fields + individual product data
+      const salesData = validProducts.map((product) => ({
+        recordingDate: form.recordingDate,
+        invoiceNumber: form.invoiceNumber,
+        invoiceDate: form.invoiceDate,
+        mrName: form.mrName,
+        customerCode: form.customerCode,
+        productName: product.productName,
+        salesQty: product.salesQty,
+        bonusQty: product.bonusQty,
+        totalQty: product.totalQty,
+        sellingPrice: product.sellingPrice,
+        amount: product.amount,
+        discount: product.discount,
+        netSellingAmount: product.netSellingAmount,
+        averageUnitPrice: product.averageUnitPrice,
+        lc: product.lc,
+        profitLoss: product.profitLoss,
+        creditDays: form.creditDays,
+        dueDate: form.dueDate,
+        deliveryDate: form.deliveryDate,
+        paidAmount: form.paidAmount,
+        dueAmount: form.dueAmount,
+        paymentStatus: form.paymentStatus,
+        remark: form.remark,
+      }));
+
       const response = await fetch(`${backendUrl}/api/sales`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(form),
+        body: JSON.stringify(salesData),
       });
 
       const respData = await response.json();
@@ -588,15 +817,14 @@ const AddSale = () => {
         throw new Error(respData.error || "Something went wrong");
       }
 
-      showToast("success", respData.message || "Sale added successfully");
+      showToast("success", respData.message || "Sales added successfully");
       navigate("/salelayout/sale");
     } catch (err) {
-      console.error("Error submitting sale:", err);
-      showToast("error", err.message || "Error submitting sale");
+      console.error("Error submitting sales:", err);
+      showToast("error", err.message || "Error submitting sales");
     }
   };
 
-  // Show loading state if needed
   if (loading) {
     return (
       <div className="max-w-5xl mx-auto p-6 bg-white rounded-2xl shadow">
@@ -609,184 +837,258 @@ const AddSale = () => {
 
   return (
     <div className="max-w-5xl mx-auto p-6 bg-white rounded-2xl shadow">
-      <h2 className="text-2xl font-bold mb-6 text-gray-800">Add New Sale</h2>
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-2xl font-bold text-gray-800">Add New Sale</h2>
+        <button
+          type="button"
+          onClick={addProduct}
+          className="flex items-center gap-2 bg-green-600 text-white px-3 py-2 rounded-lg hover:bg-green-700"
+        >
+          <PlusSquare className="w-5 h-5" />
+          Add Product
+        </button>
+      </div>
 
       <form onSubmit={handleSubmit}>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {/* DatePicker for Recording Date */}
+        {/* Common Fields */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
           <DatePickerField
             label="Recording Date"
             name="recordingDate"
             value={form.recordingDate}
             onChange={enhancedHandleChange}
             error={errors.recordingDate}
-            required={true}
+            required
             placeholder="Select recording date"
           />
-
           <InputField
             label="Invoice Number"
             name="invoiceNumber"
             value={form.invoiceNumber}
             onChange={enhancedHandleChange}
             error={errors.invoiceNumber}
-            required={true}
+            required
           />
-
-          {/* DatePicker for Invoice Date */}
           <DatePickerField
             label="Invoice Date"
             name="invoiceDate"
             value={form.invoiceDate}
             onChange={enhancedHandleChange}
             error={errors.invoiceDate}
-            required={true}
+            required
             placeholder="Select invoice date"
           />
-
           <InputField
             label="Medical Representative Name"
             name="mrName"
             value={form.mrName}
             onChange={enhancedHandleChange}
             error={errors.mrName}
-            required={true}
+            required
           />
-
           <InputField
             label="Customer Code"
             name="customerCode"
             value={form.customerCode}
             onChange={enhancedHandleChange}
             error={errors.customerCode}
-            required={true}
+            required
           />
-          <SuggestionInput
-            label="Product Name"
-            name="productName"
-            value={form.productName}
+          <DatePickerField
+            label="Delivery Date"
+            name="deliveryDate"
+            value={form.deliveryDate}
             onChange={enhancedHandleChange}
-            error={errors.productName}
-            suggestions={productNameSuggestions.filteredItems}
-            isOpen={productNameSuggestions.isOpen}
-            highlightedIndex={productNameSuggestions.highlightedIndex}
-            inputRef={productNameSuggestions.inputRef}
-            dropdownTop={productNameSuggestions.dropdownTop}
-            onFocus={() => productNameSuggestions.setIsOpen(true)}
-            onBlur={() =>
-              setTimeout(() => productNameSuggestions.setIsOpen(false), 150)
-            }
-            onSuggestionSelect={(value, isHighlight) => {
-              if (typeof value === "number" && isHighlight) {
-                handleProductNameHighlight(value, true);
-              } else {
-                productNameSuggestions.selectSuggestion(value, (val) =>
-                  updateFormField("productName", val)
-                );
-              }
-            }}
-            getSuggestionValue={(item) =>
-              typeof item === "string" ? item : item.name
-            }
-            getSuggestionDisplay={(item) =>
-              typeof item === "string" ? item : item.name
-            }
-            setHighlightedIndex={productNameSuggestions.setHighlightedIndex} // ✅ Pass this
+            error={errors.deliveryDate}
+            readOnly
+            placeholder="Delivery date will be set automatically"
           />
+        </div>
 
-          {/* Continue with remaining fields in exact order */}
-          <InputField
-            label="Sales Quantity"
-            name="salesQty"
-            type="text"
-            value={form.salesQty}
-            onChange={enhancedHandleChange}
-            error={errors.salesQty}
-            required={true}
-          />
+        <div className="mb-6">
+          {products.map((product) => {     
+            return (
+              <div key={index} className="border rounded-lg p-4 mb-4 relative">
+                <div className="flex justify-between items-center mb-3">
+                  <h4 className="text-md font-medium">Product {index + 1}</h4>
+                  {products.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeProduct(index)}
+                      className="text-red-600 hover:text-red-800"
+                    >
+                      <MinusSquare className="w-5 h-5" />
+                    </button>
+                  )}
+                </div>
 
-          <InputField
-            label="Bonus Quantity"
-            name="bonusQty"
-            type="text"
-            value={form.bonusQty}
-            onChange={enhancedHandleChange}
-            error={errors.bonusQty}
-          />
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {/* Product Name with Suggestions */}
+                  <div className="relative flex flex-col">
+                    <label className="text-sm font-medium text-gray-700 mb-1">
+                      Product Name
+                    </label>
+                    <input
+                      ref={productSuggestions.getInputRef(index)}
+                      type="text"
+                      name={`productName_${index}`}
+                      value={product.productName}
+                      onChange={(e) =>
+                        enhancedProductChange(index, "productName", e.target.value)
+                      }
+                      onKeyDown={(e) =>
+                        productSuggestions.handleKeyDown(index, e, (value) =>
+                          enhancedProductChange(index, "productName", value)
+                        )
+                      }
+                      onFocus={() => {
+                        productSuggestions.setIsOpen(index, true);
+                        productSuggestions.setDropdownTop(index);
+                      }}
+                      onBlur={() =>
+                        setTimeout(
+                          () => productSuggestions.setIsOpen(index, false),
+                          150
+                        )
+                      }
+                      className={`border rounded-md px-2 py-1 ${
+                        errors[`productName_${index}`] ? "border-red-500" : "border-gray-300"
+                      }`}
+                      placeholder="Type to search..."
+                      autoComplete="off"
+                    />
+                    {productSuggestion.isOpen && 
+                     productSuggestions.filteredItems[index]?.length > 0 && (
+                      <ul
+                        className="absolute z-10 bg-white border border-gray-300 w-full rounded-md max-h-60 overflow-auto shadow-lg"
+                        style={{ top: productSuggestion.dropdownTop }}
+                      >
+                        {productSuggestions.filteredItems[index].map((item, idx) => (
+                          <li
+                            key={typeof item === "object" ? item._id ?? idx : idx}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() =>
+                              productSuggestions.selectSuggestion(
+                                index,
+                                typeof item === "string" ? item : item.name,
+                                (value) => enhancedProductChange(index, "productName", value)
+                              )
+                            }
+                            onMouseEnter={() => handleProductRowHighlight(index, idx)}
+                            className={`cursor-pointer px-3 py-2 ${
+                              productSuggestion.highlightedIndex === idx
+                                ? "bg-blue-600 text-white"
+                                : "bg-white text-gray-900 hover:bg-gray-100"
+                            }`}
+                          >
+                            {typeof item === "string" ? item : item.name}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {errors[`productName_${index}`] && (
+                      <p className="text-red-500 text-xs mt-0.5">
+                        {errors[`productName_${index}`]}
+                      </p>
+                    )}
+                  </div>
 
-          <InputField
-            label="Total Quantity"
-            name="totalQty"
-            value={form.totalQty}
-            onChange={enhancedHandleChange}
-            error={errors.totalQty}
-            readOnly={true}
-          />
+                  <InputField
+                    label="Sales Quantity"
+                    name={`salesQty_${index}`}
+                    type="text"
+                    value={product.salesQty}
+                    onChange={(e) =>
+                      updateProduct(index, "salesQty", e.target.value)
+                    }
+                    error={errors[`salesQty_${index}`]}
+                    required
+                  />
 
-          <InputField
-            label="Selling Price"
-            name="sellingPrice"
-            type="text"
-            value={form.sellingPrice}
-            onChange={enhancedHandleChange}
-            error={errors.sellingPrice}
-            required={true}
-          />
+                  <InputField
+                    label="Bonus Quantity"
+                    name={`bonusQty_${index}`}
+                    type="text"
+                    value={product.bonusQty}
+                    onChange={(e) =>
+                      updateProduct(index, "bonusQty", e.target.value)
+                    }
+                    error={errors[`bonusQty_${index}`]}
+                  />
 
-          <InputField
-            label="Amount"
-            name="amount"
-            value={form.amount}
-            onChange={enhancedHandleChange}
-            error={errors.amount}
-            readOnly={true}
-          />
+                  <InputField
+                    label="Selling Price"
+                    name={`sellingPrice_${index}`}
+                    type="text"
+                    value={product.sellingPrice}
+                    onChange={(e) =>
+                      updateProduct(index, "sellingPrice", e.target.value)
+                    }
+                    error={errors[`sellingPrice_${index}`]}
+                    required
+                  />
 
-          <InputField
-            label="Discount"
-            name="discount"
-            type="text"
-            value={form.discount}
-            onChange={enhancedHandleChange}
-            error={errors.discount}
-          />
+                  <InputField
+                    label="Discount"
+                    name={`discount_${index}`}
+                    type="text"
+                    value={product.discount}
+                    onChange={(e) =>
+                      updateProduct(index, "discount", e.target.value)
+                    }
+                    error={errors[`discount_${index}`]}
+                  />
 
-          <InputField
-            label="Net Selling Amount"
-            name="netSellingAmount"
-            value={form.netSellingAmount}
-            onChange={enhancedHandleChange}
-            error={errors.netSellingAmount}
-            readOnly={true}
-          />
+                  <InputField
+                    label="LC"
+                    name={`lc_${index}`}
+                    type="text"
+                    value={product.lc}
+                    onChange={(e) =>
+                      updateProduct(index, "lc", e.target.value)
+                    }
+                    error={errors[`lc_${index}`]}
+                  />
 
-          <InputField
-            label="Average Unit Price"
-            name="averageUnitPrice"
-            value={form.averageUnitPrice}
-            onChange={enhancedHandleChange}
-            error={errors.averageUnitPrice}
-            readOnly={true}
-          />
+                  {/* Calculated Fields */}
+                  <InputField
+                    label="Total Quantity"
+                    name={`totalQty_${index}`}
+                    value={product.totalQty}
+                    readOnly
+                  />
+                  <InputField
+                    label="Amount"
+                    name={`amount_${index}`}
+                    value={product.amount}
+                    readOnly
+                  />
+                  <InputField
+                    label="Net Selling Amount"
+                    name={`netSellingAmount_${index}`}
+                    value={product.netSellingAmount}
+                    readOnly
+                  />
+                  <InputField
+                    label="Average Unit Price"
+                    name={`averageUnitPrice_${index}`}
+                    value={product.averageUnitPrice}
+                    readOnly
+                  />
+                  <InputField
+                    label="Profit / Loss"
+                    name={`profitLoss_${index}`}
+                    value={product.profitLoss}
+                    readOnly
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
 
-          <InputField
-            label="LC"
-            name="lc"
-            type="text"
-            value={form.lc}
-            onChange={enhancedHandleChange}
-            error={errors.lc}
-          />
-
-          <InputField
-            label="Profit / Loss"
-            name="profitLoss"
-            value={form.profitLoss}
-            onChange={enhancedHandleChange}
-            error={errors.profitLoss}
-            readOnly={true}
-          />
-
+        {/* Additional Common Fields */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
           <InputField
             label="Credit Days"
             name="creditDays"
@@ -796,26 +1098,14 @@ const AddSale = () => {
             error={errors.creditDays}
           />
 
-          {/* DatePicker for Due Date (read-only) */}
           <DatePickerField
             label="Due Date"
             name="dueDate"
             value={form.dueDate}
             onChange={enhancedHandleChange}
             error={errors.dueDate}
-            readOnly={true}
+            readOnly
             placeholder="Due date will be calculated"
-          />
-
-          {/* DatePicker for Delivery Date (read-only) */}
-          <DatePickerField
-            label="Delivery Date"
-            name="deliveryDate"
-            value={form.deliveryDate}
-            onChange={enhancedHandleChange}
-            error={errors.deliveryDate}
-            readOnly={true}
-            placeholder="Delivery date will be set automatically"
           />
 
           <InputField
@@ -833,7 +1123,7 @@ const AddSale = () => {
             value={form.dueAmount}
             onChange={enhancedHandleChange}
             error={errors.dueAmount}
-            readOnly={true}
+            readOnly
           />
 
           <SuggestionInput
@@ -851,21 +1141,14 @@ const AddSale = () => {
             onBlur={() =>
               setTimeout(() => paymentStatusSuggestions.setIsOpen(false), 150)
             }
-            onSuggestionSelect={(value, isHighlight) => {
-              if (typeof value === "number" && isHighlight) {
-                handlePaymentStatusHighlight(value, true);
-              } else {
-                paymentStatusSuggestions.selectSuggestion(value, (val) =>
-                  updateFormField("paymentStatus", val)
-                );
-              }
-            }}
+            onSuggestionSelect={(value) =>
+              updateFormField("paymentStatus", value)
+            }
             getSuggestionValue={(item) => item.type}
             getSuggestionDisplay={(item) => item.type}
-            setHighlightedIndex={paymentStatusSuggestions.setHighlightedIndex} // ✅ Pass this
+            setHighlightedIndex={paymentStatusSuggestions.setHighlightedIndex}
           />
 
-          {/* Remark field - full width */}
           <div className="sm:col-span-3">
             <InputField
               label="Remark"
