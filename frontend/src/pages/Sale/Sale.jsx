@@ -47,11 +47,21 @@ const Sales = () => {
   const { statuses, productNames, loading } = useInitialSaleData();
   const [errors, setErrors] = useState({});
   const [activeTab, setActiveTab] = useState("add");
-  const [includePaymentStatus, setIncludePaymentStatus] = useState(false);
+  const [tableColumns, setTableColumns] = useState([
+    "invoiceNumber",
+    "invoiceDate",
+    "productName",
+    "mrName",
+    "customerName",
+    "salesQty",
+    "amount",
+    "paymentStatus",
+    "actions",
+  ]); // Default visible columns
 
   const [form, setForm] = useState({
     _id: null,
-    recordingDate: "", // Use ISO string or Date object, initially empty string
+    recordingDate: "",
     invoiceNumber: "",
     invoiceDate: "",
     mrName: "",
@@ -75,6 +85,7 @@ const Sales = () => {
     remark: "",
   });
 
+  // Custom hook for suggestions
   const useSuggestions = (items, filterField = "type", inputValue = "") => {
     const [isOpen, setIsOpen] = useState(false);
     const [highlightedIndex, setHighlightedIndex] = useState(-1);
@@ -162,6 +173,7 @@ const Sales = () => {
       selectSuggestion,
     };
   };
+
   const paymentStatusSuggestions = useSuggestions(
     statuses,
     "type",
@@ -175,38 +187,267 @@ const Sales = () => {
 
   const salesPerPage = 9;
 
-  const requiredHeaders = [
-    "recording date",
-    "invoice #",
-    "invoice date",
-    "mr name",
-    "customer code",
-    "product name",
-    "sales qty",
-    "selling price (usd)",
-    "amount (usd)",
-    "credit (days)",
-    "payment status",
+  // Complete list of all available fields
+  const allFields = useMemo(
+    () => [
+      {
+        id: "invoiceNumber",
+        name: "Invoice No",
+        dbName: "invoiceNumber",
+      },
+      {
+        id: "invoiceDate",
+        name: "Invoice Date",
+        dbName: "invoiceDate",
+      },
+      {
+        id: "productName",
+        name: "Product Name",
+        dbName: "productName",
+      },
+      { id: "mrName", name: "MR Name", dbName: "mrName" },
+      {
+        id: "customerName",
+        name: "Customer Name",
+        dbName: "customerInfo.name",
+      },
+      {
+        id: "salesQty",
+        name: "Sales Qty",
+        dbName: "salesQty",
+      },
+      {
+        id: "totalQty",
+        name: "Total Qty",
+        dbName: "totalQty",
+      },
+      {
+        id: "bonusQty",
+        name: "Bonus Qty",
+        dbName: "bonusQty",
+      },
+      {
+        id: "sellingPrice",
+        name: "Selling Price (USD)",
+        dbName: "sellingPrice",
+      },
+      {
+        id: "averageUnitPrice",
+        name: "Average Unit Price (USD)",
+        dbName: "averageUnitPrice",
+      },
+      {
+        id: "discount",
+        name: "Discount (USD)",
+        dbName: "discount",
+      },
+      {
+        id: "netSellingAmount",
+        name: "Net Selling Amount (USD)",
+        dbName: "netSellingAmount",
+      },
+      {
+        id: "amount",
+        name: "Total Amount ($)",
+        dbName: "amount",
+      },
+      {
+        id: "profitLoss",
+        name: "Prof/Loss",
+        dbName: "profitLoss",
+      },
+      { id: "lc", name: "LC", dbName: "lc" },
+      {
+        id: "paidAmount",
+        name: "Paid Amount",
+        dbName: "paidAmount",
+      },
+      {
+        id: "dueAmount",
+        name: "Due Amount",
+        dbName: "dueAmount",
+      },
+      {
+        id: "paymentStatus",
+        name: "Payment Status",
+        dbName: "paymentStatus",
+      },
+      {
+        id: "creditDays",
+        name: "Credit (Days)",
+        dbName: "creditDays",
+      },
+      {
+        id: "recordingDate",
+        name: "Recording Date",
+        dbName: "recordingDate",
+      },
+      { id: "dueDate", name: "Due Date", dbName: "dueDate" },
+      {
+        id: "deliveryDate",
+        name: "Delivery Date",
+        dbName: "deliveryDate",
+      },
+      { id: "remark", name: "Remark", dbName: "remark" },
+      {
+        id: "customerCode",
+        name: "Customer Code",
+        dbName: "customerCode",
+      },
+      {
+        id: "actions",
+        name: "Actions",
+        dbName: "actions",
+      },
+    ],
+    []
+  );
+  const requiredColumns = [
+    "invoiceNumber",
+    "invoiceDate",
+    "productName",
+    "actions",
   ];
+  // Get available columns for Add tab (columns not currently in table)
+  const availableColumns = useMemo(() => {
+    return allFields.filter((item) => !tableColumns.includes(item.id));
+  }, [allFields, tableColumns]);
 
-  const handlePaymentStatusHighlight = useCallback(
-    (index, isHighlight) => {
-      if (isHighlight) {
-        paymentStatusSuggestions.setHighlightedIndex(index);
+  const removableColumns = useMemo(() => {
+    return allFields.filter(
+      (item) =>
+        tableColumns.includes(item.id) && !requiredColumns.includes(item.id)
+    );
+  }, [allFields, tableColumns]);
+
+  const chunkedItems = useMemo(() => {
+    const items = activeTab === "add" ? availableColumns : removableColumns;
+    const chunks = [];
+    for (let i = 0; i < items.length; i += 2) {
+      chunks.push(items.slice(i, i + 2));
+    }
+    return chunks;
+  }, [activeTab, availableColumns, removableColumns]);
+
+  // Toggle item selection
+  const toggleItem = (id) => {
+    if (id === "all") {
+      if (allSelected) {
+        setSelectedItems([]);
+        setAllSelected(false);
+      } else {
+        const allIds = chunkedItems.flat().map((item) => item.id);
+        setSelectedItems(allIds);
+        setAllSelected(true);
       }
-    },
-    [paymentStatusSuggestions]
-  );
-
-  const handleProductNameHighlight = useCallback(
-    (index, isHighlight) => {
-      if (isHighlight) {
-        productNameSuggestions.setHighlightedIndex(index);
+    } else {
+      let updatedItems;
+      if (selectedItems.includes(id)) {
+        updatedItems = selectedItems.filter((itemId) => itemId !== id);
+      } else {
+        updatedItems = [...selectedItems, id];
       }
-    },
-    [productNameSuggestions]
-  );
 
+      setSelectedItems(updatedItems);
+      setAllSelected(updatedItems.length === chunkedItems.flat().length);
+    }
+  };
+
+  // Handle save for column configuration
+  const handleSave = () => {
+    if (activeTab === "add") {
+      // Add selected columns to table
+      const newColumns = [...tableColumns, ...selectedItems];
+      setTableColumns(newColumns);
+    } else {
+      const requiredColumns = [
+        "invoiceNumber",
+        "invoiceDate",
+        "productName",
+        "actions",
+      ];
+      const newColumns = tableColumns.filter(
+        (id) => !selectedItems.includes(id) || requiredColumns.includes(id)
+      );
+      setTableColumns(newColumns);
+    }
+    setSelectedItems([]);
+    setAllSelected(false);
+    setIsModalOpen(false);
+  };
+
+  const handleReset = () => {
+    setSelectedItems([]);
+    setAllSelected(false);
+    // Reset to default columns
+    setTableColumns([
+      "invoiceNumber",
+      "invoiceDate",
+      "productName",
+      "mrName",
+      "customerName",
+      "salesQty",
+      "amount",
+      "paymentStatus",
+      "actions",
+    ]);
+  };
+
+  const handleCancelEvent = () => {
+    setSelectedItems([]);
+    setAllSelected(false);
+    setIsModalOpen(false);
+  };
+
+  // Get field value from sale object
+  const getFieldValue = (sale, dbName) => {
+    if (dbName === "customerInfo.name") {
+      return sale.customerInfo?.name || "--";
+    }
+
+    if (
+      ["recordingDate", "dueDate", "deliveryDate", "invoiceDate"].includes(
+        dbName
+      )
+    ) {
+      return formatDateToReadable(sale[dbName]) || "--";
+    }
+
+    if (dbName === "amount") {
+      return Math.ceil(sale.amount || 0);
+    }
+
+    if (
+      dbName === "salesQty" ||
+      dbName === "totalQty" ||
+      dbName === "bonusQty"
+    ) {
+      return Math.ceil(sale[dbName] || 0);
+    }
+
+    return sale[dbName] ?? "--";
+  };
+
+  // Helper function to capitalize first letter
+  const capitalizeFirstLetter = (string) => {
+    if (!string) return "--";
+    return string.charAt(0).toUpperCase() + string.slice(1);
+  };
+
+  // Update allSelected state when individual selections change
+  useEffect(() => {
+    const currentItems = chunkedItems.flat();
+    if (
+      currentItems.length > 0 &&
+      selectedItems.length === currentItems.length
+    ) {
+      setAllSelected(true);
+    } else {
+      setAllSelected(false);
+    }
+  }, [selectedItems, chunkedItems]);
+
+  // Form change handlers
   const updateFormField = useCallback((name, value) => {
     setForm((prev) => ({ ...prev, [name]: value }));
   }, []);
@@ -302,14 +543,13 @@ const Sales = () => {
     (e) => {
       const { name, value } = e.target;
 
-      // ✅ Actually update the form field
       if (name === "paymentStatus" || name === "productName") {
-        updateFormField(name, value); // <- This was missing
+        updateFormField(name, value);
       } else {
         setForm((prev) => handleChangeEvent(name, value, prev));
       }
 
-      // 🧠 Suggestion logic
+      // Suggestion logic
       if (name === "paymentStatus" && value.length > 0) {
         paymentStatusSuggestions.setIsOpen(true);
         paymentStatusSuggestions.setHighlightedIndex(-1);
@@ -328,113 +568,6 @@ const Sales = () => {
     ]
   );
 
-  const handleChange = useCallback(
-    (e) => {
-      const { name, value } = e.target;
-
-      if (name === "paymentStatus" || name === "productName") {
-        updateFormField(name, value);
-        return;
-      }
-
-      setForm((prev) => handleChangeEvent(name, value, prev));
-    },
-    [updateFormField, handleChangeEvent]
-  );
-  // const enhancedHandleChange = useCallback(
-  //   (e) => {
-  //     const { name, value } = e.target;
-
-  //     handleChange(e);
-
-  //     // Auto-open suggestions when typing in these fields
-  //     if (name === "paymentStatus" && value.length > 0) {
-  //       paymentStatusSuggestions.setIsOpen(true);
-  //       paymentStatusSuggestions.setHighlightedIndex(-1);
-  //     }
-  //     if (name === "productName" && value.length > 0) {
-  //       productNameSuggestions.setIsOpen(true);
-  //       productNameSuggestions.setHighlightedIndex(-1);
-  //     }
-  //   },
-  //   [handleChange, paymentStatusSuggestions, productNameSuggestions]
-  // );
-
-  const hideRowList = useMemo(
-    () => [
-      { id: 0, name: "All", dbName: "" },
-      { id: 1, name: "Recording Date", dbName: "recordingDate" },
-      { id: 2, name: "Bonus Qty", dbName: "bonusQty" },
-      { id: 3, name: "Selling Price (USD)", dbName: "sellingPrice" },
-      { id: 4, name: "Discount (USD)", dbName: "discount" },
-      { id: 5, name: "Net Selling Amount (USD)", dbName: "netSellingAmount" },
-      { id: 6, name: "Average Unit Price (USD)", dbName: "averageUnitPrice" },
-      { id: 7, name: "Prof/Loss", dbName: "profitLoss" },
-      { id: 8, name: "Credit (Days)", dbName: "creditDays" },
-      { id: 9, name: "Due Date", dbName: "dueDate" },
-      { id: 10, name: "Delivery Date", dbName: "deliveryDate" },
-      { id: 11, name: "Remark", dbName: "remark" },
-    ],
-    []
-  );
-
-  const toggleItem = (id) => {
-    if (id === 0) {
-      if (allSelected) {
-        setSelectedItems([]);
-        setAllSelected(false);
-      } else {
-        const allIds = hideRowList
-          .map((item) => item.id)
-          .filter((i) => i !== 0);
-        setSelectedItems(allIds);
-        setAllSelected(true);
-      }
-    } else {
-      let updatedItems;
-      if (selectedItems.includes(id)) {
-        updatedItems = selectedItems.filter((itemId) => itemId !== id);
-      } else {
-        updatedItems = [...selectedItems, id];
-      }
-
-      setSelectedItems(updatedItems);
-      setAllSelected(
-        updatedItems.length === hideRowList.length - 1 // Exclude ID 0 ("All")
-      );
-    }
-  };
-
-  // Reset page when search or tab changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm, selectedTab]);
-
-  // Fetch data on mount
-  useEffect(() => {
-    fetchSaleSummaries();
-  }, []);
-
-  function capitalizeFirstLetter(str) {
-    if (!str) return "";
-    str = str.toString();
-    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
-  }
-
-  // 6️⃣ Handle "All" toggle
-  const handleSelectAll = () => {
-    const allIds = hideRowList
-      .filter((item) => item.id !== 0) // Exclude "All"
-      .map((item) => item.id);
-
-    if (allSelected) {
-      setSelectedItems([]);
-      setAllSelected(false);
-    } else {
-      setSelectedItems(allIds);
-      setAllSelected(true);
-    }
-  };
   // Fetch function
   const fetchSaleSummaries = async () => {
     try {
@@ -445,6 +578,7 @@ const Sales = () => {
       const uniqueTypes = Array.from(
         new Set(data.map((item) => item.paymentStatus?.toLowerCase()))
       );
+
       setTypes(["All", ...uniqueTypes]);
       setSales(data);
     } catch (error) {
@@ -455,6 +589,16 @@ const Sales = () => {
     }
   };
 
+  const handleView = (sale) => {
+    setForm({ ...sale });
+    setIsOpen(true);
+    setIsViewModalOpen(true);
+  };
+  const editSale = (sale) => {
+    setForm({ ...sale });
+    setIsOpen(true);
+    setIsEditModalOpen(true);
+  };
   // Memoized filtered sales
   const filteredSales = useMemo(() => {
     const lowerSearch = searchTerm.trim().toLowerCase();
@@ -500,30 +644,178 @@ const Sales = () => {
     [currentPage, totalPages]
   );
 
-  // Memoized chunked items
-  const chunkedItems = useMemo(() => {
-    const chunks = [];
-    for (let i = 0; i < hideRowList.length; i += 2) {
-      chunks.push(hideRowList.slice(i, i + 2));
+  // Reset page when search or tab changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, selectedTab]);
+
+  // Fetch data on mount
+  useEffect(() => {
+    fetchSaleSummaries();
+  }, []);
+
+  const toggleSelect = (sale) => {
+    setSelected((prev) => {
+      const exists = prev.some((c) => c.id === sale._id);
+
+      if (exists) {
+        return prev.filter((c) => c.id !== sale._id);
+      } else {
+        return [...prev, { id: sale._id }];
+      }
+    });
+  };
+
+  const toggleSelectAll = (checked) => {
+    if (checked) {
+      const allSelected = currentSales.map((s) => ({ id: s._id }));
+      setSelected(allSelected);
+    } else {
+      setSelected([]);
     }
-    return chunks;
-  }, [hideRowList]);
+  };
 
-  const handleSave = useCallback(() => {
-    setIsModalOpen(false);
-  }, []);
+  const handleDateChange = (date, fieldName) => {
+    setForm((prev) => {
+      const updatedForm = {
+        ...prev,
+        [fieldName]: date ? date.toISOString().split("T")[0] : "",
+      };
+      if (fieldName === "invoiceDate" && date) {
+        updatedForm.deliveryDate = date.toISOString().split("T")[0];
+      }
 
-  const handleReset = useCallback(() => {
-    setSelectedItems([]);
-    setAllSelected(false);
-    setIsModalOpen(false);
-  }, []);
+      return updatedForm;
+    });
+  };
 
-  const handleCancelEvent = useCallback(() => {
-    setSelectedItems([]);
-    setAllSelected(false);
-    setIsModalOpen(false);
-  }, []);
+  // SuggestionInput component
+  const SuggestionInput = React.memo(
+    ({
+      label,
+      name,
+      value,
+      onChange,
+      onFocus,
+      onBlur,
+      error,
+      suggestions,
+      isOpen,
+      highlightedIndex,
+      inputRef,
+      dropdownTop,
+      onSuggestionSelect,
+      getSuggestionValue = (item) => item,
+      getSuggestionDisplay = (item) => item,
+      setHighlightedIndex,
+    }) => {
+      const handleMouseEnter = useCallback(
+        (index) => {
+          onSuggestionSelect && onSuggestionSelect(index, true);
+        },
+        [onSuggestionSelect]
+      );
+
+      const handleClick = useCallback(
+        (item) => {
+          const value = getSuggestionValue(item);
+          onSuggestionSelect && onSuggestionSelect(value);
+        },
+        [onSuggestionSelect, getSuggestionValue]
+      );
+
+      const handleKeyDown = useCallback(
+        (e) => {
+          if (!isOpen || suggestions.length === 0) return;
+
+          switch (e.key) {
+            case "ArrowDown":
+              e.preventDefault();
+              setHighlightedIndex((prev) =>
+                prev < suggestions.length - 1 ? prev + 1 : 0
+              );
+              break;
+            case "ArrowUp":
+              e.preventDefault();
+              setHighlightedIndex((prev) =>
+                prev > 0 ? prev - 1 : suggestions.length - 1
+              );
+              break;
+            case "Enter":
+              e.preventDefault();
+              if (
+                highlightedIndex >= 0 &&
+                highlightedIndex < suggestions.length
+              ) {
+                const selectedItem = suggestions[highlightedIndex];
+                const value = getSuggestionValue(selectedItem);
+                onSuggestionSelect && onSuggestionSelect(value);
+              }
+              break;
+            default:
+              break;
+          }
+        },
+        [
+          highlightedIndex,
+          suggestions,
+          isOpen,
+          onSuggestionSelect,
+          getSuggestionValue,
+          setHighlightedIndex,
+        ]
+      );
+
+      return (
+        <div className="relative flex flex-col">
+          <label className="text-sm font-medium text-gray-700 mb-1">
+            {label}
+          </label>
+          <input
+            ref={inputRef}
+            type="text"
+            name={name}
+            value={value}
+            onChange={onChange}
+            onKeyDown={handleKeyDown}
+            onFocus={onFocus}
+            onBlur={onBlur}
+            className={`border rounded-md px-2 py-1 ${
+              error ? "border-red-500" : "border-gray-300"
+            }`}
+            placeholder="Type to search..."
+            autoComplete="off"
+            aria-autocomplete="list"
+            aria-expanded={isOpen}
+            role="combobox"
+          />
+          {isOpen && suggestions.length > 0 && (
+            <ul
+              className="absolute z-10 bg-white border border-gray-300 w-full rounded-md max-h-60 overflow-auto shadow-lg"
+              style={{ top: dropdownTop }}
+            >
+              {suggestions.map((item, idx) => (
+                <li
+                  key={typeof item === "object" ? item._id ?? idx : idx}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => handleClick(item)}
+                  onMouseEnter={() => handleMouseEnter(idx)}
+                  className={`cursor-pointer px-3 py-2 ${
+                    highlightedIndex === idx
+                      ? "bg-blue-600 text-white"
+                      : "bg-white text-gray-900 hover:bg-gray-100"
+                  }`}
+                >
+                  {getSuggestionDisplay(item)}
+                </li>
+              ))}
+            </ul>
+          )}
+          {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
+        </div>
+      );
+    }
+  );
 
   // Render loading
   if (loadingData) {
@@ -539,6 +831,74 @@ const Sales = () => {
     );
   }
 
+  const handleUpdateSales = async (e, sale) => {
+    e.preventDefault();
+
+    try {
+      const res = await axios.put(`${backendUrl}/api/sales/${sale._id}`, sale);
+      if (res.status === 200) {
+        showToast("success", "Sales record updated successfully");
+        setIsEditModalOpen(false);
+        fetchSaleSummaries();
+      }
+    } catch (err) {
+      showToast("error", "Failed to update sales record.");
+    }
+  };
+
+  const deleteSale = async (sale) => {
+    if (!sale._id) return;
+    const confirmDelete = await confirmDialog({
+      title: "Delete",
+      text: `Are you sure you want to delete <b>${sale.invoiceNumber}</b>?`,
+      icon: "warning",
+      confirmButtonText: "Yes, delete",
+      cancelButtonText: "Cancel",
+    });
+
+    if (confirmDelete.isConfirmed) {
+      try {
+        const res = await axios.delete(`${backendUrl}/api/sales/${sale._id}`);
+        if (res.status === 200) {
+          showToast(
+            "success",
+            `Customer <b>${sale.invoiceNumber}</b> deleted successfully`
+          );
+          fetchSaleSummaries();
+        }
+      } catch (error) {
+        showToast("error", "Failed to delete customer.");
+      }
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    const confirm = await confirmDialog({
+      text: `Are you sure you want to delete <b>${selected.length}</b> sales`,
+      icon: "warning",
+      confirmButtonText: "Yes, delete",
+      cancelButtonText: "Cancel",
+      selected,
+    });
+
+    if (confirm.isConfirmed) {
+      try {
+        const res = await axios.delete(`${backendUrl}/api/sales`, {
+          data: { ids: selected },
+        });
+
+        if (res.status === 200) {
+          showToast("success", "Selected Sales deleted successfully");
+          fetchSaleSummaries();
+          setSelected([]);
+        }
+      } catch (error) {
+        showToast("error", "Failed to delete selected customers.");
+      }
+    } else {
+      setSelected([]);
+    }
+  };
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -735,266 +1095,9 @@ const Sales = () => {
     }
   };
 
-  const editSale = (sale) => {
-    setForm({ ...sale });
-    setIsOpen(true);
-    setIsEditModalOpen(true);
-  };
-
-  const handleView = (sale) => {
-    setForm({ ...sale });
-    setIsOpen(true);
-    setIsViewModalOpen(true);
-  };
-
-  const handleUpdateSales = async (e, sale) => {
-    e.preventDefault();
-
-    try {
-      const res = await axios.put(`${backendUrl}/api/sales/${sale._id}`, sale);
-      if (res.status === 200) {
-        showToast("success", "Sales record updated successfully");
-        setIsEditModalOpen(false);
-        fetchSaleSummaries();
-      }
-    } catch (err) {
-      showToast("error", "Failed to update sales record.");
-    }
-  };
-
-  const deleteSale = async (sale) => {
-    if (!sale._id) return;
-    const confirmDelete = await confirmDialog({
-      title: "Delete",
-      text: `Are you sure you want to delete <b>${sale.invoiceNumber}</b>?`,
-      icon: "warning",
-      confirmButtonText: "Yes, delete",
-      cancelButtonText: "Cancel",
-    });
-
-    if (confirmDelete.isConfirmed) {
-      try {
-        const res = await axios.delete(`${backendUrl}/api/sales/${sale._id}`);
-        if (res.status === 200) {
-          showToast(
-            "success",
-            `Customer <b>${sale.invoiceNumber}</b> deleted successfully`
-          );
-          fetchSaleSummaries();
-        }
-      } catch (error) {
-        showToast("error", "Failed to delete customer.");
-      }
-    }
-  };
-  // 🔁 Calculate derived form fields based on field change
-
-  // ✅ Enhanced change handler: opens suggestion dropdowns
-
-  const handleDeleteSelected = async () => {
-    const confirm = await confirmDialog({
-      text: `Are you sure you want to delete <b>${selected.length}</b> sales`,
-      icon: "warning",
-      confirmButtonText: "Yes, delete",
-      cancelButtonText: "Cancel",
-      selected,
-    });
-
-    if (confirm.isConfirmed) {
-      try {
-        const res = await axios.delete(`${backendUrl}/api/sales`, {
-          data: { ids: selected },
-        });
-
-        if (res.status === 200) {
-          showToast("success", "Selected Sales deleted successfully");
-          fetchSaleSummaries();
-          setSelected([]);
-        }
-      } catch (error) {
-        showToast("error", "Failed to delete selected customers.");
-      }
-    } else {
-      setSelected([]);
-    }
-  };
-
-  const toggleSelect = (sale) => {
-    setSelected((prev) => {
-      const exists = prev.some((c) => c.id === sale._id);
-
-      if (exists) {
-        return prev.filter((c) => c.id !== sale._id);
-      } else {
-        return [...prev, { id: sale._id }];
-      }
-    });
-  };
-
-  const toggleSelectAll = (checked) => {
-    if (checked) {
-      const allSelected = currentSales.map((s) => ({ id: s._id }));
-      setSelected(allSelected);
-    } else {
-      setSelected([]);
-    }
-  };
-
-  const handleIconClick = () => {
-    if (inputRef.current) {
-      inputRef.current.focus();
-      inputRef.current.classList.add("highlight");
-      setTimeout(() => {
-        inputRef.current.classList.remove("highlight");
-      }, 1000);
-    }
-  };
-
-  const handleDateChange = (date, fieldName) => {
-    setForm((prev) => {
-      const updatedForm = {
-        ...prev,
-        [fieldName]: date ? date.toISOString().split("T")[0] : "",
-      };
-      if (fieldName === "invoiceDate" && date) {
-        updatedForm.deliveryDate = date.toISOString().split("T")[0];
-      }
-
-      return updatedForm;
-    });
-  };
-
-  const SuggestionInput = React.memo(
-    ({
-      label,
-      name,
-      value,
-      onChange,
-      onFocus,
-      onBlur,
-      error,
-      suggestions,
-      isOpen,
-      highlightedIndex,
-      inputRef,
-      dropdownTop,
-      onSuggestionSelect,
-      getSuggestionValue = (item) => item,
-      getSuggestionDisplay = (item) => item,
-      setHighlightedIndex, // <-- NEW: Pass this from parent to allow keyboard navigation
-    }) => {
-      const handleMouseEnter = useCallback(
-        (index) => {
-          onSuggestionSelect && onSuggestionSelect(index, true);
-        },
-        [onSuggestionSelect]
-      );
-
-      const handleClick = useCallback(
-        (item) => {
-          const value = getSuggestionValue(item);
-          onSuggestionSelect && onSuggestionSelect(value);
-        },
-        [onSuggestionSelect, getSuggestionValue]
-      );
-
-      const handleKeyDown = useCallback(
-        (e) => {
-          if (!isOpen || suggestions.length === 0) return;
-
-          switch (e.key) {
-            case "ArrowDown":
-              e.preventDefault();
-              setHighlightedIndex((prev) =>
-                prev < suggestions.length - 1 ? prev + 1 : 0
-              );
-              break;
-            case "ArrowUp":
-              e.preventDefault();
-              setHighlightedIndex((prev) =>
-                prev > 0 ? prev - 1 : suggestions.length - 1
-              );
-              break;
-            case "Enter":
-              e.preventDefault();
-              if (
-                highlightedIndex >= 0 &&
-                highlightedIndex < suggestions.length
-              ) {
-                const selectedItem = suggestions[highlightedIndex];
-                const value = getSuggestionValue(selectedItem);
-                onSuggestionSelect && onSuggestionSelect(value);
-              }
-              break;
-            default:
-              break;
-          }
-        },
-        [
-          highlightedIndex,
-          suggestions,
-          isOpen,
-          onSuggestionSelect,
-          getSuggestionValue,
-          setHighlightedIndex,
-        ]
-      );
-
-      return (
-        <div className="relative flex flex-col">
-          <label className="text-sm font-medium text-gray-700 mb-1">
-            {label}
-          </label>
-          <input
-            ref={inputRef}
-            type="text"
-            name={name}
-            value={value}
-            onChange={onChange}
-            onKeyDown={handleKeyDown}
-            onFocus={onFocus}
-            onBlur={onBlur}
-            className={`border rounded-md px-2 py-1 ${
-              error ? "border-red-500" : "border-gray-300"
-            }`}
-            placeholder="Type to search..."
-            autoComplete="off"
-            aria-autocomplete="list"
-            aria-expanded={isOpen}
-            role="combobox"
-          />
-          {isOpen && suggestions.length > 0 && (
-            <ul
-              className="absolute z-10 bg-white border border-gray-300 w-full rounded-md max-h-60 overflow-auto shadow-lg"
-              style={{ top: dropdownTop }}
-            >
-              {suggestions.map((item, idx) => (
-                <li
-                  key={typeof item === "object" ? item._id ?? idx : idx}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => handleClick(item)}
-                  onMouseEnter={() => handleMouseEnter(idx)}
-                  className={`cursor-pointer px-3 py-2 ${
-                    highlightedIndex === idx
-                      ? "bg-blue-600 text-white"
-                      : "bg-white text-gray-900 hover:bg-gray-100"
-                  }`}
-                >
-                  {getSuggestionDisplay(item)}
-                </li>
-              ))}
-            </ul>
-          )}
-          {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
-        </div>
-      );
-    }
-  );
-
   return (
     <div className="p-6">
       <div className="container">
-        {/* ✅ FIXED: Closed missing </div> */}
         <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
           <div className="flex gap-3 items-center">
             <button
@@ -1011,7 +1114,6 @@ const Sales = () => {
               <Upload size={18} /> Import Product
             </button>
 
-            {/* ✅ FIXED: Missing closing bracket for conditional render */}
             {selected.length > 0 && (
               <button
                 onClick={handleDeleteSelected}
@@ -1024,11 +1126,9 @@ const Sales = () => {
           <SaleExcelDownload />
         </div>
 
-        {/* ✅ FIXED: Added missing closing parenthesis and braces */}
         <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
           {sales.length > 0 ? (
             <div className="flex items-center gap-6">
-              {/* Tabs */}
               <div className="flex gap-4">
                 {types.map((tab) => (
                   <button
@@ -1062,7 +1162,6 @@ const Sales = () => {
             <div></div>
           )}
 
-          {/* ✅ FIXED: Missing closing tag for <p> and <div> */}
           <div className="flex items-center gap-8">
             <p className="text-lg font-semibold text-gray-700">
               Total Count:{" "}
@@ -1074,7 +1173,7 @@ const Sales = () => {
               <Search
                 className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
                 size={16}
-                onClick={handleIconClick}
+                onClick={() => inputRef.current?.focus()}
               />
               <input
                 ref={inputRef}
@@ -1091,49 +1190,48 @@ const Sales = () => {
           </div>
         </div>
 
-        <div className="overflow-x-hidden md:overflow-x-auto whitespace-nowrap shadow">
-          <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
+        <div className="overflow-x-auto shadow">
+          <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
             <thead className="bg-gray-100 text-gray-700 border-b">
               <tr>
-                <th className="p-3">
-                  <div className="flex items-center gap-4">
-                    {currentSales.length > 0 && (
-                      <input
-                        type="checkbox"
-                        aria-label="Select all sales"
-                        checked={
-                          selected.length === currentSales.length &&
-                          currentSales.length > 0
-                        }
-                        onChange={(e) => toggleSelectAll(e.target.checked)}
-                      />
-                    )}
-                    <span>Invoice No</span>
-                  </div>
-                </th>
-                <th className="p-3">Invoice Date</th>
-                <th className="p-3">Product Name</th>
-                <th className="p-3">MR Name</th>
-                <th className="p-3">Customer Name</th>
-                <th className="p-3">Sales Qty</th>
-                {hideRowList
-                  .filter(
-                    (item) => item.id !== 0 && selectedItems.includes(item.id)
-                  )
+                {allFields
+                  .filter((item) => tableColumns.includes(item.id))
                   .map((item) => (
-                    <th key={item.id} className="p-3 whitespace-nowrap">
-                      {item.name}
+                    <th
+                      key={item.id}
+                      className="p-3 whitespace-nowrap min-w-[120px]"
+                    >
+                      {item.name === "Invoice No" ? (
+                        <div className="flex items-center gap-4">
+                          {currentSales.length > 0 && (
+                            <input
+                              type="checkbox"
+                              aria-label="Select all sales"
+                              checked={
+                                selected.length === currentSales.length &&
+                                currentSales.length > 0
+                              }
+                              onChange={(e) =>
+                                toggleSelectAll(e.target.checked)
+                              }
+                            />
+                          )}
+                          <span>{item.name}</span>
+                        </div>
+                      ) : (
+                        item.name
+                      )}
                     </th>
                   ))}
-                <th className="p-3">Total Amount ($)</th>
-                <th className="p-3">Payment Status</th>
-                <th className="p-3">Actions</th>
               </tr>
             </thead>
             <tbody>
               {currentSales.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="p-4 text-center text-gray-500">
+                  <td
+                    colSpan={tableColumns.length}
+                    className="p-4 text-center text-gray-500"
+                  >
                     No Sales found.
                   </td>
                 </tr>
@@ -1148,127 +1246,61 @@ const Sales = () => {
                         : "border-b"
                     }`}
                   >
-                    <td className="p-3">
-                      <div className="flex items-center gap-4">
-                        <input
-                          type="checkbox"
-                          checked={selected.some((s) => s.id === sale._id)}
-                          onChange={() => toggleSelect(sale)}
-                        />
-                        <span className="capitalize">{sale.invoiceNumber}</span>
-                      </div>
-                    </td>
-                    <td className="p-3">
-                      {formatDateToReadable(sale.invoiceDate)}
-                    </td>
-                    <td className="p-3">
-                      {capitalizeFirstLetter(sale.productName)}
-                    </td>
-                    <td className="p-3">
-                      {capitalizeFirstLetter(sale.mrName)}
-                    </td>
-                    <td className="p-3">
-                      {capitalizeFirstLetter(sale.customerInfo?.name) || "--"}
-                    </td>
-                    <td className="p-3">{Math.ceil(sale.salesQty)}</td>
-                    {hideRowList
-                      .filter(
-                        (item) =>
-                          item.id !== 0 && selectedItems.includes(item.id)
-                      )
+                    {allFields
+                      .filter((item) => tableColumns.includes(item.id))
                       .map((item) => (
-                        <td key={item.id} className="p-3 whitespace-nowrap">
-                          {[
-                            "recordingDate",
-                            "dueDate",
-                            "deliveryDate",
-                          ].includes(item.dbName)
-                            ? formatDateToReadable(sale[item.dbName]) || "--"
-                            : sale[item.dbName] ?? "--"}
+                        <td
+                          key={item.id}
+                          className="p-3 whitespace-nowrap min-w-[120px]"
+                        >
+                          {item.id === "invoiceNumber" ? (
+                            <div className="flex items-center gap-4">
+                              <input
+                                type="checkbox"
+                                checked={selected.some(
+                                  (s) => s.id === sale._id
+                                )}
+                                onChange={() => toggleSelect(sale)}
+                              />
+                              <span className="capitalize">
+                                {sale.invoiceNumber}
+                              </span>
+                            </div>
+                          ) : item.id === "actions" ? (
+                            <div className="flex items-center justify-center gap-3 min-w-[150px]">
+                              <button className="text-blue-600 hover:text-blue-800 cursor-pointer">
+                                <Eye
+                                  onClick={() => handleView(sale)}
+                                  size={18}
+                                />
+                              </button>
+                              <button
+                                className="text-green-600 hover:text-green-800 cursor-pointer"
+                                onClick={() => editSale(sale)}
+                                title="Edit"
+                              >
+                                <Edit size={18} />
+                              </button>
+                              <button
+                                className="text-red-600 hover:text-red-800 cursor-pointer"
+                                onClick={() => deleteSale(sale)}
+                                title="Delete"
+                              >
+                                <Trash2 size={18} />
+                              </button>
+                            </div>
+                          ) : (
+                            getFieldValue(sale, item.dbName)
+                          )}
                         </td>
                       ))}
-                    <td className="p-3">{Math.ceil(sale.amount)}</td>
-                    <td className="p-3">
-                      {capitalizeFirstLetter(sale.paymentStatus)}
-                    </td>
-                    <td className="p-3 flex items-center justify-center gap-3">
-                      <button className="text-blue-600 hover:text-blue-800 cursor-pointer">
-                        <Eye onClick={() => handleView(sale)} size={18} />
-                      </button>
-                      <button
-                        className="text-green-600 hover:text-green-800 cursor-pointer"
-                        onClick={() => editSale(sale)}
-                        title="Edit"
-                      >
-                        <Edit size={18} />
-                      </button>
-                      <button
-                        className="text-red-600 hover:text-red-800 cursor-pointer"
-                        onClick={() => deleteSale(sale)}
-                        title="Delete"
-                      >
-                        <Trash2 size={18} />
-                      </button>
-                    </td>
                   </tr>
                 ))
               )}
             </tbody>
           </table>
         </div>
-
-        {showImportModal &&
-          ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-              <div
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setIsOpen(false)}
-              />
-              <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
-                <button
-                  onClick={() => setShowImportModal(false)}
-                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-                  disabled={isUploading}
-                >
-                  <X size={20} />
-                </button>
-                <h2 className="text-lg font-semibold mb-4">Import Products</h2>
-                {isSampleFile && <SampleExcelDownloadSale />}
-                <input
-                  type="file"
-                  accept=".csv, .xlsx"
-                  onChange={handleFileUpload}
-                  className="block w-full border rounded-lg px-3 py-2 mb-6"
-                />
-                <div className="flex justify-end gap-3">
-                  <button
-                    onClick={() => handleCancelEvent}
-                    disabled={isUploading}
-                    className={`px-5 py-2 rounded-lg cursor-pointer ${
-                      isUploading
-                        ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                        : "bg-gray-300 hover:bg-gray-400 text-gray-700"
-                    }`}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleProductImport}
-                    disabled={isUploading}
-                    className={`px-5 py-2 rounded-lg cursor-pointer ${
-                      isUploading
-                        ? "bg-blue-400 text-white cursor-not-allowed"
-                        : "bg-blue-600 hover:bg-blue-700 text-white"
-                    }`}
-                  >
-                    {isUploading ? "Uploading…" : "Upload"}
-                  </button>
-                </div>
-              </div>
-            </div>,
-            document.body
-          )}
-
+        {/* Pagination */}
         {currentSales.length > 0 && (
           <div className="mt-4 p-5 flex justify-start gap-2">
             <button
@@ -1327,143 +1359,189 @@ const Sales = () => {
           </div>
         )}
 
-        {/* ✅ COLUMN SELECT MODAL FIX */}
-        {/* {isModalOpen &&
+        {showImportModal &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
               <div
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
                 onClick={() => setIsOpen(false)}
               />
-              <div
-                className="relative bg-white p-6 rounded shadow-lg max-w-xl w-full z-10"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <h2 className="text-xl font-semibold mb-4">Select Columns</h2>
-                <div className="grid grid-cols-1 gap-3">
-                  {chunkedItems.map((pair, index) => (
-                    <div key={index} className="flex gap-4">
-                      {pair.map(({ id, name }) => (
-                        <label
-                          key={id}
-                          className="flex items-center gap-2 flex-1 cursor-pointer select-none"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={
-                              id === 0
-                                ? allSelected
-                                : selectedItems.includes(id)
-                            }
-                            onChange={() => toggleItem(id)}
-                          />
-                          {name}
-                        </label>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-
-                <div className="mt-6 flex justify-between items-center">
+              <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
+                <button
+                  onClick={() => setShowImportModal(false)}
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                  disabled={isUploading}
+                >
+                  <X size={20} />
+                </button>
+                <h2 className="text-lg font-semibold mb-4">Import Products</h2>
+                {isSampleFile && <SampleExcelDownloadSale />}
+                <input
+                  type="file"
+                  accept=".csv, .xlsx"
+                  onChange={handleFileUpload}
+                  className="block w-full border rounded-lg px-3 py-2 mb-6"
+                />
+                <div className="flex justify-end gap-3">
                   <button
-                    onClick={handleReset}
-                    className="px-4 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200 cursor-pointer"
+                    onClick={() => handleCancelEvent}
+                    disabled={isUploading}
+                    className={`px-5 py-2 rounded-lg cursor-pointer ${
+                      isUploading
+                        ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                        : "bg-gray-300 hover:bg-gray-400 text-gray-700"
+                    }`}
                   >
-                    Reset
+                    Cancel
                   </button>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleCancelEvent}
-                      className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 cursor-pointer"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleSave}
-                      className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 cursor-pointer"
-                    >
-                      Save
-                    </button>
-                  </div>
+                  <button
+                    onClick={handleProductImport}
+                    disabled={isUploading}
+                    className={`px-5 py-2 rounded-lg cursor-pointer ${
+                      isUploading
+                        ? "bg-blue-400 text-white cursor-not-allowed"
+                        : "bg-blue-600 hover:bg-blue-700 text-white"
+                    }`}
+                  >
+                    {isUploading ? "Uploading…" : "Upload"}
+                  </button>
                 </div>
               </div>
             </div>,
             document.body
-          )} */}
+          )}
+
         {isModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
               <div
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setIsOpen(false)}
+                onClick={() => setIsModalOpen(false)}
               />
               <div
-                className="relative bg-white p-6 rounded shadow-lg max-w-xl w-full z-10"
+                className="relative bg-white p-6 rounded shadow-lg max-w-4xl w-full z-10 max-h-[90vh] overflow-hidden flex flex-col"
                 onClick={(e) => e.stopPropagation()}
               >
-                <h2 className="text-xl font-semibold mb-4">Select Columns</h2>
+                <h2 className="text-xl font-semibold mb-4">
+                  {activeTab === "add" ? "Add Columns" : "Remove Columns"}
+                </h2>
 
-                <div className="flex w-full gap-2">
+                <div className="flex w-full gap-2 mb-4">
                   <div className="w-1/2">
                     <button
-                      onClick={() => setActiveTab("add")}
+                      onClick={() => {
+                        setActiveTab("add");
+                        setSelectedItems([]);
+                        setAllSelected(false);
+                      }}
                       className={`w-full px-4 py-2 font-medium text-center rounded-lg ${
                         activeTab === "add"
                           ? "bg-green-600 text-white"
                           : "bg-gray-200 text-gray-700"
                       }`}
                     >
-                      Add
+                      Add Columns ({availableColumns.length})
                     </button>
                   </div>
                   <div className="w-1/2">
                     <button
-                      onClick={() => setActiveTab("remove")}
+                      onClick={() => {
+                        setActiveTab("remove");
+                        setSelectedItems([]);
+                        setAllSelected(false);
+                      }}
                       className={`w-full px-4 py-2 font-medium text-center rounded-lg ${
                         activeTab === "remove"
                           ? "bg-red-600 text-white"
                           : "bg-gray-200 text-gray-700"
                       }`}
                     >
-                      Remove
+                      Remove Columns ({removableColumns.length})
                     </button>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3">
-                  {chunkedItems.map((pair, index) => (
-                    <div key={index} className="flex gap-4">
-                      {pair.map(({ id, name }) => (
-                        <label
-                          key={id}
-                          className="flex items-center gap-2 flex-1 cursor-pointer select-none"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={
-                              activeTab === "add"
-                                ? id === 0
-                                  ? allSelected
-                                  : selectedItems.includes(id)
-                                : id === 0
-                                ? allSelected
-                                : selectedItems.includes(id)
-                            }
-                            onChange={() => toggleItem(id)}
-                          />
-                          {name}
-                        </label>
+                <div className="flex-1 overflow-y-auto">
+                  {chunkedItems.length > 0 ? (
+                    <div className="grid grid-cols-1 gap-3">
+                      {/* Select All option (only when not in required tab) */}
+                      {chunkedItems.flat().length > 0 && (
+                        <div className="flex gap-4 border-b pb-2 mb-2 sticky top-0 bg-white">
+                          <label className="flex items-center gap-2 flex-1 cursor-pointer select-none font-semibold">
+                            <input
+                              type="checkbox"
+                              checked={allSelected}
+                              onChange={() => toggleItem("all")}
+                            />
+                            Select All
+                          </label>
+                          <div className="flex-1"></div>
+                        </div>
+                      )}
+
+                      {chunkedItems.map((pair, index) => (
+                        <div key={index} className="flex gap-4">
+                          {pair.map(({ id, name }) => (
+                            <label
+                              key={id}
+                              className="flex items-center gap-1 flex-1 cursor-pointer select-none hover:bg-gray-50 rounded"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedItems.includes(id)}
+                                onChange={() => toggleItem(id)}
+                              />
+                              <span className="flex-1">{name}</span>
+                            </label>
+                          ))}
+                          {pair.length === 1 && <div className="flex-1"></div>}
+                        </div>
                       ))}
+
+                      {/* REQUIRED COLUMNS shown on Remove tab */}
+                      {activeTab === "remove" && (
+                        <div className="mt-6 border-t pt-4">
+                          <h3 className="text-sm font-semibold text-gray-600 mb-2">
+                            Compulsory Fields
+                          </h3>
+                          <div className="grid grid-cols-2 gap-3 text-gray-400 text-sm">
+                            {allFields
+                              .filter((field) =>
+                                requiredColumns.includes(field.id)
+                              )
+                              .map((field) => (
+                                <div
+                                  key={field.id}
+                                  className="flex items-center gap-2 bg-gray-100 rounded px-2 py-1 cursor-not-allowed"
+                                >
+                                  <input type="checkbox" checked disabled />
+                                  <div className="flex flex-col">
+                                    <span>{field.name}</span>
+                                    <span className="text-xs text-red-500">
+                                      This field is compulsory
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  ))}
+                  ) : (
+                    <div className="text-center py-8 text-gray-500">
+                      {activeTab === "add"
+                        ? "All available columns are already in the table."
+                        : "No columns available to remove."}
+                    </div>
+                  )}
                 </div>
 
-                <div className="mt-6 flex justify-between items-center">
+                <div className="mt-4 pt-4 border-t flex justify-between items-center">
                   <button
                     onClick={handleReset}
                     className="px-4 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200 cursor-pointer"
                   >
-                    Reset
+                    Reset to Default
                   </button>
                   <div className="flex gap-2">
                     <button
@@ -1474,9 +1552,10 @@ const Sales = () => {
                     </button>
                     <button
                       onClick={handleSave}
-                      className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 cursor-pointer"
+                      disabled={selectedItems.length === 0}
+                      className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 cursor-pointer disabled:bg-gray-400 disabled:cursor-not-allowed"
                     >
-                      Save
+                      Save Changes
                     </button>
                   </div>
                 </div>
