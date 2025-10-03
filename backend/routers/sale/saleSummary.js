@@ -4,6 +4,7 @@ import paymentStatus from "../../models/paymentStatus.js";
 import Product from "../../models/projectManger/product.js";
 import customer from "../../models/master/customer.js";
 import ExcelJS from "exceljs";
+import SalesReturn from "../../models/sale/saleReturn.js";
 
 const router = express.Router();
 
@@ -489,6 +490,48 @@ router.post("/sales/download-excel", async (req, res) => {
     });
   }
 });
+
+router.post("/sales/return", async (req, res) => {
+  try {
+    const data = req.body;
+    const newSaleReturn = new SalesReturn(data);
+    const saved = await newSaleReturn.save();
+
+    res.status(201).json({
+      message: "Sale return recorded successfully.",
+      data: saved,
+    });
+  } catch (error) {
+    console.error("Error saving sales return:", error);
+    res.status(500).json({ message: "Server error", error });
+  }
+});
+
+router.get("/sales/return", async (req, res) => {
+  try {
+    // Optional: Add filters from query params
+    const filters = {};
+
+    // Example filter: /api/sales/return?invoiceNumber=INV-123
+    if (req.query.invoiceNumber) {
+      filters.invoiceNumber = req.query.invoiceNumber;
+    }
+    if (req.query.customerCode) {
+      filters.customerCode = req.query.customerCode;
+    }
+
+    const returns = await SalesReturn.find(filters).sort({ createdAt: -1 });
+
+    res.status(200).json({
+      message: "Sales return records fetched successfully.",
+      data: returns,
+    });
+  } catch (error) {
+    console.error("Error fetching sales return records:", error);
+    res.status(500).json({ message: "Server error", error });
+  }
+});
+
 
 
 export default router;

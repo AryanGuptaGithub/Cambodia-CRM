@@ -27,14 +27,9 @@ const INITIAL_FORM_STATE = {
   discount: "",
   netSellingAmount: "",
   usedPrice: "",
-  lc: "",
-  profitLoss: "",
-  creditDays: "",
-  dueDate: "",
-  deliveryDate: "",
   paidAmount: "",
   dueAmount: "",
-  balanceAmount: "",
+  usedAmount: "",
   paymentStatus: "",
   remark: "",
 };
@@ -436,7 +431,7 @@ const AddReturnSale = () => {
       const netAmount = getNum("netSellingAmount");
       const paidAmount = getNum("paidAmount");
       updatedForm.dueAmount = Math.max(netAmount - paidAmount, 0).toFixed(2);
-      updatedForm.balanceAmount = updatedForm.dueAmount;
+      updatedForm.usedAmount = updatedForm.dueAmount;
     }
 
     return updatedForm;
@@ -535,7 +530,8 @@ const AddReturnSale = () => {
       const usedPrice = usedQty * sellingPrice;
 
       const paidAmount = Number(sale.paidAmount) || 0;
-      const usedAmount = Number(usedPrice) - Number(discount / sale.salesQty);
+      const usedAmount =
+        Number(usedPrice) - Number((discount / sale.salesQty) * usedQty);
       const dueAmount = usedAmount - paidAmount; // or some logic
 
       updateFormField("usedQty", usedQty.toString());
@@ -557,8 +553,7 @@ const AddReturnSale = () => {
 
       updateFormField("invoiceNumber", value);
       const fil = filterSalesByInvoice(value);
-      console.log('values of fi', fil);
-      // Make sure fil is defined and is an array
+
       if (!Array.isArray(fil)) {
         console.warn("filterSalesByInvoice did not return an array:", fil);
         return;
@@ -577,7 +572,8 @@ const AddReturnSale = () => {
         const usedPrice = usedQty * sellingPrice;
 
         const paidAmount = Number(sale.paidAmount) || 0;
-        const usedAmount = Number(usedPrice) - Number(discount / sale.salesQty);
+        const usedAmount =
+          Number(usedPrice) - Number((discount / sale.salesQty) * usedQty);
         const dueAmount = usedAmount - paidAmount; // or some logic
 
         // Update form fields
@@ -607,40 +603,12 @@ const AddReturnSale = () => {
     ]
   );
 
-  const fetchSaleSummaries = async () => {
-    try {
-      const res = await fetch(`${backendUrl}/api/sales`);
-      if (!res.ok) throw new Error("Failed to fetch sale summaries");
-
-      const data = await res.json();
-      setSales(data);
-      setFilteredSales(data);
-    } catch (error) {
-      console.error("❌ Fetch error:", error);
-      showToast("error", error.message || "Error fetching sale summaries");
-    } finally {
-      setLoadingData(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchSaleSummaries();
-  }, []);
-
   // Handle suggestion selection for product name
   const handleProductNameSelect = useCallback(
     (value) => {
       updateFormField("productName", value);
     },
     [updateFormField]
-  );
-
-  // Handle mouse enter for product name suggestions
-  const handleProductNameHighlight = useCallback(
-    (index) => {
-      productNameSuggestions.setHighlightedIndex(index);
-    },
-    [productNameSuggestions]
   );
 
   const handleSubmit = async (e) => {
@@ -860,9 +828,18 @@ const AddReturnSale = () => {
             value={form.paidAmount}
             onChange={enhancedHandleChange}
             error={errors.paidAmount}
-            disabled
+            readOnly={true}
+            className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
           />
 
+          <InputField
+            label="Used Amount"
+            name="usedAmount"
+            value={form.usedAmount}
+            onChange={enhancedHandleChange}
+            error={errors.usedAmount}
+            readOnly={true}
+          />
           <InputField
             label="Due Amount"
             name="dueAmount"
@@ -872,14 +849,33 @@ const AddReturnSale = () => {
             readOnly={true}
             disabled
           />
-
-          <InputField
-            label="Balance Amount"
-            name="balanceAmount"
-            value={form.balanceAmount}
+          <SuggestionInput
+            label="Payment Status"
+            name="paymentStatus"
             onChange={enhancedHandleChange}
-            error={errors.balanceAmount}
-            readOnly={true}
+            value={form.paymentStatus}
+            error={errors.paymentStatus}
+            suggestions={paymentStatusSuggestions.filteredItems}
+            isOpen={paymentStatusSuggestions.isOpen}
+            highlightedIndex={paymentStatusSuggestions.highlightedIndex}
+            inputRef={paymentStatusSuggestions.inputRef}
+            dropdownTop={paymentStatusSuggestions.dropdownTop}
+            onFocus={() => paymentStatusSuggestions.setIsOpen(true)}
+            onBlur={() =>
+              setTimeout(() => paymentStatusSuggestions.setIsOpen(false), 150)
+            }
+            onSuggestionSelect={(value, isHighlight) => {
+              if (typeof value === "number" && isHighlight) {
+                handlePaymentStatusHighlight(value, true);
+              } else {
+                paymentStatusSuggestions.selectSuggestion(value, (val) =>
+                  updateFormField("paymentStatus", val)
+                );
+              }
+            }}
+            getSuggestionValue={(item) => item.type}
+            getSuggestionDisplay={(item) => item.type}
+            setHighlightedIndex={paymentStatusSuggestions.setHighlightedIndex} // ✅ Pass this
           />
 
           {/* Remark field - full width */}
