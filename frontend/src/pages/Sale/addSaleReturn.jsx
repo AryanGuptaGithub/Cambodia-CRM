@@ -835,6 +835,17 @@ const AddReturnSale = () => {
     [productSuggestions]
   );
 
+  // Get available products count (products that haven't been selected yet)
+  const getAvailableProductsCount = useCallback(() => {
+    const selectedProducts = form.products
+      .filter((product) => product.productName.trim() !== "")
+      .map((product) => product.productName);
+
+    return filteredProducts.filter(
+      (product) => !selectedProducts.includes(product)
+    ).length;
+  }, [form.products, filteredProducts]);
+
   // Check if "Add Return Sale" button should be enabled
   const isAddReturnSaleEnabled = useMemo(() => {
     return (
@@ -844,10 +855,20 @@ const AddReturnSale = () => {
     );
   }, [isInvoiceDataFetched, form, areCommonFieldsFilled, hasAtLeastOneProduct]);
 
-  // Check if "Add Product" button should be enabled
+  // Check if "Add Product" button should be enabled - FIXED LOGIC
   const isAddProductEnabled = useMemo(() => {
-    return isInvoiceDataFetched && filteredProducts.length > 0;
-  }, [isInvoiceDataFetched, filteredProducts]);
+    // Only enable if invoice data is fetched AND there are available products to select
+    return isInvoiceDataFetched && getAvailableProductsCount() > 0;
+  }, [isInvoiceDataFetched, getAvailableProductsCount]);
+
+  // Enhanced add product function that prevents adding when no products available
+  const enhancedAddProduct = useCallback(() => {
+    if (!isAddProductEnabled) {
+      showToast("error", "No more products available to add");
+      return;
+    }
+    addProduct();
+  }, [isAddProductEnabled, addProduct]);
 
   // Function to filter sales based on invoiceNumber
   const filterSalesByInvoice = useCallback(
@@ -915,7 +936,7 @@ const AddReturnSale = () => {
     ]
   );
 
-  // Update filtered products when invoice number changes - FIXED: Removed form.products from dependencies
+  // Update filtered products when invoice number changes
   useEffect(() => {
     if (form.invoiceNumber && form.invoiceNumber !== lastInvoiceNumber) {
       const filtered = filterSalesByInvoice(form.invoiceNumber);
@@ -934,7 +955,6 @@ const AddReturnSale = () => {
         updateFormField("remark", firstSale.remark ?? "");
       } else {
         setIsInvoiceDataFetched(false);
-        // Don't show toast here to avoid spam
       }
     } else if (!form.invoiceNumber) {
       setFilteredProducts([]);
@@ -1016,7 +1036,7 @@ const AddReturnSale = () => {
         showToast("error", "Please add at least one product");
         return;
       }
-      console.log('values of form', form);
+      console.log("values of form", form);
       // Create return sales data array
       const returnSalesData = validProducts.map((product) => ({
         recordingDate: form.recordingDate,
@@ -1092,19 +1112,27 @@ const AddReturnSale = () => {
         <h2 className="text-2xl font-bold text-gray-800">
           Add New Sale Return
         </h2>
-        <button
-          type="button"
-          onClick={addProduct}
-          disabled={!isAddProductEnabled}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors cursor-pointer ${
-            isAddProductEnabled
-              ? "bg-blue-600 hover:bg-blue-700 text-white"
-              : "bg-gray-400 text-white opacity-50 cursor-not-allowed"
-          }`}
-        >
-          <PlusSquare size={18} />
-          Add Return Product
-        </button>
+        <div className="flex items-center gap-4">
+          {/* Show available products count */}
+          {isInvoiceDataFetched && (
+            <span className="text-sm text-gray-600">
+              Available products: {getAvailableProductsCount()}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={enhancedAddProduct}
+            disabled={!isAddProductEnabled}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+              isAddProductEnabled
+                ? "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
+                : "bg-gray-400 text-white opacity-50 cursor-not-allowed"
+            }`}
+          >
+            <PlusSquare size={18} />
+            Add Return Product
+          </button>
+        </div>
       </div>
 
       {/* Common Fields */}

@@ -26,10 +26,10 @@ export const useApi = () => {
   return { fetchData };
 };
 
-// ✅ Custom hook to fetch initial sale data
 export const useInitialSaleData = () => {
   const { fetchData } = useApi();
   const [statuses, setStatuses] = useState([]);
+  const [products, setProducts] = useState([]);
   const [productNames, setProductNames] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -38,21 +38,29 @@ export const useInitialSaleData = () => {
       try {
         const [statusesData, productsData] = await Promise.all([
           fetchData("/api/sales/payment-status"),
-          fetchData("/api/sales/unique-names"),
+          fetchData("/api/products"), // Changed endpoint to get full product data
         ]);
 
         setStatuses(statusesData);
-        const uniqueNames = Array.from(
+
+        // Get unique products by productName with LC
+        const uniqueProducts = Array.from(
           new Map(
-            (productsData?.productNames || []).map((name) => [
-              name.trim().toLowerCase(),
-              name.trim(),
+            (productsData || []).map((product) => [
+              product.productName?.trim().toLowerCase(),
+              {
+                productName: product.productName?.trim(),
+                lc: product.lc,
+              },
             ])
           ).values()
-        );
+        ).filter((product) => product.productName);
 
-        setProductNames(uniqueNames);
+        setProducts(uniqueProducts);
+        const names = uniqueProducts.map((product) => product.productName);
+        setProductNames(names);
       } catch (error) {
+        console.error("Error fetching initial data:", error);
         showToast("error", "Failed to load initial data");
       } finally {
         setLoading(false);
@@ -62,5 +70,5 @@ export const useInitialSaleData = () => {
     fetchInitialData();
   }, [fetchData]);
 
-  return { statuses, productNames, loading };
+  return { statuses, products, productNames, loading };
 };

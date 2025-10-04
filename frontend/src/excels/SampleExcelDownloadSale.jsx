@@ -11,14 +11,14 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
       const worksheet = workbook.addWorksheet("Sale Summary");
 
       // === Sheet Titles ===
-      worksheet.mergeCells("A1:P1");
+      worksheet.mergeCells("A1:O1");
       const titleCell = worksheet.getCell("A1");
       titleCell.value = "HEALTHCARE SOUTH EAST ASIA";
       titleCell.font = { bold: true, size: 16 };
       titleCell.alignment = { vertical: "middle", horizontal: "center" };
       worksheet.getRow(1).height = 25;
 
-      worksheet.mergeCells("A2:P2");
+      worksheet.mergeCells("A2:O2");
       const subtitleCell = worksheet.getCell("A2");
       subtitleCell.value = "Sale Summary List";
       subtitleCell.font = { bold: true, size: 14 };
@@ -38,7 +38,6 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
         { key: "bonusQty", width: 15 },
         { key: "sellingPrice", width: 27 },
         { key: "discount", width: 15 },
-        { key: "lc", width: 25 },
         { key: "creditDays", width: 12 },
         { key: "paidAmount", width: 12 },
         { key: "paymentStatus", width: 15 },
@@ -59,7 +58,6 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
         "Bonus Qty",
         "Selling Price (USD)",
         "Discount (USD)",
-        "LC Price (USD)",
         "Credit Days",
         "Paid Amount",
         "Payment Status",
@@ -87,29 +85,27 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
             invoiceDate: item.invoiceDate ? new Date(item.invoiceDate) : null,
             mrName: item.mrName || "",
             customerCode: item.customerCode || "",
-            productName: item.productName || "", // Product Name as normal text field
+            productName: item.productName || "",
             salesQty: item.salesQty || 0,
             bonusQty: item.bonusQty || 0,
             sellingPrice: item.sellingPrice || 0,
             discount: item.discount || 0,
-            lc: item.lc || 0,
             creditDays: item.creditDays || 0,
             paidAmount: item.paidAmount || 0,
-            paymentStatus: item.paymentStatus || "", // Will have dropdown
+            paymentStatus: item.paymentStatus || "",
             remark: item.remark || "",
           });
 
-          // Format numeric cells
+          // Format numeric cells (excluding lc)
           [
             "salesQty",
             "bonusQty",
             "sellingPrice",
             "discount",
-            "lc",
             "paidAmount",
           ].forEach((key) => {
             const cell = row.getCell(key);
-            if (cell && cell.value) {
+            if (cell && cell.value !== undefined && cell.value !== null) {
               cell.numFmt = "#,##0.00";
             }
           });
@@ -117,30 +113,26 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
       }
 
       const startRow = 4;
-      const endRow = 1000; // Apply to large range for future rows
+      const endRow = 1000;
 
       // Prepare dropdown values for payment status only
       const paymentStatusTypes = statuses
         .map((s) => (typeof s === "string" ? s : s.type || ""))
         .filter(Boolean);
 
-      // Create a separate sheet for dropdown values
+      // Create a hidden dropdown sheet
       const dropdownSheet = workbook.addWorksheet("DropdownValues");
-      dropdownSheet.state = "veryHidden"; // Hide the sheet completely
+      dropdownSheet.state = "veryHidden";
 
-      // Add payment statuses to dropdown sheet
       paymentStatusTypes.forEach((status, index) => {
         dropdownSheet.getCell(`A${index + 1}`).value = status;
       });
 
-      // REMOVED: Product name dropdown setup
-
-      // Set up data validation for dropdowns - ONLY FOR PAYMENT STATUS
+      // Set up dropdown for Payment Status column
       if (paymentStatusTypes.length > 0) {
-        // Apply to entire column O (Payment Status) from row 4 to 1000
         for (let i = startRow; i <= endRow; i++) {
           try {
-            worksheet.getCell(`O${i}`).dataValidation = {
+            worksheet.getCell(`N${i}`).dataValidation = {
               type: "list",
               allowBlank: true,
               formulae: [
@@ -159,9 +151,8 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
           }
         }
 
-        // Also set data validation for the entire column (Excel table style)
         try {
-          worksheet.getColumn("O").eachCell((cell, rowNumber) => {
+          worksheet.getColumn("N").eachCell((cell, rowNumber) => {
             if (rowNumber >= startRow) {
               cell.dataValidation = {
                 type: "list",
@@ -184,7 +175,7 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
         }
       }
 
-      // === Apply borders to all existing cells ===
+      // === Apply borders to all cells ===
       worksheet.eachRow((row, rowNumber) => {
         if (rowNumber <= worksheet.rowCount) {
           row.eachCell((cell) => {
@@ -211,7 +202,6 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
       document.body.appendChild(link);
       link.click();
 
-      // Clean up
       setTimeout(() => {
         document.body.removeChild(link);
         URL.revokeObjectURL(url);

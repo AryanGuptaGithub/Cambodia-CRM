@@ -171,7 +171,6 @@ const useProductSuggestions = (products, productNames) => {
 
   const filteredItems = useMemo(() => {
     return products.map((product, productIndex) => {
-      // Get all currently selected product names except the current one
       const selectedProductNames = products
         .filter((p, idx) => idx !== productIndex && p.productName.trim() !== "")
         .map((p) => p.productName);
@@ -350,7 +349,6 @@ const useSaleForm = (initialCustomerCode = "") => {
     [expandedProductIndex]
   );
 
-  // Check if a product is filled (has product name)
   const isProductFilled = useCallback((product) => {
     return product.productName.trim() !== "";
   }, []);
@@ -797,8 +795,9 @@ const AddSale = () => {
     areCommonFieldsFilled,
     hasAtLeastOneProduct,
   } = useSaleForm(customerCode);
+  const { statuses, products, productNames, loading } = useInitialSaleData();
 
-  const { statuses, productNames, loading } = useInitialSaleData();
+  // Usage
 
   // Payment Status Suggestions
   const paymentStatusSuggestions = useSuggestions(
@@ -829,24 +828,33 @@ const AddSale = () => {
     [handleChange, paymentStatusSuggestions]
   );
 
-  // Enhanced product change handler
   const enhancedProductChange = useCallback(
     (index, field, value) => {
+      // First, update the main field (e.g., productName)
       updateProduct(index, field, value);
 
       if (field === "productName") {
-        // Always open suggestions on focus/typing, show all when empty
+        // Find the matching product and get its LC
+        const lcValue = getProductLC(value);
+        console.log("LC Value:", lcValue);
+
+        // Now correctly update the 'lc' field for the same product index
+        updateProduct(index, "lc", lcValue);
+
+        // Handle product suggestion UI
         productSuggestions.setIsOpen(index, true);
         productSuggestions.setDropdownTop(index);
-        if (value.length > 0) {
-          productSuggestions.setHighlightedIndex(index, 0);
-        } else {
-          productSuggestions.setHighlightedIndex(index, 0); // Highlight first item when showing all
-        }
+        productSuggestions.setHighlightedIndex(index, 0);
       }
     },
-    [updateProduct, productSuggestions]
+    [updateProduct, productSuggestions, products]
   );
+
+  // Move this helper out of the function if used elsewhere
+  const getProductLC = (productName) => {
+    const product = products.find((p) => p.productName === productName);
+    return product ? product.lc : "";
+  };
 
   // Handle payment status keyboard events
   const handlePaymentStatusKeyDown = useCallback(
@@ -902,8 +910,7 @@ const AddSale = () => {
     return (
       currentProduct.productName.trim() !== "" &&
       currentProduct.salesQty.trim() !== "" &&
-      currentProduct.sellingPrice.trim() !== "" &&
-      currentProduct.lc.trim() !== ""
+      currentProduct.sellingPrice.trim() !== ""
     );
   };
 
@@ -1007,11 +1014,9 @@ const AddSale = () => {
         </button>
       </div>
 
-      {/* Product Summary View */}
       <div className="mb-6">
         {form.products.map((product, index) => (
           <div key={index} className="border p-4 mb-4 rounded shadow-sm">
-            {/* Product Name and View Button */}
             <div className="flex justify-between items-center mb-2">
               <h3 className="text-lg font-semibold">
                 {product.productName || `Product ${index + 1}`}
@@ -1025,7 +1030,6 @@ const AddSale = () => {
               </button>
             </div>
 
-            {/* Conditionally render full details - only if this product is expanded */}
             {isProductExpanded(index) && (
               <div className="border rounded-lg p-4 mt-2">
                 <div className="flex justify-between items-center mb-3">
@@ -1044,7 +1048,6 @@ const AddSale = () => {
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {/* Product Name Field with Suggestions */}
                   <div className="relative flex flex-col">
                     <label className="text-sm font-medium text-gray-700 mb-1">
                       Product Name
@@ -1191,15 +1194,8 @@ const AddSale = () => {
                   <InputField
                     label="LC"
                     name={`lc_${index}`}
-                    type="text"
                     value={product.lc}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
-                        updateProduct(index, "lc", value);
-                      }
-                    }}
-                    error={errors[`lc_${index}`]}
+                    readOnly
                   />
 
                   {/* Calculated Fields */}

@@ -952,6 +952,7 @@ const Sales = () => {
 
         const rawHeaders = rows[headerRowIndex];
 
+        // 🧹 Removed 'lc' from mapping
         const columnMapping = [
           { index: 0, key: "no" },
           { index: 1, key: "recordingDate" },
@@ -964,11 +965,10 @@ const Sales = () => {
           { index: 8, key: "bonusQty" },
           { index: 9, key: "sellingPrice" },
           { index: 10, key: "discount" },
-          { index: 11, key: "lc" },
-          { index: 12, key: "creditDays" },
-          { index: 13, key: "paidAmount" },
-          { index: 14, key: "paymentStatus" },
-          { index: 15, key: "remark" },
+          { index: 11, key: "creditDays" },
+          { index: 12, key: "paidAmount" },
+          { index: 13, key: "paymentStatus" },
+          { index: 14, key: "remark" },
         ];
 
         columnMapping.forEach(({ index, key }) => {
@@ -1018,7 +1018,6 @@ const Sales = () => {
                   "bonusQty",
                   "sellingPrice",
                   "discount",
-                  "lc",
                   "paidAmount",
                   "creditDays",
                 ].includes(key)
@@ -1045,7 +1044,6 @@ const Sales = () => {
               bonusQty: item.bonusQty || 0,
               sellingPrice: item.sellingPrice || 0,
               discount: item.discount || 0,
-              lc: item.lc || 0,
               creditDays: item.creditDays || 0,
               paidAmount: item.paidAmount || 0,
               paymentStatus: item.paymentStatus || "",
@@ -1059,6 +1057,7 @@ const Sales = () => {
           showToast("warning", "No valid data records found in the Excel file");
           return;
         }
+
         setParsedData(mappedData);
       } catch (error) {
         console.error("Error reading Excel file:", error);
@@ -1094,6 +1093,7 @@ const Sales = () => {
       setIsUploading(false);
     }
   };
+
   const handleNumericInputChange = (e, updateFunc) => {
     const value = e.target.value;
     if (value === "" || /^-?\d*\.?\d*$/.test(value)) {

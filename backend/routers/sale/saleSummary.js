@@ -49,20 +49,24 @@ router.post("/sale/import", async (req, res) => {
       return isNaN(date.getTime()) ? null : date;
     };
 
+    // Preload products with lc in a map for efficiency
+    const allProducts = await Product.find(
+      {},
+      { productName: 1, lc: 1 }
+    ).lean();
+    const lcMap = {};
+    allProducts.forEach((p) => {
+      if (p.productName) {
+        lcMap[p.productName.trim().toLowerCase()] = p.lc;
+      }
+    });
+
     parsedData.forEach((item, index) => {
       const rowNumber = index + 2;
 
       const invoiceDate = parseExcelDate(Number(item.invoiceDate));
       const recordingDate = parseExcelDate(Number(item.recordingDate));
       const deliveryDate = invoiceDate;
-
-      // Credit days to dueDate
-      const creditDays =
-        item.creditDays !== "" ? Number(item.creditDays) : null;
-      const dueDate =
-        creditDays !== null && !isNaN(creditDays)
-          ? new Date(Date.now() + creditDays * 86400000)
-          : null;
 
       const addSkip = (reason) => {
         skippedRows.push({ row: rowNumber, reason, data: item });
@@ -85,13 +89,24 @@ router.post("/sale/import", async (req, res) => {
         return addSkip("Missing or invalid 'invoiceDate'");
       }
 
+      // Fetch lc from product map
+      const lookupName = item.productName
+        ? item.productName.trim().toLowerCase()
+        : "";
+      const lcFromProduct = lcMap[lookupName];
+      if (lcFromProduct === undefined || lcFromProduct === null) {
+        return addSkip(
+          `Could not find 'lc' for productName '${item.productName}'`
+        );
+      }
+
       // === Conversions and calculations ===
       const salesQty = Number(item.salesQty) || 0;
       const bonusQty = Number(item.bonusQty) || 0;
       const totalQty = salesQty + bonusQty;
       const sellingPrice = Number(item.sellingPrice) || 0;
       const discount = Number(item.discount) || 0;
-      const lc = Number(item.lc) || 0;
+      const lc = Number(lcFromProduct) || 0; // using fetched lc
       const paidAmount = Number(item.paidAmount) || 0;
 
       const amount = salesQty * sellingPrice;
@@ -100,7 +115,14 @@ router.post("/sale/import", async (req, res) => {
       const profitLoss = netSellingAmount - totalQty * lc;
       const dueAmount = netSellingAmount - paidAmount;
 
-      // === Final doc ===
+      // Parse creditDays & dueDate
+      const creditDays =
+        item.creditDays !== "" ? Number(item.creditDays) : null;
+      const dueDate =
+        creditDays !== null && !isNaN(creditDays)
+          ? new Date(Date.now() + creditDays * 86400000)
+          : null;
+
       validDocs.push({
         recordingDate,
         invoiceNumber: item.invoiceNumber || "",
@@ -130,7 +152,8 @@ router.post("/sale/import", async (req, res) => {
 
     if (validDocs.length === 0) {
       return res.status(400).json({
-        message: "❌ No valid rows to import. Please check required fields.",
+        message:
+          "❌ No valid rows to import. Please check required fields and product lc mapping.",
         skippedRows,
       });
     }
