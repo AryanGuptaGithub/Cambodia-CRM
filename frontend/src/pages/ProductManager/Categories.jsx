@@ -3,7 +3,7 @@ import { Search, Plus, Upload, Edit, Trash2, X } from "lucide-react";
 import parenteralLogo from "../../../public/categories/parenteral.jpg";
 import liquidLogo from "../../../public/categories/liquid.jpg";
 import solidLogo from "../../../public/categories/solid.jpg";
-import  ("../ProductManager/categories.css");
+import("../ProductManager/categories.css");
 import SampleExcelDownloadProduct from "../../excels/SampleExcelDownloadProduct";
 
 const initialCategories = [
@@ -157,7 +157,8 @@ const Categories = () => {
                   </td>
                   <td className="px-4 py-3">{category.name}</td>
                   <td className="px-4 py-3">
-                    <img className="h-8 category-width"
+                    <img
+                      className="h-8 category-width"
                       src={category.logo}
                       alt={category.name}
                     />
@@ -228,7 +229,7 @@ const Categories = () => {
               <X size={20} />
             </button>
             <h2 className="text-lg font-semibold mb-4">Import Categories</h2>
-         
+
             <input
               type="file"
               accept=".csv, .xlsx"
@@ -244,7 +245,6 @@ const Categories = () => {
               </button>
               <button
                 onClick={() => {
-                  console.log("Uploaded File:", file);
                   setShowImportModal(false);
                 }}
                 className="bg-blue-600 text-white px-4 py-2 rounded"
@@ -323,7 +323,6 @@ const Categories = () => {
               </button>
               <button
                 onClick={() => {
-                  console.log("Creating category:", newCategory);
                   setShowAddCategoryModal(false);
                 }}
                 className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg"

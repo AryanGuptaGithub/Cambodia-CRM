@@ -1094,6 +1094,12 @@ const Sales = () => {
       setIsUploading(false);
     }
   };
+  const handleNumericInputChange = (e, updateFunc) => {
+    const value = e.target.value;
+    if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+      updateFunc(e);
+    }
+  };
 
   return (
     <div className="p-6">
@@ -1608,7 +1614,9 @@ const Sales = () => {
                       type="text"
                       name="invoiceNumber"
                       value={form.invoiceNumber}
-                      onChange={enhancedHandleChange}
+                      onChange={(e) =>
+                        handleNumericInputChange(e, enhancedHandleChange)
+                      }
                       className="w-full border px-3 py-2 rounded-lg capitalize"
                       autoComplete="off"
                     />
@@ -1649,7 +1657,9 @@ const Sales = () => {
                       type="text"
                       name="customerCode"
                       value={form.customerCode}
-                      onChange={enhancedHandleChange}
+                      onChange={(e) =>
+                        handleNumericInputChange(e, enhancedHandleChange)
+                      }
                       className="w-full border px-3 py-2 rounded-lg capitalize"
                       autoComplete="off"
                     />
@@ -1701,7 +1711,9 @@ const Sales = () => {
                       type="text"
                       name="salesQty"
                       value={form.salesQty}
-                      onChange={enhancedHandleChange}
+                      onChange={(e) =>
+                        handleNumericInputChange(e, enhancedHandleChange)
+                      }
                       className="w-full border px-3 py-2 rounded-lg"
                       autoComplete="off"
                     />
@@ -1715,7 +1727,9 @@ const Sales = () => {
                       type="text"
                       name="bonusQty"
                       value={form.bonusQty}
-                      onChange={enhancedHandleChange}
+                      onChange={(e) =>
+                        handleNumericInputChange(e, enhancedHandleChange)
+                      }
                       className="w-full border px-3 py-2 rounded-lg"
                       autoComplete="off"
                     />
@@ -1729,7 +1743,7 @@ const Sales = () => {
                       type="text"
                       value={form.totalQty}
                       disabled
-                      className="w-full border px-3 py-2 rounded-lg bg-gray-100"
+                      className="w-full border px-3 py-2 rounded-lg bg-gray-200"
                     />
                   </div>
 
@@ -1741,7 +1755,9 @@ const Sales = () => {
                       type="text"
                       name="sellingPrice"
                       value={form.sellingPrice}
-                      onChange={enhancedHandleChange}
+                      onChange={(e) =>
+                        handleNumericInputChange(e, enhancedHandleChange)
+                      }
                       className="w-full border px-3 py-2 rounded-lg"
                       autoComplete="off"
                     />
@@ -1765,7 +1781,9 @@ const Sales = () => {
                       type="text"
                       name="discount"
                       value={form.discount}
-                      onChange={enhancedHandleChange}
+                      onChange={(e) =>
+                        handleNumericInputChange(e, enhancedHandleChange)
+                      }
                       className="w-full border px-3 py-2 rounded-lg"
                       autoComplete="off"
                     />
@@ -1815,7 +1833,9 @@ const Sales = () => {
                       type="text"
                       name="creditDays"
                       value={form.creditDays}
-                      onChange={enhancedHandleChange}
+                      onChange={(e) =>
+                        handleNumericInputChange(e, enhancedHandleChange)
+                      }
                       className="w-full border px-3 py-2 rounded-lg"
                       autoComplete="off"
                     />
@@ -1857,7 +1877,9 @@ const Sales = () => {
                       type="text"
                       name="paidAmount"
                       value={form.paidAmount}
-                      onChange={enhancedHandleChange}
+                      onChange={(e) =>
+                        handleNumericInputChange(e, enhancedHandleChange)
+                      }
                       className="w-full border px-3 py-2 rounded-lg"
                       autoComplete="off"
                     />

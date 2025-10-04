@@ -16,7 +16,7 @@ const SaleReturn = () => {
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
   const showToast = (type, message) => {
-    console.log(`${type.toUpperCase()}: ${message}`);
+    
   };
 
   const fetchSaleReturn = async () => {

@@ -186,7 +186,7 @@ const AddDailReports = () => {
     const start = (currentPage - 1) * dailyReportsPerPage;
     return filteredDailyReports.slice(start, start + dailyReportsPerPage);
   }, [filteredDailyReports, currentPage, dailyReportsPerPage]);
-  console.log('values of currentDailyReports', currentDailyReports);
+  
 
   const totalPages = useMemo(
     () => Math.ceil(filteredDailyReports.length / dailyReportsPerPage),

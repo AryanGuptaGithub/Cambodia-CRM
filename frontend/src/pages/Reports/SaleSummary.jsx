@@ -480,7 +480,7 @@ const SaleSummary = () => {
     setIsEditModalOpen(true);
   };
 
-    const editCombineSaleSammaryReports = (product) => {
+  const editCombineSaleSammaryReports = (product) => {
     setForm({
       productName: product.productName || "",
       salesQuantity: product.salesQuantity || 0,
@@ -736,7 +736,6 @@ const SaleSummary = () => {
             <tbody>
               {currentDailySummaries.length > 0 ? (
                 currentDailySummaries.map((product, index) => {
-                  console.log("values of actve", selectedTab);
                   const entryDate = formatDateToReadable(product.date);
                   const isSelected = selected.some(
                     (s) => s._id === product._id
@@ -1252,7 +1251,7 @@ const SaleSummary = () => {
           </div>,
           document.body
         )}
-        {isViewCombineModalOpen &&
+      {isViewCombineModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
             {/* Background Overlay */}

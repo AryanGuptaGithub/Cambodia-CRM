@@ -298,19 +298,17 @@ function Purchase() {
   const editPurchase = (purchase) => {
     setForm({ ...purchase });
     setIsOpen(true);
-    console.log("values of pur", purchase);
     setIsEditModalOpen(true);
   };
 
   const handleView = (purchases) => {
-    console.log("values of pures", purchases);
     setForm({ ...purchases });
     setIsOpen(true);
     setIsViewModalOpen(true);
   };
 
   const deletePurchase = async (purchase) => {
-    console.log("avlues of p", purchase);
+    
     if (!purchase._id) return;
     const confirmDelete = await confirmDialog({
       title: "Delete",

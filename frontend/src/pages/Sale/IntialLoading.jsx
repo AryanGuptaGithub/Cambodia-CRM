@@ -15,7 +15,7 @@ export const useApi = () => {
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      
+
       return await response.json();
     } catch (error) {
       console.error(`API Error (${endpoint}):`, error);
@@ -42,7 +42,16 @@ export const useInitialSaleData = () => {
         ]);
 
         setStatuses(statusesData);
-        setProductNames(productsData?.productNames || []);
+        const uniqueNames = Array.from(
+          new Map(
+            (productsData?.productNames || []).map((name) => [
+              name.trim().toLowerCase(),
+              name.trim(),
+            ])
+          ).values()
+        );
+
+        setProductNames(uniqueNames);
       } catch (error) {
         showToast("error", "Failed to load initial data");
       } finally {

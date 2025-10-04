@@ -40,7 +40,7 @@ const INITIAL_FORM_STATE = {
   deliveryDate: "",
   paidAmount: "",
   dueAmount: "",
-  totalAmount: "0.00", // Added totalAmount field
+  totalAmount: "0.00",
   products: [
     {
       ...INITIAL_PRODUCT_STATE,
@@ -66,6 +66,10 @@ const useSuggestions = (items, filterField = "type", inputValue = "") => {
         .filter((item) => {
           const fieldValue =
             typeof item === "string" ? item : item[filterField];
+          // Show all items when input is empty, otherwise filter
+          if (inputValue.trim() === "") {
+            return true;
+          }
           return fieldValue.toLowerCase().includes(inputValue.toLowerCase());
         })
         .sort((a, b) => {
@@ -111,10 +115,13 @@ const useSuggestions = (items, filterField = "type", inputValue = "") => {
             const value =
               typeof selected === "string" ? selected : selected[filterField];
             onSelect(value);
+            setIsOpen(false);
+            setHighlightedIndex(-1);
           }
           break;
         case "Escape":
           setIsOpen(false);
+          setHighlightedIndex(-1);
           break;
         default:
           break;
@@ -163,10 +170,26 @@ const useProductSuggestions = (products, productNames) => {
   }, [products.length]);
 
   const filteredItems = useMemo(() => {
-    return products.map((product) =>
-      productNames
+    return products.map((product, productIndex) => {
+      // Get all currently selected product names except the current one
+      const selectedProductNames = products
+        .filter((p, idx) => idx !== productIndex && p.productName.trim() !== "")
+        .map((p) => p.productName);
+
+      return productNames
         .filter((item) => {
           const fieldValue = typeof item === "string" ? item : item.name;
+          const itemName = typeof item === "string" ? item : item.name;
+
+          // Filter out already selected products (except the current one)
+          if (selectedProductNames.includes(itemName)) {
+            return false;
+          }
+
+          // Show all items when input is empty, otherwise filter
+          if (product.productName.trim() === "") {
+            return true;
+          }
           return fieldValue
             .toLowerCase()
             .includes(product.productName.toLowerCase());
@@ -175,8 +198,8 @@ const useProductSuggestions = (products, productNames) => {
           const aVal = typeof a === "string" ? a : a.name;
           const bVal = typeof b === "string" ? b : b.name;
           return aVal.localeCompare(bVal);
-        })
-    );
+        });
+    });
   }, [products, productNames]);
 
   const setIsOpen = useCallback((index, isOpen) => {
@@ -240,10 +263,13 @@ const useProductSuggestions = (products, productNames) => {
             const value =
               typeof selected === "string" ? selected : selected.name;
             onSelect(value);
+            setIsOpen(index, false);
+            setHighlightedIndex(index, -1);
           }
           break;
         case "Escape":
           setIsOpen(index, false);
+          setHighlightedIndex(index, -1);
           break;
         default:
           break;
@@ -284,7 +310,7 @@ const useSaleForm = (initialCustomerCode = "") => {
     customerCode: initialCustomerCode,
   });
   const [errors, setErrors] = useState({});
-  const [expandedProductIndex, setExpandedProductIndex] = useState(0); // Track only one expanded product
+  const [expandedProductIndex, setExpandedProductIndex] = useState(0);
 
   const parseNumber = useCallback((val) => {
     const num = parseFloat(val);
@@ -294,7 +320,7 @@ const useSaleForm = (initialCustomerCode = "") => {
   // Calculate total amount from all products
   const calculateTotalAmount = useCallback((products) => {
     const total = products.reduce((sum, product) => {
-      return sum + parseFloat(product.amount || 0);
+      return sum + parseFloat(product.netSellingAmount || 0);
     }, 0);
     return total.toFixed(2);
   }, []);
@@ -313,19 +339,42 @@ const useSaleForm = (initialCustomerCode = "") => {
 
   // Toggle product view - only one product can be expanded at a time
   const toggleView = useCallback((index) => {
-    setExpandedProductIndex((prevIndex) => 
-      prevIndex === index ? -1 : index
-    );
+    setExpandedProductIndex((prevIndex) => (prevIndex === index ? -1 : index));
   }, []);
 
   // Check if a product is expanded
-  const isProductExpanded = useCallback((index) => {
-    return expandedProductIndex === index;
-  }, [expandedProductIndex]);
+  const isProductExpanded = useCallback(
+    (index) => {
+      return expandedProductIndex === index;
+    },
+    [expandedProductIndex]
+  );
 
   // Check if a product is filled (has product name)
   const isProductFilled = useCallback((product) => {
     return product.productName.trim() !== "";
+  }, []);
+
+  // Check if all required common fields are filled
+  const areCommonFieldsFilled = useCallback((currentForm) => {
+    const requiredFields = [
+      "recordingDate",
+      "invoiceNumber",
+      "invoiceDate",
+      "mrName",
+      "customerCode",
+      "paymentStatus",
+    ];
+
+    return requiredFields.every(
+      (field) =>
+        currentForm[field] && currentForm[field].toString().trim() !== ""
+    );
+  }, []);
+
+  // Check if at least one product is filled
+  const hasAtLeastOneProduct = useCallback((products) => {
+    return products.some((product) => product.productName.trim() !== "");
   }, []);
 
   // Add new product
@@ -342,18 +391,20 @@ const useSaleForm = (initialCustomerCode = "") => {
           profitLoss: "0.00",
         },
       ];
-      
+
       const totalAmount = calculateTotalAmount(newProducts);
       const totalNetAmount = calculateTotalNetAmount(newProducts);
-      
+
       return {
         ...prev,
         products: newProducts,
         totalAmount,
-        dueAmount: (parseFloat(totalNetAmount) - parseFloat(prev.paidAmount || 0)).toFixed(2),
+        dueAmount: (
+          parseFloat(totalNetAmount) - parseFloat(prev.paidAmount || 0)
+        ).toFixed(2),
       };
     });
-    
+
     // Expand the new product and collapse others
     setExpandedProductIndex(form.products.length);
   }, [form.products.length, calculateTotalAmount, calculateTotalNetAmount]);
@@ -363,27 +414,27 @@ const useSaleForm = (initialCustomerCode = "") => {
     (index) => {
       if (form.products.length > 1) {
         const removedProduct = form.products[index];
-        
+
         setForm((prev) => {
           const newProducts = prev.products.filter((_, i) => i !== index);
           const totalAmount = calculateTotalAmount(newProducts);
           const totalNetAmount = calculateTotalNetAmount(newProducts);
-          
+
           return {
             ...prev,
             products: newProducts,
             totalAmount,
-            dueAmount: (parseFloat(totalNetAmount) - parseFloat(prev.paidAmount || 0)).toFixed(2),
+            dueAmount: (
+              parseFloat(totalNetAmount) - parseFloat(prev.paidAmount || 0)
+            ).toFixed(2),
           };
         });
 
         // Adjust expanded index after removal
         setExpandedProductIndex((prevIndex) => {
           if (prevIndex === index) {
-            // If the removed product was expanded, expand the first product
             return 0;
           } else if (prevIndex > index) {
-            // If expanded product was after the removed one, adjust index
             return prevIndex - 1;
           }
           return prevIndex;
@@ -394,28 +445,33 @@ const useSaleForm = (initialCustomerCode = "") => {
   );
 
   // Update product field
-  const updateProduct = useCallback((index, field, value) => {
-    setForm((prev) => {
-      const updatedProducts = [...prev.products];
-      updatedProducts[index] = { ...updatedProducts[index], [field]: value };
+  const updateProduct = useCallback(
+    (index, field, value) => {
+      setForm((prev) => {
+        const updatedProducts = [...prev.products];
+        updatedProducts[index] = { ...updatedProducts[index], [field]: value };
 
-      // Recalculate derived fields for this product
-      const recalculatedProducts = updatedProducts.map((product) =>
-        calculateProductFields(product)
-      );
+        // Recalculate derived fields for this product
+        const recalculatedProducts = updatedProducts.map((product) =>
+          calculateProductFields(product)
+        );
 
-      // Recalculate total amounts
-      const totalAmount = calculateTotalAmount(recalculatedProducts);
-      const totalNetAmount = calculateTotalNetAmount(recalculatedProducts);
+        // Recalculate total amounts
+        const totalAmount = calculateTotalAmount(recalculatedProducts);
+        const totalNetAmount = calculateTotalNetAmount(recalculatedProducts);
 
-      return {
-        ...prev,
-        products: recalculatedProducts,
-        totalAmount,
-        dueAmount: (parseFloat(totalNetAmount) - parseFloat(prev.paidAmount || 0)).toFixed(2),
-      };
-    });
-  }, [calculateTotalAmount, calculateTotalNetAmount]);
+        return {
+          ...prev,
+          products: recalculatedProducts,
+          totalAmount,
+          dueAmount: (
+            parseFloat(totalNetAmount) - parseFloat(prev.paidAmount || 0)
+          ).toFixed(2),
+        };
+      });
+    },
+    [calculateTotalAmount, calculateTotalNetAmount]
+  );
 
   // Calculate derived fields for a single product
   const calculateProductFields = useCallback((product) => {
@@ -468,7 +524,9 @@ const useSaleForm = (initialCustomerCode = "") => {
       if (["paidAmount"].includes(name)) {
         const totalNetAmount = calculateTotalNetAmount(currentForm.products);
         const paidAmount = parseNumber(value);
-        updatedForm.dueAmount = (parseFloat(totalNetAmount) - paidAmount).toFixed(2);
+        updatedForm.dueAmount = (
+          parseFloat(totalNetAmount) - paidAmount
+        ).toFixed(2);
       }
 
       return updatedForm;
@@ -537,6 +595,8 @@ const useSaleForm = (initialCustomerCode = "") => {
     toggleView,
     isProductExpanded,
     isProductFilled,
+    areCommonFieldsFilled,
+    hasAtLeastOneProduct,
     setErrors,
   };
 };
@@ -570,7 +630,7 @@ const InputField = React.memo(
         readOnly={readOnly}
         className={`border rounded-md px-2 py-1 ${className} ${
           error ? "border-red-500" : "border-gray-300"
-        } ${readOnly ? "bg-gray-100" : ""}`}
+        } ${readOnly ? "bg-gray-200" : ""}`}
         autoComplete="off"
         tabIndex={readOnly ? -1 : 0}
         {...props}
@@ -624,7 +684,7 @@ const DatePickerField = React.memo(
         readOnly={readOnly}
         className={`w-full border rounded-md px-2 py-1 ${
           error ? "border-red-500" : "border-gray-300"
-        } ${readOnly ? "bg-gray-100" : ""} ${className}`}
+        } ${readOnly ? "bg-gray-200" : ""} ${className}`}
         autoComplete="off"
       />
       {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
@@ -632,7 +692,7 @@ const DatePickerField = React.memo(
   )
 );
 
-// Suggestion Input Component
+// Enhanced Suggestion Input Component
 const SuggestionInput = React.memo(
   ({
     label,
@@ -651,6 +711,7 @@ const SuggestionInput = React.memo(
     getSuggestionValue = (item) => item,
     getSuggestionDisplay = (item) => item,
     setHighlightedIndex,
+    handleKeyDown,
   }) => {
     const handleMouseEnter = useCallback(
       (index) => {
@@ -665,48 +726,6 @@ const SuggestionInput = React.memo(
         onSuggestionSelect && onSuggestionSelect(value);
       },
       [onSuggestionSelect, getSuggestionValue]
-    );
-
-    const handleKeyDown = useCallback(
-      (e) => {
-        if (!isOpen || suggestions.length === 0) return;
-
-        switch (e.key) {
-          case "ArrowDown":
-            e.preventDefault();
-            setHighlightedIndex((prev) =>
-              prev < suggestions.length - 1 ? prev + 1 : 0
-            );
-            break;
-          case "ArrowUp":
-            e.preventDefault();
-            setHighlightedIndex((prev) =>
-              prev > 0 ? prev - 1 : suggestions.length - 1
-            );
-            break;
-          case "Enter":
-            e.preventDefault();
-            if (
-              highlightedIndex >= 0 &&
-              highlightedIndex < suggestions.length
-            ) {
-              const selectedItem = suggestions[highlightedIndex];
-              const value = getSuggestionValue(selectedItem);
-              onSuggestionSelect && onSuggestionSelect(value);
-            }
-            break;
-          default:
-            break;
-        }
-      },
-      [
-        highlightedIndex,
-        suggestions,
-        isOpen,
-        onSuggestionSelect,
-        getSuggestionValue,
-        setHighlightedIndex,
-      ]
     );
 
     return (
@@ -728,9 +747,6 @@ const SuggestionInput = React.memo(
           }`}
           placeholder="Type to search..."
           autoComplete="off"
-          aria-autocomplete="list"
-          aria-expanded={isOpen}
-          role="combobox"
         />
         {isOpen && suggestions.length > 0 && (
           <ul
@@ -778,6 +794,8 @@ const AddSale = () => {
     toggleView,
     isProductExpanded,
     isProductFilled,
+    areCommonFieldsFilled,
+    hasAtLeastOneProduct,
   } = useSaleForm(customerCode);
 
   const { statuses, productNames, loading } = useInitialSaleData();
@@ -792,17 +810,20 @@ const AddSale = () => {
   // Product Suggestions using custom hook for product rows
   const productSuggestions = useProductSuggestions(form.products, productNames);
 
-  // Enhanced handleChange to handle suggestion opening
+  // Enhanced handleChange for payment status
   const enhancedHandleChange = useCallback(
     (e) => {
       const { name, value } = e.target;
-
       handleChange(e);
 
-      // Auto-open suggestions when typing in these fields
-      if (name === "paymentStatus" && value.length > 0) {
+      if (name === "paymentStatus") {
+        // Always open suggestions on focus/typing, show all when empty
         paymentStatusSuggestions.setIsOpen(true);
-        paymentStatusSuggestions.setHighlightedIndex(-1);
+        if (value.trim().length > 0) {
+          paymentStatusSuggestions.setHighlightedIndex(0);
+        } else {
+          paymentStatusSuggestions.setHighlightedIndex(0); // Highlight first item when showing all
+        }
       }
     },
     [handleChange, paymentStatusSuggestions]
@@ -813,14 +834,54 @@ const AddSale = () => {
     (index, field, value) => {
       updateProduct(index, field, value);
 
-      // Auto-open product name suggestions when typing
-      if (field === "productName" && value.length > 0) {
+      if (field === "productName") {
+        // Always open suggestions on focus/typing, show all when empty
         productSuggestions.setIsOpen(index, true);
-        productSuggestions.setHighlightedIndex(index, -1);
         productSuggestions.setDropdownTop(index);
+        if (value.length > 0) {
+          productSuggestions.setHighlightedIndex(index, 0);
+        } else {
+          productSuggestions.setHighlightedIndex(index, 0); // Highlight first item when showing all
+        }
       }
     },
     [updateProduct, productSuggestions]
+  );
+
+  // Handle payment status keyboard events
+  const handlePaymentStatusKeyDown = useCallback(
+    (e) => {
+      paymentStatusSuggestions.handleKeyDown(e, (value) => {
+        updateFormField("paymentStatus", value);
+      });
+    },
+    [paymentStatusSuggestions, updateFormField]
+  );
+
+  // Handle product name keyboard events for specific index
+  const handleProductNameKeyDown = useCallback(
+    (index, e) => {
+      productSuggestions.handleKeyDown(index, e, (value) => {
+        enhancedProductChange(index, "productName", value);
+      });
+    },
+    [productSuggestions, enhancedProductChange]
+  );
+
+  // Handle payment status focus - show all suggestions when focused
+  const handlePaymentStatusFocus = useCallback(() => {
+    paymentStatusSuggestions.setIsOpen(true);
+    paymentStatusSuggestions.setHighlightedIndex(0);
+  }, [paymentStatusSuggestions]);
+
+  // Handle product name focus - show all suggestions when focused
+  const handleProductNameFocus = useCallback(
+    (index) => {
+      productSuggestions.setIsOpen(index, true);
+      productSuggestions.setDropdownTop(index);
+      productSuggestions.setHighlightedIndex(index, 0);
+    },
+    [productSuggestions]
   );
 
   const handleProductRowHighlight = useCallback(
@@ -829,6 +890,22 @@ const AddSale = () => {
     },
     [productSuggestions]
   );
+
+  // Check if "Add Sale" button should be enabled
+  const isAddSaleEnabled = useMemo(() => {
+    return areCommonFieldsFilled(form) && hasAtLeastOneProduct(form.products);
+  }, [form, areCommonFieldsFilled, hasAtLeastOneProduct]);
+
+  // Check if "Add Product" button should be enabled
+  const isCurrentProductValid = () => {
+    const currentProduct = form.products[form.products.length - 1];
+    return (
+      currentProduct.productName.trim() !== "" &&
+      currentProduct.salesQty.trim() !== "" &&
+      currentProduct.sellingPrice.trim() !== "" &&
+      currentProduct.lc.trim() !== ""
+    );
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -868,7 +945,7 @@ const AddSale = () => {
         deliveryDate: form.deliveryDate,
         paidAmount: form.paidAmount,
         dueAmount: form.dueAmount,
-        totalAmount: form.totalAmount, // Include totalAmount in submission
+        totalAmount: form.totalAmount,
         paymentStatus: form.paymentStatus,
         remark: form.remark,
       }));
@@ -895,16 +972,6 @@ const AddSale = () => {
     }
   };
 
-  const isCurrentProductValid = () => {
-    const currentProduct = form.products[form.products.length - 1];
-    return (
-      currentProduct.productName.trim() !== "" &&
-      currentProduct.salesQty.trim() !== "" &&
-      currentProduct.sellingPrice.trim() !== "" &&
-      currentProduct.lc.trim() !== ""
-    );
-  };
-
   if (loading) {
     return (
       <div className="max-w-5xl mx-auto p-6 bg-white rounded-2xl shadow">
@@ -914,6 +981,12 @@ const AddSale = () => {
       </div>
     );
   }
+  const handleNumericInputChange = (e, updateFunc) => {
+    const value = e.target.value;
+    if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+      updateFunc(e);
+    }
+  };
 
   return (
     <div className="max-w-5xl mx-auto p-6 bg-white rounded-2xl shadow">
@@ -988,15 +1061,8 @@ const AddSale = () => {
                           e.target.value
                         )
                       }
-                      onKeyDown={(e) =>
-                        productSuggestions.handleKeyDown(index, e, (value) =>
-                          enhancedProductChange(index, "productName", value)
-                        )
-                      }
-                      onFocus={() => {
-                        productSuggestions.setIsOpen(index, true);
-                        productSuggestions.setDropdownTop(index);
-                      }}
+                      onKeyDown={(e) => handleProductNameKeyDown(index, e)}
+                      onFocus={() => handleProductNameFocus(index)}
                       onBlur={() =>
                         setTimeout(
                           () => productSuggestions.setIsOpen(index, false),
@@ -1008,7 +1074,7 @@ const AddSale = () => {
                           ? "border-red-500"
                           : "border-gray-300"
                       }`}
-                      placeholder="Type to search..."
+                      placeholder="Type to search or click to see all options"
                       autoComplete="off"
                     />
                     {productSuggestions.suggestionsList[index]?.isOpen &&
@@ -1069,9 +1135,12 @@ const AddSale = () => {
                     name={`salesQty_${index}`}
                     type="text"
                     value={product.salesQty}
-                    onChange={(e) =>
-                      updateProduct(index, "salesQty", e.target.value)
-                    }
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+                        updateProduct(index, "salesQty", value);
+                      }
+                    }}
                     error={errors[`salesQty_${index}`]}
                     required
                   />
@@ -1081,9 +1150,12 @@ const AddSale = () => {
                     name={`bonusQty_${index}`}
                     type="text"
                     value={product.bonusQty}
-                    onChange={(e) =>
-                      updateProduct(index, "bonusQty", e.target.value)
-                    }
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+                        updateProduct(index, "bonusQty", value);
+                      }
+                    }}
                     error={errors[`bonusQty_${index}`]}
                   />
 
@@ -1092,9 +1164,12 @@ const AddSale = () => {
                     name={`sellingPrice_${index}`}
                     type="text"
                     value={product.sellingPrice}
-                    onChange={(e) =>
-                      updateProduct(index, "sellingPrice", e.target.value)
-                    }
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+                        updateProduct(index, "sellingPrice", value);
+                      }
+                    }}
                     error={errors[`sellingPrice_${index}`]}
                     required
                   />
@@ -1104,9 +1179,12 @@ const AddSale = () => {
                     name={`discount_${index}`}
                     type="text"
                     value={product.discount}
-                    onChange={(e) =>
-                      updateProduct(index, "discount", e.target.value)
-                    }
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+                        updateProduct(index, "discount", value);
+                      }
+                    }}
                     error={errors[`discount_${index}`]}
                   />
 
@@ -1115,7 +1193,12 @@ const AddSale = () => {
                     name={`lc_${index}`}
                     type="text"
                     value={product.lc}
-                    onChange={(e) => updateProduct(index, "lc", e.target.value)}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+                        updateProduct(index, "lc", value);
+                      }
+                    }}
                     error={errors[`lc_${index}`]}
                   />
 
@@ -1173,7 +1256,7 @@ const AddSale = () => {
             label="Invoice Number"
             name="invoiceNumber"
             value={form.invoiceNumber}
-            onChange={enhancedHandleChange}
+            onChange={(e) => handleNumericInputChange(e, enhancedHandleChange)}
             error={errors.invoiceNumber}
             required
           />
@@ -1198,7 +1281,7 @@ const AddSale = () => {
             label="Customer Code"
             name="customerCode"
             value={form.customerCode}
-            onChange={enhancedHandleChange}
+            onChange={(e) => handleNumericInputChange(e, enhancedHandleChange)}
             error={errors.customerCode}
             required
           />
@@ -1220,7 +1303,7 @@ const AddSale = () => {
             name="creditDays"
             type="text"
             value={form.creditDays}
-            onChange={enhancedHandleChange}
+            onChange={(e) => handleNumericInputChange(e, enhancedHandleChange)}
             error={errors.creditDays}
           />
 
@@ -1248,7 +1331,7 @@ const AddSale = () => {
             name="paidAmount"
             type="text"
             value={form.paidAmount}
-            onChange={enhancedHandleChange}
+            onChange={(e) => handleNumericInputChange(e, enhancedHandleChange)}
             error={errors.paidAmount}
           />
 
@@ -1272,7 +1355,7 @@ const AddSale = () => {
             highlightedIndex={paymentStatusSuggestions.highlightedIndex}
             inputRef={paymentStatusSuggestions.inputRef}
             dropdownTop={paymentStatusSuggestions.dropdownTop}
-            onFocus={() => paymentStatusSuggestions.setIsOpen(true)}
+            onFocus={handlePaymentStatusFocus}
             onBlur={() =>
               setTimeout(() => paymentStatusSuggestions.setIsOpen(false), 150)
             }
@@ -1282,6 +1365,7 @@ const AddSale = () => {
             getSuggestionValue={(item) => item.type}
             getSuggestionDisplay={(item) => item.type}
             setHighlightedIndex={paymentStatusSuggestions.setHighlightedIndex}
+            handleKeyDown={handlePaymentStatusKeyDown}
             required
           />
 
@@ -1299,7 +1383,12 @@ const AddSale = () => {
         <div className="flex justify-end mt-6 gap-3">
           <button
             type="submit"
-            className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg shadow transition-colors cursor-pointer"
+            disabled={!isAddSaleEnabled}
+            className={`flex items-center gap-2 px-6 py-2 rounded-lg shadow transition-colors ${
+              isAddSaleEnabled
+                ? "bg-green-600 hover:bg-green-700 text-white cursor-pointer"
+                : "bg-gray-400 text-white opacity-50 cursor-not-allowed"
+            }`}
           >
             Add Sale
           </button>

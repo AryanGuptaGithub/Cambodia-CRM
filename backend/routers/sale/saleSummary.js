@@ -20,7 +20,7 @@ const excelDateToJSDate = (serial) => {
   return !isNaN(parsed) ? parsed : null;
 };
 
- const formatDateToReadable = (isoString) => {
+const formatDateToReadable = (isoString) => {
   if (!isoString) return "";
 
   const date = new Date(isoString);
@@ -245,13 +245,46 @@ router.delete("/sales", async (req, res) => {
 
 router.post("/sales", async (req, res) => {
   try {
-    const newSaleData = req.body;
-    const newSale = new SaleSummary(newSaleData);
-    const savedSale = await newSale.save();
+    // Assuming req.body is an array of sale items, not a single object
+    const rawSalesData = req.body;
+
+    // Validate and convert each sale item
+    const newSaleData = rawSalesData.map((item) => ({
+      recordingDate: new Date(item.recordingDate),
+      invoiceNumber: item.invoiceNumber,
+      invoiceDate: new Date(item.invoiceDate),
+      mrName: item.mrName,
+      customerCode: item.customerCode,
+      productName: item.productName,
+      salesQty: Number(item.salesQty),
+      bonusQty: Number(item.bonusQty) || 0,
+      totalQty: Number(item.totalQty),
+      sellingPrice: Number(item.sellingPrice),
+      amount: Number(item.amount),
+      discount: Number(item.discount) || 0,
+      netSellingAmount: Number(item.netSellingAmount),
+      averageUnitPrice: Number(item.averageUnitPrice),
+      lc: Number(item.lc),
+      profitLoss: Number(item.profitLoss) || 0,
+      creditDays: item.creditDays ? Number(item.creditDays) : null,
+      dueDate: item.dueDate ? new Date(item.dueDate) : null,
+      deliveryDate: item.deliveryDate ? new Date(item.deliveryDate) : null,
+      paidAmount: Number(item.paidAmount) || 0,
+      dueAmount: Number(item.dueAmount) || 0,
+      totalAmount: Number(item.totalAmount), // If used in schema or elsewhere
+      paymentStatus: item.paymentStatus,
+      remark: item.remark || "",
+    }));
+
+    // If your schema expects one document per sale item:
+    // You can save each item separately or use insertMany for bulk insert
+
+    // Example with insertMany
+    const savedSales = await SaleSummary.insertMany(newSaleData);
 
     res.status(201).json({
-      message: `Sale <b>${newSaleData.productName} - ${newSaleData.invoiceNumber}</b> added successfully`,
-      sale: savedSale,
+      message: `Sales added successfully`,
+      sales: savedSales,
     });
   } catch (error) {
     console.error("Sale creation error:", error);
@@ -362,7 +395,9 @@ router.post("/sales/download-excel", async (req, res) => {
 
     worksheet.mergeCells("A2:AB2");
     const subtitleCell = worksheet.getCell("A2");
-    subtitleCell.value = `Sale Summary List (${formatDateToReadable(startDate)} to ${formatDateToReadable(endDate)})`;
+    subtitleCell.value = `Sale Summary List (${formatDateToReadable(
+      startDate
+    )} to ${formatDateToReadable(endDate)})`;
     subtitleCell.font = { bold: true, size: 14 };
     subtitleCell.alignment = { vertical: "middle", horizontal: "center" };
     worksheet.getRow(2).height = 20;
@@ -401,21 +436,36 @@ router.post("/sales/download-excel", async (req, res) => {
 
     // === Header Row ===
     const headerRow = worksheet.getRow(3);
-    headerRow.values = worksheet.columns.map((col) => col.key.replace(/([A-Z])/g, " $1").replace(/^./, str => str.toUpperCase()));
+    headerRow.values = worksheet.columns.map((col) =>
+      col.key
+        .replace(/([A-Z])/g, " $1")
+        .replace(/^./, (str) => str.toUpperCase())
+    );
     headerRow.font = { bold: true };
     headerRow.alignment = { vertical: "middle", horizontal: "center" };
     headerRow.height = 20;
 
     // === Format Columns ===
-    ["recordingDate", "invoiceDate", "dueDate", "deliveryDate"].forEach((key) => {
-      const col = worksheet.getColumn(key);
-      if (col) col.numFmt = "dd-mmm-yy";
-    });
+    ["recordingDate", "invoiceDate", "dueDate", "deliveryDate"].forEach(
+      (key) => {
+        const col = worksheet.getColumn(key);
+        if (col) col.numFmt = "dd-mmm-yy";
+      }
+    );
 
     [
-      "salesQty", "bonusQty", "totalQty", "sellingPrice", "amount",
-      "discount", "netSellingAmount", "averageUnitPrice", "lc",
-      "profitLoss", "paidAmount", "dueAmount"
+      "salesQty",
+      "bonusQty",
+      "totalQty",
+      "sellingPrice",
+      "amount",
+      "discount",
+      "netSellingAmount",
+      "averageUnitPrice",
+      "lc",
+      "profitLoss",
+      "paidAmount",
+      "dueAmount",
     ].forEach((key) => {
       const col = worksheet.getColumn(key);
       if (col) col.numFmt = "#,##0.00";
@@ -475,8 +525,13 @@ router.post("/sales/download-excel", async (req, res) => {
       });
     });
 
-    const fileName = `sale_summary_${formatDateToReadable(startDate)}_to_${formatDateToReadable(endDate)}.xlsx`;
-    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    const fileName = `sale_summary_${formatDateToReadable(
+      startDate
+    )}_to_${formatDateToReadable(endDate)}.xlsx`;
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
 
     await workbook.xlsx.write(res);
@@ -491,19 +546,102 @@ router.post("/sales/download-excel", async (req, res) => {
   }
 });
 
+// routers/sale/saleSummary.js
 router.post("/sales/return", async (req, res) => {
   try {
     const data = req.body;
-    const newSaleReturn = new SalesReturn(data);
-    const saved = await newSaleReturn.save();
+    console.log("values of data", data);
+
+    // Check if data is an array
+    if (!Array.isArray(data)) {
+      return res.status(400).json({
+        message: "Expected an array of sales return records",
+      });
+    }
+
+    // Validate that array is not empty
+    if (data.length === 0) {
+      return res.status(400).json({
+        message: "No sales return records provided",
+      });
+    }
+
+    // Validate each record has required fields
+    for (let i = 0; i < data.length; i++) {
+      const record = data[i];
+      const requiredFields = [
+        "recordingDate",
+        "invoiceNumber",
+        "invoiceDate",
+        "mrName",
+        "customerCode",
+        "customerName",
+        "productName",
+        "salesQty",
+        "returnQuantity",
+        "usedQty",
+        "sellingPrice",
+        "amount",
+        "discount",
+        "netSellingAmount",
+        "usedPrice",
+        "paidAmount",
+        "dueAmount",
+        "usedAmount",
+        "paymentStatus",
+      ];
+
+      for (const field of requiredFields) {
+        if (record[field] === undefined || record[field] === null) {
+          return res.status(400).json({
+            message: `Missing required field: ${field} in record ${i + 1}`,
+          });
+        }
+      }
+    }
+
+    // Convert string numbers to actual numbers
+    const processedData = data.map((record) => ({
+      ...record,
+      salesQty: Number(record.salesQty),
+      returnQuantity: Number(record.returnQuantity),
+      usedQty: Number(record.usedQty),
+      sellingPrice: Number(record.sellingPrice),
+      amount: Number(record.amount),
+      discount: Number(record.discount),
+      netSellingAmount: Number(record.netSellingAmount),
+      usedPrice: Number(record.usedPrice),
+      paidAmount: Number(record.paidAmount),
+      dueAmount: Number(record.dueAmount),
+      usedAmount: Number(record.usedAmount),
+      remark: record.remark || "",
+    }));
+
+    // Insert all records
+    const savedReturns = await SalesReturn.insertMany(processedData);
 
     res.status(201).json({
-      message: "Sale return recorded successfully.",
-      data: saved,
+      message: `${savedReturns.length} sales return records saved successfully.`,
+      data: savedReturns,
     });
   } catch (error) {
-    console.error("Error saving sales return:", error);
-    res.status(500).json({ message: "Server error", error });
+    console.error("Error saving sales returns:", error);
+
+    if (error.name === "ValidationError") {
+      const validationErrors = {};
+      Object.keys(error.errors).forEach((key) => {
+        validationErrors[key] = error.errors[key].message;
+      });
+      return res.status(400).json({
+        message: "Validation failed",
+        errors: validationErrors,
+      });
+    }
+
+    res.status(500).json({
+      message: "Server error",
+      error: error.message,
+    });
   }
 });
 
@@ -531,7 +669,5 @@ router.get("/sales/return", async (req, res) => {
     res.status(500).json({ message: "Server error", error });
   }
 });
-
-
 
 export default router;

@@ -50,8 +50,7 @@ const navigate = useNavigate();
   };
 
   const onFinish = (values) => {
-    console.log('Form Submitted', values, 'Items:', items);
-    // Add actual save or API logic here.
+
   };
 
   return (
