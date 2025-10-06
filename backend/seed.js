@@ -60,7 +60,7 @@ async function seedSaleTypes() {
     ];
 
     const result = await SaleType.insertMany(saleTypes);
-    console.log("✅ Inserted SaleTypes:", result);
+    
   } catch (err) {
     console.error("❌ Error inserting SaleTypes:", err);
   } finally {

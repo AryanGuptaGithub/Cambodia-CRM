@@ -19,6 +19,7 @@ import purcharse from "./routers/purcharsing/purcharsing.js";
 import dailySummary from "./routers/reports/dailysummary.js";
 import dailyReports from "./routers/reports/dailyReports.js";
 import SalesReturn from "./routers/sale/saleReturn.js";
+import stockAdjustment from "./routers/stock/stockAdjustment.js";
 
 dotenv.config(); // Load environment variables
 
@@ -71,6 +72,7 @@ app.use('/api', purcharse);
 app.use('/api', dailySummary);
 app.use("/api", dailyReports);
 app.use("/api", SalesReturn);
+app.use("/api", stockAdjustment);
 
 // Server listener
 app.listen(PORT, () => {

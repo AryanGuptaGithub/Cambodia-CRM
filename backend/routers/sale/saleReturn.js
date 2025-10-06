@@ -8,7 +8,6 @@ const router = express.Router();
 router.post("/salesreturn", async (req, res) => {
   try {
     const data = req.body;
-    console.log("Received sales return data:", data);
 
     if (!Array.isArray(data) || data.length === 0) {
       return res.status(400).json({
@@ -110,7 +109,6 @@ router.get("/salesreturn", async (req, res) => {
 router.delete("/salesreturn", async (req, res) => {
   try {
     const { ids } = req.body;
-    console.log("values of ids", ids);
 
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({
