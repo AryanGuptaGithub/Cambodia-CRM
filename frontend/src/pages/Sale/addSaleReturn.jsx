@@ -1062,7 +1062,7 @@ const AddReturnSale = () => {
         remark: form.remark,
       }));
 
-      const response = await fetch(`${backendUrl}/api/sales/return`, {
+      const response = await fetch(`${backendUrl}/api/salesreturn`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

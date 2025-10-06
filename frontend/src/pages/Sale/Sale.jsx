@@ -5,7 +5,7 @@ import React, {
   useCallback,
   useRef,
 } from "react";
-import { UserPlus, Trash2, Edit, Upload, X, Eye, Search } from "lucide-react";
+import { UserPlus, Trash2, Edit, Upload, X, Eye, Search,Settings } from "lucide-react";
 import ReactDOM from "react-dom";
 import SampleExcelDownloadSale from "../../excels/SampleExcelDownloadSale";
 import { handleAxiosError } from "../../utils/errorHandler";
@@ -84,6 +84,32 @@ const Sales = () => {
     paymentStatus: "",
     remark: "",
   });
+
+  // Add the missing function to fix the ReferenceError
+  const handleProductNameHighlight = useCallback(
+    (value, shouldUpdateForm = false) => {
+      if (shouldUpdateForm && typeof value === "string") {
+        setForm((prevForm) => ({
+          ...prevForm,
+          productName: value,
+        }));
+      }
+    },
+    []
+  );
+
+  // Also add the payment status highlight function if needed
+  const handlePaymentStatusHighlight = useCallback(
+    (value, shouldUpdateForm = false) => {
+      if (shouldUpdateForm && typeof value === "string") {
+        setForm((prevForm) => ({
+          ...prevForm,
+          paymentStatus: value,
+        }));
+      }
+    },
+    []
+  );
 
   // Custom hook for suggestions
   const useSuggestions = (items, filterField = "type", inputValue = "") => {
@@ -187,7 +213,6 @@ const Sales = () => {
 
   const salesPerPage = 9;
 
-  // Complete list of all available fields
   const allFields = useMemo(
     () => [
       {
@@ -542,7 +567,7 @@ const Sales = () => {
   const enhancedHandleChange = useCallback(
     (e) => {
       const { name, value } = e.target;
-
+      console.log("values of name", name, value);
       if (name === "paymentStatus" || name === "productName") {
         updateFormField(name, value);
       } else {
@@ -560,12 +585,7 @@ const Sales = () => {
         productNameSuggestions.setHighlightedIndex(-1);
       }
     },
-    [
-      updateFormField,
-      handleChangeEvent,
-      paymentStatusSuggestions,
-      productNameSuggestions,
-    ]
+    [updateFormField, paymentStatusSuggestions, productNameSuggestions]
   );
 
   // Fetch function
@@ -629,7 +649,6 @@ const Sales = () => {
     });
   }, [sales, searchTerm, selectedTab]);
 
-  // Memoized current page slice
   const currentSales = useMemo(() => {
     const start = (currentPage - 1) * salesPerPage;
     return filteredSales.slice(start, start + salesPerPage);
@@ -689,7 +708,7 @@ const Sales = () => {
     });
   };
 
-  // SuggestionInput component
+  // Fixed SuggestionInput component with proper highlighting
   const SuggestionInput = React.memo(
     ({
       label,
@@ -711,15 +730,27 @@ const Sales = () => {
     }) => {
       const handleMouseEnter = useCallback(
         (index) => {
-          onSuggestionSelect && onSuggestionSelect(index, true);
+          setHighlightedIndex(index);
+          // Get the suggestion value for highlighting
+          if (index >= 0 && index < suggestions.length) {
+            const suggestion = suggestions[index];
+            const suggestionValue = getSuggestionValue(suggestion);
+            // Call onSuggestionSelect with highlight only (no form update)
+            onSuggestionSelect && onSuggestionSelect(suggestionValue, true);
+          }
         },
-        [onSuggestionSelect]
+        [
+          suggestions,
+          getSuggestionValue,
+          onSuggestionSelect,
+          setHighlightedIndex,
+        ]
       );
 
       const handleClick = useCallback(
         (item) => {
           const value = getSuggestionValue(item);
-          onSuggestionSelect && onSuggestionSelect(value);
+          onSuggestionSelect && onSuggestionSelect(value, false);
         },
         [onSuggestionSelect, getSuggestionValue]
       );
@@ -734,12 +765,26 @@ const Sales = () => {
               setHighlightedIndex((prev) =>
                 prev < suggestions.length - 1 ? prev + 1 : 0
               );
+              // Auto-highlight when navigating with keyboard
+              if (highlightedIndex < suggestions.length - 1) {
+                const nextIndex = highlightedIndex + 1;
+                const nextSuggestion = suggestions[nextIndex];
+                const nextValue = getSuggestionValue(nextSuggestion);
+                onSuggestionSelect && onSuggestionSelect(nextValue, true);
+              }
               break;
             case "ArrowUp":
               e.preventDefault();
               setHighlightedIndex((prev) =>
                 prev > 0 ? prev - 1 : suggestions.length - 1
               );
+              // Auto-highlight when navigating with keyboard
+              if (highlightedIndex > 0) {
+                const prevIndex = highlightedIndex - 1;
+                const prevSuggestion = suggestions[prevIndex];
+                const prevValue = getSuggestionValue(prevSuggestion);
+                onSuggestionSelect && onSuggestionSelect(prevValue, true);
+              }
               break;
             case "Enter":
               e.preventDefault();
@@ -749,7 +794,7 @@ const Sales = () => {
               ) {
                 const selectedItem = suggestions[highlightedIndex];
                 const value = getSuggestionValue(selectedItem);
-                onSuggestionSelect && onSuggestionSelect(value);
+                onSuggestionSelect && onSuggestionSelect(value, false);
               }
               break;
             default:
@@ -899,6 +944,7 @@ const Sales = () => {
       setSelected([]);
     }
   };
+
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -1156,12 +1202,10 @@ const Sales = () => {
               </div>
 
               <button
-                onClick={() => {
-                  setIsModalOpen(true);
-                }}
-                className="px-4 py-2 bg-blue-600 text-white rounded cursor-pointer"
+                className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+                onClick={() => setIsModalOpen(true)}
               >
-                Add /Remove Column
+                <Settings size={18} /> Add /Remove Column
               </button>
             </div>
           ) : (
@@ -1569,6 +1613,7 @@ const Sales = () => {
             </div>,
             document.body
           )}
+
         {isEditModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -1576,7 +1621,7 @@ const Sales = () => {
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
                 onClick={() => setIsOpen(false)}
               />
-              <div className="bg-white w-full max-w-3xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+              <div className="bg-white w-full max-w-4xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
                 <button
                   onClick={() => setIsEditModalOpen(false)}
                   className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
@@ -1588,7 +1633,8 @@ const Sales = () => {
                   Edit Sales Record
                 </h2>
 
-                <form className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[70vh] overflow-y-auto">
+                <form className="grid grid-cols-1 md:grid-cols-3 gap-4 max-h-[70vh]">
+                  {/* Recording Date */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700">
                       Recording Date
@@ -1606,6 +1652,7 @@ const Sales = () => {
                     />
                   </div>
 
+                  {/* Invoice Number */}
                   <div>
                     <label className="block text-sm font-medium">
                       Invoice Number
@@ -1622,6 +1669,7 @@ const Sales = () => {
                     />
                   </div>
 
+                  {/* Invoice Date */}
                   <div>
                     <label className="block text-sm font-medium">
                       Invoice Date
@@ -1637,6 +1685,7 @@ const Sales = () => {
                     />
                   </div>
 
+                  {/* MR Name */}
                   <div>
                     <label className="block text-sm font-medium">MR Name</label>
                     <input
@@ -1649,6 +1698,7 @@ const Sales = () => {
                     />
                   </div>
 
+                  {/* Customer Code */}
                   <div>
                     <label className="block text-sm font-medium">
                       Customer Code
@@ -1664,45 +1714,50 @@ const Sales = () => {
                       autoComplete="off"
                     />
                   </div>
-                  <SuggestionInput
-                    label="Product Name"
-                    name="productName"
-                    value={form.productName}
-                    onChange={enhancedHandleChange}
-                    suggestions={productNameSuggestions.filteredItems}
-                    isOpen={productNameSuggestions.isOpen}
-                    highlightedIndex={productNameSuggestions.highlightedIndex}
-                    inputRef={productNameSuggestions.inputRef}
-                    dropdownTop={productNameSuggestions.dropdownTop}
-                    onFocus={() => productNameSuggestions.setIsOpen(true)}
-                    onBlur={() =>
-                      setTimeout(
-                        () => productNameSuggestions.setIsOpen(false),
-                        150
-                      )
-                    }
-                    onSuggestionSelect={(value, isHighlight) => {
-                      value = Number(value);
-                      if (typeof value === "number" && isHighlight) {
-                        handleProductNameHighlight(value, true);
-                      } else {
-                        productNameSuggestions.selectSuggestion(value, (val) =>
-                          updateFormField("productName", val)
-                        );
-                      }
-                    }}
-                    getSuggestionValue={(item) =>
-                      typeof item === "string" ? item : item.name
-                    }
-                    getSuggestionDisplay={(item) =>
-                      typeof item === "string" ? item : item.name
-                    }
-                    setHighlightedIndex={
-                      productNameSuggestions.setHighlightedIndex
-                    } // ✅ Pass this
-                  />
 
-                  {/* Numeric inputs with min=0 */}
+                  {/* Product Name - Fixed SuggestionInput */}
+                  <div>
+                    <SuggestionInput
+                      label="Product Name"
+                      name="productName"
+                      value={form.productName || ""}
+                      onChange={enhancedHandleChange}
+                      suggestions={productNameSuggestions.filteredItems}
+                      isOpen={productNameSuggestions.isOpen}
+                      highlightedIndex={productNameSuggestions.highlightedIndex}
+                      inputRef={productNameSuggestions.inputRef}
+                      dropdownTop={productNameSuggestions.dropdownTop}
+                      onFocus={() => productNameSuggestions.setIsOpen(true)}
+                      onBlur={() =>
+                        setTimeout(
+                          () => productNameSuggestions.setIsOpen(false),
+                          150
+                        )
+                      }
+                      onSuggestionSelect={(value, isHighlight) => {
+                        if (isHighlight) {
+                          // Just highlight, don't update form
+                          handleProductNameHighlight(value, false);
+                        } else {
+                          // Actually select the value and update form
+                          productNameSuggestions.selectSuggestion(
+                            value,
+                            (val) => updateFormField("productName", val)
+                          );
+                        }
+                      }}
+                      getSuggestionValue={(item) =>
+                        typeof item === "string" ? item : item.name
+                      }
+                      getSuggestionDisplay={(item) =>
+                        typeof item === "string" ? item : item.name
+                      }
+                      setHighlightedIndex={
+                        productNameSuggestions.setHighlightedIndex
+                      }
+                    />
+                  </div>
+
                   <div>
                     <label className="block text-sm font-medium">
                       Sales Quantity
@@ -1896,41 +1951,57 @@ const Sales = () => {
                       disabled
                     />
                   </div>
-                  <SuggestionInput
-                    label="Payment Status"
-                    name="paymentStatus"
-                    onChange={enhancedHandleChange}
-                    value={form.paymentStatus}
-                    error={errors.paymentStatus}
-                    suggestions={paymentStatusSuggestions.filteredItems}
-                    isOpen={paymentStatusSuggestions.isOpen}
-                    highlightedIndex={paymentStatusSuggestions.highlightedIndex}
-                    inputRef={paymentStatusSuggestions.inputRef}
-                    dropdownTop={paymentStatusSuggestions.dropdownTop}
-                    onFocus={() => paymentStatusSuggestions.setIsOpen(true)}
-                    onBlur={() =>
-                      setTimeout(
-                        () => paymentStatusSuggestions.setIsOpen(false),
-                        150
-                      )
-                    }
-                    onSuggestionSelect={(value, isHighlight) => {
-                      if (typeof value === "number" && isHighlight) {
-                        handlePaymentStatusHighlight(value, true);
-                      } else {
-                        paymentStatusSuggestions.selectSuggestion(
-                          value,
-                          (val) => updateFormField("paymentStatus", val)
-                        );
+
+                  {/* Payment Status */}
+                  <div>
+                    <SuggestionInput
+                      label="Payment Status"
+                      name="paymentStatus"
+                      onChange={enhancedHandleChange}
+                      value={form.paymentStatus}
+                      error={errors.paymentStatus}
+                      suggestions={paymentStatusSuggestions.filteredItems}
+                      isOpen={paymentStatusSuggestions.isOpen}
+                      highlightedIndex={
+                        paymentStatusSuggestions.highlightedIndex
                       }
-                    }}
-                    getSuggestionValue={(item) => item.type}
-                    getSuggestionDisplay={(item) => item.type}
-                    setHighlightedIndex={
-                      paymentStatusSuggestions.setHighlightedIndex
-                    } // ✅ Pass this
-                  />
-                  <div className="md:col-span-2">
+                      inputRef={paymentStatusSuggestions.inputRef}
+                      dropdownTop={paymentStatusSuggestions.dropdownTop}
+                      onFocus={() => paymentStatusSuggestions.setIsOpen(true)}
+                      onBlur={() =>
+                        setTimeout(
+                          () => paymentStatusSuggestions.setIsOpen(false),
+                          150
+                        )
+                      }
+                      onSuggestionSelect={(value, isHighlight) => {
+                        console.log(
+                          "Payment status selected:",
+                          value,
+                          "isHighlight:",
+                          isHighlight
+                        );
+                        if (isHighlight) {
+                          // Just highlight, don't update form
+                          handlePaymentStatusHighlight(value, false);
+                        } else {
+                          // Actually select the value and update form
+                          paymentStatusSuggestions.selectSuggestion(
+                            value,
+                            (val) => updateFormField("paymentStatus", val)
+                          );
+                        }
+                      }}
+                      getSuggestionValue={(item) => item.type}
+                      getSuggestionDisplay={(item) => item.type}
+                      setHighlightedIndex={
+                        paymentStatusSuggestions.setHighlightedIndex
+                      }
+                    />
+                  </div>
+
+                  {/* Remark - full width */}
+                  <div className="md:col-span-3">
                     <label className="block text-sm font-medium">Remark</label>
                     <input
                       type="text"
@@ -1940,7 +2011,8 @@ const Sales = () => {
                     />
                   </div>
 
-                  <div className="md:col-span-2 mt-4 flex justify-end gap-3">
+                  {/* Footer buttons - full width */}
+                  <div className="md:col-span-3 mt-4 flex justify-end gap-3">
                     <button
                       type="button"
                       onClick={() => setIsEditModalOpen(false)}
@@ -1964,14 +2036,12 @@ const Sales = () => {
         {isViewModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-              {/* Background Overlay */}
               <div
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setIsViewModalOpen(false)}
+                onClick={() => setIsOpen(false)}
               />
 
-              {/* Modal Content */}
-              <div className="bg-white w-full max-w-3xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+              <div className="bg-white w-full max-w-4xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
                 <button
                   onClick={() => setIsViewModalOpen(false)}
                   className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
@@ -1983,8 +2053,7 @@ const Sales = () => {
                   View Sales Record
                 </h2>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[70vh] overflow-y-auto">
-                  {/* Fixed fields */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-h-[70vh] overflow-y-auto">
                   <div>
                     <label className="block text-sm font-medium text-gray-600">
                       Recording Date
@@ -2043,7 +2112,6 @@ const Sales = () => {
                     </p>
                   </div>
 
-                  {/* Numeric Fields */}
                   {[
                     ["Sales Quantity", "salesQty"],
                     ["Bonus Quantity", "bonusQty"],
@@ -2068,7 +2136,6 @@ const Sales = () => {
                     </div>
                   ))}
 
-                  {/* Date Fields */}
                   {[
                     ["Due Date", "dueDate"],
                     ["Delivery Date", "deliveryDate"],
@@ -2085,7 +2152,6 @@ const Sales = () => {
                     </div>
                   ))}
 
-                  {/* Payment Status */}
                   <div>
                     <label className="block text-sm font-medium text-gray-600">
                       Payment Status
@@ -2095,8 +2161,7 @@ const Sales = () => {
                     </p>
                   </div>
 
-                  {/* Remark - full width */}
-                  <div className="md:col-span-2">
+                  <div className="md:col-span-3">
                     <label className="block text-sm font-medium text-gray-600">
                       Remark
                     </label>
@@ -2106,7 +2171,6 @@ const Sales = () => {
                   </div>
                 </div>
 
-                {/* Footer */}
                 <div className="mt-6 flex justify-end">
                   <button
                     onClick={() => setIsViewModalOpen(false)}

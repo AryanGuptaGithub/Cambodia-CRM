@@ -374,7 +374,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                 <span className="mx-auto">Sale Return/Cr.Note</span>
               </Link>
 
-              <Link
+              {/* <Link
                 to="/salelayout/payment"
                 className={getChildLinkClass("/salelayout/payment")}
                 onClick={() => setActiveParentMenu(activeParentMenu)}
@@ -390,7 +390,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               >
                 <ClipboardList className="w-4 h-4" />
                 <span className="mx-auto">Quotation</span>
-              </Link>
+              </Link> */}
             </div>
           )}
         </div>
