@@ -12,6 +12,7 @@ import {
 import axios from "axios";
 import { showToast } from "../utils/toast";
 import { getVisiblePages } from "../utils/useVisiblePages";
+import CustomDropdown from "./Utility/customDropdown";
 
 // Configuration constants
 const CONFIG = {
@@ -37,84 +38,6 @@ const CONFIG = {
 };
 
 // Custom Dropdown Component
-const CustomDropdown = ({
-  value,
-  onChange,
-  options,
-  disabled,
-  placeholder = "Select Product",
-  required = false,
-}) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef(null);
-
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-        setIsOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  const selectedOption = options.find((opt) => opt.value === value);
-
-  return (
-    <div className="relative w-full" ref={dropdownRef}>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => !disabled && setIsOpen(!isOpen)}
-        className={`w-full border border-gray-300 rounded-md px-3 py-2 text-left focus:outline-none focus:ring-2
-           focus:ring-indigo-500 disabled:bg-gray-100 flex justify-between items-center ${
-             disabled
-               ? "cursor-not-allowed opacity-60"
-               : "cursor-pointer hover:border-gray-400"
-           } ${!value ? "text-gray-500" : "text-gray-900"}`}
-      >
-        <span className="truncate">
-          {selectedOption ? selectedOption.label : placeholder}
-        </span>
-        {!disabled && (
-          <span className="text-gray-400 flex-shrink-0 ml-2">
-            {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-          </span>
-        )}
-      </button>
-
-      {isOpen && !disabled && (
-        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
-          {options.length === 0 ? (
-            <div className="px-3 py-2 text-gray-500 text-sm">
-              No options available
-            </div>
-          ) : (
-            options.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => {
-                  onChange(option.value);
-                  setIsOpen(false);
-                }}
-                className={`w-full px-3 py-2 text-left hover:bg-indigo-50 hover:text-indigo-900 transition-colors duration-150 ${
-                  value === option.value
-                    ? "bg-indigo-100 text-indigo-900 font-medium"
-                    : "text-gray-900"
-                } ${option.disabled ? "opacity-50 cursor-not-allowed" : ""}`}
-                disabled={option.disabled}
-              >
-                {option.label}
-              </button>
-            ))
-          )}
-        </div>
-      )}
-    </div>
-  );
-};
 
 // Helper function to validate MongoDB ObjectId
 const isValidObjectId = (id) => {
@@ -130,6 +53,7 @@ const StockAdjustment = () => {
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingAdjustment, setEditingAdjustment] = useState(null);
+  const [selected, setSelected] = useState([]);
   const inputRef = useRef(null);
 
   const [formData, setFormData] = useState({
@@ -167,17 +91,13 @@ const StockAdjustment = () => {
 
   const fetchProducts = async () => {
     try {
-      const response = await axios.get(
-        `${backendUrl}/api/stock-adjustments/products`
-      );
-      if (response.data && response.data.success) {
-        setProducts(response.data.data);
-      } else {
-        showToast("error", "Failed to load products");
-      }
-    } catch (error) {
-      console.error("Error fetching products:", error);
-      showToast("error", "Error fetching products");
+      const response = await fetch(`${backendUrl}/api/products`);
+      const data = await response.json();
+
+      setProducts(data);
+      setSelected([]);
+    } catch (err) {
+      handleError(err);
     }
   };
 
@@ -244,16 +164,19 @@ const StockAdjustment = () => {
     }
 
     // Validate IDs before sending
-    const invalidIds = selectedIds.filter(id => !isValidObjectId(id));
+    const invalidIds = selectedIds.filter((id) => !isValidObjectId(id));
     if (invalidIds.length > 0) {
       console.error("❌ Invalid IDs found:", invalidIds);
-      showToast("error", `Invalid adjustment IDs detected. Please refresh the page and try again.`);
+      showToast(
+        "error",
+        `Invalid adjustment IDs detected. Please refresh the page and try again.`
+      );
       return;
     }
 
     try {
       console.log("🔄 Sending bulk delete request with IDs:", selectedIds);
-      
+
       const response = await axios.delete(
         `${backendUrl}/api/stock-adjustments/bulk`,
         {
@@ -265,7 +188,10 @@ const StockAdjustment = () => {
       );
       fetchAdjustments();
 
-      showToast("success", response.data?.message || "Adjustments deleted successfully.");
+      showToast(
+        "success",
+        response.data?.message || "Adjustments deleted successfully."
+      );
     } catch (error) {
       console.error("❌ Bulk delete error:", error);
 
@@ -296,7 +222,6 @@ const StockAdjustment = () => {
       await axios.delete(`${backendUrl}/api/stock-adjustments/${id}`);
 
       setAdjustments((prev) => prev.filter((adj) => adj._id !== id));
-      // Remove from selected IDs if it was selected
       setSelectedIds((prev) => prev.filter((selectedId) => selectedId !== id));
       showToast("success", CONFIG.MESSAGES.DELETE_SUCCESS);
     } catch (error) {
@@ -616,7 +541,8 @@ const StockAdjustment = () => {
                                 if (input) {
                                   input.indeterminate =
                                     selectedIds.length > 0 &&
-                                    selectedIds.length < paginatedAdjustments.length;
+                                    selectedIds.length <
+                                      paginatedAdjustments.length;
                                 }
                               }}
                               onChange={(e) =>
@@ -785,9 +711,7 @@ const StockAdjustment = () => {
 
               <form onSubmit={handleModalSubmit} className="p-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {/* Left Column */}
                   <div className="space-y-4">
-                    {/* Product Selection */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Product <span className="text-red-500">*</span>

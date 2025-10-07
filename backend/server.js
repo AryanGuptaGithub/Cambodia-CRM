@@ -3,7 +3,7 @@ import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
 import connectDB from "./utils/db.js";
-import bodyParser  from "body-parser";
+import bodyParser from "body-parser";
 
 import customerRoutes from "./routers/master/customers.js";
 import suppilerRoutes from "./routers/master/supplier.js";
@@ -20,11 +20,14 @@ import dailySummary from "./routers/reports/dailysummary.js";
 import dailyReports from "./routers/reports/dailyReports.js";
 import SalesReturn from "./routers/sale/saleReturn.js";
 import stockAdjustment from "./routers/stock/stockAdjustment.js";
+import stockTransfer from "./routers/stock/stockTransfer.js";
+import warehouse from "./routers/stock/warehouse.js";
+import orderStatus from "./routers/stock/orderStatus.js";
 
 dotenv.config(); // Load environment variables
 
 const app = express();
-app.use(bodyParser.json({ limit: "10mb" }));  
+app.use(bodyParser.json({ limit: "10mb" }));
 app.use(bodyParser.urlencoded({ extended: true, limit: "10mb" }));
 const PORT = process.env.PORT || 3000;
 
@@ -65,14 +68,17 @@ app.use("/api", product);
 app.use("/api", authRoutes);
 app.use("/api", staff);
 app.use("/api", priceList);
-app.use('/api', saleSummary);
-app.use('/api', payments);
-app.use('/api', dailySample);
-app.use('/api', purcharse);
-app.use('/api', dailySummary);
+app.use("/api", saleSummary);
+app.use("/api", payments);
+app.use("/api", dailySample);
+app.use("/api", purcharse);
+app.use("/api", dailySummary);
 app.use("/api", dailyReports);
 app.use("/api", SalesReturn);
 app.use("/api", stockAdjustment);
+app.use("/api", stockTransfer);
+app.use("/api", warehouse);
+app.use("/api", orderStatus);
 
 // Server listener
 app.listen(PORT, () => {

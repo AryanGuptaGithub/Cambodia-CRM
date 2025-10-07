@@ -225,29 +225,6 @@ router.put("/stock-adjustments/:id", async (req, res) => {
   }
 });
 
-// DELETE an adjustment
-
-// GET products for adjustments
-router.get("/stock-adjustments/products", async (req, res) => {
-  try {
-    const products = await Product.find()
-      .select("productName type qtyPerCarton currentStock createdAt")
-      .sort({ createdAt: -1 });
-
-    res.status(200).json({
-      success: true,
-      data: products,
-      count: products.length,
-    });
-  } catch (error) {
-    console.error("Error fetching products:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error while fetching products",
-    });
-  }
-});
-
 // DELETE multiple adjustments (bulk delete)
 router.delete("/stock-adjustments/bulk", async (req, res) => {
   try {

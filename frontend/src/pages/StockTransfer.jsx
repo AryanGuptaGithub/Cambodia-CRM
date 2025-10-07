@@ -1,369 +1,4 @@
-// import React, { useState } from 'react';
-// import {
-//   Plus,
-//   Upload,
-//   Trash2,
-//   Search,
-//   Eye,
-//   Edit,
-//   X,
-//   Trash,
-// } from 'lucide-react';
-// import { useNavigate } from "react-router-dom";
-// const stockTransferData = [
-//   // Transfers
-//   {
-//     id: 1,
-//     type: 'transfer',
-//     invoiceNo: 'INV001',
-//     date: '2025-08-25',
-//     warehouse: 'Warehouse A',
-//     totalAmount: 1000,
-//     paidAmount: 700,
-//     paymentStatus: 'Partial',
-//   },
-//   {
-//     id: 2,
-//     type: 'transfer',
-//     invoiceNo: 'INV002',
-//     date: '2025-08-26',
-//     warehouse: 'Warehouse B',
-//     totalAmount: 2000,
-//     paidAmount: 2000,
-//     paymentStatus: 'Paid',
-//   },
-//   {
-//     id: 3,
-//     type: 'transfer',
-//     invoiceNo: 'INV003',
-//     date: '2025-08-27',
-//     warehouse: 'Warehouse C',
-//     totalAmount: 1500,
-//     paidAmount: 0,
-//     paymentStatus: 'Due',
-//   },
-//   // Recieve
-//   {
-//     id: 4,
-//     type: 'recieve',
-//     invoiceNo: 'RCV001',
-//     date: '2025-08-20',
-//     warehouse: 'Warehouse A',
-//     totalAmount: 800,
-//     paidAmount: 800,
-//     paymentStatus: 'Collected',
-//   },
-//   {
-//     id: 5,
-//     type: 'recieve',
-//     invoiceNo: 'RCV002',
-//     date: '2025-08-21',
-//     warehouse: 'Warehouse B',
-//     totalAmount: 1200,
-//     paidAmount: 400,
-//     paymentStatus: 'Partial',
-//   },
-//   {
-//     id: 6,
-//     type: 'recieve',
-//     invoiceNo: 'RCV003',
-//     date: '2025-08-22',
-//     warehouse: 'Warehouse C',
-//     totalAmount: 1000,
-//     paidAmount: 0,
-//     paymentStatus: 'Pending',
-//   },
-// ];
-
-// const ITEMS_PER_PAGE = 4;
-
-// const StockTransfer = () => {
-//     const navigate = useNavigate();
-  
-//   const [activeTab, setActiveTab] = useState('transfer');
-//   const [searchTerm, setSearchTerm] = useState('');
-//   const [selectedRows, setSelectedRows] = useState([]);
-//   const [currentPage, setCurrentPage] = useState(1);
-
-//     // Popup state
-//     const [showImportModal, setShowImportModal] = useState(false);
-//     const [file, setFile] = useState(null);
-
-//   const filteredData = stockTransferData.filter(item =>
-//     item.type === activeTab &&
-//     item.invoiceNo.toLowerCase().includes(searchTerm.toLowerCase())
-//   );
-
-//   const paginatedData = filteredData.slice(
-//     (currentPage - 1) * ITEMS_PER_PAGE,
-//     currentPage * ITEMS_PER_PAGE
-//   );
-
-//   const handleSelectRow = (id) => {
-//     setSelectedRows(prev =>
-//       prev.includes(id) ? prev.filter(rowId => rowId !== id) : [...prev, id]
-//     );
-//   };
-
-//   const handleDelete = () => {
-//     alert(`Deleted rows: ${selectedRows.join(', ')}`);
-//     setSelectedRows([]);
-//   };
-
-//   const totalAmount = filteredData.reduce((sum, item) => sum + item.totalAmount, 0);
-//   const totalPaid = filteredData.reduce((sum, item) => sum + item.paidAmount, 0);
-//   const totalDue = totalAmount - totalPaid;
-//   const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
-
-//   const isRecieveTab = activeTab === 'recieve';
-
-//   return (
-//     <div className="p-6">
-//       {/* Breadcrumb */}
-//       <div className="mb-4 text-gray-600 text-sm">
-//         Dashboard  <span className="mx-2">{'>'}</span> Stock Transfer
-//       </div>
-
-//       {/* Header Buttons & Search */}
-//       <div className="flex justify-between items-center mb-4">
-//         <div className="flex gap-3 flex-wrap">
-//           <button
-//             onClick={() => navigate('/stocktransferform')}
-//           className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md">
-//             <Plus size={18} /> Add New Stock Transfer
-          
-//           </button>
-//           <button
-//                    onClick={() => setShowImportModal(true)}
-//                    className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md"
-//                  >
-//                    <Upload size={18} /> Import CSV
-//                  </button>
-//           {selectedRows.length > 0 && (
-//             <button
-//               onClick={handleDelete}
-//               className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md"
-//             >
-//               <Trash2 size={18} /> Delete Selected
-//             </button>
-//           )}
-//         </div>
-
-//         {/* Search Bar */}
-//         <div className="relative w-full max-w-xs">
-//           <Search className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400" size={16} />
-//           <input
-//             type="text"
-//             placeholder="Search by Invoice No"
-//             value={searchTerm}
-//             onChange={e => {
-//               setSearchTerm(e.target.value);
-//               setCurrentPage(1);
-//             }}
-//             className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-//           />
-//         </div>
-//       </div>
-
-//       {/* Tabs */}
-//       <div className="flex gap-4 mb-4">
-//         {['transfer', 'recieve'].map(tab => (
-//           <button
-//             key={tab}
-//             onClick={() => {
-//               setActiveTab(tab);
-//               setSelectedRows([]);
-//               setCurrentPage(1);
-//             }}
-//             className={`px-4 py-2 rounded-lg capitalize ${
-//               activeTab === tab
-//                 ? 'bg-indigo-600 text-white'
-//                 : 'bg-gray-200 text-gray-700'
-//             }`}
-//           >
-//             {tab}
-//           </button>
-//         ))}
-//       </div>
-
-//       {/* Table */}
-//       <div className="overflow-x-auto">
-//         <table className="w-full border-collapse bg-white rounded-xl overflow-hidden">
-//           <thead className="bg-gray-100 text-gray-700 text-sm">
-//             <tr>
-//               <th className="p-3">
-//                 <input
-//                   type="checkbox"
-//                   checked={
-//                     selectedRows.length > 0 &&
-//                     paginatedData.every(row => selectedRows.includes(row.id))
-//                   }
-//                   onChange={(e) =>
-//                     setSelectedRows(
-//                       e.target.checked ? paginatedData.map(row => row.id) : []
-//                     )
-//                   }
-//                 />
-//               </th>
-//               <th className="p-3 text-left">Invoice No</th>
-//               <th className="p-3 text-left">Date</th>
-//               <th className="p-3 text-left">Warehouse</th>
-//               <th className="p-3 text-left">Total Amount</th>
-//               <th className="p-3 text-left">{isRecieveTab ? 'Collected Amount' : 'Paid Amount'}</th>
-//               <th className="p-3 text-left">Due Amount</th>
-//               <th className="p-3 text-left">Payment Status</th>
-//               <th className="p-3 text-center">Action</th>
-//             </tr>
-//           </thead>
-//           <tbody>
-//             {paginatedData.length > 0 ? (
-//               paginatedData.map(item => (
-//                 <tr key={item.id} className="border-b hover:bg-gray-50 text-sm">
-//                   <td className="p-3 text-center">
-//                     <input
-//                       type="checkbox"
-//                       checked={selectedRows.includes(item.id)}
-//                       onChange={() => handleSelectRow(item.id)}
-//                     />
-//                   </td>
-//                   <td className="p-3">{item.invoiceNo}</td>
-//                   <td className="p-3">{item.date}</td>
-//                   <td className="p-3">{item.warehouse}</td>
-//                   <td className="p-3">₹{item.totalAmount.toFixed(2)}</td>
-//                   <td className="p-3">₹{item.paidAmount.toFixed(2)}</td>
-//                   <td className="p-3 text-red-600 font-medium">
-//                     ₹{(item.totalAmount - item.paidAmount).toFixed(2)}
-//                   </td>
-//                   <td className="p-3">{item.paymentStatus}</td>
-//                   <td className="p-3">
-//                     <div className="flex justify-center gap-2">
-//                       <button className="text-blue-600 hover:text-blue-800">
-//                         <Eye size={18} />
-//                       </button>
-//                       <button className="text-green-600 hover:text-green-800">
-//                         <Edit size={18} />
-//                       </button>
-//                       <button className="text-red-600 hover:text-red-800">
-//                         <Trash size={18} />
-//                       </button>
-//                     </div>
-//                   </td>
-//                 </tr>
-//               ))
-//             ) : (
-//               <tr>
-//                 <td colSpan="9" className="text-center py-4 text-gray-500">
-//                   No data found
-//                 </td>
-//               </tr>
-//             )}
-//           </tbody>
-
-//           {/* Footer Totals */}
-//           <tfoot>
-//             <tr className="bg-gray-100 font-semibold text-sm">
-//               <td colSpan="4" className="text-right p-3">Total:</td>
-//               <td className="p-3">₹{totalAmount.toFixed(2)}</td>
-//               <td className="p-3">₹{totalPaid.toFixed(2)}</td>
-//               <td className="p-3 text-red-600">₹{totalDue.toFixed(2)}</td>
-//               <td colSpan="2"></td>
-//             </tr>
-//           </tfoot>
-//         </table>
-//       </div>
-
-//       {/* Pagination */}
-//       <div className="mt-4 flex justify-center gap-2 text-sm">
-//         <button
-//           onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-//           disabled={currentPage === 1}
-//           className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
-//         >
-//           Prev
-//         </button>
-//         {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
-//           <button
-//             key={page}
-//             onClick={() => setCurrentPage(page)}
-//             className={`px-3 py-1 rounded ${
-//               currentPage === page
-//                 ? 'bg-indigo-600 text-white'
-//                 : 'bg-gray-200 hover:bg-gray-300'
-//             }`}
-//           >
-//             {page}
-//           </button>
-//         ))}
-//         <button
-//           onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-//           disabled={currentPage === totalPages}
-//           className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
-//         >
-//           Next
-//         </button>
-//       </div>
-//          {/* CSV Upload Modal */}
-//        {showImportModal && (
-//         <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-//           <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
-//             {/* Close */}
-//             <button
-//               onClick={() => setShowImportModal(false)}
-//               className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
-//             >
-//               <X size={20} />
-//             </button>
-
-//             <h2 className="text-lg font-semibold text-gray-800 mb-4">
-//               Import Supplier
-//             </h2>
-
-//             {/* Sample CSV link */}
-//             <a
-//               href="/sample.csv"
-//               download
-//               className="text-blue-600 hover:underline text-sm mb-4 block"
-//             >
-//               Click here to download Sample CSV file
-//             </a>
-
-//             {/* File Upload */}
-//             <div className="mb-6">
-//               <label className="block text-gray-700 mb-2">File</label>
-//               <input
-//                 type="file"
-//                 accept=".csv, .xlsx"
-//                 onChange={(e) => setFile(e.target.files[0])}
-//                 className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
-//               />
-//             </div>
-
-//             {/* Buttons */}
-//             <div className="flex justify-end gap-3">
-//               <button
-//                 onClick={() => setShowImportModal(false)}
-//                 className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg"
-//               >
-//                 Cancel
-//               </button>
-//               <button
-//                 onClick={() => {
-//                   setShowImportModal(false);
-//                 }}
-//                 className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg"
-//               >
-//                 Create
-//               </button>
-//             </div>
-//           </div>
-//         </div>
-//       )}
-//     </div>
-//   );
-// };
-
-// export default StockTransfer;
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from "react";
 import {
   Plus,
   Upload,
@@ -373,42 +8,36 @@ import {
   Edit,
   X,
   Trash,
-} from 'lucide-react';
+} from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 const ITEMS_PER_PAGE = 4;
 
 const StockTransfer = () => {
   const navigate = useNavigate();
-  
+
   // State management
-  const [activeTab, setActiveTab] = useState('transfer');
-  const [searchTerm, setSearchTerm] = useState('');
+  const [activeTab, setActiveTab] = useState("transfer");
+  const [searchTerm, setSearchTerm] = useState("");
   const [selectedRows, setSelectedRows] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [stockTransferData, setStockTransferData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Popup state
-  const [showImportModal, setShowImportModal] = useState(false);
-  const [file, setFile] = useState(null);
-
+  const backendUrl = import.meta.env.VITE_BACKEND_URL;
   // Fetch data from API
   const fetchStockTransfers = async () => {
     setLoading(true);
     setError(null);
     try {
-      // Replace with your actual API endpoint
-      const response = await fetch(`/api/stock-transfers?type=${activeTab}`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch data');
-      }
+      const response = await fetch(`${backendUrl}/api/stock-transfers`);
+      if (!response.ok) throw new Error("Failed to fetch data");
+
       const data = await response.json();
-      setStockTransferData(data);
+      setStockTransferData(data.data);
     } catch (err) {
       setError(err.message);
-      console.error('Error fetching stock transfers:', err);
     } finally {
       setLoading(false);
     }
@@ -419,9 +48,11 @@ const StockTransfer = () => {
     fetchStockTransfers();
   }, [activeTab]);
 
-  // Filter data based on search term
-  const filteredData = stockTransferData.filter(item =>
-    item.invoiceNo.toLowerCase().includes(searchTerm.toLowerCase())
+  // Filter data based on search term and active tab
+  const filteredData = stockTransferData.filter(
+    (item) =>
+      item.type === activeTab &&
+      item.invoiceNo.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   // Pagination
@@ -432,46 +63,55 @@ const StockTransfer = () => {
 
   // Row selection handler
   const handleSelectRow = (id) => {
-    setSelectedRows(prev =>
-      prev.includes(id) ? prev.filter(rowId => rowId !== id) : [...prev, id]
+    setSelectedRows((prev) =>
+      prev.includes(id) ? prev.filter((rowId) => rowId !== id) : [...prev, id]
     );
+  };
+
+  // Select all rows on current page
+  const handleSelectAll = (e) => {
+    if (e.target.checked) {
+      setSelectedRows(paginatedData.map((row) => row.id));
+    } else {
+      setSelectedRows([]);
+    }
   };
 
   // Delete handler
   const handleDelete = async () => {
     if (!selectedRows.length) return;
 
-    if (window.confirm(`Are you sure you want to delete ${selectedRows.length} item(s)?`)) {
-      try {
-        // Delete multiple items
-        const deletePromises = selectedRows.map(id =>
-          fetch(`/api/stock-transfers/${id}`, { method: 'DELETE' })
-        );
-        
-        await Promise.all(deletePromises);
-        
-        // Refresh data after deletion
-        fetchStockTransfers();
-        setSelectedRows([]);
-        
-        alert('Selected items deleted successfully');
-      } catch (err) {
-        alert('Error deleting items');
-        console.error('Delete error:', err);
-      }
+    try {
+      const deletePromises = selectedRows.map((id) =>
+        fetch(`${backendUrl}/api/stock-transfers/${id}`, { method: "DELETE" })
+      );
+      await Promise.all(deletePromises);
+
+      fetchStockTransfers();
+      setSelectedRows([]);
+
+      alert("Selected items deleted successfully");
+    } catch (err) {
+      alert("Error deleting items");
+      console.error("Delete error:", err);
     }
   };
 
   // Single item delete handler
   const handleDeleteSingle = async (id, invoiceNo) => {
-    if (window.confirm(`Are you sure you want to delete invoice ${invoiceNo}?`)) {
+    if (
+      window.confirm(`Are you sure you want to delete invoice ${invoiceNo}?`)
+    ) {
       try {
-        await fetch(`/api/stock-transfers/${id}`, { method: 'DELETE' });
+        await fetch(`${backendUrl}/api/stock-transfers/${id}`, {
+          method: "DELETE",
+        });
+
         fetchStockTransfers();
-        alert('Item deleted successfully');
+        alert("Item deleted successfully");
       } catch (err) {
-        alert('Error deleting item');
-        console.error('Delete error:', err);
+        alert("Error deleting item");
+        console.error("Delete error:", err);
       }
     }
   };
@@ -486,56 +126,31 @@ const StockTransfer = () => {
     navigate(`/stock-transfer/edit/${id}`);
   };
 
-  // CSV import handler
-  const handleImportCSV = async () => {
-    if (!file) {
-      alert('Please select a file');
-      return;
-    }
-
-    const formData = new FormData();
-    formData.append('file', file);
-
-    try {
-      const response = await fetch('/api/stock-transfers/import', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error('Import failed');
-      }
-
-      const result = await response.json();
-      setShowImportModal(false);
-      setFile(null);
-      fetchStockTransfers(); // Refresh data
-      alert('CSV imported successfully');
-    } catch (err) {
-      alert('Error importing CSV');
-      console.error('Import error:', err);
-    }
-  };
-
   // Calculate totals
-  const totalAmount = filteredData.reduce((sum, item) => sum + item.totalAmount, 0);
-  const totalPaid = filteredData.reduce((sum, item) => sum + item.paidAmount, 0);
+  const totalAmount = filteredData.reduce(
+    (sum, item) => sum + item.totalAmount,
+    0
+  );
+  const totalPaid = filteredData.reduce(
+    (sum, item) => sum + item.paidAmount,
+    0
+  );
   const totalDue = totalAmount - totalPaid;
   const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
 
-  const isRecieveTab = activeTab === 'recieve';
+  const isRecieveTab = activeTab === "recieve";
 
   // Reset states when tab changes
   const handleTabChange = (tab) => {
     setActiveTab(tab);
     setSelectedRows([]);
     setCurrentPage(1);
-    setSearchTerm('');
+    setSearchTerm("");
   };
 
   if (loading) {
     return (
-      <div className="p-6 flex justify-center items-center">
+      <div className="p-6 flex justify-center items-center h-64">
         <div className="text-gray-600">Loading...</div>
       </div>
     );
@@ -545,7 +160,7 @@ const StockTransfer = () => {
     <div className="p-6">
       {/* Breadcrumb */}
       <div className="mb-4 text-gray-600 text-sm">
-        Dashboard <span className="mx-2">{'>'}</span> Stock Transfer
+        Dashboard <span className="mx-2">{">"}</span> Stock Transfer
       </div>
 
       {/* Error Message */}
@@ -556,24 +171,19 @@ const StockTransfer = () => {
       )}
 
       {/* Header Buttons & Search */}
-      <div className="flex justify-between items-center mb-4">
-        <div className="flex gap-3 flex-wrap">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+        <div className="flex flex-wrap gap-3">
           <button
-            onClick={() => navigate('/stocktransferform')}
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md"
+            onClick={() => navigate("/stocktransferform")}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md transition-colors cursor-pointer"
           >
             <Plus size={18} /> Add New Stock Transfer
           </button>
-          <button
-            onClick={() => setShowImportModal(true)}
-            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md"
-          >
-            <Upload size={18} /> Import CSV
-          </button>
+
           {selectedRows.length > 0 && (
             <button
               onClick={handleDelete}
-              className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md"
+              className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md transition-colors cursor-pointer"
             >
               <Trash2 size={18} /> Delete Selected ({selectedRows.length})
             </button>
@@ -581,31 +191,35 @@ const StockTransfer = () => {
         </div>
 
         {/* Search Bar */}
-        <div className="relative w-full max-w-xs">
-          <Search className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400" size={16} />
+        <div className="relative w-full sm:max-w-xs">
+          <Search
+            className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
+            size={16}
+          />
           <input
             type="text"
             placeholder="Search by Invoice No"
             value={searchTerm}
-            onChange={e => {
+            onChange={(e) => {
               setSearchTerm(e.target.value);
               setCurrentPage(1);
             }}
-            className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+            className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-200
+             focus:border-indigo-400 outline-none transition-colors"
           />
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-4 mb-4">
-        {['transfer', 'recieve'].map(tab => (
+      <div className="flex gap-4 mb-6">
+        {["transfer", "recieve"].map((tab) => (
           <button
             key={tab}
             onClick={() => handleTabChange(tab)}
-            className={`px-4 py-2 rounded-lg capitalize ${
+            className={`px-6 py-2 rounded-lg capitalize font-medium transition-colors cursor-pointer ${
               activeTab === tab
-                ? 'bg-indigo-600 text-white'
-                : 'bg-gray-200 text-gray-700'
+                ? "bg-indigo-600 text-white shadow-md"
+                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
             }`}
           >
             {tab} ({filteredData.length})
@@ -614,81 +228,100 @@ const StockTransfer = () => {
       </div>
 
       {/* Table */}
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse bg-white rounded-xl overflow-hidden">
-          <thead className="bg-gray-100 text-gray-700 text-sm">
+      <div className="overflow-x-auto bg-white rounded-xl shadow-sm border border-gray-200">
+        <table className="w-full border-collapse">
+          <thead className="bg-gray-50 text-gray-700 text-sm">
             <tr>
-              <th className="p-3">
+              <th className="p-4 w-12">
                 <input
                   type="checkbox"
                   checked={
-                    selectedRows.length > 0 &&
-                    paginatedData.every(row => selectedRows.includes(row.id))
+                    paginatedData.length > 0 &&
+                    selectedRows.length === paginatedData.length
                   }
-                  onChange={(e) =>
-                    setSelectedRows(
-                      e.target.checked ? paginatedData.map(row => row.id) : []
-                    )
-                  }
+                  onChange={handleSelectAll}
+                  className="rounded border-gray-300"
                 />
               </th>
-              <th className="p-3 text-left">Invoice No</th>
-              <th className="p-3 text-left">Date</th>
-              <th className="p-3 text-left">Warehouse</th>
-              <th className="p-3 text-left">Total Amount</th>
-              <th className="p-3 text-left">{isRecieveTab ? 'Collected Amount' : 'Paid Amount'}</th>
-              <th className="p-3 text-left">Due Amount</th>
-              <th className="p-3 text-left">Payment Status</th>
-              <th className="p-3 text-center">Action</th>
+              <th className="p-4 text-left font-semibold">Invoice No</th>
+              <th className="p-4 text-left font-semibold">Date</th>
+              <th className="p-4 text-left font-semibold">Warehouse 1</th>
+              <th className="p-4 text-left font-semibold">Total Amount</th>
+              <th className="p-4 text-left font-semibold">
+                {isRecieveTab ? "Collected Amount" : "Paid Amount"}
+              </th>
+              <th className="p-4 text-left font-semibold">Due Amount</th>
+              <th className="p-4 text-left font-semibold">Payment Status</th>
+              <th className="p-4 text-center font-semibold">Action</th>
             </tr>
           </thead>
           <tbody>
             {paginatedData.length > 0 ? (
-              paginatedData.map(item => (
-                <tr key={item.id} className="border-b hover:bg-gray-50 text-sm">
-                  <td className="p-3 text-center">
+              paginatedData.map((item) => (
+                <tr
+                  key={item.id}
+                  className="border-t border-gray-100 hover:bg-gray-50 text-sm transition-colors"
+                >
+                  <td className="p-4 text-center">
                     <input
                       type="checkbox"
                       checked={selectedRows.includes(item.id)}
                       onChange={() => handleSelectRow(item.id)}
+                      className="rounded border-gray-300"
                     />
                   </td>
-                  <td className="p-3">{item.invoiceNo}</td>
-                  <td className="p-3">{new Date(item.date).toLocaleDateString()}</td>
-                  <td className="p-3">{item.warehouse}</td>
-                  <td className="p-3">₹{item.totalAmount.toFixed(2)}</td>
-                  <td className="p-3">₹{item.paidAmount.toFixed(2)}</td>
-                  <td className="p-3 text-red-600 font-medium">
+                  <td className="p-4 font-medium text-gray-900">
+                    {item.invoiceNo}
+                  </td>
+                  <td className="p-4 text-gray-600">
+                    {new Date(item.date).toLocaleDateString("en-GB")}
+                  </td>
+                  <td className="p-4 text-gray-600">{item.warehouse}</td>
+                  <td className="p-4 font-semibold text-gray-900">
+                    ₹{item.totalAmount.toFixed(2)}
+                  </td>
+                  <td className="p-4 text-gray-600">
+                    ₹{item.paidAmount.toFixed(2)}
+                  </td>
+                  <td className="p-4 font-semibold text-red-600">
                     ₹{(item.totalAmount - item.paidAmount).toFixed(2)}
                   </td>
-                  <td className="p-3">
-                    <span className={`px-2 py-1 rounded-full text-xs ${
-                      item.paymentStatus === 'Paid' || item.paymentStatus === 'Collected' 
-                        ? 'bg-green-100 text-green-800'
-                        : item.paymentStatus === 'Partial'
-                        ? 'bg-yellow-100 text-yellow-800'
-                        : 'bg-red-100 text-red-800'
-                    }`}>
+                  <td className="p-4">
+                    <span
+                      className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
+                        item.paymentStatus === "Paid" ||
+                        item.paymentStatus === "Collected"
+                          ? "bg-green-100 text-green-800"
+                          : item.paymentStatus === "Partial"
+                          ? "bg-yellow-100 text-yellow-800"
+                          : "bg-red-100 text-red-800"
+                      }`}
+                    >
                       {item.paymentStatus}
                     </span>
                   </td>
-                  <td className="p-3">
-                    <div className="flex justify-center gap-2">
-                      <button 
+                  <td className="p-4">
+                    <div className="flex justify-center gap-3">
+                      <button
                         onClick={() => handleView(item.id)}
-                        className="text-blue-600 hover:text-blue-800"
+                        className="text-blue-600 hover:text-blue-800 transition-colors p-1 rounded hover:bg-blue-50"
+                        title="View"
                       >
                         <Eye size={18} />
                       </button>
-                      <button 
+                      <button
                         onClick={() => handleEdit(item.id)}
-                        className="text-green-600 hover:text-green-800"
+                        className="text-green-600 hover:text-green-800 transition-colors p-1 rounded hover:bg-green-50"
+                        title="Edit"
                       >
                         <Edit size={18} />
                       </button>
-                      <button 
-                        onClick={() => handleDeleteSingle(item.id, item.invoiceNo)}
-                        className="text-red-600 hover:text-red-800"
+                      <button
+                        onClick={() =>
+                          handleDeleteSingle(item.id, item.invoiceNo)
+                        }
+                        className="text-red-600 hover:text-red-800 transition-colors p-1 rounded hover:bg-red-50"
+                        title="Delete"
                       >
                         <Trash size={18} />
                       </button>
@@ -698,107 +331,66 @@ const StockTransfer = () => {
               ))
             ) : (
               <tr>
-                <td colSpan="9" className="text-center py-4 text-gray-500">
-                  {searchTerm ? 'No matching records found' : 'No data available'}
+                <td colSpan="9" className="text-center py-8 text-gray-500">
+                  {searchTerm
+                    ? "No matching records found"
+                    : "No data available"}
                 </td>
               </tr>
             )}
           </tbody>
 
           {/* Footer Totals */}
-          <tfoot>
-            <tr className="bg-gray-100 font-semibold text-sm">
-              <td colSpan="4" className="text-right p-3">Total:</td>
-              <td className="p-3">₹{totalAmount.toFixed(2)}</td>
-              <td className="p-3">₹{totalPaid.toFixed(2)}</td>
-              <td className="p-3 text-red-600">₹{totalDue.toFixed(2)}</td>
-              <td colSpan="2"></td>
-            </tr>
-          </tfoot>
+          {filteredData.length > 0 && (
+            <tfoot>
+              <tr className="bg-gray-50 border-t border-gray-200 font-semibold text-sm">
+                <td colSpan="4" className="p-4 text-right text-gray-700">
+                  Total:
+                </td>
+                <td className="p-4 text-gray-900">₹{totalAmount.toFixed(2)}</td>
+                <td className="p-4 text-gray-900">₹{totalPaid.toFixed(2)}</td>
+                <td className="p-4 text-red-600">₹{totalDue.toFixed(2)}</td>
+                <td colSpan="2"></td>
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="mt-4 flex justify-center gap-2 text-sm">
+        <div className="mt-6 flex justify-center items-center gap-2 text-sm">
           <button
-            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
             disabled={currentPage === 1}
-            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
+            className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            Prev
+            Previous
           </button>
-          {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
-            <button
-              key={page}
-              onClick={() => setCurrentPage(page)}
-              className={`px-3 py-1 rounded ${
-                currentPage === page
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-gray-200 hover:bg-gray-300'
-              }`}
-            >
-              {page}
-            </button>
-          ))}
+
+          <div className="flex gap-1">
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+              <button
+                key={page}
+                onClick={() => setCurrentPage(page)}
+                className={`px-3 py-2 rounded-lg min-w-[40px] transition-colors ${
+                  currentPage === page
+                    ? "bg-indigo-600 text-white shadow-md"
+                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                }`}
+              >
+                {page}
+              </button>
+            ))}
+          </div>
+
           <button
-            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
             disabled={currentPage === totalPages}
-            className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
+            className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             Next
           </button>
-        </div>
-      )}
-
-      {/* CSV Upload Modal */}
-      {showImportModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50">
-          <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
-            <button
-              onClick={() => setShowImportModal(false)}
-              className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
-            >
-              <X size={20} />
-            </button>
-
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">
-              Import Stock Transfers
-            </h2>
-
-            <a
-              href="/sample-stock-transfer.csv"
-              download
-              className="text-blue-600 hover:underline text-sm mb-4 block"
-            >
-              Click here to download Sample CSV file
-            </a>
-
-            <div className="mb-6">
-              <label className="block text-gray-700 mb-2">File</label>
-              <input
-                type="file"
-                accept=".csv"
-                onChange={(e) => setFile(e.target.files[0])}
-                className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
-              />
-            </div>
-
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setShowImportModal(false)}
-                className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleImportCSV}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg"
-              >
-                Import
-              </button>
-            </div>
-          </div>
         </div>
       )}
     </div>
