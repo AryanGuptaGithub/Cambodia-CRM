@@ -152,7 +152,7 @@ const useStockTransferForm = () => {
       const response = await axios.get(
         `${backendUrl}/api/stock-transfers/last-number`
       );
-      console.log("values of response", response);
+
       if (response.data.success) {
         const lastNumber = response.data.lastNumber || 0;
         const nextNumber = lastNumber + 1;
@@ -746,14 +746,14 @@ const StockTransferForm = () => {
           <button
             type="button"
             onClick={() => navigate("/stocktransfer")}
-            className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-6 py-2 rounded-lg transition-colors"
+            className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-6 py-2 rounded-lg transition-colors cursor-pointer"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={isLoading}
-            className="bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white px-6 py-2 rounded-lg transition-colors"
+            className="bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white px-6 py-2 rounded-lg transition-colors cursor-pointer"
           >
             {isLoading ? "Saving..." : "Save Transfer"}
           </button>

@@ -65,7 +65,7 @@ router.get("/stock-transfers", async (req, res) => {
         .lean(),
       StockTransfer.countDocuments(filter),
     ]);
-    
+
     res.status(200).json({
       success: true,
       data: transfers,
@@ -274,24 +274,64 @@ router.put("/stock-transfers/:id", async (req, res) => {
       });
     }
 
-    const updateData = { ...req.body, updatedBy: "65d8f5c8a1b2c3e4f5g6h7i8" }; // Example static ID
+    const updateData = { ...req.body };
 
+    // Handle items update with proper field mapping and validation
     if (req.body.items) {
-      updateData.items = req.body.items.map((item) => ({
-        productId: item.productId,
-        productName: item.productName,
-        quantity: parseInt(item.quantity),
-        unitPrice: parseFloat(item.unitPrice),
-        totalPrice: parseFloat(item.quantity) * parseFloat(item.unitPrice),
-      }));
+      updateData.items = req.body.items.map((item, index) => {
+        let productId, productName;
+
+        // Handle different data formats from frontend
+        if (item.product && typeof item.product === "object") {
+          // New format with product object
+          productId = item.product.value || item.productId;
+          productName = item.product.label || item.productName;
+        } else if (item.productId) {
+          // Existing format
+          productId = item.productId;
+          productName = item.productName;
+        } else {
+          // Fallback - this should not happen with proper frontend validation
+          throw new Error(`Item ${index} is missing productId`);
+        }
+
+        // Validate required fields
+        if (!productId) {
+          throw new Error(`Item ${index} has invalid productId`);
+        }
+
+        if (!productName) {
+          throw new Error(`Item ${index} has invalid productName`);
+        }
+
+        return {
+          productId: productId,
+          productName: productName,
+          boxQuantity: parseInt(item.boxQuantity) || 0,
+          openPieces: parseInt(item.openPieces) || 0,
+          qtyPerCarton: parseInt(item.qtyPerCarton) || 0,
+          totalPieces: parseInt(item.totalPieces) || 0,
+          expenses: parseFloat(item.expenses) || 0,
+        };
+      });
+
+      // Calculate total expenses from items
+      const totalItemsExpenses = updateData.items.reduce(
+        (sum, item) => sum + (parseFloat(item.expenses) || 0),
+        0
+      );
+      updateData.totalExpenses = totalItemsExpenses;
     }
 
-    if (req.body.totalAmount || req.body.paidAmount) {
-      const total = parseFloat(req.body.totalAmount || transfer.totalAmount);
-      const paid = parseFloat(req.body.paidAmount || transfer.paidAmount);
-      updateData.dueAmount = total - paid;
-      updateData.paymentStatus =
-        paid >= total ? "paid" : paid > 0 ? "partial" : "pending";
+    // Calculate grand total (total expenses + shipping)
+    if (
+      req.body.shipping !== undefined ||
+      req.body.totalExpenses !== undefined
+    ) {
+      const shipping = parseFloat(req.body.shipping) || transfer.shipping;
+      const totalExpenses =
+        parseFloat(updateData.totalExpenses) || transfer.totalExpenses;
+      updateData.grandTotal = shipping + totalExpenses;
     }
 
     const updatedTransfer = await StockTransfer.findByIdAndUpdate(
@@ -301,9 +341,7 @@ router.put("/stock-transfers/:id", async (req, res) => {
         new: true,
         runValidators: true,
       }
-    )
-      .populate("createdBy", "name email")
-      .populate("updatedBy", "name email");
+    );
 
     res.status(200).json({
       success: true,
@@ -321,6 +359,13 @@ router.put("/stock-transfers/:id", async (req, res) => {
           Object.values(error.errors)
             .map((e) => e.message)
             .join(", "),
+      });
+    }
+
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: "Invoice number already exists",
       });
     }
 

@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from "react";
 import ReactDOM from "react-dom";
 import { Plus, Trash2, Search, Eye, Edit, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -6,6 +12,8 @@ import { getVisiblePages } from "../utils/useVisiblePages.jsx";
 import { formatDateToReadable } from "../utils/dateUtil.js";
 import CustomDropdown from "./Utility/customDropdown.jsx";
 import axios from "axios";
+import { showToast } from "../utils/toast.jsx";
+import { confirmDialog } from "../utils/confirmationDialog.js";
 
 const ITEMS_PER_PAGE = 9;
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
@@ -25,7 +33,8 @@ const StockTransfer = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  console.log('values of pres', products);
+  const inputRef = useRef(null);
+
   // Form state
   const [form, setForm] = useState({
     invoiceNo: "",
@@ -131,6 +140,36 @@ const StockTransfer = () => {
   const handleUpdateStockTransfer = async (e, formData) => {
     e.preventDefault();
     try {
+      // Transform the data before sending to match backend schema
+      const transformedData = {
+        ...formData,
+        items: formData.items.map((item) => {
+          // For new items with CustomDropdown
+          if (item._id && item._id.startsWith("new-") && item.product) {
+            return {
+              productId: item.product.value, // Use the product ID from dropdown
+              productName: item.product.label, // Use the product name from dropdown
+              boxQuantity: parseInt(item.boxQuantity) || 0,
+              openPieces: parseInt(item.openPieces) || 0,
+              qtyPerCarton: parseInt(item.qtyPerCarton) || 0,
+              totalPieces: parseInt(item.totalPieces) || 0,
+              expenses: parseFloat(item.expenses) || 0,
+            };
+          }
+
+          // For existing items
+          return {
+            productId: item.productId, // Keep existing productId
+            productName: item.productName, // Keep existing productName
+            boxQuantity: parseInt(item.boxQuantity) || 0,
+            openPieces: parseInt(item.openPieces) || 0,
+            qtyPerCarton: parseInt(item.qtyPerCarton) || 0,
+            totalPieces: parseInt(item.totalPieces) || 0,
+            expenses: parseFloat(item.expenses) || 0,
+          };
+        }),
+      };
+
       const response = await fetch(
         `${backendUrl}/api/stock-transfers/${formData._id}`,
         {
@@ -138,20 +177,20 @@ const StockTransfer = () => {
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify(formData),
+          body: JSON.stringify(transformedData),
         }
       );
 
       if (!response.ok) {
-        throw new Error("Failed to update stock transfer");
+        const errorData = await response.json();
+        throw new Error(errorData.message || "Failed to update stock transfer");
       }
 
       await fetchStockTransfers();
       setIsEditModalOpen(false);
-      alert("Stock transfer updated successfully");
+      showToast("success", "Stock transfer updated successfully");
     } catch (err) {
-      console.error("Error updating stock transfer:", err);
-      alert("Error updating stock transfer");
+      showToast("error", `Error updating stock transfer: ${err.message}`);
     }
   };
 
@@ -211,21 +250,28 @@ const StockTransfer = () => {
   const handleItemProductChange = (index, productValue) => {
     setForm((prev) => {
       const updatedItems = [...prev.items];
-      const selectedProduct = productOptions.find(opt => opt.value === productValue);
-      
+      const selectedProduct = productOptions.find(
+        (opt) => opt.value === productValue
+      );
+
       updatedItems[index] = {
         ...updatedItems[index],
-        product: productValue,
+        product: {
+          value: productValue, // Store the product ID
+          label: selectedProduct?.label || productValue, // Store the product name
+          qtyPerCarton: selectedProduct?.qtyPerCarton || 0,
+        },
         productName: selectedProduct?.label || productValue,
-        qtyPerCarton: selectedProduct?.qtyPerCarton || 0, // Auto-fill qtyPerCarton from product
+        qtyPerCarton: selectedProduct?.qtyPerCarton || 0,
       };
 
       // Auto-calculate totalPieces when product is selected
       const boxQuantity = updatedItems[index].boxQuantity || 0;
       const openPieces = updatedItems[index].openPieces || 0;
       const qtyPerCarton = selectedProduct?.qtyPerCarton || 0;
-      
-      updatedItems[index].totalPieces = (parseInt(boxQuantity) * parseInt(qtyPerCarton)) + parseInt(openPieces);
+
+      updatedItems[index].totalPieces =
+        parseInt(boxQuantity) * parseInt(qtyPerCarton) + parseInt(openPieces);
 
       return {
         ...prev,
@@ -233,7 +279,6 @@ const StockTransfer = () => {
       };
     });
   };
-
   // Enhanced handleItemChange with auto-calculation
   const handleItemChange = (index, field, value) => {
     setForm((prev) => {
@@ -279,37 +324,57 @@ const StockTransfer = () => {
   };
 
   const handleDelete = async () => {
-    if (selectedRows.length === 0) return;
-    try {
-      await Promise.all(
-        selectedRows.map((id) =>
-          fetch(`${backendUrl}/api/stock-transfers/${id}`, {
-            method: "DELETE",
-          })
-        )
-      );
-      await fetchStockTransfers();
-      setSelectedRows([]);
-      alert("Selected items deleted");
-    } catch (err) {
-      console.error("Error deleting selected:", err);
-      alert("Error deleting items");
+    const confirm = await confirmDialog({
+      text: `Are you sure you want to delete <b>${selectedRows.length}</b> Stock Transfers`,
+      icon: "warning",
+      confirmButtonText: "Yes, delete",
+      cancelButtonText: "Cancel",
+      selectedRows,
+    });
+
+    if (confirm.isConfirmed) {
+      try {
+        await Promise.all(
+          selectedRows.map((id) =>
+            fetch(`${backendUrl}/api/stock-transfers/${id}`, {
+              method: "DELETE",
+            })
+          )
+        );
+        await fetchStockTransfers();
+        setSelectedRows([]);
+        showToast("success", "Selected items deleted");
+      } catch (err) {
+        showToast("error", error.message || "Error deleting items");
+      }
     }
   };
 
-  const handleDeleteSingle = async (id, invoiceNo) => {
-    if (!window.confirm(`Are you sure to delete invoice ${invoiceNo}?`)) {
-      return;
-    }
-    try {
-      await fetch(`${backendUrl}/api/stock-transfers/${id}`, {
-        method: "DELETE",
-      });
-      await fetchStockTransfers();
-      alert("Deleted successfully");
-    } catch (err) {
-      console.error("Error deleting:", err);
-      alert("Error deleting item");
+  const handleDeleteSingle = async (stockTransferData) => {
+    if (!stockTransferData._id) return;
+    const confirmDelete = await confirmDialog({
+      title: "Delete",
+      text: `Are you sure you want to delete stock trannsers <b>${stockTransferData.invoiceNo}</b>?`,
+      icon: "warning",
+      confirmButtonText: "Yes, delete",
+      cancelButtonText: "Cancel",
+    });
+
+    if (confirmDelete.isConfirmed) {
+      try {
+        const res = await axios.delete(
+          `${backendUrl}/api/stock-transfers/${stockTransferData._id}`
+        );
+        if (res.status === 200) {
+          showToast(
+            "success",
+            `Stock Transfer <b>${stockTransferData.invoiceNo}</b> deleted successfully`
+          );
+          await fetchStockTransfers();
+        }
+      } catch (error) {
+        showToast("error", "Failed to delete stock transfer.");
+      }
     }
   };
 
@@ -358,57 +423,70 @@ const StockTransfer = () => {
         <div className="flex gap-3">
           <button
             onClick={() => navigate("/stocktransferform")}
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md"
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
           >
             <Plus size={18} /> Add New Stock Transfer
           </button>
           {selectedRows.length > 0 && (
             <button
               onClick={handleDelete}
-              className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md"
+              className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
             >
               <Trash2 size={18} /> Delete Selected ({selectedRows.length})
             </button>
           )}
         </div>
-        <div className="relative w-full sm:max-w-xs">
-          <Search
-            className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
-            size={16}
-          />
-          <input
-            type="text"
-            placeholder="Search by Invoice or Remarks"
-            value={searchTerm}
-            onChange={(e) => {
-              setSearchTerm(e.target.value);
-              setCurrentPage(1);
-            }}
-            className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
-          />
-        </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-4 mb-6">
-        {["send", "receive"].map((tab) => (
-          <button
-            key={tab}
-            onClick={() => handleTabChange(tab)}
-            className={`px-6 py-2 rounded-lg capitalize font-medium transition-colors ${
-              activeTab === tab
-                ? "bg-indigo-600 text-white shadow-md"
-                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-            }`}
-          >
-            {tab} (
-            {
-              filteredStockTransfers.filter((st) => st.transferType === tab)
-                .length
-            }
-            )
-          </button>
-        ))}
+      <div className="flex flex-row justify-between items-center gap-4 mb-6">
+        {/* Tabs Section */}
+        <div className="flex gap-3">
+          {["send", "receive"].map((tab) => (
+            <button
+              key={tab}
+              onClick={() => handleTabChange(tab)}
+              className={`px-5 py-2 rounded-lg capitalize font-medium transition-colors cursor-pointer ${
+                activeTab === tab
+                  ? "bg-indigo-600 text-white shadow-md"
+                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+              }`}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
+
+        {/* Right Section - Total Count and Search */}
+        <div className="flex items-center gap-4">
+          {/* Total Count */}
+          <div className="flex items-center">
+            <p className="text-base font-semibold text-gray-700 whitespace-nowrap">
+              Total Count:{" "}
+              <span className="inline-block bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-sm font-medium">
+                {filteredStockTransfers.length}
+              </span>
+            </p>
+          </div>
+
+          {/* Search Input */}
+          <div className="relative w-60">
+            <Search
+              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+              size={16}
+            />
+            <input
+              type="text"
+              placeholder="Search by Invoice or Remarks"
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
+            />
+          </div>
+        </div>
       </div>
 
       <div className="overflow-x-auto shadow">
@@ -428,7 +506,7 @@ const StockTransfer = () => {
                       onChange={handleSelectAll}
                     />
                   )}
-                  <span>Invoice No</span>
+                  <span>Transfer No</span>
                 </div>
               </th>
               <th className="p-3 min-w-[120px]">Date</th>
@@ -501,9 +579,7 @@ const StockTransfer = () => {
                         </button>
                         <button
                           className="text-red-600 hover:text-red-800 cursor-pointer"
-                          onClick={() =>
-                            handleDeleteSingle(item._id, item.invoiceNo)
-                          }
+                          onClick={() => handleDeleteSingle(item)}
                         >
                           <Trash2 size={18} />
                         </button>
@@ -523,7 +599,7 @@ const StockTransfer = () => {
           <button
             onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
             disabled={currentPage === 1}
-            className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             Previous
           </button>
@@ -532,7 +608,7 @@ const StockTransfer = () => {
               <button
                 key={pg}
                 onClick={() => setCurrentPage(pg)}
-                className={`px-3 py-2 rounded-lg min-w-[40px] ${
+                className={`px-3 py-2 rounded-lg min-w-[40px] cursor-pointer ${
                   currentPage === pg
                     ? "bg-indigo-600 text-white"
                     : "bg-gray-200 text-gray-700 hover:bg-gray-300"
@@ -545,7 +621,7 @@ const StockTransfer = () => {
           <button
             onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
             disabled={currentPage === totalPages}
-            className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             Next
           </button>
@@ -576,7 +652,7 @@ const StockTransfer = () => {
                 {/* Main Information - 3 columns */}
                 <div>
                   <label className="block text-sm font-medium text-gray-600">
-                    Invoice Number
+                    Transfer No
                   </label>
                   <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
                     {form.invoiceNo || "-"}
@@ -763,7 +839,7 @@ const StockTransfer = () => {
                 {/* Invoice Number */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
-                    Invoice Number
+                    Transfer No
                   </label>
                   <input
                     type="text"
@@ -1043,7 +1119,7 @@ const StockTransfer = () => {
                             <button
                               type="button"
                               onClick={() => handleDeleteItem(index)}
-                              className="text-red-600 hover:text-red-800 text-sm flex items-center gap-1"
+                              className="text-red-600 hover:text-red-800 text-sm flex items-center gap-1 cursor-pointer"
                             >
                               <Trash2 size={16} />
                               Remove Item
@@ -1061,7 +1137,7 @@ const StockTransfer = () => {
                     <button
                       type="button"
                       onClick={handleAddNewItem}
-                      className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg"
+                      className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg cursor-pointer"
                     >
                       <Plus size={16} />
                       Add New Product
