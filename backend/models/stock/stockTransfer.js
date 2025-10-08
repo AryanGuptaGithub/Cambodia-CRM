@@ -1,158 +1,119 @@
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 
-const stockTransferSchema = new mongoose.Schema({
-  invoiceNo: {
-    type: String,
-    required: true,
-    unique: true,
-    trim: true
-  },
-  date: {
-    type: Date,
-    required: true,
-    default: Date.now
-  },
-  warehouse: {
-    type: String,
-    required: true,
-    trim: true
-  },
-  totalAmount: {
-    type: Number,
-    required: true,
-    min: 0
-  },
-  paidAmount: {
-    type: Number,
-    required: true,
-    min: 0,
-    validate: {
-      validator: function(value) {
-        return value <= this.totalAmount;
-      },
-      message: 'Paid amount cannot exceed total amount'
-    }
-  },
-  dueAmount: {
-    type: Number,
-    required: true,
-    min: 0
-  },
-  paymentStatus: {
-    type: String,
-    required: true,
-    enum: ['paid', 'pending', 'partial', 'overdue'],
-    default: 'pending'
-  },
-  transferType: {
-    type: String,
-    required: true,
-    enum: ['internal', 'external', 'return', 'adjustment'],
-    default: 'internal'
-  },
-  status: {
-    type: String,
-    enum: ['pending', 'completed', 'cancelled', 'in_transit'],
-    default: 'pending'
-  },
-  items: [{
-    productId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Product',
-      required: true
-    },
-    productName: {
+const stockTransferSchema = new mongoose.Schema(
+  {
+    invoiceNo: {
       type: String,
-      required: true
+      required: true,
+      unique: true,
+      trim: true,
     },
-    quantity: {
+    date: {
+      type: Date,
+      required: true,
+    },
+    items: [
+      {
+        productId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Product",
+          required: true,
+        },
+        productName: {
+          type: String,
+          required: true,
+        },
+        boxQuantity: {
+          type: Number,
+          required: true,
+          min: 0,
+        },
+        openPieces: {
+          type: Number,
+          required: true,
+          min: 0,
+        },
+        qtyPerCarton: {
+          type: Number,
+          required: true,
+          min: 0,
+        },
+        totalPieces: {
+          type: Number,
+          required: true,
+          min: 0,
+        },
+        expenses: {
+          type: Number,
+          required: true,
+          min: 0,
+        }
+      },
+    ],
+    remarks: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    notes: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    status: {
+      type: String,
+      required: true,
+    },
+    transferType: {
+      type: String,
+      required: true,
+      enum: ["send", "receive"], // Updated enum values
+      default: "send",
+    },
+    shipping: {
       type: Number,
       required: true,
-      min: 1
+      min: 0,
+      default: 0,
     },
-    unitPrice: {
+    totalExpenses: {
       type: Number,
       required: true,
-      min: 0
+      min: 0,
+      default: 0,
     },
-    totalPrice: {
+    grandTotal: {
       type: Number,
       required: true,
-      min: 0
-    }
-  }],
-  sourceWarehouse: {
-    type: String,
-    required: true,
-    trim: true
+      min: 0,
+      default: 0,
+    },
   },
-  destinationWarehouse: {
-    type: String,
-    required: true,
-    trim: true
-  },
-  notes: {
-    type: String,
-    trim: true,
-    maxlength: 500
-  },
-  createdBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
-  updatedBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
+  {
+    timestamps: true,
   }
-}, {
-  timestamps: true
-});
+);
 
-// Calculate due amount before saving
-stockTransferSchema.pre('save', function(next) {
-  this.dueAmount = this.totalAmount - this.paidAmount;
+// Generate invoice number method (optional - you can keep your frontend generation)
+stockTransferSchema.statics.generateInvoiceNo = async function () {
+  const lastTransfer = await this.findOne({}, {}, { sort: { createdAt: -1 } });
   
-  // Auto-update payment status based on amounts
-  if (this.paidAmount === 0) {
-    this.paymentStatus = 'pending';
-  } else if (this.paidAmount === this.totalAmount) {
-    this.paymentStatus = 'paid';
-  } else if (this.paidAmount > 0 && this.paidAmount < this.totalAmount) {
-    this.paymentStatus = 'partial';
+  let lastNumber = 0;
+  if (lastTransfer && lastTransfer.invoiceNo) {
+    // Extract number from format "ST-0001"
+    const match = lastTransfer.invoiceNo.match(/\d+/);
+    lastNumber = match ? parseInt(match[0]) : 0;
   }
   
-  next();
-});
-
-// Static method to generate invoice number
-stockTransferSchema.statics.generateInvoiceNo = async function() {
-  const currentYear = new Date().getFullYear();
-  const prefix = `ST-${currentYear}-`;
-  
-  const lastTransfer = await this.findOne(
-    { invoiceNo: new RegExp(`^${prefix}`) },
-    {},
-    { sort: { createdAt: -1 } }
-  );
-  
-  if (!lastTransfer) {
-    return `${prefix}0001`;
-  }
-  
-  const lastNumber = parseInt(lastTransfer.invoiceNo.split('-')[2]);
-  const newNumber = (lastNumber + 1).toString().padStart(4, '0');
-  
-  return `${prefix}${newNumber}`;
+  const nextNumber = lastNumber + 1;
+  return `ST-${String(nextNumber).padStart(4, "0")}`;
 };
-
 
 stockTransferSchema.index({ invoiceNo: 1 });
 stockTransferSchema.index({ date: -1 });
-stockTransferSchema.index({ warehouse: 1 });
-stockTransferSchema.index({ paymentStatus: 1 });
+stockTransferSchema.index({ status: 1 });
 stockTransferSchema.index({ transferType: 1 });
 
-const StockTransfer = mongoose.model('StockTransfer', stockTransferSchema);
+const StockTransfer = mongoose.model("StockTransfer", stockTransferSchema);
 
 export default StockTransfer;

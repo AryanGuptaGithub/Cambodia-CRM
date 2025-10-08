@@ -143,8 +143,6 @@ router.put("/stock-adjustments/:id", async (req, res) => {
   }
 
   try {
-    console.log("🔄 Updating adjustment:", id, "with data:", req.body);
-
     // Check if adjustment exists
     const existingAdjustment = await StockAdjustment.findById(id);
     if (!existingAdjustment) {
@@ -229,7 +227,6 @@ router.put("/stock-adjustments/:id", async (req, res) => {
 router.delete("/stock-adjustments/bulk", async (req, res) => {
   try {
     const { ids } = req.body;
-    console.log("🆔 Extracted IDs:", ids);
 
     if (!Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({

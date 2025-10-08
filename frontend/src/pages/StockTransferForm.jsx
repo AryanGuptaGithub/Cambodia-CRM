@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { showToast } from "../utils/toast.jsx";
 import CustomDropdown from "./Utility/customDropdown.jsx";
 import axios from "axios";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -12,7 +14,7 @@ const INITIAL_PRODUCT_ITEM = {
   productName: "",
   boxQuantity: 0,
   openPieces: 0,
-  qtyPerCarton: 0, // Changed from quantityPerBox to qtyPerCarton
+  qtyPerCarton: 0,
   totalPieces: 0,
   expenses: 0,
 };
@@ -21,12 +23,19 @@ const INITIAL_FORM_STATE = {
   invoiceNumber: "",
   transferDate: "",
   product: "",
-  terms: "",
-  notes: "",
+  remarks: "", // Changed from terms
+  notes: "", // Keep notes as is
   orderStatus: "",
   shipping: "",
+  transferType: "send", // Added transfer type
   items: [],
 };
+
+// Transfer type options
+const TRANSFER_TYPE_OPTIONS = [
+  { value: "send", label: "Send" },
+  { value: "receive", label: "Receive" },
+];
 
 // Custom hook for form state management
 const useStockTransferForm = () => {
@@ -50,6 +59,8 @@ const useStockTransferForm = () => {
     if (!form.transferDate)
       newErrors.transferDate = "Transfer date is required";
     if (!form.orderStatus) newErrors.orderStatus = "Order status is required";
+    if (!form.transferType)
+      newErrors.transferType = "Transfer type is required";
     if (items.length === 0)
       newErrors.items = "At least one product item is required";
 
@@ -85,23 +96,22 @@ const useStockTransferForm = () => {
           if (item.id === id) {
             const updatedItem = {
               ...item,
-              [field]: [
-                "boxQuantity",
-                "openPieces",
-                "expenses",
-              ].includes(field)
+              [field]: ["boxQuantity", "openPieces", "expenses"].includes(field)
                 ? parseNumber(value) || 0
                 : value,
             };
 
-            // ✅ Calculate Total Pieces when box quantity or open pieces change
+            // Calculate Total Pieces when box quantity or open pieces change
             if (["boxQuantity", "openPieces"].includes(field)) {
               // Find the product to get qtyPerCarton
-              const selectedProduct = products.find(p => p._id === item.productId);
+              const selectedProduct = products.find(
+                (p) => p._id === item.productId
+              );
               const qtyPerCarton = selectedProduct?.qtyPerCarton || 0;
-              
+
               updatedItem.totalPieces =
-                parseNumber(updatedItem.boxQuantity) * parseNumber(qtyPerCarton) +
+                parseNumber(updatedItem.boxQuantity) *
+                  parseNumber(qtyPerCarton) +
                 parseNumber(updatedItem.openPieces);
             }
 
@@ -138,7 +148,27 @@ const useStockTransferForm = () => {
   );
 
   const generateStockTransferNumber = useCallback(async () => {
-    return 1;
+    try {
+      const response = await axios.get(
+        `${backendUrl}/api/stock-transfers/last-number`
+      );
+      console.log("values of response", response);
+      if (response.data.success) {
+        const lastNumber = response.data.lastNumber || 0;
+        const nextNumber = lastNumber + 1;
+
+        // Format the number, e.g., ST-0002
+        const formattedNumber = `ST-${String(nextNumber).padStart(4, "0")}`;
+
+        return formattedNumber;
+      } else {
+        console.error("Failed to fetch last number");
+        return null;
+      }
+    } catch (error) {
+      console.error("Error generating stock transfer number:", error);
+      return null;
+    }
   }, []);
 
   useEffect(() => {
@@ -149,7 +179,7 @@ const useStockTransferForm = () => {
     setStockTransferNumber();
   }, [generateStockTransferNumber, updateFormField]);
 
-  // ✅ Fixed: Calculate totals - Expenses are NOT multiplied with quantity
+  // Calculate totals - Expenses are NOT multiplied with quantity
   const calculateTotals = useCallback(() => {
     const totalExpenses = items.reduce(
       (sum, item) => sum + parseNumber(item.expenses),
@@ -183,7 +213,7 @@ const useStockTransferForm = () => {
   };
 };
 
-// Reusable Components (keep the same as before)
+// Reusable Components
 const InputField = React.memo(
   ({
     label,
@@ -320,7 +350,7 @@ const StockTransferForm = () => {
       ...products.map((product) => ({
         value: product._id,
         label: product.productName,
-        qtyPerCarton: product.qtyPerCarton // Include qtyPerCarton in options
+        qtyPerCarton: product.qtyPerCarton,
       })),
     ],
     [products]
@@ -328,7 +358,6 @@ const StockTransferForm = () => {
 
   const orderStatusOptions = useMemo(
     () => [
-      { value: "", label: "Select Order Status" },
       ...orderStatuses.map((status) => ({
         value: status.code,
         label: status.name,
@@ -382,14 +411,14 @@ const StockTransferForm = () => {
       id: Date.now(),
       productId: form.product,
       productName: selectedProduct?.productName || `Product ${form.product}`,
-      qtyPerCarton: selectedProduct?.qtyPerCarton || 0, // Set qtyPerCarton from product
+      qtyPerCarton: selectedProduct?.qtyPerCarton || 0,
     };
 
     addItem(newItem);
     handleFormChange("product", "");
   }, [form.product, products, addItem, handleFormChange]);
 
-  // ✅ Updated: Pass products to updateItem
+  // Pass products to updateItem
   const handleItemChange = useCallback(
     (id, field, value) => {
       updateItem(id, field, value, products);
@@ -399,7 +428,10 @@ const StockTransferForm = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!validate()) return;
+    if (!validate()) {
+      showToast("error", "Please fix the form errors before submitting");
+      return;
+    }
 
     setIsLoading(true);
 
@@ -409,18 +441,19 @@ const StockTransferForm = () => {
       items: items.map((item) => ({
         productId: item.productId,
         productName: item.productName,
-        boxQuantity: parseFloat(item.boxQuantity),
-        openPieces: parseFloat(item.openPieces),
-        qtyPerCarton: parseFloat(item.qtyPerCarton),
-        totalPieces: parseFloat(item.totalPieces),
-        expenses: parseFloat(item.expenses),
+        boxQuantity: parseFloat(item.boxQuantity || 0),
+        openPieces: parseFloat(item.openPieces || 0),
+        qtyPerCarton: parseFloat(item.qtyPerCarton || 0),
+        totalPieces: parseFloat(item.totalPieces || 0),
+        expenses: parseFloat(item.expenses || 0),
       })),
-      terms: form.terms,
-      notes: form.notes,
+      remarks: form.remarks || "", // Changed from terms to remarks
+      notes: form.notes || "",
       status: form.orderStatus,
-      shipping: parseFloat(form.shipping),
-      totalExpenses,
-      grandTotal,
+      transferType: form.transferType, // Added transfer type
+      shipping: parseFloat(form.shipping || 0),
+      totalExpenses: parseFloat(totalExpenses || 0),
+      grandTotal: parseFloat(grandTotal || 0),
     };
 
     try {
@@ -441,19 +474,50 @@ const StockTransferForm = () => {
         );
       }
     } catch (error) {
-      showToast("error", error.message);
+      console.error("Error creating stock transfer:", error);
+
+      // Handle different error types
+      let errorMessage = error.message;
+      if (error.response) {
+        // Server responded with error status
+        errorMessage =
+          error.response.data.message ||
+          error.response.data.error ||
+          error.message;
+      } else if (error.request) {
+        // Request was made but no response received
+        errorMessage = "Network error: Unable to connect to server";
+      }
+
+      showToast("error", errorMessage);
     } finally {
       setIsLoading(false);
     }
   };
 
   const isCurrentProductValid = useMemo(
-    () => form.product && form.product.trim() !== "",
-    [form.product]
+    () =>
+      form.product &&
+      form.product.trim() !== "" &&
+      form.shipping &&
+      form.shipping.trim() !== "" &&
+      form.transferDate &&
+      form.transferDate.trim() !== "" &&
+      form.orderStatus &&
+      form.orderStatus.trim() !== "" &&
+      form.transferType &&
+      form.transferType.trim() !== "",
+    [
+      form.product,
+      form.shipping,
+      form.transferDate,
+      form.orderStatus,
+      form.transferType,
+    ]
   );
 
   return (
-    <div className="max-w-6xl mx-auto p-6 bg-white rounded-2xl shadow-lg">
+    <div className="max-w-3xl mx-auto p-6 bg-white rounded-2xl shadow-lg">
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold text-gray-800">
           Create Stock Transfer
@@ -485,10 +549,20 @@ const StockTransferForm = () => {
           <InputField
             label="Transfer Date"
             name="transferDate"
-            type="datetime-local"
+            type="date"
             value={form.transferDate}
             onChange={handleChange}
             error={errors.transferDate}
+            required
+          />
+          <SelectField
+            label="Transfer Type"
+            name="transferType"
+            value={form.transferType}
+            onChange={(e) => handleSelectChange("transferType", e.target.value)}
+            options={TRANSFER_TYPE_OPTIONS}
+            error={errors.transferType}
+            placeholder="Select Transfer Type"
             required
           />
           <InputField
@@ -497,9 +571,7 @@ const StockTransferForm = () => {
             value={form.shipping}
             onChange={(e) => handleNumberChange("shipping", e.target.value)}
             placeholder="Enter Shipping"
-            type="number"
-            min="0"
-            step="0.01"
+            type="text"
           />
         </div>
 
@@ -537,21 +609,20 @@ const StockTransferForm = () => {
           )}
         </div>
 
-        {/* Items Table */}
         {items.length > 0 && (
           <div className="mb-6">
-            <h3 className="text-lg font-semibold mb-4">Product Items</h3>
+            <h3 className="text-lg font-semibold">Product Items</h3>
             <div className="overflow-x-auto">
               <table className="w-full border-collapse border border-gray-300 text-center">
                 <thead>
                   <tr className="bg-gray-100">
-                    <th className="border border-gray-300 px-4 py-2">Product</th>
-                    <th className="border border-gray-300 px-4 py-2">Box Quantity</th>
-                    <th className="border border-gray-300 px-4 py-2">Qty Per Carton</th>
-                    <th className="border border-gray-300 px-4 py-2">Open Pieces</th>
-                    <th className="border border-gray-300 px-4 py-2">Total Pieces</th>
-                    <th className="border border-gray-300 px-4 py-2">Expenses ($)</th>
-                    <th className="border border-gray-300 px-4 py-2">Action</th>
+                    <th className="border border-gray-300">Product</th>
+                    <th className="border border-gray-300">Box Quantity</th>
+                    <th className="border border-gray-300">Qty Per Carton</th>
+                    <th className="border border-gray-300">Open Pieces</th>
+                    <th className="border border-gray-300">Total Pieces</th>
+                    <th className="border border-gray-300">Expenses ($)</th>
+                    <th className="border border-gray-300">Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -562,7 +633,7 @@ const StockTransferForm = () => {
                       </td>
                       <td className="border border-gray-300 px-4 py-2">
                         <input
-                          type="number"
+                          type="text"
                           value={item.boxQuantity}
                           onChange={(e) =>
                             handleItemChange(
@@ -572,7 +643,6 @@ const StockTransferForm = () => {
                             )
                           }
                           className="w-20 border border-gray-300 rounded px-2 py-1"
-                          min="0"
                         />
                       </td>
                       <td className="border border-gray-300 px-4 py-2 font-semibold">
@@ -580,7 +650,7 @@ const StockTransferForm = () => {
                       </td>
                       <td className="border border-gray-300 px-4 py-2">
                         <input
-                          type="number"
+                          type="text"
                           value={item.openPieces}
                           onChange={(e) =>
                             handleItemChange(
@@ -590,7 +660,6 @@ const StockTransferForm = () => {
                             )
                           }
                           className="w-20 border border-gray-300 rounded px-2 py-1"
-                          min="0"
                         />
                       </td>
                       <td className="border border-gray-300 px-4 py-2 font-semibold">
@@ -598,7 +667,7 @@ const StockTransferForm = () => {
                       </td>
                       <td className="border border-gray-300 px-4 py-2">
                         <input
-                          type="number"
+                          type="text"
                           value={item.expenses}
                           onChange={(e) =>
                             handleItemChange(
@@ -608,8 +677,6 @@ const StockTransferForm = () => {
                             )
                           }
                           className="w-24 border border-gray-300 rounded px-2 py-1"
-                          min="0"
-                          step="0.01"
                         />
                       </td>
                       <td className="border border-gray-300 px-4 py-2">
@@ -630,13 +697,13 @@ const StockTransferForm = () => {
         )}
 
         {/* Text Areas */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-3">
           <TextAreaField
-            label="Terms & Conditions"
-            name="terms"
-            value={form.terms}
+            label="Remarks" // Changed from "Terms & Conditions"
+            name="remarks" // Changed from "terms"
+            value={form.remarks}
             onChange={handleChange}
-            placeholder="Terms & Conditions"
+            placeholder="Remarks"
             rows={3}
           />
           <TextAreaField

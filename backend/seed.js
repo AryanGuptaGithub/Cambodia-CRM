@@ -13,7 +13,6 @@ const MONGO_URI = process.env.MONGODB_URI;
 async function connectDB() {
   try {
     await mongoose.connect(MONGO_URI);
-    console.log("✅ Connected to MongoDB");
   } catch (err) {
     console.error("❌ MongoDB connection failed:", err);
     process.exit(1);
@@ -32,8 +31,6 @@ async function seedUsers() {
     const user = new User(u);
     await user.save();
   }
-
-  console.log("✅ Users seeded successfully");
 }
 
 // Seed sale types
@@ -46,7 +43,6 @@ async function seedSaleTypes() {
   ];
 
   await SaleType.insertMany(saleTypes);
-  console.log("✅ SaleTypes seeded successfully");
 }
 
 // Seed warehouses
@@ -61,37 +57,35 @@ async function seedWarehouses() {
   ];
 
   await Warehouse.insertMany(warehouses);
-  console.log("✅ Warehouses seeded successfully");
 }
 
 // ✅ Seed order statuses
 async function seedOrderStatuses() {
   await OrderStatus.deleteMany({});
   const orderStatuses = [
-    { 
-      name: "Draft", 
-      code: "draft", 
-      description: "Initial draft state of the order" 
+    {
+      name: "Draft",
+      code: "draft",
+      description: "Initial draft state of the order",
     },
-    { 
-      name: "Confirmed", 
-      code: "confirmed", 
-      description: "Order has been confirmed and approved" 
+    {
+      name: "Confirmed",
+      code: "confirmed",
+      description: "Order has been confirmed and approved",
     },
-    { 
-      name: "Shipped", 
-      code: "shipped", 
-      description: "Items have been shipped to destination" 
+    {
+      name: "Shipped",
+      code: "shipped",
+      description: "Items have been shipped to destination",
     },
-    { 
-      name: "Delivered", 
-      code: "delivered", 
-      description: "Items have been successfully delivered" 
+    {
+      name: "Delivered",
+      code: "delivered",
+      description: "Items have been successfully delivered",
     },
   ];
 
   await OrderStatus.insertMany(orderStatuses);
-  console.log("✅ OrderStatuses seeded successfully");
 }
 
 // Run all seeders in order
@@ -103,12 +97,11 @@ async function runSeeders() {
     await seedSaleTypes();
     await seedWarehouses();
     await seedOrderStatuses(); // ✅ Add order statuses seeding
-    console.log("✅ All data seeded successfully");
   } catch (error) {
     console.error("❌ Seeding error:", error);
   } finally {
     await mongoose.disconnect();
-    console.log("🔌 MongoDB disconnected");
+
     process.exit(0);
   }
 }

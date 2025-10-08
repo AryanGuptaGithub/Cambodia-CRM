@@ -5,7 +5,28 @@ import Product from "../../models/projectManger/product.js";
 
 const router = express.Router();
 
-// GET all stock transfers with filtering and pagination
+router.get("/stock-transfers/last-number", async (req, res) => {
+  try {
+    const lastTransfer = await StockTransfer.findOne()
+      .sort({ invoiceNo: -1 })
+      .select("invoiceNo");
+
+    let lastNumber = 0;
+    if (lastTransfer?.invoiceNo) {
+      const match = lastTransfer.invoiceNo.match(/\d+/);
+      lastNumber = match ? parseInt(match[0]) : 0;
+    }
+
+    res.json({ success: true, lastNumber });
+  } catch (error) {
+    console.error("Error fetching last stock transfer number:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching last stock transfer number",
+    });
+  }
+});
+
 router.get("/stock-transfers", async (req, res) => {
   try {
     const {
@@ -17,20 +38,11 @@ router.get("/stock-transfers", async (req, res) => {
       paymentStatus,
     } = req.query;
 
-    // Build filter object
     const filter = {};
 
-    if (type && type !== "all") {
-      filter.transferType = type;
-    }
-
-    if (status) {
-      filter.status = status;
-    }
-
-    if (paymentStatus) {
-      filter.paymentStatus = paymentStatus;
-    }
+    if (type && type !== "all") filter.transferType = type;
+    if (status) filter.status = status;
+    if (paymentStatus) filter.paymentStatus = paymentStatus;
 
     if (search) {
       filter.$or = [
@@ -45,17 +57,15 @@ router.get("/stock-transfers", async (req, res) => {
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
 
-    // Get transfers with pagination
-    const transfers = await StockTransfer.find(filter)
-      .sort({ createdAt: -1 })
-      .limit(limitNum)
-      .skip(skip)
-      .populate("createdBy", "name email")
-      .populate("updatedBy", "name email")
-      .lean();
-
-    const totalCount = await StockTransfer.countDocuments(filter);
-
+    const [transfers, totalCount] = await Promise.all([
+      StockTransfer.find(filter)
+        .sort({ createdAt: -1 })
+        .limit(limitNum)
+        .skip(skip)
+        .lean(),
+      StockTransfer.countDocuments(filter),
+    ]);
+    
     res.status(200).json({
       success: true,
       data: transfers,
@@ -76,18 +86,17 @@ router.get("/stock-transfers", async (req, res) => {
   }
 });
 
-// GET single stock transfer by ID
 router.get("/stock-transfers/:id", async (req, res) => {
+  const { id } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid stock transfer ID",
+    });
+  }
+
   try {
-    const { id } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid stock transfer ID",
-      });
-    }
-
     const transfer = await StockTransfer.findById(id)
       .populate("createdBy", "name email")
       .populate("updatedBy", "name email")
@@ -100,10 +109,7 @@ router.get("/stock-transfers/:id", async (req, res) => {
       });
     }
 
-    res.status(200).json({
-      success: true,
-      data: transfer,
-    });
+    res.status(200).json({ success: true, data: transfer });
   } catch (error) {
     console.error("Error fetching stock transfer:", error);
     res.status(500).json({
@@ -114,87 +120,141 @@ router.get("/stock-transfers/:id", async (req, res) => {
   }
 });
 
-// POST create new stock transfer
 router.post("/stock-transfers", async (req, res) => {
   try {
     const {
-      warehouse,
-      totalAmount,
-      paidAmount,
-      transferType,
+      invoiceNo,
+      date,
       items,
-      sourceWarehouse,
-      destinationWarehouse,
+      remarks,
       notes,
-      createdBy,
+      status,
+      transferType,
+      shipping,
+      totalExpenses,
+      grandTotal,
     } = req.body;
 
-    // Generate invoice number (you need to implement this method in your model)
-    const invoiceNo = `ST${Date.now()}`; // Simple invoice number generation
+    if (!invoiceNo || !date || !items || !status || !transferType) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Missing required fields: invoiceNo, date, items, status, transferType",
+      });
+    }
 
-    const transferData = {
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "At least one item is required",
+      });
+    }
+
+    const validTransferTypes = ["send", "receive"];
+    if (!validTransferTypes.includes(transferType)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid transfer type. Must be 'send' or 'receive'",
+      });
+    }
+
+    for (const item of items) {
+      if (!item.productId || !item.productName) {
+        return res.status(400).json({
+          success: false,
+          message: "Each item must have productId and productName",
+        });
+      }
+
+      const numericFields = [
+        item.boxQuantity,
+        item.openPieces,
+        item.qtyPerCarton,
+        item.totalPieces,
+        item.expenses,
+      ];
+
+      if (numericFields.some((val) => isNaN(val))) {
+        return res.status(400).json({
+          success: false,
+          message: "All numeric fields must be valid numbers",
+        });
+      }
+
+      const product = await Product.findById(item.productId);
+      if (!product) {
+        return res.status(404).json({
+          success: false,
+          message: `Product not found: ${item.productName}`,
+        });
+      }
+
+      if (transferType === "send") {
+        if (product.stockQuantity < item.totalPieces) {
+          return res.status(400).json({
+            success: false,
+            message: `Insufficient stock for ${item.productName}. Available: ${product.stockQuantity}, Required: ${item.totalPieces}`,
+          });
+        }
+      }
+    }
+
+    const stockTransfer = new StockTransfer({
       invoiceNo,
-      date: new Date(),
-      warehouse,
-      totalAmount: parseFloat(totalAmount),
-      paidAmount: parseFloat(paidAmount || 0),
-      transferType,
+      date: new Date(date),
       items: items.map((item) => ({
         productId: item.productId,
         productName: item.productName,
-        quantity: parseInt(item.quantity),
-        unitPrice: parseFloat(item.unitPrice),
-        totalPrice: parseFloat(item.quantity) * parseFloat(item.unitPrice),
+        boxQuantity: parseFloat(item.boxQuantity),
+        openPieces: parseFloat(item.openPieces),
+        qtyPerCarton: parseFloat(item.qtyPerCarton),
+        totalPieces: parseFloat(item.totalPieces),
+        expenses: parseFloat(item.expenses),
       })),
-      sourceWarehouse,
-      destinationWarehouse,
-      notes,
-      createdBy: createdBy || "65d8f5c8a1b2c3e4f5g6h7i8", // Default user ID or from auth
-      dueAmount: parseFloat(totalAmount) - parseFloat(paidAmount || 0),
-      paymentStatus:
-        paidAmount >= totalAmount
-          ? "paid"
-          : paidAmount > 0
-          ? "partial"
-          : "pending",
-    };
+      remarks: remarks || "",
+      notes: notes || "",
+      status,
+      transferType,
+      shipping: parseFloat(shipping || 0),
+      totalExpenses: parseFloat(totalExpenses || 0),
+      grandTotal: parseFloat(grandTotal || 0),
+    });
 
-    const transfer = new StockTransfer(transferData);
-    await transfer.save();
+    const savedTransfer = await stockTransfer.save();
 
-    // Populate the created transfer
-    const populatedTransfer = await StockTransfer.findById(
-      transfer._id
-    ).populate("createdBy", "name email");
+    for (const item of items) {
+      const quantityChange =
+        transferType === "send" ? -item.totalPieces : item.totalPieces;
+      await Product.findByIdAndUpdate(item.productId, {
+        $inc: { stockQuantity: quantityChange },
+      });
+    }
 
     res.status(201).json({
       success: true,
-      data: populatedTransfer,
-      message: "Stock transfer created successfully",
+      message: `Stock transfer ${
+        transferType === "send" ? "sent" : "received"
+      } successfully`,
+      data: savedTransfer,
     });
   } catch (error) {
     console.error("Error creating stock transfer:", error);
 
-    if (error.name === "ValidationError") {
+    if (error.code === 11000) {
       return res.status(400).json({
         success: false,
-        message:
-          "Validation error: " +
-          Object.values(error.errors)
-            .map((e) => e.message)
-            .join(", "),
+        message: "Invoice number already exists",
       });
     }
 
     res.status(500).json({
       success: false,
-      message: "Server error while creating stock transfer",
+      message: "Internal server error",
       error: error.message,
     });
   }
 });
 
-// PUT update stock transfer
 router.put("/stock-transfers/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -214,10 +274,8 @@ router.put("/stock-transfers/:id", async (req, res) => {
       });
     }
 
-    // Update fields
-    const updateData = { ...req.body, updatedBy: "65d8f5c8a1b2c3e4f5g6h7i8" }; // From auth
+    const updateData = { ...req.body, updatedBy: "65d8f5c8a1b2c3e4f5g6h7i8" }; // Example static ID
 
-    // Recalculate item totals if items are updated
     if (req.body.items) {
       updateData.items = req.body.items.map((item) => ({
         productId: item.productId,
@@ -228,7 +286,6 @@ router.put("/stock-transfers/:id", async (req, res) => {
       }));
     }
 
-    // Recalculate due amount and payment status
     if (req.body.totalAmount || req.body.paidAmount) {
       const total = parseFloat(req.body.totalAmount || transfer.totalAmount);
       const paid = parseFloat(req.body.paidAmount || transfer.paidAmount);
@@ -240,15 +297,18 @@ router.put("/stock-transfers/:id", async (req, res) => {
     const updatedTransfer = await StockTransfer.findByIdAndUpdate(
       id,
       updateData,
-      { new: true, runValidators: true }
+      {
+        new: true,
+        runValidators: true,
+      }
     )
       .populate("createdBy", "name email")
       .populate("updatedBy", "name email");
 
     res.status(200).json({
       success: true,
-      data: updatedTransfer,
       message: "Stock transfer updated successfully",
+      data: updatedTransfer,
     });
   } catch (error) {
     console.error("Error updating stock transfer:", error);
@@ -272,20 +332,18 @@ router.put("/stock-transfers/:id", async (req, res) => {
   }
 });
 
-// DELETE single stock transfer
 router.delete("/stock-transfers/:id", async (req, res) => {
+  const { id } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid stock transfer ID",
+    });
+  }
+
   try {
-    const { id } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid stock transfer ID",
-      });
-    }
-
     const transfer = await StockTransfer.findByIdAndDelete(id);
-
     if (!transfer) {
       return res.status(404).json({
         success: false,
@@ -308,30 +366,28 @@ router.delete("/stock-transfers/:id", async (req, res) => {
   }
 });
 
-// DELETE multiple stock transfers (bulk delete)
 router.delete("/stock-transfers/bulk/delete", async (req, res) => {
+  const { ids } = req.body;
+
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({
+      success: false,
+      message: "No stock transfer IDs provided",
+    });
+  }
+
+  const validIds = ids.filter((id) => mongoose.Types.ObjectId.isValid(id));
+  const invalidIds = ids.filter((id) => !mongoose.Types.ObjectId.isValid(id));
+
+  if (invalidIds.length > 0) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid ID(s) provided",
+      invalidIds,
+    });
+  }
+
   try {
-    const { ids } = req.body;
-
-    if (!Array.isArray(ids) || ids.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "No stock transfer IDs provided",
-      });
-    }
-
-    // Validate all IDs
-    const validIds = ids.filter((id) => mongoose.Types.ObjectId.isValid(id));
-    const invalidIds = ids.filter((id) => !mongoose.Types.ObjectId.isValid(id));
-
-    if (invalidIds.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid ID(s) provided",
-        invalidIds,
-      });
-    }
-
     const result = await StockTransfer.deleteMany({ _id: { $in: validIds } });
 
     if (result.deletedCount === 0) {
@@ -355,7 +411,5 @@ router.delete("/stock-transfers/bulk/delete", async (req, res) => {
     });
   }
 });
-
-
 
 export default router;

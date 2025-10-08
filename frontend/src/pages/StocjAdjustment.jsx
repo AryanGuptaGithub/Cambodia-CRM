@@ -146,15 +146,7 @@ const StockAdjustment = () => {
     );
   };
 
-  // Check if all items on current page are selected
-  const isAllOnPageSelected =
-    paginatedAdjustments.length > 0 &&
-    paginatedAdjustments.every((adj) => selectedIds.includes(adj._id));
 
-  // Check if some items on current page are selected
-  const isSomeOnPageSelected = paginatedAdjustments.some((adj) =>
-    selectedIds.includes(adj._id)
-  );
 
   // FIXED: Bulk delete with proper ID validation
   const handleBulkDelete = async () => {
