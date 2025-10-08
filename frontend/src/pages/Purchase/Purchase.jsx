@@ -23,23 +23,20 @@ const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
 const initialFormState = {
-  id: "",
+  _id: "",
   invoiceNumber: "",
   invoiceDate: "",
   deliveryNumber: "",
   receivedDate: "",
   expiredDate: "",
   productName: "",
-  type: "",
-  packing: "",
-  qtyMain: 0,
-  qty: 0,
-  unitPrice: 0,
+  qtyBox: 0,
+  qtyPerCarton: 0,
+  fob: 0,
+  cif: 0,
+  lcNumber: "",
+  remarks: "",
   amount: 0,
-  otherExpenses: 0,
-  totalAmount: 0,
-  unitCost: 0,
-  remark: "",
 };
 
 const requiredHeaders = [
@@ -49,15 +46,21 @@ const requiredHeaders = [
   "received date",
   "expired date",
   "product name",
-  "type",
-  "packing",
-  "qty main",
-  "qty",
-  "unit price (usd)",
-  "amount (usd)",
-  "other expenses (usd)",
-  "total amount (usd)",
-  "remark",
+  "qty box",
+  "qty per carton",
+  "fob",
+  "cif",
+  "lc number",
+  "remarks",
+];
+
+// Define which fields should be treated as numbers
+const numericFields = [
+  "qtyBox",
+  "qtyPerCarton",
+  "fob",
+  "cif",
+  "amount",
 ];
 
 function Purchase() {
@@ -84,7 +87,7 @@ function Purchase() {
   const filteredPurchases = purchases.filter((p) => {
     const matchesType =
       selectedTab.toLowerCase() === "all" ||
-      p.type?.toLowerCase() === selectedTab.toLowerCase();
+      p.productType?.toLowerCase() === selectedTab.toLowerCase();
 
     if (!matchesType) return false;
 
@@ -97,30 +100,36 @@ function Purchase() {
         formatDateToReadable(p.receivedDate)
           .toLowerCase()
           .includes(lowerSearch) ||
-        p.type.toLowerCase().includes(lowerSearch) ||
-        p.packing.toLowerCase().includes(lowerSearch) ||
-        p.unitPrice.toString().includes(lowerSearch) ||
-        p.otherExpenses.toString().includes(lowerSearch) ||
-        p.qtyMain.toString().includes(lowerSearch) ||
-        p.totalAmount.toString().includes(lowerSearch) ||
-        p.productName.toLowerCase().includes(lowerSearch))
+        p.productName.toLowerCase().includes(lowerSearch) ||
+        p.deliveryNumber.toLowerCase().includes(lowerSearch) ||
+        p.lcNumber.toLowerCase().includes(lowerSearch))
     );
   });
 
   const fetchPurchaseDetails = async () => {
     try {
-      const res = await fetch(`${backendUrl}/api/purchase`);
-      if (!res.ok) throw new Error("Failed to fetch purchase details");
+      setLoading(true);
 
-      const data = await res.json();
-      const uniqueTypes = Array.from(
-        new Set(data.reports.map((item) => item.type.toLowerCase()))
-      );
+      const purchaseRes = await fetch(`${backendUrl}/api/purchase`);
+      if (!purchaseRes.ok) throw new Error("Failed to fetch purchase details");
+      const purchaseData = await purchaseRes.json();
+
+      // Extract unique types from both productType and type fields
+      const typeSet = new Set();
+      purchaseData.reports.forEach((item) => {
+        const type = item.productType || item.type;
+        if (type && type.trim() && type.toLowerCase() !== "unknown") {
+          typeSet.add(type.trim());
+        }
+      });
+
+      const uniqueTypes = Array.from(typeSet).sort();
+
       setTypes(["All", ...uniqueTypes]);
-      setPurchases(data.reports);
+      setPurchases(purchaseData.reports || []);
     } catch (error) {
       console.error("❌ Fetch error:", error);
-      showToast("error", error.message || "Error fetching purchase details");
+      alert(error.message || "Error fetching purchase details");
     } finally {
       setLoading(false);
     }
@@ -182,6 +191,23 @@ function Purchase() {
           return;
         }
 
+        // Updated required headers for your new format
+        const requiredHeaders = [
+          "no",
+          "invoice number",
+          "invoice date",
+          "delivery no.",
+          "received date",
+          "product name",
+          "expiry date",
+          "qty box",
+          "qty per carton",
+          "fob",
+          "cif",
+          "lc number",
+          "remarks",
+        ];
+
         // Step 1: Find the header row index
         let headerRowIndex = -1;
         for (let i = 0; i < Math.min(rows.length, 10); i++) {
@@ -190,7 +216,8 @@ function Purchase() {
           );
 
           const matched = requiredHeaders.filter((hdr) => row.includes(hdr));
-          if (matched.length === requiredHeaders.length) {
+          // Require at least 8 matching headers to be flexible
+          if (matched.length >= 8) {
             headerRowIndex = i;
             break;
           }
@@ -204,10 +231,7 @@ function Purchase() {
           const missing = requiredHeaders.filter(
             (hdr) => !lowerSampleRow.includes(hdr)
           );
-          showToast(
-            "error",
-            `❌ Required headers missing: ${missing.join(", ")}`
-          );
+
           return;
         }
 
@@ -224,7 +248,7 @@ function Purchase() {
         // Step 3: Map rows to structured data
         const dataRows = rows.slice(headerRowIndex + 1);
         const mappedData = dataRows
-          .map((row) => {
+          .map((row, index) => {
             const item = {};
             Object.entries(headersMap).forEach(([colIndex, key]) => {
               let cellVal = row[colIndex] || "";
@@ -235,28 +259,30 @@ function Purchase() {
               }
               item[key] = cellVal;
             });
+
             return {
-              invoiceNumber: item["invoice #"],
+              invoiceNumber: item["invoice number"] || "",
               invoiceDate: parseDate(item["invoice date"]),
-              deliveryNumber: item["delivery #"],
+              deliveryNumber: item["delivery no."] || "",
               receivedDate: parseDate(item["received date"]),
-              expiredDate: parseDate(item["expired date"]),
-              productName: item["product name"],
-              type: item["type"],
-              packing: item["packing"],
-              qtyMain: parseNumber(item["qty main"]),
-              qty: parseNumber(item["qty"]),
-              unitPrice: parseNumber(item["unit price (usd)"]),
-              amount: parseNumber(item["amount (usd)"]),
-              otherExpenses: parseNumber(item["other expenses (usd)"]),
-              totalAmount: parseNumber(item["total amount (usd)"]),
-              remark: item["remark"],
+              expiredDate: parseDate(item["expiry date"]),
+              productName: item["product name"] || "",
+              qtyBox: parseNumber(item["qty box"]),
+              qtyPerCarton: parseNumber(item["qty per carton"]),
+              fob: parseNumber(item["fob"]),
+              cif: parseNumber(item["cif"]),
+              lcNumber: item["lc number"] || "",
+              remarks: item["remarks"] || "",
             };
           })
-          .filter((entry) => entry.productName !== "");
+          .filter(
+            (entry) =>
+              entry.invoiceNumber !== "" ||
+              entry.productName !== "" ||
+              entry.deliveryNumber !== ""
+          ); // Filter out completely empty rows
 
         setParsedData(mappedData);
-        showToast("success", `Successfully parsed ${mappedData.length} rows`);
       } catch (error) {
         console.error("Error reading Excel file:", error);
         showToast("error", "Failed to process the file.");
@@ -266,7 +292,7 @@ function Purchase() {
     reader.readAsArrayBuffer(file);
   };
 
-  const handlePurcharseImport = async () => {
+  const handlePurchaseImport = async () => {
     if (parsedData.length === 0) {
       showToast("warning", "Please upload a valid file first");
       return;
@@ -296,7 +322,15 @@ function Purchase() {
   };
 
   const editPurchase = (purchase) => {
-    setForm({ ...purchase });
+    setForm({ 
+      ...purchase,
+      // Ensure numeric values are properly formatted
+      qtyBox: purchase.qtyBox || 0,
+      qtyPerCarton: purchase.qtyPerCarton || 0,
+      fob: purchase.fob || 0,
+      cif: purchase.cif || 0,
+      amount: purchase.amount || 0,
+    });
     setIsOpen(true);
     setIsEditModalOpen(true);
   };
@@ -308,7 +342,6 @@ function Purchase() {
   };
 
   const deletePurchase = async (purchase) => {
-    
     if (!purchase._id) return;
     const confirmDelete = await confirmDialog({
       title: "Delete",
@@ -331,7 +364,7 @@ function Purchase() {
           fetchPurchaseDetails();
         }
       } catch (error) {
-        console.loog("values of error", error);
+        console.log("values of error", error);
         showToast("error", "Failed to delete purchase.");
       }
     }
@@ -381,13 +414,16 @@ function Purchase() {
   };
 
   const formatNumber = (num) => {
-    if (typeof num === "number") {
-      return num.toLocaleString(undefined, {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      });
-    }
-    return "--";
+    if (num === null || num === undefined || num === "") return "--";
+    
+    const numberValue = typeof num === 'string' ? parseFloat(num) : num;
+    
+    if (isNaN(numberValue)) return "--";
+    
+    return numberValue.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
   };
 
   const totalPages = Math.ceil(filteredPurchases.length / purchasesPerPage);
@@ -432,6 +468,7 @@ function Purchase() {
       showToast("error", "Failed to update product.");
     }
   };
+
   const toggleSelectAll = useCallback(
     (checked) => {
       setSelected(
@@ -444,6 +481,85 @@ function Purchase() {
     },
     [currentPurchases]
   );
+
+  // Calculate amount when lcNumber or qtyBox changes - FIXED VERSION
+  useEffect(() => {
+    if (isEditModalOpen) {
+      const lcValue = parseFloat(form.lcNumber) || 0;
+      const qtyBoxValue = parseFloat(form.qtyBox) || 0;
+      const amount = lcValue * qtyBoxValue;
+      
+      // Round to 2 decimal places
+      const roundedAmount = Math.round(amount * 100) / 100;
+
+      setForm((prev) => ({
+        ...prev,
+        amount: roundedAmount,
+      }));
+    }
+  }, [form.lcNumber, form.qtyBox, isEditModalOpen]);
+
+  // Numeric input handler - IMPROVED VERSION
+  const handleNumericInputChange = (e, updateFunc) => {
+    const { name, value } = e.target;
+
+    // For numeric fields, allow only numbers and decimal point
+    if (numericFields.includes(name)) {
+      // Allow empty, numbers, and decimal point with proper format
+      if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+        const validatedEvent = {
+          target: {
+            name: name,
+            value: value,
+          },
+        };
+        updateFunc(validatedEvent);
+      }
+    } else {
+      // For non-numeric fields, pass through directly
+      updateFunc(e);
+    }
+  };
+
+  // Enhanced handle change with proper number conversion - FIXED VERSION
+  const enhancedHandleChange = useCallback((e) => {
+    const { name, value } = e.target;
+
+    setForm((prev) => {
+      let processedValue = value;
+
+      // Convert numeric fields to numbers when they're complete
+      if (numericFields.includes(name)) {
+        if (value === "" || value === "-") {
+          processedValue = value; // Keep as string for intermediate input
+        } else if (!value.endsWith(".")) {
+          const numValue = parseFloat(value);
+          processedValue = isNaN(numValue) ? 0 : numValue;
+        }
+        // If value ends with ".", keep it as string to allow decimal input
+      }
+
+      return {
+        ...prev,
+        [name]: processedValue,
+      };
+    });
+  }, []);
+
+  // Format numeric values for display in edit modal
+  const getDisplayValue = (fieldName, value) => {
+    if (!numericFields.includes(fieldName)) return value || "";
+    
+    if (value === null || value === undefined) return "";
+    
+    // If it's a number and we're not in the middle of typing a decimal
+    if (typeof value === 'number') {
+      return value.toString();
+    }
+    
+    // If it's a string (like during input), return as is
+    return value;
+  };
 
   return (
     <div className="p-6">
@@ -542,13 +658,14 @@ function Purchase() {
                   <span>Invoice Number</span>
                 </div>
               </th>
+              <th className="p-3">Delivery No</th>
+              <th className="p-3">Invoice Date</th>
               <th className="p-3">Received Date</th>
               <th className="p-3">Product Name</th>
-              <th className="p-3">Type</th>
-              <th className="p-3">Packing</th>
-              <th className="p-3">Unit Price($)</th>
-              <th className="p-3">Other Expenses($) </th>
-              <th className="p-3">Quantity</th>
+              <th className="p-3">Box Qty</th>
+              <th className="p-3">Qty per Carton</th>
+              <th className="p-3">LC</th>
+              <th className="p-3">FOB</th>
               <th className="p-3">Amount($)</th>
               <th className="p-3">Actions</th>
             </tr>
@@ -556,7 +673,7 @@ function Purchase() {
           <tbody>
             {currentPurchases.length === 0 ? (
               <tr>
-                <td colSpan={10} className="p-4 text-gray-500">
+                <td colSpan={11} className="p-4 text-gray-500">
                   No purchases found.
                 </td>
               </tr>
@@ -582,18 +699,24 @@ function Purchase() {
                         <span>{purchase.invoiceNumber || "--"}</span>
                       </div>
                     </td>
+                    <td className="p-3">{purchase.deliveryNumber || "--"}</td>
+                    <td className="p-3">
+                      {formatDateToReadable(purchase.invoiceDate)}
+                    </td>
                     <td className="p-3">
                       {formatDateToReadable(purchase.receivedDate)}
                     </td>
                     <td className="p-3">{purchase.productName || "--"}</td>
-                    <td className="p-3">{purchase.type || "--"}</td>
-                    <td className="p-3">{purchase.packing || "--"}</td>
-                    <td className="p-3">{formatNumber(purchase.unitPrice)}</td>
-                    <td className="p-3">{purchase.otherExpenses || "--"}</td>
-                    <td className="p-3">{purchase.qtyMain || "--"}</td>
+                    <td className="p-3">{purchase.qtyBox || "--"}</td>
+                    <td className="p-3">{purchase.qtyPerCarton}</td>
                     <td className="p-3">
-                      {formatNumber(purchase.totalAmount)}
+                      {formatNumber(Number(purchase.lcNumber)) || "--"}
                     </td>
+                    <td className="p-3">
+                      {formatNumber(purchase.fob) || "--"}
+                    </td>
+
+                    <td className="p-3">{formatNumber(purchase.amount)}</td>
                     <td className="p-3 flex items-center justify-center gap-3">
                       <button
                         className="text-blue-600 hover:text-blue-800 cursor-pointer"
@@ -668,7 +791,7 @@ function Purchase() {
                     Cancel
                   </button>
                   <button
-                    onClick={handlePurcharseImport}
+                    onClick={handlePurchaseImport}
                     disabled={isUploading}
                     className={`px-5 py-2 rounded-lg cursor-pointer ${
                       isUploading
@@ -728,22 +851,20 @@ function Purchase() {
           </div>
         )}
       </div>
+
+      {/* VIEW MODAL */}
       {isViewModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            {/* Backdrop */}
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={() => setIsOpen(false)}
             />
 
-            {/* Modal Content */}
             <div className="bg-white w-full max-w-3xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
-              {/* Close Button */}
               <button
                 onClick={() => setIsViewModalOpen(false)}
                 className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-                aria-label="Close modal"
               >
                 <X size={20} />
               </button>
@@ -752,7 +873,7 @@ function Purchase() {
                 View Purchase Details
               </h2>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
                 <div>
                   <label className="block font-medium text-gray-600">
                     Invoice Number
@@ -764,19 +885,19 @@ function Purchase() {
 
                 <div>
                   <label className="block font-medium text-gray-600">
-                    Invoice Date
+                    Delivery Number
                   </label>
                   <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {formatDateToReadable(form.invoiceDate) || "--"}
+                    {form.deliveryNumber || "--"}
                   </p>
                 </div>
 
                 <div>
                   <label className="block font-medium text-gray-600">
-                    Delivery Number
+                    Invoice Date
                   </label>
                   <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {form.deliveryNumber || "--"}
+                    {formatDateToReadable(form.invoiceDate) || "--"}
                   </p>
                 </div>
 
@@ -809,44 +930,46 @@ function Purchase() {
 
                 <div>
                   <label className="block font-medium text-gray-600">
-                    Type
+                    Box Quantity
                   </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.type || "--"}
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {form.qtyBox || 0}
                   </p>
                 </div>
 
                 <div>
                   <label className="block font-medium text-gray-600">
-                    Packing
+                    Quantity Per Carton
                   </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.packing || "--"}
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {form.qtyPerCarton || 0}
                   </p>
                 </div>
 
                 <div>
                   <label className="block font-medium text-gray-600">
-                    Qty Main
+                    FOB (USD)
                   </label>
                   <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {form.qtyMain || 0}
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block font-medium text-gray-600">Qty</label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {form.qty || 0}
+                    {formatNumber(form.fob)}
                   </p>
                 </div>
 
                 <div>
                   <label className="block font-medium text-gray-600">
-                    Unit Price (USD)
+                    CIF (USD)
                   </label>
                   <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {formatNumber(form.unitPrice)}
+                    {formatNumber(form.cif)}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block font-medium text-gray-600">
+                    LC Number
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {formatNumber(Number(form.lcNumber)) || "--"}
                   </p>
                 </div>
 
@@ -859,39 +982,13 @@ function Purchase() {
                   </p>
                 </div>
 
-                <div>
+                {/* Remarks - Full width */}
+                <div className="md:col-span-3">
                   <label className="block font-medium text-gray-600">
-                    Other Expenses (USD)
+                    Remarks
                   </label>
                   <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {formatNumber(form.otherExpenses)}
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block font-medium text-gray-600">
-                    Total Amount (USD)
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {formatNumber(form.totalAmount)}
-                  </p>
-                </div>
-
-                {/* <div>
-                  <label className="block font-medium text-gray-600">
-                    Unit Cost (USD)
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {formatNumber(form.unitCost)}
-                  </p>
-                </div> */}
-
-                <div className="md:col-span-2">
-                  <label className="block font-medium text-gray-600">
-                    Remark
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {form.remark || "—"}
+                    {form.remarks || "—"}
                   </p>
                 </div>
               </div>
@@ -908,6 +1005,8 @@ function Purchase() {
           </div>,
           document.body
         )}
+
+      {/* EDIT MODAL - FIXED VERSION */}
       {isEditModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -916,13 +1015,10 @@ function Purchase() {
               onClick={() => setIsOpen(false)}
             />
 
-            {/* Modal Box */}
-            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative max-h-screen overflow-y-auto">
-              {/* Close Button */}
+            <div className="bg-white w-full max-w-3xl p-6 rounded-xl shadow-lg relative max-h-screen overflow-y-auto">
               <button
                 onClick={() => setIsEditModalOpen(false)}
                 className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-                aria-label="Close modal"
               >
                 <X size={20} />
               </button>
@@ -931,21 +1027,34 @@ function Purchase() {
                 Edit Purchase
               </h2>
 
-              {/* Form */}
               <form
-                className="grid grid-cols-1 md:grid-cols-2 gap-4"
+                className="grid grid-cols-1 md:grid-cols-3 gap-4"
                 onSubmit={(e) => e.preventDefault()}
               >
+                {/* Invoice Number - Text field */}
                 <div>
                   <label className="block text-sm font-medium">
                     Invoice Number
                   </label>
                   <input
                     type="text"
-                    value={form.invoiceNumber || "--"}
-                    onChange={(e) =>
-                      setForm({ ...form, invoiceNumber: e.target.value })
-                    }
+                    name="invoiceNumber"
+                    value={form.invoiceNumber || ""}
+                    onChange={enhancedHandleChange}
+                    className="w-full border px-3 py-2 rounded-lg"
+                  />
+                </div>
+
+                {/* Delivery Number - Text field */}
+                <div>
+                  <label className="block text-sm font-medium">
+                    Delivery Number
+                  </label>
+                  <input
+                    type="text"
+                    name="deliveryNumber"
+                    value={form.deliveryNumber || ""}
+                    onChange={enhancedHandleChange}
                     className="w-full border px-3 py-2 rounded-lg"
                   />
                 </div>
@@ -972,24 +1081,12 @@ function Purchase() {
 
                 <div>
                   <label className="block text-sm font-medium">
-                    Delivery Number
-                  </label>
-                  <input
-                    type="text"
-                    value={form.deliveryNumber || "--"}
-                    onChange={(e) =>
-                      setForm({ ...form, deliveryNumber: e.target.value })
-                    }
-                    className="w-full border px-3 py-2 rounded-lg"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium">
                     Received Date
                   </label>
                   <DatePicker
-                    selected={parseDate(form.receivedDate) || "--"}
+                    selected={
+                      form.receivedDate ? new Date(form.receivedDate) : null
+                    }
                     onChange={(date) =>
                       setForm({
                         ...form,
@@ -1007,7 +1104,9 @@ function Purchase() {
                     Expired Date
                   </label>
                   <DatePicker
-                    selected={parseDate(form.expiredDate)}
+                    selected={
+                      form.expiredDate ? new Date(form.expiredDate) : null
+                    }
                     onChange={(date) =>
                       setForm({
                         ...form,
@@ -1020,171 +1119,132 @@ function Purchase() {
                   />
                 </div>
 
+                {/* Product Name - Text field */}
                 <div>
                   <label className="block text-sm font-medium">
                     Product Name
                   </label>
                   <input
                     type="text"
-                    value={capitalizeFirstLetter(form.productName)}
-                    onChange={(e) =>
-                      setForm({ ...form, productName: e.target.value })
-                    }
+                    name="productName"
+                    value={form.productName || ""}
+                    onChange={enhancedHandleChange}
                     className="w-full border px-3 py-2 rounded-lg"
                   />
                 </div>
 
+                {/* Box Quantity - Numeric field (integer) */}
                 <div>
-                  <label className="block text-sm font-medium">Type</label>
+                  <label className="block text-sm font-medium">
+                    Box Quantity
+                  </label>
                   <input
                     type="text"
-                    value={form.type}
-                    onChange={(e) => setForm({ ...form, type: e.target.value })}
+                    name="qtyBox"
+                    value={getDisplayValue("qtyBox", form.qtyBox)}
+                    onChange={(e) =>
+                      handleNumericInputChange(e, enhancedHandleChange)
+                    }
                     className="w-full border px-3 py-2 rounded-lg"
                   />
                 </div>
 
+                {/* Quantity Per Carton - Numeric field (integer) */}
                 <div>
-                  <label className="block text-sm font-medium">Packing</label>
+                  <label className="block text-sm font-medium">
+                    Quantity Per Carton
+                  </label>
                   <input
                     type="text"
-                    value={form.packing}
+                    name="qtyPerCarton"
+                    value={getDisplayValue("qtyPerCarton", form.qtyPerCarton)}
                     onChange={(e) =>
-                      setForm({ ...form, packing: e.target.value })
+                      handleNumericInputChange(e, enhancedHandleChange)
                     }
                     className="w-full border px-3 py-2 rounded-lg"
                   />
                 </div>
 
+                {/* FOB - Numeric field (4 decimal places) */}
                 <div>
-                  <label className="block text-sm font-medium">Qty Main</label>
+                  <label className="block text-sm font-medium">FOB (USD)</label>
                   <input
-                    type="number"
-                    value={form.qtyMain}
+                    type="text"
+                    name="fob"
+                    value={getDisplayValue("fob", form.fob)}
                     onChange={(e) =>
-                      setForm({ ...form, qtyMain: Number(e.target.value) })
+                      handleNumericInputChange(e, enhancedHandleChange)
                     }
                     className="w-full border px-3 py-2 rounded-lg"
-                    min={0}
                   />
                 </div>
 
+                {/* CIF - Numeric field (4 decimal places) */}
                 <div>
-                  <label className="block text-sm font-medium">Qty</label>
+                  <label className="block text-sm font-medium">CIF (USD)</label>
                   <input
-                    type="number"
-                    value={form.qty}
+                    type="text"
+                    name="cif"
+                    value={getDisplayValue("cif", form.cif)}
                     onChange={(e) =>
-                      setForm({ ...form, qty: Number(e.target.value) })
+                      handleNumericInputChange(e, enhancedHandleChange)
                     }
                     className="w-full border px-3 py-2 rounded-lg"
-                    min={0}
                   />
                 </div>
 
+                {/* LC Number - Text field */}
                 <div>
-                  <label className="block text-sm font-medium">
-                    Unit Price
-                  </label>
+                  <label className="block text-sm font-medium">LC Number</label>
                   <input
-                    type="number"
-                    step="0.01"
-                    min={0}
-                    value={
-                      form.unitPrice !== "" && form.unitPrice !== null
-                        ? Number(form.unitPrice).toFixed(2)
-                        : ""
-                    }
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        unitPrice:
-                          e.target.value === "" ? "" : Number(e.target.value),
-                      })
-                    }
+                    type="text"
+                    name="lcNumber"
+                    value={form.lcNumber || ""}
+                    onChange={enhancedHandleChange}
                     className="w-full border px-3 py-2 rounded-lg"
                   />
                 </div>
 
-                {/* <div>
-                  <label className="block text-sm font-medium">Amount</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={form.amount}
-                    onChange={(e) => {
-                      const val = parseFloat(e.target.value);
-                      setForm({
-                        ...form,
-                        amount: isNaN(val) ? 0 : Number(val.toFixed(1)),
-                      });
-                    }}
-                    className="w-full border px-3 py-2 rounded-lg"
-                    min={0}
-                  />
-                </div> */}
-
+                {/* Amount - Numeric field (2 decimal places, readonly) - FIXED */}
                 <div>
                   <label className="block text-sm font-medium">
-                    Other Expenses
+                    Amount (USD)
                   </label>
                   <input
-                    type="number"
-                    step="0.01"
-                    value={form.otherExpenses}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        otherExpenses: Number(e.target.value),
-                      })
-                    }
-                    className="w-full border px-3 py-2 rounded-lg"
-                    min={0}
+                    type="text"
+                    name="amount"
+                    value={form.amount ? parseFloat(form.amount).toFixed(2) : "0.00"}
+                    className="w-full border px-3 py-2 rounded-lg bg-gray-100"
+                    readOnly
                   />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Calculated: LC Number × Box Quantity
+                  </p>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium">
-                    Total Amount
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={form.totalAmount.toFixed(2)}
-                    onChange={(e) =>
-                      setForm({ ...form, totalAmount: Number(e.target.value) })
-                    }
-                    className="w-full border px-3 py-2 rounded-lg"
-                    min={0}
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium">Remark</label>
+                {/* Remarks - Full width */}
+                <div className="md:col-span-3">
+                  <label className="block text-sm font-medium">Remarks</label>
                   <textarea
-                    value={form.remark}
-                    onChange={(e) =>
-                      setForm({ ...form, remark: e.target.value })
-                    }
+                    name="remarks"
+                    value={form.remarks || ""}
+                    onChange={enhancedHandleChange}
                     className="w-full border px-3 py-2 rounded-lg"
                     rows={3}
                   />
                 </div>
               </form>
 
-              {/* Buttons */}
               <div className="mt-6 flex justify-end gap-3">
                 <button
                   onClick={() => setIsEditModalOpen(false)}
                   className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
-                  type="button"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handlePurchaseUpdate}
                   className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
-                  type="button"
                 >
                   Update
                 </button>

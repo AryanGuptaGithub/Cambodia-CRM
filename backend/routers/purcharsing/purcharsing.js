@@ -1,27 +1,47 @@
 import express from "express";
 import purchaseInventory from "../../models/purcharsing/purchaseInventory.js";
+import product from "../../models/projectManger/product.js";
 const router = express.Router();
 
 // POST /api/purchase-inventory/import
 router.post("/purchase/import", async (req, res) => {
   try {
     const data = req.body;
-
     if (!Array.isArray(data) || data.length === 0) {
       return res.status(400).json({ message: "No data received" });
     }
 
-    const converted = data.map((item) => ({
-      ...item,
-      invoiceDate: item.invoiceDate ? new Date(item.invoiceDate) : null,
-      receivedDate: item.receivedDate ? new Date(item.receivedDate) : null,
-      expiredDate: item.expiredDate ? new Date(item.expiredDate) : null,
-    }));
+    const converted = data.map((item) => {
+      // Parse and calculate amount
+      let lcValue = 0;
+      if (item.lcNumber) {
+        lcValue = parseFloat(item.lcNumber.toString().replace(/[^\d.-]/g, ""));
+      }
+
+      const qtyBoxValue = parseFloat(item.qtyBox) || 0;
+      const amount =
+        !isNaN(lcValue) && !isNaN(qtyBoxValue)
+          ? lcValue * (qtyBoxValue * qtyPerCarton)
+          : 0;
+
+      return {
+        ...item,
+        invoiceDate: item.invoiceDate ? new Date(item.invoiceDate) : null,
+        receivedDate: item.receivedDate ? new Date(item.receivedDate) : null,
+        expiredDate: item.expiredDate ? new Date(item.expiredDate) : null,
+        amount: amount,
+        lcNumber: item.lcNumber?.toString() || "",
+        qtyBox: qtyBoxValue,
+        fob: parseFloat(item.fob) || 0,
+        cif: parseFloat(item.cif) || 0,
+        qtyPerCarton: parseFloat(item.qtyPerCarton) || 0,
+      };
+    });
 
     const inserted = await purchaseInventory.insertMany(converted);
 
     res.status(200).json({
-      message: `✅ Successfully imported ${inserted.length} purchase inventory records.`,
+      message: `✅ Successfully imported ${inserted.length} purchase inventory records with calculated amounts.`,
       count: inserted.length,
     });
   } catch (err) {
@@ -32,11 +52,47 @@ router.post("/purchase/import", async (req, res) => {
 
 router.get("/purchase", async (req, res) => {
   try {
-    const reports = await purchaseInventory.find().sort({ createdAt: -1 });
-    res.status(200).json({ reports });
-  } catch (err) {
-    console.error("❌ Fetch Error:", err);
-    res.status(500).json({ message: "Failed to fetch daily sample reports." });
+    const purchases = await purchaseInventory.find().sort({ createdAt: -1 });
+
+    // Get all products to map types
+    const products = await product.find(
+      {},
+      "productName type packing qtyPerCarton"
+    );
+
+    // Create product map for quick lookup
+    const productMap = new Map();
+    products.forEach((product) => {
+      productMap.set(product.productName, {
+        type: product.type,
+        packing: product.packing,
+        qtyPerCarton: product.qtyPerCarton,
+      });
+    });
+
+    // Enhance purchases with product data
+    const enhancedPurchases = purchases.map((purchase) => {
+      const productInfo = productMap.get(purchase.productName);
+      return {
+        ...purchase.toObject(),
+        productType: productInfo?.type || "Unknown",
+        productPacking: productInfo?.packing || "",
+        productQtyPerCarton: productInfo?.qtyPerCarton || 0,
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      count: enhancedPurchases.length,
+      reports: enhancedPurchases,
+    });
+  } catch (error) {
+    console.error("Error fetching purchases:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error while fetching purchases",
+      error: error.message,
+    });
   }
 });
 
@@ -111,7 +167,7 @@ router.post("/purchase", async (req, res) => {
         .json({ message: "Invoice number and product name are required." });
     }
 
-    // Create new purchase document
+    // Create new purchase document with updated fields
     const newPurchase = new purchaseInventory({
       invoiceNumber: formData.invoiceNumber,
       invoiceDate: formData.invoiceDate || null,
@@ -119,16 +175,12 @@ router.post("/purchase", async (req, res) => {
       receivedDate: formData.receivedDate || null,
       expiredDate: formData.expiredDate || null,
       productName: formData.productName,
-      type: formData.type,
-      packing: formData.packing,
-      qtyMain: formData.qtyMain,
-      qty: formData.qty,
-      unitPrice: formData.unitPrice,
-      amount: formData.amount,
-      otherExpenses: formData.otherExpenses,
-      totalAmount: formData.totalAmount,
-      unitCost: formData.unitCost,
-      remark: formData.remark,
+      qtyBox: formData.qtyBox || 0,
+      qtyPerCarton: formData.qtyPerCarton || 0,
+      fob: formData.fob || 0,
+      cif: formData.cif || 0,
+      lcNumber: formData.lcNumber || "",
+      remarks: formData.remarks || "",
     });
 
     await newPurchase.save();

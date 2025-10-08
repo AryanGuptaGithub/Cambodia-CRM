@@ -1,4 +1,4 @@
-// import React from "react";
+import React from "react";
 import ExcelJS from "exceljs";
 import { useInitialSaleData } from "../pages/Sale/IntialLoading";
 
@@ -96,7 +96,7 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
             remark: item.remark || "",
           });
 
-          // Format numeric cells (excluding lc)
+          // Format numeric cells
           [
             "salesQty",
             "bonusQty",
@@ -115,42 +115,33 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
       const startRow = 4;
       const endRow = 1000;
 
-      // Prepare dropdown values for payment status only
-      const paymentStatusTypes = statuses
-        .map((s) => (typeof s === "string" ? s : s.type || ""))
-        .filter(Boolean);
-
       // Create a hidden dropdown sheet
       const dropdownSheet = workbook.addWorksheet("DropdownValues");
       dropdownSheet.state = "veryHidden";
 
+      // Prepare dropdown values for payment status
+      const paymentStatusTypes = statuses
+        .map((s) => (typeof s === "string" ? s : s.type || ""))
+        .filter(Boolean);
+
+      // Prepare dropdown values for product names (unique)
+      const uniqueProductNames = [...new Set(productNames
+        .map((p) => (typeof p === "string" ? p : p.name || ""))
+        .filter(Boolean)
+      )];
+
+      // Write payment status dropdown values
       paymentStatusTypes.forEach((status, index) => {
         dropdownSheet.getCell(`A${index + 1}`).value = status;
       });
 
-      // Set up dropdown for Payment Status column
-      if (paymentStatusTypes.length > 0) {
-        for (let i = startRow; i <= endRow; i++) {
-          try {
-            worksheet.getCell(`N${i}`).dataValidation = {
-              type: "list",
-              allowBlank: true,
-              formulae: [
-                `=DropdownValues!$A$1:$A$${paymentStatusTypes.length}`,
-              ],
-              showErrorMessage: true,
-              errorTitle: "Invalid Input",
-              error: "Please select a value from the list",
-              showDropDown: true,
-            };
-          } catch (error) {
-            console.warn(
-              `Failed to set dropdown for Payment Status at row ${i}:`,
-              error
-            );
-          }
-        }
+      // Write product name dropdown values
+      uniqueProductNames.forEach((product, index) => {
+        dropdownSheet.getCell(`B${index + 1}`).value = product;
+      });
 
+      // Set up dropdown for Payment Status column (Column N)
+      if (paymentStatusTypes.length > 0) {
         try {
           worksheet.getColumn("N").eachCell((cell, rowNumber) => {
             if (rowNumber >= startRow) {
@@ -172,6 +163,70 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
             "Failed to set column-wide data validation for Payment Status:",
             error
           );
+        }
+      }
+
+      // Set up dropdown for Product Name column (Column G)
+      if (uniqueProductNames.length > 0) {
+        try {
+          worksheet.getColumn("G").eachCell((cell, rowNumber) => {
+            if (rowNumber >= startRow) {
+              cell.dataValidation = {
+                type: "list",
+                allowBlank: true,
+                formulae: [
+                  `=DropdownValues!$B$1:$B$${uniqueProductNames.length}`,
+                ],
+                showErrorMessage: true,
+                errorTitle: "Invalid Input",
+                error: "Please select a value from the list",
+                showDropDown: true,
+              };
+            }
+          });
+        } catch (error) {
+          console.warn(
+            "Failed to set column-wide data validation for Product Name:",
+            error
+          );
+        }
+      }
+
+      // Alternative method for setting dropdowns (if above doesn't work)
+      // Set dropdown for each cell individually
+      for (let i = startRow; i <= endRow; i++) {
+        try {
+          // Product Name dropdown (Column G)
+          if (uniqueProductNames.length > 0) {
+            worksheet.getCell(`G${i}`).dataValidation = {
+              type: "list",
+              allowBlank: true,
+              formulae: [
+                `=DropdownValues!$B$1:$B$${uniqueProductNames.length}`,
+              ],
+              showErrorMessage: true,
+              errorTitle: "Invalid Input",
+              error: "Please select a product from the list",
+              showDropDown: true,
+            };
+          }
+
+          // Payment Status dropdown (Column N)
+          if (paymentStatusTypes.length > 0) {
+            worksheet.getCell(`N${i}`).dataValidation = {
+              type: "list",
+              allowBlank: true,
+              formulae: [
+                `=DropdownValues!$A$1:$A$${paymentStatusTypes.length}`,
+              ],
+              showErrorMessage: true,
+              errorTitle: "Invalid Input",
+              error: "Please select a payment status from the list",
+              showDropDown: true,
+            };
+          }
+        } catch (error) {
+          console.warn(`Failed to set dropdowns for row ${i}:`, error);
         }
       }
 
