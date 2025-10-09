@@ -309,7 +309,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                 <Package className="w-4 h-4" />
                 <span className="mx-auto">Purchase</span>
               </Link>
-
               <Link
                 to="/purchaselayout/purchasereturn"
                 className={getChildLinkClass("/purchaselayout/purchasereturn")}

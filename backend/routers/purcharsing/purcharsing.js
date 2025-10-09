@@ -179,48 +179,67 @@ router.delete("/purchase", async (req, res) => {
 router.post("/purchase", async (req, res) => {
   try {
     const formData = req.body;
+
+    // Validate required fields
     if (
       !formData.invoiceNumber ||
-      !formData.productName ||
-      !formData.supplierName
+      !formData.supplierName ||
+      !formData.products ||
+      !Array.isArray(formData.products) ||
+      formData.products.length === 0
     ) {
-      return res
-        .status(400)
-        .json({
-          message:
-            "Invoice number, product name, and supplier name are required.",
-        });
+      return res.status(400).json({
+        message:
+          "Invoice number, supplier name, and at least one product are required.",
+      });
     }
 
-    // Calculate amount
-    const lcValue = parseFloat(formData.lcNumber) || 0;
-    const qtyBoxValue = parseFloat(formData.qtyBox) || 0;
-    const qtyPerCartonValue = parseFloat(formData.qtyPerCarton) || 0;
-    const amount = lcValue * qtyBoxValue * qtyPerCartonValue;
+    // Validate each product
+    for (const product of formData.products) {
+      if (!product.productName) {
+        return res.status(400).json({
+          message: "Product name is required for all products.",
+        });
+      }
+    }
 
-    // Create new purchase document with updated fields
-    const newPurchase = new purchaseInventory({
-      invoiceNumber: formData.invoiceNumber,
-      invoiceDate: formData.invoiceDate || null,
-      deliveryNumber: formData.deliveryNumber,
-      receivedDate: formData.receivedDate || null,
-      expiredDate: formData.expiredDate || null,
-      productName: formData.productName,
-      supplierName: formData.supplierName, // Added supplierName
-      qtyBox: formData.qtyBox || 0,
-      qtyPerCarton: formData.qtyPerCarton || 0,
-      fob: formData.fob || 0,
-      cif: formData.cif || 0,
-      lcNumber: formData.lcNumber || "",
-      remarks: formData.remarks || "",
-      amount: amount, // Pre-calculated amount
-    });
+    const purchaseDocuments = [];
 
-    await newPurchase.save();
+    // Create a purchase document for each product
+    for (const product of formData.products) {
+      // Calculate amount if not provided
+      const lcValue = parseFloat(product.lcNumber) || 0;
+      const qtyBoxValue = parseFloat(product.qtyBox) || 0;
+      const qtyPerCartonValue = parseFloat(product.qtyPerCarton) || 0;
+      const amount =
+        product.amount || lcValue * qtyBoxValue * qtyPerCartonValue;
+
+      // Create new purchase document
+      const newPurchase = new purchaseInventory({
+        invoiceNumber: formData.invoiceNumber,
+        invoiceDate: formData.invoiceDate || null,
+        deliveryNumber: formData.deliveryNumber,
+        receivedDate: formData.receivedDate || null,
+        expiredDate: product.expiredDate || null,
+        productId: product.productId,
+        productName: product.productName,
+        supplierName: formData.supplierName,
+        qtyBox: product.qtyBox || 0,
+        qtyPerCarton: product.qtyPerCarton || 0,
+        fob: product.fob || 0,
+        cif: product.cif || 0,
+        lcNumber: product.lcNumber || "",
+        remarks: formData.remarks || "",
+        amount: amount,
+      });
+
+      await newPurchase.save();
+      purchaseDocuments.push(newPurchase);
+    }
 
     res.status(201).json({
-      message: `Purchase <b>${formData.productName}-${formData.invoiceNumber}</b> added successfully`,
-      purchase: newPurchase,
+      message: `Purchase for invoice <b>${formData.invoiceNumber}</b> added successfully with ${purchaseDocuments.length} products`,
+      purchases: purchaseDocuments,
     });
   } catch (error) {
     console.error("Error adding purchase:", error);

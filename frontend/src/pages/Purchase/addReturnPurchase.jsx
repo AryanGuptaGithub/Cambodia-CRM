@@ -1,10 +1,5 @@
-import React, {
-  useState,
-  useEffect,
-  useRef,
-  useCallback,
-  useMemo,
-} from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
@@ -55,6 +50,8 @@ const useReturnForm = () => {
   const [products, setProducts] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [purchases, setPurchases] = useState([]);
+  const [showInvoiceSuggestions, setShowInvoiceSuggestions] = useState(false);
+  const [filteredPurchases, setFilteredPurchases] = useState([]);
 
   const parseNumber = useCallback((val) => {
     if (typeof val === "number") return val;
@@ -64,8 +61,6 @@ const useReturnForm = () => {
     }
     return 0;
   }, []);
-  
-  console.log('values of purchases', purchases);
 
   // Calculate return amount when return quantity or unit price changes
   useEffect(() => {
@@ -85,6 +80,26 @@ const useReturnForm = () => {
       returnAmount: roundedReturnAmount,
     }));
   }, [form.returnQuantity, form.purchaseQty, form.amount, parseNumber]);
+
+  // Filter purchases based on invoice number input
+  const filterPurchases = (searchValue) => {
+    if (!searchValue.trim()) {
+      setFilteredPurchases(purchases);
+      return;
+    }
+
+    const filtered = purchases.filter(
+      (purchase) =>
+        purchase.invoiceNumber
+          ?.toLowerCase()
+          .includes(searchValue.toLowerCase()) ||
+        purchase.productName
+          ?.toLowerCase()
+          .includes(searchValue.toLowerCase()) ||
+        purchase.supplierName?.toLowerCase().includes(searchValue.toLowerCase())
+    );
+    setFilteredPurchases(filtered);
+  };
 
   const updateFormField = useCallback((name, value) => {
     setForm((prev) => ({ ...prev, [name]: value }));
@@ -126,6 +141,72 @@ const useReturnForm = () => {
     }));
   }, []);
 
+  // Handle invoice number change - auto-fill purchase data with suggestions
+  const handleInvoiceNumberChange = useCallback(
+    (e) => {
+      const { value } = e.target;
+      setForm((prev) => ({ ...prev, invoiceNumber: value }));
+
+      // Show suggestions and filter
+      setShowInvoiceSuggestions(true);
+      filterPurchases(value);
+
+      // Find exact match for auto-fill
+      const purchase = purchases.find(
+        (p) => p.invoiceNumber?.toLowerCase() === value.toLowerCase()
+      );
+
+      console.log("Found purchase:", purchase);
+
+      if (purchase) {
+        setForm((prev) => ({
+          ...prev,
+          invoiceDate: purchase.invoiceDate || "",
+          deliveryNumber: purchase.deliveryNumber || "",
+          receivedDate: purchase.receivedDate || "",
+          productId: purchase.productId || "",
+          productName: purchase.productName || "",
+          supplierId: purchase.supplierId || "",
+          supplierName: purchase.supplierName || "",
+          purchaseQty: purchase.qtyBox || 0,
+          fob: purchase.fob || 0,
+          cif: purchase.cif || 0,
+          lcNumber: purchase.lcNumber || "",
+          amount: purchase.amount || 0,
+          expiredDate: purchase.expiredDate || "",
+        }));
+      }
+
+      // Clear error when user starts typing
+      if (errors.invoiceNumber) {
+        setErrors((prev) => ({ ...prev, invoiceNumber: "" }));
+      }
+    },
+    [purchases, errors]
+  );
+
+  // Handle invoice selection from suggestions
+  const handleInvoiceSelect = (purchase) => {
+    setForm((prev) => ({
+      ...prev,
+      invoiceNumber: purchase.invoiceNumber,
+      invoiceDate: purchase.invoiceDate || "",
+      deliveryNumber: purchase.deliveryNumber || "",
+      receivedDate: purchase.receivedDate || "",
+      productId: purchase.productId || "",
+      productName: purchase.productName || "",
+      supplierId: purchase.supplierId || "",
+      supplierName: purchase.supplierName || "",
+      purchaseQty: purchase.qtyBox || 0,
+      fob: purchase.fob || 0,
+      cif: purchase.cif || 0,
+      lcNumber: purchase.lcNumber || "",
+      amount: purchase.amount || 0,
+      expiredDate: purchase.expiredDate || "",
+    }));
+    setShowInvoiceSuggestions(false);
+  };
+
   // Handle product selection from dropdown
   const handleProductChange = useCallback(
     (productId) => {
@@ -160,46 +241,6 @@ const useReturnForm = () => {
     [suppliers]
   );
 
-  // Handle invoice number change - auto-fill purchase data
-  const handleInvoiceNumberChange = useCallback(
-    (e) => {
-      const { value } = e.target;
-      setForm((prev) => ({ ...prev, invoiceNumber: value }));
-
-      // Find purchase by invoice number
-      const purchase = purchases.find(
-        (p) => p.invoiceNumber?.toLowerCase() === value.toLowerCase()
-      );
-      
-      console.log('Found purchase:', purchase); // Debug log
-      
-      if (purchase) {
-        setForm((prev) => ({
-          ...prev,
-          invoiceDate: purchase.invoiceDate || "",
-          deliveryNumber: purchase.deliveryNumber || "",
-          receivedDate: purchase.receivedDate || "",
-          productId: purchase.productId || "",
-          productName: purchase.productName || "",
-          supplierId: purchase.supplierId || "",
-          supplierName: purchase.supplierName || "",
-          purchaseQty: purchase.qtyBox || 0,
-          fob: purchase.fob || 0,
-          cif: purchase.cif || 0,
-          lcNumber: purchase.lcNumber || "",
-          amount: purchase.amount || 0,
-          expiredDate: purchase.expiredDate || "", // Add expired date
-        }));
-      }
-
-      // Clear error when user starts typing
-      if (errors.invoiceNumber) {
-        setErrors((prev) => ({ ...prev, invoiceNumber: "" }));
-      }
-    },
-    [purchases, errors]
-  );
-
   const validate = useCallback(() => {
     const newErrors = {};
 
@@ -210,14 +251,17 @@ const useReturnForm = () => {
     if (!form.deliveryNumber?.trim())
       newErrors.deliveryNumber = "Delivery number is required";
     if (!form.invoiceDate) newErrors.invoiceDate = "Invoice date is required";
-    if (!form.receivedDate) newErrors.receivedDate = "Received date is required";
-    if (!form.recordingDate) newErrors.recordingDate = "Recording date is required";
+    if (!form.receivedDate)
+      newErrors.receivedDate = "Received date is required";
+    if (!form.recordingDate)
+      newErrors.recordingDate = "Recording date is required";
     if (!form.returnReason?.trim())
       newErrors.returnReason = "Return reason is required";
 
     // Convert to numbers for numeric validation
     const purchaseQtyNum = parseNumber(form.purchaseQty);
     const returnQtyNum = parseNumber(form.returnQuantity);
+
     const amountNum = parseNumber(form.amount);
     const returnAmountNum = parseNumber(form.returnAmount);
 
@@ -226,9 +270,9 @@ const useReturnForm = () => {
     if (returnQtyNum <= 0)
       newErrors.returnQuantity = "Return quantity must be greater than 0";
     if (returnQtyNum > purchaseQtyNum)
-      newErrors.returnQuantity = "Return quantity cannot exceed purchase quantity";
-    if (usedQtyNum > purchaseQtyNum)
-      newErrors.usedQty = "Used quantity cannot exceed purchase quantity";
+      newErrors.returnQuantity =
+        "Return quantity cannot exceed purchase quantity";
+
     if (amountNum < 0) newErrors.amount = "Amount cannot be negative";
     if (returnAmountNum < 0)
       newErrors.returnAmount = "Return amount cannot be negative";
@@ -265,10 +309,11 @@ const useReturnForm = () => {
   const fetchPurchases = useCallback(async () => {
     try {
       const response = await axios.get(`${backendUrl}/api/purchase`);
-      console.log('values of response', response.data);
+      console.log("values of response", response.data);
       // Check the structure of your API response
       const purchaseData = response.data.reports || response.data || [];
       setPurchases(purchaseData);
+      setFilteredPurchases(purchaseData);
     } catch (err) {
       console.error("Error fetching purchases:", err);
       showToast("error", "Failed to fetch purchases");
@@ -281,6 +326,8 @@ const useReturnForm = () => {
     products,
     suppliers,
     purchases,
+    showInvoiceSuggestions,
+    filteredPurchases,
     handleChange,
     validate,
     updateFormField,
@@ -288,6 +335,8 @@ const useReturnForm = () => {
     handleProductChange,
     handleSupplierChange,
     handleInvoiceNumberChange,
+    handleInvoiceSelect,
+    setShowInvoiceSuggestions,
     fetchProducts,
     fetchSuppliers,
     fetchPurchases,
@@ -425,6 +474,8 @@ const AddReturnPurchase = () => {
     products,
     suppliers,
     purchases,
+    showInvoiceSuggestions,
+    filteredPurchases,
     handleChange,
     validate,
     updateFormField,
@@ -432,10 +483,26 @@ const AddReturnPurchase = () => {
     handleProductChange,
     handleSupplierChange,
     handleInvoiceNumberChange,
+    handleInvoiceSelect,
+    setShowInvoiceSuggestions,
     fetchProducts,
     fetchSuppliers,
     fetchPurchases,
   } = useReturnForm();
+
+  // Handle click outside to close suggestions
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (!event.target.closest(".invoice-suggestions-container")) {
+        setShowInvoiceSuggestions(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
 
   // Memoized product options for dropdown
   const productOptions = useMemo(() => {
@@ -507,10 +574,10 @@ const AddReturnPurchase = () => {
         returnAmount: parseFloat(form.returnAmount) || 0,
         remarks: form.remarks,
         returnReason: form.returnReason,
-        expiredDate: form.expiredDate, // Include expired date
+        expiredDate: form.expiredDate,
       };
 
-      const response = await fetch(`${backendUrl}/api/purchasereturn`, {
+      const response = await fetch(`${backendUrl}/api/purchase-return`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(submissionData),
@@ -523,8 +590,11 @@ const AddReturnPurchase = () => {
         return;
       }
 
-      showToast("success", data.message || "Purchase return added successfully");
-      navigate("/purchaselayout/purchase-return");
+      showToast(
+        "success",
+        data.message || "Purchase return added successfully"
+      );
+      navigate("/purchaselayout/purchasereturn");
     } catch (err) {
       showToast("error", err.message || "Network error");
     }
@@ -573,6 +643,21 @@ const AddReturnPurchase = () => {
     return purchaseQty > 0 ? amount / purchaseQty : 0;
   }, [form.purchaseQty, form.amount]);
 
+  // Format date for display
+  const formatDate = (dateString) => {
+    if (!dateString) return "";
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString("en-US", {
+        month: "2-digit",
+        day: "2-digit",
+        year: "numeric",
+      });
+    } catch (error) {
+      return dateString;
+    }
+  };
+
   return (
     <div className="max-w-4xl mx-auto p-8 bg-white rounded-2xl shadow">
       <h2 className="text-2xl font-bold mb-6 text-gray-800">
@@ -582,15 +667,64 @@ const AddReturnPurchase = () => {
       <form onSubmit={handleSubmit}>
         {/* First Row - Basic Information */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <InputField
-            label="Invoice Number"
-            name="invoiceNumber"
-            value={form.invoiceNumber}
-            onChange={handleInvoiceNumberChange}
-            error={errors.invoiceNumber}
-            placeholder="Enter invoice number"
-            required
-          />
+          {/* Invoice Number with Suggestions */}
+          <div className="invoice-suggestions-container relative">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Invoice Number <span className="text-red-500">*</span>
+            </label>
+            <div className="relative">
+              <input
+                type="text"
+                name="invoiceNumber"
+                value={form.invoiceNumber}
+                onChange={handleInvoiceNumberChange}
+                onFocus={() => setShowInvoiceSuggestions(true)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                placeholder="Enter invoice number"
+                required
+                autoComplete="off"
+              />
+              <button
+                type="button"
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                onClick={() =>
+                  setShowInvoiceSuggestions(!showInvoiceSuggestions)
+                }
+              >
+                {showInvoiceSuggestions ? (
+                  <ChevronUp size={16} />
+                ) : (
+                  <ChevronDown size={16} />
+                )}
+              </button>
+            </div>
+
+            {/* Invoice Suggestions Dropdown */}
+            {showInvoiceSuggestions && filteredPurchases.length > 0 && (
+              <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                {filteredPurchases.map((purchase) => (
+                  <div
+                    key={purchase._id || purchase.id}
+                    className="px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                    onClick={() => handleInvoiceSelect(purchase)}
+                  >
+                    <div className="font-medium text-gray-800">
+                      {purchase.invoiceNumber}
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      {purchase.productName} • {purchase.supplierName} •{" "}
+                      {formatDate(purchase.invoiceDate)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {errors.invoiceNumber && (
+              <p className="text-red-500 text-xs mt-0.5">
+                {errors.invoiceNumber}
+              </p>
+            )}
+          </div>
 
           <InputField
             label="Delivery Number"
@@ -600,6 +734,7 @@ const AddReturnPurchase = () => {
             error={errors.deliveryNumber}
             placeholder="Enter delivery number"
             required
+            readOnly
           />
 
           <DatePickerField
@@ -612,6 +747,7 @@ const AddReturnPurchase = () => {
           />
         </div>
 
+        {/* Rest of your form remains the same... */}
         {/* Second Row - Product and Supplier */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
           <div className="flex flex-col">
@@ -685,6 +821,7 @@ const AddReturnPurchase = () => {
             value={form.expiredDate}
             onChange={handleDateChange}
             placeholder="Select expired date"
+            readOnly
           />
         </div>
 
@@ -700,6 +837,16 @@ const AddReturnPurchase = () => {
             required
             readOnly
           />
+
+          {/* <NumericInputField
+            label="Used Quantity"
+            name="usedQty"
+            value={form.usedQty}
+            onChange={handleNumericInputChange}
+            error={errors.usedQty}
+            placeholder="0"
+            required
+          /> */}
 
           <NumericInputField
             label="Return Quantity"

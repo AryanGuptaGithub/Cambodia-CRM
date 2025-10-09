@@ -135,10 +135,15 @@ function App() {
             />
           </Route>
           <Route path="/purchaselayout" element={<PurchaseLayout />}>
-            <Route path="purchase" element={<Purchase />} />
-            <Route path="purchase/new" element={<AddNewPurchase />} />
-            <Route path="purchasereturn" element={<PurchaseReturn />} />
-            <Route path="purchasereturn/new" element={<AddReturnPurchase />} />
+            <Route index element={<Purchase />} />
+            <Route path="purchase">
+              <Route index element={<Purchase />} />
+              <Route path="new" element={<AddNewPurchase />} />
+            </Route>
+            <Route path="purchasereturn">
+              <Route index element={<PurchaseReturn />} />
+              <Route path="new" element={<AddReturnPurchase />} />
+            </Route>
             <Route path="purchaseout" element={<PurchaseOut />} />
           </Route>
           <Route path="/salelayout" element={<SaleLayout />}>
