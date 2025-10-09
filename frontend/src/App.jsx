@@ -4,7 +4,6 @@ import OnlineOrders from "./pages/OnlineOrders";
 import StaffMember from "./pages/StaffMember";
 import StocjAdjustment from "./pages/StocjAdjustment";
 import StockTransfer from "./pages/StockTransfer";
-import CashandBank from "./pages/CashandBank";
 import Login from "./pages/Login";
 import Graph from "./pages/graph";
 import MasterLayout from "./pages/MasterLayout";
@@ -21,8 +20,6 @@ import Purchase from "./pages/Purchase/Purchase";
 import PurchaseReturn from "./pages/Purchase/PurchaseReturn";
 import PurchaseOut from "./pages/Purchase/PurchaseOut";
 import Sale from "./pages/Sale/Sale";
-// import Payment from './pages/Sale/PaymentSale';
-// import Payment from './pages/Reports/PaymentReports';
 import Quotation from "./pages/Sale/Quotation";
 import SaleReturn from "./pages/Sale/SaleReturn";
 import ExepenseLayout from "./pages/ExepenseLayout";
@@ -82,6 +79,11 @@ import AddDailySummaryReports from "./pages/Reports/AddNewSaleSummaryReports";
 import AddDailReports from "./pages/Reports/AddDailyReports";
 import AddReturnSale from "./pages/Sale/addSaleReturn";
 import AddReturnPurchase from "./pages/Purchase/addReturnPurchase";
+
+// Import new Cash and Bank components
+import CashAndBankLayout from "./pages/CashAndBankLayout";
+import HelloCashAndBank from "./pages/Account/HelloCashAndBank";
+
 function App() {
   return (
     <>
@@ -101,7 +103,12 @@ function App() {
           <Route path="/stockadjustment" element={<StocjAdjustment />} />
           <Route path="/stocktransfer" element={<StockTransfer />} />
           <Route path="/stocktransferform" element={<StockTransferForm />} />
-          <Route path="/cashandbank" element={<CashandBank />} />
+          
+          {/* Updated Cash and Bank Route with Layout */}
+          <Route path="/accountlayout" element={<CashAndBankLayout />}>
+            <Route index element={<HelloCashAndBank />} />
+   
+          </Route>
 
           <Route path="/staffmemberLayout" element={<StaffMemberLayout />}>
             <Route path="staffmember" element={<StaffMember />} />{" "}

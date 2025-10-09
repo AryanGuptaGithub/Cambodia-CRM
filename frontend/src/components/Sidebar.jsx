@@ -31,6 +31,7 @@ import {
   UserCheck,
   UsersRound,
   Coins,
+  Landmark,
 } from "lucide-react";
 
 const masterPaths = ["/masterlayout/customer", "/masterlayout/supplier"];
@@ -87,6 +88,8 @@ const utilityPaths = [
   "/utilitylayout/frontsettings",
 ];
 
+const accountPaths = ["/accountlayout"];
+
 function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
   const location = useLocation();
 
@@ -109,6 +112,8 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
       setActiveParentMenu("utility");
     } else if (location.pathname.startsWith("/hrmlayout")) {
       setActiveParentMenu("hrm");
+    } else if (location.pathname.startsWith("/accountlayout")) {
+      setActiveParentMenu("accounts");
     } else if (location.pathname.startsWith("/settinglayout")) {
       setActiveParentMenu("hrm");
     } else {
@@ -165,13 +170,11 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
           {isOpen && <span className="mx-auto">Dashboard</span>}
         </Link>
 
+        {/* Master */}
         <div>
           <button
-            onClick={() => toggleMenu("master", "/masterlayout/customer")}
-            className={getDropdownButtonClass("master", [
-              "/masterlayout/customer",
-              "/masterlayout/supplier",
-            ])}
+            onClick={() => toggleMenu("master")}
+            className={getDropdownButtonClass("master", masterPaths)}
           >
             <span className="flex items-center gap-3">
               <Users className="w-5 h-5" />
@@ -205,10 +208,11 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
           )}
         </div>
 
+        {/* Product Manager */}
         <div>
           <button
             onClick={() => toggleMenu("products")}
-            className={getDropdownButtonClass("products")}
+            className={getDropdownButtonClass("products", productPaths)}
           >
             <span className="flex items-center gap-3">
               <Package className="w-5 h-5" />
@@ -225,30 +229,9 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
 
           {activeParentMenu === "products" && isOpen && (
             <div className="ml-6 mt-1 space-y-1">
-              {/* <Link
-                to="/productmanagerlayout/brands"
-                className={getChildLinkClass("/productmanagerlayout/brands")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
-              >
-                <Tags className="w-4 h-4" />
-                <span className="mx-auto">Brands</span>
-              </Link>
-
-              <Link
-                to="/productmanagerlayout/categories"
-                className={getChildLinkClass(
-                  "/productmanagerlayout/categories"
-                )}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
-              >
-                <Layers className="w-4 h-4" />
-                <span className="mx-auto">Categories</span>
-              </Link> */}
-
               <Link
                 to="/productmanagerlayout/product"
                 className={getChildLinkClass("/productmanagerlayout/product")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <Boxes className="w-4 h-4" />
                 <span className="mx-auto">Products</span>
@@ -257,7 +240,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <Link
                 to="/productmanagerlayout/pricelist"
                 className={getChildLinkClass("/productmanagerlayout/pricelist")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <ClipboardList className="w-4 h-4" />
                 <span className="mx-auto">Price List</span>
@@ -268,7 +250,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                 className={getChildLinkClass(
                   "/productmanagerlayout/printbarcode"
                 )}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <Barcode className="w-4 h-4" />
                 <span className="mx-auto">Print Barcode</span>
@@ -277,14 +258,11 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
           )}
         </div>
 
+        {/* Purchase */}
         <div>
           <button
             onClick={() => toggleMenu("purchase")}
-            className={getDropdownButtonClass("purchase", [
-              "/purchaselayout/purchase",
-              "/purchaselayout/purchasereturn",
-              "/purchaselayout/purchaseout",
-            ])}
+            className={getDropdownButtonClass("purchase", purchasePaths)}
           >
             <span className="flex items-center gap-3">
               <ShoppingCart className="w-5 h-5" />
@@ -304,7 +282,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <Link
                 to="/purchaselayout/purchase"
                 className={getChildLinkClass("/purchaselayout/purchase")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <Package className="w-4 h-4" />
                 <span className="mx-auto">Purchase</span>
@@ -312,7 +289,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <Link
                 to="/purchaselayout/purchasereturn"
                 className={getChildLinkClass("/purchaselayout/purchasereturn")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <FileText className="w-4 h-4" />
                 <span className="mx-auto">Purchase/Cr.Note</span>
@@ -321,7 +297,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <Link
                 to="/purchaselayout/purchaseout"
                 className={getChildLinkClass("/purchaselayout/purchaseout")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <Truck className="w-4 h-4" />
                 <span className="mx-auto">Purchase Out</span>
@@ -330,15 +305,11 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
           )}
         </div>
 
+        {/* Sales */}
         <div>
           <button
             onClick={() => toggleMenu("sales")}
-            className={getDropdownButtonClass("sales", [
-              "/salelayout/sale",
-              "/salelayout/salereturn",
-              "/salelayout/payment",
-              "/salelayout/quotation",
-            ])}
+            className={getDropdownButtonClass("sales", salesPaths)}
           >
             <span className="flex items-center gap-3">
               <TrendingUp className="w-5 h-5" />
@@ -358,7 +329,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <Link
                 to="/salelayout/sale"
                 className={getChildLinkClass("/salelayout/sale")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <DollarSign className="w-4 h-4" />
                 <span className="mx-auto">Sale</span>
@@ -367,32 +337,15 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <Link
                 to="/salelayout/salereturn"
                 className={getChildLinkClass("/salelayout/salereturn")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <FileText className="w-4 h-4" />
                 <span className="mx-auto">Sale Return/Cr.Note</span>
               </Link>
-
-              {/* <Link
-                to="/salelayout/payment"
-                className={getChildLinkClass("/salelayout/payment")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
-              >
-                <CreditCard className="w-4 h-4" />
-                <span className="mx-auto">Payment In</span>
-              </Link>
-
-              <Link
-                to="/salelayout/quotation"
-                className={getChildLinkClass("/salelayout/quotation")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
-              >
-                <ClipboardList className="w-4 h-4" />
-                <span className="mx-auto">Quotation</span>
-              </Link> */}
             </div>
           )}
         </div>
+
+        {/* Stock Adjustment */}
         <Link
           to="/stockadjustment"
           className={getLinkClass("/stockadjustment")}
@@ -401,23 +354,44 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
           {isOpen && <span className="mx-auto">Stock Adjustment</span>}
         </Link>
 
+        {/* Stock Transfer */}
         <Link to="/stocktransfer" className={getLinkClass("/stocktransfer")}>
           <Truck className="w-5 h-5" />
           {isOpen && <span className="mx-auto">Stock Transfer</span>}
         </Link>
-
-        <Link to="/cashandbank" className={getLinkClass("/cashandbank")}>
-          <Wallet className="w-5 h-5" />
-          {isOpen && <span className="mx-auto">Cash & Bank</span>}
-        </Link>
-
+        <div>
+          <button
+            onClick={() => toggleMenu("accounts")}
+            className={getDropdownButtonClass("accounts", accountPaths)}
+          >
+            <span className="flex items-center gap-3">
+              <Landmark className="w-5 h-5" />
+            </span>
+            <span>{isOpen && "Accounts"}</span>
+            {isOpen && (
+              <ChevronDown
+                className={`w-4 h-4 transform transition-transform ${
+                  activeParentMenu === "accounts" ? "rotate-180" : ""
+                }`}
+              />
+            )}
+          </button>
+          {activeParentMenu === "accounts" && isOpen && (
+            <div className="ml-6 mt-1 space-y-1">
+              <Link
+                to="/accountlayout"
+                className={getChildLinkClass("/accountlayout")}
+              >
+                <Wallet className="w-4 h-4" />
+                <span className="mx-auto">Cash & Bank</span>
+              </Link>
+            </div>
+          )}
+        </div>
         <div>
           <button
             onClick={() => toggleMenu("expense")}
-            className={getDropdownButtonClass("expense", [
-              "/expenselayout/expensecategories",
-              "/expenselayout/expenses",
-            ])}
+            className={getDropdownButtonClass("expense", expensePaths)}
           >
             <span className="flex items-center gap-3">
               <FileText className="w-5 h-5" />
@@ -439,7 +413,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                 className={getChildLinkClass(
                   "/expenselayout/expensecategories"
                 )}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <Layers className="w-4 h-4" />
                 <span className="mx-auto">Expense Categories</span>
@@ -447,7 +420,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <Link
                 to="/expenselayout/expenses"
                 className={getChildLinkClass("/expenselayout/expenses")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <DollarSign className="w-4 h-4" />
                 <span className="mx-auto">Expenses</span>
@@ -455,21 +427,12 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
             </div>
           )}
         </div>
+
+        {/* Reports */}
         <div>
           <button
             onClick={() => toggleMenu("reports")}
-            className={getDropdownButtonClass("reports", [
-              "/reportlayout/dailyreport",
-              "/reportlayout/payment",
-              "/reportlayout/salesummary",
-              "/reportlayout/dailysample",
-              "/reportlayout/productsalessummary",
-              "/reportlayout/stockalert",
-              "/reportlayout/expensereport",
-              "/reportlayout/userreport",
-              "/reportlayout/ratelist",
-              "/reportlayout/profitloss",
-            ])}
+            className={getDropdownButtonClass("reports", reportPaths)}
           >
             <span className="flex items-center gap-3">
               <BarChart3 className="w-5 h-5" />
@@ -489,7 +452,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <Link
                 to="/reportlayout/dailyreport"
                 className={getChildLinkClass("/reportlayout/dailyreport")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <CreditCard className="w-4 h-4" />
                 <span className="mx-auto">Daily Reports</span>
@@ -497,7 +459,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <Link
                 to="/reportlayout/payment"
                 className={getChildLinkClass("/reportlayout/payment")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <CreditCard className="w-4 h-4" />
                 <span className="mx-auto">Payments</span>
@@ -505,7 +466,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <Link
                 to="/reportlayout/salesummary"
                 className={getChildLinkClass("/reportlayout/salesummary")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <TrendingUp className="w-4 h-4" />
                 <span className="mx-auto">Sale Summary</span>
@@ -513,7 +473,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <Link
                 to="/reportlayout/dailysample"
                 className={getChildLinkClass("/reportlayout/dailysample")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <Boxes className="w-4 h-4" />
                 <span className="mx-auto">Daily Sample</span>
@@ -523,7 +482,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                 className={getChildLinkClass(
                   "/reportlayout/productsalessummary"
                 )}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <Package className="w-4 h-4" />
                 <span className="mx-auto">Product Sales</span>
@@ -531,7 +489,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <Link
                 to="/reportlayout/stockalert"
                 className={getChildLinkClass("/reportlayout/stockalert")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <AlertTriangle className="w-4 h-4" />
                 <span className="mx-auto">Stock Alert</span>
@@ -539,7 +496,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <Link
                 to="/reportlayout/expensereport"
                 className={getChildLinkClass("/reportlayout/expensereport")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <FileBarChart className="w-4 h-4" />
                 <span className="mx-auto">Expenses Report</span>
@@ -547,7 +503,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <Link
                 to="/reportlayout/userreport"
                 className={getChildLinkClass("/reportlayout/userreport")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <UsersRound className="w-4 h-4" />
                 <span className="mx-auto">User Report</span>
@@ -555,7 +510,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <Link
                 to="/reportlayout/ratelist"
                 className={getChildLinkClass("/reportlayout/ratelist")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <ListChecks className="w-4 h-4" />
                 <span className="mx-auto">Rate List</span>
@@ -563,7 +517,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <Link
                 to="/reportlayout/profitloss"
                 className={getChildLinkClass("/reportlayout/profitloss")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <DollarSign className="w-4 h-4" />
                 <span className="mx-auto">Profit & Loss</span>
@@ -572,6 +525,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
           )}
         </div>
 
+        {/* Staff Members */}
         <Link
           to="/staffmemberLayout/staffmember"
           className={getLinkClass("/staffmemberLayout")}
@@ -580,13 +534,11 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
           {isOpen && <span className="mx-auto">Staff Members</span>}
         </Link>
 
+        {/* Utility */}
         <div>
           <button
             onClick={() => toggleMenu("utility")}
-            className={getDropdownButtonClass("utility", [
-              "/utilitylayout/productcard",
-              "/utilitylayout/frontsettings",
-            ])}
+            className={getDropdownButtonClass("utility", utilityPaths)}
           >
             <span className="flex items-center gap-3">
               <Briefcase className="w-5 h-5" />
@@ -605,7 +557,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <Link
                 to="/utilitylayout/productcard"
                 className={getChildLinkClass("/utilitylayout/productcard")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <Package className="w-4 h-4" />
                 <span className="mx-auto">Product Card</span>
@@ -613,7 +564,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <Link
                 to="/utilitylayout/frontsettings"
                 className={getChildLinkClass("/utilitylayout/frontsettings")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <Settings className="w-4 h-4" />
                 <span className="mx-auto">Front Settings</span>
@@ -622,22 +572,17 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
           )}
         </div>
 
+        {/* Online Orders */}
         <Link to="/onlineorder" className={getLinkClass("/onlineorder")}>
           <ShoppingCart className="w-5 h-5" />
           {isOpen && <span className="mx-auto">Online Orders</span>}
         </Link>
 
+        {/* HRM */}
         <div>
           <button
             onClick={() => toggleMenu("hrm")}
-            className={getDropdownButtonClass("hrm", [
-              "/hrmlayout/dashboard",
-              "/hrmlayout/holidays",
-              "/hrmlayout/leaves",
-              "/hrmlayout/attendance",
-              "/hrmlayout/payroll",
-              "/hrmlayout/hrmsetting",
-            ])}
+            className={getDropdownButtonClass("hrm", hrmPaths)}
           >
             <span className="flex items-center gap-3">
               <UserCog className="w-5 h-5" />
@@ -656,7 +601,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <Link
                 to="/hrmlayout/dashboard"
                 className={getChildLinkClass("/hrmlayout/dashboard")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <Home className="w-4 h-4" />
                 <span className="mx-auto">Dashboard</span>
@@ -664,7 +608,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <Link
                 to="/hrmlayout/holidays"
                 className={getChildLinkClass("/hrmlayout/holidays")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <Umbrella className="w-4 h-4" />
                 <span className="mx-auto">Holidays</span>
@@ -672,7 +615,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <Link
                 to="/hrmlayout/leaves"
                 className={getChildLinkClass("/hrmlayout/leaves")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <Calendar className="w-4 h-4" />
                 <span className="mx-auto">Leaves</span>
@@ -680,7 +622,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <Link
                 to="/hrmlayout/attendance"
                 className={getChildLinkClass("/hrmlayout/attendance")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <Calendar className="w-4 h-4" />
                 <span className="mx-auto">Attendance</span>
@@ -688,7 +629,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <Link
                 to="/hrmlayout/payroll"
                 className={getChildLinkClass("/hrmlayout/payroll")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <DollarSign className="w-4 h-4" />
                 <span className="mx-auto">Payroll</span>
@@ -696,7 +636,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               <Link
                 to="/hrmlayout/hrmsetting"
                 className={getChildLinkClass("/hrmlayout/hrmsetting")}
-                onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <Settings className="w-4 h-4" />
                 <span className="mx-auto">HRM Settings</span>
@@ -705,9 +644,10 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
           )}
         </div>
 
+        {/* Settings */}
         <button
           onClick={openSettingsSidebar}
-          className="flex items-center gap-15 w-full  rounded-md hover:bg-gray-700"
+          className="flex items-center gap-15 w-full p-2 rounded-md hover:bg-gray-700 text-gray-200"
         >
           <Settings className="w-5 h-5" />
           {isOpen && "Settings"}
