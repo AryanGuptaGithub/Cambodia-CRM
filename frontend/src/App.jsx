@@ -18,7 +18,7 @@ import Product from "./pages/ProductManager/Product";
 import PrintBarCode from "./pages/ProductManager/PrintBarCode";
 import PurchaseLayout from "./pages/PurchaseLayout";
 import Purchase from "./pages/Purchase/Purchase";
-import CrNote from "./pages/Purchase/CrNote";
+import PurchaseReturn from "./pages/Purchase/PurchaseReturn";
 import PurchaseOut from "./pages/Purchase/PurchaseOut";
 import Sale from "./pages/Sale/Sale";
 // import Payment from './pages/Sale/PaymentSale';
@@ -81,7 +81,7 @@ import AddNewPurchase from "./pages/Purchase/addNewPurchase";
 import AddDailySummaryReports from "./pages/Reports/AddNewSaleSummaryReports";
 import AddDailReports from "./pages/Reports/AddDailyReports";
 import AddReturnSale from "./pages/Sale/addSaleReturn";
-
+import AddReturnPurchase from "./pages/Purchase/addReturnPurchase";
 function App() {
   return (
     <>
@@ -137,7 +137,8 @@ function App() {
           <Route path="/purchaselayout" element={<PurchaseLayout />}>
             <Route path="purchase" element={<Purchase />} />
             <Route path="purchase/new" element={<AddNewPurchase />} />
-            <Route path="crnote" element={<CrNote />} />
+            <Route path="purchasereturn" element={<PurchaseReturn />} />
+            <Route path="purchasereturn/new" element={<AddReturnPurchase />} />
             <Route path="purchaseout" element={<PurchaseOut />} />
           </Route>
           <Route path="/salelayout" element={<SaleLayout />}>

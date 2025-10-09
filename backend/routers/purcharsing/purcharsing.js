@@ -19,9 +19,10 @@ router.post("/purchase/import", async (req, res) => {
       }
 
       const qtyBoxValue = parseFloat(item.qtyBox) || 0;
+      const qtyPerCartonValue = parseFloat(item.qtyPerCarton) || 0;
       const amount =
         !isNaN(lcValue) && !isNaN(qtyBoxValue)
-          ? lcValue * (qtyBoxValue * qtyPerCarton)
+          ? lcValue * qtyBoxValue * qtyPerCartonValue
           : 0;
 
       return {
@@ -34,7 +35,8 @@ router.post("/purchase/import", async (req, res) => {
         qtyBox: qtyBoxValue,
         fob: parseFloat(item.fob) || 0,
         cif: parseFloat(item.cif) || 0,
-        qtyPerCarton: parseFloat(item.qtyPerCarton) || 0,
+        qtyPerCarton: qtyPerCartonValue,
+        supplierName: item.supplierName || "", // Added supplierName
       };
     });
 
@@ -47,6 +49,22 @@ router.post("/purchase/import", async (req, res) => {
   } catch (err) {
     console.error("Import error:", err);
     res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+router.get("/purchase-invoice", async (req, res) => {
+  try {
+    const invoices = await purchaseInventory
+      .find()
+      .sort({ invoiceDate: -1 })
+      .select("invoiceNumber invoiceDate supplierName amount paymentStatus");
+    res.status(200).json(invoices);
+  } catch (error) {
+    console.error("Error fetching purchase invoices:", error);
+    res.status(500).json({
+      message: "Failed to fetch invoices",
+      error: error.message,
+    });
   }
 });
 
@@ -161,11 +179,24 @@ router.delete("/purchase", async (req, res) => {
 router.post("/purchase", async (req, res) => {
   try {
     const formData = req.body;
-    if (!formData.invoiceNumber || !formData.productName) {
+    if (
+      !formData.invoiceNumber ||
+      !formData.productName ||
+      !formData.supplierName
+    ) {
       return res
         .status(400)
-        .json({ message: "Invoice number and product name are required." });
+        .json({
+          message:
+            "Invoice number, product name, and supplier name are required.",
+        });
     }
+
+    // Calculate amount
+    const lcValue = parseFloat(formData.lcNumber) || 0;
+    const qtyBoxValue = parseFloat(formData.qtyBox) || 0;
+    const qtyPerCartonValue = parseFloat(formData.qtyPerCarton) || 0;
+    const amount = lcValue * qtyBoxValue * qtyPerCartonValue;
 
     // Create new purchase document with updated fields
     const newPurchase = new purchaseInventory({
@@ -175,12 +206,14 @@ router.post("/purchase", async (req, res) => {
       receivedDate: formData.receivedDate || null,
       expiredDate: formData.expiredDate || null,
       productName: formData.productName,
+      supplierName: formData.supplierName, // Added supplierName
       qtyBox: formData.qtyBox || 0,
       qtyPerCarton: formData.qtyPerCarton || 0,
       fob: formData.fob || 0,
       cif: formData.cif || 0,
       lcNumber: formData.lcNumber || "",
       remarks: formData.remarks || "",
+      amount: amount, // Pre-calculated amount
     });
 
     await newPurchase.save();

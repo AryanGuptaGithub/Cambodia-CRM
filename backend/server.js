@@ -23,6 +23,8 @@ import stockAdjustment from "./routers/stock/stockAdjustment.js";
 import stockTransfer from "./routers/stock/stockTransfer.js";
 import warehouse from "./routers/stock/warehouse.js";
 import orderStatus from "./routers/stock/orderStatus.js";
+import purchaseReturn from "./routers/purcharsing/purchaseReturn.js";
+import PurchaseOut from "./routers/purcharsing/paymentOut.js";
 
 dotenv.config(); // Load environment variables
 
@@ -79,6 +81,8 @@ app.use("/api", stockAdjustment);
 app.use("/api", stockTransfer);
 app.use("/api", warehouse);
 app.use("/api", orderStatus);
+app.use("/api", purchaseReturn);
+app.use("/api", PurchaseOut);
 
 // Server listener
 app.listen(PORT, () => {

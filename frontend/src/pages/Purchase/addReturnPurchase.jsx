@@ -15,57 +15,76 @@ import axios from "axios";
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
 const INITIAL_FORM_STATE = {
+  recordingDate: "",
   invoiceNumber: "",
   invoiceDate: "",
   deliveryNumber: "",
   receivedDate: "",
-  expiredDate: "",
   productId: "",
   productName: "",
   supplierId: "",
   supplierName: "",
-  qtyBox: 0,
-  qtyPerCarton: 0,
+  purchaseQty: 0,
+  returnQuantity: 0,
+  usedQty: 0,
   fob: 0,
   cif: 0,
   lcNumber: "",
-  remarks: "",
   amount: 0,
+  returnAmount: 0,
+  remarks: "",
+  returnReason: "",
+  expiredDate: "",
 };
 
 // Define numeric fields for proper handling
-const NUMERIC_FIELDS = ["amount", "lcNumber", "qtyPerCarton", "qtyBox", "invoiceNumber","deliveryNumber"];
+const NUMERIC_FIELDS = [
+  "purchaseQty",
+  "returnQuantity",
+  "usedQty",
+  "fob",
+  "cif",
+  "amount",
+  "returnAmount",
+];
 
 // Custom hook for form state management
-const usePurchaseForm = () => {
+const useReturnForm = () => {
   const [form, setForm] = useState(INITIAL_FORM_STATE);
   const [errors, setErrors] = useState({});
   const [products, setProducts] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
+  const [purchases, setPurchases] = useState([]);
 
   const parseNumber = useCallback((val) => {
-    if (typeof val === 'number') return val;
-    if (typeof val === 'string') {
+    if (typeof val === "number") return val;
+    if (typeof val === "string") {
       const num = parseFloat(val);
       return isNaN(num) ? 0 : num;
     }
     return 0;
   }, []);
+  
+  console.log('values of purchases', purchases);
 
-  // Calculate amount when lcNumber or qtyBox changes
+  // Calculate return amount when return quantity or unit price changes
   useEffect(() => {
-    const lcValue = parseNumber(form.lcNumber);
-    const qtyBoxValue = parseNumber(form.qtyBox);
-    const qtyPerCarton = parseNumber(form.qtyPerCarton);
-    const amount = lcValue * qtyBoxValue * qtyPerCarton;
+    const returnQty = parseNumber(form.returnQuantity);
+    const purchaseQty = parseNumber(form.purchaseQty);
+    const totalAmount = parseNumber(form.amount);
 
-    const roundedAmount = Math.round(amount * 100) / 100;
+    // Calculate unit price
+    const unitPrice = purchaseQty > 0 ? totalAmount / purchaseQty : 0;
+
+    // Calculate return amount
+    const calculatedReturnAmount = returnQty * unitPrice;
+    const roundedReturnAmount = Math.round(calculatedReturnAmount * 100) / 100;
 
     setForm((prev) => ({
       ...prev,
-      amount: roundedAmount,
+      returnAmount: roundedReturnAmount,
     }));
-  }, [form.lcNumber, form.qtyBox, form.qtyPerCarton, parseNumber]);
+  }, [form.returnQuantity, form.purchaseQty, form.amount, parseNumber]);
 
   const updateFormField = useCallback((name, value) => {
     setForm((prev) => ({ ...prev, [name]: value }));
@@ -118,7 +137,6 @@ const usePurchaseForm = () => {
           ...prev,
           productId: selectedProduct._id,
           productName: selectedProduct.productName,
-          qtyPerCarton: selectedProduct.qtyPerCarton || 0,
         }));
       }
     },
@@ -142,32 +160,80 @@ const usePurchaseForm = () => {
     [suppliers]
   );
 
+  // Handle invoice number change - auto-fill purchase data
+  const handleInvoiceNumberChange = useCallback(
+    (e) => {
+      const { value } = e.target;
+      setForm((prev) => ({ ...prev, invoiceNumber: value }));
+
+      // Find purchase by invoice number
+      const purchase = purchases.find(
+        (p) => p.invoiceNumber?.toLowerCase() === value.toLowerCase()
+      );
+      
+      console.log('Found purchase:', purchase); // Debug log
+      
+      if (purchase) {
+        setForm((prev) => ({
+          ...prev,
+          invoiceDate: purchase.invoiceDate || "",
+          deliveryNumber: purchase.deliveryNumber || "",
+          receivedDate: purchase.receivedDate || "",
+          productId: purchase.productId || "",
+          productName: purchase.productName || "",
+          supplierId: purchase.supplierId || "",
+          supplierName: purchase.supplierName || "",
+          purchaseQty: purchase.qtyBox || 0,
+          fob: purchase.fob || 0,
+          cif: purchase.cif || 0,
+          lcNumber: purchase.lcNumber || "",
+          amount: purchase.amount || 0,
+          expiredDate: purchase.expiredDate || "", // Add expired date
+        }));
+      }
+
+      // Clear error when user starts typing
+      if (errors.invoiceNumber) {
+        setErrors((prev) => ({ ...prev, invoiceNumber: "" }));
+      }
+    },
+    [purchases, errors]
+  );
+
   const validate = useCallback(() => {
     const newErrors = {};
 
-    // Convert to string before using trim() for numeric fields
-    const invoiceNumberStr = String(form.invoiceNumber || "");
-    const deliveryNumberStr = String(form.deliveryNumber || "");
-    const lcNumberStr = String(form.lcNumber || "");
-
-    if (!invoiceNumberStr.trim()) newErrors.invoiceNumber = "Invoice number is required";
-    if (!form.productId) newErrors.productId = "Product selection is required";
-    if (!form.supplierId) newErrors.supplierId = "Supplier selection is required";
-    if (!deliveryNumberStr.trim()) newErrors.deliveryNumber = "Delivery number is required";
+    if (!form.invoiceNumber?.trim())
+      newErrors.invoiceNumber = "Invoice number is required";
+    if (!form.productId) newErrors.productId = "Product is required";
+    if (!form.supplierId) newErrors.supplierId = "Supplier is required";
+    if (!form.deliveryNumber?.trim())
+      newErrors.deliveryNumber = "Delivery number is required";
     if (!form.invoiceDate) newErrors.invoiceDate = "Invoice date is required";
     if (!form.receivedDate) newErrors.receivedDate = "Received date is required";
-    
+    if (!form.recordingDate) newErrors.recordingDate = "Recording date is required";
+    if (!form.returnReason?.trim())
+      newErrors.returnReason = "Return reason is required";
+
     // Convert to numbers for numeric validation
-    const qtyBoxNum = parseNumber(form.qtyBox);
-    const qtyPerCartonNum = parseNumber(form.qtyPerCarton);
-    const fobNum = parseNumber(form.fob);
-    const cifNum = parseNumber(form.cif);
-    
-    if (qtyBoxNum <= 0) newErrors.qtyBox = "Box quantity must be greater than 0";
-    if (qtyPerCartonNum <= 0) newErrors.qtyPerCarton = "Quantity per carton must be greater than 0";
-    if (fobNum < 0) newErrors.fob = "FOB cannot be negative";
-    if (cifNum < 0) newErrors.cif = "CIF cannot be negative";
-    if (!lcNumberStr.trim()) newErrors.lcNumber = "LC number is required";
+    const purchaseQtyNum = parseNumber(form.purchaseQty);
+    const returnQtyNum = parseNumber(form.returnQuantity);
+    const amountNum = parseNumber(form.amount);
+    const returnAmountNum = parseNumber(form.returnAmount);
+
+    if (purchaseQtyNum <= 0)
+      newErrors.purchaseQty = "Purchase quantity must be greater than 0";
+    if (returnQtyNum <= 0)
+      newErrors.returnQuantity = "Return quantity must be greater than 0";
+    if (returnQtyNum > purchaseQtyNum)
+      newErrors.returnQuantity = "Return quantity cannot exceed purchase quantity";
+    if (usedQtyNum > purchaseQtyNum)
+      newErrors.usedQty = "Used quantity cannot exceed purchase quantity";
+    if (amountNum < 0) newErrors.amount = "Amount cannot be negative";
+    if (returnAmountNum < 0)
+      newErrors.returnAmount = "Return amount cannot be negative";
+    if (returnAmountNum > amountNum)
+      newErrors.returnAmount = "Return amount cannot exceed original amount";
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -195,19 +261,36 @@ const usePurchaseForm = () => {
     }
   }, []);
 
+  // Fetch purchases for auto-fill
+  const fetchPurchases = useCallback(async () => {
+    try {
+      const response = await axios.get(`${backendUrl}/api/purchase`);
+      console.log('values of response', response.data);
+      // Check the structure of your API response
+      const purchaseData = response.data.reports || response.data || [];
+      setPurchases(purchaseData);
+    } catch (err) {
+      console.error("Error fetching purchases:", err);
+      showToast("error", "Failed to fetch purchases");
+    }
+  }, []);
+
   return {
     form,
     errors,
     products,
     suppliers,
+    purchases,
     handleChange,
     validate,
     updateFormField,
     handleDateChange,
     handleProductChange,
     handleSupplierChange,
+    handleInvoiceNumberChange,
     fetchProducts,
     fetchSuppliers,
+    fetchPurchases,
     setErrors,
   };
 };
@@ -301,9 +384,9 @@ const NumericInputField = React.memo(
   }) => {
     const handleNumericChange = (e) => {
       const { value } = e.target;
-      
+
       const regex = allowDecimal ? /^-?\d*\.?\d*$/ : /^-?\d*$/;
-      
+
       if (value === "" || regex.test(value)) {
         onChange(e);
       }
@@ -334,22 +417,25 @@ const NumericInputField = React.memo(
   }
 );
 
-const AddNewPurchase = () => {
+const AddReturnPurchase = () => {
   const navigate = useNavigate();
   const {
     form,
     errors,
     products,
     suppliers,
+    purchases,
     handleChange,
     validate,
     updateFormField,
     handleDateChange,
     handleProductChange,
     handleSupplierChange,
+    handleInvoiceNumberChange,
     fetchProducts,
     fetchSuppliers,
-  } = usePurchaseForm();
+    fetchPurchases,
+  } = useReturnForm();
 
   // Memoized product options for dropdown
   const productOptions = useMemo(() => {
@@ -376,13 +462,14 @@ const AddNewPurchase = () => {
   useEffect(() => {
     fetchProducts();
     fetchSuppliers();
-  }, [fetchProducts, fetchSuppliers]);
+    fetchPurchases();
+  }, [fetchProducts, fetchSuppliers, fetchPurchases]);
 
   // Numeric input handler
   const handleNumericInputChange = useCallback(
     (e) => {
       const { name, value } = e.target;
-      
+
       if (NUMERIC_FIELDS.includes(name)) {
         if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
           handleChange(e);
@@ -401,19 +488,29 @@ const AddNewPurchase = () => {
     try {
       // Prepare data for submission - convert numeric strings to numbers
       const submissionData = {
-        ...form,
-        // Convert numeric fields to numbers for API
-        qtyBox: parseFloat(form.qtyBox) || 0,
-        qtyPerCarton: parseFloat(form.qtyPerCarton) || 0,
+        recordingDate: form.recordingDate,
+        invoiceNumber: form.invoiceNumber,
+        invoiceDate: form.invoiceDate,
+        deliveryNumber: form.deliveryNumber,
+        receivedDate: form.receivedDate,
+        productId: form.productId,
+        productName: form.productName,
+        supplierId: form.supplierId,
+        supplierName: form.supplierName,
+        purchaseQty: parseFloat(form.purchaseQty) || 0,
+        returnQuantity: parseFloat(form.returnQuantity) || 0,
+        usedQty: parseFloat(form.usedQty) || 0,
         fob: parseFloat(form.fob) || 0,
         cif: parseFloat(form.cif) || 0,
+        lcNumber: form.lcNumber,
         amount: parseFloat(form.amount) || 0,
-        productName: products.find((p) => p._id === form.productId)?.productName || "",
-        supplierName: suppliers.find((s) => s._id === form.supplierId)?.supplierName || 
-                     suppliers.find((s) => s._id === form.supplierId)?.name || "",
+        returnAmount: parseFloat(form.returnAmount) || 0,
+        remarks: form.remarks,
+        returnReason: form.returnReason,
+        expiredDate: form.expiredDate, // Include expired date
       };
 
-      const response = await fetch(`${backendUrl}/api/purchase`, {
+      const response = await fetch(`${backendUrl}/api/purchasereturn`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(submissionData),
@@ -422,75 +519,101 @@ const AddNewPurchase = () => {
       const data = await response.json();
 
       if (!response.ok) {
-        showToast("error", data.message || "Error adding purchase");
+        showToast("error", data.message || "Error adding purchase return");
         return;
       }
 
-      showToast("success", data.message || "Purchase added successfully");
-      navigate("/purchaselayout/purchase");
+      showToast("success", data.message || "Purchase return added successfully");
+      navigate("/purchaselayout/purchase-return");
     } catch (err) {
       showToast("error", err.message || "Network error");
     }
   };
 
-  // Check if form is valid for submission - FIXED: Convert to strings for trim()
+  // Check if form is valid for submission
   const isFormValid = useMemo(() => {
-    const invoiceNumberStr = String(form.invoiceNumber || "");
-    const deliveryNumberStr = String(form.deliveryNumber || "");
-    const lcNumberStr = String(form.lcNumber || "");
-    
-    // Convert to numbers for numeric validation
-    const qtyBoxNum = parseFloat(form.qtyBox) || 0;
-    const qtyPerCartonNum = parseFloat(form.qtyPerCarton) || 0;
-    const fobNum = parseFloat(form.fob) || 0;
-    const cifNum = parseFloat(form.cif) || 0;
+    const purchaseQtyNum = parseFloat(form.purchaseQty) || 0;
+    const returnQtyNum = parseFloat(form.returnQuantity) || 0;
+    const usedQtyNum = parseFloat(form.usedQty) || 0;
+    const amountNum = parseFloat(form.amount) || 0;
+    const returnAmountNum = parseFloat(form.returnAmount) || 0;
 
     return (
-      invoiceNumberStr.trim() &&
+      form.invoiceNumber?.trim() &&
       form.productId &&
       form.supplierId &&
-      deliveryNumberStr.trim() &&
+      form.deliveryNumber?.trim() &&
       form.invoiceDate &&
       form.receivedDate &&
-      qtyBoxNum > 0 &&
-      qtyPerCartonNum > 0 &&
-      fobNum >= 0 &&
-      cifNum >= 0 &&
-      lcNumberStr.trim()
+      form.recordingDate &&
+      form.returnReason?.trim() &&
+      purchaseQtyNum > 0 &&
+      returnQtyNum > 0 &&
+      returnQtyNum <= purchaseQtyNum &&
+      usedQtyNum >= 0 &&
+      usedQtyNum <= purchaseQtyNum &&
+      amountNum >= 0 &&
+      returnAmountNum >= 0 &&
+      returnAmountNum <= amountNum
     );
   }, [form]);
 
+  // Calculate remaining quantity
+  const remainingQty = useMemo(() => {
+    const purchaseQty = parseFloat(form.purchaseQty) || 0;
+    const returnQty = parseFloat(form.returnQuantity) || 0;
+    const usedQty = parseFloat(form.usedQty) || 0;
+    return Math.max(0, purchaseQty - returnQty - usedQty);
+  }, [form.purchaseQty, form.returnQuantity, form.usedQty]);
+
+  // Calculate unit price
+  const unitPrice = useMemo(() => {
+    const purchaseQty = parseFloat(form.purchaseQty) || 0;
+    const amount = parseFloat(form.amount) || 0;
+    return purchaseQty > 0 ? amount / purchaseQty : 0;
+  }, [form.purchaseQty, form.amount]);
+
   return (
-    <div className="max-w-3xl mx-auto p-8 bg-white rounded-2xl shadow">
+    <div className="max-w-4xl mx-auto p-8 bg-white rounded-2xl shadow">
       <h2 className="text-2xl font-bold mb-6 text-gray-800">
-        Add New Purchase
+        Add Purchase Return
       </h2>
 
       <form onSubmit={handleSubmit}>
-        {/* First Row */}
+        {/* First Row - Basic Information */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <NumericInputField
+          <InputField
             label="Invoice Number"
             name="invoiceNumber"
             value={form.invoiceNumber}
-            onChange={handleNumericInputChange}
+            onChange={handleInvoiceNumberChange}
             error={errors.invoiceNumber}
-            placeholder="123456"
+            placeholder="Enter invoice number"
             required
-            allowDecimal={false}
           />
-          
+
           <InputField
             label="Delivery Number"
             name="deliveryNumber"
             value={form.deliveryNumber}
             onChange={handleChange}
             error={errors.deliveryNumber}
-            placeholder="DEL-001"
+            placeholder="Enter delivery number"
             required
           />
 
-          {/* Product Dropdown */}
+          <DatePickerField
+            label="Recording Date"
+            name="recordingDate"
+            value={form.recordingDate}
+            onChange={handleDateChange}
+            error={errors.recordingDate}
+            required
+          />
+        </div>
+
+        {/* Second Row - Product and Supplier */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
           <div className="flex flex-col">
             <label className="text-sm font-medium text-gray-700 mb-1">
               Product <span className="text-red-500">*</span>
@@ -506,11 +629,7 @@ const AddNewPurchase = () => {
               <p className="text-red-500 text-xs mt-0.5">{errors.productId}</p>
             )}
           </div>
-        </div>
 
-        {/* Second Row */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
-          {/* Supplier Dropdown */}
           <div className="flex flex-col">
             <label className="text-sm font-medium text-gray-700 mb-1">
               Supplier <span className="text-red-500">*</span>
@@ -527,91 +646,19 @@ const AddNewPurchase = () => {
             )}
           </div>
 
-          <NumericInputField
-            label="Box Quantity"
-            name="qtyBox"
-            value={form.qtyBox}
-            onChange={handleNumericInputChange}
-            error={errors.qtyBox}
-            placeholder="0"
-            required
-            allowDecimal={false}
-          />
-
-          {/* Quantity Per Carton Field */}
-          <div className="flex flex-col">
-            <label className="text-sm font-medium text-gray-700 mb-1">
-              Quantity Per Carton <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              name="qtyPerCarton"
-              value={form.qtyPerCarton}
-              onChange={handleNumericInputChange}
-              placeholder="0"
-              className="w-full border px-3 py-2 rounded-lg bg-gray-100 border-gray-300"
-              autoComplete="off"
-              readOnly
-            />
-            {errors.qtyPerCarton && (
-              <p className="text-red-500 text-xs mt-0.5">{errors.qtyPerCarton}</p>
-            )}
-          </div>
-        </div>
-
-        {/* Third Row */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
-          <NumericInputField
+          <InputField
             label="LC Number"
             name="lcNumber"
             value={form.lcNumber}
-            onChange={handleNumericInputChange}
+            onChange={handleChange}
             error={errors.lcNumber}
-            placeholder="0.00"
-            required
-            allowDecimal={true}
-          />
-          
-          <NumericInputField
-            label="FOB (USD)"
-            name="fob"
-            value={form.fob}
-            onChange={handleNumericInputChange}
-            error={errors.fob}
-            placeholder="0.00"
-            allowDecimal={true}
-          />
-          
-          <NumericInputField
-            label="CIF (USD)"
-            name="cif"
-            value={form.cif}
-            onChange={handleNumericInputChange}
-            error={errors.cif}
-            placeholder="0.00"
-            allowDecimal={true}
+            placeholder="Enter LC number"
+            readOnly
           />
         </div>
 
-        {/* Fourth Row */}
+        {/* Third Row - Dates */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
-          {/* Amount - Readonly field */}
-          <div className="flex flex-col">
-            <label className="text-sm font-medium text-gray-700 mb-1">
-              Amount (USD)
-            </label>
-            <input
-              type="text"
-              name="amount"
-              value={form.amount ? parseFloat(form.amount).toFixed(2) : "0.00"}
-              className="w-full border px-3 py-2 rounded-lg bg-gray-100 border-gray-300"
-              readOnly
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              Calculated: LC Number × Box Quantity × Qty Per Carton
-            </p>
-          </div>
-
           <DatePickerField
             label="Invoice Date"
             name="invoiceDate"
@@ -619,7 +666,9 @@ const AddNewPurchase = () => {
             onChange={handleDateChange}
             error={errors.invoiceDate}
             required
+            readOnly
           />
+
           <DatePickerField
             label="Received Date"
             name="receivedDate"
@@ -627,19 +676,121 @@ const AddNewPurchase = () => {
             onChange={handleDateChange}
             error={errors.receivedDate}
             required
+            readOnly
           />
-        </div>
 
-        {/* Fifth Row */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
           <DatePickerField
             label="Expired Date"
             name="expiredDate"
             value={form.expiredDate}
             onChange={handleDateChange}
-            error={errors.expiredDate}
+            placeholder="Select expired date"
           />
-          <div className="col-span-2"></div>
+        </div>
+
+        {/* Fourth Row - Quantities */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mt-6">
+          <NumericInputField
+            label="Purchase Quantity"
+            name="purchaseQty"
+            value={form.purchaseQty}
+            onChange={handleNumericInputChange}
+            error={errors.purchaseQty}
+            placeholder="0"
+            required
+            readOnly
+          />
+
+          <NumericInputField
+            label="Return Quantity"
+            name="returnQuantity"
+            value={form.returnQuantity}
+            onChange={handleNumericInputChange}
+            error={errors.returnQuantity}
+            placeholder="0"
+            required
+          />
+
+          <div className="flex flex-col">
+            <label className="text-sm font-medium text-gray-700 mb-1">
+              Remaining Quantity
+            </label>
+            <input
+              type="text"
+              value={remainingQty.toFixed(2)}
+              className="w-full border px-3 py-2 rounded-lg bg-gray-100 border-gray-300"
+              readOnly
+            />
+          </div>
+        </div>
+
+        {/* Fifth Row - Amounts */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mt-6">
+          <NumericInputField
+            label="FOB (USD)"
+            name="fob"
+            value={form.fob}
+            onChange={handleNumericInputChange}
+            error={errors.fob}
+            placeholder="0.00"
+            readOnly
+          />
+
+          <NumericInputField
+            label="CIF (USD)"
+            name="cif"
+            value={form.cif}
+            onChange={handleNumericInputChange}
+            error={errors.cif}
+            placeholder="0.00"
+            readOnly
+          />
+
+          <div className="flex flex-col">
+            <label className="text-sm font-medium text-gray-700 mb-1">
+              Unit Price (USD)
+            </label>
+            <input
+              type="text"
+              value={unitPrice.toFixed(2)}
+              className="w-full border px-3 py-2 rounded-lg bg-gray-100 border-gray-300"
+              readOnly
+            />
+          </div>
+
+          <NumericInputField
+            label="Total Amount (USD)"
+            name="amount"
+            value={form.amount}
+            onChange={handleNumericInputChange}
+            error={errors.amount}
+            placeholder="0.00"
+            readOnly
+          />
+        </div>
+
+        {/* Sixth Row - Return Information */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+          <NumericInputField
+            label="Return Amount (USD)"
+            name="returnAmount"
+            value={form.returnAmount}
+            onChange={handleNumericInputChange}
+            error={errors.returnAmount}
+            placeholder="0.00"
+            required
+            readOnly
+          />
+
+          <InputField
+            label="Return Reason"
+            name="returnReason"
+            value={form.returnReason}
+            onChange={handleChange}
+            error={errors.returnReason}
+            placeholder="Enter return reason"
+            required
+          />
         </div>
 
         {/* Remarks */}
@@ -668,11 +819,11 @@ const AddNewPurchase = () => {
                 : "bg-gray-400 text-white opacity-50 cursor-not-allowed"
             }`}
           >
-            Submit
+            Submit Return
           </button>
           <button
             type="button"
-            onClick={() => navigate("/purchaselayout/purchase")}
+            onClick={() => navigate("/purchaselayout/purchase-return")}
             className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-6 py-2 rounded-lg cursor-pointer transition-colors"
           >
             Cancel
@@ -683,4 +834,4 @@ const AddNewPurchase = () => {
   );
 };
 
-export default AddNewPurchase;
+export default AddReturnPurchase;

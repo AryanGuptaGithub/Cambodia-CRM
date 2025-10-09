@@ -36,7 +36,7 @@ import {
 const masterPaths = ["/masterlayout/customer", "/masterlayout/supplier"];
 const purchasePaths = [
   "/purchaselayout/purchase",
-  "/purchaselayout/crnote",
+  "/purchaselayout/purchasereturn",
   "/purchaselayout/purchaseout",
 ];
 
@@ -282,7 +282,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
             onClick={() => toggleMenu("purchase")}
             className={getDropdownButtonClass("purchase", [
               "/purchaselayout/purchase",
-              "/purchaselayout/crnote",
+              "/purchaselayout/purchasereturn",
               "/purchaselayout/purchaseout",
             ])}
           >
@@ -311,8 +311,8 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               </Link>
 
               <Link
-                to="/purchaselayout/crnote"
-                className={getChildLinkClass("/purchaselayout/crnote")}
+                to="/purchaselayout/purchasereturn"
+                className={getChildLinkClass("/purchaselayout/purchasereturn")}
                 onClick={() => setActiveParentMenu(activeParentMenu)}
               >
                 <FileText className="w-4 h-4" />
