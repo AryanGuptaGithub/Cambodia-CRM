@@ -211,7 +211,6 @@ const accountConfig = {
 
 const ITEMS_PER_PAGE = 10;
 
-// Function to generate table columns from accountConfig fields
 const generateTableColumns = (fields) => {
   const columns = fields.map((field) => ({
     id: field.key,
@@ -712,48 +711,6 @@ const AddTransactionModal = ({
                 error ? "border-red-500" : "border-gray-300"
               }`}
             />
-
-            {field.key === "invoiceNumber" && (
-              <>
-                {isFetchingSales && (
-                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg p-3">
-                    <div className="flex items-center gap-2 text-gray-600">
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-600"></div>
-                      Searching for sales data...
-                    </div>
-                  </div>
-                )}
-                {saleSuggestions.length > 0 && !isFetchingSales && (
-                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                    <div className="p-2 text-xs text-gray-500 bg-gray-50 border-b">
-                      Found {saleSuggestions.length} matching sale(s)
-                    </div>
-                    {saleSuggestions.map((sale, index) => (
-                      <div
-                        key={index}
-                        className="p-3 hover:bg-gray-100 cursor-pointer border-b border-gray-200 last:border-b-0"
-                        onClick={() => handleSelectSaleSuggestion(sale)}
-                      >
-                        <div className="font-medium text-gray-900">
-                          {sale.invoiceNumber}
-                        </div>
-                        <div className="text-sm text-gray-600">
-                          {sale.customerName}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          {sale.customerAddress}
-                        </div>
-                        {sale.amount && (
-                          <div className="text-xs text-green-600 font-medium">
-                            Amount: ₹{sale.amount}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
           </div>
         );
     }
@@ -783,6 +740,7 @@ const AddTransactionModal = ({
         <form onSubmit={handleSubmit} className="p-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
             {currentConfig.fields.map((field) => {
+              console.log("avlueso f ", field);
               const fieldElement = renderFormField(field);
 
               if (!fieldElement) {
@@ -953,12 +911,6 @@ const AddTransactionModal = ({
                     {field.label}
                     {field.required && !field.readonly && !field.disabled && (
                       <span className="text-red-500 ml-1">*</span>
-                    )}
-                    {field.readonly && (
-                      <span className="text-yellow-600 ml-1">(Read Only)</span>
-                    )}
-                    {field.disabled && (
-                      <span className="text-gray-500 ml-1">(Auto-filled)</span>
                     )}
                   </label>
 
