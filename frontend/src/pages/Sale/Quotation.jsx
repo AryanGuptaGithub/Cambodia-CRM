@@ -236,9 +236,9 @@ const Quotation = () => {
                     <td className="p-3">{q.quotationDate}</td>
                     <td className="p-3">{q.customerName}</td>
                     <td className="p-3">{q.quotationStatus}</td>
-                    <td className="p-3">₹{q.totalAmount}</td>
-                    <td className="p-3">₹{q.paidAmount}</td>
-                    <td className="p-3">₹{dueAmount}</td>
+                    <td className="p-3">${q.totalAmount}</td>
+                    <td className="p-3">${q.paidAmount}</td>
+                    <td className="p-3">${dueAmount}</td>
                     <td className="p-3">{q.paymentStatus}</td>
                     <td className="p-3 flex items-center justify-center gap-3">
                       <button

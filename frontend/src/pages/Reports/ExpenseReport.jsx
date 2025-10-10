@@ -76,7 +76,7 @@ const ExpenseReport = () => {
                   <td className="p-3">{item.date}</td>
                   <td className="p-3">{item.category}</td>
                   <td className="p-3">{item.user}</td>
-                  <td className="p-3 text-red-600 font-medium">-₹{item.amount.toLocaleString()}</td>
+                  <td className="p-3 text-red-600 font-medium">-${item.amount.toLocaleString()}</td>
                 </tr>
               ))
             ) : (
@@ -92,7 +92,7 @@ const ExpenseReport = () => {
           <tfoot>
             <tr className="bg-gray-100 font-semibold text-sm">
               <td colSpan="3" className="text-right p-3">Total:</td>
-              <td className="p-3 text-red-600">-₹{totalAmount.toLocaleString()}</td>
+              <td className="p-3 text-red-600">-${totalAmount.toLocaleString()}</td>
             </tr>
           </tfoot>
         </table>

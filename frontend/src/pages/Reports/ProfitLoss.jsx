@@ -92,7 +92,7 @@ const ProfitLoss = () => {
                       item.amount < 0 ? 'text-red-600' : 'text-green-700'
                     }`}
                   >
-                    {item.amount < 0 ? '-' : ''}₹{Math.abs(item.amount).toLocaleString()}
+                    {item.amount < 0 ? '-' : ''}${Math.abs(item.amount).toLocaleString()}
                   </td>
                 </tr>
               ))
@@ -114,7 +114,7 @@ const ProfitLoss = () => {
                   totalAmount < 0 ? 'text-red-600' : 'text-green-700'
                 }`}
               >
-                {totalAmount < 0 ? '-' : ''}₹{Math.abs(totalAmount).toLocaleString()}
+                {totalAmount < 0 ? '-' : ''}${Math.abs(totalAmount).toLocaleString()}
               </td>
             </tr>
           </tfoot>

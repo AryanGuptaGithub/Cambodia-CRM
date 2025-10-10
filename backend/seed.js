@@ -1,10 +1,12 @@
-// seed.js
 import mongoose from "mongoose";
 import dotenv from "dotenv";
 import User from "./models/User.js";
 import SaleType from "./models/reports/saleType.js";
 import Warehouse from "./models/stock/warehouse.js";
-import OrderStatus from "./models/stock/orderStatus.js"; // ✅ Import OrderStatus model
+import OrderStatus from "./models/stock/orderStatus.js"; 
+import Destination from "./models/accounts/Destination.js";
+import CategoryType from "./models/accounts/CategoryType.js";
+import TransactionType from "./models/accounts/TransactionType.js"; // ✅ Add this import
 
 dotenv.config();
 
@@ -13,6 +15,7 @@ const MONGO_URI = process.env.MONGODB_URI;
 async function connectDB() {
   try {
     await mongoose.connect(MONGO_URI);
+    console.log("✅ MongoDB connected successfully");
   } catch (err) {
     console.error("❌ MongoDB connection failed:", err);
     process.exit(1);
@@ -31,6 +34,50 @@ async function seedUsers() {
     const user = new User(u);
     await user.save();
   }
+  console.log("✅ Users seeded successfully");
+}
+
+// ✅ CORRECTED: Seed destinations (with the exact names you requested)
+async function seedDestinations() {
+  await Destination.deleteMany({});
+  const destinations = [
+    { name: "Cash Balance", code: "cash_balance" },
+    { name: "Personal Account", code: "personal_account" },
+    { name: "Company Account", code: "company_account" },
+  ];
+
+  await Destination.insertMany(destinations);
+  console.log("✅ Destinations seeded successfully");
+}
+
+// ✅ Seed category types
+async function seedCategoryTypes() {
+  await CategoryType.deleteMany({});
+  const categoryTypes = [
+    { name: "Withdraw", code: "withdraw" },
+    { name: "Remittance", code: "remittance" },
+    { name: "Deposit", code: "deposit" },
+    { name: "Cash Sale", code: "cash_sale" },
+    { name: "Cash", code: "cash" },
+    { name: "Payment Invert", code: "payment_invert" },
+  ];
+
+  await CategoryType.insertMany(categoryTypes);
+  console.log("✅ Category Types seeded successfully");
+}
+
+// ✅ NEW: Seed transaction types
+async function seedTransactionTypes() {
+  await TransactionType.deleteMany({});
+  const transactionTypes = [
+    { name: "Income", code: "income" },
+    { name: "Expense", code: "expense" },
+    { name: "Transfer", code: "transfer" },
+    { name: "Adjustment", code: "adjustment" },
+  ];
+
+  await TransactionType.insertMany(transactionTypes);
+  console.log("✅ Transaction Types seeded successfully");
 }
 
 // Seed sale types
@@ -43,6 +90,7 @@ async function seedSaleTypes() {
   ];
 
   await SaleType.insertMany(saleTypes);
+  console.log("✅ Sale Types seeded successfully");
 }
 
 // Seed warehouses
@@ -57,6 +105,7 @@ async function seedWarehouses() {
   ];
 
   await Warehouse.insertMany(warehouses);
+  console.log("✅ Warehouses seeded successfully");
 }
 
 // ✅ Seed order statuses
@@ -86,6 +135,7 @@ async function seedOrderStatuses() {
   ];
 
   await OrderStatus.insertMany(orderStatuses);
+  console.log("✅ Order Statuses seeded successfully");
 }
 
 // Run all seeders in order
@@ -93,15 +143,22 @@ async function runSeeders() {
   await connectDB();
 
   try {
+    console.log("🌱 Starting database seeding...");
+    
     await seedUsers();
     await seedSaleTypes();
     await seedWarehouses();
-    await seedOrderStatuses(); // ✅ Add order statuses seeding
+    await seedOrderStatuses();
+    await seedDestinations(); // ✅ Now with correct order: Cash Balance first
+    await seedCategoryTypes();
+    await seedTransactionTypes(); // ✅ Add transaction types seeding
+    
+    console.log("🎉 All seeders completed successfully!");
   } catch (error) {
     console.error("❌ Seeding error:", error);
   } finally {
     await mongoose.disconnect();
-
+    console.log("🔌 MongoDB disconnected");
     process.exit(0);
   }
 }

@@ -25,6 +25,7 @@ import warehouse from "./routers/stock/warehouse.js";
 import orderStatus from "./routers/stock/orderStatus.js";
 import purchaseReturn from "./routers/purcharsing/purchaseReturn.js";
 import PurchaseOut from "./routers/purcharsing/paymentOut.js";
+import Accounts from "./routers/accounts/accounts.js";
 
 dotenv.config(); // Load environment variables
 
@@ -83,6 +84,7 @@ app.use("/api", warehouse);
 app.use("/api", orderStatus);
 app.use("/api", purchaseReturn);
 app.use("/api", PurchaseOut);
+app.use("/api", Accounts);
 
 // Server listener
 app.listen(PORT, () => {

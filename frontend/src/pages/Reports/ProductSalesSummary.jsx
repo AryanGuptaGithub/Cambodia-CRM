@@ -153,8 +153,8 @@ const ProductSalesSummary = () => {
                   <td className="p-3">{item.product}</td>
                   <td className="p-3">{item.itemCode}</td>
                   <td className="p-3">{item.unitSold}</td>
-                  <td className="p-3 text-gray-700">₹{item.totalPurchase.toLocaleString()}</td>
-                  <td className="p-3 text-green-700 font-medium">₹{item.totalSales.toLocaleString()}</td>
+                  <td className="p-3 text-gray-700">${item.totalPurchase.toLocaleString()}</td>
+                  <td className="p-3 text-green-700 font-medium">${item.totalSales.toLocaleString()}</td>
                 </tr>
               ))
             ) : (
@@ -170,8 +170,8 @@ const ProductSalesSummary = () => {
           <tfoot>
             <tr className="bg-gray-100 font-semibold text-sm">
               <td colSpan="3" className="text-right p-3">Total:</td>
-              <td className="p-3 text-gray-700">₹{totalPurchase.toLocaleString()}</td>
-              <td className="p-3 text-green-700">₹{totalSales.toLocaleString()}</td>
+              <td className="p-3 text-gray-700">${totalPurchase.toLocaleString()}</td>
+              <td className="p-3 text-green-700">${totalSales.toLocaleString()}</td>
             </tr>
           </tfoot>
         </table>

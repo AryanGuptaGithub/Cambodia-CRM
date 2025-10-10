@@ -67,7 +67,7 @@ const Expenses = () => {
           <thead className="bg-gray-100 text-gray-700">
             <tr>
               <th className="px-4 py-3 text-left">Expense Category</th>
-              <th className="px-4 py-3 text-left">Amount (₹)</th>
+              <th className="px-4 py-3 text-left">Amount ($)</th>
               <th className="px-4 py-3 text-left">Date</th>
               <th className="px-4 py-3 text-left">User</th>
               <th className="px-4 py-3 text-left">Action</th>
@@ -77,7 +77,7 @@ const Expenses = () => {
             {currentExpenses.map((exp) => (
               <tr key={exp.id} className="hover:bg-gray-50">
                 <td className="px-4 py-3">{exp.category}</td>
-                <td className="px-4 py-3">₹{exp.amount}</td>
+                <td className="px-4 py-3">${exp.amount}</td>
                 <td className="px-4 py-3">{exp.date}</td>
                 <td className="px-4 py-3">{exp.user}</td>
                 <td className="px-4 py-3 flex gap-2">
@@ -94,7 +94,7 @@ const Expenses = () => {
             {/* Total Row */}
             <tr className="bg-gray-100 font-semibold">
               <td className="px-4 py-3 text-right">Total</td>
-              <td className="px-4 py-3">₹{totalAmount}</td>
+              <td className="px-4 py-3">${totalAmount}</td>
               <td className="px-4 py-3" colSpan={3}></td>
             </tr>
           </tbody>

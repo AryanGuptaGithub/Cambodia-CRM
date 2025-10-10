@@ -54,7 +54,7 @@ const ExpenseCategory = () => {
             <tr>
               <th className="px-4 py-3 text-left">Expense Category</th>
               <th className="px-4 py-3 text-left">Description</th>
-              <th className="px-4 py-3 text-left">Amount (₹)</th>
+              <th className="px-4 py-3 text-left">Amount ($)</th>
               <th className="px-4 py-3 text-left">Action</th>
             </tr>
           </thead>
@@ -63,7 +63,7 @@ const ExpenseCategory = () => {
               <tr key={cat.id} className="hover:bg-gray-50">
                 <td className="px-4 py-3">{cat.category}</td>
                 <td className="px-4 py-3">{cat.description}</td>
-                <td className="px-4 py-3">₹{cat.amount}</td>
+                <td className="px-4 py-3">${cat.amount}</td>
                 <td className="px-4 py-3 flex gap-2">
                   <button className="p-2 text-green-600 hover:bg-green-100 rounded-lg">
                     <Edit size={18} />

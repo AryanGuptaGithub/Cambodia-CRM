@@ -226,7 +226,7 @@ const CashandBank = () => {
             <td className="p-3">{item.user}</td>
             <td className="p-3">{item.paymentMode}</td>
             <td className={`p-3 font-medium ${item.paymentType === 'Expense' ? 'text-red-600' : 'text-green-700'}`}>
-              {item.paymentType === 'Expense' ? '-' : ''}₹{item.amount.toFixed(2)}
+              {item.paymentType === 'Expense' ? '-' : ''}${item.amount.toFixed(2)}
             </td>
           </tr>
         ))
@@ -244,7 +244,7 @@ const CashandBank = () => {
       <tr className="bg-gray-100 font-semibold text-sm">
         <td colSpan="5" className="text-right p-3">Total:</td>
         <td className={`p-3 ${totalAmount >= 0 ? 'text-green-700' : 'text-red-600'}`}>
-          ₹{totalAmount.toFixed(2)}
+          ${totalAmount.toFixed(2)}
         </td>
       </tr>
     </tfoot>

@@ -186,7 +186,7 @@ const PaymentSale = () => {
                   <td className="p-3">{payment.paymentDate}</td>
                   <td className="p-3">{payment.taxNo}</td>
                   <td className="p-3">{payment.userName}</td>
-                  <td className="p-3">₹{payment.amount}</td>
+                  <td className="p-3">${payment.amount}</td>
                   <td className="p-3 flex items-center justify-center gap-3">
                     <button
                       className="text-green-600 hover:text-green-800"

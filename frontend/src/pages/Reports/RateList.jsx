@@ -164,8 +164,8 @@ const RateList = () => {
                   <td className="p-3">{item.itemCode}</td>
                   <td className="p-3">{item.category}</td>
                   <td className="p-3">{item.brand}</td>
-                  <td className="p-3 text-gray-700">₹{item.mrp.toLocaleString()}</td>
-                  <td className="p-3 text-green-600 font-medium">₹{item.salesPrice.toLocaleString()}</td>
+                  <td className="p-3 text-gray-700">${item.mrp.toLocaleString()}</td>
+                  <td className="p-3 text-green-600 font-medium">${item.salesPrice.toLocaleString()}</td>
                 </tr>
               ))
             ) : (
