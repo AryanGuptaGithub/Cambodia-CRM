@@ -2,6 +2,7 @@ import { Search, Download, X, Plus, Trash2, Edit, Eye } from "lucide-react";
 import ReactDOM from "react-dom";
 import axios from "axios";
 import { useState, useEffect, useMemo } from "react";
+import { showToast } from "../../utils/toast";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const ITEMS_PER_PAGE = 10;
@@ -84,7 +85,7 @@ const AddTransactionModal = ({
   const [errors, setErrors] = useState({});
   const [isFetchingSales, setIsFetchingSales] = useState(false);
 
-  // Define form fields configuration based on activeTab - CORRECTED SEQUENCE
+  // Define form fields configuration with custom layout
   const formFields = useMemo(() => {
     return [
       {
@@ -92,6 +93,7 @@ const AddTransactionModal = ({
         label: "Invoice Number",
         type: "text",
         required: true,
+        layout: "half",
       },
       {
         key: "categoryType",
@@ -99,6 +101,7 @@ const AddTransactionModal = ({
         type: "select",
         required: true,
         options: categoryOptions,
+        layout: "half",
       },
       {
         key: "source",
@@ -106,6 +109,7 @@ const AddTransactionModal = ({
         type: "select",
         required: true,
         options: sourceOptions,
+        layout: "half",
       },
       {
         key: "destination",
@@ -113,14 +117,22 @@ const AddTransactionModal = ({
         type: "select",
         required: false,
         options: destinationOptions,
+        layout: "half",
       },
-      { key: "date", label: "Date", type: "date", required: true },
+      {
+        key: "date",
+        label: "Date",
+        type: "date",
+        required: true,
+        layout: "half",
+      },
       {
         key: "invoiceDate",
         label: "Invoice Date",
         type: "date",
         required: true,
         disabled: true,
+        layout: "half",
       },
       {
         key: "customerName",
@@ -128,18 +140,29 @@ const AddTransactionModal = ({
         type: "text",
         required: true,
         disabled: true,
+        layout: "half",
+      },
+      {
+        key: "customerAddress",
+        label: "Customer Address",
+        type: "text",
+        required: false,
+        disabled: true,
+        layout: "half",
       },
       {
         key: "amount",
         label: "Amount",
         type: "number",
         required: true,
+        layout: "half",
       },
       {
         key: "exchangeLoss",
         label: "Exchange Loss",
         type: "number",
         required: false,
+        layout: "half",
       },
       {
         key: "finalAmount",
@@ -148,13 +171,7 @@ const AddTransactionModal = ({
         required: true,
         readonly: true,
         disabled: true,
-      },
-      {
-        key: "customerAddress",
-        label: "Customer Address",
-        type: "text",
-        required: false,
-        disabled: true,
+        layout: "half",
       },
     ];
   }, [categoryOptions, sourceOptions, destinationOptions]);
@@ -228,18 +245,11 @@ const AddTransactionModal = ({
         `${backendUrl}/api/accounts/alternative?invoiceNumber=${invoiceNumber}`
       );
       const salesData = salesResponse.data;
-      console.log("values of salesData", salesData);
 
       // FIXED: Check the correct response structure
-      if (
-        salesData &&
-        salesData.success &&
-        salesData.data &&
-        salesData.data.length > 0
-      ) {
+      if (salesData.data.length > 0) {
         // Auto-fill with the first matching record
         const saleRecord = salesData.data[0];
-
         setForm((prev) => ({
           ...prev,
           invoiceNumber: saleRecord.invoiceNumber || prev.invoiceNumber,
@@ -250,6 +260,19 @@ const AddTransactionModal = ({
           customerAddress: saleRecord.customerAddress || "",
           amount: saleRecord.amount || "",
         }));
+      } else {
+        setForm((prev) => ({
+          ...prev,
+          invoiceNumber: form.invoiceNumber,
+          invoiceDate: "",
+          customerName: "",
+          customerAddress: "",
+          amount: "",
+        }));
+        showToast(
+          "error",
+          `Invoice No <b>${form.invoiceNumber}</b> is not found in sale`
+        );
       }
     } catch (error) {
       console.error("Error fetching sales data:", error);
@@ -274,11 +297,11 @@ const AddTransactionModal = ({
     }
 
     // Handle invoice number change - Fetch sales data when invoice number changes
-    if (field === "invoiceNumber") {
-      if (value && value.trim() !== "") {
-        fetchSalesData(value);
-      }
-    }
+    // if (field === "invoiceNumber") {
+    //   if (value && value.trim() !== "") {
+    //     fetchSalesData(value);
+    //   }
+    // }
 
     // Handle category type change - Trigger sales fetch if we have invoice number
     if (field === "categoryType" && value && form.invoiceNumber) {
@@ -418,12 +441,12 @@ const AddTransactionModal = ({
     }
   };
 
-  // Destination Account should show only for withdraw categories
+  // Destination Account should show only for withdraw and deposit categories
   const shouldShowDestinationField = () => {
     const categoryType = form.categoryType;
     const category = categoryOptions.find((cat) => cat.value === categoryType);
     const categoryName = category?.label?.toLowerCase() || "";
-    return categoryName === "withdraw";
+    return categoryName === "withdraw" || categoryName === "deposit";
   };
 
   // Exchange Loss should show only for deposit categories
@@ -440,6 +463,22 @@ const AddTransactionModal = ({
     const category = categoryOptions.find((cat) => cat.value === categoryType);
     const categoryName = category?.label?.toLowerCase() || "";
     return categoryName === "deposit";
+  };
+
+  // Get filtered source options (exclude selected destination)
+  const getFilteredSourceOptions = () => {
+    if (!form.destination) {
+      return sourceOptions;
+    }
+    return sourceOptions.filter((option) => option.value !== form.destination);
+  };
+
+  // Get filtered destination options (exclude selected source)
+  const getFilteredDestinationOptions = () => {
+    if (!form.source) {
+      return destinationOptions;
+    }
+    return destinationOptions.filter((option) => option.value !== form.source);
   };
 
   const renderFormField = (field) => {
@@ -460,7 +499,14 @@ const AddTransactionModal = ({
 
     const value = form[field.key] || "";
     const error = errors[field.key];
-    const fieldOptions = field.options || [];
+    let fieldOptions = field.options || [];
+
+    // Use filtered options for source and destination
+    if (field.key === "source") {
+      fieldOptions = getFilteredSourceOptions();
+    } else if (field.key === "destination") {
+      fieldOptions = getFilteredDestinationOptions();
+    }
 
     // Handle disabled fields
     if (field.disabled) {
@@ -475,6 +521,11 @@ const AddTransactionModal = ({
       );
     }
 
+    
+    const isCategoryTypeDisabled =
+      field.key === "categoryType" &&
+      (!form.invoiceNumber || form.invoiceNumber.trim() === "");
+
     switch (field.type) {
       case "select":
         return (
@@ -483,12 +534,16 @@ const AddTransactionModal = ({
             onChange={(e) => handleInputChange(field.key, e.target.value)}
             className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
               error ? "border-red-500" : "border-gray-300"
+            } ${
+              isCategoryTypeDisabled ? "bg-gray-100 cursor-not-allowed" : ""
             }`}
-            disabled={fieldOptions.length === 0}
+            disabled={fieldOptions.length === 0 || isCategoryTypeDisabled}
           >
             <option value="">
               {fieldOptions.length === 0
                 ? "Loading..."
+                : isCategoryTypeDisabled
+                ? "Enter Invoice Number first"
                 : `Select ${field.label}`}
             </option>
             {fieldOptions.map((option) => (
@@ -577,7 +632,7 @@ const AddTransactionModal = ({
                 <div
                   key={field.key}
                   className={`space-y-2 ${
-                    field.key === "categoryType" ? "md:col-span-1" : ""
+                    field.layout === "full" ? "md:col-span-2" : "md:col-span-1"
                   }`}
                 >
                   <label className="block text-sm font-medium text-gray-700">
@@ -623,6 +678,8 @@ const AddTransactionModal = ({
     document.body
   );
 };
+
+// ... (rest of the CashandBank component remains exactly the same)
 
 const CashandBank = () => {
   const [activeTab, setActiveTab] = useState("Cash Balance");
@@ -678,6 +735,11 @@ const CashandBank = () => {
         dbName: "customerName",
       },
       {
+        id: "customerAddress",
+        name: "Customer Address",
+        dbName: "customerAddress",
+      },
+      {
         id: "amount",
         name: "Amount",
         dbName: "amount",
@@ -692,11 +754,7 @@ const CashandBank = () => {
         name: "Final Amount",
         dbName: "finalAmount",
       },
-      {
-        id: "customerAddress",
-        name: "Customer Address",
-        dbName: "customerAddress",
-      },
+
       {
         id: "date",
         name: "Date",
