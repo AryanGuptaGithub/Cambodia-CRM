@@ -4,223 +4,10 @@ import axios from "axios";
 import { useState, useEffect, useMemo } from "react";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
-
-// Configuration for different account types
-const accountConfig = {
-  "Cash Balance": {
-    fields: [
-      {
-        key: "categoryType",
-        label: "Category Type",
-        type: "select",
-        required: true,
-        options: [],
-      },
-      {
-        key: "invoiceNumber",
-        label: "Invoice Number",
-        type: "text",
-        required: true,
-      },
-      {
-        key: "source",
-        label: "Source Account",
-        type: "select",
-        required: true,
-        options: [],
-      },
-      {
-        key: "destination",
-        label: "Destination Account",
-        type: "select",
-        required: false,
-        options: [],
-      },
-      {
-        key: "invoiceDate",
-        label: "Invoice Date",
-        type: "date",
-        required: true,
-        disabled: true,
-      },
-      {
-        key: "customerName",
-        label: "Customer Name",
-        type: "text",
-        required: true,
-        disabled: true,
-      },
-      {
-        key: "amount",
-        label: "Amount",
-        type: "number",
-        required: true,
-      },
-      {
-        key: "exchangeLoss",
-        label: "Exchange Loss",
-        type: "number",
-        required: false,
-      },
-      {
-        key: "finalAmount",
-        label: "Final Amount",
-        type: "number",
-        required: true,
-        readonly: true,
-        disabled: true,
-      },
-      {
-        key: "customerAddress",
-        label: "Customer Address",
-        type: "text",
-        required: false,
-        disabled: true,
-      },
-      { key: "date", label: "Date", type: "date", required: true },
-    ],
-    searchFields: ["invoiceNumber", "customerName"],
-    placeholder: "Search by Invoice Number or Customer",
-  },
-  "Personal Account": {
-    fields: [
-      {
-        key: "categoryType",
-        label: "Category Type",
-        type: "select",
-        required: true,
-        options: [],
-      },
-      {
-        key: "source",
-        label: "Source Account",
-        type: "select",
-        required: true,
-        options: [],
-      },
-      {
-        key: "destination",
-        label: "Destination Account",
-        type: "select",
-        required: false,
-        options: [],
-      },
-      {
-        key: "description",
-        label: "Description",
-        type: "text",
-        required: true,
-      },
-      {
-        key: "amount",
-        label: "Amount",
-        type: "number",
-        required: true,
-      },
-      { key: "date", label: "Date", type: "date", required: true },
-    ],
-    searchFields: ["description", "categoryType"],
-    placeholder: "Search by Description or Category",
-  },
-  "Company Account": {
-    fields: [
-      {
-        key: "balanceAmount",
-        label: "Balance Amount",
-        type: "number",
-        required: true,
-        readonly: true,
-        disabled: true,
-        defaultValue: 4000.0,
-      },
-      {
-        key: "categoryType",
-        label: "Category Type",
-        type: "select",
-        required: true,
-        options: [],
-      },
-      {
-        key: "source",
-        label: "Source Account",
-        type: "select",
-        required: true,
-        options: [],
-      },
-      {
-        key: "destination",
-        label: "Destination Account",
-        type: "select",
-        required: false,
-        options: [],
-      },
-      {
-        key: "invoiceNumber",
-        label: "Invoice Number",
-        type: "text",
-        required: true,
-      },
-      {
-        key: "invoiceDate",
-        label: "Invoice Date",
-        type: "date",
-        required: true,
-        disabled: true,
-      },
-      {
-        key: "customerName",
-        label: "Customer Name",
-        type: "text",
-        required: true,
-        disabled: true,
-      },
-      {
-        key: "amount",
-        label: "Amount",
-        type: "number",
-        required: true,
-      },
-      {
-        key: "exchangeLoss",
-        label: "Exchange Loss",
-        type: "number",
-        required: false,
-      },
-      {
-        key: "finalAmount",
-        label: "Final Amount",
-        type: "number",
-        required: true,
-        readonly: true,
-        disabled: true,
-      },
-      {
-        key: "customerAddress",
-        label: "Customer Address",
-        type: "text",
-        required: false,
-        disabled: true,
-      },
-      { key: "balance", label: "Balance", type: "number", required: true },
-      { key: "date", label: "Date", type: "date", required: true },
-    ],
-    searchFields: ["invoiceNumber", "customerName"],
-    placeholder: "Search by Invoice Number or Customer",
-  },
-};
-
 const ITEMS_PER_PAGE = 10;
 
-const generateTableColumns = (fields) => {
-  const columns = fields.map((field) => ({
-    id: field.key,
-    name: field.label,
-    dbName: field.key,
-  }));
-  // Add actions column
-  columns.push({ id: "actions", name: "Actions", dbName: "actions" });
-  return columns;
-};
+// Account types configuration
+const accountTypes = ["Cash Balance", "Personal Account", "Company Account"];
 
 // Custom hook to fetch dropdown options from backend
 const useDropdownOptions = () => {
@@ -295,46 +82,91 @@ const AddTransactionModal = ({
 }) => {
   const [form, setForm] = useState({});
   const [errors, setErrors] = useState({});
-  const [saleSuggestions, setSaleSuggestions] = useState([]); // Separate state for sales suggestions
   const [isFetchingSales, setIsFetchingSales] = useState(false);
 
-  // Create updated account config with backend options
-  const currentConfig = useMemo(() => {
-    const config = JSON.parse(JSON.stringify(accountConfig[activeTab]));
+  // Define form fields configuration based on activeTab - CORRECTED SEQUENCE
+  const formFields = useMemo(() => {
+    return [
+      {
+        key: "invoiceNumber",
+        label: "Invoice Number",
+        type: "text",
+        required: true,
+      },
+      {
+        key: "categoryType",
+        label: "Category Type",
+        type: "select",
+        required: true,
+        options: categoryOptions,
+      },
+      {
+        key: "source",
+        label: "Source Account",
+        type: "select",
+        required: true,
+        options: sourceOptions,
+      },
+      {
+        key: "destination",
+        label: "Destination Account",
+        type: "select",
+        required: false,
+        options: destinationOptions,
+      },
+      { key: "date", label: "Date", type: "date", required: true },
+      {
+        key: "invoiceDate",
+        label: "Invoice Date",
+        type: "date",
+        required: true,
+        disabled: true,
+      },
+      {
+        key: "customerName",
+        label: "Customer Name",
+        type: "text",
+        required: true,
+        disabled: true,
+      },
+      {
+        key: "amount",
+        label: "Amount",
+        type: "number",
+        required: true,
+      },
+      {
+        key: "exchangeLoss",
+        label: "Exchange Loss",
+        type: "number",
+        required: false,
+      },
+      {
+        key: "finalAmount",
+        label: "Final Amount",
+        type: "number",
+        required: true,
+        readonly: true,
+        disabled: true,
+      },
+      {
+        key: "customerAddress",
+        label: "Customer Address",
+        type: "text",
+        required: false,
+        disabled: true,
+      },
+    ];
+  }, [categoryOptions, sourceOptions, destinationOptions]);
 
-    // Update categoryType options
-    const categoryField = config.fields.find(
-      (field) => field.key === "categoryType"
-    );
-    if (categoryField) {
-      categoryField.options = categoryOptions || [];
-    }
-
-    // Update source options
-    const sourceField = config.fields.find((field) => field.key === "source");
-    if (sourceField) {
-      sourceField.options = sourceOptions || [];
-    }
-
-    // Update destination options
-    const destinationField = config.fields.find(
-      (field) => field.key === "destination"
-    );
-    if (destinationField) {
-      destinationField.options = destinationOptions || [];
-    }
-
-    return config;
-  }, [activeTab, categoryOptions, sourceOptions, destinationOptions]);
-
-  // Initialize form data based on account type
+  // Initialize form data
   const initializeFormData = () => {
     const initialData = {};
-    currentConfig.fields.forEach((field) => {
+    formFields.forEach((field) => {
       if (field.type === "date") {
         initialData[field.key] = new Date().toISOString().split("T")[0];
-      } else if (field.defaultValue !== undefined) {
-        initialData[field.key] = field.defaultValue;
+      } else if (field.key === "finalAmount") {
+        initialData[field.key] = "0.00";
       } else {
         initialData[field.key] = "";
       }
@@ -350,65 +182,43 @@ const AddTransactionModal = ({
         setForm(initializeFormData());
       }
       setErrors({});
-      setSaleSuggestions([]); // Clear sale suggestions when modal opens
     }
-  }, [isOpen, activeTab, isEdit, editData, currentConfig]);
+  }, [isOpen, isEdit, editData, activeTab]);
 
   // Calculate final amount whenever amount or exchange loss changes
   useEffect(() => {
-    const amount = parseFloat(form.amount) || 0;
-    const exchangeLoss = parseFloat(form.exchangeLoss) || 0;
-    const finalAmount = amount - exchangeLoss;
+    if (activeTab === "Cash Balance" || activeTab === "Company Account") {
+      const amount = parseFloat(form.amount) || 0;
+      const exchangeLoss = parseFloat(form.exchangeLoss) || 0;
 
-    setForm((prev) => ({
-      ...prev,
-      finalAmount: isNaN(finalAmount) ? "" : finalAmount.toFixed(2),
-    }));
-  }, [form.amount, form.exchangeLoss]);
+      // FIXED: Only calculate final amount for deposit categories
+      if (shouldShowExchangeLossField()) {
+        // For deposit categories: Final Amount = Amount - Exchange Loss
+        const finalAmount = amount - exchangeLoss;
 
-  // Destination Account should show only for withdraw categories
-  const shouldShowDestinationField = () => {
-    const categoryType = form.categoryType;
-    const category = categoryOptions.find((cat) => cat.value === categoryType);
-    const categoryName = category?.label?.toLowerCase() || "";
+        setForm((prev) => ({
+          ...prev,
+          finalAmount: isNaN(finalAmount) ? "0.00" : finalAmount.toFixed(2),
+        }));
+      } else {
+        // For other categories: Clear final amount
+        setForm((prev) => ({
+          ...prev,
+          finalAmount: "0.00",
+        }));
+      }
+    }
+  }, [form.amount, form.exchangeLoss, activeTab, form.categoryType]);
 
-    return categoryName === "withdraw";
-  };
-
-  // Exchange Loss should show only for deposit categories
-  const shouldShowExchangeLossField = () => {
-    const categoryType = form.categoryType;
-    const category = categoryOptions.find((cat) => cat.value === categoryType);
-    const categoryName = category?.label?.toLowerCase() || "";
-
-    return categoryName === "deposit";
-  };
-
-  // Get filtered options for source and destination
-  const getFilteredSourceOptions = () => {
-    const selectedDestination = form.destination;
-    return sourceOptions.filter(
-      (option) => option.value !== selectedDestination
-    );
-  };
-
-  const getFilteredDestinationOptions = () => {
-    const selectedSource = form.source;
-    return destinationOptions.filter(
-      (option) => option.value !== selectedSource
-    );
-  };
-
-  // Fetch sales data when invoice number is entered
+  // Fetch sales data when invoice number is entered AND category type is selected
   const fetchSalesData = async (invoiceNumber) => {
+    // FIXED: Remove the condition that prevents API call
     if (!invoiceNumber || invoiceNumber.trim() === "") {
-      setSaleSuggestions([]);
       return;
     }
 
     // Only fetch for Cash Balance and Company Account tabs
     if (activeTab !== "Cash Balance" && activeTab !== "Company Account") {
-      setSaleSuggestions([]);
       return;
     }
 
@@ -418,46 +228,37 @@ const AddTransactionModal = ({
         `${backendUrl}/api/accounts/alternative?invoiceNumber=${invoiceNumber}`
       );
       const salesData = salesResponse.data;
-      console.log("Sales data:", salesData);
+      console.log("values of salesData", salesData);
 
-      if (salesData && salesData.length > 0) {
-        setSaleSuggestions(salesData); // Use separate state for suggestions
-      } else {
-        setSaleSuggestions([]);
+      // FIXED: Check the correct response structure
+      if (
+        salesData &&
+        salesData.success &&
+        salesData.data &&
+        salesData.data.length > 0
+      ) {
+        // Auto-fill with the first matching record
+        const saleRecord = salesData.data[0];
+
+        setForm((prev) => ({
+          ...prev,
+          invoiceNumber: saleRecord.invoiceNumber || prev.invoiceNumber,
+          invoiceDate:
+            saleRecord.invoiceDate?.split("T")[0] ||
+            new Date().toISOString().split("T")[0],
+          customerName: saleRecord.customerName || "",
+          customerAddress: saleRecord.customerAddress || "",
+          amount: saleRecord.amount || "",
+        }));
       }
     } catch (error) {
       console.error("Error fetching sales data:", error);
-      setSaleSuggestions([]);
     } finally {
       setIsFetchingSales(false);
     }
   };
 
-  // Handle invoice number change
-  const handleInvoiceNumberChange = async (value) => {
-    handleInputChange("invoiceNumber", value);
-    if (value && value.trim() !== "") {
-      await fetchSalesData(value);
-    } else {
-      setSaleSuggestions([]);
-    }
-  };
-
-  // Handle selecting a sale suggestion
-  const handleSelectSaleSuggestion = (sale) => {
-    setForm((prev) => ({
-      ...prev,
-      invoiceNumber: sale.invoiceNumber,
-      invoiceDate:
-        sale.invoiceDate?.split("T")[0] ||
-        new Date().toISOString().split("T")[0],
-      customerName: sale.customerName,
-      customerAddress: sale.customerAddress,
-      amount: sale.amount || "",
-    }));
-    setSaleSuggestions([]); // Clear suggestions after selection
-  };
-
+  // Handle input change
   const handleInputChange = (field, value) => {
     setForm((prev) => ({
       ...prev,
@@ -470,6 +271,18 @@ const AddTransactionModal = ({
         ...prev,
         [field]: "",
       }));
+    }
+
+    // Handle invoice number change - Fetch sales data when invoice number changes
+    if (field === "invoiceNumber") {
+      if (value && value.trim() !== "") {
+        fetchSalesData(value);
+      }
+    }
+
+    // Handle category type change - Trigger sales fetch if we have invoice number
+    if (field === "categoryType" && value && form.invoiceNumber) {
+      fetchSalesData(form.invoiceNumber);
     }
 
     // Clear destination when source is selected and vice versa
@@ -492,7 +305,7 @@ const AddTransactionModal = ({
         source: "",
         destination: "",
         exchangeLoss: "",
-        finalAmount: prev.amount || "",
+        finalAmount: "0.00",
       }));
     }
   };
@@ -500,7 +313,7 @@ const AddTransactionModal = ({
   const validateForm = () => {
     const newErrors = {};
 
-    currentConfig.fields.forEach((field) => {
+    formFields.forEach((field) => {
       // Skip validation for disabled fields
       if (field.disabled) {
         return;
@@ -508,6 +321,16 @@ const AddTransactionModal = ({
 
       // Skip validation for exchange loss if it shouldn't be shown
       if (field.key === "exchangeLoss" && !shouldShowExchangeLossField()) {
+        return;
+      }
+
+      // Skip validation for destination if it shouldn't be shown
+      if (field.key === "destination" && !shouldShowDestinationField()) {
+        return;
+      }
+
+      // Skip validation for final amount if it shouldn't be shown
+      if (field.key === "finalAmount" && !shouldShowFinalAmountField()) {
         return;
       }
 
@@ -538,14 +361,14 @@ const AddTransactionModal = ({
 
       // Validate numeric fields
       if (
-        (field.key === "amount" ||
-          field.key === "balance" ||
-          field.key === "exchangeLoss") &&
+        (field.key === "amount" || field.key === "exchangeLoss") &&
         form[field.key]
       ) {
         const numValue = parseFloat(form[field.key]);
-        if (isNaN(numValue)) {
-          newErrors[field.key] = `${field.label} must be a valid number`;
+        if (isNaN(numValue) || numValue < 0) {
+          newErrors[
+            field.key
+          ] = `${field.label} must be a valid positive number`;
         }
       }
     });
@@ -564,6 +387,7 @@ const AddTransactionModal = ({
     // Prepare transaction data
     const transactionData = {
       ...form,
+      accountType: activeTab,
     };
 
     if (!isEdit) {
@@ -571,13 +395,11 @@ const AddTransactionModal = ({
     }
 
     // Convert number fields
-    currentConfig.fields.forEach((field) => {
+    formFields.forEach((field) => {
       if (
         (field.key === "amount" ||
-          field.key === "balance" ||
           field.key === "exchangeLoss" ||
-          field.key === "finalAmount" ||
-          field.key === "balanceAmount") &&
+          field.key === "finalAmount") &&
         transactionData[field.key]
       ) {
         transactionData[field.key] = parseFloat(transactionData[field.key]);
@@ -591,9 +413,33 @@ const AddTransactionModal = ({
   // Handle numeric input for text fields
   const handleNumericInputChange = (e, field) => {
     const value = e.target.value;
-    if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+    if (value === "" || /^\d*\.?\d*$/.test(value)) {
       handleInputChange(field, value);
     }
+  };
+
+  // Destination Account should show only for withdraw categories
+  const shouldShowDestinationField = () => {
+    const categoryType = form.categoryType;
+    const category = categoryOptions.find((cat) => cat.value === categoryType);
+    const categoryName = category?.label?.toLowerCase() || "";
+    return categoryName === "withdraw";
+  };
+
+  // Exchange Loss should show only for deposit categories
+  const shouldShowExchangeLossField = () => {
+    const categoryType = form.categoryType;
+    const category = categoryOptions.find((cat) => cat.value === categoryType);
+    const categoryName = category?.label?.toLowerCase() || "";
+    return categoryName === "deposit";
+  };
+
+  // Final Amount should show only for deposit categories
+  const shouldShowFinalAmountField = () => {
+    const categoryType = form.categoryType;
+    const category = categoryOptions.find((cat) => cat.value === categoryType);
+    const categoryName = category?.label?.toLowerCase() || "";
+    return categoryName === "deposit";
   };
 
   const renderFormField = (field) => {
@@ -607,32 +453,16 @@ const AddTransactionModal = ({
       return null;
     }
 
+    // Skip rendering final amount if it shouldn't be shown
+    if (field.key === "finalAmount" && !shouldShowFinalAmountField()) {
+      return null;
+    }
+
     const value = form[field.key] || "";
     const error = errors[field.key];
+    const fieldOptions = field.options || [];
 
-    // Use filtered options for source and destination
-    let fieldOptions = field.options || [];
-    if (field.key === "source") {
-      fieldOptions = getFilteredSourceOptions();
-    } else if (field.key === "destination") {
-      fieldOptions = getFilteredDestinationOptions();
-    }
-
-    // Special handling for readonly balance amount field
-    if (field.readonly && field.disabled) {
-      return (
-        <input
-          type="text"
-          value={`${value}`}
-          readOnly
-          disabled
-          className="w-full p-2 border-2 border-yellow-400 bg-yellow-50 rounded-lg font-semibold text-gray-700 cursor-not-allowed"
-          style={{ backgroundColor: "#fffbeb", borderColor: "#f59e0b" }}
-        />
-      );
-    }
-
-    // Handle disabled fields (invoiceDate, customerName, customerAddress, finalAmount)
+    // Handle disabled fields
     if (field.disabled) {
       return (
         <input
@@ -651,7 +481,7 @@ const AddTransactionModal = ({
           <select
             value={value}
             onChange={(e) => handleInputChange(field.key, e.target.value)}
-            className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 max-h-32 overflow-y-auto ${
+            className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
               error ? "border-red-500" : "border-gray-300"
             }`}
             disabled={fieldOptions.length === 0}
@@ -701,16 +531,16 @@ const AddTransactionModal = ({
               type="text"
               value={value}
               onChange={(e) => handleInputChange(field.key, e.target.value)}
-              onBlur={(e) => {
-                if (field.key === "invoiceNumber") {
-                  handleInvoiceNumberChange(e.target.value);
-                }
-              }}
               placeholder={`Enter ${field.label}`}
               className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
                 error ? "border-red-500" : "border-gray-300"
               }`}
             />
+            {field.key === "invoiceNumber" && isFetchingSales && (
+              <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-600"></div>
+              </div>
+            )}
           </div>
         );
     }
@@ -739,172 +569,15 @@ const AddTransactionModal = ({
 
         <form onSubmit={handleSubmit} className="p-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            {currentConfig.fields.map((field) => {
-              console.log("avlueso f ", field);
+            {formFields.map((field) => {
               const fieldElement = renderFormField(field);
+              if (!fieldElement) return null;
 
-              if (!fieldElement) {
-                return null;
-              }
-
-              // Special handling for source and destination to put them in one row when both are visible
-              if (field.key === "source" || field.key === "destination") {
-                const showDestination = shouldShowDestinationField();
-
-                // If both fields should be shown, render them in one row
-                if (showDestination) {
-                  if (field.key === "source") {
-                    return (
-                      <div
-                        key="source-destination-row"
-                        className="md:col-span-2"
-                      >
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {/* Source Field */}
-                          <div className="space-y-2">
-                            <label className="block text-sm font-medium text-gray-700">
-                              Source Account
-                              <span className="text-red-500 ml-1">*</span>
-                            </label>
-                            {renderFormField(
-                              currentConfig.fields.find(
-                                (f) => f.key === "source"
-                              )
-                            )}
-                            {errors.source && (
-                              <p className="text-red-500 text-xs mt-1">
-                                {errors.source}
-                              </p>
-                            )}
-                          </div>
-
-                          {/* Destination Field */}
-                          <div className="space-y-2">
-                            <label className="block text-sm font-medium text-gray-700">
-                              Destination Account
-                              {shouldShowDestinationField() && (
-                                <span className="text-red-500 ml-1">*</span>
-                              )}
-                            </label>
-                            {renderFormField(
-                              currentConfig.fields.find(
-                                (f) => f.key === "destination"
-                              )
-                            )}
-                            {errors.destination && (
-                              <p className="text-red-500 text-xs mt-1">
-                                {errors.destination}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  }
-                  // Skip rendering destination field separately since it's already handled above
-                  return null;
-                }
-
-                // If only source should be shown, render it normally
-                if (field.key === "source") {
-                  return (
-                    <div key={field.key} className="space-y-2 md:col-span-1">
-                      <label className="block text-sm font-medium text-gray-700">
-                        {field.label}
-                        <span className="text-red-500 ml-1">*</span>
-                      </label>
-                      {fieldElement}
-                      {errors[field.key] && (
-                        <p className="text-red-500 text-xs mt-1">
-                          {errors[field.key]}
-                        </p>
-                      )}
-                    </div>
-                  );
-                }
-              }
-
-              // Special handling for amount, exchange loss, and final amount
-              if (
-                field.key === "amount" ||
-                field.key === "exchangeLoss" ||
-                field.key === "finalAmount"
-              ) {
-                const showExchangeLoss = shouldShowExchangeLossField();
-
-                if (field.key === "amount") {
-                  return (
-                    <div key={field.key} className="space-y-2 md:col-span-1">
-                      <label className="block text-sm font-medium text-gray-700">
-                        {field.label}
-                        <span className="text-red-500 ml-1">*</span>
-                      </label>
-                      {fieldElement}
-                      {errors[field.key] && (
-                        <p className="text-red-500 text-xs mt-1">
-                          {errors[field.key]}
-                        </p>
-                      )}
-                    </div>
-                  );
-                }
-
-                if (field.key === "exchangeLoss" && showExchangeLoss) {
-                  return (
-                    <div key={field.key} className="space-y-2 md:col-span-1">
-                      <label className="block text-sm font-medium text-gray-700">
-                        {field.label}
-                      </label>
-                      {fieldElement}
-                      {errors[field.key] && (
-                        <p className="text-red-500 text-xs mt-1">
-                          {errors[field.key]}
-                        </p>
-                      )}
-                      <p className="text-xs text-gray-500">
-                        Enter exchange loss amount (will be subtracted from
-                        original amount)
-                      </p>
-                    </div>
-                  );
-                }
-
-                if (field.key === "finalAmount" && showExchangeLoss) {
-                  return (
-                    <div key={field.key} className="space-y-2 md:col-span-1">
-                      <label className="block text-sm font-medium text-gray-700">
-                        {field.label}
-                        <span className="text-red-500 ml-1">*</span>
-                      </label>
-                      {fieldElement}
-                      {errors[field.key] && (
-                        <p className="text-red-500 text-xs mt-1">
-                          {errors[field.key]}
-                        </p>
-                      )}
-                      <p className="text-xs text-green-600 font-medium">
-                        Final Amount = Amount - Exchange Loss
-                      </p>
-                    </div>
-                  );
-                }
-
-                // Skip final amount if exchange loss shouldn't be shown
-                if (field.key === "finalAmount" && !showExchangeLoss) {
-                  return null;
-                }
-              }
-
-              // Normal field rendering for all other fields
               return (
                 <div
                   key={field.key}
                   className={`space-y-2 ${
                     field.key === "categoryType" ? "md:col-span-1" : ""
-                  } ${
-                    field.key === "balanceAmount"
-                      ? "md:col-span-2 bg-yellow-50 p-4 rounded-lg border-2 border-yellow-200"
-                      : ""
                   }`}
                 >
                   <label className="block text-sm font-medium text-gray-700">
@@ -913,15 +586,7 @@ const AddTransactionModal = ({
                       <span className="text-red-500 ml-1">*</span>
                     )}
                   </label>
-
-                  {field.key === "categoryType" ? (
-                    <div className="max-h-32 overflow-y-auto">
-                      {fieldElement}
-                    </div>
-                  ) : (
-                    fieldElement
-                  )}
-
+                  {fieldElement}
                   {errors[field.key] && (
                     <p className="text-red-500 text-xs mt-1">
                       {errors[field.key]}
@@ -943,9 +608,7 @@ const AddTransactionModal = ({
             <button
               type="submit"
               disabled={
-                categoryOptions.length === 0 ||
-                sourceOptions.length === 0 ||
-                destinationOptions.length === 0
+                categoryOptions.length === 0 || sourceOptions.length === 0
               }
               className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center
                gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
@@ -968,11 +631,9 @@ const CashandBank = () => {
   const [exportLoading, setExportLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [data, setData] = useState({});
   const [selected, setSelected] = useState([]);
   const [editingTransaction, setEditingTransaction] = useState(null);
-  const [viewingTransaction, setViewingTransaction] = useState(null);
 
   // Fetch dropdown options from backend
   const {
@@ -983,17 +644,97 @@ const CashandBank = () => {
     error: optionsError,
   } = useDropdownOptions();
 
-  const currentConfig = accountConfig[activeTab];
-  const currentData = data[activeTab] || [];
-  // Dynamically generate table columns
-  const currentTableColumns = useMemo(
-    () => generateTableColumns(currentConfig.fields),
-    [currentConfig]
+  // Define table columns using useMemo
+  const allFields = useMemo(
+    () => [
+      {
+        id: "invoiceNumber",
+        name: "Invoice No",
+        dbName: "invoiceNumber",
+      },
+      {
+        id: "categoryType",
+        name: "Category Type",
+        dbName: "categoryType",
+      },
+      {
+        id: "source",
+        name: "Source Account",
+        dbName: "source",
+      },
+      {
+        id: "destination",
+        name: "Destination Account",
+        dbName: "destination",
+      },
+      {
+        id: "invoiceDate",
+        name: "Invoice Date",
+        dbName: "invoiceDate",
+      },
+      {
+        id: "customerName",
+        name: "Customer Name",
+        dbName: "customerName",
+      },
+      {
+        id: "amount",
+        name: "Amount",
+        dbName: "amount",
+      },
+      {
+        id: "exchangeLoss",
+        name: "Exchange Loss",
+        dbName: "exchangeLoss",
+      },
+      {
+        id: "finalAmount",
+        name: "Final Amount",
+        dbName: "finalAmount",
+      },
+      {
+        id: "customerAddress",
+        name: "Customer Address",
+        dbName: "customerAddress",
+      },
+      {
+        id: "date",
+        name: "Date",
+        dbName: "date",
+      },
+      {
+        id: "description",
+        name: "Description",
+        dbName: "description",
+      },
+      {
+        id: "actions",
+        name: "Actions",
+        dbName: "actions",
+      },
+    ],
+    []
   );
 
-  // Filter data based on search term
+  const requiredColumns = [
+    "categoryType",
+    "source",
+    "amount",
+    "date",
+    "actions",
+  ];
+
+  const currentData = data[activeTab] || [];
+
   const filteredData = currentData.filter((item) => {
-    return currentConfig.searchFields.some((field) =>
+    if (!searchTerm) return true;
+
+    const searchFields =
+      activeTab === "Personal Account"
+        ? ["description", "categoryType"]
+        : ["invoiceNumber", "customerName"];
+
+    return searchFields.some((field) =>
       item[field]?.toString().toLowerCase().includes(searchTerm.toLowerCase())
     );
   });
@@ -1012,7 +753,6 @@ const CashandBank = () => {
   // Handle adding new transaction
   const handleAddTransaction = (transactionData, isEdit = false) => {
     if (isEdit && editingTransaction) {
-      // Update existing transaction
       setData((prev) => ({
         ...prev,
         [activeTab]: prev[activeTab].map((item) =>
@@ -1022,18 +762,11 @@ const CashandBank = () => {
         ),
       }));
     } else {
-      // Add new transaction
       setData((prev) => ({
         ...prev,
         [activeTab]: [...(prev[activeTab] || []), transactionData],
       }));
     }
-  };
-
-  // Handle view transaction
-  const handleView = (transaction) => {
-    setViewingTransaction(transaction);
-    setIsViewModalOpen(true);
   };
 
   // Handle edit transaction
@@ -1075,11 +808,11 @@ const CashandBank = () => {
 
   // Handle selection
   const toggleSelect = (item) => {
-    setSelected((prev) => {
-      return prev.some((s) => s === item.id)
+    setSelected((prev) =>
+      prev.some((s) => s === item.id)
         ? prev.filter((s) => s !== item.id)
-        : [...prev, item.id];
-    });
+        : [...prev, item.id]
+    );
   };
 
   const toggleSelectAll = (checked) => {
@@ -1096,18 +829,6 @@ const CashandBank = () => {
     return option ? option.label : value;
   };
 
-  // Format display values for table
-  const formatDisplayValue = (field, value) => {
-    if (field.dbName === "categoryType") {
-      return getLabelFromValue(value, categoryOptions);
-    } else if (field.dbName === "source") {
-      return getLabelFromValue(value, sourceOptions);
-    } else if (field.dbName === "destination") {
-      return getLabelFromValue(value, destinationOptions);
-    }
-    return value;
-  };
-
   // Render cell content based on field type
   const renderCellContent = (item, field) => {
     const value = item[field.dbName];
@@ -1116,13 +837,6 @@ const CashandBank = () => {
       return (
         <div className="flex items-center justify-center gap-3 min-w-[150px]">
           <button
-            className="text-blue-600 hover:text-blue-800 cursor-pointer"
-            title="View"
-            onClick={() => handleView(item)}
-          >
-            <Eye size={18} />
-          </button>
-          <button
             className="text-green-600 hover:text-green-800 cursor-pointer"
             title="Edit"
             onClick={() => handleEdit(item)}
@@ -1130,7 +844,6 @@ const CashandBank = () => {
             <Edit size={18} />
           </button>
           <button
-            view
             className="text-red-600 hover:text-red-800 cursor-pointer"
             title="Delete"
             onClick={() => handleDelete(item)}
@@ -1141,7 +854,7 @@ const CashandBank = () => {
       );
     }
 
-    if (field.dbName === "amount" || field.dbName === "balance") {
+    if (field.dbName === "amount" || field.dbName === "finalAmount") {
       return (
         <span
           className={`font-medium ${
@@ -1153,23 +866,21 @@ const CashandBank = () => {
       );
     }
 
-    if (field.dbName === "date" || field.dbName === "invoiceDate") {
-      return new Date(value).toLocaleDateString();
+    if (field.dbName === "categoryType") {
+      const displayValue = getLabelFromValue(value, categoryOptions);
+      return (
+        <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
+          {displayValue}
+        </span>
+      );
     }
 
-    if (
-      field.dbName === "categoryType" ||
-      field.dbName === "source" ||
-      field.dbName === "destination"
-    ) {
-      const displayValue = formatDisplayValue(field, value);
+    if (field.dbName === "source" || field.dbName === "destination") {
+      const displayValue = getLabelFromValue(value, sourceOptions);
       const colorClass =
-        field.dbName === "categoryType"
-          ? "bg-blue-50 text-blue-700"
-          : field.dbName === "source"
+        field.dbName === "source"
           ? "bg-green-50 text-green-700"
           : "bg-purple-50 text-purple-700";
-
       return (
         <span
           className={`px-2 py-1 rounded-full text-xs font-medium ${colorClass}`}
@@ -1179,7 +890,11 @@ const CashandBank = () => {
       );
     }
 
-    return formatDisplayValue(field, value) || "--";
+    if (field.dbName === "date" || field.dbName === "invoiceDate") {
+      return value ? new Date(value).toLocaleDateString() : "--";
+    }
+
+    return value || "--";
   };
 
   // Export functionality
@@ -1188,12 +903,12 @@ const CashandBank = () => {
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
     const csvContent = [
-      currentTableColumns.map((field) => field.name).join(","),
+      allFields.map((field) => field.name).join(","),
       ...filteredData.map((item) =>
-        currentTableColumns
+        allFields
           .map((field) => {
             const value = item[field.dbName];
-            if (field.dbName === "amount" || field.dbName === "balance") {
+            if (field.dbName === "amount" || field.dbName === "finalAmount") {
               return `"${value >= 0 ? "+" : ""}₹${Math.abs(value).toFixed(2)}"`;
             }
             if (
@@ -1201,7 +916,12 @@ const CashandBank = () => {
               field.dbName === "source" ||
               field.dbName === "destination"
             ) {
-              return `"${formatDisplayValue(field, value)}"`;
+              return `"${getLabelFromValue(
+                value,
+                field.dbName === "categoryType"
+                  ? categoryOptions
+                  : sourceOptions
+              )}"`;
             }
             return `"${value}"`;
           })
@@ -1228,6 +948,12 @@ const CashandBank = () => {
     setSearchTerm(e.target.value);
     setSelected([]);
     setCurrentPage(1);
+  };
+
+  const getSearchPlaceholder = () => {
+    return activeTab === "Personal Account"
+      ? "Search by Description or Category"
+      : "Search by Invoice Number or Customer";
   };
 
   return (
@@ -1265,8 +991,7 @@ const CashandBank = () => {
               disabled={
                 optionsLoading ||
                 categoryOptions.length === 0 ||
-                sourceOptions.length === 0 ||
-                destinationOptions.length === 0
+                sourceOptions.length === 0
               }
               className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -1297,7 +1022,7 @@ const CashandBank = () => {
         <div className="flex justify-between items-center mb-6">
           {/* Left side - Tabs */}
           <div className="flex gap-2">
-            {Object.keys(accountConfig).map((tab) => (
+            {accountTypes.map((tab) => (
               <button
                 key={tab}
                 onClick={() => {
@@ -1332,7 +1057,7 @@ const CashandBank = () => {
               />
               <input
                 type="text"
-                placeholder={currentConfig.placeholder}
+                placeholder={getSearchPlaceholder()}
                 value={searchTerm}
                 onChange={handleSearchChange}
                 className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
@@ -1350,7 +1075,7 @@ const CashandBank = () => {
               </h3>
               <div className="flex items-center gap-4">
                 <div className="text-2xl font-bold text-indigo-700">
-                  ${totalAmount.toFixed(2)}
+                  ₹{totalAmount.toFixed(2)}
                 </div>
               </div>
             </div>
@@ -1362,7 +1087,7 @@ const CashandBank = () => {
           <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
             <thead className="bg-gray-100 text-gray-700 border-b">
               <tr>
-                {currentTableColumns
+                {allFields
                   .filter((field) => field.id !== "actions")
                   .map((field) => (
                     <th
@@ -1398,10 +1123,12 @@ const CashandBank = () => {
               {paginatedData.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={currentTableColumns.length}
+                    colSpan={allFields.length}
                     className="p-4 text-center text-gray-500"
                   >
-                    No transactions found.
+                    {searchTerm
+                      ? "No transactions match your search."
+                      : "No transactions found."}
                   </td>
                 </tr>
               ) : (
@@ -1409,13 +1136,10 @@ const CashandBank = () => {
                   <tr
                     key={item.id}
                     className={`hover:bg-gray-50 ${
-                      (index + 1) % ITEMS_PER_PAGE === 0 ||
-                      index + 1 === paginatedData.length
-                        ? ""
-                        : "border-b"
+                      index < paginatedData.length - 1 ? "border-b" : ""
                     }`}
                   >
-                    {currentTableColumns
+                    {allFields
                       .filter((field) => field.id !== "actions")
                       .map((field) => (
                         <td
@@ -1441,9 +1165,7 @@ const CashandBank = () => {
                     <td className="p-3 whitespace-nowrap min-w-[150px]">
                       {renderCellContent(
                         item,
-                        currentTableColumns.find(
-                          (field) => field.id === "actions"
-                        )
+                        allFields.find((field) => field.id === "actions")
                       )}
                     </td>
                   </tr>
@@ -1454,7 +1176,7 @@ const CashandBank = () => {
         </div>
 
         {/* Pagination */}
-        {paginatedData.length > 0 && (
+        {filteredData.length > 0 && (
           <div className="mt-4 p-5 flex justify-start gap-2">
             <button
               onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
