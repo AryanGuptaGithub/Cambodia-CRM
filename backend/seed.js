@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 import User from "./models/User.js";
 import SaleType from "./models/reports/saleType.js";
 import Warehouse from "./models/stock/warehouse.js";
-import OrderStatus from "./models/stock/orderStatus.js"; 
+import OrderStatus from "./models/stock/orderStatus.js";
 import Destination from "./models/accounts/Destination.js";
 import CategoryType from "./models/accounts/CategoryType.js";
 import TransactionType from "./models/accounts/TransactionType.js"; // ✅ Add this import
@@ -37,13 +37,13 @@ async function seedUsers() {
   console.log("✅ Users seeded successfully");
 }
 
-// ✅ CORRECTED: Seed destinations (with the exact names you requested)
+// ✅ CORRECTED: Seed destinations (with totalAmount)
 async function seedDestinations() {
   await Destination.deleteMany({});
   const destinations = [
-    { name: "Cash Balance", code: "cash_balance" },
-    { name: "Personal Account", code: "personal_account" },
-    { name: "Company Account", code: "company_account" },
+    { name: "Cash Balance", code: "cash_balance", totalAmount: 0 },
+    { name: "Personal Account", code: "personal_account", totalAmount: 0 },
+    { name: "Company Account", code: "company_account", totalAmount: 0 },
   ];
 
   await Destination.insertMany(destinations);
@@ -144,7 +144,7 @@ async function runSeeders() {
 
   try {
     console.log("🌱 Starting database seeding...");
-    
+
     await seedUsers();
     await seedSaleTypes();
     await seedWarehouses();
@@ -152,7 +152,7 @@ async function runSeeders() {
     await seedDestinations(); // ✅ Now with correct order: Cash Balance first
     await seedCategoryTypes();
     await seedTransactionTypes(); // ✅ Add transaction types seeding
-    
+
     console.log("🎉 All seeders completed successfully!");
   } catch (error) {
     console.error("❌ Seeding error:", error);

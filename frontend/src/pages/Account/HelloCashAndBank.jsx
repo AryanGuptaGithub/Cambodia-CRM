@@ -1,4 +1,13 @@
-import { Search, Download, X, Plus, Trash2, Edit, Eye } from "lucide-react";
+import {
+  Search,
+  Download,
+  X,
+  Plus,
+  Trash2,
+  Edit,
+  Eye,
+  Settings,
+} from "lucide-react";
 import ReactDOM from "react-dom";
 import axios from "axios";
 import { useState, useEffect, useMemo } from "react";
@@ -6,9 +15,6 @@ import { showToast } from "../../utils/toast";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const ITEMS_PER_PAGE = 10;
-
-// Account types configuration
-const accountTypes = ["Cash Balance", "Personal Account", "Company Account"];
 
 // Custom hook to fetch dropdown options from backend
 const useDropdownOptions = () => {
@@ -107,7 +113,7 @@ const AddTransactionModal = ({
         key: "source",
         label: "Source Account",
         type: "select",
-        required: true,
+        required: false,
         options: sourceOptions,
         layout: "half",
       },
@@ -115,7 +121,7 @@ const AddTransactionModal = ({
         key: "destination",
         label: "Destination Account",
         type: "select",
-        required: false,
+        required: true,
         options: destinationOptions,
         layout: "half",
       },
@@ -152,7 +158,7 @@ const AddTransactionModal = ({
       },
       {
         key: "amount",
-        label: "Amount",
+        label: "Amount ($)",
         type: "number",
         required: true,
         layout: "half",
@@ -166,7 +172,7 @@ const AddTransactionModal = ({
       },
       {
         key: "finalAmount",
-        label: "Final Amount",
+        label: "Final Amount ($)",
         type: "number",
         required: true,
         readonly: true,
@@ -315,12 +321,11 @@ const AddTransactionModal = ({
       }));
     }
 
-    // Clear source/destination when category type changes
+    // Clear source when category type changes
     if (field === "categoryType") {
       setForm((prev) => ({
         ...prev,
-        source: "",
-        destination: "",
+        source: "", // Clear source when category changes
         exchangeLoss: "",
         finalAmount: "0.00",
       }));
@@ -341,8 +346,8 @@ const AddTransactionModal = ({
         return;
       }
 
-      // Skip validation for destination if it shouldn't be shown
-      if (field.key === "destination" && !shouldShowDestinationField()) {
+      // Skip validation for source if it shouldn't be shown
+      if (field.key === "source" && !shouldShowSourceField()) {
         return;
       }
 
@@ -351,15 +356,15 @@ const AddTransactionModal = ({
         return;
       }
 
-      // Source is always required
+      // Destination is always required (for all categories)
       if (field.key === "destination") {
         if (!form[field.key]) {
           newErrors[field.key] = `${field.label} is required`;
         }
       }
 
-      // Destination is required only when shown
-      if (field.key === "source" && shouldShowDestinationField()) {
+      // Source is required only when shown (for withdraw and deposit)
+      if (field.key === "source" && shouldShowSourceField()) {
         if (!form[field.key]) {
           newErrors[
             field.key
@@ -403,12 +408,11 @@ const AddTransactionModal = ({
     const exchangeLoss = parseFloat(form.exchangeLoss) || 0;
     const finalAmount = amount - exchangeLoss;
 
-    // Only send the ObjectIds to the server
     const transactionData = {
       invoiceNumber: form.invoiceNumber,
       categoryType: form.categoryType,
-      source: form.source,
-      destination: form.destination || null,
+      source: form.source || null,
+      destination: form.destination,
       date: form.date,
       invoiceDate: form.invoiceDate,
       customerName: form.customerName,
@@ -447,8 +451,8 @@ const AddTransactionModal = ({
     }
   };
 
-  // Destination Account should show only for withdraw and deposit categories
-  const shouldShowDestinationField = () => {
+  // Source Account should show only for withdraw and deposit categories
+  const shouldShowSourceField = () => {
     const categoryType = form.categoryType;
     const category = categoryOptions.find((cat) => cat.value === categoryType);
     const categoryName = category?.label?.toLowerCase() || "";
@@ -488,8 +492,8 @@ const AddTransactionModal = ({
   };
 
   const renderFormField = (field) => {
-    // Skip rendering destination if it shouldn't be shown
-    if (field.key === "destination" && !shouldShowDestinationField()) {
+    // Skip rendering source if it shouldn't be shown
+    if (field.key === "source" && !shouldShowSourceField()) {
       return null;
     }
 
@@ -668,7 +672,7 @@ const AddTransactionModal = ({
             <button
               type="submit"
               disabled={
-                categoryOptions.length === 0 || sourceOptions.length === 0
+                categoryOptions.length === 0 || destinationOptions.length === 0
               }
               className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center
                gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
@@ -698,6 +702,23 @@ const CashandBank = () => {
   const [totalPages, setTotalPages] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
 
+  // Column configuration state
+  const [isColumnModalOpen, setIsColumnModalOpen] = useState(false);
+  const [selectedItems, setSelectedItems] = useState([]);
+  const [allSelected, setAllSelected] = useState(false);
+  const [activeColumnTab, setActiveColumnTab] = useState("add");
+  const [tableColumns, setTableColumns] = useState([
+    "invoiceNumber",
+    "categoryType",
+    "source",
+    "destination",
+    "amount",
+    "exchangeLoss",
+    "finalAmount",
+    "date",
+    "actions",
+  ]);
+
   // Fetch dropdown options from backend
   const {
     categoryOptions,
@@ -707,41 +728,7 @@ const CashandBank = () => {
     error: optionsError,
   } = useDropdownOptions();
 
-  // Fetch transactions from backend
-  const fetchTransactions = async () => {
-    try {
-      setLoading(true);
-      const params = {
-        page: currentPage,
-        limit: ITEMS_PER_PAGE,
-        accountType: activeTab,
-        ...(searchTerm && { search: searchTerm }),
-      };
-
-      const response = await axios.get(`${backendUrl}/api/transaction`, {
-        params,
-      });
-
-      if (response.data.success) {
-        setData(response.data.data);
-        setTotalPages(response.data.totalPages);
-        setTotalCount(response.data.total);
-      }
-    } catch (error) {
-      console.error("Error fetching transactions:", error);
-      showToast("error", "Failed to fetch transactions");
-      setData([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Fetch transactions when component mounts or filters change
-  useEffect(() => {
-    fetchTransactions();
-  }, [activeTab, searchTerm, currentPage]);
-
-  // Define table columns using useMemo
+  // Define all fields for column configuration
   const allFields = useMemo(
     () => [
       {
@@ -813,7 +800,153 @@ const CashandBank = () => {
     []
   );
 
-  // Use data directly from backend
+  // Required columns that cannot be removed
+  const requiredColumns = ["invoiceNumber", "actions"];
+
+  // Get available columns for Add tab (columns not currently in table)
+  const availableColumns = useMemo(() => {
+    return allFields.filter((item) => !tableColumns.includes(item.id));
+  }, [allFields, tableColumns]);
+
+  // Get removable columns for Remove tab (columns in table except required ones)
+  const removableColumns = useMemo(() => {
+    return allFields.filter(
+      (item) =>
+        tableColumns.includes(item.id) && !requiredColumns.includes(item.id)
+    );
+  }, [allFields, tableColumns]);
+
+  // Chunk items for display in modal
+  const chunkedItems = useMemo(() => {
+    const items =
+      activeColumnTab === "add" ? availableColumns : removableColumns;
+    const chunks = [];
+    for (let i = 0; i < items.length; i += 2) {
+      chunks.push(items.slice(i, i + 2));
+    }
+    return chunks;
+  }, [activeColumnTab, availableColumns, removableColumns]);
+
+  // Toggle item selection in column modal
+  const toggleItem = (id) => {
+    if (id === "all") {
+      if (allSelected) {
+        setSelectedItems([]);
+        setAllSelected(false);
+      } else {
+        const allIds = chunkedItems.flat().map((item) => item.id);
+        setSelectedItems(allIds);
+        setAllSelected(true);
+      }
+    } else {
+      let updatedItems;
+      if (selectedItems.includes(id)) {
+        updatedItems = selectedItems.filter((itemId) => itemId !== id);
+      } else {
+        updatedItems = [...selectedItems, id];
+      }
+
+      setSelectedItems(updatedItems);
+      setAllSelected(updatedItems.length === chunkedItems.flat().length);
+    }
+  };
+
+  useEffect(() => {}, [activeTab]);
+  // Handle save for column configuration
+  const handleColumnSave = () => {
+    if (activeColumnTab === "add") {
+      // Add selected columns to table
+      const newColumns = [...tableColumns, ...selectedItems];
+      setTableColumns(newColumns);
+    } else {
+      // Remove selected columns from table (except required ones)
+      const newColumns = tableColumns.filter(
+        (id) => !selectedItems.includes(id) || requiredColumns.includes(id)
+      );
+      setTableColumns(newColumns);
+    }
+    setSelectedItems([]);
+    setAllSelected(false);
+    setIsColumnModalOpen(false);
+  };
+
+  const handleColumnReset = () => {
+    setSelectedItems([]);
+    setAllSelected(false);
+    // Reset to default columns
+    setTableColumns([
+      "invoiceNumber",
+      "categoryType",
+      "source",
+      "destination",
+      "amount",
+      "exchangeLoss",
+      "finalAmount",
+      "date",
+      "actions",
+    ]);
+  };
+
+  const handleColumnCancel = () => {
+    setSelectedItems([]);
+    setAllSelected(false);
+    setIsColumnModalOpen(false);
+  };
+
+  // Update allSelected state when individual selections change
+  useEffect(() => {
+    const currentItems = chunkedItems.flat();
+    if (
+      currentItems.length > 0 &&
+      selectedItems.length === currentItems.length
+    ) {
+      setAllSelected(true);
+    } else {
+      setAllSelected(false);
+    }
+  }, [selectedItems, chunkedItems]);
+
+  // Fetch transactions from backend
+  const fetchTransactions = async () => {
+    try {
+      setLoading(true);
+      const params = {
+        page: currentPage,
+        limit: ITEMS_PER_PAGE,
+
+        ...(searchTerm && { search: searchTerm }),
+      };
+
+      const response = await axios.get(`${backendUrl}/api/transaction`, {
+        params,
+      });
+
+      if (response.data.success) {
+        // Filter transactions based on active tab
+        const filteredData = response.data.data.filter((data) => {
+          const destinationName = data?.destination?.name?.toLowerCase();
+          const tab = activeTab.toLowerCase();
+
+          return destinationName === tab;
+        });
+
+        setData(filteredData);
+      }
+    } catch (error) {
+      console.error("❌ Error fetching transactions:", error);
+      showToast("error", "Failed to fetch transactions");
+      setData([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Fetch transactions when component mounts or filters change
+  useEffect(() => {
+    fetchTransactions();
+  }, [activeTab, searchTerm, currentPage]);
+
+  // Use data directly from backend (already filtered)
   const currentData = data || [];
 
   const totalAmount = currentData.reduce(
@@ -963,7 +1096,8 @@ const CashandBank = () => {
             value >= 0 ? "text-green-700" : "text-red-600"
           }`}
         >
-          {value >= 0 ? "+" : ""}₹{Math.abs(value || 0).toFixed(2)}
+          {value >= 0 ? "+" : ""}
+          {Math.abs(value || 0).toFixed(2)}
         </span>
       );
     }
@@ -1055,6 +1189,8 @@ const CashandBank = () => {
     setSelected([]);
   };
 
+  const accountTypes = ["Cash Balance", "Personal Account", "Company Account"];
+
   return (
     <div className="p-6">
       <div className="container">
@@ -1111,14 +1247,23 @@ const CashandBank = () => {
             )}
           </div>
 
-          <button
-            onClick={handleExport}
-            disabled={exportLoading || currentData.length === 0}
-            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50"
-          >
-            <Download size={18} />
-            {exportLoading ? "Exporting..." : "Export"}
-          </button>
+          <div className="flex gap-3 items-center">
+            <button
+              className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+              onClick={() => setIsColumnModalOpen(true)}
+            >
+              <Settings size={18} /> Add / Remove Column
+            </button>
+
+            <button
+              onClick={handleExport}
+              disabled={exportLoading || currentData.length === 0}
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50"
+            >
+              <Download size={18} />
+              {exportLoading ? "Exporting..." : "Export"}
+            </button>
+          </div>
         </div>
 
         {/* Tabs */}
@@ -1145,7 +1290,7 @@ const CashandBank = () => {
             <p className="text-lg font-semibold text-gray-700">
               Total Count:{" "}
               <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-                {totalCount}
+                {currentData.length}
               </span>
             </p>
             <div className="relative w-full md:w-72">
@@ -1173,10 +1318,7 @@ const CashandBank = () => {
               </h3>
               <div className="flex items-center gap-4">
                 <div className="text-2xl font-bold text-indigo-700">
-                  ₹{totalAmount.toFixed(2)}
-                </div>
-                <div className="text-sm text-gray-600">
-                  Showing {currentData.length} of {totalCount} transactions
+                  ${totalAmount.toFixed(2)}
                 </div>
               </div>
             </div>
@@ -1189,7 +1331,7 @@ const CashandBank = () => {
             <thead className="bg-gray-100 text-gray-700 border-b">
               <tr>
                 {allFields
-                  .filter((field) => field.id !== "actions")
+                  .filter((item) => tableColumns.includes(item.id))
                   .map((field) => (
                     <th
                       key={`header-${field.id}`}
@@ -1217,19 +1359,13 @@ const CashandBank = () => {
                       )}
                     </th>
                   ))}
-                <th
-                  key="header-actions"
-                  className="p-3 whitespace-nowrap min-w-[150px]"
-                >
-                  Actions
-                </th>
               </tr>
             </thead>
             <tbody>
               {currentData.length === 0 ? (
                 <tr key="empty-row">
                   <td
-                    colSpan={allFields.length}
+                    colSpan={tableColumns.length}
                     className="p-4 text-center text-gray-500"
                   >
                     {loading
@@ -1248,7 +1384,7 @@ const CashandBank = () => {
                     }`}
                   >
                     {allFields
-                      .filter((field) => field.id !== "actions")
+                      .filter((item) => tableColumns.includes(item.id))
                       .map((field) => (
                         <td
                           key={`cell-${item._id}-${field.id}`}
@@ -1270,15 +1406,6 @@ const CashandBank = () => {
                           )}
                         </td>
                       ))}
-                    <td
-                      key={`actions-${item._id}`}
-                      className="p-3 whitespace-nowrap min-w-[150px]"
-                    >
-                      {renderCellContent(
-                        item,
-                        allFields.find((field) => field.id === "actions")
-                      )}
-                    </td>
                   </tr>
                 ))
               )}
@@ -1359,6 +1486,160 @@ const CashandBank = () => {
           sourceOptions={sourceOptions}
           destinationOptions={destinationOptions}
         />
+
+        {/* Column Configuration Modal */}
+        {isColumnModalOpen &&
+          ReactDOM.createPortal(
+            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+              <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                onClick={handleColumnCancel}
+              />
+              <div
+                className="relative bg-white p-6 rounded shadow-lg max-w-4xl w-full z-10 max-h-[90vh] overflow-hidden flex flex-col"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h2 className="text-xl font-semibold mb-4">
+                  {activeColumnTab === "add" ? "Add Columns" : "Remove Columns"}
+                </h2>
+
+                <div className="flex w-full gap-2 mb-4">
+                  <div className="w-1/2">
+                    <button
+                      onClick={() => {
+                        setActiveColumnTab("add");
+                        setSelectedItems([]);
+                        setAllSelected(false);
+                      }}
+                      className={`w-full px-4 py-2 font-medium text-center rounded-lg ${
+                        activeColumnTab === "add"
+                          ? "bg-green-600 text-white"
+                          : "bg-gray-200 text-gray-700"
+                      }`}
+                    >
+                      Add Columns ({availableColumns.length})
+                    </button>
+                  </div>
+                  <div className="w-1/2">
+                    <button
+                      onClick={() => {
+                        setActiveColumnTab("remove");
+                        setSelectedItems([]);
+                        setAllSelected(false);
+                      }}
+                      className={`w-full px-4 py-2 font-medium text-center rounded-lg ${
+                        activeColumnTab === "remove"
+                          ? "bg-red-600 text-white"
+                          : "bg-gray-200 text-gray-700"
+                      }`}
+                    >
+                      Remove Columns ({removableColumns.length})
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto">
+                  {chunkedItems.length > 0 ? (
+                    <div className="grid grid-cols-1 gap-3">
+                      {/* Select All option */}
+                      {chunkedItems.flat().length > 0 && (
+                        <div className="flex gap-4 border-b pb-2 mb-2 sticky top-0 bg-white">
+                          <label className="flex items-center gap-2 flex-1 cursor-pointer select-none font-semibold">
+                            <input
+                              type="checkbox"
+                              checked={allSelected}
+                              onChange={() => toggleItem("all")}
+                            />
+                            Select All
+                          </label>
+                          <div className="flex-1"></div>
+                        </div>
+                      )}
+
+                      {chunkedItems.map((pair, index) => (
+                        <div key={index} className="flex gap-4">
+                          {pair.map(({ id, name }) => (
+                            <label
+                              key={id}
+                              className="flex items-center gap-1 flex-1 cursor-pointer select-none hover:bg-gray-50 rounded"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedItems.includes(id)}
+                                onChange={() => toggleItem(id)}
+                              />
+                              <span className="flex-1">{name}</span>
+                            </label>
+                          ))}
+                          {pair.length === 1 && <div className="flex-1"></div>}
+                        </div>
+                      ))}
+
+                      {/* REQUIRED COLUMNS shown on Remove tab */}
+                      {activeColumnTab === "remove" && (
+                        <div className="mt-6 border-t pt-4">
+                          <h3 className="text-sm font-semibold text-gray-600 mb-2">
+                            Compulsory Fields
+                          </h3>
+                          <div className="grid grid-cols-2 gap-3 text-gray-400 text-sm">
+                            {allFields
+                              .filter((field) =>
+                                requiredColumns.includes(field.id)
+                              )
+                              .map((field) => (
+                                <div
+                                  key={field.id}
+                                  className="flex items-center gap-2 bg-gray-100 rounded px-2 py-1 cursor-not-allowed"
+                                >
+                                  <input type="checkbox" checked disabled />
+                                  <div className="flex flex-col">
+                                    <span>{field.name}</span>
+                                    <span className="text-xs text-red-500">
+                                      This field is compulsory
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-gray-500">
+                      {activeColumnTab === "add"
+                        ? "All available columns are already in the table."
+                        : "No columns available to remove."}
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-4 pt-4 border-t flex justify-between items-center">
+                  <button
+                    onClick={handleColumnReset}
+                    className="px-4 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200 cursor-pointer"
+                  >
+                    Reset to Default
+                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleColumnCancel}
+                      className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleColumnSave}
+                      disabled={selectedItems.length === 0}
+                      className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 cursor-pointer disabled:bg-gray-400 disabled:cursor-not-allowed"
+                    >
+                      Save Changes
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
       </div>
     </div>
   );

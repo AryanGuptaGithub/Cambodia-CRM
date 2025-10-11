@@ -15,6 +15,11 @@ const destinationSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  totalAmount: { // ✅ NEW FIELD
+    type: Number,
+    default: 0,
+    min: 0,
+  },
   date: {
     type: Date,
     default: Date.now,

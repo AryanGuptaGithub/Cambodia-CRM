@@ -16,12 +16,13 @@ const transactionSchema = new mongoose.Schema(
     source: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Destination", // ✅ Ensure you have an Account model
-      required: true,
+      required: false,
+       default: null,
     },
     destination: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Destination", // ✅ Same here
-      required: false,
+      required: true,
       default: null,
     },
     date: {

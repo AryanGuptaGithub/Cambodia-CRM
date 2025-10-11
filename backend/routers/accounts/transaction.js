@@ -1,15 +1,13 @@
 import express from "express";
 import Transaction from "../../models/accounts/Transaction.js";
-
-const router = express.Router();
-
-// Create new transaction
+import Destination from "../../models/accounts/Destination.js";
 import mongoose from "mongoose";
+const router = express.Router();
 
 router.post("/transaction", async (req, res) => {
   try {
     const { categoryType, source, destination } = req.body;
-
+    // Validate ObjectIds
     const validateObjectId = (id, name) => {
       if (id && !mongoose.Types.ObjectId.isValid(id)) {
         throw new Error(`Invalid ${name} ID`);
@@ -20,16 +18,36 @@ router.post("/transaction", async (req, res) => {
     validateObjectId(source, "source");
     if (destination) validateObjectId(destination, "destination");
 
+    // Prepare transaction data
+    const amount = parseFloat(req.body.amount);
+    const exchangeLoss = parseFloat(req.body.exchangeLoss) || 0;
+    const finalAmount = parseFloat(req.body.finalAmount) || 0;
+
     const transactionData = {
       ...req.body,
-      amount: parseFloat(req.body.amount),
-      exchangeLoss: parseFloat(req.body.exchangeLoss) || 0,
-      finalAmount: parseFloat(req.body.finalAmount) || 0,
+      amount,
+      exchangeLoss,
+      finalAmount,
     };
 
+    // Save transaction
     const transaction = new Transaction(transactionData);
     await transaction.save();
 
+    // ✅ Update destination totalAmount if destination is provided
+    if (destination) {
+      const updatedDestination = await Destination.findByIdAndUpdate(
+        destination,
+        { $inc: { totalAmount: amount } }, // Increment totalAmount
+        { new: true }
+      );
+
+      if (!updatedDestination) {
+        throw new Error("Destination not found to update totalAmount");
+      }
+    }
+
+    // Populate transaction for response
     const populatedTransaction = await Transaction.findById(transaction._id)
       .populate("categoryType", "name")
       .populate("source", "name")
@@ -87,7 +105,7 @@ router.get("/transaction", async (req, res) => {
       .skip((page - 1) * limit);
 
     const total = await Transaction.countDocuments(query);
-
+    console.log("values of transactions", transactions);
     res.json({
       success: true,
       data: transactions,
