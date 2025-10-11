@@ -221,9 +221,7 @@ const AddTransactionModal = ({
       const amount = parseFloat(form.amount) || 0;
       const exchangeLoss = parseFloat(form.exchangeLoss) || 0;
 
-      // Only calculate final amount for deposit categories
       if (shouldShowExchangeLossField()) {
-        // For deposit categories: Final Amount = Amount - Exchange Loss
         const finalAmount = amount - exchangeLoss;
 
         setForm((prev) => ({
@@ -231,7 +229,6 @@ const AddTransactionModal = ({
           finalAmount: isNaN(finalAmount) ? "0.00" : finalAmount.toFixed(2),
         }));
       } else {
-        // For other categories: Clear final amount
         setForm((prev) => ({
           ...prev,
           finalAmount: "0.00",
@@ -240,14 +237,8 @@ const AddTransactionModal = ({
     }
   }, [form.amount, form.exchangeLoss, activeTab, form.categoryType]);
 
-  // Fetch sales data when invoice number is entered AND category type is selected
   const fetchSalesData = async (invoiceNumber) => {
     if (!invoiceNumber || invoiceNumber.trim() === "") {
-      return;
-    }
-
-    // Only fetch for Cash Balance and Company Account tabs
-    if (activeTab !== "Cash Balance" && activeTab !== "Company Account") {
       return;
     }
 
@@ -707,6 +698,7 @@ const CashandBank = () => {
   const [selectedItems, setSelectedItems] = useState([]);
   const [allSelected, setAllSelected] = useState(false);
   const [activeColumnTab, setActiveColumnTab] = useState("add");
+  const [totalAmountTab, setTotalAmountTab] = useState(0);
   const [tableColumns, setTableColumns] = useState([
     "invoiceNumber",
     "categoryType",
@@ -907,13 +899,14 @@ const CashandBank = () => {
   }, [selectedItems, chunkedItems]);
 
   // Fetch transactions from backend
+
   const fetchTransactions = async () => {
     try {
       setLoading(true);
+
       const params = {
         page: currentPage,
         limit: ITEMS_PER_PAGE,
-
         ...(searchTerm && { search: searchTerm }),
       };
 
@@ -922,13 +915,21 @@ const CashandBank = () => {
       });
 
       if (response.data.success) {
-        // Filter transactions based on active tab
-        const filteredData = response.data.data.filter((data) => {
-          const destinationName = data?.destination?.name?.toLowerCase();
-          const tab = activeTab.toLowerCase();
+        const { data: transactions, destinations } = response.data;
 
-          return destinationName === tab;
+        // ✅ Filter transactions based on active tab
+        const filteredData = transactions.filter((tx) => {
+          const destinationName = tx?.destination?.name?.toLowerCase();
+          return destinationName === activeTab.toLowerCase();
         });
+
+        // ✅ Find totalAmount from destinations array
+        const matchingDestination = destinations.find(
+          (dest) => dest.name.toLowerCase() === activeTab.toLowerCase()
+        );
+
+        const totalAmount = matchingDestination?.totalAmount || 0;
+        setTotalAmountTab(totalAmount);
 
         setData(filteredData);
       }
@@ -948,11 +949,6 @@ const CashandBank = () => {
 
   // Use data directly from backend (already filtered)
   const currentData = data || [];
-
-  const totalAmount = currentData.reduce(
-    (sum, item) => sum + (item.amount || 0),
-    0
-  );
 
   // Helper function to safely extract display value
   const getDisplayValue = (value, options) => {
@@ -1318,7 +1314,7 @@ const CashandBank = () => {
               </h3>
               <div className="flex items-center gap-4">
                 <div className="text-2xl font-bold text-indigo-700">
-                  ${totalAmount.toFixed(2)}
+                  ${totalAmountTab.toFixed(2)}
                 </div>
               </div>
             </div>

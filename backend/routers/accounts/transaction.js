@@ -1,13 +1,15 @@
 import express from "express";
 import Transaction from "../../models/accounts/Transaction.js";
 import Destination from "../../models/accounts/Destination.js";
+import CategoryType from "../../models/accounts/CategoryType.js";
 import mongoose from "mongoose";
 const router = express.Router();
 
 router.post("/transaction", async (req, res) => {
   try {
     const { categoryType, source, destination } = req.body;
-    // Validate ObjectIds
+
+    // ✅ Validate ObjectIds
     const validateObjectId = (id, name) => {
       if (id && !mongoose.Types.ObjectId.isValid(id)) {
         throw new Error(`Invalid ${name} ID`);
@@ -18,7 +20,6 @@ router.post("/transaction", async (req, res) => {
     validateObjectId(source, "source");
     if (destination) validateObjectId(destination, "destination");
 
-    // Prepare transaction data
     const amount = parseFloat(req.body.amount);
     const exchangeLoss = parseFloat(req.body.exchangeLoss) || 0;
     const finalAmount = parseFloat(req.body.finalAmount) || 0;
@@ -30,24 +31,51 @@ router.post("/transaction", async (req, res) => {
       finalAmount,
     };
 
-    // Save transaction
+    // ✅ Save transaction
     const transaction = new Transaction(transactionData);
     await transaction.save();
 
-    // ✅ Update destination totalAmount if destination is provided
-    if (destination) {
-      const updatedDestination = await Destination.findByIdAndUpdate(
-        destination,
-        { $inc: { totalAmount: amount } }, // Increment totalAmount
+    // ✅ Fetch the category type to check its name
+    const category = await CategoryType.findById(categoryType);
+    if (!category) throw new Error("Category type not found");
+
+    const categoryName = category.name.toLowerCase();
+
+    // ✅ Handle balance updates based on category type
+    if (
+      source &&
+      destination &&
+      (categoryName === "deposit" || categoryName === "withdraw")
+    ) {
+      // Subtract from source
+      const updatedSource = await Destination.findByIdAndUpdate(
+        source,
+        { $inc: { totalAmount: - finalAmount - exchangeLoss } },
         { new: true }
       );
+      if (!updatedSource)
+        throw new Error("Source not found to update totalAmount");
 
-      if (!updatedDestination) {
+      // Add to destination
+      const updatedDestination = await Destination.findByIdAndUpdate(
+        destination,
+        { $inc: { totalAmount: amount } },
+        { new: true }
+      );
+      if (!updatedDestination)
         throw new Error("Destination not found to update totalAmount");
-      }
+    } else if (destination) {
+      // ✅ Only update destination if no transfer involved
+      const updatedDestination = await Destination.findByIdAndUpdate(
+        destination,
+        { $inc: { totalAmount: amount } },
+        { new: true }
+      );
+      if (!updatedDestination)
+        throw new Error("Destination not found to update totalAmount");
     }
 
-    // Populate transaction for response
+    // ✅ Populate and return the saved transaction
     const populatedTransaction = await Transaction.findById(transaction._id)
       .populate("categoryType", "name")
       .populate("source", "name")
@@ -68,6 +96,7 @@ router.post("/transaction", async (req, res) => {
 });
 
 // Get all transactions with pagination and filtering
+
 router.get("/transaction", async (req, res) => {
   try {
     const {
@@ -105,15 +134,20 @@ router.get("/transaction", async (req, res) => {
       .skip((page - 1) * limit);
 
     const total = await Transaction.countDocuments(query);
-    console.log("values of transactions", transactions);
+
+    // ✅ Get full list of destinations
+    const updatedDestinations = await Destination.find();
+
     res.json({
       success: true,
       data: transactions,
+      destinations: updatedDestinations, // ✅ Include in response
       totalPages: Math.ceil(total / limit),
       currentPage: parseInt(page),
       total,
     });
   } catch (error) {
+    console.error("Transaction fetch error:", error);
     res.status(500).json({
       success: false,
       message: error.message,
