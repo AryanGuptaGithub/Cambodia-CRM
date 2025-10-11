@@ -100,7 +100,7 @@ router.get("/accounts/alternative", async (req, res) => {
       customerAddress: sale.customerAddress || "N/A",
       amount: sale.dueAmount,
     }));
-    console.log('valuesof transformedSales', transformedSales);
+    
     res.json({
       success: true,
       data: transformedSales,

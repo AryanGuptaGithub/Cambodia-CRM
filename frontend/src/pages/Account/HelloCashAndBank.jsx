@@ -296,28 +296,17 @@ const AddTransactionModal = ({
       }));
     }
 
-    // Handle invoice number change - Fetch sales data when invoice number changes
-    // if (field === "invoiceNumber") {
-    //   if (value && value.trim() !== "") {
-    //     fetchSalesData(value);
-    //   }
-    // }
-
-    // Handle category type change - Trigger sales fetch if we have invoice number
     if (field === "categoryType" && value && form.invoiceNumber) {
       fetchSalesData(form.invoiceNumber);
     }
 
-    // Clear destination when source is selected and vice versa
     if (field === "source" && value) {
       setForm((prev) => ({
         ...prev,
-        destination: "",
       }));
     } else if (field === "destination" && value) {
       setForm((prev) => ({
         ...prev,
-        source: "",
       }));
     }
 
@@ -400,38 +389,80 @@ const AddTransactionModal = ({
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
+const handleSubmit = async (e) => {
+  e.preventDefault();
 
-    if (!validateForm()) {
-      return;
-    }
+  if (!validateForm()) return;
 
-    // Prepare transaction data
-    const transactionData = {
-      ...form,
-      accountType: activeTab,
-    };
+  const amount = parseFloat(form.amount) || 0;
+  const exchangeLoss = parseFloat(form.exchangeLoss) || 0;
+  const finalAmount = amount - exchangeLoss;
 
-    if (!isEdit) {
-      transactionData.id = Date.now();
-    }
-
-    // Convert number fields
-    formFields.forEach((field) => {
-      if (
-        (field.key === "amount" ||
-          field.key === "exchangeLoss" ||
-          field.key === "finalAmount") &&
-        transactionData[field.key]
-      ) {
-        transactionData[field.key] = parseFloat(transactionData[field.key]);
-      }
-    });
-
-    onAddTransaction(transactionData, isEdit);
-    onClose();
+  // Only send the ObjectIds to the server
+  const transactionData = {
+    invoiceNumber: form.invoiceNumber,
+    categoryType: form.categoryType?._id || form.categoryType, // If full object is selected
+    source: form.source?._id || form.source,
+    destination: form.destination?._id || form.destination || null,
+    date: form.date,
+    invoiceDate: form.invoiceDate,
+    customerName: form.customerName,
+    customerAddress: form.customerAddress,
+    amount,
+    exchangeLoss,
+    finalAmount,
+    accountType: activeTab,
+    description: form.description,
   };
+
+  try {
+    const response = await axios.post(`${backendUrl}/api/transaction`, transactionData);
+
+    if (response.data.success) {
+      onAddTransaction(response.data.data, isEdit);
+      onClose();
+    }
+  } catch (err) {
+    console.error("Transaction submission error:", err);
+    alert(
+      "Failed to submit transaction: " +
+        (err.response?.data?.message || err.message)
+    );
+  }
+};
+
+  // const handleSubmit = (e) => {
+  //   e.preventDefault();
+
+  //   if (!validateForm()) {
+  //     return;
+  //   }
+
+  //   // Prepare transaction data
+  //   const transactionData = {
+  //     ...form,
+  //     accountType: activeTab,
+  //   };
+
+  //   if (!isEdit) {
+  //     transactionData.id = Date.now();
+  //   }
+
+  //   // Convert number fields
+  //   formFields.forEach((field) => {
+  //     if (
+  //       (field.key === "amount" ||
+  //         field.key === "exchangeLoss" ||
+  //         field.key === "finalAmount") &&
+  //       transactionData[field.key]
+  //     ) {
+  //       transactionData[field.key] = parseFloat(transactionData[field.key]);
+  //     }
+  //   });
+
+  //   onAddTransaction(transactionData, isEdit);
+  //   onClose();
+  // };
 
   // Handle numeric input for text fields
   const handleNumericInputChange = (e, field) => {
@@ -521,7 +552,6 @@ const AddTransactionModal = ({
       );
     }
 
-    
     const isCategoryTypeDisabled =
       field.key === "categoryType" &&
       (!form.invoiceNumber || form.invoiceNumber.trim() === "");
