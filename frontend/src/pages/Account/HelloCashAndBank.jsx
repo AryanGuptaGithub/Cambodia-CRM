@@ -194,7 +194,14 @@ const AddTransactionModal = ({
   useEffect(() => {
     if (isOpen) {
       if (isEdit && editData) {
-        setForm(editData);
+        // FIXED: Handle populated data from backend
+        const processedEditData = {
+          ...editData,
+          categoryType: editData.categoryType?._id || editData.categoryType,
+          source: editData.source?._id || editData.source,
+          destination: editData.destination?._id || editData.destination,
+        };
+        setForm(processedEditData);
       } else {
         setForm(initializeFormData());
       }
@@ -229,7 +236,6 @@ const AddTransactionModal = ({
 
   // Fetch sales data when invoice number is entered AND category type is selected
   const fetchSalesData = async (invoiceNumber) => {
-    // FIXED: Remove the condition that prevents API call
     if (!invoiceNumber || invoiceNumber.trim() === "") {
       return;
     }
@@ -246,7 +252,6 @@ const AddTransactionModal = ({
       );
       const salesData = salesResponse.data;
 
-      // FIXED: Check the correct response structure
       if (salesData.data.length > 0) {
         // Auto-fill with the first matching record
         const saleRecord = salesData.data[0];
@@ -389,80 +394,47 @@ const AddTransactionModal = ({
     return Object.keys(newErrors).length === 0;
   };
 
-const handleSubmit = async (e) => {
-  e.preventDefault();
+  const handleSubmit = async (e) => {
+    e.preventDefault();
 
-  if (!validateForm()) return;
+    if (!validateForm()) return;
 
-  const amount = parseFloat(form.amount) || 0;
-  const exchangeLoss = parseFloat(form.exchangeLoss) || 0;
-  const finalAmount = amount - exchangeLoss;
+    const amount = parseFloat(form.amount) || 0;
+    const exchangeLoss = parseFloat(form.exchangeLoss) || 0;
+    const finalAmount = amount - exchangeLoss;
 
-  // Only send the ObjectIds to the server
-  const transactionData = {
-    invoiceNumber: form.invoiceNumber,
-    categoryType: form.categoryType?._id || form.categoryType, // If full object is selected
-    source: form.source?._id || form.source,
-    destination: form.destination?._id || form.destination || null,
-    date: form.date,
-    invoiceDate: form.invoiceDate,
-    customerName: form.customerName,
-    customerAddress: form.customerAddress,
-    amount,
-    exchangeLoss,
-    finalAmount,
-    accountType: activeTab,
-    description: form.description,
-  };
+    // Only send the ObjectIds to the server
+    const transactionData = {
+      invoiceNumber: form.invoiceNumber,
+      categoryType: form.categoryType,
+      source: form.source,
+      destination: form.destination || null,
+      date: form.date,
+      invoiceDate: form.invoiceDate,
+      customerName: form.customerName,
+      customerAddress: form.customerAddress,
+      amount,
+      exchangeLoss,
+      finalAmount,
+      accountType: activeTab,
+      description: form.description,
+    };
 
-  try {
-    const response = await axios.post(`${backendUrl}/api/transaction`, transactionData);
+    try {
+      const response = await axios.post(`${backendUrl}/api/transaction`, transactionData);
 
-    if (response.data.success) {
-      onAddTransaction(response.data.data, isEdit);
-      onClose();
+      if (response.data.success) {
+        onAddTransaction(response.data.data, isEdit);
+        onClose();
+      }
+    } catch (err) {
+      console.error("Transaction submission error:", err);
+      alert(
+        "Failed to submit transaction: " +
+          (err.response?.data?.message || err.message)
+      );
     }
-  } catch (err) {
-    console.error("Transaction submission error:", err);
-    alert(
-      "Failed to submit transaction: " +
-        (err.response?.data?.message || err.message)
-    );
-  }
-};
-
-  // const handleSubmit = (e) => {
-  //   e.preventDefault();
-
-  //   if (!validateForm()) {
-  //     return;
-  //   }
-
-  //   // Prepare transaction data
-  //   const transactionData = {
-  //     ...form,
-  //     accountType: activeTab,
-  //   };
-
-  //   if (!isEdit) {
-  //     transactionData.id = Date.now();
-  //   }
-
-  //   // Convert number fields
-  //   formFields.forEach((field) => {
-  //     if (
-  //       (field.key === "amount" ||
-  //         field.key === "exchangeLoss" ||
-  //         field.key === "finalAmount") &&
-  //       transactionData[field.key]
-  //     ) {
-  //       transactionData[field.key] = parseFloat(transactionData[field.key]);
-  //     }
-  //   });
-
-  //   onAddTransaction(transactionData, isEdit);
-  //   onClose();
-  // };
+  };
 
   // Handle numeric input for text fields
   const handleNumericInputChange = (e, field) => {
@@ -709,8 +681,6 @@ const handleSubmit = async (e) => {
   );
 };
 
-// ... (rest of the CashandBank component remains exactly the same)
-
 const CashandBank = () => {
   const [activeTab, setActiveTab] = useState("Cash Balance");
   const [searchTerm, setSearchTerm] = useState("");
@@ -784,7 +754,6 @@ const CashandBank = () => {
         name: "Final Amount",
         dbName: "finalAmount",
       },
-
       {
         id: "date",
         name: "Date",
@@ -803,14 +772,6 @@ const CashandBank = () => {
     ],
     []
   );
-
-  const requiredColumns = [
-    "categoryType",
-    "source",
-    "amount",
-    "date",
-    "actions",
-  ];
 
   const currentData = data[activeTab] || [];
 
@@ -837,6 +798,20 @@ const CashandBank = () => {
     0
   );
   const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
+
+  // Helper function to safely extract display value
+  const getDisplayValue = (value, options) => {
+    if (!value) return "--";
+    
+    // If value is an object (populated data from backend)
+    if (typeof value === 'object' && value !== null) {
+      return value.name || value.label || "--";
+    }
+    
+    // If value is a string (ID), find the label from options
+    const option = options.find((opt) => opt.value === value);
+    return option ? option.label : value;
+  };
 
   // Handle adding new transaction
   const handleAddTransaction = (transactionData, isEdit = false) => {
@@ -911,12 +886,6 @@ const CashandBank = () => {
     }
   };
 
-  // Helper function to get label from value
-  const getLabelFromValue = (value, options) => {
-    const option = options.find((opt) => opt.value === value);
-    return option ? option.label : value;
-  };
-
   // Render cell content based on field type
   const renderCellContent = (item, field) => {
     const value = item[field.dbName];
@@ -949,13 +918,13 @@ const CashandBank = () => {
             value >= 0 ? "text-green-700" : "text-red-600"
           }`}
         >
-          {value >= 0 ? "+" : ""}₹{Math.abs(value).toFixed(2)}
+          {value >= 0 ? "+" : ""}₹{Math.abs(value || 0).toFixed(2)}
         </span>
       );
     }
 
     if (field.dbName === "categoryType") {
-      const displayValue = getLabelFromValue(value, categoryOptions);
+      const displayValue = getDisplayValue(value, categoryOptions);
       return (
         <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
           {displayValue}
@@ -964,7 +933,7 @@ const CashandBank = () => {
     }
 
     if (field.dbName === "source" || field.dbName === "destination") {
-      const displayValue = getLabelFromValue(value, sourceOptions);
+      const displayValue = getDisplayValue(value, sourceOptions);
       const colorClass =
         field.dbName === "source"
           ? "bg-green-50 text-green-700"
@@ -982,7 +951,8 @@ const CashandBank = () => {
       return value ? new Date(value).toLocaleDateString() : "--";
     }
 
-    return value || "--";
+    // Handle all other fields safely
+    return value ? value.toString() : "--";
   };
 
   // Export functionality
@@ -997,21 +967,21 @@ const CashandBank = () => {
           .map((field) => {
             const value = item[field.dbName];
             if (field.dbName === "amount" || field.dbName === "finalAmount") {
-              return `"${value >= 0 ? "+" : ""}₹${Math.abs(value).toFixed(2)}"`;
+              return `"${value >= 0 ? "+" : ""}₹${Math.abs(value || 0).toFixed(2)}"`;
             }
             if (
               field.dbName === "categoryType" ||
               field.dbName === "source" ||
               field.dbName === "destination"
             ) {
-              return `"${getLabelFromValue(
+              return `"${getDisplayValue(
                 value,
                 field.dbName === "categoryType"
                   ? categoryOptions
                   : sourceOptions
               )}"`;
             }
-            return `"${value}"`;
+            return `"${value || ""}"`;
           })
           .join(",")
       ),
@@ -1112,7 +1082,7 @@ const CashandBank = () => {
           <div className="flex gap-2">
             {accountTypes.map((tab) => (
               <button
-                key={tab}
+                key={`tab-${tab}`}
                 onClick={() => {
                   setActiveTab(tab);
                   setCurrentPage(1);
@@ -1179,7 +1149,7 @@ const CashandBank = () => {
                   .filter((field) => field.id !== "actions")
                   .map((field) => (
                     <th
-                      key={field.id}
+                      key={`header-${field.id}`}
                       className="p-3 whitespace-nowrap min-w-[120px]"
                     >
                       {field.id === "invoiceNumber" ? (
@@ -1204,12 +1174,12 @@ const CashandBank = () => {
                       )}
                     </th>
                   ))}
-                <th className="p-3 whitespace-nowrap min-w-[150px]">Actions</th>
+                <th key="header-actions" className="p-3 whitespace-nowrap min-w-[150px]">Actions</th>
               </tr>
             </thead>
             <tbody>
               {paginatedData.length === 0 ? (
-                <tr>
+                <tr key="empty-row">
                   <td
                     colSpan={allFields.length}
                     className="p-4 text-center text-gray-500"
@@ -1222,7 +1192,7 @@ const CashandBank = () => {
               ) : (
                 paginatedData.map((item, index) => (
                   <tr
-                    key={item.id}
+                    key={`row-${item.id || index}`}
                     className={`hover:bg-gray-50 ${
                       index < paginatedData.length - 1 ? "border-b" : ""
                     }`}
@@ -1231,7 +1201,7 @@ const CashandBank = () => {
                       .filter((field) => field.id !== "actions")
                       .map((field) => (
                         <td
-                          key={field.id}
+                          key={`cell-${item.id}-${field.id}`}
                           className="p-3 whitespace-nowrap min-w-[120px]"
                         >
                           {field.id === "invoiceNumber" ? (
@@ -1250,7 +1220,7 @@ const CashandBank = () => {
                           )}
                         </td>
                       ))}
-                    <td className="p-3 whitespace-nowrap min-w-[150px]">
+                    <td key={`actions-${item.id}`} className="p-3 whitespace-nowrap min-w-[150px]">
                       {renderCellContent(
                         item,
                         allFields.find((field) => field.id === "actions")
@@ -1276,7 +1246,7 @@ const CashandBank = () => {
 
             {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
               <button
-                key={page}
+                key={`page-${page}`}
                 onClick={() => setCurrentPage(page)}
                 className={`px-3 py-1 rounded cursor-pointer ${
                   currentPage === page
@@ -1302,6 +1272,7 @@ const CashandBank = () => {
 
         {/* Add Transaction Modal */}
         <AddTransactionModal
+          key="add-modal"
           isOpen={isModalOpen}
           onClose={() => setIsModalOpen(false)}
           activeTab={activeTab}
@@ -1313,6 +1284,7 @@ const CashandBank = () => {
 
         {/* Edit Transaction Modal */}
         <AddTransactionModal
+          key="edit-modal"
           isOpen={isEditModalOpen}
           onClose={() => {
             setIsEditModalOpen(false);
