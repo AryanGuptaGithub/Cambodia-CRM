@@ -194,7 +194,7 @@ const AddTransactionModal = ({
   useEffect(() => {
     if (isOpen) {
       if (isEdit && editData) {
-        // FIXED: Handle populated data from backend
+        // Handle populated data from backend
         const processedEditData = {
           ...editData,
           categoryType: editData.categoryType?._id || editData.categoryType,
@@ -215,7 +215,7 @@ const AddTransactionModal = ({
       const amount = parseFloat(form.amount) || 0;
       const exchangeLoss = parseFloat(form.exchangeLoss) || 0;
 
-      // FIXED: Only calculate final amount for deposit categories
+      // Only calculate final amount for deposit categories
       if (shouldShowExchangeLossField()) {
         // For deposit categories: Final Amount = Amount - Exchange Loss
         const finalAmount = amount - exchangeLoss;
@@ -352,14 +352,14 @@ const AddTransactionModal = ({
       }
 
       // Source is always required
-      if (field.key === "source") {
+      if (field.key === "destination") {
         if (!form[field.key]) {
           newErrors[field.key] = `${field.label} is required`;
         }
       }
 
       // Destination is required only when shown
-      if (field.key === "destination" && shouldShowDestinationField()) {
+      if (field.key === "source" && shouldShowDestinationField()) {
         if (!form[field.key]) {
           newErrors[
             field.key
@@ -421,7 +421,10 @@ const AddTransactionModal = ({
     };
 
     try {
-      const response = await axios.post(`${backendUrl}/api/transaction`, transactionData);
+      const response = await axios.post(
+        `${backendUrl}/api/transaction`,
+        transactionData
+      );
 
       if (response.data.success) {
         onAddTransaction(response.data.data, isEdit);
@@ -688,9 +691,12 @@ const CashandBank = () => {
   const [exportLoading, setExportLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [data, setData] = useState({});
+  const [data, setData] = useState([]);
   const [selected, setSelected] = useState([]);
   const [editingTransaction, setEditingTransaction] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [totalPages, setTotalPages] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
 
   // Fetch dropdown options from backend
   const {
@@ -700,6 +706,40 @@ const CashandBank = () => {
     loading: optionsLoading,
     error: optionsError,
   } = useDropdownOptions();
+
+  // Fetch transactions from backend
+  const fetchTransactions = async () => {
+    try {
+      setLoading(true);
+      const params = {
+        page: currentPage,
+        limit: ITEMS_PER_PAGE,
+        accountType: activeTab,
+        ...(searchTerm && { search: searchTerm }),
+      };
+
+      const response = await axios.get(`${backendUrl}/api/transaction`, {
+        params,
+      });
+
+      if (response.data.success) {
+        setData(response.data.data);
+        setTotalPages(response.data.totalPages);
+        setTotalCount(response.data.total);
+      }
+    } catch (error) {
+      console.error("Error fetching transactions:", error);
+      showToast("error", "Failed to fetch transactions");
+      setData([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Fetch transactions when component mounts or filters change
+  useEffect(() => {
+    fetchTransactions();
+  }, [activeTab, searchTerm, currentPage]);
 
   // Define table columns using useMemo
   const allFields = useMemo(
@@ -773,62 +813,50 @@ const CashandBank = () => {
     []
   );
 
-  const currentData = data[activeTab] || [];
+  // Use data directly from backend
+  const currentData = data || [];
 
-  const filteredData = currentData.filter((item) => {
-    if (!searchTerm) return true;
-
-    const searchFields =
-      activeTab === "Personal Account"
-        ? ["description", "categoryType"]
-        : ["invoiceNumber", "customerName"];
-
-    return searchFields.some((field) =>
-      item[field]?.toString().toLowerCase().includes(searchTerm.toLowerCase())
-    );
-  });
-
-  const paginatedData = filteredData.slice(
-    (currentPage - 1) * ITEMS_PER_PAGE,
-    currentPage * ITEMS_PER_PAGE
-  );
-
-  const totalAmount = filteredData.reduce(
+  const totalAmount = currentData.reduce(
     (sum, item) => sum + (item.amount || 0),
     0
   );
-  const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
 
   // Helper function to safely extract display value
   const getDisplayValue = (value, options) => {
     if (!value) return "--";
-    
+
     // If value is an object (populated data from backend)
-    if (typeof value === 'object' && value !== null) {
+    if (typeof value === "object" && value !== null) {
       return value.name || value.label || "--";
     }
-    
+
     // If value is a string (ID), find the label from options
     const option = options.find((opt) => opt.value === value);
     return option ? option.label : value;
   };
 
   // Handle adding new transaction
-  const handleAddTransaction = (transactionData, isEdit = false) => {
-    if (isEdit && editingTransaction) {
-      setData((prev) => ({
-        ...prev,
-        [activeTab]: prev[activeTab].map((item) =>
-          item.id === editingTransaction.id
-            ? { ...transactionData, id: editingTransaction.id }
-            : item
-        ),
-      }));
-    } else {
-      setData((prev) => ({
-        ...prev,
-        [activeTab]: [...(prev[activeTab] || []), transactionData],
-      }));
+  const handleAddTransaction = async (transactionData, isEdit = false) => {
+    try {
+      if (isEdit && editingTransaction) {
+        // Update transaction
+        const response = await axios.put(
+          `${backendUrl}/api/transaction/${editingTransaction._id}`,
+          transactionData
+        );
+
+        if (response.data.success) {
+          showToast("success", "Transaction updated successfully");
+          fetchTransactions(); // Refresh data
+        }
+      } else {
+        // Add new transaction - already handled in modal
+        showToast("success", "Transaction added successfully");
+        fetchTransactions(); // Refresh data
+      }
+    } catch (error) {
+      console.error("Error saving transaction:", error);
+      showToast("error", "Failed to save transaction");
     }
   };
 
@@ -839,19 +867,26 @@ const CashandBank = () => {
   };
 
   // Handle delete transaction
-  const handleDelete = (transaction) => {
+  const handleDelete = async (transaction) => {
     if (window.confirm(`Are you sure you want to delete this transaction?`)) {
-      setData((prev) => ({
-        ...prev,
-        [activeTab]: prev[activeTab].filter(
-          (item) => item.id !== transaction.id
-        ),
-      }));
+      try {
+        const response = await axios.delete(
+          `${backendUrl}/api/transaction/${transaction._id}`
+        );
+
+        if (response.data.success) {
+          showToast("success", "Transaction deleted successfully");
+          fetchTransactions(); // Refresh data
+        }
+      } catch (error) {
+        console.error("Error deleting transaction:", error);
+        showToast("error", "Failed to delete transaction");
+      }
     }
   };
 
   // Handle delete selected transactions
-  const handleDeleteSelected = () => {
+  const handleDeleteSelected = async () => {
     if (selected.length === 0) return;
 
     if (
@@ -859,28 +894,38 @@ const CashandBank = () => {
         `Are you sure you want to delete ${selected.length} selected transactions?`
       )
     ) {
-      setData((prev) => ({
-        ...prev,
-        [activeTab]: prev[activeTab].filter(
-          (item) => !selected.includes(item.id)
-        ),
-      }));
-      setSelected([]);
+      try {
+        // Delete multiple transactions
+        const deletePromises = selected.map((id) =>
+          axios.delete(`${backendUrl}/api/transaction/${id}`)
+        );
+
+        await Promise.all(deletePromises);
+        showToast(
+          "success",
+          `${selected.length} transactions deleted successfully`
+        );
+        setSelected([]);
+        fetchTransactions(); // Refresh data
+      } catch (error) {
+        console.error("Error deleting transactions:", error);
+        showToast("error", "Failed to delete some transactions");
+      }
     }
   };
 
   // Handle selection
   const toggleSelect = (item) => {
     setSelected((prev) =>
-      prev.some((s) => s === item.id)
-        ? prev.filter((s) => s !== item.id)
-        : [...prev, item.id]
+      prev.some((s) => s === item._id)
+        ? prev.filter((s) => s !== item._id)
+        : [...prev, item._id]
     );
   };
 
   const toggleSelectAll = (checked) => {
     if (checked) {
-      setSelected(paginatedData.map((r) => r.id));
+      setSelected(currentData.map((r) => r._id));
     } else {
       setSelected([]);
     }
@@ -958,48 +1003,36 @@ const CashandBank = () => {
   // Export functionality
   const handleExport = async () => {
     setExportLoading(true);
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    try {
+      const response = await axios.get(`${backendUrl}/api/transaction/export`, {
+        params: {
+          accountType: activeTab,
+          ...(searchTerm && { search: searchTerm }),
+        },
+        responseType: "blob",
+      });
 
-    const csvContent = [
-      allFields.map((field) => field.name).join(","),
-      ...filteredData.map((item) =>
-        allFields
-          .map((field) => {
-            const value = item[field.dbName];
-            if (field.dbName === "amount" || field.dbName === "finalAmount") {
-              return `"${value >= 0 ? "+" : ""}₹${Math.abs(value || 0).toFixed(2)}"`;
-            }
-            if (
-              field.dbName === "categoryType" ||
-              field.dbName === "source" ||
-              field.dbName === "destination"
-            ) {
-              return `"${getDisplayValue(
-                value,
-                field.dbName === "categoryType"
-                  ? categoryOptions
-                  : sourceOptions
-              )}"`;
-            }
-            return `"${value || ""}"`;
-          })
-          .join(",")
-      ),
-    ].join("\n");
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute(
+        "download",
+        `transactions_${activeTab}_${
+          new Date().toISOString().split("T")[0]
+        }.csv`
+      );
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
 
-    const blob = new Blob([csvContent], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${activeTab.replace(/\s+/g, "_")}_${
-      new Date().toISOString().split("T")[0]
-    }.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-
-    setExportLoading(false);
+      showToast("success", "Export completed successfully");
+    } catch (error) {
+      console.error("Error exporting transactions:", error);
+      showToast("error", "Failed to export transactions");
+    } finally {
+      setExportLoading(false);
+    }
   };
 
   const handleSearchChange = (e) => {
@@ -1014,6 +1047,14 @@ const CashandBank = () => {
       : "Search by Invoice Number or Customer";
   };
 
+  // Handle tab change
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+    setCurrentPage(1);
+    setSearchTerm("");
+    setSelected([]);
+  };
+
   return (
     <div className="p-6">
       <div className="container">
@@ -1022,11 +1063,15 @@ const CashandBank = () => {
         </div>
 
         {/* Show loading state */}
-        {optionsLoading && (
+        {(optionsLoading || loading) && (
           <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
             <div className="flex items-center gap-3">
               <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
-              <span className="text-blue-700">Loading transaction data...</span>
+              <span className="text-blue-700">
+                {loading
+                  ? "Loading transactions..."
+                  : "Loading dropdown options..."}
+              </span>
             </div>
           </div>
         )}
@@ -1068,7 +1113,7 @@ const CashandBank = () => {
 
           <button
             onClick={handleExport}
-            disabled={exportLoading}
+            disabled={exportLoading || currentData.length === 0}
             className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50"
           >
             <Download size={18} />
@@ -1083,12 +1128,7 @@ const CashandBank = () => {
             {accountTypes.map((tab) => (
               <button
                 key={`tab-${tab}`}
-                onClick={() => {
-                  setActiveTab(tab);
-                  setCurrentPage(1);
-                  setSearchTerm("");
-                  setSelected([]);
-                }}
+                onClick={() => handleTabChange(tab)}
                 className={`px-4 py-2 rounded-lg capitalize transition-colors ${
                   activeTab === tab
                     ? "bg-indigo-600 text-white shadow-md"
@@ -1105,7 +1145,7 @@ const CashandBank = () => {
             <p className="text-lg font-semibold text-gray-700">
               Total Count:{" "}
               <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-                {filteredData.length}
+                {totalCount}
               </span>
             </p>
             <div className="relative w-full md:w-72">
@@ -1135,6 +1175,9 @@ const CashandBank = () => {
                 <div className="text-2xl font-bold text-indigo-700">
                   ₹{totalAmount.toFixed(2)}
                 </div>
+                <div className="text-sm text-gray-600">
+                  Showing {currentData.length} of {totalCount} transactions
+                </div>
               </div>
             </div>
           </div>
@@ -1154,13 +1197,13 @@ const CashandBank = () => {
                     >
                       {field.id === "invoiceNumber" ? (
                         <div className="flex items-center gap-4">
-                          {paginatedData.length > 0 && (
+                          {currentData.length > 0 && (
                             <input
                               type="checkbox"
                               aria-label="Select all transactions"
                               checked={
-                                selected.length === paginatedData.length &&
-                                paginatedData.length > 0
+                                selected.length === currentData.length &&
+                                currentData.length > 0
                               }
                               onChange={(e) =>
                                 toggleSelectAll(e.target.checked)
@@ -1174,41 +1217,48 @@ const CashandBank = () => {
                       )}
                     </th>
                   ))}
-                <th key="header-actions" className="p-3 whitespace-nowrap min-w-[150px]">Actions</th>
+                <th
+                  key="header-actions"
+                  className="p-3 whitespace-nowrap min-w-[150px]"
+                >
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody>
-              {paginatedData.length === 0 ? (
+              {currentData.length === 0 ? (
                 <tr key="empty-row">
                   <td
                     colSpan={allFields.length}
                     className="p-4 text-center text-gray-500"
                   >
-                    {searchTerm
+                    {loading
+                      ? "Loading transactions..."
+                      : searchTerm
                       ? "No transactions match your search."
                       : "No transactions found."}
                   </td>
                 </tr>
               ) : (
-                paginatedData.map((item, index) => (
+                currentData.map((item, index) => (
                   <tr
-                    key={`row-${item.id || index}`}
+                    key={`row-${item._id || index}`}
                     className={`hover:bg-gray-50 ${
-                      index < paginatedData.length - 1 ? "border-b" : ""
+                      index < currentData.length - 1 ? "border-b" : ""
                     }`}
                   >
                     {allFields
                       .filter((field) => field.id !== "actions")
                       .map((field) => (
                         <td
-                          key={`cell-${item.id}-${field.id}`}
+                          key={`cell-${item._id}-${field.id}`}
                           className="p-3 whitespace-nowrap min-w-[120px]"
                         >
                           {field.id === "invoiceNumber" ? (
                             <div className="flex items-center gap-4">
                               <input
                                 type="checkbox"
-                                checked={selected.includes(item.id)}
+                                checked={selected.includes(item._id)}
                                 onChange={() => toggleSelect(item)}
                               />
                               <span className="capitalize">
@@ -1220,7 +1270,10 @@ const CashandBank = () => {
                           )}
                         </td>
                       ))}
-                    <td key={`actions-${item.id}`} className="p-3 whitespace-nowrap min-w-[150px]">
+                    <td
+                      key={`actions-${item._id}`}
+                      className="p-3 whitespace-nowrap min-w-[150px]"
+                    >
                       {renderCellContent(
                         item,
                         allFields.find((field) => field.id === "actions")
@@ -1234,39 +1287,47 @@ const CashandBank = () => {
         </div>
 
         {/* Pagination */}
-        {filteredData.length > 0 && (
-          <div className="mt-4 p-5 flex justify-start gap-2">
-            <button
-              onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-              disabled={currentPage === 1}
-              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-            >
-              Prev
-            </button>
-
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+        {totalPages > 1 && (
+          <div className="mt-4 p-5 flex justify-between items-center">
+            <div className="text-sm text-gray-600">
+              Page {currentPage} of {totalPages} • {totalCount} total
+              transactions
+            </div>
+            <div className="flex gap-2">
               <button
-                key={`page-${page}`}
-                onClick={() => setCurrentPage(page)}
-                className={`px-3 py-1 rounded cursor-pointer ${
-                  currentPage === page
-                    ? "bg-indigo-600 text-white"
-                    : "bg-gray-200 hover:bg-gray-300"
-                }`}
+                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
               >
-                {page}
+                Prev
               </button>
-            ))}
 
-            <button
-              onClick={() =>
-                setCurrentPage((prev) => Math.min(prev + 1, totalPages))
-              }
-              disabled={currentPage === totalPages}
-              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-            >
-              Next
-            </button>
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map(
+                (page) => (
+                  <button
+                    key={`page-${page}`}
+                    onClick={() => setCurrentPage(page)}
+                    className={`px-3 py-1 rounded cursor-pointer ${
+                      currentPage === page
+                        ? "bg-indigo-600 text-white"
+                        : "bg-gray-200 hover:bg-gray-300"
+                    }`}
+                  >
+                    {page}
+                  </button>
+                )
+              )}
+
+              <button
+                onClick={() =>
+                  setCurrentPage((prev) => Math.min(prev + 1, totalPages))
+                }
+                disabled={currentPage === totalPages}
+                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+              >
+                Next
+              </button>
+            </div>
           </div>
         )}
 
