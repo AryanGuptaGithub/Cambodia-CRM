@@ -119,28 +119,55 @@ const CustomDropdown = ({
   disabled,
   placeholder,
 }) => {
+  const [isOpen, setIsOpen] = useState(false);
+
+  const handleSelect = (optionValue) => {
+    onChange({ target: { value: optionValue } });
+    setIsOpen(false);
+  };
+
+  const selectedOption = options.find((opt) => opt.value === value);
+
   return (
-    <div className="relative">
-      <select
-        value={value}
-        onChange={onChange}
-        className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
+    <div className="relative w-full">
+      <button
+        type="button"
+        onClick={() => !disabled && setIsOpen(!isOpen)}
+        className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 text-left ${
           error ? "border-red-500" : "border-gray-300"
-        } ${disabled ? "bg-gray-100 cursor-not-allowed" : ""}`}
-        
-        // Show only 3 items at a time, rest will scroll
+        } ${
+          disabled
+            ? "bg-gray-100 cursor-not-allowed"
+            : "bg-white cursor-pointer"
+        }`}
+        disabled={disabled || options.length === 0}
       >
-        <option value="">
-          {options.length === 0
-            ? "Loading..."
-            : placeholder || "Select an option"}
-        </option>
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
+        {selectedOption
+          ? selectedOption.label
+          : options.length === 0
+          ? "Loading..."
+          : placeholder || "Select an option"}
+      </button>
+
+      {isOpen && !disabled && (
+        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto">
+          {options.length === 0 ? (
+            <div className="p-2 text-gray-500 text-sm">Loading options...</div>
+          ) : (
+            options.map((option) => (
+              <div
+                key={option.value}
+                onClick={() => handleSelect(option.value)}
+                className={`p-2 cursor-pointer hover:bg-indigo-50 ${
+                  value === option.value ? "bg-indigo-100 text-indigo-700" : ""
+                }`}
+              >
+                {option.label}
+              </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 };
@@ -1203,7 +1230,7 @@ const CashandBank = () => {
 
   const fetchTransactions = async () => {
     try {
-      setLoading(true);
+      //   setLoading(true);
 
       const params = {
         page: currentPage,
@@ -1280,7 +1307,6 @@ const CashandBank = () => {
           fetchTransactions(); // Refresh data
         }
       } else {
-        // Add new transaction - already handled in modal
         showToast("success", "Transaction added successfully");
         fetchTransactions(); // Refresh data
       }

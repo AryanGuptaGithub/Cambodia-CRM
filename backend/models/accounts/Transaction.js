@@ -22,7 +22,7 @@ const transactionSchema = new mongoose.Schema(
     destination: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Destination", // ✅ Same here
-      required: true,
+      required: false,
       default: null,
     },
     date: {

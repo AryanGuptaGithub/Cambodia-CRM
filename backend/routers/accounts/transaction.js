@@ -84,7 +84,7 @@ router.post("/transaction", async (req, res) => {
     res.status(201).json({
       success: true,
       data: populatedTransaction,
-      message: "Transaction created successfully",
+      message: `Transaction created successfully in <b>${destination.name}</b>`,
     });
   } catch (error) {
     console.error("Transaction submission error:", error.message);
