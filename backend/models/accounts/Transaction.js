@@ -5,7 +5,7 @@ const transactionSchema = new mongoose.Schema(
   {
     invoiceNumber: {
       type: String,
-      required: true,
+      required: false,
       trim: true,
     },
     categoryType: {
@@ -31,16 +31,16 @@ const transactionSchema = new mongoose.Schema(
     },
     invoiceDate: {
       type: Date,
-      required: true,
+      required: false,
     },
     customerName: {
       type: String,
-      required: true,
+      required: false,
       trim: true,
     },
     customerAddress: {
       type: String,
-      trim: true,
+      trim: false,
     },
     amount: {
       type: Number,

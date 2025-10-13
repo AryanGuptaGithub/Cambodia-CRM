@@ -27,6 +27,8 @@ import purchaseReturn from "./routers/purcharsing/purchaseReturn.js";
 import PurchaseOut from "./routers/purcharsing/paymentOut.js";
 import Accounts from "./routers/accounts/accounts.js";
 import Transaction from "./routers/accounts/transaction.js";
+import addExpenseCategary from "./routers/expenses/addExpenseCategary.js";
+import addExpense from "./routers/expenses/addExpense.js";
 
 dotenv.config(); // Load environment variables
 
@@ -87,6 +89,8 @@ app.use("/api", purchaseReturn);
 app.use("/api", PurchaseOut);
 app.use("/api", Accounts);
 app.use("/api", Transaction);
+app.use("/api", addExpenseCategary);
+app.use("/api", addExpense);
 
 // Server listener
 app.listen(PORT, () => {

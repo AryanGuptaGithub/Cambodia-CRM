@@ -79,6 +79,8 @@ import AddDailySummaryReports from "./pages/Reports/AddNewSaleSummaryReports";
 import AddDailReports from "./pages/Reports/AddDailyReports";
 import AddReturnSale from "./pages/Sale/addSaleReturn";
 import AddReturnPurchase from "./pages/Purchase/addReturnPurchase";
+import AddExpenseCategory from "./pages/Expense/addExpenseCategory";
+import AddExpense from "./pages/Expense/addExpense";
 
 // Import new Cash and Bank components
 import CashAndBankLayout from "./pages/CashAndBankLayout";
@@ -103,11 +105,10 @@ function App() {
           <Route path="/stockadjustment" element={<StocjAdjustment />} />
           <Route path="/stocktransfer" element={<StockTransfer />} />
           <Route path="/stocktransferform" element={<StockTransferForm />} />
-          
+
           {/* Updated Cash and Bank Route with Layout */}
           <Route path="/accountlayout" element={<CashAndBankLayout />}>
             <Route index element={<HelloCashAndBank />} />
-   
           </Route>
 
           <Route path="/staffmemberLayout" element={<StaffMemberLayout />}>
@@ -161,11 +162,15 @@ function App() {
             <Route path="payment" element={<PaymentSale />} />
             <Route path="quotation" element={<Quotation />} />
           </Route>
+
           <Route path="/expenselayout" element={<ExepenseLayout />}>
-            <Route path="/expenselayout/expenses" element={<Expenses />} />
+            <Route path="expenses" element={<Expenses />} />
+            <Route path="expenses/new" element={<AddExpense />} />
+
+            <Route path="expensecategories" element={<ExpenseCategory />} />
             <Route
-              path="/expenselayout/expensecategories"
-              element={<ExpenseCategory />}
+              path="expensecategories/new"
+              element={<AddExpenseCategory />}
             />
           </Route>
 

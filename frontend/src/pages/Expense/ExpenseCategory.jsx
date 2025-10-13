@@ -1,125 +1,635 @@
-import React, { useState } from "react";
-import { Plus, Edit, Trash2 } from "lucide-react";
+// components/ExpenseCategory.jsx
+import React, { useState, useMemo, useCallback, useEffect } from "react";
+import { Plus, Edit, Trash2, Loader, X } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { confirmDialog } from "../../utils/confirmationDialog.js";
+import { showToast } from "../../utils/toast";
+import ReactDOM from "react-dom";
+
+const backendUrl = import.meta.env.VITE_BACKEND_URL;
+
+// API service functions
+const expenseCategoryAPI = {
+  // Fetch all categories
+  fetchExpenseCategories: async () => {
+    const response = await fetch(`${backendUrl}/api/expense-categary`);
+    if (!response.ok) {
+      throw new Error("Failed to fetch categories");
+    }
+    return response.json();
+  },
+
+  // Create new category
+  createExpenseCategory: async (categoryData) => {
+    const response = await fetch(`${backendUrl}/api/expense-categary`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(categoryData),
+    });
+    if (!response.ok) {
+      throw new Error("Failed to create category");
+    }
+    return response.json();
+  },
+
+  // Update category
+  updateExpenseCategory: async (id, categoryData) => {
+    const response = await fetch(`${backendUrl}/api/expense-categary/${id}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(categoryData),
+    });
+    if (!response.ok) {
+      throw new Error("Failed to update category");
+    }
+    return response.json();
+  },
+
+  // Delete category
+  deleteExpenseCategory: async (id) => {
+    const response = await fetch(`${backendUrl}/api/expense-categary/${id}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) {
+      throw new Error("Failed to delete category");
+    }
+    return response.json();
+  },
+};
 
 const ExpenseCategory = () => {
-  const [categories, setCategories] = useState([
-    { id: 1, category: "Office Supplies", description: "Stationery & office utilities", amount: 5000 },
-    { id: 2, category: "Travel", description: "Flight tickets & local transport", amount: 12000 },
-    { id: 3, category: "Utilities", description: "Electricity, water, internet bills", amount: 8000 },
-    { id: 4, category: "Marketing", description: "Online ads & promotion", amount: 15000 },
-    { id: 5, category: "Maintenance", description: "Repair & upkeep of office", amount: 3000 },
-  ]);
-
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
-  const rowsPerPage = 5;
+  const [editingId, setEditingId] = useState(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [form, setForm] = useState({
+    category: "",
+    description: "",
+    amountUntilYear: "",
+    amountMonthly: "",
+    isActive: true,
+  });
 
-  // Search filter
-  const filteredData = categories.filter(
-    (cat) =>
-      cat.category.toLowerCase().includes(search.toLowerCase()) ||
-      cat.description.toLowerCase().includes(search.toLowerCase())
+  const navigate = useNavigate();
+  const itemsPerPage = 5;
+
+  // Fetch categories on component mount
+  const fetchCategories = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const result = await expenseCategoryAPI.fetchExpenseCategories();
+
+      if (result.success) {
+        setCategories(result.data);
+      } else {
+        throw new Error(result.message || "Failed to fetch categories");
+      }
+    } catch (err) {
+      setError(err.message);
+      console.error("Error fetching categories:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchCategories();
+  }, [fetchCategories]);
+
+  // Edit category function
+  const editCategory = (category) => {
+    setForm({
+      ...category,
+      amountUntilYear: category.amountUntilYear || "",
+      amountMonthly: category.amountMonthly || "",
+    });
+    setEditingId(category._id);
+    setIsEditModalOpen(true);
+  };
+
+  // Handle form input changes
+  const handleChange = useCallback((e) => {
+    const { name, value, type, checked } = e.target;
+    setForm((prev) => ({
+      ...prev,
+      [name]: type === "checkbox" ? checked : value,
+    }));
+  }, []);
+
+  // Handle numeric input changes
+  const handleNumericInputChange = useCallback((e, onChangeFunc) => {
+    const { name, value } = e.target;
+    // Allow only numbers and decimal point
+    const numericValue = value.replace(/[^0-9.]/g, "");
+    onChangeFunc({
+      target: { name, value: numericValue },
+    });
+  }, []);
+
+  // Handle form submission for update
+  const handleUpdateCategory = useCallback(
+    async (e) => {
+      e.preventDefault();
+
+      try {
+        setLoading(true);
+        const updateData = {
+          ...form,
+          amountUntilYear: parseFloat(form.amountUntilYear) || 0,
+          amountMonthly: parseFloat(form.amountMonthly) || 0,
+        };
+
+        const result = await expenseCategoryAPI.updateExpenseCategory(
+          editingId,
+          updateData
+        );
+
+        if (result.success) {
+          showToast(
+            "success",
+            `Category <b>${form.category}</b> updated successfully`
+          );
+          setIsEditModalOpen(false);
+          setEditingId(null);
+          setForm({
+            category: "",
+            description: "",
+            amountUntilYear: "",
+            amountMonthly: "",
+            isActive: true,
+          });
+          fetchCategories(); // Refresh the list
+        } else {
+          throw new Error(result.message || "Failed to update category");
+        }
+      } catch (err) {
+        setError(err.message);
+        console.error("Error updating category:", err);
+        showToast("error", `Failed to update category: ${err.message}`);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [form, editingId, fetchCategories]
   );
 
-  // Pagination
-  const totalPages = Math.ceil(filteredData.length / rowsPerPage);
-  const indexOfLastRow = currentPage * rowsPerPage;
-  const indexOfFirstRow = indexOfLastRow - rowsPerPage;
-  const currentRows = filteredData.slice(indexOfFirstRow, indexOfLastRow);
+  // Filter categories based on search (client-side fallback)
+  const filteredCategories = useMemo(() => {
+    if (!search) return categories;
+
+    const searchLower = search.toLowerCase();
+    return categories.filter(
+      (cat) =>
+        cat.category?.toLowerCase().includes(searchLower) ||
+        cat.description?.toLowerCase().includes(searchLower)
+    );
+  }, [categories, search]);
+
+  // Pagination calculations
+  const totalPages = Math.ceil(filteredCategories.length / itemsPerPage);
+  const currentRows = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return filteredCategories.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredCategories, currentPage, itemsPerPage]);
+
+  // Totals calculation
+  const totals = useMemo(
+    () => ({
+      totalCategories: categories.length,
+      totalYearlyAmount: categories.reduce(
+        (sum, cat) => sum + (cat.amountUntilYear || 0),
+        0
+      ),
+      totalMonthlyAmount: categories.reduce(
+        (sum, cat) => sum + (cat.amountMonthly || 0),
+        0
+      ),
+    }),
+    [categories]
+  );
+
+  // Utility function
+  const formatCurrency = useCallback((amount) => {
+    return new Intl.NumberFormat().format(amount);
+  }, []);
+
+  // CRUD operations
+
+  const handleEdit = useCallback(
+    (id) => {
+      const categoryToEdit = categories.find((cat) => cat._id === id);
+      if (categoryToEdit) {
+        editCategory(categoryToEdit);
+      }
+    },
+    [categories]
+  );
+
+  const handleDelete = useCallback(
+    async (id) => {
+      // Find the category to get its name for the confirmation message
+      const categoryToDelete = categories.find((cat) => cat._id === id);
+
+      if (!categoryToDelete) return;
+
+      const confirmDelete = await confirmDialog({
+        title: "Delete Category",
+        text: `Are you sure you want to delete <b>${categoryToDelete.category}</b>?`,
+        icon: "warning",
+        confirmButtonText: "Yes, delete",
+        cancelButtonText: "Cancel",
+      });
+
+      if (confirmDelete.isConfirmed) {
+        try {
+          setLoading(true);
+          const result = await expenseCategoryAPI.deleteExpenseCategory(id);
+
+          if (result.success) {
+            showToast(
+              "success",
+              `Category <b>${categoryToDelete.category}</b> deleted successfully`
+            );
+
+            setCategories((prev) => prev.filter((cat) => cat._id !== id));
+            // Reset to first page if current page becomes empty
+            if (currentRows.length === 1 && currentPage > 1) {
+              setCurrentPage((prev) => prev - 1);
+            }
+            fetchCategories(); // Refresh the list
+          } else {
+            throw new Error(result.message || "Failed to delete category");
+          }
+        } catch (err) {
+          setError(err.message);
+          console.error("Error deleting category:", err);
+
+          // Show error message
+          showToast("error", `Failed to delete category: ${err.message}`);
+        } finally {
+          setLoading(false);
+        }
+      }
+    },
+    [categories, currentRows.length, currentPage, fetchCategories]
+  );
+
+  // Handle search change
+  const handleSearchChange = useCallback((e) => {
+    setSearch(e.target.value);
+    setCurrentPage(1); // Reset to first page when searching
+  }, []);
+
+  if (loading && categories.length === 0) {
+    return (
+      <div className="p-6 flex justify-center items-center h-64">
+        <Loader className="animate-spin text-indigo-600" size={32} />
+        <span className="ml-2 text-gray-600">Loading categories...</span>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6">
+      {/* Error Message */}
+      {error && (
+        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
+          <strong>Error:</strong> {error}
+          <button
+            onClick={() => setError(null)}
+            className="float-right text-red-500 hover:text-red-700"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {/* Top Bar */}
-      <div className="flex justify-between items-center mb-6">
-        <button className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700">
-          <Plus size={18} /> Add New Category
-        </button>
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
+        <div className="flex flex-col sm:flex-row gap-4">
+          <button
+            onClick={() => navigate("/expenselayout/expensecategories/new")}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors bg-indigo-600 text-white hover:bg-indigo-700`}
+          >
+            {loading ? (
+              <Loader className="animate-spin" size={18} />
+            ) : (
+              <Plus size={18} />
+            )}
+            Add New Category
+          </button>
+        </div>
 
         <input
           type="text"
-          placeholder="Search..."
+          placeholder="Search categories or descriptions..."
           value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
-            setCurrentPage(1);
-          }}
-          className="w-72 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+          onChange={handleSearchChange}
+          className="w-full lg:w-72 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
         />
       </div>
 
-      {/* Table */}
-      <div className="bg-white shadow rounded-2xl overflow-hidden">
-        <table className="w-full border-collapse">
-          <thead className="bg-gray-100 text-gray-700">
+      {/* Table - Full Width */}
+      <div className="bg-white shadow rounded-xl overflow-hidden w-full">
+        <table className="w-full border-collapse table-fixed text-center">
+          <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
-              <th className="px-4 py-3 text-left">Expense Category</th>
-              <th className="px-4 py-3 text-left">Description</th>
-              <th className="px-4 py-3 text-left">Amount ($)</th>
-              <th className="px-4 py-3 text-left">Action</th>
+              <th className="w-16 px-4 py-4 text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                Sr
+              </th>
+              <th className="w-1/6 px-4 py-4 text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                Category
+              </th>
+              <th className="w-2/6 px-4 py-4 text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                Description
+              </th>
+              <th className="w-1/6 px-4 py-4 text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                Amount Until Year ($)
+              </th>
+              <th className="w-1/6 px-4 py-4 text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                Monthly Amount ($)
+              </th>
+              <th className="w-32 px-4 py-4 text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                Actions
+              </th>
             </tr>
           </thead>
-          <tbody>
-            {currentRows.map((cat) => (
-              <tr key={cat.id} className="hover:bg-gray-50">
-                <td className="px-4 py-3">{cat.category}</td>
-                <td className="px-4 py-3">{cat.description}</td>
-                <td className="px-4 py-3">${cat.amount}</td>
-                <td className="px-4 py-3 flex gap-2">
-                  <button className="p-2 text-green-600 hover:bg-green-100 rounded-lg">
-                    <Edit size={18} />
-                  </button>
-                  <button className="p-2 text-red-600 hover:bg-red-100 rounded-lg">
-                    <Trash2 size={18} />
-                  </button>
+          <tbody className="bg-white divide-y divide-gray-200">
+            {currentRows.map((cat, index) => (
+              <tr
+                key={cat._id}
+                className={`hover:bg-gray-50 transition-colors ${
+                  !cat.isActive ? "bg-gray-100 opacity-75" : ""
+                }`}
+              >
+                <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-600">
+                  {(currentPage - 1) * itemsPerPage + index + 1}
+                </td>
+                <td className="px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                  {cat.category}
+                  {!cat.isActive && (
+                    <span className="ml-2 px-2 py-1 text-xs bg-gray-200 text-gray-600 rounded">
+                      Inactive
+                    </span>
+                  )}
+                </td>
+                <td className="px-4 py-4 text-sm text-gray-600 truncate">
+                  {cat.description}
+                </td>
+                <td className="px-4 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
+                  $
+                  {cat.amountUntilYear
+                    ? formatCurrency(cat.amountUntilYear)
+                    : "NO Expense Added"}
+                </td>
+                <td className="px-4 py-4 whitespace-nowrap text-sm font-semibold text-blue-600">
+                  $
+                  {cat.amountMonthly
+                    ? formatCurrency(cat.amountMonthly)
+                    : "NO Expense Added"}
+                </td>
+                <td className="px-4 py-4 whitespace-nowrap text-sm">
+                  <div className="flex justify-center gap-1">
+                    <button
+                      onClick={() => handleEdit(cat._id)}
+                      className={`p-2 rounded-lg transition-colors text-green-600 hover:bg-green-100`}
+                      title="Edit category"
+                    >
+                      <Edit size={18} />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(cat._id)}
+                      className={`p-2 rounded-lg transition-colors text-red-600 hover:bg-red-100"`}
+                      title="Delete category"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
 
-            {currentRows.length === 0 && (
+            {currentRows.length === 0 && !loading && (
               <tr>
-                <td colSpan="4" className="px-4 py-3 text-center text-gray-500">
-                  No matching categories found.
+                <td colSpan="6" className="px-6 py-8 text-center text-gray-500">
+                  {search
+                    ? "No matching categories found."
+                    : "No categories added yet."}
                 </td>
               </tr>
             )}
           </tbody>
         </table>
+
+        {loading && categories.length > 0 && (
+          <div className="flex justify-center items-center py-4">
+            <Loader className="animate-spin text-indigo-600" size={20} />
+            <span className="ml-2 text-gray-600">Updating...</span>
+          </div>
+        )}
       </div>
 
       {/* Pagination */}
-      <div className="flex justify-center mt-4 gap-2">
-        <button
-          disabled={currentPage === 1}
-          onClick={() => setCurrentPage((prev) => prev - 1)}
-          className={`px-3 py-1 rounded-lg ${
-            currentPage === 1 ? "bg-gray-200 text-gray-500" : "bg-indigo-600 text-white"
-          }`}
-        >
-          Prev
-        </button>
-
-        {Array.from({ length: totalPages }, (_, i) => (
+      {totalPages > 1 && (
+        <div className="flex justify-center items-center mt-6 gap-2">
           <button
-            key={i + 1}
-            onClick={() => setCurrentPage(i + 1)}
-            className={`px-3 py-1 rounded-lg ${
-              currentPage === i + 1 ? "bg-indigo-600 text-white" : "bg-gray-200 text-gray-700"
+            disabled={currentPage === 1 || loading}
+            onClick={() => setCurrentPage((prev) => prev - 1)}
+            className={`px-4 py-2 rounded-lg transition-colors ${
+              currentPage === 1 || loading
+                ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                : "bg-indigo-600 text-white hover:bg-indigo-700"
             }`}
           >
-            {i + 1}
+            Previous
           </button>
-        ))}
 
-        <button
-          disabled={currentPage === totalPages}
-          onClick={() => setCurrentPage((prev) => prev + 1)}
-          className={`px-3 py-1 rounded-lg ${
-            currentPage === totalPages ? "bg-gray-200 text-gray-500" : "bg-indigo-600 text-white"
-          }`}
-        >
-          Next
-        </button>
+          <div className="flex gap-1">
+            {Array.from({ length: totalPages }, (_, i) => (
+              <button
+                key={i + 1}
+                onClick={() => setCurrentPage(i + 1)}
+                disabled={loading}
+                className={`px-3 py-2 rounded-lg transition-colors ${
+                  currentPage === i + 1
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                } ${loading ? "opacity-50 cursor-not-allowed" : ""}`}
+              >
+                {i + 1}
+              </button>
+            ))}
+          </div>
+
+          <button
+            disabled={currentPage === totalPages || loading}
+            onClick={() => setCurrentPage((prev) => prev + 1)}
+            className={`px-4 py-2 rounded-lg transition-colors ${
+              currentPage === totalPages || loading
+                ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                : "bg-indigo-600 text-white hover:bg-indigo-700"
+            }`}
+          >
+            Next
+          </button>
+        </div>
+      )}
+
+      {/* Summary */}
+      <div className="mt-6 p-6 bg-blue-50 rounded-lg border border-blue-200">
+        <h3 className="font-semibold text-blue-800 mb-4 text-lg">Summary</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="text-center">
+            <div className="text-2xl font-bold text-blue-600">
+              {totals.totalCategories}
+            </div>
+            <div className="text-sm text-blue-800">Total Categories</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-green-600">
+              ${formatCurrency(totals.totalYearlyAmount)}
+            </div>
+            <div className="text-sm text-green-800">Total Yearly Amount</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-purple-600">
+              ${formatCurrency(totals.totalMonthlyAmount)}
+            </div>
+            <div className="text-sm text-purple-800">Total Monthly Amount</div>
+          </div>
+        </div>
       </div>
+
+      {/* Edit Modal */}
+      {isEditModalOpen &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setIsEditModalOpen(false)}
+            />
+            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+              <button
+                onClick={() => setIsEditModalOpen(false)}
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+
+              <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                Edit Expense Category
+              </h2>
+
+              <form className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[70vh]">
+                {/* Category Name */}
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Category Name
+                  </label>
+                  <input
+                    type="text"
+                    name="category"
+                    value={form.category}
+                    onChange={handleChange}
+                    className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    placeholder="Enter category name"
+                  />
+                </div>
+
+                {/* Description */}
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Description
+                  </label>
+                  <textarea
+                    name="description"
+                    value={form.description}
+                    onChange={handleChange}
+                    rows={3}
+                    className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    placeholder="Enter category description"
+                  />
+                </div>
+
+                {/* Amount Until Year */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Amount Until Year ($)
+                  </label>
+                  <input
+                    type="text"
+                    name="amountUntilYear"
+                    value={form.amountUntilYear}
+                    onChange={(e) => handleNumericInputChange(e, handleChange)}
+                    className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    placeholder="0.00"
+                  />
+                </div>
+
+                {/* Monthly Amount */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Monthly Amount ($)
+                  </label>
+                  <input
+                    type="text"
+                    name="amountMonthly"
+                    value={form.amountMonthly}
+                    onChange={(e) => handleNumericInputChange(e, handleChange)}
+                    className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    placeholder="0.00"
+                  />
+                </div>
+
+                {/* Active Status */}
+                <div className="md:col-span-2">
+                  <label className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      name="isActive"
+                      checked={form.isActive}
+                      onChange={handleChange}
+                      className="rounded text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="text-sm font-medium text-gray-700">
+                      Active Category
+                    </span>
+                  </label>
+                </div>
+
+                {/* Footer buttons */}
+                <div className="md:col-span-2 mt-4 flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditModalOpen(false)}
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    onClick={handleUpdateCategory}
+                    disabled={loading}
+                    className={`bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer transition-colors ${
+                      loading ? "opacity-50 cursor-not-allowed" : ""
+                    }`}
+                  >
+                    {loading ? "Updating..." : "Update Category"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

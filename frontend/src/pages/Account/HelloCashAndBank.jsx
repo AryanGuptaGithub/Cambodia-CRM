@@ -12,6 +12,7 @@ import ReactDOM from "react-dom";
 import axios from "axios";
 import { useState, useEffect, useMemo } from "react";
 import { showToast } from "../../utils/toast";
+import { confirmDialog } from "../../utils/confirmationDialog";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const ITEMS_PER_PAGE = 10;
@@ -21,6 +22,7 @@ const useDropdownOptions = () => {
   const [categoryOptions, setCategoryOptions] = useState([]);
   const [sourceOptions, setSourceOptions] = useState([]);
   const [destinationOptions, setDestinationOptions] = useState([]);
+  const [supplierOptions, setSupplierOptions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -48,15 +50,46 @@ const useDropdownOptions = () => {
       const destinations = destinationResponse.data.map((dest) => ({
         value: dest._id,
         label: dest.name,
+        totalAmount: dest.totalAmount || 0,
       }));
       setDestinationOptions(destinations);
       setSourceOptions(destinations);
+
+      // Fetch supplier options - FIXED: Handle different response structures
+      const supplierResponse = await axios.get(`${backendUrl}/api/suppliers`);
+
+      // Handle different possible response structures
+      let suppliers = [];
+      if (supplierResponse.data && Array.isArray(supplierResponse.data)) {
+        // If response is directly an array
+        suppliers = supplierResponse.data;
+      } else if (
+        supplierResponse.data &&
+        supplierResponse.data.data &&
+        Array.isArray(supplierResponse.data.data)
+      ) {
+        // If response has { data: [] } structure
+        suppliers = supplierResponse.data.data;
+      } else if (
+        supplierResponse.data &&
+        Array.isArray(supplierResponse.data.suppliers)
+      ) {
+        // If response has { suppliers: [] } structure
+        suppliers = supplierResponse.data.suppliers;
+      }
+
+      const supplierOptions = suppliers.map((supplier) => ({
+        value: supplier._id,
+        label: supplier.name,
+      }));
+      setSupplierOptions(supplierOptions);
     } catch (err) {
       console.error("Error fetching dropdown options:", err);
       setError(err.message);
       setCategoryOptions([]);
       setSourceOptions([]);
       setDestinationOptions([]);
+      setSupplierOptions([]);
     } finally {
       setLoading(false);
     }
@@ -70,10 +103,46 @@ const useDropdownOptions = () => {
     categoryOptions,
     sourceOptions,
     destinationOptions,
+    supplierOptions,
     loading,
     error,
     refetch: fetchDropdownOptions,
   };
+};
+
+// Custom dropdown component with limited visible items and scroll
+const CustomDropdown = ({
+  value,
+  onChange,
+  options,
+  error,
+  disabled,
+  placeholder,
+}) => {
+  return (
+    <div className="relative">
+      <select
+        value={value}
+        onChange={onChange}
+        className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
+          error ? "border-red-500" : "border-gray-300"
+        } ${disabled ? "bg-gray-100 cursor-not-allowed" : ""}`}
+        
+        // Show only 3 items at a time, rest will scroll
+      >
+        <option value="">
+          {options.length === 0
+            ? "Loading..."
+            : placeholder || "Select an option"}
+        </option>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
 };
 
 const AddTransactionModal = ({
@@ -86,43 +155,109 @@ const AddTransactionModal = ({
   categoryOptions = [],
   sourceOptions = [],
   destinationOptions = [],
+  supplierOptions = [],
+  currentData = [],
 }) => {
   const [form, setForm] = useState({});
   const [errors, setErrors] = useState({});
   const [isFetchingSales, setIsFetchingSales] = useState(false);
+  const [invoiceDataFetched, setInvoiceDataFetched] = useState(false);
+  const [sourceAccountBalance, setSourceAccountBalance] = useState(0);
+
+  // Check if current category requires supplier (Payment Inward or Remittance)
+  const requiresSupplier = () => {
+    const categoryType = form.categoryType;
+    const category = categoryOptions.find((cat) => cat.value === categoryType);
+    const categoryName = category?.label?.toLowerCase() || "";
+    return categoryName === "payment inward" || categoryName === "remittance";
+  };
+
+  // Check if current category is remittance (special case)
+  const isRemittance = () => {
+    const categoryType = form.categoryType;
+    const category = categoryOptions.find((cat) => cat.value === categoryType);
+    const categoryName = category?.label?.toLowerCase() || "";
+    return categoryName === "remittance";
+  };
+
+  // Check if current category is payment inward
+  const isPaymentInward = () => {
+    const categoryType = form.categoryType;
+    const category = categoryOptions.find((cat) => cat.value === categoryType);
+    const categoryName = category?.label?.toLowerCase() || "";
+    return categoryName === "payment inward";
+  };
+
+  // Check if current category is payment outward
+  const isPaymentOutward = () => {
+    const categoryType = form.categoryType;
+    const category = categoryOptions.find((cat) => cat.value === categoryType);
+    const categoryName = category?.label?.toLowerCase() || "";
+    return categoryName === "payment outward";
+  };
+
+  // Check if current category is deposit or withdraw
+  const isDepositOrWithdraw = () => {
+    const categoryType = form.categoryType;
+    const category = categoryOptions.find((cat) => cat.value === categoryType);
+    const categoryName = category?.label?.toLowerCase() || "";
+    return categoryName === "withdraw" || categoryName === "deposit";
+  };
+
+  // Check if current category is deposit
+  const isDeposit = () => {
+    const categoryType = form.categoryType;
+    const category = categoryOptions.find((cat) => cat.value === categoryType);
+    const categoryName = category?.label?.toLowerCase() || "";
+    return categoryName === "deposit";
+  };
+
+  // Check if current category is withdraw
+  const isWithdraw = () => {
+    const categoryType = form.categoryType;
+    const category = categoryOptions.find((cat) => cat.value === categoryType);
+    const categoryName = category?.label?.toLowerCase() || "";
+    return categoryName === "withdraw";
+  };
+
+  // Check if category requires invoice fields
+  const requiresInvoiceFields = () => {
+    return !isDepositOrWithdraw() && !requiresSupplier() && !isPaymentOutward();
+  };
+
+  // Get filtered source options (exclude destination account for deposit/withdraw)
+  const getFilteredSourceOptions = useMemo(() => {
+    if (!isDepositOrWithdraw()) {
+      return sourceOptions;
+    }
+
+    // For deposit/withdraw, exclude the selected destination account from source options
+    return sourceOptions.filter(
+      (source) => !form.destination || source.value !== form.destination
+    );
+  }, [sourceOptions, form.destination, isDepositOrWithdraw]);
+
+  // Get filtered destination options (exclude source account for deposit/withdraw)
+  const getFilteredDestinationOptions = useMemo(() => {
+    if (!isDepositOrWithdraw()) {
+      return destinationOptions;
+    }
+
+    // For deposit/withdraw, exclude the selected source account from destination options
+    return destinationOptions.filter(
+      (destination) => !form.source || destination.value !== form.source
+    );
+  }, [destinationOptions, form.source, isDepositOrWithdraw]);
 
   // Define form fields configuration with custom layout
   const formFields = useMemo(() => {
-    return [
-      {
-        key: "invoiceNumber",
-        label: "Invoice Number",
-        type: "text",
-        required: true,
-        layout: "half",
-      },
+    const baseFields = [
       {
         key: "categoryType",
         label: "Category Type",
         type: "select",
         required: true,
         options: categoryOptions,
-        layout: "half",
-      },
-      {
-        key: "source",
-        label: "Source Account",
-        type: "select",
-        required: false,
-        options: sourceOptions,
-        layout: "half",
-      },
-      {
-        key: "destination",
-        label: "Destination Account",
-        type: "select",
-        required: true,
-        options: destinationOptions,
         layout: "half",
       },
       {
@@ -133,54 +268,177 @@ const AddTransactionModal = ({
         layout: "half",
       },
       {
-        key: "invoiceDate",
-        label: "Invoice Date",
-        type: "date",
-        required: true,
-        disabled: true,
-        layout: "half",
-      },
-      {
-        key: "customerName",
-        label: "Customer Name",
-        type: "text",
-        required: true,
-        disabled: true,
-        layout: "half",
-      },
-      {
-        key: "customerAddress",
-        label: "Customer Address",
-        type: "text",
-        required: false,
-        disabled: true,
-        layout: "half",
-      },
-      {
         key: "amount",
         label: "Amount ($)",
         type: "number",
         required: true,
         layout: "half",
       },
-      {
-        key: "exchangeLoss",
-        label: "Exchange Loss",
-        type: "number",
-        required: false,
-        layout: "half",
-      },
-      {
-        key: "finalAmount",
-        label: "Final Amount ($)",
-        type: "number",
-        required: true,
-        readonly: true,
-        disabled: true,
-        layout: "half",
-      },
     ];
-  }, [categoryOptions, sourceOptions, destinationOptions]);
+
+    // Add supplier field for payment inward/remittance
+    if (requiresSupplier()) {
+      baseFields.splice(1, 0, {
+        key: "supplier",
+        label: "Supplier Name",
+        type: "select",
+        required: true,
+        options: supplierOptions,
+        layout: "half",
+      });
+
+      // For REMITTANCE: Use SOURCE account instead of destination
+      if (isRemittance()) {
+        baseFields.splice(2, 0, {
+          key: "source",
+          label: "Source Account",
+          type: "select",
+          required: true,
+          options: sourceOptions,
+          layout: "half",
+        });
+      }
+      // For PAYMENT INWARD: Use DESTINATION account (original behavior)
+      else if (isPaymentInward()) {
+        baseFields.splice(2, 0, {
+          key: "destination",
+          label: "Destination Account",
+          type: "select",
+          required: true,
+          options: destinationOptions,
+          layout: "half",
+        });
+      }
+    }
+    // Add source field for payment outward
+    else if (isPaymentOutward()) {
+      baseFields.splice(1, 0, {
+        key: "supplier",
+        label: "Payment To",
+        type: "select",
+        required: true,
+        options: supplierOptions,
+        layout: "half",
+      });
+      baseFields.splice(2, 0, {
+        key: "source",
+        label: "Source Account",
+        type: "select",
+        required: true,
+        options: sourceOptions,
+        layout: "half",
+      });
+    }
+    // Add source/destination fields for deposit/withdraw
+    else if (isDepositOrWithdraw()) {
+      if (isDeposit()) {
+        baseFields.splice(1, 0, {
+          key: "source",
+          label: "Source Account",
+          type: "select",
+          required: true,
+          options: getFilteredSourceOptions,
+          layout: "half",
+        });
+        baseFields.splice(2, 0, {
+          key: "destination",
+          label: "Destination Account",
+          type: "select",
+          required: true,
+          options: getFilteredDestinationOptions,
+          layout: "half",
+        });
+        // Add exchange loss for deposit
+        baseFields.push({
+          key: "exchangeLoss",
+          label: "Exchange Loss",
+          type: "number",
+          required: false,
+          layout: "half",
+        });
+        baseFields.push({
+          key: "finalAmount",
+          label: "Final Amount ($)",
+          type: "number",
+          required: true,
+          readonly: true,
+          disabled: true,
+          layout: "half",
+        });
+      } else if (isWithdraw()) {
+        baseFields.splice(1, 0, {
+          key: "source",
+          label: "Source Account",
+          type: "select",
+          required: true,
+          options: getFilteredSourceOptions,
+          layout: "half",
+        });
+        baseFields.splice(2, 0, {
+          key: "destination",
+          label: "Destination Account",
+          type: "select",
+          required: true,
+          options: getFilteredDestinationOptions,
+          layout: "half",
+        });
+      }
+    }
+    // Add invoice fields for other categories (sales, etc.)
+    else {
+      baseFields.splice(1, 0, {
+        key: "invoiceNumber",
+        label: "Invoice Number",
+        type: "text",
+        required: true,
+        layout: "half",
+      });
+      baseFields.splice(2, 0, {
+        key: "destination",
+        label: "Destination Account",
+        type: "select",
+        required: true,
+        options: destinationOptions,
+        layout: "half",
+      });
+      baseFields.push(
+        {
+          key: "invoiceDate",
+          label: "Invoice Date",
+          type: "date",
+          required: true,
+          layout: "half",
+          disabled: true,
+        },
+        {
+          key: "customerName",
+          label: "Customer Name",
+          type: "text",
+          required: true,
+          layout: "half",
+          disabled: true,
+        },
+        {
+          key: "customerAddress",
+          label: "Customer Address",
+          type: "text",
+          required: false,
+          layout: "half",
+          disabled: true,
+        }
+      );
+    }
+
+    return baseFields;
+  }, [
+    categoryOptions,
+    sourceOptions,
+    destinationOptions,
+    supplierOptions,
+    form.categoryType,
+    getFilteredSourceOptions,
+    getFilteredDestinationOptions,
+  ]);
 
   // Initialize form data
   const initializeFormData = () => {
@@ -200,45 +458,97 @@ const AddTransactionModal = ({
   useEffect(() => {
     if (isOpen) {
       if (isEdit && editData) {
-        // Handle populated data from backend
         const processedEditData = {
           ...editData,
           categoryType: editData.categoryType?._id || editData.categoryType,
           source: editData.source?._id || editData.source,
           destination: editData.destination?._id || editData.destination,
+          supplier: editData.supplier?._id || editData.supplier,
         };
         setForm(processedEditData);
+        setInvoiceDataFetched(true);
+
+        if (editData.source && editData.source.totalAmount !== undefined) {
+          setSourceAccountBalance(editData.source.totalAmount);
+        }
       } else {
         setForm(initializeFormData());
+        setInvoiceDataFetched(false);
+        setSourceAccountBalance(0);
       }
       setErrors({});
     }
   }, [isOpen, isEdit, editData, activeTab]);
 
-  // Calculate final amount whenever amount or exchange loss changes
+  // Calculate final amount for deposit transactions
   useEffect(() => {
-    if (activeTab === "Cash Balance" || activeTab === "Company Account") {
+    if (isDeposit()) {
       const amount = parseFloat(form.amount) || 0;
       const exchangeLoss = parseFloat(form.exchangeLoss) || 0;
-
-      if (shouldShowExchangeLossField()) {
-        const finalAmount = amount - exchangeLoss;
-
-        setForm((prev) => ({
-          ...prev,
-          finalAmount: isNaN(finalAmount) ? "0.00" : finalAmount.toFixed(2),
-        }));
-      } else {
-        setForm((prev) => ({
-          ...prev,
-          finalAmount: "0.00",
-        }));
-      }
+      const finalAmount = amount - exchangeLoss;
+      setForm((prev) => ({
+        ...prev,
+        finalAmount: isNaN(finalAmount) ? "0.00" : finalAmount.toFixed(2),
+      }));
     }
-  }, [form.amount, form.exchangeLoss, activeTab, form.categoryType]);
+  }, [form.amount, form.exchangeLoss, form.categoryType]);
+
+  // Update source account balance when source changes for deposit
+  useEffect(() => {
+    if (form.source && isDeposit()) {
+      const selectedSource = sourceOptions.find(
+        (option) => option.value === form.source
+      );
+      if (selectedSource) {
+        setSourceAccountBalance(selectedSource.totalAmount || 0);
+      }
+    } else {
+      setSourceAccountBalance(0);
+    }
+  }, [form.source, form.categoryType, sourceOptions]);
+
+  // Handle category type change - reset relevant fields
+  useEffect(() => {
+    if (form.categoryType) {
+      setForm((prev) => {
+        const newForm = { ...prev };
+
+        // Reset supplier field when category changes away from supplier-required categories
+        if (!requiresSupplier() && !isPaymentOutward() && newForm.supplier) {
+          newForm.supplier = "";
+        }
+
+        // Reset invoice fields when category changes to non-invoice categories
+        if (!requiresInvoiceFields() && newForm.invoiceNumber) {
+          newForm.invoiceNumber = "";
+          newForm.invoiceDate = "";
+          newForm.customerName = "";
+          newForm.customerAddress = "";
+        }
+
+        // Reset source/destination for non-deposit/withdraw
+        if (!isDepositOrWithdraw() && !isPaymentOutward() && !isRemittance()) {
+          if (newForm.source) newForm.source = "";
+        }
+
+        // Reset exchange loss and final amount for non-deposit
+        if (!isDeposit()) {
+          if (newForm.exchangeLoss) newForm.exchangeLoss = "";
+          if (newForm.finalAmount) newForm.finalAmount = "0.00";
+        }
+
+        return newForm;
+      });
+      setInvoiceDataFetched(false);
+    }
+  }, [form.categoryType]);
 
   const fetchSalesData = async (invoiceNumber) => {
-    if (!invoiceNumber || invoiceNumber.trim() === "") {
+    if (
+      !invoiceNumber ||
+      invoiceNumber.trim() === "" ||
+      !requiresInvoiceFields()
+    ) {
       return;
     }
 
@@ -249,12 +559,30 @@ const AddTransactionModal = ({
       );
       const salesData = salesResponse.data;
 
-      if (salesData.data.length > 0) {
-        // Auto-fill with the first matching record
+      if (salesData.data && salesData.data.length > 0) {
+        const existingTransaction = currentData.find(
+          (item) => item.invoiceNumber === invoiceNumber
+        );
+
+        if (existingTransaction) {
+          showToast(
+            "error",
+            `Invoice number ${invoiceNumber} already has a transaction with amount $${existingTransaction.amount}`
+          );
+          setForm((prev) => ({
+            ...prev,
+            invoiceDate: "",
+            customerName: "",
+            customerAddress: "",
+            amount: "",
+          }));
+          setInvoiceDataFetched(false);
+          return;
+        }
+
         const saleRecord = salesData.data[0];
         setForm((prev) => ({
           ...prev,
-          invoiceNumber: saleRecord.invoiceNumber || prev.invoiceNumber,
           invoiceDate:
             saleRecord.invoiceDate?.split("T")[0] ||
             new Date().toISOString().split("T")[0],
@@ -262,22 +590,21 @@ const AddTransactionModal = ({
           customerAddress: saleRecord.customerAddress || "",
           amount: saleRecord.amount || "",
         }));
+        setInvoiceDataFetched(true);
       } else {
         setForm((prev) => ({
           ...prev,
-          invoiceNumber: form.invoiceNumber,
           invoiceDate: "",
           customerName: "",
           customerAddress: "",
           amount: "",
         }));
-        showToast(
-          "error",
-          `Invoice No <b>${form.invoiceNumber}</b> is not found in sale`
-        );
+        setInvoiceDataFetched(false);
       }
     } catch (error) {
       console.error("Error fetching sales data:", error);
+      setInvoiceDataFetched(false);
+      showToast("error", "Error fetching invoice details");
     } finally {
       setIsFetchingSales(false);
     }
@@ -298,28 +625,63 @@ const AddTransactionModal = ({
       }));
     }
 
-    if (field === "categoryType" && value && form.invoiceNumber) {
-      fetchSalesData(form.invoiceNumber);
-    }
-
-    if (field === "source" && value) {
-      setForm((prev) => ({
-        ...prev,
-      }));
-    } else if (field === "destination" && value) {
-      setForm((prev) => ({
-        ...prev,
-      }));
-    }
-
-    // Clear source when category type changes
+    // When category type changes, reset related fields
     if (field === "categoryType") {
       setForm((prev) => ({
         ...prev,
-        source: "", // Clear source when category changes
+        invoiceNumber: "",
+        source: "",
+        destination: "",
         exchangeLoss: "",
         finalAmount: "0.00",
+        invoiceDate: "",
+        customerName: "",
+        customerAddress: "",
+        amount: "",
+        supplier: "",
       }));
+      setInvoiceDataFetched(false);
+      setSourceAccountBalance(0);
+    }
+
+    // When source changes, update source account balance for deposit
+    if (field === "source" && value && isDeposit()) {
+      const selectedSource = sourceOptions.find(
+        (option) => option.value === value
+      );
+      if (selectedSource) {
+        setSourceAccountBalance(selectedSource.totalAmount || 0);
+      }
+    }
+
+    // When invoice number changes, fetch the details for invoice-required categories
+    if (field === "invoiceNumber" && value && requiresInvoiceFields()) {
+      fetchSalesData(value);
+    }
+
+    // When amount changes, validate against source account balance for deposit
+    if (field === "amount" && value && isDeposit() && form.source) {
+      const amountValue = parseFloat(value) || 0;
+      if (amountValue > sourceAccountBalance) {
+        setErrors((prev) => ({
+          ...prev,
+          amount: `Amount cannot exceed source account balance of $${sourceAccountBalance.toFixed(
+            2
+          )}`,
+        }));
+      }
+    }
+
+    // When exchange loss changes, validate it doesn't exceed amount for deposit
+    if (field === "exchangeLoss" && value && isDeposit() && form.amount) {
+      const amountValue = parseFloat(form.amount) || 0;
+      const exchangeLossValue = parseFloat(value) || 0;
+      if (exchangeLossValue > amountValue) {
+        setErrors((prev) => ({
+          ...prev,
+          exchangeLoss: `Exchange loss cannot exceed amount`,
+        }));
+      }
     }
   };
 
@@ -327,61 +689,47 @@ const AddTransactionModal = ({
     const newErrors = {};
 
     formFields.forEach((field) => {
-      // Skip validation for disabled fields
-      if (field.disabled) {
+      // Skip validation for readonly and disabled fields
+      if (field.readonly || field.disabled) {
         return;
       }
 
-      // Skip validation for exchange loss if it shouldn't be shown
-      if (field.key === "exchangeLoss" && !shouldShowExchangeLossField()) {
-        return;
-      }
-
-      // Skip validation for source if it shouldn't be shown
-      if (field.key === "source" && !shouldShowSourceField()) {
-        return;
-      }
-
-      // Skip validation for final amount if it shouldn't be shown
-      if (field.key === "finalAmount" && !shouldShowFinalAmountField()) {
-        return;
-      }
-
-      // Destination is always required (for all categories)
-      if (field.key === "destination") {
-        if (!form[field.key]) {
-          newErrors[field.key] = `${field.label} is required`;
-        }
-      }
-
-      // Source is required only when shown (for withdraw and deposit)
-      if (field.key === "source" && shouldShowSourceField()) {
-        if (!form[field.key]) {
-          newErrors[
-            field.key
-          ] = `${field.label} is required for this category type`;
-        }
-      }
-
-      if (
-        field.required &&
-        !form[field.key] &&
-        !field.readonly &&
-        !field.disabled
-      ) {
+      if (field.required && !form[field.key]) {
         newErrors[field.key] = `${field.label} is required`;
       }
 
-      // Validate numeric fields
-      if (
-        (field.key === "amount" || field.key === "exchangeLoss") &&
-        form[field.key]
-      ) {
-        const numValue = parseFloat(form[field.key]);
-        if (isNaN(numValue) || numValue < 0) {
+      // Amount validation
+      if (field.key === "amount" && form[field.key]) {
+        const amountValue = parseFloat(form[field.key]);
+        if (isNaN(amountValue) || amountValue <= 0) {
           newErrors[
             field.key
           ] = `${field.label} must be a valid positive number`;
+        }
+
+        // For deposit transactions, validate against source account balance
+        if (isDeposit() && form.source && amountValue > sourceAccountBalance) {
+          newErrors[
+            field.key
+          ] = `Amount cannot exceed source account balance of $${sourceAccountBalance.toFixed(
+            2
+          )}`;
+        }
+      }
+
+      // Exchange loss validation for deposit
+      if (field.key === "exchangeLoss" && form[field.key] && isDeposit()) {
+        const exchangeLossValue = parseFloat(form[field.key]);
+        const amountValue = parseFloat(form.amount) || 0;
+
+        if (isNaN(exchangeLossValue) || exchangeLossValue < 0) {
+          newErrors[
+            field.key
+          ] = `${field.label} must be a valid positive number`;
+        }
+
+        if (exchangeLossValue > amountValue) {
+          newErrors[field.key] = `Exchange loss cannot exceed amount`;
         }
       }
     });
@@ -397,23 +745,53 @@ const AddTransactionModal = ({
 
     const amount = parseFloat(form.amount) || 0;
     const exchangeLoss = parseFloat(form.exchangeLoss) || 0;
-    const finalAmount = amount - exchangeLoss;
 
+    // Calculate final amount based on category type
+    let finalAmount = amount;
+    if (isDeposit()) {
+      finalAmount = amount - exchangeLoss;
+    }
+
+    // Prepare transaction data based on category type
     const transactionData = {
-      invoiceNumber: form.invoiceNumber,
       categoryType: form.categoryType,
-      source: form.source || null,
-      destination: form.destination,
       date: form.date,
-      invoiceDate: form.invoiceDate,
-      customerName: form.customerName,
-      customerAddress: form.customerAddress,
       amount,
       exchangeLoss,
       finalAmount,
       accountType: activeTab,
       description: form.description,
     };
+
+    // Add supplier for payment inward/remittance/outward
+    if (requiresSupplier() || isPaymentOutward()) {
+      transactionData.supplier = form.supplier;
+    }
+
+    // Add source/destination based on category type
+    if (requiresSupplier()) {
+      if (isRemittance()) {
+        // REMITTANCE: supplier + source
+        transactionData.source = form.source;
+      } else if (isPaymentInward()) {
+        // PAYMENT INWARD: supplier + destination
+        transactionData.destination = form.destination;
+      }
+    } else if (isPaymentOutward()) {
+      // Payment Outward: supplier + source
+      transactionData.source = form.source;
+    } else if (isDepositOrWithdraw()) {
+      // Deposit/Withdraw: source + destination
+      transactionData.source = form.source;
+      transactionData.destination = form.destination;
+    } else {
+      // Other categories: destination + invoice fields
+      transactionData.destination = form.destination;
+      transactionData.invoiceNumber = form.invoiceNumber;
+      transactionData.invoiceDate = form.invoiceDate;
+      transactionData.customerName = form.customerName;
+      transactionData.customerAddress = form.customerAddress;
+    }
 
     try {
       const response = await axios.post(
@@ -442,116 +820,34 @@ const AddTransactionModal = ({
     }
   };
 
-  // Source Account should show only for withdraw and deposit categories
-  const shouldShowSourceField = () => {
-    const categoryType = form.categoryType;
-    const category = categoryOptions.find((cat) => cat.value === categoryType);
-    const categoryName = category?.label?.toLowerCase() || "";
-    return categoryName === "withdraw" || categoryName === "deposit";
-  };
-
-  // Exchange Loss should show only for deposit categories
-  const shouldShowExchangeLossField = () => {
-    const categoryType = form.categoryType;
-    const category = categoryOptions.find((cat) => cat.value === categoryType);
-    const categoryName = category?.label?.toLowerCase() || "";
-    return categoryName === "deposit";
-  };
-
-  // Final Amount should show only for deposit categories
-  const shouldShowFinalAmountField = () => {
-    const categoryType = form.categoryType;
-    const category = categoryOptions.find((cat) => cat.value === categoryType);
-    const categoryName = category?.label?.toLowerCase() || "";
-    return categoryName === "deposit";
-  };
-
-  // Get filtered source options (exclude selected destination)
-  const getFilteredSourceOptions = () => {
-    if (!form.destination) {
-      return sourceOptions;
-    }
-    return sourceOptions.filter((option) => option.value !== form.destination);
-  };
-
-  // Get filtered destination options (exclude selected source)
-  const getFilteredDestinationOptions = () => {
-    if (!form.source) {
-      return destinationOptions;
-    }
-    return destinationOptions.filter((option) => option.value !== form.source);
-  };
-
   const renderFormField = (field) => {
-    // Skip rendering source if it shouldn't be shown
-    if (field.key === "source" && !shouldShowSourceField()) {
-      return null;
-    }
-
-    // Skip rendering exchange loss if it shouldn't be shown
-    if (field.key === "exchangeLoss" && !shouldShowExchangeLossField()) {
-      return null;
-    }
-
-    // Skip rendering final amount if it shouldn't be shown
-    if (field.key === "finalAmount" && !shouldShowFinalAmountField()) {
-      return null;
-    }
-
     const value = form[field.key] || "";
     const error = errors[field.key];
-    let fieldOptions = field.options || [];
+    const fieldOptions = field.options || [];
 
-    // Use filtered options for source and destination
-    if (field.key === "source") {
-      fieldOptions = getFilteredSourceOptions();
-    } else if (field.key === "destination") {
-      fieldOptions = getFilteredDestinationOptions();
-    }
-
-    // Handle disabled fields
-    if (field.disabled) {
+    // Handle readonly and disabled fields with custom styling
+    if (field.readonly || field.disabled) {
       return (
         <input
           type={field.type === "date" ? "date" : "text"}
           value={value}
           readOnly
-          disabled
-          className="w-full p-2 border border-gray-300 bg-gray-100 rounded-lg text-gray-600 cursor-not-allowed"
+          className="border border-gray-300 rounded-md px-3 py-2 bg-gray-100 text-gray-700 cursor-not-allowed w-full"
         />
       );
     }
 
-    const isCategoryTypeDisabled =
-      field.key === "categoryType" &&
-      (!form.invoiceNumber || form.invoiceNumber.trim() === "");
-
     switch (field.type) {
       case "select":
         return (
-          <select
+          <CustomDropdown
             value={value}
             onChange={(e) => handleInputChange(field.key, e.target.value)}
-            className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
-              error ? "border-red-500" : "border-gray-300"
-            } ${
-              isCategoryTypeDisabled ? "bg-gray-100 cursor-not-allowed" : ""
-            }`}
-            disabled={fieldOptions.length === 0 || isCategoryTypeDisabled}
-          >
-            <option value="">
-              {fieldOptions.length === 0
-                ? "Loading..."
-                : isCategoryTypeDisabled
-                ? "Enter Invoice Number first"
-                : `Select ${field.label}`}
-            </option>
-            {fieldOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+            options={fieldOptions}
+            error={error}
+            disabled={fieldOptions.length === 0}
+            placeholder={`Select ${field.label}`}
+          />
         );
 
       case "date":
@@ -568,15 +864,23 @@ const AddTransactionModal = ({
 
       case "number":
         return (
-          <input
-            type="text"
-            value={value}
-            onChange={(e) => handleNumericInputChange(e, field.key)}
-            placeholder={`Enter ${field.label}`}
-            className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
-              error ? "border-red-500" : "border-gray-300"
-            }`}
-          />
+          <div className="relative">
+            <input
+              type="text"
+              value={value}
+              onChange={(e) => handleNumericInputChange(e, field.key)}
+              placeholder={`Enter ${field.label}`}
+              className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
+                error ? "border-red-500" : "border-gray-300"
+              }`}
+            />
+            {/* Show source account balance for deposit transactions */}
+            {field.key === "amount" && isDeposit() && form.source && (
+              <div className="absolute -bottom-6 left-0 text-xs text-gray-500">
+                Available balance: ${sourceAccountBalance.toFixed(2)}
+              </div>
+            )}
+          </div>
         );
 
       default:
@@ -624,32 +928,27 @@ const AddTransactionModal = ({
 
         <form onSubmit={handleSubmit} className="p-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            {formFields.map((field) => {
-              const fieldElement = renderFormField(field);
-              if (!fieldElement) return null;
-
-              return (
-                <div
-                  key={field.key}
-                  className={`space-y-2 ${
-                    field.layout === "full" ? "md:col-span-2" : "md:col-span-1"
-                  }`}
-                >
-                  <label className="block text-sm font-medium text-gray-700">
-                    {field.label}
-                    {field.required && !field.readonly && !field.disabled && (
-                      <span className="text-red-500 ml-1">*</span>
-                    )}
-                  </label>
-                  {fieldElement}
-                  {errors[field.key] && (
-                    <p className="text-red-500 text-xs mt-1">
-                      {errors[field.key]}
-                    </p>
+            {formFields.map((field) => (
+              <div
+                key={field.key}
+                className={`space-y-2 ${
+                  field.layout === "full" ? "md:col-span-2" : "md:col-span-1"
+                }`}
+              >
+                <label className="block text-sm font-medium text-gray-700">
+                  {field.label}
+                  {field.required && !field.readonly && !field.disabled && (
+                    <span className="text-red-500 ml-1">*</span>
                   )}
-                </div>
-              );
-            })}
+                </label>
+                {renderFormField(field)}
+                {errors[field.key] && (
+                  <p className="text-red-500 text-xs mt-1">
+                    {errors[field.key]}
+                  </p>
+                )}
+              </div>
+            ))}
           </div>
 
           <div className="flex justify-end gap-3 pt-4">
@@ -679,6 +978,7 @@ const AddTransactionModal = ({
   );
 };
 
+// ... rest of the CashandBank component remains exactly the same ...
 const CashandBank = () => {
   const [activeTab, setActiveTab] = useState("Cash Balance");
   const [searchTerm, setSearchTerm] = useState("");
@@ -716,6 +1016,7 @@ const CashandBank = () => {
     categoryOptions,
     sourceOptions,
     destinationOptions,
+    supplierOptions, // ADD THIS
     loading: optionsLoading,
     error: optionsError,
   } = useDropdownOptions();
@@ -995,51 +1296,65 @@ const CashandBank = () => {
     setIsEditModalOpen(true);
   };
 
-  // Handle delete transaction
+  // Handle delete transaction (single)
   const handleDelete = async (transaction) => {
-    if (window.confirm(`Are you sure you want to delete this transaction?`)) {
-      try {
-        const response = await axios.delete(
-          `${backendUrl}/api/transaction/${transaction._id}`
-        );
+    const confirm = await confirmDialog({
+      title: "Delete Transaction",
+      text: `Are you sure you want to delete <b>${
+        transaction.title || "This transaction"
+      }</b>?`,
+      icon: "warning",
+      confirmButtonText: "Yes, delete",
+      cancelButtonText: "Cancel",
+    });
 
-        if (response.data.success) {
-          showToast("success", "Transaction deleted successfully");
-          fetchTransactions(); // Refresh data
-        }
-      } catch (error) {
-        console.error("Error deleting transaction:", error);
+    if (!confirm.isConfirmed) return;
+
+    try {
+      const response = await axios.delete(
+        `${backendUrl}/api/transaction/${transaction._id}` // ✅ fixed
+      );
+
+      if (response.data.success) {
+        showToast("success", "Transaction deleted successfully");
+        fetchTransactions();
+      } else {
         showToast("error", "Failed to delete transaction");
       }
+    } catch (error) {
+      console.error("Error deleting transaction:", error);
+      showToast("error", "Failed to delete transaction");
     }
   };
 
-  // Handle delete selected transactions
+  // Handle delete selected transactions (bulk)
   const handleDeleteSelected = async () => {
     if (selected.length === 0) return;
 
-    if (
-      window.confirm(
-        `Are you sure you want to delete ${selected.length} selected transactions?`
-      )
-    ) {
-      try {
-        // Delete multiple transactions
-        const deletePromises = selected.map((id) =>
-          axios.delete(`${backendUrl}/api/transaction/${id}`)
-        );
+    const confirm = await confirmDialog({
+      title: "Delete Selected Transactions",
+      text: `Are you sure you want to delete <b>${selected.length}</b> selected transaction(s)?`,
+      icon: "warning",
+      confirmButtonText: "Yes, delete",
+      cancelButtonText: "Cancel",
+    });
 
-        await Promise.all(deletePromises);
-        showToast(
-          "success",
-          `${selected.length} transactions deleted successfully`
-        );
-        setSelected([]);
-        fetchTransactions(); // Refresh data
-      } catch (error) {
-        console.error("Error deleting transactions:", error);
-        showToast("error", "Failed to delete some transactions");
-      }
+    if (!confirm.isConfirmed) return;
+
+    try {
+      await axios.delete(`${backendUrl}/api/transactions`, {
+        data: { ids: selected }, // ✅ send array of IDs in body
+      });
+
+      showToast(
+        "success",
+        `${selected.length} transaction(s) deleted successfully`
+      );
+      setSelected([]);
+      fetchTransactions();
+    } catch (error) {
+      console.error("Error deleting transactions:", error);
+      showToast("error", "Failed to delete some transactions");
     }
   };
 
@@ -1394,7 +1709,7 @@ const CashandBank = () => {
                                 onChange={() => toggleSelect(item)}
                               />
                               <span className="capitalize">
-                                {item.invoiceNumber}
+                                {item.invoiceNumber || "NA"}
                               </span>
                             </div>
                           ) : (
@@ -1454,36 +1769,6 @@ const CashandBank = () => {
           </div>
         )}
 
-        {/* Add Transaction Modal */}
-        <AddTransactionModal
-          key="add-modal"
-          isOpen={isModalOpen}
-          onClose={() => setIsModalOpen(false)}
-          activeTab={activeTab}
-          onAddTransaction={handleAddTransaction}
-          categoryOptions={categoryOptions}
-          sourceOptions={sourceOptions}
-          destinationOptions={destinationOptions}
-        />
-
-        {/* Edit Transaction Modal */}
-        <AddTransactionModal
-          key="edit-modal"
-          isOpen={isEditModalOpen}
-          onClose={() => {
-            setIsEditModalOpen(false);
-            setEditingTransaction(null);
-          }}
-          activeTab={activeTab}
-          onAddTransaction={handleAddTransaction}
-          editData={editingTransaction}
-          isEdit={true}
-          categoryOptions={categoryOptions}
-          sourceOptions={sourceOptions}
-          destinationOptions={destinationOptions}
-        />
-
-        {/* Column Configuration Modal */}
         {isColumnModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -1636,6 +1921,37 @@ const CashandBank = () => {
             </div>,
             document.body
           )}
+        <AddTransactionModal
+          key="add-modal"
+          isOpen={isModalOpen}
+          onClose={() => setIsModalOpen(false)}
+          activeTab={activeTab}
+          onAddTransaction={handleAddTransaction}
+          categoryOptions={categoryOptions}
+          sourceOptions={sourceOptions}
+          destinationOptions={destinationOptions}
+          supplierOptions={supplierOptions} // ADD THIS
+          currentData={currentData}
+        />
+
+        {/* Edit Transaction Modal - FIXED: Pass supplierOptions */}
+        <AddTransactionModal
+          key="edit-modal"
+          isOpen={isEditModalOpen}
+          onClose={() => {
+            setIsEditModalOpen(false);
+            setEditingTransaction(null);
+          }}
+          activeTab={activeTab}
+          onAddTransaction={handleAddTransaction}
+          editData={editingTransaction}
+          isEdit={true}
+          categoryOptions={categoryOptions}
+          sourceOptions={sourceOptions}
+          destinationOptions={destinationOptions}
+          supplierOptions={supplierOptions} // ADD THIS
+          currentData={currentData}
+        />
       </div>
     </div>
   );

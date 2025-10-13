@@ -41,7 +41,6 @@ router.post("/transaction", async (req, res) => {
 
     const categoryName = category.name.toLowerCase();
 
-    // ✅ Handle balance updates based on category type
     if (
       source &&
       destination &&
@@ -50,16 +49,17 @@ router.post("/transaction", async (req, res) => {
       // Subtract from source
       const updatedSource = await Destination.findByIdAndUpdate(
         source,
-        { $inc: { totalAmount: - finalAmount - exchangeLoss } },
+        { $inc: { totalAmount: -amount } },
         { new: true }
       );
+      console.log("values of up", updatedSource);
       if (!updatedSource)
         throw new Error("Source not found to update totalAmount");
 
       // Add to destination
       const updatedDestination = await Destination.findByIdAndUpdate(
         destination,
-        { $inc: { totalAmount: amount } },
+        { $inc: { totalAmount: -amount - exchangeLoss } },
         { new: true }
       );
       if (!updatedDestination)
@@ -219,8 +219,8 @@ router.put("/transaction:id", async (req, res) => {
   }
 });
 
-// Delete transaction
-router.delete("/transaction:id", async (req, res) => {
+// DELETE single transaction by ID
+router.delete("/transaction/:id", async (req, res) => {
   try {
     const transaction = await Transaction.findByIdAndDelete(req.params.id);
 
@@ -240,6 +240,27 @@ router.delete("/transaction:id", async (req, res) => {
       success: false,
       message: error.message,
     });
+  }
+});
+
+// DELETE multiple transactions by array of IDs
+router.delete("/transactions", async (req, res) => {
+  const { ids } = req.body;
+
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ success: false, message: "No IDs provided" });
+  }
+
+  try {
+    const result = await Transaction.deleteMany({ _id: { $in: ids } });
+
+    res.json({
+      success: true,
+      message: `${result.deletedCount} transaction(s) deleted successfully`,
+    });
+  } catch (error) {
+    console.error("Error deleting transactions:", error);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
