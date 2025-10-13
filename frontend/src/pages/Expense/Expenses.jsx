@@ -56,10 +56,10 @@ const Expenses = () => {
     try {
       setLoading(true);
       setError(null);
-      
+
       const [expensesResult, categoriesResult] = await Promise.all([
         expensesAPI.fetchExpenses(),
-        expensesAPI.fetchExpenseCategories()
+        expensesAPI.fetchExpenseCategories(),
       ]);
 
       if (expensesResult.success) {
@@ -84,10 +84,13 @@ const Expenses = () => {
   }, [fetchData]);
 
   // Get category name by ID
-  const getCategoryName = useCallback((categoryId) => {
-    const category = expenseCategories.find(cat => cat._id === categoryId);
-    return category ? category.category : "Unknown Category";
-  }, [expenseCategories]);
+  const getCategoryName = useCallback(
+    (categoryId) => {
+      const category = expenseCategories.find((cat) => cat._id === categoryId);
+      return category ? category.category : "Unknown Category";
+    },
+    [expenseCategories]
+  );
 
   // Filter expenses based on search query
   const filteredExpenses = useMemo(() => {
@@ -96,7 +99,9 @@ const Expenses = () => {
     const searchLower = searchQuery.toLowerCase();
     return expenses.filter(
       (exp) =>
-        getCategoryName(exp.expenseCategory).toLowerCase().includes(searchLower) ||
+        getCategoryName(exp.expenseCategory)
+          .toLowerCase()
+          .includes(searchLower) ||
         exp.sourceAccount.toLowerCase().includes(searchLower) ||
         exp.description.toLowerCase().includes(searchLower) ||
         exp.date.includes(searchQuery)
@@ -106,7 +111,10 @@ const Expenses = () => {
   // Pagination
   const indexOfLastExpense = currentPage * expensesPerPage;
   const indexOfFirstExpense = indexOfLastExpense - expensesPerPage;
-  const currentExpenses = filteredExpenses.slice(indexOfFirstExpense, indexOfLastExpense);
+  const currentExpenses = filteredExpenses.slice(
+    indexOfFirstExpense,
+    indexOfLastExpense
+  );
 
   const totalPages = Math.ceil(filteredExpenses.length / expensesPerPage);
 
@@ -114,45 +122,51 @@ const Expenses = () => {
   const totalAmount = currentExpenses.reduce((sum, exp) => sum + exp.amount, 0);
 
   // Handle delete expense
-  const handleDelete = useCallback(async (id) => {
-    const expenseToDelete = expenses.find((exp) => exp._id === id);
-    if (!expenseToDelete) return;
+  const handleDelete = useCallback(
+    async (id) => {
+      const expenseToDelete = expenses.find((exp) => exp._id === id);
+      if (!expenseToDelete) return;
 
-    const confirmDelete = await confirmDialog({
-      title: "Delete Expense",
-      text: `Are you sure you want to delete this expense of $${expenseToDelete.amount}?`,
-      icon: "warning",
-      confirmButtonText: "Yes, delete",
-      cancelButtonText: "Cancel",
-    });
+      const confirmDelete = await confirmDialog({
+        title: "Delete Expense",
+        text: `Are you sure you want to delete this expense of $${expenseToDelete.amount}?`,
+        icon: "warning",
+        confirmButtonText: "Yes, delete",
+        cancelButtonText: "Cancel",
+      });
 
-    if (confirmDelete.isConfirmed) {
-      try {
-        setLoading(true);
-        const result = await expensesAPI.deleteExpense(id);
+      if (confirmDelete.isConfirmed) {
+        try {
+          setLoading(true);
+          const result = await expensesAPI.deleteExpense(id);
 
-        if (result.success) {
-          showToast("success", "Expense deleted successfully");
-          setExpenses((prev) => prev.filter((exp) => exp._id !== id));
-          // Refresh data to ensure consistency
-          fetchData();
-        } else {
-          throw new Error(result.message || "Failed to delete expense");
+          if (result.success) {
+            showToast("success", "Expense deleted successfully");
+            setExpenses((prev) => prev.filter((exp) => exp._id !== id));
+            // Refresh data to ensure consistency
+            fetchData();
+          } else {
+            throw new Error(result.message || "Failed to delete expense");
+          }
+        } catch (err) {
+          setError(err.message);
+          console.error("Error deleting expense:", err);
+          showToast("error", `Failed to delete expense: ${err.message}`);
+        } finally {
+          setLoading(false);
         }
-      } catch (err) {
-        setError(err.message);
-        console.error("Error deleting expense:", err);
-        showToast("error", `Failed to delete expense: ${err.message}`);
-      } finally {
-        setLoading(false);
       }
-    }
-  }, [expenses, fetchData]);
+    },
+    [expenses, fetchData]
+  );
 
   // Handle edit expense
-  const handleEdit = useCallback((id) => {
-    navigate(`/expenselayout/expenses/edit/${id}`);
-  }, [navigate]);
+  const handleEdit = useCallback(
+    (id) => {
+      navigate(`/expenselayout/expenses/edit/${id}`);
+    },
+    [navigate]
+  );
 
   // Handle search change
   const handleSearchChange = useCallback((e) => {
@@ -162,7 +176,7 @@ const Expenses = () => {
 
   // Format currency
   const formatCurrency = useCallback((amount) => {
-    return new Intl.NumberFormat('en-US', {
+    return new Intl.NumberFormat("en-US", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(amount);
@@ -194,7 +208,7 @@ const Expenses = () => {
 
       {/* Top Bar */}
       <div className="flex justify-between items-center mb-6">
-        <button 
+        <button
           onClick={() => navigate("/expenselayout/expenses/new")}
           className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700"
         >
@@ -227,20 +241,31 @@ const Expenses = () => {
           <tbody>
             {currentExpenses.map((exp, index) => (
               <tr key={exp._id} className="hover:bg-gray-50">
-                <td className="px-4 py-3">{(currentPage - 1) * expensesPerPage + index + 1}</td>
-                <td className="px-4 py-3 capitalize">{exp.sourceAccount.replace('_', ' ')}</td>
-                <td className="px-4 py-3">{getCategoryName(exp.expenseCategory)}</td>
+                <td className="px-4 py-3">
+                  {(currentPage - 1) * expensesPerPage + index + 1}
+                </td>
+                <td className="px-4 py-3 capitalize">
+                  {exp.sourceAccount}
+                  {console.log(exp)}
+                </td>
+                <td className="px-4 py-3">
+                  {getCategoryName(exp.expenseCategory)}
+                </td>
                 <td className="px-4 py-3">{exp.description}</td>
-                <td className="px-4 py-3 font-semibold">${formatCurrency(exp.amount)}</td>
-                <td className="px-4 py-3">{new Date(exp.date).toLocaleDateString()}</td>
+                <td className="px-4 py-3 font-semibold">
+                  ${formatCurrency(exp.amount)}
+                </td>
+                <td className="px-4 py-3">
+                  {new Date(exp.date).toLocaleDateString()}
+                </td>
                 <td className="px-4 py-3 flex gap-2">
-                  <button 
+                  <button
                     onClick={() => handleEdit(exp._id)}
                     className="p-2 text-green-600 hover:bg-green-100 rounded-lg"
                   >
                     <Edit size={18} />
                   </button>
-                  <button 
+                  <button
                     onClick={() => handleDelete(exp._id)}
                     className="p-2 text-red-600 hover:bg-red-100 rounded-lg"
                   >
@@ -253,7 +278,9 @@ const Expenses = () => {
             {/* Total Row */}
             {currentExpenses.length > 0 && (
               <tr className="bg-gray-100 font-semibold">
-                <td className="px-4 py-3 text-right" colSpan={4}>Page Total</td>
+                <td className="px-4 py-3 text-right" colSpan={4}>
+                  Page Total
+                </td>
                 <td className="px-4 py-3">${formatCurrency(totalAmount)}</td>
                 <td className="px-4 py-3" colSpan={2}></td>
               </tr>
@@ -262,7 +289,9 @@ const Expenses = () => {
             {currentExpenses.length === 0 && !loading && (
               <tr>
                 <td colSpan="7" className="px-4 py-8 text-center text-gray-500">
-                  {searchQuery ? "No matching expenses found." : "No expenses added yet."}
+                  {searchQuery
+                    ? "No matching expenses found."
+                    : "No expenses added yet."}
                 </td>
               </tr>
             )}
@@ -326,7 +355,10 @@ const Expenses = () => {
             </div>
             <div className="text-center">
               <div className="text-2xl font-bold text-green-600">
-                ${formatCurrency(expenses.reduce((sum, exp) => sum + exp.amount, 0))}
+                $
+                {formatCurrency(
+                  expenses.reduce((sum, exp) => sum + exp.amount, 0)
+                )}
               </div>
               <div className="text-sm text-green-800">Total Amount</div>
             </div>

@@ -456,6 +456,15 @@ const AddTransactionModal = ({
       );
     }
 
+    // Add remarks textarea for all category types (full width)
+    baseFields.push({
+      key: "remarks",
+      label: "Remarks",
+      type: "textarea",
+      required: false,
+      layout: "full",
+    });
+
     return baseFields;
   }, [
     categoryOptions,
@@ -491,6 +500,7 @@ const AddTransactionModal = ({
           source: editData.source?._id || editData.source,
           destination: editData.destination?._id || editData.destination,
           supplier: editData.supplier?._id || editData.supplier,
+          remarks: editData.remarks || "", // ADD REMARKS FIELD
         };
         setForm(processedEditData);
         setInvoiceDataFetched(true);
@@ -788,6 +798,7 @@ const AddTransactionModal = ({
       finalAmount,
       accountType: activeTab,
       description: form.description,
+      remarks: form.remarks || "", // ADD REMARKS TO TRANSACTION DATA
     };
 
     // Add supplier for payment inward/remittance/outward
@@ -908,6 +919,19 @@ const AddTransactionModal = ({
               </div>
             )}
           </div>
+        );
+
+      case "textarea":
+        return (
+          <textarea
+            value={value}
+            onChange={(e) => handleInputChange(field.key, e.target.value)}
+            placeholder={`Enter ${field.label}`}
+            rows={4}
+            className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 resize-vertical ${
+              error ? "border-red-500" : "border-gray-300"
+            }`}
+          />
         );
 
       default:
@@ -1035,6 +1059,7 @@ const CashandBank = () => {
     "exchangeLoss",
     "finalAmount",
     "date",
+    "remarks", // ADD REMARKS TO DEFAULT COLUMNS
     "actions",
   ]);
 
@@ -1043,7 +1068,7 @@ const CashandBank = () => {
     categoryOptions,
     sourceOptions,
     destinationOptions,
-    supplierOptions, // ADD THIS
+    supplierOptions,
     loading: optionsLoading,
     error: optionsError,
   } = useDropdownOptions();
@@ -1110,6 +1135,11 @@ const CashandBank = () => {
         id: "description",
         name: "Description",
         dbName: "description",
+      },
+      {
+        id: "remarks", // ADD REMARKS FIELD
+        name: "Remarks",
+        dbName: "remarks",
       },
       {
         id: "actions",
@@ -1203,6 +1233,7 @@ const CashandBank = () => {
       "exchangeLoss",
       "finalAmount",
       "date",
+      "remarks", // ADD REMARKS TO DEFAULT COLUMNS
       "actions",
     ]);
   };
@@ -1465,6 +1496,17 @@ const CashandBank = () => {
 
     if (field.dbName === "date" || field.dbName === "invoiceDate") {
       return value ? new Date(value).toLocaleDateString() : "--";
+    }
+
+    // Handle remarks field with proper formatting
+    if (field.dbName === "remarks") {
+      return value ? (
+        <div className="max-w-xs truncate" title={value}>
+          {value}
+        </div>
+      ) : (
+        "--"
+      );
     }
 
     // Handle all other fields safely
@@ -1956,11 +1998,11 @@ const CashandBank = () => {
           categoryOptions={categoryOptions}
           sourceOptions={sourceOptions}
           destinationOptions={destinationOptions}
-          supplierOptions={supplierOptions} // ADD THIS
+          supplierOptions={supplierOptions}
           currentData={currentData}
         />
 
-        {/* Edit Transaction Modal - FIXED: Pass supplierOptions */}
+        {/* Edit Transaction Modal */}
         <AddTransactionModal
           key="edit-modal"
           isOpen={isEditModalOpen}
@@ -1975,7 +2017,7 @@ const CashandBank = () => {
           categoryOptions={categoryOptions}
           sourceOptions={sourceOptions}
           destinationOptions={destinationOptions}
-          supplierOptions={supplierOptions} // ADD THIS
+          supplierOptions={supplierOptions}
           currentData={currentData}
         />
       </div>

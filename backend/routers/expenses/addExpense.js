@@ -1,7 +1,7 @@
 // routes/expenses.js
 import express from "express";
 const router = express.Router();
-import Expense from "../../models/expenses/addExpense.js"
+import Expense from "../../models/expenses/addExpense.js";
 
 router.get("/expenses", async (req, res) => {
   try {
@@ -102,7 +102,7 @@ router.get("/expenses/:id", async (req, res) => {
 router.post("/expenses", async (req, res) => {
   try {
     const expenseData = req.body;
-
+    console.log("values of ", expenseData);
     // Validate required fields
     if (!expenseData.date || !expenseData.category || !expenseData.amount) {
       return res.status(400).json({

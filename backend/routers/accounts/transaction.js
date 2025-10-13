@@ -52,7 +52,7 @@ router.post("/transaction", async (req, res) => {
         { $inc: { totalAmount: -amount } },
         { new: true }
       );
-      console.log("values of up", updatedSource);
+
       if (!updatedSource)
         throw new Error("Source not found to update totalAmount");
 

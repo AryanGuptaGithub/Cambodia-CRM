@@ -18,6 +18,7 @@ const InputField = ({
   type = "text",
   readOnly = false,
   autoComplete = "off",
+  onKeyPress, // Add onKeyPress prop
 }) => (
   <div className="flex flex-col">
     <label htmlFor={name} className="text-sm font-medium text-gray-700 mb-1">
@@ -29,6 +30,7 @@ const InputField = ({
       name={name}
       value={value || ""}
       onChange={onChange}
+      onKeyPress={onKeyPress} // Add onKeyPress handler
       placeholder={placeholder}
       readOnly={readOnly}
       autoComplete={autoComplete}
@@ -134,14 +136,50 @@ const AddExpense = ({
   const [categoryOptions, setCategoryOptions] = useState([]);
   const [sourceAccountOptions, setSourceAccountOptions] = useState([]);
 
-  // Payment method options
-  const paymentMethodOptions = [
-    { value: "cash", label: "Cash" },
-    { value: "card", label: "Card" },
-    { value: "bank transfer", label: "Bank Transfer" },
-    { value: "digital wallet", label: "Digital Wallet" },
-    { value: "other", label: "Other" },
-  ];
+  // Function to allow only numbers and decimal point
+  const handleAmountChange = (value) => {
+    // Allow only numbers and one decimal point
+    const sanitizedValue = value.replace(/[^0-9.]/g, "");
+
+    // Ensure only one decimal point
+    const decimalCount = (sanitizedValue.match(/\./g) || []).length;
+    if (decimalCount > 1) {
+      // If more than one decimal point, remove the extra ones
+      const parts = sanitizedValue.split(".");
+      const finalValue = parts[0] + "." + parts.slice(1).join("");
+      setFormData((prev) => ({ ...prev, amount: finalValue }));
+    } else {
+      setFormData((prev) => ({ ...prev, amount: sanitizedValue }));
+    }
+
+    if (errors.amount) {
+      setErrors((prev) => ({ ...prev, amount: "" }));
+    }
+  };
+
+  // Function to prevent non-numeric input on key press
+  const handleKeyPress = (e) => {
+    const charCode = e.which ? e.which : e.keyCode;
+    const char = String.fromCharCode(charCode);
+
+    // Allow numbers (0-9), decimal point (.), and control keys (backspace, tab, etc.)
+    if (
+      !/[\d.]/.test(char) &&
+      charCode > 31 &&
+      (charCode < 48 || charCode > 57)
+    ) {
+      e.preventDefault();
+      return false;
+    }
+
+    // Prevent multiple decimal points
+    if (char === "." && e.target.value.includes(".")) {
+      e.preventDefault();
+      return false;
+    }
+
+    return true;
+  };
 
   // Populate form data if editing
   useEffect(() => {
@@ -262,6 +300,8 @@ const AddExpense = ({
 
     if (!formData.amount || parseFloat(formData.amount) <= 0) {
       newErrors.amount = "Valid amount is required";
+    } else if (isNaN(parseFloat(formData.amount))) {
+      newErrors.amount = "Amount must be a valid number";
     }
 
     if (!formData.description?.trim()) {
@@ -277,10 +317,6 @@ const AddExpense = ({
 
     if (!formData.sourceAccount) {
       newErrors.sourceAccount = "Source Account is required";
-    }
-
-    if (!formData.paymentMethod) {
-      newErrors.paymentMethod = "Payment Method is required";
     }
 
     setErrors(newErrors);
@@ -302,7 +338,7 @@ const AddExpense = ({
         paymentMethod: formData.paymentMethod,
         notes: formData.notes?.trim() || "",
       };
-
+      console.log('valueso f submitData', submitData);
       setIsSubmitting(true);
 
       let response;
@@ -405,13 +441,12 @@ const AddExpense = ({
                 <InputField
                   label="Amount ($)"
                   name="amount"
-                  type="number"
+                  type="text"
                   value={formData.amount}
-                  onChange={(e) => handleInputChange("amount", e.target.value)}
+                  onChange={(e) => handleAmountChange(e.target.value)}
+                  onKeyPress={handleKeyPress}
                   error={errors.amount}
                   placeholder="0.00"
-                  step="0.01"
-                  min="0"
                   required
                 />
 
@@ -429,7 +464,7 @@ const AddExpense = ({
 
                 {/* Source Account Dropdown */}
                 <SelectField
-                  label="Source Account *"
+                  label="Source Account"
                   name="sourceAccount"
                   value={formData.sourceAccount}
                   onChange={handleSelectChange}
@@ -438,17 +473,6 @@ const AddExpense = ({
                   required={true}
                   placeholder="Select an option"
                   disabled={loading}
-                />
-
-                {/* Payment Method Dropdown */}
-                <SelectField
-                  label="Payment Method"
-                  name="paymentMethod"
-                  value={formData.paymentMethod}
-                  onChange={handleSelectChange}
-                  error={errors.paymentMethod}
-                  options={paymentMethodOptions}
-                  required={true}
                 />
 
                 {/* Description - Full width */}
