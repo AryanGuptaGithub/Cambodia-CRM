@@ -5,60 +5,14 @@ import Expense from "../../models/expenses/addExpense.js";
 
 router.get("/expenses", async (req, res) => {
   try {
-    const {
-      startDate,
-      endDate,
-      category,
-      search,
-      page = 1,
-      limit = 10,
-    } = req.query;
-
-    let query = {};
-
-    // Date range filtering
-    if (startDate || endDate) {
-      query.date = {};
-      if (startDate) query.date.$gte = new Date(startDate);
-      if (endDate) query.date.$lte = new Date(endDate);
-    }
-
-    // Category filtering
-    if (category) {
-      query.category = category;
-    }
-
-    // Search functionality
-    if (search) {
-      query.$or = [
-        { description: { $regex: search, $options: "i" } },
-        { category: { $regex: search, $options: "i" } },
-        { notes: { $regex: search, $options: "i" } },
-      ];
-    }
-
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
-    const skip = (pageNum - 1) * limitNum;
-
-    const expenses = await Expense.find(query)
-      .sort({ date: -1, createdAt: -1 })
-      .skip(skip)
-      .limit(limitNum);
-
-    const total = await Expense.countDocuments(query);
-    const totalPages = Math.ceil(total / limitNum);
+    const expenses = await Expense.find()
+      .populate("category", "category description")
+      .populate("sourceAccount", "name")
+      .sort({ date: -1, createdAt: -1 });
 
     res.json({
       success: true,
       data: expenses,
-      pagination: {
-        currentPage: pageNum,
-        totalPages,
-        totalItems: total,
-        hasNext: pageNum < totalPages,
-        hasPrev: pageNum > 1,
-      },
     });
   } catch (error) {
     console.error("Error fetching expenses:", error);

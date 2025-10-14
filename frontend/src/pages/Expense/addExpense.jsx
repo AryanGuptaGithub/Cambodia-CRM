@@ -352,7 +352,6 @@ const AddExpense = ({
         response = await axios.post(`${backendUrl}/api/expenses`, submitData);
       }
 
-      console.log("values of response", response);
       if (response.data.success) {
         showToast("success", `${response.data.message}`);
 

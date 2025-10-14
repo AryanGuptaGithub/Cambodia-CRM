@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { confirmDialog } from "../../utils/confirmationDialog.js";
 import { showToast } from "../../utils/toast";
 import axios from "axios";
+import { formatDateToReadable } from "../../utils/dateUtil.js";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -226,65 +227,47 @@ const Expenses = () => {
 
       {/* Table */}
       <div className="bg-white shadow rounded-2xl overflow-hidden">
-        <table className="w-full border-collapse">
+        <table className="w-full border-collapse text-center">
           <thead className="bg-gray-100 text-gray-700">
             <tr>
-              <th className="px-4 py-3 text-left w-16">Sr</th>
-              <th className="px-4 py-3 text-left">Source Account</th>
-              <th className="px-4 py-3 text-left">Expense Category</th>
-              <th className="px-4 py-3 text-left">Description</th>
-              <th className="px-4 py-3 text-left">Amount ($)</th>
-              <th className="px-4 py-3 text-left">Date</th>
-              <th className="px-4 py-3 text-left">Action</th>
+              <th className="p-3 w-16">Sr</th>
+              <th className="p-3">Source Account</th>
+              <th className="p-3">Expense Category</th>
+              <th className="p-3">Description</th>
+              <th className="p-3">Amount ($)</th>
+              <th className="p-3">Date</th>
+              <th className="p-3">Action</th>
             </tr>
           </thead>
           <tbody>
             {currentExpenses.map((exp, index) => (
               <tr key={exp._id} className="hover:bg-gray-50">
-                <td className="px-4 py-3">
+                <td className="p-3">
                   {(currentPage - 1) * expensesPerPage + index + 1}
                 </td>
-                <td className="px-4 py-3 capitalize">
-                  {exp.sourceAccount}
-                  {console.log(exp)}
+                <td className="p-3 capitalize">{exp.sourceAccount?.name}</td>
+                <td className="p-3">{exp.category.category}</td>
+                <td className="p-3">{exp.description}</td>
+                <td className="p-3 font-semibold">
+                  {formatCurrency(exp.amount)}
                 </td>
-                <td className="px-4 py-3">
-                  {getCategoryName(exp.expenseCategory)}
-                </td>
-                <td className="px-4 py-3">{exp.description}</td>
-                <td className="px-4 py-3 font-semibold">
-                  ${formatCurrency(exp.amount)}
-                </td>
-                <td className="px-4 py-3">
-                  {new Date(exp.date).toLocaleDateString()}
-                </td>
-                <td className="px-4 py-3 flex gap-2">
+                <td className="p-3">{formatDateToReadable(exp.date)}</td>
+                <td className="p-3">
                   <button
                     onClick={() => handleEdit(exp._id)}
-                    className="p-2 text-green-600 hover:bg-green-100 rounded-lg"
+                    className="text-green-600 hover:bg-green-100 rounded-lg"
                   >
                     <Edit size={18} />
                   </button>
                   <button
                     onClick={() => handleDelete(exp._id)}
-                    className="p-2 text-red-600 hover:bg-red-100 rounded-lg"
+                    className="p-1 text-red-600 hover:bg-red-100 rounded-lg"
                   >
                     <Trash2 size={18} />
                   </button>
                 </td>
               </tr>
             ))}
-
-            {/* Total Row */}
-            {currentExpenses.length > 0 && (
-              <tr className="bg-gray-100 font-semibold">
-                <td className="px-4 py-3 text-right" colSpan={4}>
-                  Page Total
-                </td>
-                <td className="px-4 py-3">${formatCurrency(totalAmount)}</td>
-                <td className="px-4 py-3" colSpan={2}></td>
-              </tr>
-            )}
 
             {currentExpenses.length === 0 && !loading && (
               <tr>
