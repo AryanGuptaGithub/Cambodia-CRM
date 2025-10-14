@@ -2,7 +2,7 @@ import React from "react";
 import { Route, Router, Routes } from "react-router-dom";
 import OnlineOrders from "./pages/OnlineOrders";
 import StaffMember from "./pages/StaffMember";
-import StocjAdjustment from "./pages/StocjAdjustment";
+import StockAdjustment from "./pages/StockAdjustment";
 import StockTransfer from "./pages/StockTransfer";
 import Login from "./pages/Login";
 import Graph from "./pages/graph";
@@ -102,7 +102,7 @@ function App() {
         >
           <Route path="/graph" element={<Graph />} />
           <Route path="/onlineorder" element={<OnlineOrders />} />
-          <Route path="/stockadjustment" element={<StocjAdjustment />} />
+          <Route path="/stockadjustment" element={<StockAdjustment />} />
           <Route path="/stocktransfer" element={<StockTransfer />} />
           <Route path="/stocktransferform" element={<StockTransferForm />} />
 

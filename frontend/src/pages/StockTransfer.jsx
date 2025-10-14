@@ -474,8 +474,10 @@ const StockTransfer = () => {
             <Search
               className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
               size={16}
+              onClick={() => inputRef.current?.focus()}
             />
             <input
+              ref={inputRef}
               type="text"
               placeholder="Search by Invoice or Remarks"
               value={searchTerm}
@@ -489,7 +491,7 @@ const StockTransfer = () => {
         </div>
       </div>
 
-      <div className="overflow-x-auto shadow">
+      <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
@@ -591,43 +593,41 @@ const StockTransfer = () => {
             )}
           </tbody>
         </table>
-      </div>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="mt-6 flex justify-center gap-2 text-sm">
-          <button
-            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-            disabled={currentPage === 1}
-            className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-          >
-            Previous
-          </button>
-          <div className="flex gap-1">
-            {visiblePages.map((pg) => (
-              <button
-                key={pg}
-                onClick={() => setCurrentPage(pg)}
-                className={`px-3 py-2 rounded-lg min-w-[40px] cursor-pointer ${
-                  currentPage === pg
-                    ? "bg-indigo-600 text-white"
-                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                }`}
-              >
-                {pg}
-              </button>
-            ))}
+        {currentStockTransfers.length > 0 && (
+          <div className="mt-4 p-5 flex justify-start gap-2">
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            >
+              Previous
+            </button>
+            <div className="flex gap-1">
+              {visiblePages.map((pg) => (
+                <button
+                  key={pg}
+                  onClick={() => setCurrentPage(pg)}
+                  className={`px-3 py-2 rounded-lg min-w-[40px] cursor-pointer ${
+                    currentPage === pg
+                      ? "bg-indigo-600 text-white"
+                      : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                  }`}
+                >
+                  {pg}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            >
+              Next
+            </button>
           </div>
-          <button
-            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-            disabled={currentPage === totalPages}
-            className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-          >
-            Next
-          </button>
-        </div>
-      )}
-
+        )}
+      </div>
       {isViewModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">

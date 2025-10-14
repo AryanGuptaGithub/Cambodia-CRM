@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import ReactDOM from "react-dom";
 import axios from "axios";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { showToast } from "../../utils/toast";
 import { confirmDialog } from "../../utils/confirmationDialog";
 
@@ -25,7 +25,6 @@ const useDropdownOptions = () => {
   const [supplierOptions, setSupplierOptions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
   const fetchDropdownOptions = async () => {
     try {
       setLoading(true);
@@ -1029,7 +1028,6 @@ const AddTransactionModal = ({
   );
 };
 
-// ... rest of the CashandBank component remains exactly the same ...
 const CashandBank = () => {
   const [activeTab, setActiveTab] = useState("Cash Balance");
   const [searchTerm, setSearchTerm] = useState("");
@@ -1043,8 +1041,8 @@ const CashandBank = () => {
   const [loading, setLoading] = useState(false);
   const [totalPages, setTotalPages] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
+  const inputRef = useRef(null);
 
-  // Column configuration state
   const [isColumnModalOpen, setIsColumnModalOpen] = useState(false);
   const [selectedItems, setSelectedItems] = useState([]);
   const [allSelected, setAllSelected] = useState(false);
@@ -1676,13 +1674,15 @@ const CashandBank = () => {
               <Search
                 className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
                 size={16}
+                onClick={() => inputRef.current?.focus()}
               />
               <input
+                ref={inputRef}
                 type="text"
                 placeholder={getSearchPlaceholder()}
                 value={searchTerm}
                 onChange={handleSearchChange}
-                className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+                className="pl-10 pr-4 py-2 border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
               />
             </div>
           </div>
@@ -1704,8 +1704,7 @@ const CashandBank = () => {
           </div>
         </div>
 
-        {/* Table */}
-        <div className="overflow-x-auto shadow">
+        <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
           <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
             <thead className="bg-gray-100 text-gray-700 border-b">
               <tr>
@@ -1790,16 +1789,9 @@ const CashandBank = () => {
               )}
             </tbody>
           </table>
-        </div>
 
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="mt-4 p-5 flex justify-between items-center">
-            <div className="text-sm text-gray-600">
-              Page {currentPage} of {totalPages} • {totalCount} total
-              transactions
-            </div>
-            <div className="flex gap-2">
+          {currentData.length > 1 && (
+            <div className="mt-4 p-5 flex justify-start gap-2">
               <button
                 onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
                 disabled={currentPage === 1}
@@ -1807,13 +1799,19 @@ const CashandBank = () => {
               >
                 Prev
               </button>
-
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map(
-                (page) => (
+              {visiblePages.map((page, idx) =>
+                page === "..." ? (
+                  <span
+                    key={`ellipsis-${idx}`}
+                    className="px-3 py-1 text-gray-500 select-none"
+                  >
+                    ...
+                  </span>
+                ) : (
                   <button
-                    key={`page-${page}`}
+                    key={page}
                     onClick={() => setCurrentPage(page)}
-                    className={`px-3 py-1 rounded cursor-pointer ${
+                    className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
                       currentPage === page
                         ? "bg-indigo-600 text-white"
                         : "bg-gray-200 hover:bg-gray-300"
@@ -1823,7 +1821,6 @@ const CashandBank = () => {
                   </button>
                 )
               )}
-
               <button
                 onClick={() =>
                   setCurrentPage((prev) => Math.min(prev + 1, totalPages))
@@ -1834,8 +1831,8 @@ const CashandBank = () => {
                 Next
               </button>
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {isColumnModalOpen &&
           ReactDOM.createPortal(

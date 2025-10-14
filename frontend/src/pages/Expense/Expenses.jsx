@@ -1,6 +1,12 @@
 // components/Expenses.jsx
-import React, { useState, useMemo, useCallback, useEffect } from "react";
-import { Plus, Edit, Trash2, Loader } from "lucide-react";
+import React, {
+  useState,
+  useMemo,
+  useCallback,
+  useEffect,
+  useRef,
+} from "react";
+import { Plus, Edit, Trash2, Loader, Search } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { confirmDialog } from "../../utils/confirmationDialog.js";
 import { showToast } from "../../utils/toast";
@@ -9,35 +15,18 @@ import { formatDateToReadable } from "../../utils/dateUtil.js";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-// API service functions
 const expensesAPI = {
-  // Fetch all expenses
   fetchExpenses: async () => {
-    const response = await fetch(`${backendUrl}/api/expenses`);
-    if (!response.ok) {
-      throw new Error("Failed to fetch expenses");
-    }
-    return response.json();
+    const resp = await axios.get(`${backendUrl}/api/expenses`);
+    return resp.data;
   },
-
-  // Fetch expense categories
   fetchExpenseCategories: async () => {
-    const response = await fetch(`${backendUrl}/api/expense-categary`);
-    if (!response.ok) {
-      throw new Error("Failed to fetch categories");
-    }
-    return response.json();
+    const resp = await axios.get(`${backendUrl}/api/expense-categary`);
+    return resp.data;
   },
-
-  // Delete expense
   deleteExpense: async (id) => {
-    const response = await fetch(`${backendUrl}/api/expenses/${id}`, {
-      method: "DELETE",
-    });
-    if (!response.ok) {
-      throw new Error("Failed to delete expense");
-    }
-    return response.json();
+    const resp = await axios.delete(`${backendUrl}/api/expenses/${id}`);
+    return resp.data;
   },
 };
 
@@ -48,33 +37,36 @@ const Expenses = () => {
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const inputRef = useRef(null);
   const expensesPerPage = 10;
+
+  // For checkbox selection
+  const [selectedRows, setSelectedRows] = useState([]);
 
   const navigate = useNavigate();
 
-  // Fetch expenses and categories on component mount
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
-      const [expensesResult, categoriesResult] = await Promise.all([
+      const [expensesResp, categoriesResp] = await Promise.all([
         expensesAPI.fetchExpenses(),
         expensesAPI.fetchExpenseCategories(),
       ]);
 
-      if (expensesResult.success) {
-        setExpenses(expensesResult.data);
+      if (expensesResp.success) {
+        setExpenses(expensesResp.data);
       } else {
-        throw new Error(expensesResult.message || "Failed to fetch expenses");
+        throw new Error(expensesResp.message || "Failed to fetch expenses");
       }
 
-      if (categoriesResult.success) {
-        setExpenseCategories(categoriesResult.data);
+      if (categoriesResp.success) {
+        setExpenseCategories(categoriesResp.data);
       }
     } catch (err) {
-      setError(err.message);
       console.error("Error fetching data:", err);
+      setError(err.message || "Error");
     } finally {
       setLoading(false);
     }
@@ -84,104 +76,131 @@ const Expenses = () => {
     fetchData();
   }, [fetchData]);
 
-  // Get category name by ID
+  // Get category name from categories list
   const getCategoryName = useCallback(
     (categoryId) => {
-      const category = expenseCategories.find((cat) => cat._id === categoryId);
-      return category ? category.category : "Unknown Category";
+      const cat = expenseCategories.find((c) => c._id === categoryId);
+      return cat ? cat.category : "Unknown";
     },
     [expenseCategories]
   );
 
-  // Filter expenses based on search query
+  // Search filter
   const filteredExpenses = useMemo(() => {
     if (!searchQuery) return expenses;
 
-    const searchLower = searchQuery.toLowerCase();
-    return expenses.filter(
-      (exp) =>
-        getCategoryName(exp.expenseCategory)
-          .toLowerCase()
-          .includes(searchLower) ||
-        exp.sourceAccount.toLowerCase().includes(searchLower) ||
-        exp.description.toLowerCase().includes(searchLower) ||
-        exp.date.includes(searchQuery)
-    );
+    const lower = searchQuery.toLowerCase();
+    return expenses.filter((exp) => {
+      const catName = exp.category?.category ?? getCategoryName(exp.category);
+      const sourceName = exp.sourceAccount?.name ?? "";
+      const desc = exp.description ?? "";
+      const dt = formatDateToReadable(exp.date).toLowerCase();
+
+      return (
+        catName.toLowerCase().includes(lower) ||
+        sourceName.toLowerCase().includes(lower) ||
+        desc.toLowerCase().includes(lower) ||
+        dt.includes(lower)
+      );
+    });
   }, [expenses, searchQuery, getCategoryName]);
 
-  // Pagination
+  // Pagination indices
   const indexOfLastExpense = currentPage * expensesPerPage;
   const indexOfFirstExpense = indexOfLastExpense - expensesPerPage;
   const currentExpenses = filteredExpenses.slice(
     indexOfFirstExpense,
     indexOfLastExpense
   );
-
   const totalPages = Math.ceil(filteredExpenses.length / expensesPerPage);
 
-  // Total of current page
-  const totalAmount = currentExpenses.reduce((sum, exp) => sum + exp.amount, 0);
+  const totalAmountOnPage = currentExpenses.reduce(
+    (sum, e) => sum + (e.amount || 0),
+    0
+  );
 
-  // Handle delete expense
+  // Checkbox handlers
+  const handleSelectRow = useCallback(
+    (id) => {
+      setSelectedRows((prev) =>
+        prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+      );
+    },
+    [setSelectedRows]
+  );
+
+  const handleSelectAll = useCallback(() => {
+    if (selectedRows.length === currentExpenses.length) {
+      setSelectedRows([]);
+    } else {
+      setSelectedRows(currentExpenses.map((e) => e._id));
+    }
+  }, [currentExpenses, selectedRows]);
+
   const handleDelete = useCallback(
     async (id) => {
-      const expenseToDelete = expenses.find((exp) => exp._id === id);
-      if (!expenseToDelete) return;
+      const exp = expenses.find((e) => e._id === id);
+      if (!exp) return;
 
-      const confirmDelete = await confirmDialog({
+      // Suppose the “name” you want is from sourceAccount or category name
+      const sourceName = exp.sourceAccount?.name || "Unknown Account";
+
+      const result = await confirmDialog({
         title: "Delete Expense",
-        text: `Are you sure you want to delete this expense of $${expenseToDelete.amount}?`,
+        text: `Are you sure you want to delete this expense <b>${exp.category.category}</b> for <b>$${exp.amount}</b> from <b>${sourceName}</b>?`,
         icon: "warning",
         confirmButtonText: "Yes, delete",
         cancelButtonText: "Cancel",
       });
 
-      if (confirmDelete.isConfirmed) {
+      if (result.isConfirmed) {
         try {
           setLoading(true);
-          const result = await expensesAPI.deleteExpense(id);
-
-          if (result.success) {
-            showToast("success", "Expense deleted successfully");
-            setExpenses((prev) => prev.filter((exp) => exp._id !== id));
-            // Refresh data to ensure consistency
-            fetchData();
+          const delRes = await expensesAPI.deleteExpense(id);
+          if (delRes.success) {
+            showToast(
+              "success",
+              `Deleted expense <b>${exp.category.category}</b> of <b>$${exp.amount}</b> from <b>${sourceName}</b> successfully`
+            );
+            setExpenses((prev) => prev.filter((e) => e._id !== id));
           } else {
-            throw new Error(result.message || "Failed to delete expense");
+            throw new Error(delRes.message || "Delete failed");
           }
         } catch (err) {
-          setError(err.message);
-          console.error("Error deleting expense:", err);
-          showToast("error", `Failed to delete expense: ${err.message}`);
+          console.error("Delete error:", err);
+          showToast("error", `Failed: ${err.message}`);
         } finally {
           setLoading(false);
         }
       }
     },
-    [expenses, fetchData]
+    [expenses]
   );
 
-  // Handle edit expense
   const handleEdit = useCallback(
-    (id) => {
-      navigate(`/expenselayout/expenses/edit/${id}`);
+    (exp) => {
+      navigate(`/expenselayout/expenses/edit/${exp._id}`);
     },
     [navigate]
   );
 
-  // Handle search change
   const handleSearchChange = useCallback((e) => {
     setSearchQuery(e.target.value);
-    setCurrentPage(1); // Reset to first page when searching
+    setCurrentPage(1);
   }, []);
 
-  // Format currency
-  const formatCurrency = useCallback((amount) => {
+  const formatCurrency = useCallback((amt) => {
     return new Intl.NumberFormat("en-US", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
-    }).format(amount);
+    }).format(amt);
   }, []);
+
+  // Generate visible page numbers (e.g. for pagination)
+  const visiblePages = useMemo(() => {
+    // You can make this smarter (window of pages), here we show all
+    return Array.from({ length: totalPages }, (_, i) => i + 1);
+  }, [totalPages]);
 
   if (loading && expenses.length === 0) {
     return (
@@ -194,7 +213,6 @@ const Expenses = () => {
 
   return (
     <div className="p-6">
-      {/* Error Message */}
       {error && (
         <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
           <strong>Error:</strong> {error}
@@ -206,8 +224,6 @@ const Expenses = () => {
           </button>
         </div>
       )}
-
-      {/* Top Bar */}
       <div className="flex justify-between items-center mb-6">
         <button
           onClick={() => navigate("/expenselayout/expenses/new")}
@@ -215,132 +231,160 @@ const Expenses = () => {
         >
           <Plus size={18} /> Add New Expense
         </button>
-
-        <input
-          type="text"
-          placeholder="Search by category, account, or description..."
-          className="w-72 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-          value={searchQuery}
-          onChange={handleSearchChange}
-        />
+        <div className="relative w-full md:w-72">
+          <Search
+            className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+            size={16}
+            onClick={() => inputRef.current?.focus()}
+          />
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="Search by Source Account, Expense Category	, or description..."
+            className="pl-10 pr-4 py-2 border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+            value={searchQuery}
+            onChange={handleSearchChange}
+          />
+        </div>
       </div>
-
-      {/* Table */}
-      <div className="bg-white shadow rounded-2xl overflow-hidden">
-        <table className="w-full border-collapse text-center">
-          <thead className="bg-gray-100 text-gray-700">
+      <div className="overflow-x-auto shadow">
+        <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
+          <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
-              <th className="p-3 w-16">Sr</th>
-              <th className="p-3">Source Account</th>
-              <th className="p-3">Expense Category</th>
-              <th className="p-3">Description</th>
-              <th className="p-3">Amount ($)</th>
-              <th className="p-3">Date</th>
-              <th className="p-3">Action</th>
+              <th className="p-3 min-w-[120px]">
+                <div className="flex items-center gap-4">
+                  {currentExpenses.length > 0 && (
+                    <input
+                      type="checkbox"
+                      aria-label="Select all"
+                      checked={
+                        selectedRows.length === currentExpenses.length &&
+                        currentExpenses.length > 0
+                      }
+                      onChange={handleSelectAll}
+                    />
+                  )}
+                  <span>Sr</span>
+                </div>
+              </th>
+              <th className="p-3 min-w-[150px]">Source Account</th>
+              <th className="p-3 min-w-[180px]">Expense Category</th>
+              <th className="p-3 min-w-[200px]">Description</th>
+              <th className="p-3 min-w-[120px]">Amount ($)</th>
+              <th className="p-3 min-w-[150px]">Date</th>
+              <th className="p-3 min-w-[150px]">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {currentExpenses.map((exp, index) => (
-              <tr key={exp._id} className="hover:bg-gray-50">
-                <td className="p-3">
-                  {(currentPage - 1) * expensesPerPage + index + 1}
-                </td>
-                <td className="p-3 capitalize">{exp.sourceAccount?.name}</td>
-                <td className="p-3">{exp.category.category}</td>
-                <td className="p-3">{exp.description}</td>
-                <td className="p-3 font-semibold">
-                  {formatCurrency(exp.amount)}
-                </td>
-                <td className="p-3">{formatDateToReadable(exp.date)}</td>
-                <td className="p-3">
-                  <button
-                    onClick={() => handleEdit(exp._id)}
-                    className="text-green-600 hover:bg-green-100 rounded-lg"
-                  >
-                    <Edit size={18} />
-                  </button>
-                  <button
-                    onClick={() => handleDelete(exp._id)}
-                    className="p-1 text-red-600 hover:bg-red-100 rounded-lg"
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                </td>
-              </tr>
-            ))}
-
-            {currentExpenses.length === 0 && !loading && (
+            {currentExpenses.length === 0 ? (
               <tr>
-                <td colSpan="7" className="px-4 py-8 text-center text-gray-500">
+                <td colSpan={7} className="p-4 text-center text-gray-500">
                   {searchQuery
                     ? "No matching expenses found."
-                    : "No expenses added yet."}
+                    : "No data available"}
                 </td>
               </tr>
+            ) : (
+              currentExpenses.map((exp, idx) => (
+                <tr
+                  key={exp._id}
+                  className={`hover:bg-gray-50 ${
+                    (idx + 1) % expensesPerPage === 0 ||
+                    idx + 1 === currentExpenses.length
+                      ? ""
+                      : "border-b"
+                  }`}
+                >
+                  <td className="p-3 min-w-[120px]">
+                    <div className="flex items-center gap-4">
+                      <input
+                        type="checkbox"
+                        checked={selectedRows.includes(exp._id)}
+                        onChange={() => handleSelectRow(exp._id)}
+                      />
+                      <span>
+                        {(currentPage - 1) * expensesPerPage + idx + 1}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="p-3 capitalize">
+                    {exp.sourceAccount?.name ?? "N/A"}
+                  </td>
+                  <td className="p-3">{exp.category?.category ?? "N/A"}</td>
+                  <td className="p-3">{exp.description}</td>
+                  <td className="p-3 font-semibold">
+                    {formatCurrency(exp.amount)}
+                  </td>
+                  <td className="p-3">{formatDateToReadable(exp.date)}</td>
+                  <td className="p-3">
+                    <div className="flex items-center justify-center gap-3">
+                      <button
+                        className="text-green-600 hover:text-green-800 cursor-pointer"
+                        onClick={() => handleEdit(exp)}
+                      >
+                        <Edit size={18} />
+                      </button>
+                      <button
+                        className="text-red-600 hover:text-red-800 cursor-pointer"
+                        onClick={() => handleDelete(exp._id)}
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
             )}
           </tbody>
         </table>
       </div>
-
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex justify-center items-center mt-6 gap-2">
-          <button
-            onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-            disabled={currentPage === 1}
-            className={`px-3 py-1 rounded-lg ${
-              currentPage === 1
-                ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                : "bg-indigo-600 text-white hover:bg-indigo-700"
-            }`}
-          >
-            Prev
-          </button>
-
-          {[...Array(totalPages)].map((_, idx) => (
+      <div className="mt-6 flex justify-start gap-2 text-sm">
+        <button
+          onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+          disabled={currentPage === 1}
+          className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+        >
+          Previous
+        </button>
+        <div className="flex gap-1">
+          {visiblePages.map((pg) => (
             <button
-              key={idx}
-              onClick={() => setCurrentPage(idx + 1)}
-              className={`px-3 py-1 rounded-lg ${
-                currentPage === idx + 1
+              key={pg}
+              onClick={() => setCurrentPage(pg)}
+              className={`px-3 py-2 rounded-lg min-w-[40px] cursor-pointer ${
+                currentPage === pg
                   ? "bg-indigo-600 text-white"
                   : "bg-gray-200 text-gray-700 hover:bg-gray-300"
               }`}
             >
-              {idx + 1}
+              {pg}
             </button>
           ))}
-
-          <button
-            onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
-            disabled={currentPage === totalPages}
-            className={`px-3 py-1 rounded-lg ${
-              currentPage === totalPages
-                ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                : "bg-indigo-600 text-white hover:bg-indigo-700"
-            }`}
-          >
-            Next
-          </button>
         </div>
-      )}
-
-      {/* Summary */}
+        <button
+          onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+          disabled={currentPage === totalPages}
+          className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+        >
+          Next
+        </button>
+      </div>
+      
       {expenses.length > 0 && (
         <div className="mt-6 p-6 bg-blue-50 rounded-lg border border-blue-200">
           <h3 className="font-semibold text-blue-800 mb-4 text-lg">Summary</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="text-center">
               <div className="text-2xl font-bold text-blue-600">
-                {expenses.length}
+                {filteredExpenses.length}
               </div>
               <div className="text-sm text-blue-800">Total Expenses</div>
             </div>
             <div className="text-center">
               <div className="text-2xl font-bold text-green-600">
-                $
+                ${" "}
                 {formatCurrency(
-                  expenses.reduce((sum, exp) => sum + exp.amount, 0)
+                  filteredExpenses.reduce((sum, e) => sum + (e.amount || 0), 0)
                 )}
               </div>
               <div className="text-sm text-green-800">Total Amount</div>

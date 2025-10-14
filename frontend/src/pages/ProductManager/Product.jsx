@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from "react";
 import { UserPlus, Upload, Trash2, Eye, X, Edit, Search } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import SampleExcelDownloadProduct from "../../excels/SampleExcelDownloadProduct";
@@ -391,560 +397,567 @@ const Product = () => {
 
   return (
     <div className="p-6">
-      <div className="flex justify-between items-center mb-4">
-        <div className="flex gap-3">
-          <button
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-            onClick={() => navigate("/productmanagerlayout/addproduct")}
-          >
-            <UserPlus size={18} /> Add New Product
-          </button>
-
-          <button
-            onClick={() => setShowImportModal(true)}
-            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-          >
-            <Upload size={18} /> Import Product
-          </button>
-
-          {selected.length > 0 && (
+      <div className="container">
+        <div className="flex justify-between items-center mb-4">
+          <div className="flex gap-3">
             <button
-              className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-              onClick={handleDeleteSelected}
+              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+              onClick={() => navigate("/productmanagerlayout/addproduct")}
             >
-              <Trash2 size={18} /> Delete
+              <UserPlus size={18} /> Add New Product
             </button>
-          )}
-        </div>
-      </div>
 
-      <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
-        {products.length > 0 ? (
-          <div className="flex gap-4">
-            {types.map((tab) => (
+            <button
+              onClick={() => setShowImportModal(true)}
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+            >
+              <Upload size={18} /> Import Product
+            </button>
+
+            {selected.length > 0 && (
               <button
-                key={tab}
-                onClick={() => setSelectedTab(tab)}
-                className={`px-4 py-2 rounded-lg cursor-pointer ${
-                  selectedTab === tab
-                    ? "bg-indigo-600 text-white"
-                    : "bg-gray-200 text-gray-700"
-                }`}
+                className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+                onClick={handleDeleteSelected}
               >
-                {capitalizeFirstLetter(tab)}
+                <Trash2 size={18} /> Delete
               </button>
-            ))}
-          </div>
-        ) : (
-          <div></div>
-        )}
-
-        <div className="flex items-center gap-8">
-          <p className="text-lg font-semibold text-gray-700">
-            Total Count:{" "}
-            <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-              {filteredProducts.length}
-            </span>
-          </p>
-
-          <div className="relative w-full md:w-72">
-            <Search
-              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-              size={16}
-              onClick={handleIconClick}
-            />
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder="Search..."
-              value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-            />
+            )}
           </div>
         </div>
-      </div>
 
-      {/* Table */}
-      <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-        <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
-          <thead className="bg-gray-100 text-gray-700 border-b">
-            <tr>
-              <th className="p-3">
-                <div className="flex items-center gap-4">
-                  {currentProducts.length > 0 && (
-                    <input
-                      type="checkbox"
-                      checked={
-                        selected.length === currentProducts.length &&
-                        currentProducts.length > 0
-                      }
-                      onChange={(e) => toggleSelectAll(e.target.checked)}
-                    />
-                  )}
-                  <span>Product Name</span>
-                </div>
-              </th>
-              <th className="p-3">Product Type</th>
-              <th className="p-3">Packing</th>
-              <th className="p-3">Quantity Per Box</th>
-              <th className="p-3">Supplier</th>
-              <th className="p-3">Drug License</th>
-              <th className="p-3">License Validity</th>
-              <th className="p-3">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {currentProducts.length === 0 ? (
-              <tr>
-                <td colSpan={9} className="p-4 text-center text-gray-500">
-                  No products found.
-                </td>
-              </tr>
-            ) : (
-              currentProducts.map((product, index) => (
-                <tr
-                  key={product._id}
-                  className={`hover:bg-gray-50 ${
-                    (index + 1) % productsPerPage === 0 ||
-                    index + 1 === currentProducts.length
-                      ? ""
-                      : "border-b"
+        <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
+          {products.length > 0 ? (
+            <div className="flex gap-4">
+              {types.map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setSelectedTab(tab)}
+                  className={`px-4 py-2 rounded-lg cursor-pointer ${
+                    selectedTab === tab
+                      ? "bg-indigo-600 text-white"
+                      : "bg-gray-200 text-gray-700"
                   }`}
                 >
-                  <td className="p-3">
-                    <div className="flex items-center gap-4">
+                  {capitalizeFirstLetter(tab)}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div></div>
+          )}
+
+          <div className="flex items-center gap-8">
+            <p className="text-lg font-semibold text-gray-700">
+              Total Count:{" "}
+              <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+                {filteredProducts.length}
+              </span>
+            </p>
+
+            <div className="relative w-full md:w-72">
+              <Search
+                className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                size={16}
+                onClick={handleIconClick}
+              />
+              <input
+                ref={inputRef}
+                type="text"
+                placeholder="Search..."
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
+          <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
+            <thead className="bg-gray-100 text-gray-700 border-b">
+              <tr>
+                <th className="p-3">
+                  <div className="flex items-center gap-4">
+                    {currentProducts.length > 0 && (
                       <input
                         type="checkbox"
-                        checked={selected.some((s) => s.id === product._id)}
-                        onChange={() => toggleSelect(product)} 
+                        checked={
+                          selected.length === currentProducts.length &&
+                          currentProducts.length > 0
+                        }
+                        onChange={(e) => toggleSelectAll(e.target.checked)}
                       />
-                      <span> {capitalizeFirstLetter(product.productName)}</span>
-                    </div>
-                  </td>
-                  <td className="p-3">{product.type}</td>
-                  <td className="p-3">{product.packing}</td>
-                  <td className="p-3">{product.qtyPerBox}</td>
-                  <td className="p-3">
-                    {capitalizeFirstLetter(product.supplierName) || "--"}
-                  </td>
-                  <td className="p-3">{product.drugLicense || "--"} </td>
-                  <td className="p-3">
-                    {formatDateToReadable(product.licenseValidityDate) || "--"}
-                  </td>
-                  <td className="p-3 flex items-center justify-center gap-3">
-                    <button
-                      className="text-blue-600 hover:text-blue-800 cursor-pointer"
-                      onClick={() => handleView(product)}
-                      title="View"
-                    >
-                      <Eye size={18} />
-                    </button>
-                    <button
-                      className="text-green-600 hover:text-green-800 cursor-pointer"
-                      onClick={() => handleEdit(product)}
-                      title="Edit"
-                    >
-                      <Edit size={18} />
-                    </button>
-                    <button
-                      className="text-red-600 hover:text-red-800 cursor-pointer"
-                      onClick={() => deleteProduct(product)}
-                      title="Delete"
-                    >
-                      <Trash2 size={18} />
-                    </button>
+                    )}
+                    <span>Product Name</span>
+                  </div>
+                </th>
+                <th className="p-3">Product Type</th>
+                <th className="p-3">Packing</th>
+                <th className="p-3">Quantity Per Box</th>
+                <th className="p-3">Supplier</th>
+                <th className="p-3">Drug License</th>
+                <th className="p-3">License Validity</th>
+                <th className="p-3">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {currentProducts.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="p-4 text-center text-gray-500">
+                    No products found.
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : (
+                currentProducts.map((product, index) => (
+                  <tr
+                    key={product._id}
+                    className={`hover:bg-gray-50 ${
+                      (index + 1) % productsPerPage === 0 ||
+                      index + 1 === currentProducts.length
+                        ? ""
+                        : "border-b"
+                    }`}
+                  >
+                    <td className="p-3">
+                      <div className="flex items-center gap-4">
+                        <input
+                          type="checkbox"
+                          checked={selected.some((s) => s.id === product._id)}
+                          onChange={() => toggleSelect(product)}
+                        />
+                        <span>
+                          {" "}
+                          {capitalizeFirstLetter(product.productName)}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="p-3">{product.type}</td>
+                    <td className="p-3">{product.packing}</td>
+                    <td className="p-3">{product.qtyPerBox}</td>
+                    <td className="p-3">
+                      {capitalizeFirstLetter(product.supplierName) || "--"}
+                    </td>
+                    <td className="p-3">{product.drugLicense || "--"} </td>
+                    <td className="p-3">
+                      {formatDateToReadable(product.licenseValidityDate) ||
+                        "--"}
+                    </td>
+                    <td className="p-3 flex items-center justify-center gap-3">
+                      <button
+                        className="text-blue-600 hover:text-blue-800 cursor-pointer"
+                        onClick={() => handleView(product)}
+                        title="View"
+                      >
+                        <Eye size={18} />
+                      </button>
+                      <button
+                        className="text-green-600 hover:text-green-800 cursor-pointer"
+                        onClick={() => handleEdit(product)}
+                        title="Edit"
+                      >
+                        <Edit size={18} />
+                      </button>
+                      <button
+                        className="text-red-600 hover:text-red-800 cursor-pointer"
+                        onClick={() => deleteProduct(product)}
+                        title="Delete"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
 
-        {currentProducts.length > 0 && (
-          <div className="mt-4 p-5 flex justify-start gap-2">
-            <button
-              onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-              disabled={currentPage === 1}
-              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-            >
-              Prev
-            </button>
-
-            {visiblePages.map((page) => (
+          {currentProducts.length > 0 && (
+            <div className="mt-4 p-5 flex justify-start gap-2">
               <button
-                key={page}
-                onClick={() => setCurrentPage(page)}
-                className={`px-3 py-1 rounded cursor-pointer ${
-                  currentPage === page
-                    ? "bg-indigo-600 text-white"
-                    : "bg-gray-200 hover:bg-gray-300"
-                }`}
+                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
               >
-                {page}
+                Prev
               </button>
-            ))}
 
-            <button
-              onClick={() =>
-                setCurrentPage((prev) => Math.min(prev + 1, totalPages))
-              }
-              disabled={currentPage === totalPages}
-              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-            >
-              Next
-            </button>
-          </div>
-        )}
-      </div>
-      {showImportModal &&
-        ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            <div
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsOpen(false)}
-            />
-            <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
+              {visiblePages.map((page) => (
+                <button
+                  key={page}
+                  onClick={() => setCurrentPage(page)}
+                  className={`px-3 py-1 rounded cursor-pointer ${
+                    currentPage === page
+                      ? "bg-indigo-600 text-white"
+                      : "bg-gray-200 hover:bg-gray-300"
+                  }`}
+                >
+                  {page}
+                </button>
+              ))}
+
               <button
-                onClick={() => setShowImportModal(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-                disabled={isUploading}
+                onClick={() =>
+                  setCurrentPage((prev) => Math.min(prev + 1, totalPages))
+                }
+                disabled={currentPage === totalPages}
+                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
               >
-                <X size={20} />
+                Next
               </button>
-              <h2 className="text-lg font-semibold mb-4">Import Products</h2>
-              {isSampleFile && <SampleExcelDownloadProduct />}
-              <input
-                type="file"
-                accept=".csv, .xlsx"
-                onChange={handleFileUpload}
-                className="block w-full border rounded-lg px-3 py-2 mb-6"
+            </div>
+          )}
+        </div>
+        {showImportModal &&
+          ReactDOM.createPortal(
+            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+              <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                onClick={() => setIsOpen(false)}
               />
-              <div className="flex justify-end gap-3">
+              <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
                 <button
                   onClick={() => setShowImportModal(false)}
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
                   disabled={isUploading}
-                  className={`px-5 py-2 rounded-lg cursor-pointer ${
-                    isUploading
-                      ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                      : "bg-gray-300 hover:bg-gray-400 text-gray-700"
-                  }`}
                 >
-                  Cancel
+                  <X size={20} />
                 </button>
-                <button
-                  onClick={handleProductImport}
-                  disabled={isUploading}
-                  className={`px-5 py-2 rounded-lg cursor-pointer ${
-                    isUploading
-                      ? "bg-blue-400 text-white cursor-not-allowed"
-                      : "bg-blue-600 hover:bg-blue-700 text-white"
-                  }`}
-                >
-                  {isUploading ? "Uploading…" : "Upload"}
-                </button>
-              </div>
-            </div>
-          </div>,
-          document.body
-        )}
-
-      {isViewModalOpen &&
-        ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            {/* Backdrop */}
-            <div
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsOpen(false)}
-            />
-
-            {/* Modal Content */}
-            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
-              {/* Close Button */}
-              <button
-                onClick={() => setIsViewModalOpen(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-              >
-                <X size={20} />
-              </button>
-
-              <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                View Product
-              </h2>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Product Name
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {capitalizeFirstLetter(form.productName)}
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Type
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.type}
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Packing
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.packing}
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Qty per Box
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {form.qtyPerBox || "--"}
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Qty per Carton
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {form.qtyPerCarton || "--"}
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Supplier Name
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {capitalizeFirstLetter(form.supplierName) || "--"}
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Drug License
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {form.drugLicense || "--"}
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    License Validity Date
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {form.licenseValidityDate
-                      ? formatDateToReadable(form.licenseValidityDate)
-                      : "N/A"}
-                  </p>
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-600">
-                    Remarks
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {form.remarks || "—"}
-                  </p>
+                <h2 className="text-lg font-semibold mb-4">Import Products</h2>
+                {isSampleFile && <SampleExcelDownloadProduct />}
+                <input
+                  type="file"
+                  accept=".csv, .xlsx"
+                  onChange={handleFileUpload}
+                  className="block w-full border rounded-lg px-3 py-2 mb-6"
+                />
+                <div className="flex justify-end gap-3">
+                  <button
+                    onClick={() => setShowImportModal(false)}
+                    disabled={isUploading}
+                    className={`px-5 py-2 rounded-lg cursor-pointer ${
+                      isUploading
+                        ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                        : "bg-gray-300 hover:bg-gray-400 text-gray-700"
+                    }`}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleProductImport}
+                    disabled={isUploading}
+                    className={`px-5 py-2 rounded-lg cursor-pointer ${
+                      isUploading
+                        ? "bg-blue-400 text-white cursor-not-allowed"
+                        : "bg-blue-600 hover:bg-blue-700 text-white"
+                    }`}
+                  >
+                    {isUploading ? "Uploading…" : "Upload"}
+                  </button>
                 </div>
               </div>
+            </div>,
+            document.body
+          )}
 
-              <div className="mt-6 flex justify-end">
+        {isViewModalOpen &&
+          ReactDOM.createPortal(
+            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+              {/* Backdrop */}
+              <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                onClick={() => setIsOpen(false)}
+              />
+
+              {/* Modal Content */}
+              <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+                {/* Close Button */}
                 <button
                   onClick={() => setIsViewModalOpen(false)}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
                 >
-                  Close
+                  <X size={20} />
                 </button>
+
+                <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                  View Product
+                </h2>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Product Name
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                      {capitalizeFirstLetter(form.productName)}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Type
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                      {form.type}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Packing
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                      {form.packing}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Qty per Box
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                      {form.qtyPerBox || "--"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Qty per Carton
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                      {form.qtyPerCarton || "--"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Supplier Name
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                      {capitalizeFirstLetter(form.supplierName) || "--"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Drug License
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                      {form.drugLicense || "--"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      License Validity Date
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                      {form.licenseValidityDate
+                        ? formatDateToReadable(form.licenseValidityDate)
+                        : "N/A"}
+                    </p>
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-600">
+                      Remarks
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                      {form.remarks || "—"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-6 flex justify-end">
+                  <button
+                    onClick={() => setIsViewModalOpen(false)}
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
-            </div>
-          </div>,
-          document.body
-        )}
-      {isEditModalOpen &&
-        ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            {/* Backdrop */}
-            <div
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsOpen(false)}
-            />
+            </div>,
+            document.body
+          )}
+        {isEditModalOpen &&
+          ReactDOM.createPortal(
+            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+              {/* Backdrop */}
+              <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                onClick={() => setIsOpen(false)}
+              />
 
-            {/* Modal Box */}
-            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative max-h-screen overflow-y-auto">
-              {/* Close Button */}
-              <button
-                onClick={() => setIsEditModalOpen(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-              >
-                <X size={20} />
-              </button>
-
-              <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                Edit Product
-              </h2>
-
-              {/* Form */}
-              <form className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Fields */}
-                <div>
-                  <label className="block text-sm font-medium">
-                    Product Name
-                  </label>
-                  <input
-                    type="text"
-                    value={capitalizeFirstLetter(form.productName)}
-                    onChange={(e) =>
-                      setForm({ ...form, productName: e.target.value })
-                    }
-                    className="w-full border px-3 py-2 rounded-lg"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium">Type</label>
-                  <input
-                    type="text"
-                    value={form.type}
-                    onChange={(e) => setForm({ ...form, type: e.target.value })}
-                    className="w-full border px-3 py-2 rounded-lg"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium">Packing</label>
-                  <input
-                    type="text"
-                    value={form.packing}
-                    onChange={(e) =>
-                      setForm({ ...form, packing: e.target.value })
-                    }
-                    className="w-full border px-3 py-2 rounded-lg"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium">
-                    Qty per Box
-                  </label>
-                  <input
-                    type="number"
-                    value={form.qtyPerBox}
-                    onChange={(e) =>
-                      setForm({ ...form, qtyPerBox: e.target.value })
-                    }
-                    className="w-full border px-3 py-2 rounded-lg"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium">
-                    Qty per Carton
-                  </label>
-                  <input
-                    type="number"
-                    value={form.qtyPerCarton}
-                    onChange={(e) =>
-                      setForm({ ...form, qtyPerCarton: e.target.value })
-                    }
-                    className="w-full border px-3 py-2 rounded-lg"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium">
-                    Supplier Name
-                  </label>
-                  <input
-                    type="text"
-                    value={capitalizeFirstLetter(form.supplierName)}
-                    onChange={(e) =>
-                      setForm({ ...form, supplierName: e.target.value })
-                    }
-                    className="w-full border px-3 py-2 rounded-lg"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium">
-                    Drug License
-                  </label>
-                  <input
-                    type="text"
-                    value={form.drugLicense}
-                    onChange={(e) =>
-                      setForm({ ...form, drugLicense: e.target.value })
-                    }
-                    className="w-full border px-3 py-2 rounded-lg"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium">
-                    License Validity Date
-                  </label>
-                  <DatePicker
-                    selected={
-                      form.licenseValidityDate
-                        ? new Date(form.licenseValidityDate)
-                        : null
-                    }
-                    onChange={(date) =>
-                      date
-                        ? setForm({
-                            ...form,
-                            licenseValidityDate: date.toISOString(),
-                          })
-                        : null
-                    }
-                    dateFormat="yyyy-MM-dd"
-                    placeholderText="Select date"
-                    className="w-full border px-3 py-2 rounded-lg"
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium">Remarks</label>
-                  <textarea
-                    value={form.remarks}
-                    onChange={(e) =>
-                      setForm({ ...form, remarks: e.target.value })
-                    }
-                    className="w-full border px-3 py-2 rounded-lg"
-                  />
-                </div>
-              </form>
-
-              {/* Buttons */}
-              <div className="mt-6 flex justify-end gap-3">
+              {/* Modal Box */}
+              <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative max-h-screen overflow-y-auto">
+                {/* Close Button */}
                 <button
                   onClick={() => setIsEditModalOpen(false)}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
                 >
-                  Cancel
+                  <X size={20} />
                 </button>
-                <button
-                  onClick={handleProductUpdate}
-                  className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
-                >
-                  Update
-                </button>
+
+                <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                  Edit Product
+                </h2>
+
+                {/* Form */}
+                <form className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Fields */}
+                  <div>
+                    <label className="block text-sm font-medium">
+                      Product Name
+                    </label>
+                    <input
+                      type="text"
+                      value={capitalizeFirstLetter(form.productName)}
+                      onChange={(e) =>
+                        setForm({ ...form, productName: e.target.value })
+                      }
+                      className="w-full border px-3 py-2 rounded-lg"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium">Type</label>
+                    <input
+                      type="text"
+                      value={form.type}
+                      onChange={(e) =>
+                        setForm({ ...form, type: e.target.value })
+                      }
+                      className="w-full border px-3 py-2 rounded-lg"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium">Packing</label>
+                    <input
+                      type="text"
+                      value={form.packing}
+                      onChange={(e) =>
+                        setForm({ ...form, packing: e.target.value })
+                      }
+                      className="w-full border px-3 py-2 rounded-lg"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium">
+                      Qty per Box
+                    </label>
+                    <input
+                      type="number"
+                      value={form.qtyPerBox}
+                      onChange={(e) =>
+                        setForm({ ...form, qtyPerBox: e.target.value })
+                      }
+                      className="w-full border px-3 py-2 rounded-lg"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium">
+                      Qty per Carton
+                    </label>
+                    <input
+                      type="number"
+                      value={form.qtyPerCarton}
+                      onChange={(e) =>
+                        setForm({ ...form, qtyPerCarton: e.target.value })
+                      }
+                      className="w-full border px-3 py-2 rounded-lg"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium">
+                      Supplier Name
+                    </label>
+                    <input
+                      type="text"
+                      value={capitalizeFirstLetter(form.supplierName)}
+                      onChange={(e) =>
+                        setForm({ ...form, supplierName: e.target.value })
+                      }
+                      className="w-full border px-3 py-2 rounded-lg"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium">
+                      Drug License
+                    </label>
+                    <input
+                      type="text"
+                      value={form.drugLicense}
+                      onChange={(e) =>
+                        setForm({ ...form, drugLicense: e.target.value })
+                      }
+                      className="w-full border px-3 py-2 rounded-lg"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium">
+                      License Validity Date
+                    </label>
+                    <DatePicker
+                      selected={
+                        form.licenseValidityDate
+                          ? new Date(form.licenseValidityDate)
+                          : null
+                      }
+                      onChange={(date) =>
+                        date
+                          ? setForm({
+                              ...form,
+                              licenseValidityDate: date.toISOString(),
+                            })
+                          : null
+                      }
+                      dateFormat="yyyy-MM-dd"
+                      placeholderText="Select date"
+                      className="w-full border px-3 py-2 rounded-lg"
+                    />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium">Remarks</label>
+                    <textarea
+                      value={form.remarks}
+                      onChange={(e) =>
+                        setForm({ ...form, remarks: e.target.value })
+                      }
+                      className="w-full border px-3 py-2 rounded-lg"
+                    />
+                  </div>
+                </form>
+
+                {/* Buttons */}
+                <div className="mt-6 flex justify-end gap-3">
+                  <button
+                    onClick={() => setIsEditModalOpen(false)}
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleProductUpdate}
+                    className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+                  >
+                    Update
+                  </button>
+                </div>
               </div>
-            </div>
-          </div>,
-          document.body
-        )}
+            </div>,
+            document.body
+          )}
+      </div>
     </div>
   );
 };

@@ -1,14 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import {
-  Plus,
-  Trash2,
-  Edit,
-  Save,
-  Search,
-  X,
-  ChevronDown,
-  ChevronUp,
-} from "lucide-react";
+import {Plus,Trash2,Edit,Save,Search,X,} from "lucide-react";
 import axios from "axios";
 import { showToast } from "../utils/toast";
 import { getVisiblePages } from "../utils/useVisiblePages";
@@ -147,8 +138,6 @@ const StockAdjustment = () => {
   };
 
 
-
-  // FIXED: Bulk delete with proper ID validation
   const handleBulkDelete = async () => {
     if (selectedIds.length === 0) {
       showToast("error", "Please select adjustments to delete.");
@@ -497,7 +486,7 @@ const StockAdjustment = () => {
               <input
                 ref={inputRef}
                 type="text"
-                placeholder="Search adjustments..."
+                placeholder="Search by Product Name,Box Quantity....."
                 value={searchTerm}
                 onChange={(e) => {
                   setSearchTerm(e.target.value);
@@ -641,7 +630,6 @@ const StockAdjustment = () => {
             </tbody>
           </table>
 
-          {/* Pagination */}
           {paginatedAdjustments.length > 0 && (
             <div className="mt-4 p-5 flex justify-start gap-2">
               <button

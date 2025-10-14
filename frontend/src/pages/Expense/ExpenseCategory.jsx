@@ -1,6 +1,12 @@
 // components/ExpenseCategory.jsx
-import React, { useState, useMemo, useCallback, useEffect } from "react";
-import { Plus, Edit, Trash2, Loader, X } from "lucide-react";
+import React, {
+  useState,
+  useMemo,
+  useCallback,
+  useEffect,
+  useRef,
+} from "react";
+import { Plus, Edit, Trash2, Loader, X, Search } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { confirmDialog } from "../../utils/confirmationDialog.js";
 import { showToast } from "../../utils/toast";
@@ -76,6 +82,7 @@ const ExpenseCategory = () => {
     amountMonthly: "",
     isActive: true,
   });
+  const inputRef = useRef(null);
 
   const navigate = useNavigate();
   const itemsPerPage = 5;
@@ -327,14 +334,21 @@ const ExpenseCategory = () => {
             Add New Category
           </button>
         </div>
-
-        <input
-          type="text"
-          placeholder="Search categories or descriptions..."
-          value={search}
-          onChange={handleSearchChange}
-          className="w-full lg:w-72 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-        />
+        <div className="relative w-full md:w-72">
+          <Search
+            className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+            size={16}
+            onClick={() => inputRef.current?.focus()}
+          />
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="Search categories or descriptions..."
+            className="pl-10 pr-4 py-2 border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+            value={search}
+            onChange={handleSearchChange}
+          />
+        </div>
       </div>
 
       {/* Table - Full Width */}
@@ -400,14 +414,14 @@ const ExpenseCategory = () => {
                   <div className="flex justify-center gap-1">
                     <button
                       onClick={() => handleEdit(cat._id)}
-                      className={`p-2 rounded-lg transition-colors text-green-600 hover:bg-green-100`}
+                      className={`p-1 rounded-lg transition-colors text-green-600 hover:bg-green-100`}
                       title="Edit category"
                     >
                       <Edit size={18} />
                     </button>
                     <button
                       onClick={() => handleDelete(cat._id)}
-                      className={`p-2 rounded-lg transition-colors text-red-600 hover:bg-red-100"`}
+                      className={`p-1 rounded-lg transition-colors text-red-600 hover:bg-red-100"`}
                       title="Delete category"
                     >
                       <Trash2 size={18} />

@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   UserPlus,
   Trash2,
   Edit,
   X,
-  Upload,
   Search,
   ChevronDown,
   ChevronUp,
@@ -29,7 +28,8 @@ const PurchaseOut = () => {
   const [loading, setLoading] = useState(false);
   const [showInvoiceSuggestions, setShowInvoiceSuggestions] = useState(false);
   const [filteredInvoices, setFilteredInvoices] = useState([]);
-  const [paymentDate, setPaymentDate] = useState(null); // Add this state for DatePicker
+  const [paymentDate, setPaymentDate] = useState(null);
+  const inputRef = useRef(null);
 
   const [newPayment, setNewPayment] = useState({
     paymentDate: "",
@@ -449,8 +449,10 @@ const PurchaseOut = () => {
             <Search
               className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
               size={16}
+              onClick={() => inputRef.current?.focus()}
             />
             <input
+              ref={inputRef}
               type="text"
               placeholder="Search payment date, invoice no, supplier, bank..."
               value={searchTerm}
@@ -462,152 +464,151 @@ const PurchaseOut = () => {
           </div>
         </div>
 
-        {/* Table */}
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-          <div className="max-h-[calc(100vh-300px)] overflow-auto">
-            <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
-              <thead className="bg-gray-100 text-gray-700 border-b sticky top-0 z-10">
+          <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
+            <thead className="bg-gray-100 text-gray-700 border-b sticky top-0 z-10">
+              <tr>
+                <th className="p-3 text-center bg-gray-100">
+                  <input
+                    type="checkbox"
+                    checked={
+                      selected.length === currentPayments.length &&
+                      currentPayments.length > 0
+                    }
+                    onChange={(e) => toggleSelectAll(e.target.checked)}
+                    autoComplete="off"
+                  />
+                </th>
+                <th className="p-3 bg-gray-100">Invoice No</th>
+                <th className="p-3 bg-gray-100">Payment Date</th>
+                <th className="p-3 bg-gray-100">Invoice Date</th>
+                <th className="p-3 bg-gray-100">Supplier Name</th>
+                <th className="p-3 bg-gray-100">Invoice Amount($)</th>
+                <th className="p-3 bg-gray-100">Paid Amount($)</th>
+                <th className="p-3 bg-gray-100">Bank</th>
+                <th className="p-3 bg-gray-100">Remarks</th>
+                <th className="p-3 bg-gray-100">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {currentPayments.length === 0 ? (
                 <tr>
-                  <th className="p-3 text-center bg-gray-100">
-                    <input
-                      type="checkbox"
-                      checked={
-                        selected.length === currentPayments.length &&
-                        currentPayments.length > 0
-                      }
-                      onChange={(e) => toggleSelectAll(e.target.checked)}
-                      autoComplete="off"
-                    />
-                  </th>
-                  <th className="p-3 bg-gray-100">Invoice No</th>
-                  <th className="p-3 bg-gray-100">Payment Date</th>
-                  <th className="p-3 bg-gray-100">Invoice Date</th>
-                  <th className="p-3 bg-gray-100">Supplier Name</th>
-                  <th className="p-3 bg-gray-100">Invoice Amount($)</th>
-                  <th className="p-3 bg-gray-100">Paid Amount($)</th>
-                  <th className="p-3 bg-gray-100">Bank</th>
-                  <th className="p-3 bg-gray-100">Remarks</th>
-                  <th className="p-3 bg-gray-100">Actions</th>
+                  <td colSpan={10} className="p-4 text-center text-gray-500">
+                    {searchTerm
+                      ? "No payments match your search."
+                      : "No payments found."}
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {currentPayments.length === 0 ? (
-                  <tr>
-                    <td colSpan={10} className="p-4 text-center text-gray-500">
-                      {searchTerm
-                        ? "No payments match your search."
-                        : "No payments found."}
+              ) : (
+                currentPayments.map((payment, index) => (
+                  <tr
+                    key={payment._id || payment.id}
+                    className={`hover:bg-gray-50 ${
+                      (index + 1) % paymentsPerPage === 0 ||
+                      index + 1 === currentPayments.length
+                        ? ""
+                        : "border-b"
+                    }`}
+                  >
+                    <td className="p-3 text-center">
+                      <input
+                        type="checkbox"
+                        checked={selected.includes(payment._id || payment.id)}
+                        onChange={() => toggleSelect(payment._id || payment.id)}
+                        autoComplete="off"
+                      />
+                    </td>
+                    <td className="p-3">{payment.invoiceNo}</td>
+                    <td className="p-3">{formatDate(payment.paymentDate)}</td>
+                    <td className="p-3">{formatDate(payment.invoiceDate)}</td>
+                    <td className="p-3">{payment.supplierName}</td>
+                    <td className="p-3 font-medium">
+                      {formatCurrency(payment.invoiceAmount)}
+                    </td>
+                    <td className="p-3 font-semibold">
+                      {formatCurrency(payment.paidAmount || payment.amount)}
+                    </td>
+                    <td className="p-3">{payment.bank}</td>
+                    <td className="p-3">{payment.remarks}</td>
+                    <td className="p-3 flex items-center justify-center gap-3">
+                      <button
+                        className="text-green-600 hover:text-green-800 cursor-pointer"
+                        onClick={() => {
+                          setNewPayment({
+                            paymentDate: payment.paymentDate,
+                            invoiceNo: payment.invoiceNo,
+                            invoiceDate: payment.invoiceDate,
+                            supplierName: payment.supplierName,
+                            amount: formatDisplayAmount(
+                              payment.paidAmount || payment.amount
+                            ),
+                            invoiceAmount: formatDisplayAmount(
+                              payment.invoiceAmount
+                            ),
+                            bank: payment.bank,
+                            remarks: payment.remarks,
+                          });
+                          // Set the date picker value when editing
+                          setPaymentDate(
+                            payment.paymentDate
+                              ? new Date(payment.paymentDate)
+                              : null
+                          );
+                          setIsModalOpen(true);
+                        }}
+                        title="Edit"
+                      >
+                        <Edit size={18} />
+                      </button>
+                      <button
+                        className="text-red-600 hover:text-red-800 cursor-pointer"
+                        onClick={async () => {
+                          const confirm = await confirmDialog({
+                            text: `Are you sure you want to delete payment <b>${payment.invoiceNo}</b>?`,
+                            icon: "warning",
+                            confirmButtonText: "Yes, delete",
+                            cancelButtonText: "Cancel",
+                          });
+
+                          if (confirm.isConfirmed) {
+                            try {
+                              await axios.delete(
+                                `${backendUrl}/api/payments-out/${
+                                  payment._id || payment.id
+                                }`
+                              );
+                              setPayments((prev) =>
+                                prev.filter(
+                                  (p) =>
+                                    (p._id || p.id) !==
+                                    (payment._id || payment.id)
+                                )
+                              );
+                              setSelected((prev) =>
+                                prev.filter(
+                                  (id) => id !== (payment._id || payment.id)
+                                )
+                              );
+                              showToast(
+                                "success",
+                                "Payment deleted successfully"
+                              );
+                            } catch (error) {
+                              console.error("Error deleting payment:", error);
+                              showToast("error", "Failed to delete payment");
+                            }
+                          }
+                        }}
+                        title="Delete"
+                      >
+                        <Trash2 size={18} />
+                      </button>
                     </td>
                   </tr>
-                ) : (
-                  currentPayments.map((payment) => (
-                    <tr
-                      key={payment._id || payment.id}
-                      className="border-b hover:bg-gray-50"
-                    >
-                      <td className="p-3 text-center">
-                        <input
-                          type="checkbox"
-                          checked={selected.includes(payment._id || payment.id)}
-                          onChange={() =>
-                            toggleSelect(payment._id || payment.id)
-                          }
-                          autoComplete="off"
-                        />
-                      </td>
-                      <td className="p-3">{payment.invoiceNo}</td>
-                      <td className="p-3">{formatDate(payment.paymentDate)}</td>
-                      <td className="p-3">{formatDate(payment.invoiceDate)}</td>
-                      <td className="p-3">{payment.supplierName}</td>
-                      <td className="p-3 font-medium">
-                        {formatCurrency(payment.invoiceAmount)}
-                      </td>
-                      <td className="p-3 font-semibold">
-                        {formatCurrency(payment.paidAmount || payment.amount)}
-                      </td>
-                      <td className="p-3">{payment.bank}</td>
-                      <td className="p-3">{payment.remarks}</td>
-                      <td className="p-3 flex items-center justify-center gap-3">
-                        <button
-                          className="text-green-600 hover:text-green-800 cursor-pointer"
-                          onClick={() => {
-                            setNewPayment({
-                              paymentDate: payment.paymentDate,
-                              invoiceNo: payment.invoiceNo,
-                              invoiceDate: payment.invoiceDate,
-                              supplierName: payment.supplierName,
-                              amount: formatDisplayAmount(
-                                payment.paidAmount || payment.amount
-                              ),
-                              invoiceAmount: formatDisplayAmount(
-                                payment.invoiceAmount
-                              ),
-                              bank: payment.bank,
-                              remarks: payment.remarks,
-                            });
-                            // Set the date picker value when editing
-                            setPaymentDate(
-                              payment.paymentDate
-                                ? new Date(payment.paymentDate)
-                                : null
-                            );
-                            setIsModalOpen(true);
-                          }}
-                          title="Edit"
-                        >
-                          <Edit size={18} />
-                        </button>
-                        <button
-                          className="text-red-600 hover:text-red-800 cursor-pointer"
-                          onClick={async () => {
-                            const confirm = await confirmDialog({
-                              text: `Are you sure you want to delete payment <b>${payment.invoiceNo}</b>?`,
-                              icon: "warning",
-                              confirmButtonText: "Yes, delete",
-                              cancelButtonText: "Cancel",
-                            });
-
-                            if (confirm.isConfirmed) {
-                              try {
-                                await axios.delete(
-                                  `${backendUrl}/api/payments-out/${
-                                    payment._id || payment.id
-                                  }`
-                                );
-                                setPayments((prev) =>
-                                  prev.filter(
-                                    (p) =>
-                                      (p._id || p.id) !==
-                                      (payment._id || payment.id)
-                                  )
-                                );
-                                setSelected((prev) =>
-                                  prev.filter(
-                                    (id) => id !== (payment._id || payment.id)
-                                  )
-                                );
-                                showToast(
-                                  "success",
-                                  "Payment deleted successfully"
-                                );
-                              } catch (error) {
-                                console.error("Error deleting payment:", error);
-                                showToast("error", "Failed to delete payment");
-                              }
-                            }
-                          }}
-                          title="Delete"
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-
+                ))
+              )}
+            </tbody>
+          </table>
           {/* Pagination */}
           {currentPayments.length > 0 && (
             <div className="mt-4 p-5 flex justify-start gap-2 bg-white">

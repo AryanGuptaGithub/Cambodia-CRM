@@ -1031,7 +1031,7 @@ const SaleReturn = () => {
           </div>
         </div>
 
-        <div className="overflow-x-auto shadow">
+        <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
           <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
             <thead className="bg-gray-100 text-gray-700 border-b">
               <tr>
@@ -1141,7 +1141,7 @@ const SaleReturn = () => {
               )}
             </tbody>
           </table>
-        </div>
+
         {currentReturns.length > 0 && (
           <div className="mt-4 p-5 flex justify-start gap-2">
             <button
@@ -1177,6 +1177,7 @@ const SaleReturn = () => {
             </button>
           </div>
         )}
+        </div>
 
         {isColumnModalOpen &&
           ReactDOM.createPortal(

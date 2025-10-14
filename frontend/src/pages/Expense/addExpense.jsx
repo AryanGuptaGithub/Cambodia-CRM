@@ -338,7 +338,7 @@ const AddExpense = ({
         paymentMethod: formData.paymentMethod,
         notes: formData.notes?.trim() || "",
       };
-      console.log('valueso f submitData', submitData);
+
       setIsSubmitting(true);
 
       let response;
@@ -474,7 +474,6 @@ const AddExpense = ({
                   disabled={loading}
                 />
 
-                {/* Description - Full width */}
                 <div className="md:col-span-2">
                   <InputField
                     label="Description"
@@ -485,14 +484,13 @@ const AddExpense = ({
                     }
                     error={errors.description}
                     placeholder="Enter expense description"
-                    required
                   />
                 </div>
 
                 {/* Notes - Full width */}
                 <div className="md:col-span-2">
                   <TextAreaField
-                    label="Notes (Optional)"
+                    label="Remarks (Optional)"
                     name="notes"
                     value={formData.notes}
                     onChange={(e) => handleInputChange("notes", e.target.value)}

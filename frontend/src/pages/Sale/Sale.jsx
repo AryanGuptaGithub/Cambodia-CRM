@@ -1228,7 +1228,7 @@ const Sales = () => {
               <input
                 ref={inputRef}
                 type="text"
-                placeholder="Search invoice, customer, status..."
+                placeholder="Search invoice,product name, customer name..."
                 value={searchTerm}
                 onChange={(e) => {
                   setSearchTerm(e.target.value);
@@ -1240,7 +1240,7 @@ const Sales = () => {
           </div>
         </div>
 
-        <div className="overflow-x-auto shadow">
+        <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
           <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
             <thead className="bg-gray-100 text-gray-700 border-b">
               <tr>
@@ -1349,8 +1349,7 @@ const Sales = () => {
               )}
             </tbody>
           </table>
-        </div>
-        {/* Pagination */}
+        
         {currentSales.length > 0 && (
           <div className="mt-4 p-5 flex justify-start gap-2">
             <button
@@ -1408,6 +1407,7 @@ const Sales = () => {
             </button>
           </div>
         )}
+        </div>
 
         {showImportModal &&
           ReactDOM.createPortal(
