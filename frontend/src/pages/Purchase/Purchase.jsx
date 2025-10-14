@@ -885,7 +885,7 @@ function Purchase() {
                   .map((item) => (
                     <th
                       key={item.id}
-                      className="p-3 whitespace-nowrap min-w-[120px]"
+                      className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium"
                     >
                       {item.id === "invoiceNumber" ? (
                         <div className="flex items-center gap-4">

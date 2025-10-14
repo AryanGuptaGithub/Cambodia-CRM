@@ -502,7 +502,7 @@ const Customer = () => {
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
-              <th className="p-3">
+              <th className="p-3 text-sm font-medium">
                 <div className="flex items-center gap-4">
                   {currentCustomers.length > 0 && (
                     <input
@@ -517,14 +517,14 @@ const Customer = () => {
                   <span>Name</span>
                 </div>
               </th>
-              <th className="p-3">Business</th>
-              <th className="p-3">medicalRepName</th>
-              <th className="p-3">Address</th>
-              <th className="p-3">Zone</th>
-              <th className="p-3">Location</th>
-              <th className="p-3">Created At</th>
-              <th className="p-3">Status</th>
-              <th className="p-3">Action</th>
+              <th className="p-3 text-sm font-medium">Business</th>
+              <th className="p-3 text-sm font-medium">medicalRepName</th>
+              <th className="p-3 text-sm font-medium">Address</th>
+              <th className="p-3 text-sm font-medium">Zone</th>
+              <th className="p-3 text-sm font-medium">Location</th>
+              <th className="p-3 text-sm font-medium">Created At</th>
+              <th className="p-3 text-sm font-medium">Status</th>
+              <th className="p-3 text-sm font-medium">Action</th>
             </tr>
           </thead>
           <tbody>

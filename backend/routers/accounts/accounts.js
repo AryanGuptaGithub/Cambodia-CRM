@@ -100,7 +100,7 @@ router.get("/accounts/alternative", async (req, res) => {
       customerAddress: sale.customerAddress || "N/A",
       amount: sale.dueAmount,
     }));
-    
+
     res.json({
       success: true,
       data: transformedSales,
@@ -115,5 +115,6 @@ router.get("/accounts/alternative", async (req, res) => {
     });
   }
 });
+
 
 export default router;

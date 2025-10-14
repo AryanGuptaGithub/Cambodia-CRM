@@ -217,12 +217,12 @@ const PurchaseReturn = () => {
       },
       {
         id: "amount",
-        name: "Amount",
+        name: "Amount ($)",
         dbName: "amount",
       },
       {
         id: "returnAmount",
-        name: "Return Amount",
+        name: "Return Amount ($)",
         dbName: "returnAmount",
       },
       {
@@ -713,7 +713,7 @@ const PurchaseReturn = () => {
                   .map((item) => (
                     <th
                       key={item.id}
-                      className="p-3 whitespace-nowrap min-w-[120px]"
+                      className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium"
                     >
                       {item.id === "invoiceNumber" ? (
                         <div className="flex items-center gap-4">
@@ -1375,7 +1375,7 @@ const PurchaseReturn = () => {
 
                   {/* Amount Fields */}
                   <div>
-                    <label className="block text-sm font-medium">Amount</label>
+                    <label className="block text-sm font-medium">Amount ($)</label>
                     <input
                       type="text"
                       name="amount"
@@ -1390,7 +1390,7 @@ const PurchaseReturn = () => {
 
                   <div>
                     <label className="block text-sm font-medium">
-                      Return Amount
+                      Return Amount ($)
                     </label>
                     <input
                       type="text"

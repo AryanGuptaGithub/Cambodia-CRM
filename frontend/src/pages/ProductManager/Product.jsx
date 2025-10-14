@@ -491,16 +491,16 @@ const Product = () => {
                         onChange={(e) => toggleSelectAll(e.target.checked)}
                       />
                     )}
-                    <span>Product Name</span>
+                    <span className="text-sm font-medium">Product Name</span>
                   </div>
                 </th>
-                <th className="p-3">Product Type</th>
-                <th className="p-3">Packing</th>
-                <th className="p-3">Quantity Per Box</th>
-                <th className="p-3">Supplier</th>
-                <th className="p-3">Drug License</th>
-                <th className="p-3">License Validity</th>
-                <th className="p-3">Action</th>
+                <th className="p-3 text-sm font-medium">Product Type</th>
+                <th className="p-3  text-sm font-medium">Packing</th>
+                <th className="p-3  text-sm font-medium">Quantity Per Box</th>
+                <th className="p-3  text-sm font-medium">Supplier</th>
+                <th className="p-3  text-sm font-medium">Drug License</th>
+                <th className="p-3  text-sm font-medium">License Validity</th>
+                <th className="p-3  text-sm font-medium">Action</th>
               </tr>
             </thead>
             <tbody>

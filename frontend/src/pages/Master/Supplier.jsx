@@ -405,7 +405,7 @@ const Supplier = () => {
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
-              <th className="p-3">
+              <th className="p-3 text-sm font-medium">
                 <div className="flex items-center gap-4">
                   {currentSuppliers.length > 0 && (
                     <input
@@ -420,11 +420,11 @@ const Supplier = () => {
                   <span>Product Name</span>
                 </div>
               </th>
-              <th className="p-3">Address</th>
-              <th className="p-3">Site Registration Date</th>
-              <th className="p-3">Site Registration Expiry Date</th>
-              <th className="p-3">Enabled</th>
-              <th className="p-3">Action</th>
+              <th className="p-3 text-sm font-medium">Address</th>
+              <th className="p-3 text-sm font-medium">Site Registration Date</th>
+              <th className="p-3 text-sm font-medium">Site Registration Expiry Date</th>
+              <th className="p-3 text-sm font-medium">Enabled</th>
+              <th className="p-3 text-sm font-medium">Action</th>
             </tr>
           </thead>
           <tbody>

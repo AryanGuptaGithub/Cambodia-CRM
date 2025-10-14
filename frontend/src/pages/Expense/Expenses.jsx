@@ -225,33 +225,41 @@ const Expenses = () => {
         </div>
       )}
       <div className="flex justify-between items-center mb-6">
-        <button
-          onClick={() => navigate("/expenselayout/expenses/new")}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700"
-        >
-          <Plus size={18} /> Add New Expense
-        </button>
-        <div className="relative w-full md:w-72">
-          <Search
-            className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-            size={16}
-            onClick={() => inputRef.current?.focus()}
-          />
-          <input
-            ref={inputRef}
-            type="text"
-            placeholder="Search by Source Account, Expense Category	, or description..."
-            className="pl-10 pr-4 py-2 border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-            value={searchQuery}
-            onChange={handleSearchChange}
-          />
+        {/* Left side - Add New Expense button */}
+        <div className="flex items-center">
+          <button
+            onClick={() => navigate("/expenselayout/expenses/new")}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700"
+          >
+            <Plus size={18} /> Add New Expense
+          </button>
+        </div>
+
+        {/* Right side - Search Box */}
+        <div className="flex items-center gap-4">
+          <div className="relative w-72">
+            <Search
+              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+              size={16}
+              onClick={() => inputRef.current?.focus()}
+            />
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Search by Source Account, Expense Category, or description..."
+              className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+              value={searchQuery}
+              onChange={handleSearchChange}
+            />
+          </div>
         </div>
       </div>
-      <div className="overflow-x-auto shadow">
+
+      <div className="bg-white shadow rounded-xl overflow-hidden w-full">
         <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
-              <th className="p-3 min-w-[120px]">
+              <th className="p-3 min-w-[120px] text-sm font-medium">
                 <div className="flex items-center gap-4">
                   {currentExpenses.length > 0 && (
                     <input
@@ -267,12 +275,12 @@ const Expenses = () => {
                   <span>Sr</span>
                 </div>
               </th>
-              <th className="p-3 min-w-[150px]">Source Account</th>
-              <th className="p-3 min-w-[180px]">Expense Category</th>
-              <th className="p-3 min-w-[200px]">Description</th>
-              <th className="p-3 min-w-[120px]">Amount ($)</th>
-              <th className="p-3 min-w-[150px]">Date</th>
-              <th className="p-3 min-w-[150px]">Actions</th>
+              <th className="p-3 min-w-[150px] text-sm font-medium">Source Account</th>
+              <th className="p-3 min-w-[180px] text-sm font-medium">Expense Category</th>
+              <th className="p-3 min-w-[200px] text-sm font-medium">Description</th>
+              <th className="p-3 min-w-[120px] text-sm font-medium">Amount ($)</th>
+              <th className="p-3 min-w-[150px] text-sm font-medium">Date</th>
+              <th className="p-3 min-w-[150px] text-sm font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -344,7 +352,7 @@ const Expenses = () => {
           disabled={currentPage === 1}
           className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
         >
-          Previous
+          Prev
         </button>
         <div className="flex gap-1">
           {visiblePages.map((pg) => (
@@ -369,7 +377,7 @@ const Expenses = () => {
           Next
         </button>
       </div>
-      
+
       {expenses.length > 0 && (
         <div className="mt-6 p-6 bg-blue-50 rounded-lg border border-blue-200">
           <h3 className="font-semibold text-blue-800 mb-4 text-lg">Summary</h3>

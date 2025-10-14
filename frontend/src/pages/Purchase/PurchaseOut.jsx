@@ -468,7 +468,7 @@ const PurchaseOut = () => {
           <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
             <thead className="bg-gray-100 text-gray-700 border-b sticky top-0 z-10">
               <tr>
-                <th className="p-3 text-center bg-gray-100">
+                <th className="p-3 text-center bg-gray-100 text-sm font-medium">
                   <input
                     type="checkbox"
                     checked={
@@ -479,15 +479,15 @@ const PurchaseOut = () => {
                     autoComplete="off"
                   />
                 </th>
-                <th className="p-3 bg-gray-100">Invoice No</th>
-                <th className="p-3 bg-gray-100">Payment Date</th>
-                <th className="p-3 bg-gray-100">Invoice Date</th>
-                <th className="p-3 bg-gray-100">Supplier Name</th>
-                <th className="p-3 bg-gray-100">Invoice Amount($)</th>
-                <th className="p-3 bg-gray-100">Paid Amount($)</th>
-                <th className="p-3 bg-gray-100">Bank</th>
-                <th className="p-3 bg-gray-100">Remarks</th>
-                <th className="p-3 bg-gray-100">Actions</th>
+                <th className="p-3 bg-gray-100 text-sm font-medium">Invoice No</th>
+                <th className="p-3 bg-gray-100 text-sm font-medium">Payment Date</th>
+                <th className="p-3 bg-gray-100 text-sm font-medium">Invoice Date</th>
+                <th className="p-3 bg-gray-100 text-sm font-medium">Supplier Name</th>
+                <th className="p-3 bg-gray-100 text-sm font-medium">Invoice Amount($)</th>
+                <th className="p-3 bg-gray-100 text-sm font-medium">Paid Amount($)</th>
+                <th className="p-3 bg-gray-100 text-sm font-medium">Bank</th>
+                <th className="p-3 bg-gray-100 text-sm font-medium">Remarks</th>
+                <th className="p-3 bg-gray-100 text-sm font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -523,10 +523,10 @@ const PurchaseOut = () => {
                     <td className="p-3">{formatDate(payment.invoiceDate)}</td>
                     <td className="p-3">{payment.supplierName}</td>
                     <td className="p-3 font-medium">
-                      {formatCurrency(payment.invoiceAmount)}
+                      {payment.invoiceAmount}
                     </td>
                     <td className="p-3 font-semibold">
-                      {formatCurrency(payment.paidAmount || payment.amount)}
+                      {payment.paidAmount || payment.amount}
                     </td>
                     <td className="p-3">{payment.bank}</td>
                     <td className="p-3">{payment.remarks}</td>

@@ -197,14 +197,14 @@ function PriceList() {
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
           <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
-              <th className="p-3">Product Name</th>
-              <th className="p-3">Type</th>
-              <th className="p-3">Selling Price (USD)</th>
-              <th className="p-3">LC</th>
-              <th className="p-3">Tax Selling Price (USD)</th>
-              <th className="p-3">Drug License</th>
-              <th className="p-3">License Validity</th>
-              <th className="p-3">Action</th>
+              <th className="p-3 text-sm font-medium">Product Name</th>
+              <th className="p-3 text-sm font-medium">Type</th>
+              <th className="p-3 text-sm font-medium">Selling Price (USD)</th>
+              <th className="p-3 text-sm font-medium">LC</th>
+              <th className="p-3 text-sm font-medium">Tax Selling Price (USD)</th>
+              <th className="p-3 text-sm font-medium">Drug License</th>
+              <th className="p-3 text-sm font-medium">License Validity</th>
+              <th className="p-3 text-sm font-medium">Action</th>
             </tr>
           </thead>
           <tbody>

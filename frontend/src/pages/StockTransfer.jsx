@@ -495,7 +495,7 @@ const StockTransfer = () => {
         <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
-              <th className="p-3 min-w-[120px]">
+              <th className="p-3 min-w-[120px] text-sm font-medium">
                 <div className="flex items-center gap-4">
                   {currentStockTransfers.length > 0 && (
                     <input
@@ -511,12 +511,12 @@ const StockTransfer = () => {
                   <span>Transfer No</span>
                 </div>
               </th>
-              <th className="p-3 min-w-[120px]">Date</th>
-              <th className="p-3 min-w-[120px]">Grand Total ($)</th>
-              <th className="p-3 min-w-[120px]">Total Expenses ($)</th>
-              <th className="p-3 min-w-[120px]">Shipping ($)</th>
-              <th className="p-3 min-w-[120px]"># Products</th>
-              <th className="p-3 min-w-[150px]">Actions</th>
+              <th className="p-3 min-w-[120px] text-sm font-medium">Date</th>
+              <th className="p-3 min-w-[120px] text-sm font-medium">Grand Total ($)</th>
+              <th className="p-3 min-w-[120px] text-sm font-medium">Total Expenses ($)</th>
+              <th className="p-3 min-w-[120px] text-sm font-medium">Shipping ($)</th>
+              <th className="p-3 min-w-[120px] text-sm font-medium"># Products</th>
+              <th className="p-3 min-w-[150px] text-sm font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -601,7 +601,7 @@ const StockTransfer = () => {
               disabled={currentPage === 1}
               className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
-              Previous
+              Prev
             </button>
             <div className="flex gap-1">
               {visiblePages.map((pg) => (

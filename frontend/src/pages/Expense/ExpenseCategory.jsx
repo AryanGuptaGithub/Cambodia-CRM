@@ -319,12 +319,13 @@ const ExpenseCategory = () => {
         </div>
       )}
 
-      {/* Top Bar */}
-      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
-        <div className="flex flex-col sm:flex-row gap-4">
+      {/* Top Bar - CORRECTED LAYOUT */}
+      <div className="flex justify-between items-center mb-6">
+        {/* Left side - Add New Category button */}
+        <div className="flex items-center">
           <button
             onClick={() => navigate("/expenselayout/expensecategories/new")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors bg-indigo-600 text-white hover:bg-indigo-700`}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer`}
           >
             {loading ? (
               <Loader className="animate-spin" size={18} />
@@ -334,24 +335,27 @@ const ExpenseCategory = () => {
             Add New Category
           </button>
         </div>
-        <div className="relative w-full md:w-72">
-          <Search
-            className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-            size={16}
-            onClick={() => inputRef.current?.focus()}
-          />
-          <input
-            ref={inputRef}
-            type="text"
-            placeholder="Search categories or descriptions..."
-            className="pl-10 pr-4 py-2 border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-            value={search}
-            onChange={handleSearchChange}
-          />
+
+        {/* Right side - Search Box */}
+        <div className="flex items-center gap-4">
+          <div className="relative w-72">
+            <Search
+              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+              size={16}
+              onClick={() => inputRef.current?.focus()}
+            />
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Search categories or descriptions..."
+              className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+              value={search}
+              onChange={handleSearchChange}
+            />
+          </div>
         </div>
       </div>
 
-      {/* Table - Full Width */}
       <div className="bg-white shadow rounded-xl overflow-hidden w-full">
         <table className="w-full border-collapse table-fixed text-center">
           <thead className="bg-gray-50 border-b border-gray-200">
@@ -399,13 +403,11 @@ const ExpenseCategory = () => {
                   {cat.description}
                 </td>
                 <td className="px-4 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
-                  $
                   {cat.amountUntilYear
                     ? formatCurrency(cat.amountUntilYear)
                     : "NO Expense Added"}
                 </td>
                 <td className="px-4 py-4 whitespace-nowrap text-sm font-semibold text-blue-600">
-                  $
                   {cat.amountMonthly
                     ? formatCurrency(cat.amountMonthly)
                     : "NO Expense Added"}
@@ -414,14 +416,14 @@ const ExpenseCategory = () => {
                   <div className="flex justify-center gap-1">
                     <button
                       onClick={() => handleEdit(cat._id)}
-                      className={`p-1 rounded-lg transition-colors text-green-600 hover:bg-green-100`}
+                      className={`p-1 rounded-lg transition-colors text-green-600 hover:bg-green-100 cursor-pointer`}
                       title="Edit category"
                     >
                       <Edit size={18} />
                     </button>
                     <button
                       onClick={() => handleDelete(cat._id)}
-                      className={`p-1 rounded-lg transition-colors text-red-600 hover:bg-red-100"`}
+                      className={`p-1 rounded-lg transition-colors text-red-600 hover:bg-red-100 cursor-pointer`}
                       title="Delete category"
                     >
                       <Trash2 size={18} />
@@ -451,53 +453,51 @@ const ExpenseCategory = () => {
         )}
       </div>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex justify-center items-center mt-6 gap-2">
-          <button
-            disabled={currentPage === 1 || loading}
-            onClick={() => setCurrentPage((prev) => prev - 1)}
-            className={`px-4 py-2 rounded-lg transition-colors ${
-              currentPage === 1 || loading
-                ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                : "bg-indigo-600 text-white hover:bg-indigo-700"
-            }`}
-          >
-            Previous
-          </button>
+      <div className="flex justify-start items-center mt-3 gap-2">
+        <button
+          disabled={currentPage === 1 || loading}
+          onClick={() => setCurrentPage((prev) => prev - 1)}
+          className={`px-4 py-2 rounded-lg transition-colors ${
+            currentPage === 1 || loading
+              ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+              : "bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer"
+          }`}
+        >
+          Prev
+        </button>
 
-          <div className="flex gap-1">
-            {Array.from({ length: totalPages }, (_, i) => (
-              <button
-                key={i + 1}
-                onClick={() => setCurrentPage(i + 1)}
-                disabled={loading}
-                className={`px-3 py-2 rounded-lg transition-colors ${
-                  currentPage === i + 1
-                    ? "bg-indigo-600 text-white"
-                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                } ${loading ? "opacity-50 cursor-not-allowed" : ""}`}
-              >
-                {i + 1}
-              </button>
-            ))}
-          </div>
-
-          <button
-            disabled={currentPage === totalPages || loading}
-            onClick={() => setCurrentPage((prev) => prev + 1)}
-            className={`px-4 py-2 rounded-lg transition-colors ${
-              currentPage === totalPages || loading
-                ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                : "bg-indigo-600 text-white hover:bg-indigo-700"
-            }`}
-          >
-            Next
-          </button>
+        <div className="flex gap-1">
+          {Array.from({ length: totalPages }, (_, i) => (
+            <button
+              key={i + 1}
+              onClick={() => setCurrentPage(i + 1)}
+              disabled={loading}
+              className={`px-3 py-2 rounded-lg transition-colors ${
+                currentPage === i + 1
+                  ? "bg-indigo-600 text-white"
+                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+              } ${
+                loading ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
+              }`}
+            >
+              {i + 1}
+            </button>
+          ))}
         </div>
-      )}
 
-      {/* Summary */}
+        <button
+          disabled={currentPage === totalPages || loading}
+          onClick={() => setCurrentPage((prev) => prev + 1)}
+          className={`px-4 py-2 rounded-lg transition-colors ${
+            currentPage === totalPages || loading
+              ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+              : "bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer"
+          }`}
+        >
+          Next
+        </button>
+      </div>
+
       <div className="mt-6 p-6 bg-blue-50 rounded-lg border border-blue-200">
         <h3 className="font-semibold text-blue-800 mb-4 text-lg">Summary</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -611,7 +611,7 @@ const ExpenseCategory = () => {
                       name="isActive"
                       checked={form.isActive}
                       onChange={handleChange}
-                      className="rounded text-indigo-600 focus:ring-indigo-500"
+                      className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                     />
                     <span className="text-sm font-medium text-gray-700">
                       Active Category
@@ -632,8 +632,10 @@ const ExpenseCategory = () => {
                     type="submit"
                     onClick={handleUpdateCategory}
                     disabled={loading}
-                    className={`bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer transition-colors ${
-                      loading ? "opacity-50 cursor-not-allowed" : ""
+                    className={`bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg transition-colors ${
+                      loading
+                        ? "opacity-50 cursor-not-allowed"
+                        : "cursor-pointer"
                     }`}
                   >
                     {loading ? "Updating..." : "Update Category"}

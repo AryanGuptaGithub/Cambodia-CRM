@@ -2,6 +2,8 @@
 import express from "express";
 const router = express.Router();
 import Expense from "../../models/expenses/addExpense.js";
+import mongoose from "mongoose";
+import Destination from "../../models/accounts/Destination.js";
 
 router.get("/expenses", async (req, res) => {
   try {
@@ -167,34 +169,75 @@ router.put("/expenses/:id", async (req, res) => {
 
 // Delete expense
 router.delete("/expenses/:id", async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const { id } = req.params;
 
-    const deletedExpense = await Expense.findByIdAndDelete(id);
-
-    if (!deletedExpense) {
-      return res.status(404).json({
-        success: false,
-        message: "Expense not found",
-      });
-    }
-
-    res.json({
-      success: true,
-      message: "Expense deleted successfully",
-      data: deletedExpense,
-    });
-  } catch (error) {
-    console.error("Error deleting expense:", error);
-
-    if (error.name === "CastError") {
+    // Validate ID format
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({
         success: false,
         message: "Invalid expense ID",
       });
     }
 
-    res.status(500).json({
+    // Fetch the expense to get amount and sourceAccount
+    const expense = await Expense.findById(id).session(session);
+    if (!expense) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        success: false,
+        message: "Expense not found",
+      });
+    }
+
+    const { amount, sourceAccount } = expense;
+
+    // If there is a source account, refund the amount
+    if (sourceAccount) {
+      const account = await Destination.findById(sourceAccount).session(
+        session
+      );
+      if (!account) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(404).json({
+          success: false,
+          message: "Source account not found to refund the amount",
+        });
+      }
+      account.totalAmount = (account.totalAmount || 0) + amount;
+      await account.save({ session });
+    }
+
+    // Delete the expense
+    const deletedExpense = await Expense.findByIdAndDelete(id, { session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.json({
+      success: true,
+      message: "Expense deleted and amount refunded successfully",
+      data: deletedExpense,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+
+    console.error("Error deleting expense:", error);
+    if (error.name === "CastError") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid expense ID",
+      });
+    }
+    return res.status(500).json({
       success: false,
       message: "Failed to delete expense",
       error: error.message,
@@ -260,6 +303,94 @@ router.get("/expenses/statistics/summary", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to fetch expense statistics",
+      error: error.message,
+    });
+  }
+});
+
+router.patch("/expenses/destinations/:id/balance", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { amount, operation } = req.body; // operation: "add" or "subtract"
+
+    // Validate MongoDB ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid account ID format",
+      });
+    }
+
+    // Validate amount
+    if (typeof amount !== "number" || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Amount must be a positive number",
+      });
+    }
+
+    // Validate operation
+    if (!["add", "subtract"].includes(operation)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid operation. Use 'add' or 'subtract'",
+      });
+    }
+
+    // Find the account
+    const account = await Destination.findById(id);
+    if (!account) {
+      return res.status(404).json({
+        success: false,
+        message: "Destination account not found",
+      });
+    }
+
+    // Check account status
+    if (!account.isActive) {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot update inactive account",
+      });
+    }
+
+    const previousBalance = account.totalAmount;
+    let newBalance;
+
+    if (operation === "add") {
+      newBalance = previousBalance + amount;
+    } else {
+      // "subtract"
+      newBalance = previousBalance - amount;
+      if (newBalance < 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Insufficient balance",
+        });
+      }
+    }
+
+    account.totalAmount = newBalance;
+    await account.save();
+
+    res.status(200).json({
+      success: true,
+      message:
+        operation === "add"
+          ? "Amount added to balance successfully"
+          : "Amount subtracted from balance successfully",
+      data: {
+        previousBalance,
+        newBalance,
+        operation,
+        amount,
+      },
+    });
+  } catch (error) {
+    console.error("Error updating account balance:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update account balance",
       error: error.message,
     });
   }

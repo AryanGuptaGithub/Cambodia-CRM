@@ -18,7 +18,7 @@ const InputField = ({
   type = "text",
   readOnly = false,
   autoComplete = "off",
-  onKeyPress, // Add onKeyPress prop
+  onKeyPress,
 }) => (
   <div className="flex flex-col">
     <label htmlFor={name} className="text-sm font-medium text-gray-700 mb-1">
@@ -30,7 +30,7 @@ const InputField = ({
       name={name}
       value={value || ""}
       onChange={onChange}
-      onKeyPress={onKeyPress} // Add onKeyPress handler
+      onKeyPress={onKeyPress}
       placeholder={placeholder}
       readOnly={readOnly}
       autoComplete={autoComplete}
@@ -42,7 +42,6 @@ const InputField = ({
   </div>
 );
 
-// New TextAreaField component
 const TextAreaField = ({
   label,
   name,
@@ -74,7 +73,6 @@ const TextAreaField = ({
   </div>
 );
 
-// New SelectField component for dropdowns
 const SelectField = ({
   label,
   name,
@@ -115,15 +113,15 @@ const AddExpense = ({
   onCancel,
   initialData = null,
   isEditing = false,
-  onSuccess, // Callback for successful submission
+  onSuccess,
 }) => {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
     date: "",
     amount: "",
     description: "",
-    expenseCategory: "", // Dropdown field
-    sourceAccount: "", // Dropdown field
+    expenseCategory: "",
+    sourceAccount: "",
     paymentMethod: "cash",
     notes: "",
   });
@@ -132,37 +130,43 @@ const AddExpense = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // State for dropdown options
   const [categoryOptions, setCategoryOptions] = useState([]);
   const [sourceAccountOptions, setSourceAccountOptions] = useState([]);
 
-  // Function to allow only numbers and decimal point
+  const getSelectedAccountBalance = useCallback(() => {
+    if (!formData.sourceAccount) return 0;
+    const acc = sourceAccountOptions.find(
+      (a) => a.value === formData.sourceAccount
+    );
+    return acc ? acc.totalAmount : 0;
+  }, [formData.sourceAccount, sourceAccountOptions]);
+
+  const validateAmountAgainstBalance = useCallback(
+    (amount) => {
+      if (!formData.sourceAccount) return true;
+      const balance = getSelectedAccountBalance();
+      const amt = parseFloat(amount) || 0;
+      return amt <= balance;
+    },
+    [formData.sourceAccount, getSelectedAccountBalance]
+  );
+
   const handleAmountChange = (value) => {
-    // Allow only numbers and one decimal point
-    const sanitizedValue = value.replace(/[^0-9.]/g, "");
-
-    // Ensure only one decimal point
-    const decimalCount = (sanitizedValue.match(/\./g) || []).length;
+    const sanitized = value.replace(/[^0-9.]/g, "");
+    const decimalCount = (sanitized.match(/\./g) || []).length;
+    let final = sanitized;
     if (decimalCount > 1) {
-      // If more than one decimal point, remove the extra ones
-      const parts = sanitizedValue.split(".");
-      const finalValue = parts[0] + "." + parts.slice(1).join("");
-      setFormData((prev) => ({ ...prev, amount: finalValue }));
-    } else {
-      setFormData((prev) => ({ ...prev, amount: sanitizedValue }));
+      const parts = sanitized.split(".");
+      final = parts[0] + "." + parts.slice(1).join("");
     }
-
-    if (errors.amount) {
-      setErrors((prev) => ({ ...prev, amount: "" }));
-    }
+    setFormData((prev) => ({ ...prev, amount: final }));
+    // Clear amount error on change
+    setErrors((prev) => ({ ...prev, amount: "" }));
   };
 
-  // Function to prevent non-numeric input on key press
   const handleKeyPress = (e) => {
     const charCode = e.which ? e.which : e.keyCode;
     const char = String.fromCharCode(charCode);
-
-    // Allow numbers (0-9), decimal point (.), and control keys (backspace, tab, etc.)
     if (
       !/[\d.]/.test(char) &&
       charCode > 31 &&
@@ -171,22 +175,18 @@ const AddExpense = ({
       e.preventDefault();
       return false;
     }
-
-    // Prevent multiple decimal points
     if (char === "." && e.target.value.includes(".")) {
       e.preventDefault();
       return false;
     }
-
     return true;
   };
 
-  // Populate form data if editing
   useEffect(() => {
     if (initialData) {
       setFormData({
         date: initialData.date || "",
-        amount: initialData.amount || "",
+        amount: initialData.amount?.toString() || "",
         description: initialData.description || "",
         expenseCategory: initialData.expenseCategory || "",
         sourceAccount: initialData.sourceAccount || "",
@@ -194,28 +194,14 @@ const AddExpense = ({
         notes: initialData.notes || "",
       });
     } else {
-      // Set default date to today
       const today = new Date().toISOString().split("T")[0];
-      setFormData({
-        date: today,
-        amount: "",
-        description: "",
-        expenseCategory: "",
-        sourceAccount: "",
-        paymentMethod: "cash",
-        notes: "",
-      });
+      setFormData((prev) => ({ ...prev, date: today }));
     }
   }, [initialData]);
 
-  // Handle form field changes
   const handleInputChange = useCallback(
     (field, value) => {
-      setFormData((prev) => ({
-        ...prev,
-        [field]: value,
-      }));
-
+      setFormData((prev) => ({ ...prev, [field]: value }));
       if (errors[field]) {
         setErrors((prev) => ({ ...prev, [field]: "" }));
       }
@@ -223,17 +209,16 @@ const AddExpense = ({
     [errors]
   );
 
-  // Handle dropdown changes
   const handleSelectChange = useCallback(
     (e) => {
       const { name, value } = e.target;
-      setFormData((prev) => ({
-        ...prev,
-        [name]: value,
-      }));
-
+      setFormData((prev) => ({ ...prev, [name]: value }));
       if (errors[name]) {
         setErrors((prev) => ({ ...prev, [name]: "" }));
+      }
+      // Clear amount error when changing source account
+      if (name === "sourceAccount") {
+        setErrors((prev) => ({ ...prev, amount: "" }));
       }
     },
     [errors]
@@ -244,43 +229,29 @@ const AddExpense = ({
       setLoading(true);
       setError(null);
 
-      // Fetch expense category options
-      const categoryResponse = await axios.get(
-        `${backendUrl}/api/expense-categary`
-      );
-
-      if (categoryResponse.data.success) {
-        const categories = categoryResponse.data.data.map((cat) => ({
-          value: cat._id,
-          label: cat.category, // Using category field for display
-        }));
-        setCategoryOptions(categories);
-      } else {
-        throw new Error(
-          categoryResponse.data.message || "Failed to fetch categories"
+      const catResp = await axios.get(`${backendUrl}/api/expense-categary`);
+      if (catResp.data.success) {
+        setCategoryOptions(
+          catResp.data.data.map((c) => ({ value: c._id, label: c.category }))
         );
       }
 
-      // Fetch source account options from destinations
-      const destinationResponse = await axios.get(
+      const destResp = await axios.get(
         `${backendUrl}/api/accounts/destinations`
       );
-
-      if (destinationResponse.status == "200") {
-        console.log("inside if ", destinationResponse);
-        const destinations = destinationResponse.data.map((dest) => ({
-          value: dest._id,
-          label: dest.name,
-          totalAmount: dest.totalAmount || 0,
-        }));
-        setSourceAccountOptions(destinations);
+      if (destResp.status === 200) {
+        setSourceAccountOptions(
+          destResp.data.map((d) => ({
+            value: d._id,
+            label: d.name,
+            totalAmount: d.totalAmount || 0,
+          }))
+        );
       }
     } catch (err) {
-      console.log("values of err", err);
+      console.error("Error loading dropdowns:", err);
       setError(err.message);
-      setCategoryOptions([]);
-      setSourceAccountOptions([]);
-      showToast("error", `Failed to load options: ${err.message}`);
+      showToast("error", `Failed to load: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -290,7 +261,13 @@ const AddExpense = ({
     fetchDropdownOptions();
   }, []);
 
-  // Validate form before submission
+  useEffect(() => {
+    // whenever source account switches, clear amount error
+    if (errors.amount) {
+      setErrors((prev) => ({ ...prev, amount: "" }));
+    }
+  }, [formData.sourceAccount]);
+
   const validate = useCallback(() => {
     const newErrors = {};
 
@@ -302,6 +279,9 @@ const AddExpense = ({
       newErrors.amount = "Valid amount is required";
     } else if (isNaN(parseFloat(formData.amount))) {
       newErrors.amount = "Amount must be a valid number";
+    } else if (!validateAmountAgainstBalance(formData.amount)) {
+      const bal = getSelectedAccountBalance();
+      newErrors.amount = `Amount exceeds available balance ($${bal})`;
     }
 
     if (!formData.description?.trim()) {
@@ -310,30 +290,46 @@ const AddExpense = ({
       newErrors.description = "Description must be at least 3 characters long";
     }
 
-    // Validate dropdown fields
     if (!formData.expenseCategory) {
       newErrors.expenseCategory = "Expense Category is required";
     }
-
     if (!formData.sourceAccount) {
       newErrors.sourceAccount = "Source Account is required";
     }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
-  }, [formData]);
+  }, [formData, validateAmountAgainstBalance, getSelectedAccountBalance]);
 
-  // Handle form submit - Direct API call for expenses
+  const updateDestinationAccount = async (accountId, amount, operation) => {
+    try {
+      const resp = await axios.patch(
+        `${backendUrl}/api/expenses/destinations/${accountId}/balance`,
+        {
+          amount,
+          operation, // "add" or "subtract"
+        }
+      );
+      return resp.data;
+    } catch (err) {
+      console.error("Error updating dest account:", err);
+      throw new Error(
+        err.response?.data?.message || "Failed to update destination account"
+      );
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validate()) return;
 
     try {
+      const amt = parseFloat(formData.amount);
       const submitData = {
         date: formData.date,
-        amount: parseFloat(formData.amount),
+        amount: amt,
         description: formData.description.trim(),
-        category: formData.expenseCategory, // Using the selected category ID
+        category: formData.expenseCategory,
         sourceAccount: formData.sourceAccount,
         paymentMethod: formData.paymentMethod,
         notes: formData.notes?.trim() || "",
@@ -341,59 +337,54 @@ const AddExpense = ({
 
       setIsSubmitting(true);
 
-      let response;
+      let resp;
 
       if (isEditing && initialData?._id) {
-        response = await axios.put(
+        const oldAmt = initialData.amount || 0;
+        const diff = amt - oldAmt;
+
+        resp = await axios.put(
           `${backendUrl}/api/expenses/${initialData._id}`,
           submitData
         );
-      } else {
-        response = await axios.post(`${backendUrl}/api/expenses`, submitData);
-      }
 
-      if (response.data.success) {
-        showToast("success", `${response.data.message}`);
-
-        // Call onSuccess callback if provided
-        if (typeof onSuccess === "function") {
-          onSuccess(response.data.data);
+        if (diff !== 0) {
+          const op = diff > 0 ? "subtract" : "add";
+          await updateDestinationAccount(
+            formData.sourceAccount,
+            Math.abs(diff),
+            op
+          );
         }
-
-        navigate("/expenselayout/expenses"); // Redirect to expenses list
       } else {
-        throw new Error(response.data.message || "Operation failed");
+        resp = await axios.post(`${backendUrl}/api/expenses`, submitData);
+        await updateDestinationAccount(formData.sourceAccount, amt, "subtract");
       }
-    } catch (error) {
-      console.error("Error submitting expense:", error);
 
-      const errorMessage =
-        error.response?.data?.message ||
-        error.message ||
-        "Failed to save expense. Please try again.";
-
-      setErrors({ submit: errorMessage });
-
-      // Handle specific error cases
-      if (error.response?.status === 400) {
-        setErrors({
-          ...errors,
-          ...error.response.data.errors,
-        });
+      if (resp.data.success) {
+        showToast("success", resp.data.message);
+        if (typeof onSuccess === "function") {
+          onSuccess(resp.data.data);
+        }
+        navigate("/expenselayout/expenses");
+      } else {
+        throw new Error(resp.data.message || "Operation failed");
       }
+    } catch (err) {
+      console.error("Error submitting:", err);
+      const msg =
+        err.response?.data?.message || err.message || "Failed to save expense";
+      setErrors({ submit: msg });
+      showToast("error", msg);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Handle cancel with fallback
-  const handleCancelClick = useCallback(() => {
-    if (typeof onCancel === "function") {
-      onCancel();
-    } else {
-      navigate("/expenselayout/expenses");
-    }
-  }, [onCancel, navigate]);
+  const selectedBal = getSelectedAccountBalance();
+  const remaining = formData.amount
+    ? selectedBal - parseFloat(formData.amount)
+    : selectedBal;
 
   return (
     <div className="fixed inset-0 bg-transparent bg-opacity-30 flex justify-center items-center z-50">
@@ -403,27 +394,24 @@ const AddExpense = ({
             {isEditing ? "Edit Expense" : "Add New Expense"}
           </h3>
           <button
-            onClick={handleCancelClick}
+            onClick={onCancel ?? (() => navigate("/expenselayout/expenses"))}
             className="p-2 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
             disabled={isSubmitting}
           >
             <X size={20} className="text-gray-500" />
           </button>
         </div>
-
         <div className="p-6">
           {errors.submit && (
             <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded">
               {errors.submit}
             </div>
           )}
-
           {loading && (
             <div className="mb-4 p-3 bg-blue-100 border border-blue-400 text-blue-700 rounded">
               Loading options...
             </div>
           )}
-
           <form onSubmit={handleSubmit}>
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -436,7 +424,6 @@ const AddExpense = ({
                   error={errors.date}
                   required
                 />
-
                 <InputField
                   label="Amount ($)"
                   name="amount"
@@ -448,7 +435,6 @@ const AddExpense = ({
                   placeholder="0.00"
                   required
                 />
-
                 <SelectField
                   label="Expense Category"
                   name="expenseCategory"
@@ -456,24 +442,38 @@ const AddExpense = ({
                   onChange={handleSelectChange}
                   error={errors.expenseCategory}
                   options={categoryOptions}
-                  required={true}
-                  placeholder="Select an option"
+                  required
                   disabled={loading}
                 />
-
-                {/* Source Account Dropdown */}
-                <SelectField
-                  label="Source Account"
-                  name="sourceAccount"
-                  value={formData.sourceAccount}
-                  onChange={handleSelectChange}
-                  error={errors.sourceAccount}
-                  options={sourceAccountOptions}
-                  required={true}
-                  placeholder="Select an option"
-                  disabled={loading}
-                />
-
+                <div className="flex flex-col">
+                  <SelectField
+                    label="Source Account"
+                    name="sourceAccount"
+                    value={formData.sourceAccount}
+                    onChange={handleSelectChange}
+                    error={errors.sourceAccount}
+                    options={sourceAccountOptions}
+                    required
+                    disabled={loading}
+                  />
+                  {formData.sourceAccount && (
+                    <div className="mt-2 space-y-1 text-xs">
+                      <div className="text-gray-500">
+                        Current balance:{" "}
+                        <span className="font-semibold">${selectedBal}</span>
+                      </div>
+                      {formData.amount && (
+                        <div
+                          className={`font-semibold ${
+                            remaining >= 0 ? "text-green-600" : "text-red-600"
+                          }`}
+                        >
+                          Remaining after expense: ${remaining.toFixed(2)}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
                 <div className="md:col-span-2">
                   <InputField
                     label="Description"
@@ -484,10 +484,9 @@ const AddExpense = ({
                     }
                     error={errors.description}
                     placeholder="Enter expense description"
+                    required
                   />
                 </div>
-
-                {/* Notes - Full width */}
                 <div className="md:col-span-2">
                   <TextAreaField
                     label="Remarks (Optional)"
@@ -501,7 +500,6 @@ const AddExpense = ({
                 </div>
               </div>
             </div>
-
             <div className="flex justify-end gap-3 pt-6 mt-6 border-t border-gray-200">
               <button
                 type="submit"
@@ -521,10 +519,9 @@ const AddExpense = ({
               </button>
               <button
                 type="button"
-                onClick={handleCancelClick}
+                onClick={onCancel ?? (() => navigate("/expenselayout/expenses"))}
                 disabled={isSubmitting}
-                className="flex items-center gap-2 px-5 py-2.5 bg-gray-500 text-white rounded-lg hover:bg-gray-600
-                 transition-colors cursor-pointer disabled:bg-gray-400 disabled:cursor-not-allowed"
+                className="flex items-center gap-2 px-5 py-2.5 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors cursor-pointer disabled:bg-gray-400 disabled:cursor-not-allowed"
               >
                 Cancel
               </button>

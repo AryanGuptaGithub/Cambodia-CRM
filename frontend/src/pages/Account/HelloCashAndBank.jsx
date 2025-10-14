@@ -13,21 +13,57 @@ import axios from "axios";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { showToast } from "../../utils/toast";
 import { confirmDialog } from "../../utils/confirmationDialog";
+import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
+import { formatDateToReadable } from "../../utils/dateUtil.js";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const ITEMS_PER_PAGE = 10;
 
+const getDisplayValue = (value, options) => {
+  try {
+    
+    if (!value && value !== 0) return "--";
+
+    // If value is an object (populated data from backend)
+    if (typeof value === "object" && value !== null) {
+      // Try different possible property names
+      return (
+        value.name || value.label || value.title || value.toString() || "--"
+      );
+    }
+
+    // If value is a string (could be ID), find the label from options
+    if (typeof value === "string" && options && Array.isArray(options)) {
+      const option = options.find((opt) => {
+        // Handle both string and ObjectId comparisons
+        return opt.value === value || opt.value?.toString() === value;
+      });
+      return option ? option.label : value;
+    }
+
+    // If value is a number, return it as string
+    if (typeof value === "number") {
+      return value.toString();
+    }
+
+    // Return the value as string for other cases
+    return value ? value.toString() : "--";
+  } catch (error) {
+    console.error("Error in getDisplayValue:", error);
+    return "--";
+  }
+};
 // Custom hook to fetch dropdown options from backend
 const useDropdownOptions = () => {
   const [categoryOptions, setCategoryOptions] = useState([]);
   const [sourceOptions, setSourceOptions] = useState([]);
   const [destinationOptions, setDestinationOptions] = useState([]);
   const [supplierOptions, setSupplierOptions] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
   const fetchDropdownOptions = async () => {
     try {
-      setLoading(true);
       setError(null);
 
       // Fetch category options
@@ -499,7 +535,7 @@ const AddTransactionModal = ({
           source: editData.source?._id || editData.source,
           destination: editData.destination?._id || editData.destination,
           supplier: editData.supplier?._id || editData.supplier,
-          remarks: editData.remarks || "", // ADD REMARKS FIELD
+          remarks: editData.remarks || "",
         };
         setForm(processedEditData);
         setInvoiceDataFetched(true);
@@ -797,7 +833,7 @@ const AddTransactionModal = ({
       finalAmount,
       accountType: activeTab,
       description: form.description,
-      remarks: form.remarks || "", // ADD REMARKS TO TRANSACTION DATA
+      remarks: form.remarks || "",
     };
 
     // Add supplier for payment inward/remittance/outward
@@ -857,100 +893,78 @@ const AddTransactionModal = ({
     }
   };
 
+  // Render form field based on type
   const renderFormField = (field) => {
-    const value = form[field.key] || "";
-    const error = errors[field.key];
-    const fieldOptions = field.options || [];
-
-    // Handle readonly and disabled fields with custom styling
-    if (field.readonly || field.disabled) {
-      return (
-        <input
-          type={field.type === "date" ? "date" : "text"}
-          value={value}
-          readOnly
-          className="border border-gray-300 rounded-md px-3 py-2 bg-gray-100 text-gray-700 cursor-not-allowed w-full"
-        />
-      );
-    }
+    const value = form[field.key] || '';
+    const fieldError = errors[field.key];
 
     switch (field.type) {
-      case "select":
+      case 'select':
         return (
           <CustomDropdown
             value={value}
             onChange={(e) => handleInputChange(field.key, e.target.value)}
-            options={fieldOptions}
-            error={error}
-            disabled={fieldOptions.length === 0}
-            placeholder={`Select ${field.label}`}
+            options={field.options || []}
+            error={fieldError}
+            disabled={field.disabled || false}
+            placeholder={field.placeholder || `Select ${field.label}`}
           />
         );
 
-      case "date":
+      case 'date':
         return (
           <input
             type="date"
             value={value}
             onChange={(e) => handleInputChange(field.key, e.target.value)}
             className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
-              error ? "border-red-500" : "border-gray-300"
-            }`}
+              fieldError ? 'border-red-500' : 'border-gray-300'
+            } ${field.disabled ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+            disabled={field.disabled || false}
           />
         );
 
-      case "number":
+      case 'number':
         return (
-          <div className="relative">
-            <input
-              type="text"
-              value={value}
-              onChange={(e) => handleNumericInputChange(e, field.key)}
-              placeholder={`Enter ${field.label}`}
-              className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
-                error ? "border-red-500" : "border-gray-300"
-              }`}
-            />
-            {/* Show source account balance for deposit transactions */}
-            {field.key === "amount" && isDeposit() && form.source && (
-              <div className="absolute -bottom-6 left-0 text-xs text-gray-500">
-                Available balance: ${sourceAccountBalance.toFixed(2)}
-              </div>
-            )}
-          </div>
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => handleNumericInputChange(e, field.key)}
+            className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
+              fieldError ? 'border-red-500' : 'border-gray-300'
+            } ${field.disabled ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+            disabled={field.disabled || false}
+            placeholder={field.placeholder || ''}
+          />
         );
 
-      case "textarea":
+      case 'textarea':
         return (
           <textarea
             value={value}
             onChange={(e) => handleInputChange(field.key, e.target.value)}
-            placeholder={`Enter ${field.label}`}
-            rows={4}
-            className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 resize-vertical ${
-              error ? "border-red-500" : "border-gray-300"
-            }`}
+            rows={3}
+            className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
+              fieldError ? 'border-red-500' : 'border-gray-300'
+            } ${field.disabled ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+            disabled={field.disabled || false}
+            placeholder={field.placeholder || ''}
           />
         );
 
+      case 'text':
       default:
         return (
-          <div className="relative">
-            <input
-              type="text"
-              value={value}
-              onChange={(e) => handleInputChange(field.key, e.target.value)}
-              placeholder={`Enter ${field.label}`}
-              className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
-                error ? "border-red-500" : "border-gray-300"
-              }`}
-            />
-            {field.key === "invoiceNumber" && isFetchingSales && (
-              <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-600"></div>
-              </div>
-            )}
-          </div>
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => handleInputChange(field.key, e.target.value)}
+            className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
+              fieldError ? 'border-red-500' : 'border-gray-300'
+            } ${field.disabled ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+            disabled={field.disabled || false}
+            placeholder={field.placeholder || ''}
+          />
         );
     }
   };
@@ -1057,7 +1071,7 @@ const CashandBank = () => {
     "exchangeLoss",
     "finalAmount",
     "date",
-    "remarks", // ADD REMARKS TO DEFAULT COLUMNS
+    "remarks",
     "actions",
   ]);
 
@@ -1069,9 +1083,12 @@ const CashandBank = () => {
     supplierOptions,
     loading: optionsLoading,
     error: optionsError,
+    refetch: refetchDropdownOptions,
   } = useDropdownOptions();
 
-  // Define all fields for column configuration
+  // Use the custom hook for visible pages
+  const visiblePages = useVisiblePages(currentPage, totalPages);
+
   const allFields = useMemo(
     () => [
       {
@@ -1135,7 +1152,7 @@ const CashandBank = () => {
         dbName: "description",
       },
       {
-        id: "remarks", // ADD REMARKS FIELD
+        id: "remarks",
         name: "Remarks",
         dbName: "remarks",
       },
@@ -1199,7 +1216,6 @@ const CashandBank = () => {
     }
   };
 
-  useEffect(() => {}, [activeTab]);
   // Handle save for column configuration
   const handleColumnSave = () => {
     if (activeColumnTab === "add") {
@@ -1231,7 +1247,7 @@ const CashandBank = () => {
       "exchangeLoss",
       "finalAmount",
       "date",
-      "remarks", // ADD REMARKS TO DEFAULT COLUMNS
+      "remarks",
       "actions",
     ]);
   };
@@ -1255,12 +1271,8 @@ const CashandBank = () => {
     }
   }, [selectedItems, chunkedItems]);
 
-  // Fetch transactions from backend
-
   const fetchTransactions = async () => {
     try {
-      //   setLoading(true);
-
       const params = {
         page: currentPage,
         limit: ITEMS_PER_PAGE,
@@ -1270,14 +1282,23 @@ const CashandBank = () => {
       const response = await axios.get(`${backendUrl}/api/transaction`, {
         params,
       });
+      console.log("values of response", response);
 
       if (response.data.success) {
         const { data: transactions, destinations } = response.data;
 
         // ✅ Filter transactions based on active tab
         const filteredData = transactions.filter((tx) => {
-          const destinationName = tx?.destination?.name?.toLowerCase();
-          return destinationName === activeTab.toLowerCase();
+          const txCategoryName = tx.categoryType?.name?.toLowerCase() || "";
+
+          if (txCategoryName === "remittance") {
+            // For remittance, match source instead of destination
+            const sourceName = tx.source?.name?.toLowerCase() || "";
+            return sourceName === activeTab.toLowerCase();
+          } else {
+            const destinationName = tx.destination?.name?.toLowerCase() || "";
+            return destinationName === activeTab.toLowerCase();
+          }
         });
 
         // ✅ Find totalAmount from destinations array
@@ -1287,13 +1308,19 @@ const CashandBank = () => {
 
         const totalAmount = matchingDestination?.totalAmount || 0;
         setTotalAmountTab(totalAmount);
-
+        const calculatedTotalPages = Math.ceil(
+          filteredData.length / ITEMS_PER_PAGE
+        );
+        setTotalPages(calculatedTotalPages);
+        setTotalCount(filteredData.length);
         setData(filteredData);
       }
     } catch (error) {
       console.error("❌ Error fetching transactions:", error);
       showToast("error", "Failed to fetch transactions");
       setData([]);
+      setTotalPages(0);
+      setTotalCount(0);
     } finally {
       setLoading(false);
     }
@@ -1306,20 +1333,6 @@ const CashandBank = () => {
 
   // Use data directly from backend (already filtered)
   const currentData = data || [];
-
-  // Helper function to safely extract display value
-  const getDisplayValue = (value, options) => {
-    if (!value) return "--";
-
-    // If value is an object (populated data from backend)
-    if (typeof value === "object" && value !== null) {
-      return value.name || value.label || "--";
-    }
-
-    // If value is a string (ID), find the label from options
-    const option = options.find((opt) => opt.value === value);
-    return option ? option.label : value;
-  };
 
   // Handle adding new transaction
   const handleAddTransaction = async (transactionData, isEdit = false) => {
@@ -1334,10 +1347,12 @@ const CashandBank = () => {
         if (response.data.success) {
           showToast("success", "Transaction updated successfully");
           fetchTransactions(); // Refresh data
+          refetchDropdownOptions(); // Refresh dropdown options with updated balances
         }
       } else {
         showToast("success", "Transaction added successfully");
         fetchTransactions(); // Refresh data
+        refetchDropdownOptions(); // Refresh dropdown options with updated balances
       }
     } catch (error) {
       console.error("Error saving transaction:", error);
@@ -1367,12 +1382,13 @@ const CashandBank = () => {
 
     try {
       const response = await axios.delete(
-        `${backendUrl}/api/transaction/${transaction._id}` // ✅ fixed
+        `${backendUrl}/api/transaction/${transaction._id}`
       );
 
       if (response.data.success) {
         showToast("success", "Transaction deleted successfully");
         fetchTransactions();
+        refetchDropdownOptions(); // Refresh dropdown options after delete
       } else {
         showToast("error", "Failed to delete transaction");
       }
@@ -1398,7 +1414,7 @@ const CashandBank = () => {
 
     try {
       await axios.delete(`${backendUrl}/api/transactions`, {
-        data: { ids: selected }, // ✅ send array of IDs in body
+        data: { ids: selected },
       });
 
       showToast(
@@ -1407,6 +1423,7 @@ const CashandBank = () => {
       );
       setSelected([]);
       fetchTransactions();
+      refetchDropdownOptions(); // Refresh dropdown options after bulk delete
     } catch (error) {
       console.error("Error deleting transactions:", error);
       showToast("error", "Failed to delete some transactions");
@@ -1430,7 +1447,6 @@ const CashandBank = () => {
     }
   };
 
-  // Render cell content based on field type
   const renderCellContent = (item, field) => {
     const value = item[field.dbName];
 
@@ -1455,24 +1471,32 @@ const CashandBank = () => {
       );
     }
 
-    if (field.dbName === "amount" || field.dbName === "finalAmount") {
-      return (
-        <span
-          className={`font-medium ${
-            value >= 0 ? "text-green-700" : "text-red-600"
-          }`}
-        >
-          {value >= 0 ? "+" : ""}
-          {Math.abs(value || 0).toFixed(2)}
-        </span>
-      );
-    }
-
     if (field.dbName === "categoryType") {
       const displayValue = getDisplayValue(value, categoryOptions);
       return (
         <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
           {displayValue}
+        </span>
+      );
+    }
+
+    if (field.dbName === "amount" || field.dbName === "finalAmount") {
+      // Check if this is a Remittance transaction
+      const isRemittance =
+        item.categoryType?.name?.toLowerCase() === "remittance";
+
+      return (
+        <span
+          className={`font-medium ${
+            isRemittance
+              ? "text-red-600" // Always red for Remittance for both amount and finalAmount
+              : value >= 0
+              ? "text-green-700"
+              : "text-red-600"
+          }`}
+        >
+          {isRemittance ? "-" : value >= 0 ? "+" : ""}
+          {Math.abs(value || 0).toFixed(2)}
         </span>
       );
     }
@@ -1493,7 +1517,7 @@ const CashandBank = () => {
     }
 
     if (field.dbName === "date" || field.dbName === "invoiceDate") {
-      return value ? new Date(value).toLocaleDateString() : "--";
+      return value ? formatDateToReadable(value) : "--";
     }
 
     // Handle remarks field with proper formatting
@@ -1510,6 +1534,7 @@ const CashandBank = () => {
     // Handle all other fields safely
     return value ? value.toString() : "--";
   };
+
 
   // Export functionality
   const handleExport = async () => {
@@ -1564,6 +1589,7 @@ const CashandBank = () => {
     setCurrentPage(1);
     setSearchTerm("");
     setSelected([]);
+    refetchDropdownOptions();
   };
 
   const accountTypes = ["Cash Balance", "Personal Account", "Company Account"];
@@ -1575,7 +1601,6 @@ const CashandBank = () => {
           Dashboard <span className="mx-2">{">"}</span> Cash & Bank
         </div>
 
-        {/* Show loading state */}
         {(optionsLoading || loading) && (
           <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
             <div className="flex items-center gap-3">
@@ -1643,10 +1668,10 @@ const CashandBank = () => {
           </div>
         </div>
 
-        {/* Tabs */}
+        {/* Tabs - CORRECTED LAYOUT */}
         <div className="flex justify-between items-center mb-6">
           {/* Left side - Tabs */}
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-1">
             {accountTypes.map((tab) => (
               <button
                 key={`tab-${tab}`}
@@ -1662,15 +1687,14 @@ const CashandBank = () => {
             ))}
           </div>
 
-          {/* Right side - Total Count & Search */}
-          <div className="flex items-center gap-8">
-            <p className="text-lg font-semibold text-gray-700">
+          <div className="flex items-center gap-4 ml-4">
+            <p className="text-lg font-semibold text-gray-700 whitespace-nowrap">
               Total Count:{" "}
               <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-                {currentData.length}
+                {totalCount}
               </span>
             </p>
-            <div className="relative w-full md:w-72">
+            <div className="relative w-72">
               <Search
                 className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
                 size={16}
@@ -1682,7 +1706,7 @@ const CashandBank = () => {
                 placeholder={getSearchPlaceholder()}
                 value={searchTerm}
                 onChange={handleSearchChange}
-                className="pl-10 pr-4 py-2 border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+                className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
               />
             </div>
           </div>
@@ -1730,10 +1754,14 @@ const CashandBank = () => {
                               }
                             />
                           )}
-                          <span>{field.name}</span>
+                          <span className="text-sm font-medium">
+                            {field.name}
+                          </span>
                         </div>
                       ) : (
-                        field.name
+                        <span className="text-sm font-medium">
+                          {field.name}
+                        </span>
                       )}
                     </th>
                   ))}
