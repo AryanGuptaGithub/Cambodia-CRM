@@ -15,7 +15,6 @@ const MONGO_URI = process.env.MONGODB_URI;
 async function connectDB() {
   try {
     await mongoose.connect(MONGO_URI);
-    console.log("✅ MongoDB connected successfully");
   } catch (err) {
     console.error("❌ MongoDB connection failed:", err);
     process.exit(1);
@@ -34,7 +33,6 @@ async function seedUsers() {
     const user = new User(u);
     await user.save();
   }
-  console.log("✅ Users seeded successfully");
 }
 
 // ✅ CORRECTED: Seed destinations (with totalAmount)
@@ -47,7 +45,6 @@ async function seedDestinations() {
   ];
 
   await Destination.insertMany(destinations);
-  console.log("✅ Destinations seeded successfully");
 }
 
 // ✅ Seed category types
@@ -63,7 +60,6 @@ async function seedCategoryTypes() {
   ];
 
   await CategoryType.insertMany(categoryTypes);
-  console.log("✅ Category Types seeded successfully");
 }
 
 // ✅ NEW: Seed transaction types
@@ -77,7 +73,6 @@ async function seedTransactionTypes() {
   ];
 
   await TransactionType.insertMany(transactionTypes);
-  console.log("✅ Transaction Types seeded successfully");
 }
 
 // Seed sale types
@@ -90,7 +85,6 @@ async function seedSaleTypes() {
   ];
 
   await SaleType.insertMany(saleTypes);
-  console.log("✅ Sale Types seeded successfully");
 }
 
 // Seed warehouses
@@ -105,7 +99,6 @@ async function seedWarehouses() {
   ];
 
   await Warehouse.insertMany(warehouses);
-  console.log("✅ Warehouses seeded successfully");
 }
 
 // ✅ Seed order statuses
@@ -135,7 +128,6 @@ async function seedOrderStatuses() {
   ];
 
   await OrderStatus.insertMany(orderStatuses);
-  console.log("✅ Order Statuses seeded successfully");
 }
 
 // Run all seeders in order
@@ -143,22 +135,18 @@ async function runSeeders() {
   await connectDB();
 
   try {
-    console.log("🌱 Starting database seeding...");
-
     await seedUsers();
     await seedSaleTypes();
     await seedWarehouses();
     await seedOrderStatuses();
-    await seedDestinations(); // ✅ Now with correct order: Cash Balance first
+    await seedDestinations();
     await seedCategoryTypes();
-    await seedTransactionTypes(); // ✅ Add transaction types seeding
-
-    console.log("🎉 All seeders completed successfully!");
+    await seedTransactionTypes();
   } catch (error) {
     console.error("❌ Seeding error:", error);
   } finally {
     await mongoose.disconnect();
-    console.log("🔌 MongoDB disconnected");
+
     process.exit(0);
   }
 }

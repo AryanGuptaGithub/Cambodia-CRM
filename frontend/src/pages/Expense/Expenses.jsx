@@ -6,12 +6,13 @@ import React, {
   useEffect,
   useRef,
 } from "react";
-import { Plus, Edit, Trash2, Loader, Search } from "lucide-react";
+import { Plus, Edit, Trash2, Loader, Search, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { confirmDialog } from "../../utils/confirmationDialog.js";
 import { showToast } from "../../utils/toast";
 import axios from "axios";
 import { formatDateToReadable } from "../../utils/dateUtil.js";
+import ReactDOM from "react-dom";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -24,8 +25,16 @@ const expensesAPI = {
     const resp = await axios.get(`${backendUrl}/api/expense-categary`);
     return resp.data;
   },
+  fetchSourceAccounts: async () => {
+    const resp = await axios.get(`${backendUrl}/api/accounts/destinations`);
+    return resp.data;
+  },
   deleteExpense: async (id) => {
     const resp = await axios.delete(`${backendUrl}/api/expenses/${id}`);
+    return resp.data;
+  },
+  updateExpense: async (id, data) => {
+    const resp = await axios.put(`${backendUrl}/api/expenses/${id}`, data);
     return resp.data;
   },
 };
@@ -33,10 +42,22 @@ const expensesAPI = {
 const Expenses = () => {
   const [expenses, setExpenses] = useState([]);
   const [expenseCategories, setExpenseCategories] = useState([]);
+  const [sourceAccounts, setSourceAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingExpense, setEditingExpense] = useState(null);
+  const [editForm, setEditForm] = useState({
+    sourceAccount: "",
+    category: "",
+    description: "",
+    amount: "",
+    date: "",
+  });
+  const [updateLoading, setUpdateLoading] = useState(false);
+
   const inputRef = useRef(null);
   const expensesPerPage = 10;
 
@@ -50,9 +71,10 @@ const Expenses = () => {
       setLoading(true);
       setError(null);
 
-      const [expensesResp, categoriesResp] = await Promise.all([
+      const [expensesResp, categoriesResp, accountsResp] = await Promise.all([
         expensesAPI.fetchExpenses(),
         expensesAPI.fetchExpenseCategories(),
+        expensesAPI.fetchSourceAccounts(),
       ]);
 
       if (expensesResp.success) {
@@ -63,6 +85,10 @@ const Expenses = () => {
 
       if (categoriesResp.success) {
         setExpenseCategories(categoriesResp.data);
+      }
+
+      if (accountsResp.success) {
+        setSourceAccounts(accountsResp.data);
       }
     } catch (err) {
       console.error("Error fetching data:", err);
@@ -142,7 +168,6 @@ const Expenses = () => {
       const exp = expenses.find((e) => e._id === id);
       if (!exp) return;
 
-      // Suppose the “name” you want is from sourceAccount or category name
       const sourceName = exp.sourceAccount?.name || "Unknown Account";
 
       const result = await confirmDialog({
@@ -177,12 +202,41 @@ const Expenses = () => {
     [expenses]
   );
 
-  const handleEdit = useCallback(
-    (exp) => {
-      navigate(`/expenselayout/expenses/edit/${exp._id}`);
-    },
-    [navigate]
-  );
+  const handleEdit = useCallback((exp) => {
+    setEditingExpense(exp);
+    setEditForm({
+      sourceAccount: exp.sourceAccount?._id || "",
+      category: exp.category?._id || "",
+      description: exp.description || "",
+      amount: exp.amount || "",
+      date: exp.date ? new Date(exp.date).toISOString().split('T')[0] : "",
+    });
+    setIsEditModalOpen(true);
+  }, []);
+
+  const handleUpdateExpense = async (e) => {
+    e.preventDefault();
+    if (!editingExpense) return;
+
+    try {
+      setUpdateLoading(true);
+      const updateRes = await expensesAPI.updateExpense(editingExpense._id, editForm);
+      
+      if (updateRes.success) {
+        showToast("success", "Expense updated successfully");
+        setIsEditModalOpen(false);
+        setEditingExpense(null);
+        fetchData(); // Refresh the data
+      } else {
+        throw new Error(updateRes.message || "Update failed");
+      }
+    } catch (err) {
+      console.error("Update error:", err);
+      showToast("error", `Failed to update expense: ${err.message}`);
+    } finally {
+      setUpdateLoading(false);
+    }
+  };
 
   const handleSearchChange = useCallback((e) => {
     setSearchQuery(e.target.value);
@@ -198,7 +252,6 @@ const Expenses = () => {
 
   // Generate visible page numbers (e.g. for pagination)
   const visiblePages = useMemo(() => {
-    // You can make this smarter (window of pages), here we show all
     return Array.from({ length: totalPages }, (_, i) => i + 1);
   }, [totalPages]);
 
@@ -400,6 +453,135 @@ const Expenses = () => {
           </div>
         </div>
       )}
+
+      {/* Edit Expense Modal */}
+      {isEditModalOpen &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            {/* Background Overlay */}
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setIsEditModalOpen(false)}
+            />
+            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+              <button
+                onClick={() => setIsEditModalOpen(false)}
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+
+              <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                Edit Expense
+              </h2>
+
+              <form onSubmit={handleUpdateExpense} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Source Account */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Source Account
+                  </label>
+                  <select
+                    value={editForm.sourceAccount}
+                    onChange={(e) => setEditForm({ ...editForm, sourceAccount: e.target.value })}
+                    className="w-full border px-3 py-2 rounded-lg focus:ring focus:ring-indigo-200"
+                    required
+                  >
+                    <option value="">Select Source Account</option>
+                    {sourceAccounts.map((account) => (
+                      <option key={account._id} value={account._id}>
+                        {account.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Expense Category */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Expense Category
+                  </label>
+                  <select
+                    value={editForm.category}
+                    onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
+                    className="w-full border px-3 py-2 rounded-lg focus:ring focus:ring-indigo-200"
+                    required
+                  >
+                    <option value="">Select Category</option>
+                    {expenseCategories.map((category) => (
+                      <option key={category._id} value={category._id}>
+                        {category.category}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Amount */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Amount ($)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={editForm.amount}
+                    onChange={(e) => setEditForm({ ...editForm, amount: e.target.value })}
+                    className="w-full border px-3 py-2 rounded-lg focus:ring focus:ring-indigo-200"
+                    required
+                  />
+                </div>
+
+                {/* Date */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Date
+                  </label>
+                  <input
+                    type="date"
+                    value={editForm.date}
+                    onChange={(e) => setEditForm({ ...editForm, date: e.target.value })}
+                    className="w-full border px-3 py-2 rounded-lg focus:ring focus:ring-indigo-200"
+                    required
+                  />
+                </div>
+
+                {/* Description - Full width */}
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Description
+                  </label>
+                  <textarea
+                    value={editForm.description}
+                    onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                    rows={3}
+                    className="w-full border px-3 py-2 rounded-lg focus:ring focus:ring-indigo-200"
+                    placeholder="Enter expense description..."
+                  />
+                </div>
+              </form>
+
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  onClick={() => setIsEditModalOpen(false)}
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  disabled={updateLoading}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleUpdateExpense}
+                  className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer flex items-center gap-2"
+                  disabled={updateLoading}
+                >
+                  {updateLoading ? <Loader className="animate-spin" size={16} /> : null}
+                  {updateLoading ? "Updating..." : "Update Expense"}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

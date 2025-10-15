@@ -58,9 +58,6 @@ router.get("/expenses/:id", async (req, res) => {
 router.post("/expenses", async (req, res) => {
   try {
     const expenseData = req.body;
-    console.log("Received expense data:", expenseData);
-
-    // Validate required fields
     if (!expenseData.date || !expenseData.category || !expenseData.amount) {
       return res.status(400).json({
         success: false,
@@ -68,12 +65,9 @@ router.post("/expenses", async (req, res) => {
       });
     }
 
-    // Create & save the new expense
     const newExpense = new Expense(expenseData);
     let savedExpense = await newExpense.save();
 
-    // Populate the category & sourceAccount fields
-    // Instead of chaining .populate().execPopulate(), do:
     savedExpense = await savedExpense.populate([
       { path: "category", select: "category" },
       { path: "sourceAccount", select: "name" },

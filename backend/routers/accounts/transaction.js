@@ -34,11 +34,7 @@ async function getTransactionType(categoryTypeId) {
 }
 
 // Enhanced balance adjustment function - CORRECTED FOR DEPOSIT
-async function adjustBalances(
-  transaction,
-  session,
-  isDelete = false
-) {
+async function adjustBalances(transaction, session, isDelete = false) {
   const {
     transactionType,
     amount,
@@ -66,40 +62,25 @@ async function adjustBalances(
     categoryName = category ? category.name.toLowerCase() : "";
   }
 
-  console.log(`Balance Adjustment:
-    Type: ${transactionType}
-    Category: ${categoryName}
-    Amount: ${amount}
-    Final Amount: ${finalAmount}
-    Source: ${sourceAcc?.name} (${sourceAcc?.totalAmount})
-    Destination: ${destAcc?.name} (${destAcc?.totalAmount})
-    Operation: ${isDelete ? 'DELETE' : 'CREATE'}`);
-
   switch (transactionType) {
     case "deposit":
       if (!sourceAcc || !destAcc)
         throw new Error("Source or destination account missing for deposit");
 
       if (isDelete) {
-        // Reverse deposit: add back FULL AMOUNT to source, subtract FINAL AMOUNT from destination
         sourceAcc.totalAmount = (sourceAcc.totalAmount || 0) + amount;
-        
-        // For deposit reversal, ALWAYS use finalAmount for destination
-        const destinationAdjustment = finalAmount !== undefined ? finalAmount : amount;
-        destAcc.totalAmount = (destAcc.totalAmount || 0) - destinationAdjustment;
-        
-        console.log(`Deposit REVERSED: Source +${amount}, Destination -${destinationAdjustment}`);
+        const destinationAdjustment =
+          finalAmount !== undefined ? finalAmount : amount;
+        destAcc.totalAmount =
+          (destAcc.totalAmount || 0) - destinationAdjustment;
       } else {
-        // Normal deposit: subtract FULL AMOUNT from source, add FINAL AMOUNT to destination
         sourceAcc.totalAmount = (sourceAcc.totalAmount || 0) - amount;
-        
-        // For deposit, ALWAYS use finalAmount for destination if available
-        const destinationAdjustment = finalAmount !== undefined ? finalAmount : amount;
-        destAcc.totalAmount = (destAcc.totalAmount || 0) + destinationAdjustment;
-        
-        console.log(`Deposit APPLIED: Source -${amount}, Destination +${destinationAdjustment}`);
-        
-        // Check for insufficient balance
+
+        const destinationAdjustment =
+          finalAmount !== undefined ? finalAmount : amount;
+        destAcc.totalAmount =
+          (destAcc.totalAmount || 0) + destinationAdjustment;
+
         if (sourceAcc.totalAmount < 0) {
           throw new Error("Insufficient balance in source account");
         }
@@ -114,16 +95,12 @@ async function adjustBalances(
         throw new Error("Source or destination account missing for withdraw");
 
       if (isDelete) {
-        // Reverse withdraw: add back to source, subtract from destination
         sourceAcc.totalAmount = (sourceAcc.totalAmount || 0) + amount;
         destAcc.totalAmount = (destAcc.totalAmount || 0) - amount;
-        console.log(`Withdraw REVERSED: Source +${amount}, Destination -${amount}`);
       } else {
-        // Normal withdraw: subtract from source, add to destination
         sourceAcc.totalAmount = (sourceAcc.totalAmount || 0) - amount;
         destAcc.totalAmount = (destAcc.totalAmount || 0) + amount;
-        console.log(`Withdraw APPLIED: Source -${amount}, Destination +${amount}`);
-        
+
         if (sourceAcc.totalAmount < 0) {
           throw new Error("Insufficient balance in source account");
         }
@@ -139,10 +116,8 @@ async function adjustBalances(
 
       if (isDelete) {
         destAcc.totalAmount = (destAcc.totalAmount || 0) - amount;
-        console.log(`Payment Inward REVERSED: Destination -${amount}`);
       } else {
         destAcc.totalAmount = (destAcc.totalAmount || 0) + amount;
-        console.log(`Payment Inward APPLIED: Destination +${amount}`);
       }
 
       await destAcc.save({ session });
@@ -153,56 +128,38 @@ async function adjustBalances(
         throw new Error("Source account missing for payment outward");
 
       if (isDelete) {
-        // Reverse: add back to source
         sourceAcc.totalAmount = (sourceAcc.totalAmount || 0) + amount;
-        console.log(`Payment Outward REVERSED: Source +${amount}`);
       } else {
-        // Normal: subtract from source
         sourceAcc.totalAmount = (sourceAcc.totalAmount || 0) - amount;
-        console.log(`Payment Outward APPLIED: Source -${amount}`);
       }
 
       await sourceAcc.save({ session });
       break;
 
     case "remittance":
-      if (!sourceAcc)
-        throw new Error("Source account missing for remittance");
+      if (!sourceAcc) throw new Error("Source account missing for remittance");
 
       if (isDelete) {
-        // Reverse: add back to source
         sourceAcc.totalAmount = (sourceAcc.totalAmount || 0) + amount;
-        console.log(`Remittance REVERSED: Source +${amount}`);
       } else {
-        // Normal: subtract from source
         sourceAcc.totalAmount = (sourceAcc.totalAmount || 0) - amount;
-        console.log(`Remittance APPLIED: Source -${amount}`);
       }
 
       await sourceAcc.save({ session });
       break;
 
     default:
-      // For sales, cash sale, credit collection - only affect destination with amount
       if (destAcc) {
         if (isDelete) {
-          // Reverse: subtract from destination
           destAcc.totalAmount = (destAcc.totalAmount || 0) - amount;
-          console.log(`Sale REVERSED: Destination -${amount}`);
         } else {
-          // Normal: add to destination (money coming in)
           destAcc.totalAmount = (destAcc.totalAmount || 0) + amount;
-          console.log(`Sale APPLIED: Destination +${amount}`);
         }
 
         await destAcc.save({ session });
       }
       break;
   }
-
-  console.log(`Balance Adjustment Complete:
-    Source: ${sourceAcc?.name} = ${sourceAcc?.totalAmount}
-    Destination: ${destAcc?.name} = ${destAcc?.totalAmount}`);
 }
 
 // Create transaction - UPDATED TO ENSURE FINAL AMOUNT IS CALCULATED
@@ -269,11 +226,6 @@ router.post("/transaction", async (req, res) => {
       description,
       remarks,
     };
-
-    console.log(`Creating Transaction:
-      Amount: ${transactionData.amount}
-      Exchange Loss: ${transactionData.exchangeLoss}
-      Final Amount: ${transactionData.finalAmount}`);
 
     const transaction = new Transaction(transactionData);
     await transaction.save({ session });
@@ -398,23 +350,19 @@ router.put("/transaction/:id", async (req, res) => {
       newTransactionType = await getTransactionType(req.body.categoryType);
     }
 
-    console.log(`=== TRANSACTION UPDATE START ===`);
-    console.log(`Existing: ${existingTransaction.transactionType} (${existingTransaction.amount})`);
-    console.log(`New: ${newTransactionType} (${req.body.amount})`);
-    console.log(`Category Changed: ${categoryTypeChanged}`);
-
-    // STEP 1: COMPLETELY REVERSE THE OLD TRANSACTION
-    console.log("STEP 1: Reversing OLD transaction completely");
     await adjustBalances(existingTransaction, session, true);
 
-    // STEP 2: APPLY THE NEW TRANSACTION
-    console.log("STEP 2: Applying NEW transaction");
-
-    // Calculate final amount for deposit transactions
-    let calculatedFinalAmount = parseFloat(req.body.finalAmount) || parseFloat(req.body.amount) || existingTransaction.finalAmount;
+    let calculatedFinalAmount =
+      parseFloat(req.body.finalAmount) ||
+      parseFloat(req.body.amount) ||
+      existingTransaction.finalAmount;
     if (newTransactionType === "deposit") {
-      const amountValue = parseFloat(req.body.amount) || existingTransaction.amount;
-      const exchangeLossValue = parseFloat(req.body.exchangeLoss) || existingTransaction.exchangeLoss || 0;
+      const amountValue =
+        parseFloat(req.body.amount) || existingTransaction.amount;
+      const exchangeLossValue =
+        parseFloat(req.body.exchangeLoss) ||
+        existingTransaction.exchangeLoss ||
+        0;
       calculatedFinalAmount = amountValue - exchangeLossValue;
     }
 
@@ -428,30 +376,34 @@ router.put("/transaction/:id", async (req, res) => {
       finalAmount: calculatedFinalAmount,
     };
 
-    console.log(`Update Data:
-      Amount: ${updateData.amount}
-      Exchange Loss: ${updateData.exchangeLoss}
-      Final Amount: ${updateData.finalAmount}`);
-
     // For category changes, ensure proper source/destination handling
     if (categoryTypeChanged) {
       const newCategory = await CategoryType.findById(req.body.categoryType);
       const newCategoryName = newCategory ? newCategory.name.toLowerCase() : "";
 
-      console.log(`Category changed to: ${newCategoryName}`);
-
       // Clear inappropriate fields based on new category
-      if (newCategoryName === "cash sale" || newCategoryName === "sale" || newCategoryName === "credit collection") {
+      if (
+        newCategoryName === "cash sale" ||
+        newCategoryName === "sale" ||
+        newCategoryName === "credit collection"
+      ) {
         // Sales categories only need destination
         updateData.source = undefined;
         if (!updateData.destination) {
-          throw new Error("Destination account is required for sales transactions");
+          throw new Error(
+            "Destination account is required for sales transactions"
+          );
         }
-      } else if (newCategoryName === "remittance" || newCategoryName === "payment outward") {
+      } else if (
+        newCategoryName === "remittance" ||
+        newCategoryName === "payment outward"
+      ) {
         // These categories need source only
         updateData.destination = undefined;
         if (!updateData.source) {
-          throw new Error("Source account is required for this transaction type");
+          throw new Error(
+            "Source account is required for this transaction type"
+          );
         }
       } else if (newCategoryName === "payment inward") {
         // Payment inward needs destination only
@@ -471,8 +423,6 @@ router.put("/transaction/:id", async (req, res) => {
 
     await adjustBalances(newTransactionData, session, false);
 
-    // STEP 3: UPDATE THE TRANSACTION DOCUMENT
-    console.log("STEP 3: Updating transaction document");
     const transaction = await Transaction.findByIdAndUpdate(id, updateData, {
       new: true,
       runValidators: true,
@@ -487,8 +437,6 @@ router.put("/transaction/:id", async (req, res) => {
       .populate("source", "name totalAmount")
       .populate("destination", "name totalAmount")
       .populate("supplier", "name");
-
-    console.log(`=== TRANSACTION UPDATE COMPLETE ===`);
 
     res.json({
       success: true,
