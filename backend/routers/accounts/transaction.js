@@ -442,53 +442,25 @@ router.post("/transaction", async (req, res) => {
 // Get all transactions with pagination and filtering
 router.get("/transaction", async (req, res) => {
   try {
-    const {
-      page = 1,
-      limit = 10,
-      accountType,
-      search,
-      startDate,
-      endDate,
-    } = req.query;
-
-    const query = {};
-
-    if (accountType) query.accountType = accountType;
-
-    if (search) {
-      query.$or = [
-        { invoiceNumber: { $regex: search, $options: "i" } },
-        { customerName: { $regex: search, $options: "i" } },
-        { description: { $regex: search, $options: "i" } },
-      ];
-    }
-
-    if (startDate || endDate) {
-      query.date = {};
-      if (startDate) query.date.$gte = new Date(startDate);
-      if (endDate) query.date.$lte = new Date(endDate);
-    }
-
-    const transactions = await Transaction.find(query)
+    // Get all transactions without any filtering or pagination
+    const transactions = await Transaction.find({})
       .populate("categoryType", "name")
       .populate("source", "name totalAmount")
       .populate("destination", "name totalAmount")
       .populate("supplier", "name")
-      .sort({ date: -1, createdAt: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .sort({ date: -1, createdAt: -1 });
 
-    const total = await Transaction.countDocuments(query);
-
-    // ✅ Get full list of destinations
+    // Get full list of destinations
     const destinations = await Destination.find();
+
+    const total = transactions.length;
 
     res.json({
       success: true,
       data: transactions,
       destinations,
-      totalPages: Math.ceil(total / limit),
-      currentPage: parseInt(page),
+      totalPages: 1,
+      currentPage: 1,
       total,
     });
   } catch (error) {
@@ -499,7 +471,6 @@ router.get("/transaction", async (req, res) => {
     });
   }
 });
-
 // Get single transaction by ID
 router.get("/transaction/:id", async (req, res) => {
   try {

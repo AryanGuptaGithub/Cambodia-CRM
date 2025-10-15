@@ -1,3 +1,4 @@
+// Fetch transactions when component mounts or filters change
 import {
   Search,
   Download,
@@ -17,11 +18,77 @@ import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
 import { formatDateToReadable } from "../../utils/dateUtil.js";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
-const ITEMS_PER_PAGE = 10;
+const ITEMS_PER_PAGE = 7;
+
+// Helper function to convert date from "YYYY-MM-DD" to "DD MMM YYYY" format
+const formatDateForInput = (dateString) => {
+  if (!dateString) return "";
+
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return dateString;
+
+    const day = date.getDate().toString().padStart(2, "0");
+    const month = date.toLocaleString("en", { month: "short" });
+    const year = date.getFullYear();
+
+    return `${day} ${month} ${year}`;
+  } catch (error) {
+    console.error("Error formatting date:", error);
+    return dateString;
+  }
+};
+
+// Helper function to convert date from "DD MMM YYYY" back to "YYYY-MM-DD" for form submission
+const parseDateFromInput = (dateString) => {
+  if (!dateString) return "";
+
+  try {
+    // If it's already in YYYY-MM-DD format, return as is
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+      return dateString;
+    }
+
+    // Parse from "DD MMM YYYY" format
+    const parts = dateString.split(" ");
+    if (parts.length === 3) {
+      const day = parts[0];
+      const month = parts[1];
+      const year = parts[2];
+
+      const monthNames = [
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+      ];
+      const monthIndex = monthNames.findIndex(
+        (m) => m.toLowerCase() === month.toLowerCase()
+      );
+
+      if (monthIndex !== -1) {
+        const date = new Date(year, monthIndex, day);
+        return date.toISOString().split("T")[0];
+      }
+    }
+
+    return dateString;
+  } catch (error) {
+    console.error("Error parsing date:", error);
+    return dateString;
+  }
+};
 
 const getDisplayValue = (value, options) => {
   try {
-    
     if (!value && value !== 0) return "--";
 
     // If value is an object (populated data from backend)
@@ -172,7 +239,7 @@ const CustomDropdown = ({
           error ? "border-red-500" : "border-gray-300"
         } ${
           disabled
-            ? "bg-gray-100 cursor-not-allowed"
+            ? "bg-gray-200 cursor-not-allowed"
             : "bg-white cursor-pointer"
         }`}
         disabled={disabled || options.length === 0}
@@ -565,9 +632,9 @@ const AddTransactionModal = ({
     }
   }, [form.amount, form.exchangeLoss, form.categoryType]);
 
-  // Update source account balance when source changes for deposit
+  // Update source account balance when source changes for ALL transaction types
   useEffect(() => {
-    if (form.source && isDeposit()) {
+    if (form.source) {
       const selectedSource = sourceOptions.find(
         (option) => option.value === form.source
       );
@@ -716,8 +783,8 @@ const AddTransactionModal = ({
       setSourceAccountBalance(0);
     }
 
-    // When source changes, update source account balance for deposit
-    if (field === "source" && value && isDeposit()) {
+    // When source changes, update source account balance for ALL transaction types
+    if (field === "source" && value) {
       const selectedSource = sourceOptions.find(
         (option) => option.value === value
       );
@@ -787,6 +854,15 @@ const AddTransactionModal = ({
             2
           )}`;
         }
+
+        // For withdraw transactions, also validate against source account balance
+        if (isWithdraw() && form.source && amountValue > sourceAccountBalance) {
+          newErrors[
+            field.key
+          ] = `Amount cannot exceed source account balance of $${sourceAccountBalance.toFixed(
+            2
+          )}`;
+        }
       }
 
       // Exchange loss validation for deposit
@@ -818,7 +894,6 @@ const AddTransactionModal = ({
     const amount = parseFloat(form.amount) || 0;
     const exchangeLoss = parseFloat(form.exchangeLoss) || 0;
 
-    // Calculate final amount based on category type
     let finalAmount = amount;
     if (isDeposit()) {
       finalAmount = amount - exchangeLoss;
@@ -886,73 +961,152 @@ const AddTransactionModal = ({
   };
 
   // Handle numeric input for text fields
+  // Handle numeric input for text fields with validation
   const handleNumericInputChange = (e, field) => {
     const value = e.target.value;
+
+    // Allow only numbers and decimal point
     if (value === "" || /^\d*\.?\d*$/.test(value)) {
+      // Additional validation for amount field
+      if (field === "amount" && value && form.source) {
+        const numericValue = parseFloat(value);
+
+        // For deposit transactions, validate against source account balance
+        if (
+          isDeposit() &&
+          !isNaN(numericValue) &&
+          numericValue > sourceAccountBalance
+        ) {
+          setErrors((prev) => ({
+            ...prev,
+            amount: `Amount cannot exceed source account balance of $${sourceAccountBalance.toFixed(
+              2
+            )}`,
+          }));
+          return; // Don't update the value if it exceeds the balance
+        }
+
+        // Clear amount error if validation passes
+        if (errors.amount) {
+          setErrors((prev) => ({
+            ...prev,
+            amount: "",
+          }));
+        }
+      }
+
       handleInputChange(field, value);
     }
   };
 
+  // Handle date input change - convert from display format to storage format
+  const handleDateInputChange = (e, field) => {
+    const displayValue = e.target.value;
+
+    // Convert display format (DD MMM YYYY) to storage format (YYYY-MM-DD)
+    const storageValue = parseDateFromInput(displayValue);
+
+    handleInputChange(field, storageValue);
+  };
+
   // Render form field based on type
   const renderFormField = (field) => {
-    const value = form[field.key] || '';
+    const value = form[field.key] || "";
     const fieldError = errors[field.key];
 
     switch (field.type) {
-      case 'select':
+      case "select":
         return (
-          <CustomDropdown
-            value={value}
-            onChange={(e) => handleInputChange(field.key, e.target.value)}
-            options={field.options || []}
-            error={fieldError}
-            disabled={field.disabled || false}
-            placeholder={field.placeholder || `Select ${field.label}`}
-          />
+          <div>
+            <CustomDropdown
+              value={value}
+              onChange={(e) => handleInputChange(field.key, e.target.value)}
+              options={field.options || []}
+              error={fieldError}
+              disabled={field.disabled || false}
+              placeholder={field.placeholder || `Select ${field.label}`}
+            />
+            {/* Show source account balance when source is selected */}
+            {field.key === "source" && value && (
+              <div className="mt-1 text-xs text-gray-500">
+                Available Balance: ${sourceAccountBalance.toFixed(2)}
+              </div>
+            )}
+          </div>
         );
 
-      case 'date':
-        return (
+      case "date":
+        return field.key === "date" ? (
           <input
             type="date"
             value={value}
-            onChange={(e) => handleInputChange(field.key, e.target.value)}
+            onChange={(e) => handleDateInputChange(e, field.key)}
             className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
-              fieldError ? 'border-red-500' : 'border-gray-300'
-            } ${field.disabled ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+              fieldError ? "border-red-500" : "border-gray-300"
+            } ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
             disabled={field.disabled || false}
+            placeholder="DD MMM YYYY"
           />
-        );
-
-      case 'number':
-        return (
+        ) : (
           <input
             type="text"
-            value={value}
-            onChange={(e) => handleNumericInputChange(e, field.key)}
+            value={formatDateForInput(value)}
+            onChange={(e) => handleDateInputChange(e, field.key)}
             className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
-              fieldError ? 'border-red-500' : 'border-gray-300'
-            } ${field.disabled ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+              fieldError ? "border-red-500" : "border-gray-300"
+            } ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
             disabled={field.disabled || false}
-            placeholder={field.placeholder || ''}
+            placeholder="DD MMM YYYY"
           />
         );
 
-      case 'textarea':
+      case "number":
+        return (
+          <div>
+            <input
+              type="text"
+              value={value}
+              onChange={(e) => handleNumericInputChange(e, field.key)}
+              max={
+                field.key === "amount" && form.source
+                  ? sourceAccountBalance
+                  : undefined
+              }
+              className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
+                fieldError ? "border-red-500" : "border-gray-300"
+              } ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
+              disabled={field.disabled || false}
+              placeholder={field.placeholder || ""}
+            />
+            {/* Show source account balance info below amount field when source is selected */}
+            {field.key === "amount" && form.source && (
+              <div className="mt-1 text-xs text-gray-500">
+                Available Balance: ${sourceAccountBalance.toFixed(2)}
+                {isDeposit() && (
+                  <span className="block text-red-500">
+                    Maximum amount: ${sourceAccountBalance.toFixed(2)}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        );
+
+      case "textarea":
         return (
           <textarea
             value={value}
             onChange={(e) => handleInputChange(field.key, e.target.value)}
             rows={3}
             className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
-              fieldError ? 'border-red-500' : 'border-gray-300'
-            } ${field.disabled ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+              fieldError ? "border-red-500" : "border-gray-300"
+            } ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
             disabled={field.disabled || false}
-            placeholder={field.placeholder || ''}
+            placeholder={field.placeholder || ""}
           />
         );
 
-      case 'text':
+      case "text":
       default:
         return (
           <input
@@ -960,10 +1114,10 @@ const AddTransactionModal = ({
             value={value}
             onChange={(e) => handleInputChange(field.key, e.target.value)}
             className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
-              fieldError ? 'border-red-500' : 'border-gray-300'
-            } ${field.disabled ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+              fieldError ? "border-red-500" : "border-gray-300"
+            } ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
             disabled={field.disabled || false}
-            placeholder={field.placeholder || ''}
+            placeholder={field.placeholder || ""}
           />
         );
     }
@@ -984,7 +1138,7 @@ const AddTransactionModal = ({
           </h2>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
+            className="p-2 hover:bg-gray-200 rounded-lg transition-colors cursor-pointer"
           >
             <X size={20} />
           </button>
@@ -1273,31 +1427,35 @@ const CashandBank = () => {
 
   const fetchTransactions = async () => {
     try {
-      const params = {
-        page: currentPage,
-        limit: ITEMS_PER_PAGE,
-        ...(searchTerm && { search: searchTerm }),
-      };
+      // Remove all parameters including searchTerm
+      const response = await axios.get(`${backendUrl}/api/transaction`);
 
-      const response = await axios.get(`${backendUrl}/api/transaction`, {
-        params,
-      });
       console.log("values of response", response);
 
       if (response.data.success) {
         const { data: transactions, destinations } = response.data;
 
-        // ✅ Filter transactions based on active tab
+        // ✅ Filter transactions based on active tab - show both source AND destination entries
         const filteredData = transactions.filter((tx) => {
           const txCategoryName = tx.categoryType?.name?.toLowerCase() || "";
+          const sourceName = tx.source?.name?.toLowerCase() || "";
+          const destinationName = tx.destination?.name?.toLowerCase() || "";
+          const activeTabLower = activeTab.toLowerCase();
 
-          if (txCategoryName === "remittance") {
-            // For remittance, match source instead of destination
-            const sourceName = tx.source?.name?.toLowerCase() || "";
-            return sourceName === activeTab.toLowerCase();
-          } else {
-            const destinationName = tx.destination?.name?.toLowerCase() || "";
-            return destinationName === activeTab.toLowerCase();
+          // For deposit/withdraw transactions, show entries for both source and destination
+          if (txCategoryName === "deposit" || txCategoryName === "withdraw") {
+            return (
+              sourceName === activeTabLower ||
+              destinationName === activeTabLower
+            );
+          }
+          // For remittance, match source instead of destination
+          else if (txCategoryName === "remittance") {
+            return sourceName === activeTabLower;
+          }
+          // For other categories, match destination
+          else {
+            return destinationName === activeTabLower;
           }
         });
 
@@ -1308,12 +1466,20 @@ const CashandBank = () => {
 
         const totalAmount = matchingDestination?.totalAmount || 0;
         setTotalAmountTab(totalAmount);
-        const calculatedTotalPages = Math.ceil(
-          filteredData.length / ITEMS_PER_PAGE
-        );
-        setTotalPages(calculatedTotalPages);
-        setTotalCount(filteredData.length);
-        setData(filteredData);
+
+        // Calculate pagination
+        const totalCount = filteredData.length;
+        const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE);
+
+        setTotalPages(totalPages);
+        setTotalCount(totalCount);
+
+        // Get current page data (only 7 records)
+        const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+        const endIndex = startIndex + ITEMS_PER_PAGE;
+        const currentPageData = filteredData.slice(startIndex, endIndex);
+
+        setData(currentPageData);
       }
     } catch (error) {
       console.error("❌ Error fetching transactions:", error);
@@ -1329,7 +1495,7 @@ const CashandBank = () => {
   // Fetch transactions when component mounts or filters change
   useEffect(() => {
     fetchTransactions();
-  }, [activeTab, searchTerm, currentPage]);
+  }, [activeTab, currentPage]); // Added currentPage to dependencies
 
   // Use data directly from backend (already filtered)
   const currentData = data || [];
@@ -1480,22 +1646,51 @@ const CashandBank = () => {
       );
     }
 
-    if (field.dbName === "amount" || field.dbName === "finalAmount") {
-      // Check if this is a Remittance transaction
-      const isRemittance =
-        item.categoryType?.name?.toLowerCase() === "remittance";
+    if (field.dbName === "amount") {
+      // Amount field - black color, no +- symbols
+      return (
+        <span className="font-medium text-black">
+          {(value || 0).toFixed(2)}
+        </span>
+      );
+    }
+
+    if (field.dbName === "finalAmount") {
+      // Final Amount field - with +- symbols and color coding
+      const categoryName = item.categoryType?.name?.toLowerCase() || "";
+
+      const isNegativeDisplay =
+        categoryName === "remittance" ||
+        (categoryName === "withdraw" &&
+          item.source?.name?.toLowerCase() === activeTab.toLowerCase()) ||
+        (categoryName === "deposit" &&
+          item.source?.name?.toLowerCase() === activeTab.toLowerCase());
+
+      const isPositiveDisplay =
+        (categoryName === "withdraw" &&
+          item.destination?.name?.toLowerCase() === activeTab.toLowerCase()) ||
+        (categoryName === "deposit" &&
+          item.destination?.name?.toLowerCase() === activeTab.toLowerCase());
 
       return (
         <span
           className={`font-medium ${
-            isRemittance
-              ? "text-red-600" // Always red for Remittance for both amount and finalAmount
+            isNegativeDisplay
+              ? "text-red-600" // Red color for money going out
+              : isPositiveDisplay
+              ? "text-green-700" // Green color for money coming in
               : value >= 0
               ? "text-green-700"
               : "text-red-600"
           }`}
         >
-          {isRemittance ? "-" : value >= 0 ? "+" : ""}
+          {isNegativeDisplay
+            ? "-"
+            : isPositiveDisplay
+            ? "+"
+            : value >= 0
+            ? "+"
+            : ""}
           {Math.abs(value || 0).toFixed(2)}
         </span>
       );
@@ -1535,7 +1730,6 @@ const CashandBank = () => {
     return value ? value.toString() : "--";
   };
 
-
   // Export functionality
   const handleExport = async () => {
     setExportLoading(true);
@@ -1572,7 +1766,8 @@ const CashandBank = () => {
   };
 
   const handleSearchChange = (e) => {
-    setSearchTerm(e.target.value);
+    const searchValue = e.target.value;
+    setSearchTerm(searchValue);
     setSelected([]);
     setCurrentPage(1);
   };
@@ -1870,7 +2065,7 @@ const CashandBank = () => {
                 onClick={handleColumnCancel}
               />
               <div
-                className="relative bg-white p-6 rounded shadow-lg max-w-4xl w-full z-10 max-h-[90vh] overflow-hidden flex flex-col"
+                className="relative bg-white p-6 rounded shadow-lg max-w-4xl w-full z-10"
                 onClick={(e) => e.stopPropagation()}
               >
                 <h2 className="text-xl font-semibold mb-4">
@@ -1963,7 +2158,7 @@ const CashandBank = () => {
                               .map((field) => (
                                 <div
                                   key={field.id}
-                                  className="flex items-center gap-2 bg-gray-100 rounded px-2 py-1 cursor-not-allowed"
+                                  className="flex items-center gap-2 bg-gray-200 rounded px-2 py-1 cursor-not-allowed"
                                 >
                                   <input type="checkbox" checked disabled />
                                   <div className="flex flex-col">
@@ -2014,6 +2209,7 @@ const CashandBank = () => {
             </div>,
             document.body
           )}
+
         <AddTransactionModal
           key="add-modal"
           isOpen={isModalOpen}
