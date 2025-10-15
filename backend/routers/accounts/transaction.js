@@ -7,14 +7,10 @@ const router = express.Router();
 
 // Helper function to determine transaction type from category
 async function getTransactionType(categoryTypeId) {
-  console.log(
-    `🔵 getTransactionType called with categoryTypeId: ${categoryTypeId}`
-  );
   const category = await CategoryType.findById(categoryTypeId);
   if (!category) throw new Error("Category type not found");
 
   const categoryName = category.name.toLowerCase();
-  console.log(`🔵 Category name: ${categoryName}`);
 
   switch (categoryName) {
     case "deposit":
@@ -33,13 +29,18 @@ async function getTransactionType(categoryTypeId) {
     case "credit collection":
       return "credit collection";
     default:
-      return "sale"; // default fallback
+      return "sale";
   }
 }
 
-// Balance adjustment function
-async function adjustBalances(transaction, session, isDelete = false) {
-  console.log(`🔵 adjustBalances called - isDelete: ${isDelete}`);
+// Enhanced balance adjustment function
+async function adjustBalances(
+  transaction,
+  session,
+  isDelete = false,
+  isUpdate = false,
+  oldTransaction = null
+) {
   const {
     transactionType,
     amount,
@@ -49,22 +50,10 @@ async function adjustBalances(transaction, session, isDelete = false) {
     categoryType,
   } = transaction;
 
-  console.log("📦 Transaction details:", {
-    transactionType,
-    amount,
-    source,
-    destination,
-    finalAmount,
-    categoryType,
-    isDelete,
-  });
-
   if (typeof amount !== "number" || amount <= 0) {
-    console.log(`❌ Invalid amount: ${amount}`);
     throw new Error("Invalid amount in transaction");
   }
 
-  console.log("🔵 Finding source and destination accounts...");
   const sourceAcc = source
     ? await Destination.findById(source).session(session)
     : null;
@@ -72,239 +61,281 @@ async function adjustBalances(transaction, session, isDelete = false) {
     ? await Destination.findById(destination).session(session)
     : null;
 
-  console.log("📦 Account details:", {
-    sourceAcc: sourceAcc
-      ? { _id: sourceAcc._id, totalAmount: sourceAcc.totalAmount }
-      : null,
-    destAcc: destAcc
-      ? { _id: destAcc._id, totalAmount: destAcc.totalAmount }
-      : null,
-  });
+  let adjustmentAmount = amount;
+  let oldAmount = 0;
+  let oldFinalAmount = 0;
+
+  if (isUpdate && oldTransaction) {
+    oldAmount = oldTransaction.amount || 0;
+    oldFinalAmount = oldTransaction.finalAmount || oldAmount;
+  }
 
   // For delete operations, we reverse the amount
-  const adjustmentAmount = isDelete ? -amount : amount;
-  console.log(`🔵 Adjustment amount: ${adjustmentAmount}`);
+  if (isDelete) {
+    adjustmentAmount = -amount;
+  }
 
   // Get category name for special handling
   let categoryName = "";
   if (categoryType && mongoose.Types.ObjectId.isValid(categoryType)) {
     const category = await CategoryType.findById(categoryType);
-    categoryName = category ? category.name : "";
+    categoryName = category ? category.name.toLowerCase() : "";
   }
-  console.log(`🔵 Category name for special handling: ${categoryName}`);
 
-  switch (transactionType) {
-    case "deposit":
-      console.log("🔵 Processing DEPOSIT transaction...");
-      if (!sourceAcc || !destAcc)
-        throw new Error("Source or destination account missing for deposit");
+  // Handle update case - calculate net difference
+  if (isUpdate && oldTransaction) {
+    const amountDifference = amount - oldAmount;
+    const finalAmountDifference =
+      (finalAmount || amount) - (oldFinalAmount || oldAmount);
 
-      if (isDelete) {
-        console.log("🔵 Reversing DEPOSIT (delete operation)");
-        // Reverse deposit: subtract from destination, add back to source
-        sourceAcc.totalAmount = (sourceAcc.totalAmount || 0) + adjustmentAmount;
+    console.log(
+      `Update: Old=${oldAmount}, New=${amount}, Difference=${amountDifference}`
+    );
+    console.log(
+      `Final Amount: Old=${oldFinalAmount}, New=${finalAmount}, Difference=${finalAmountDifference}`
+    );
 
-        // For deposit reversal, use finalAmount if available
-        if (categoryName.toLowerCase() === "deposit" && finalAmount) {
-          console.log(
-            `🔵 Using finalAmount for deposit reversal: ${finalAmount}`
-          );
+    switch (transactionType) {
+      case "deposit":
+        if (!sourceAcc || !destAcc)
+          throw new Error("Source or destination account missing for deposit");
+
+        // For deposit: adjust source by amount difference, destination by finalAmount difference
+        sourceAcc.totalAmount = (sourceAcc.totalAmount || 0) - amountDifference;
+
+        if (categoryName === "deposit" && finalAmount !== undefined) {
           destAcc.totalAmount =
-            (destAcc.totalAmount || 0) - parseFloat(finalAmount);
+            (destAcc.totalAmount || 0) + finalAmountDifference;
         } else {
-          destAcc.totalAmount = (destAcc.totalAmount || 0) - adjustmentAmount;
+          destAcc.totalAmount = (destAcc.totalAmount || 0) + amountDifference;
         }
 
-        console.log(`📦 Source new balance: ${sourceAcc.totalAmount}`);
-        console.log(`📦 Destination new balance: ${destAcc.totalAmount}`);
-
-        // Check for insufficient balance only when subtracting
-        if (destAcc.totalAmount < 0) {
-          console.log(
-            `❌ Insufficient balance in destination account: ${destAcc.totalAmount}`
-          );
-          throw new Error("Insufficient balance in destination account");
-        }
-      } else {
-        console.log("🔵 Creating DEPOSIT (normal operation)");
-        // Normal deposit: subtract from source, add to destination
-        sourceAcc.totalAmount = (sourceAcc.totalAmount || 0) - adjustmentAmount;
-
-        // For deposit, use finalAmount instead of amount if available
-        if (categoryName.toLowerCase() === "deposit" && finalAmount) {
-          console.log(`🔵 Using finalAmount for deposit: ${finalAmount}`);
-          destAcc.totalAmount =
-            (destAcc.totalAmount || 0) + parseFloat(finalAmount);
-        } else {
-          destAcc.totalAmount = (destAcc.totalAmount || 0) + adjustmentAmount;
-        }
-
-        console.log(`📦 Source new balance: ${sourceAcc.totalAmount}`);
-        console.log(`📦 Destination new balance: ${destAcc.totalAmount}`);
-
-        // Check for insufficient balance only when subtracting
-        if (sourceAcc.totalAmount < 0) {
-          console.log(
-            `❌ Insufficient balance in source account: ${sourceAcc.totalAmount}`
-          );
-          throw new Error("Insufficient balance in source account");
-        }
-      }
-
-      console.log("🔵 Saving account balances...");
-      await sourceAcc.save({ session });
-      await destAcc.save({ session });
-      console.log("✅ Account balances saved for DEPOSIT");
-      break;
-
-    case "withdraw":
-      console.log("🔵 Processing WITHDRAW transaction...");
-      if (!sourceAcc || !destAcc)
-        throw new Error("Source or destination account missing for withdraw");
-
-      if (isDelete) {
-        console.log("🔵 Reversing WITHDRAW (delete operation)");
-        // Reverse withdraw: add back to source, subtract from destination
-        sourceAcc.totalAmount = (sourceAcc.totalAmount || 0) + adjustmentAmount;
-        destAcc.totalAmount = (destAcc.totalAmount || 0) - adjustmentAmount;
-
-        if (destAcc.totalAmount < 0) {
-          console.log(
-            `❌ Insufficient balance in destination account: ${destAcc.totalAmount}`
-          );
-          throw new Error("Insufficient balance in destination account");
-        }
-      } else {
-        console.log("🔵 Creating WITHDRAW (normal operation)");
-        // Normal withdraw: subtract from source, add to destination
-        sourceAcc.totalAmount = (sourceAcc.totalAmount || 0) - adjustmentAmount;
-        destAcc.totalAmount = (destAcc.totalAmount || 0) + adjustmentAmount;
-
-        if (sourceAcc.totalAmount < 0) {
-          console.log(
-            `❌ Insufficient balance in source account: ${sourceAcc.totalAmount}`
-          );
-          throw new Error("Insufficient balance in source account");
-        }
-      }
-
-      await sourceAcc.save({ session });
-      await destAcc.save({ session });
-      console.log("✅ Account balances saved for WITHDRAW");
-      break;
-
-    case "payment inward":
-      console.log("🔵 Processing PAYMENT INWARD transaction...");
-      if (!destAcc)
-        throw new Error("Destination account missing for payment inward");
-
-      if (isDelete) {
-        destAcc.totalAmount = (destAcc.totalAmount || 0) - adjustmentAmount;
-      } else {
-        destAcc.totalAmount = (destAcc.totalAmount || 0) + adjustmentAmount;
-
-        if (destAcc.totalAmount < 0) {
-          console.log(
-            `❌ Insufficient balance in destination account: ${destAcc.totalAmount}`
-          );
-          throw new Error("Insufficient balance in destination account");
-        }
-      }
-
-      await destAcc.save({ session });
-      console.log("✅ Account balance saved for PAYMENT INWARD");
-      break;
-
-    case "payment outward":
-      console.log("🔵 Processing PAYMENT OUTWARD transaction...");
-      if (!sourceAcc)
-        throw new Error("Source account missing for payment outward");
-
-      if (isDelete) {
-        console.log("🔵 Reversing PAYMENT OUTWARD (delete operation)");
-        // Reverse: add back to source
-        sourceAcc.totalAmount = (sourceAcc.totalAmount || 0) + adjustmentAmount;
-      } else {
-        console.log("🔵 Creating PAYMENT OUTWARD (normal operation)");
-        // Normal: subtract from source
-        sourceAcc.totalAmount = (sourceAcc.totalAmount || 0) - adjustmentAmount;
-
-        if (sourceAcc.totalAmount < 0) {
-          console.log(
-            `❌ Insufficient balance in source account: ${sourceAcc.totalAmount}`
-          );
-          throw new Error("Insufficient balance in source account");
-        }
-      }
-
-      await sourceAcc.save({ session });
-      console.log("✅ Account balance saved for PAYMENT OUTWARD");
-      break;
-
-    case "remittance":
-      console.log("🔵 Processing REMITTANCE transaction...");
-      if (!sourceAcc) throw new Error("Source account missing for remittance");
-
-      if (isDelete) {
-        console.log("🔵 Reversing REMITTANCE (delete operation)");
-        // Reverse: subtract from source
-        sourceAcc.totalAmount = (sourceAcc.totalAmount || 0) + adjustmentAmount;
-
+        // Check for insufficient balance
         if (sourceAcc.totalAmount < 0) {
           throw new Error("Insufficient balance in source account");
         }
-      } else {
-        sourceAcc.totalAmount = (sourceAcc.totalAmount || 0) - adjustmentAmount;
-      }
 
-      await sourceAcc.save({ session });
-
-      break;
-
-    default:
-      console.log(`🔵 Processing DEFAULT transaction type: ${transactionType}`);
-      // For sales and other transactions, only adjust destination if it exists
-      if (destAcc) {
-        if (isDelete) {
-          console.log("🔵 Reversing DEFAULT transaction (delete operation)");
-          // Reverse: add back to destination
-          destAcc.totalAmount = (destAcc.totalAmount || 0) + adjustmentAmount;
-          console.log(`📦 Destination new balance: ${destAcc.totalAmount}`);
-        } else {
-          console.log("🔵 Creating DEFAULT transaction (normal operation)");
-          // Normal: For sales, we ADD to destination account (money coming in)
-          destAcc.totalAmount = (destAcc.totalAmount || 0) + adjustmentAmount;
-          console.log(`📦 Destination new balance: ${destAcc.totalAmount}`);
-
-          // For sales transactions, we don't check for insufficient balance since we're ADDING money
-          // Only check if we're subtracting (which we don't do for sales)
-        }
-
-        console.log("🔵 Saving destination account balance...");
+        await sourceAcc.save({ session });
         await destAcc.save({ session });
-        console.log("✅ Destination account balance saved");
-      } else {
-        console.log(
-          "ℹ️  No destination account to adjust for DEFAULT transaction"
-        );
-      }
+        break;
+
+      case "withdraw":
+        if (!sourceAcc || !destAcc)
+          throw new Error("Source or destination account missing for withdraw");
+
+        // For withdraw: adjust source by amount difference, destination by amount difference
+        sourceAcc.totalAmount = (sourceAcc.totalAmount || 0) - amountDifference;
+        destAcc.totalAmount = (destAcc.totalAmount || 0) + amountDifference;
+
+        // Check for insufficient balance
+        if (sourceAcc.totalAmount < 0) {
+          throw new Error("Insufficient balance in source account");
+        }
+
+        await sourceAcc.save({ session });
+        await destAcc.save({ session });
+        break;
+
+      case "payment inward":
+        if (!destAcc)
+          throw new Error("Destination account missing for payment inward");
+
+        destAcc.totalAmount = (destAcc.totalAmount || 0) + amountDifference;
+
+        // Check for insufficient balance
+        if (destAcc.totalAmount < 0) {
+          throw new Error("Insufficient balance in destination account");
+        }
+
+        await destAcc.save({ session });
+        break;
+
+      case "payment outward":
+        if (!sourceAcc)
+          throw new Error("Source account missing for payment outward");
+
+        sourceAcc.totalAmount = (sourceAcc.totalAmount || 0) - amountDifference;
+
+        // Check for insufficient balance
+        if (sourceAcc.totalAmount < 0) {
+          throw new Error("Insufficient balance in source account");
+        }
+
+        await sourceAcc.save({ session });
+        break;
+
+      case "remittance":
+        if (!sourceAcc)
+          throw new Error("Source account missing for remittance");
+
+        sourceAcc.totalAmount = (sourceAcc.totalAmount || 0) - amountDifference;
+
+        // Check for insufficient balance
+        if (sourceAcc.totalAmount < 0) {
+          throw new Error("Insufficient balance in source account");
+        }
+
+        await sourceAcc.save({ session });
+        break;
+
+      default:
+        // For sales and other transactions (cash sale, credit collection, etc.)
+        if (destAcc) {
+          destAcc.totalAmount = (destAcc.totalAmount || 0) + amountDifference;
+          await destAcc.save({ session });
+        }
+        break;
+    }
+  } else {
+    // CREATE/DELETE OPERATIONS (or category type changes)
+    console.log(
+      `Create/Delete: Amount=${adjustmentAmount}, Type=${transactionType}, Category=${categoryName}`
+    );
+
+    switch (transactionType) {
+      case "deposit":
+        if (!sourceAcc || !destAcc)
+          throw new Error("Source or destination account missing for deposit");
+
+        if (isDelete) {
+          // Reverse deposit: add back to source, subtract from destination
+          sourceAcc.totalAmount =
+            (sourceAcc.totalAmount || 0) + adjustmentAmount;
+
+          // For deposit reversal, use finalAmount if available
+          if (categoryName === "deposit" && finalAmount) {
+            destAcc.totalAmount =
+              (destAcc.totalAmount || 0) - parseFloat(finalAmount);
+          } else {
+            destAcc.totalAmount = (destAcc.totalAmount || 0) - adjustmentAmount;
+          }
+
+          // Check for insufficient balance only when subtracting
+          if (destAcc.totalAmount < 0) {
+            throw new Error("Insufficient balance in destination account");
+          }
+        } else {
+          // Normal deposit: subtract from source, add to destination
+          sourceAcc.totalAmount =
+            (sourceAcc.totalAmount || 0) - adjustmentAmount;
+
+          // For deposit, use finalAmount instead of amount if available
+          if (categoryName === "deposit" && finalAmount) {
+            destAcc.totalAmount =
+              (destAcc.totalAmount || 0) + parseFloat(finalAmount);
+          } else {
+            destAcc.totalAmount = (destAcc.totalAmount || 0) + adjustmentAmount;
+          }
+
+          // Check for insufficient balance only when subtracting
+          if (sourceAcc.totalAmount < 0) {
+            throw new Error("Insufficient balance in source account");
+          }
+        }
+
+        await sourceAcc.save({ session });
+        await destAcc.save({ session });
+        break;
+
+      case "withdraw":
+        if (!sourceAcc || !destAcc)
+          throw new Error("Source or destination account missing for withdraw");
+
+        if (isDelete) {
+          // Reverse withdraw: add back to source, subtract from destination
+          sourceAcc.totalAmount =
+            (sourceAcc.totalAmount || 0) + adjustmentAmount;
+          destAcc.totalAmount = (destAcc.totalAmount || 0) - adjustmentAmount;
+
+          if (destAcc.totalAmount < 0) {
+            throw new Error("Insufficient balance in destination account");
+          }
+        } else {
+          // Normal withdraw: subtract from source, add to destination
+          sourceAcc.totalAmount =
+            (sourceAcc.totalAmount || 0) - adjustmentAmount;
+          destAcc.totalAmount = (destAcc.totalAmount || 0) + adjustmentAmount;
+
+          if (sourceAcc.totalAmount < 0) {
+            throw new Error("Insufficient balance in source account");
+          }
+        }
+
+        await sourceAcc.save({ session });
+        await destAcc.save({ session });
+        break;
+
+      case "payment inward":
+        if (!destAcc)
+          throw new Error("Destination account missing for payment inward");
+
+        if (isDelete) {
+          destAcc.totalAmount = (destAcc.totalAmount || 0) - adjustmentAmount;
+        } else {
+          destAcc.totalAmount = (destAcc.totalAmount || 0) + adjustmentAmount;
+        }
+
+        await destAcc.save({ session });
+        break;
+
+      case "payment outward":
+        if (!sourceAcc)
+          throw new Error("Source account missing for payment outward");
+
+        if (isDelete) {
+          // Reverse: add back to source
+          sourceAcc.totalAmount =
+            (sourceAcc.totalAmount || 0) + adjustmentAmount;
+        } else {
+          // Normal: subtract from source
+          sourceAcc.totalAmount =
+            (sourceAcc.totalAmount || 0) - adjustmentAmount;
+        }
+
+        await sourceAcc.save({ session });
+        break;
+
+      case "remittance":
+        if (!sourceAcc)
+          throw new Error("Source account missing for remittance");
+
+        if (isDelete) {
+          // Reverse: add back to source
+          sourceAcc.totalAmount =
+            (sourceAcc.totalAmount || 0) + adjustmentAmount;
+        } else {
+          // Normal: subtract from source
+          sourceAcc.totalAmount =
+            (sourceAcc.totalAmount || 0) - adjustmentAmount;
+        }
+
+        await sourceAcc.save({ session });
+        break;
+
+      default:
+        // For sales, cash sale, credit collection - only affect destination
+        if (destAcc) {
+          if (isDelete) {
+            // Reverse: subtract from destination
+            destAcc.totalAmount = (destAcc.totalAmount || 0) - adjustmentAmount;
+          } else {
+            // Normal: add to destination (money coming in)
+            destAcc.totalAmount = (destAcc.totalAmount || 0) + adjustmentAmount;
+          }
+
+          await destAcc.save({ session });
+        }
+        break;
+    }
   }
-
-  console.log("✅ adjustBalances completed successfully");
 }
-
 // Create transaction
 router.post("/transaction", async (req, res) => {
-  console.log("🔵 POST /transaction - Starting transaction creation");
   const session = await mongoose.startSession();
-  console.log("🔵 MongoDB session started");
 
   try {
-    console.log("🔵 Starting transaction...");
     session.startTransaction();
-    console.log("🔵 Transaction started");
 
-    console.log("🔵 Parsing request body...");
     const {
       categoryType,
       source,
@@ -323,45 +354,20 @@ router.post("/transaction", async (req, res) => {
       remarks,
     } = req.body;
 
-    console.log("📦 Request body data:", {
-      categoryType,
-      source,
-      destination,
-      supplier,
-      amount,
-      exchangeLoss,
-      finalAmount,
-      date,
-      invoiceDate,
-      invoiceNumber,
-      customerName,
-      customerAddress,
-      accountType,
-      description,
-      remarks,
-    });
-
-    console.log("🔵 Validating ObjectIds...");
+    // Validate ObjectIds
     const validateObjectId = (id, name) => {
-      console.log(`🔵 Validating ${name}: ${id}`);
       if (id && !mongoose.Types.ObjectId.isValid(id)) {
-        console.log(`❌ Invalid ${name} ID: ${id}`);
         throw new Error(`Invalid ${name} ID`);
       }
-      console.log(`✅ ${name} ID is valid`);
     };
 
     validateObjectId(categoryType, "categoryType");
     validateObjectId(source, "source");
     validateObjectId(destination, "destination");
     validateObjectId(supplier, "supplier");
-    console.log("✅ All ObjectIds validated successfully");
 
-    console.log("🔵 Determining transaction type from category...");
     const transactionType = await getTransactionType(categoryType);
-    console.log(`✅ Transaction type determined: ${transactionType}`);
 
-    console.log("🔵 Creating transaction data object...");
     const transactionData = {
       categoryType,
       source,
@@ -381,35 +387,19 @@ router.post("/transaction", async (req, res) => {
       remarks,
     };
 
-    console.log("📦 Transaction data prepared:", transactionData);
-
-    console.log("🔵 Saving transaction to database...");
     const transaction = new Transaction(transactionData);
     await transaction.save({ session });
-    console.log(
-      `✅ Transaction saved successfully with ID: ${transaction._id}`
-    );
 
-    console.log("🔵 Adjusting account balances...");
     await adjustBalances(transaction, session, false);
-    console.log("✅ Account balances adjusted successfully");
 
-    console.log("🔵 Committing transaction...");
     await session.commitTransaction();
-    console.log("✅ Transaction committed successfully");
-
-    console.log("🔵 Ending session...");
     session.endSession();
-    console.log("✅ Session ended");
 
-    console.log("🔵 Populating transaction with related data...");
     const populatedTransaction = await Transaction.findById(transaction._id)
       .populate("categoryType", "name")
       .populate("source", "name totalAmount")
       .populate("destination", "name totalAmount")
       .populate("supplier", "name");
-
-    console.log("📦 Populated transaction:", populatedTransaction);
 
     res.status(201).json({
       success: true,
@@ -417,32 +407,18 @@ router.post("/transaction", async (req, res) => {
       message: "Transaction created successfully",
     });
   } catch (error) {
-    console.error("❌ Error occurred in transaction creation:");
-    console.error("❌ Error message:", error.message);
-    console.error("❌ Error stack:", error.stack);
-
-    console.log("🔵 Attempting to abort transaction...");
     await session.abortTransaction();
-    console.log("✅ Transaction aborted");
-
-    console.log("🔵 Ending session after error...");
     session.endSession();
-    console.log("✅ Session ended after error");
-
-    console.log("❌ Sending error response to client");
     res.status(400).json({
       success: false,
       message: error.message,
     });
-    console.log("✅ Error response sent");
   }
 });
 
-// ... rest of your routes remain the same (GET, PUT, DELETE)
 // Get all transactions with pagination and filtering
 router.get("/transaction", async (req, res) => {
   try {
-    // Get all transactions without any filtering or pagination
     const transactions = await Transaction.find({})
       .populate("categoryType", "name")
       .populate("source", "name totalAmount")
@@ -450,9 +426,7 @@ router.get("/transaction", async (req, res) => {
       .populate("supplier", "name")
       .sort({ date: -1, createdAt: -1 });
 
-    // Get full list of destinations
     const destinations = await Destination.find();
-
     const total = transactions.length;
 
     res.json({
@@ -464,13 +438,13 @@ router.get("/transaction", async (req, res) => {
       total,
     });
   } catch (error) {
-    console.error("Transaction fetch error:", error);
     res.status(500).json({
       success: false,
       message: error.message,
     });
   }
 });
+
 // Get single transaction by ID
 router.get("/transaction/:id", async (req, res) => {
   try {
@@ -500,13 +474,14 @@ router.get("/transaction/:id", async (req, res) => {
 });
 
 // Update transaction
+// Update transaction - CORRECTED VERSION
+// Update transaction - COMPLETE VERSION WITH CATEGORY TYPE CHANGES
 router.put("/transaction/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
     const { id } = req.params;
-
     if (!mongoose.Types.ObjectId.isValid(id)) {
       await session.abortTransaction();
       session.endSession();
@@ -516,8 +491,8 @@ router.put("/transaction/:id", async (req, res) => {
       });
     }
 
-    // Find existing transaction
     const existingTransaction = await Transaction.findById(id).session(session);
+
     if (!existingTransaction) {
       await session.abortTransaction();
       session.endSession();
@@ -527,10 +502,7 @@ router.put("/transaction/:id", async (req, res) => {
       });
     }
 
-    // First reverse the old balances
-    await adjustBalances(existingTransaction, session, true);
-
-    // Determine new transaction type if category changed
+    // Determine new transaction type
     let transactionType = existingTransaction.transactionType;
     if (
       req.body.categoryType &&
@@ -539,7 +511,6 @@ router.put("/transaction/:id", async (req, res) => {
       transactionType = await getTransactionType(req.body.categoryType);
     }
 
-    // Prepare update data
     const updateData = {
       ...req.body,
       transactionType,
@@ -552,20 +523,78 @@ router.put("/transaction/:id", async (req, res) => {
       ),
     };
 
-    // Update transaction
+    // Get category names for both old and new transactions
+    const oldCategory = await CategoryType.findById(
+      existingTransaction.categoryType
+    );
+    const oldCategoryName = oldCategory ? oldCategory.name.toLowerCase() : "";
+
+    const newCategory = updateData.categoryType
+      ? await CategoryType.findById(updateData.categoryType)
+      : oldCategory;
+    const newCategoryName = newCategory
+      ? newCategory.name.toLowerCase()
+      : oldCategoryName;
+
+    console.log(`Category Change: ${oldCategoryName} -> ${newCategoryName}`);
+
+    // If category type changed significantly, we need special handling
+    const categoryChanged = oldCategoryName !== newCategoryName;
+
+    if (categoryChanged) {
+      console.log(
+        "Category type changed - performing full reversal and reapplication"
+      );
+
+      // STEP 1: Reverse the OLD transaction completely (like delete)
+      await adjustBalances(existingTransaction, session, true);
+
+      // STEP 2: Apply the NEW transaction completely (like create)
+      await adjustBalances(
+        {
+          ...updateData,
+          _id: existingTransaction._id,
+          transactionType,
+          source: updateData.source || existingTransaction.source,
+          destination:
+            updateData.destination || existingTransaction.destination,
+          categoryType:
+            updateData.categoryType || existingTransaction.categoryType,
+        },
+        session,
+        false
+      );
+    } else {
+      // Only amount/fields changed, use difference method
+      console.log("Same category type - adjusting by difference");
+      await adjustBalances(
+        {
+          ...updateData,
+          _id: existingTransaction._id,
+          transactionType,
+          source: updateData.source || existingTransaction.source,
+          destination:
+            updateData.destination || existingTransaction.destination,
+          categoryType:
+            updateData.categoryType || existingTransaction.categoryType,
+        },
+        session,
+        false, // isDelete = false
+        true, // isUpdate = true
+        existingTransaction // old transaction data
+      );
+    }
+
+    // Update the transaction document
     const transaction = await Transaction.findByIdAndUpdate(id, updateData, {
       new: true,
       runValidators: true,
       session,
     });
 
-    // Apply new balances
-    await adjustBalances(transaction, session, false);
-
     await session.commitTransaction();
     session.endSession();
 
-    // Populate and return
     const populatedTransaction = await Transaction.findById(transaction._id)
       .populate("categoryType", "name")
       .populate("source", "name totalAmount")
@@ -627,7 +656,6 @@ router.delete("/transaction/:id", async (req, res) => {
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
-    console.error("Error deleting transaction:", error);
     res.status(500).json({
       success: false,
       message: "Failed to delete transaction",
@@ -690,7 +718,6 @@ router.delete("/transactions", async (req, res) => {
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
-    console.error("Error deleting transactions:", error);
     res.status(500).json({
       success: false,
       message: "Failed to delete transactions",

@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import ReactDOM from "react-dom";
 import axios from "axios";
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { showToast } from "../../utils/toast";
 import { confirmDialog } from "../../utils/confirmationDialog";
 import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
@@ -120,6 +120,7 @@ const getDisplayValue = (value, options) => {
     return "--";
   }
 };
+
 // Custom hook to fetch dropdown options from backend
 const useDropdownOptions = () => {
   const [categoryOptions, setCategoryOptions] = useState([]);
@@ -292,71 +293,65 @@ const AddTransactionModal = ({
   const [isFetchingSales, setIsFetchingSales] = useState(false);
   const [invoiceDataFetched, setInvoiceDataFetched] = useState(false);
   const [sourceAccountBalance, setSourceAccountBalance] = useState(0);
+  const [originalAmount, setOriginalAmount] = useState(0);
 
-  // Check if current category requires supplier (Payment Inward or Remittance)
-  const requiresSupplier = () => {
+  // Memoized helper functions to prevent infinite re-renders
+  const requiresSupplier = useMemo(() => {
     const categoryType = form.categoryType;
     const category = categoryOptions.find((cat) => cat.value === categoryType);
     const categoryName = category?.label?.toLowerCase() || "";
     return categoryName === "payment inward" || categoryName === "remittance";
-  };
+  }, [form.categoryType, categoryOptions]);
 
-  // Check if current category is remittance (special case)
-  const isRemittance = () => {
+  const isRemittance = useMemo(() => {
     const categoryType = form.categoryType;
     const category = categoryOptions.find((cat) => cat.value === categoryType);
     const categoryName = category?.label?.toLowerCase() || "";
     return categoryName === "remittance";
-  };
+  }, [form.categoryType, categoryOptions]);
 
-  // Check if current category is payment inward
-  const isPaymentInward = () => {
+  const isPaymentInward = useMemo(() => {
     const categoryType = form.categoryType;
     const category = categoryOptions.find((cat) => cat.value === categoryType);
     const categoryName = category?.label?.toLowerCase() || "";
     return categoryName === "payment inward";
-  };
+  }, [form.categoryType, categoryOptions]);
 
-  // Check if current category is payment outward
-  const isPaymentOutward = () => {
+  const isPaymentOutward = useMemo(() => {
     const categoryType = form.categoryType;
     const category = categoryOptions.find((cat) => cat.value === categoryType);
     const categoryName = category?.label?.toLowerCase() || "";
     return categoryName === "payment outward";
-  };
+  }, [form.categoryType, categoryOptions]);
 
-  // Check if current category is deposit or withdraw
-  const isDepositOrWithdraw = () => {
+  const isDepositOrWithdraw = useMemo(() => {
     const categoryType = form.categoryType;
     const category = categoryOptions.find((cat) => cat.value === categoryType);
     const categoryName = category?.label?.toLowerCase() || "";
     return categoryName === "withdraw" || categoryName === "deposit";
-  };
+  }, [form.categoryType, categoryOptions]);
 
-  // Check if current category is deposit
-  const isDeposit = () => {
+  const isDeposit = useMemo(() => {
     const categoryType = form.categoryType;
     const category = categoryOptions.find((cat) => cat.value === categoryType);
     const categoryName = category?.label?.toLowerCase() || "";
     return categoryName === "deposit";
-  };
+  }, [form.categoryType, categoryOptions]);
 
-  // Check if current category is withdraw
-  const isWithdraw = () => {
+  const isWithdraw = useMemo(() => {
     const categoryType = form.categoryType;
     const category = categoryOptions.find((cat) => cat.value === categoryType);
     const categoryName = category?.label?.toLowerCase() || "";
     return categoryName === "withdraw";
-  };
+  }, [form.categoryType, categoryOptions]);
 
-  // Check if category requires invoice fields
-  const requiresInvoiceFields = () => {
-    return !isDepositOrWithdraw() && !requiresSupplier() && !isPaymentOutward();
-  };
+  const requiresInvoiceFields = useMemo(() => {
+    return !isDepositOrWithdraw && !requiresSupplier && !isPaymentOutward;
+  }, [isDepositOrWithdraw, requiresSupplier, isPaymentOutward]);
 
   // Get filtered source options (exclude destination account for deposit/withdraw)
   const getFilteredSourceOptions = useMemo(() => {
-    if (!isDepositOrWithdraw()) {
+    if (!isDepositOrWithdraw) {
       return sourceOptions;
     }
 
@@ -368,7 +363,7 @@ const AddTransactionModal = ({
 
   // Get filtered destination options (exclude source account for deposit/withdraw)
   const getFilteredDestinationOptions = useMemo(() => {
-    if (!isDepositOrWithdraw()) {
+    if (!isDepositOrWithdraw) {
       return destinationOptions;
     }
 
@@ -406,7 +401,7 @@ const AddTransactionModal = ({
     ];
 
     // Add supplier field for payment inward/remittance
-    if (requiresSupplier()) {
+    if (requiresSupplier) {
       baseFields.splice(1, 0, {
         key: "supplier",
         label: "Supplier Name",
@@ -417,7 +412,7 @@ const AddTransactionModal = ({
       });
 
       // For REMITTANCE: Use SOURCE account instead of destination
-      if (isRemittance()) {
+      if (isRemittance) {
         baseFields.splice(2, 0, {
           key: "source",
           label: "Source Account",
@@ -428,7 +423,7 @@ const AddTransactionModal = ({
         });
       }
       // For PAYMENT INWARD: Use DESTINATION account (original behavior)
-      else if (isPaymentInward()) {
+      else if (isPaymentInward) {
         baseFields.splice(2, 0, {
           key: "destination",
           label: "Destination Account",
@@ -440,7 +435,7 @@ const AddTransactionModal = ({
       }
     }
     // Add source field for payment outward
-    else if (isPaymentOutward()) {
+    else if (isPaymentOutward) {
       baseFields.splice(1, 0, {
         key: "supplier",
         label: "Payment To",
@@ -459,8 +454,8 @@ const AddTransactionModal = ({
       });
     }
     // Add source/destination fields for deposit/withdraw
-    else if (isDepositOrWithdraw()) {
-      if (isDeposit()) {
+    else if (isDepositOrWithdraw) {
+      if (isDeposit) {
         baseFields.splice(1, 0, {
           key: "source",
           label: "Source Account",
@@ -494,7 +489,7 @@ const AddTransactionModal = ({
           disabled: true,
           layout: "half",
         });
-      } else if (isWithdraw()) {
+      } else if (isWithdraw) {
         baseFields.splice(1, 0, {
           key: "source",
           label: "Source Account",
@@ -576,6 +571,13 @@ const AddTransactionModal = ({
     form.categoryType,
     getFilteredSourceOptions,
     getFilteredDestinationOptions,
+    requiresSupplier,
+    isRemittance,
+    isPaymentInward,
+    isPaymentOutward,
+    isDepositOrWithdraw,
+    isDeposit,
+    isWithdraw,
   ]);
 
   // Initialize form data
@@ -606,6 +608,7 @@ const AddTransactionModal = ({
         };
         setForm(processedEditData);
         setInvoiceDataFetched(true);
+        setOriginalAmount(editData.amount || 0);
 
         if (editData.source && editData.source.totalAmount !== undefined) {
           setSourceAccountBalance(editData.source.totalAmount);
@@ -614,6 +617,7 @@ const AddTransactionModal = ({
         setForm(initializeFormData());
         setInvoiceDataFetched(false);
         setSourceAccountBalance(0);
+        setOriginalAmount(0);
       }
       setErrors({});
     }
@@ -621,18 +625,19 @@ const AddTransactionModal = ({
 
   // Calculate final amount for deposit transactions
   useEffect(() => {
-    if (isDeposit()) {
+    if (isDeposit) {
       const amount = parseFloat(form.amount) || 0;
       const exchangeLoss = parseFloat(form.exchangeLoss) || 0;
       const finalAmount = amount - exchangeLoss;
+
       setForm((prev) => ({
         ...prev,
         finalAmount: isNaN(finalAmount) ? "0.00" : finalAmount.toFixed(2),
       }));
     }
-  }, [form.amount, form.exchangeLoss, form.categoryType]);
+  }, [form.amount, form.exchangeLoss, isDeposit]);
 
-  // Update source account balance when source changes for ALL transaction types
+  // Update source account balance when source changes
   useEffect(() => {
     if (form.source) {
       const selectedSource = sourceOptions.find(
@@ -644,7 +649,7 @@ const AddTransactionModal = ({
     } else {
       setSourceAccountBalance(0);
     }
-  }, [form.source, form.categoryType, sourceOptions]);
+  }, [form.source, sourceOptions]);
 
   // Handle category type change - reset relevant fields
   useEffect(() => {
@@ -653,12 +658,12 @@ const AddTransactionModal = ({
         const newForm = { ...prev };
 
         // Reset supplier field when category changes away from supplier-required categories
-        if (!requiresSupplier() && !isPaymentOutward() && newForm.supplier) {
+        if (!requiresSupplier && !isPaymentOutward && newForm.supplier) {
           newForm.supplier = "";
         }
 
         // Reset invoice fields when category changes to non-invoice categories
-        if (!requiresInvoiceFields() && newForm.invoiceNumber) {
+        if (!requiresInvoiceFields && newForm.invoiceNumber) {
           newForm.invoiceNumber = "";
           newForm.invoiceDate = "";
           newForm.customerName = "";
@@ -666,12 +671,12 @@ const AddTransactionModal = ({
         }
 
         // Reset source/destination for non-deposit/withdraw
-        if (!isDepositOrWithdraw() && !isPaymentOutward() && !isRemittance()) {
+        if (!isDepositOrWithdraw && !isPaymentOutward && !isRemittance) {
           if (newForm.source) newForm.source = "";
         }
 
         // Reset exchange loss and final amount for non-deposit
-        if (!isDeposit()) {
+        if (!isDeposit) {
           if (newForm.exchangeLoss) newForm.exchangeLoss = "";
           if (newForm.finalAmount) newForm.finalAmount = "0.00";
         }
@@ -686,7 +691,7 @@ const AddTransactionModal = ({
     if (
       !invoiceNumber ||
       invoiceNumber.trim() === "" ||
-      !requiresInvoiceFields()
+      !requiresInvoiceFields
     ) {
       return;
     }
@@ -749,6 +754,23 @@ const AddTransactionModal = ({
     }
   };
 
+  // FIXED: Calculate available balance for updates
+  const getAvailableBalanceForUpdate = useCallback(() => {
+    if (!form.source) return sourceAccountBalance;
+
+    if (isEdit && (isDeposit || isWithdraw)) {
+      return sourceAccountBalance + originalAmount;
+    }
+    return sourceAccountBalance;
+  }, [
+    isEdit,
+    form.source,
+    sourceAccountBalance,
+    originalAmount,
+    isDeposit,
+    isWithdraw,
+  ]);
+
   // Handle input change
   const handleInputChange = (field, value) => {
     setForm((prev) => ({
@@ -781,9 +803,10 @@ const AddTransactionModal = ({
       }));
       setInvoiceDataFetched(false);
       setSourceAccountBalance(0);
+      setOriginalAmount(0);
     }
 
-    // When source changes, update source account balance for ALL transaction types
+    // When source changes, update source account balance
     if (field === "source" && value) {
       const selectedSource = sourceOptions.find(
         (option) => option.value === value
@@ -794,31 +817,48 @@ const AddTransactionModal = ({
     }
 
     // When invoice number changes, fetch the details for invoice-required categories
-    if (field === "invoiceNumber" && value && requiresInvoiceFields()) {
+    if (field === "invoiceNumber" && value && requiresInvoiceFields) {
       fetchSalesData(value);
     }
 
-    // When amount changes, validate against source account balance for deposit
-    if (field === "amount" && value && isDeposit() && form.source) {
+    // When amount changes, validate against source account balance
+    if (
+      field === "amount" &&
+      value &&
+      form.source &&
+      (isDeposit || isWithdraw)
+    ) {
       const amountValue = parseFloat(value) || 0;
-      if (amountValue > sourceAccountBalance) {
+      const availableBalance = getAvailableBalanceForUpdate();
+
+      if (amountValue > availableBalance) {
         setErrors((prev) => ({
           ...prev,
-          amount: `Amount cannot exceed source account balance of $${sourceAccountBalance.toFixed(
+          amount: `Amount cannot exceed available balance of $${availableBalance.toFixed(
             2
           )}`,
+        }));
+      } else if (errors.amount) {
+        setErrors((prev) => ({
+          ...prev,
+          amount: "",
         }));
       }
     }
 
     // When exchange loss changes, validate it doesn't exceed amount for deposit
-    if (field === "exchangeLoss" && value && isDeposit() && form.amount) {
+    if (field === "exchangeLoss" && value && isDeposit && form.amount) {
       const amountValue = parseFloat(form.amount) || 0;
       const exchangeLossValue = parseFloat(value) || 0;
       if (exchangeLossValue > amountValue) {
         setErrors((prev) => ({
           ...prev,
           exchangeLoss: `Exchange loss cannot exceed amount`,
+        }));
+      } else if (errors.exchangeLoss) {
+        setErrors((prev) => ({
+          ...prev,
+          exchangeLoss: "",
         }));
       }
     }
@@ -846,27 +886,22 @@ const AddTransactionModal = ({
           ] = `${field.label} must be a valid positive number`;
         }
 
-        // For deposit transactions, validate against source account balance
-        if (isDeposit() && form.source && amountValue > sourceAccountBalance) {
-          newErrors[
-            field.key
-          ] = `Amount cannot exceed source account balance of $${sourceAccountBalance.toFixed(
-            2
-          )}`;
-        }
+        // For deposit/withdraw transactions, validate against available balance
+        if ((isDeposit || isWithdraw) && form.source) {
+          const availableBalance = getAvailableBalanceForUpdate();
 
-        // For withdraw transactions, also validate against source account balance
-        if (isWithdraw() && form.source && amountValue > sourceAccountBalance) {
-          newErrors[
-            field.key
-          ] = `Amount cannot exceed source account balance of $${sourceAccountBalance.toFixed(
-            2
-          )}`;
+          if (amountValue > availableBalance) {
+            newErrors[
+              field.key
+            ] = `Amount cannot exceed available balance of $${availableBalance.toFixed(
+              2
+            )}`;
+          }
         }
       }
 
       // Exchange loss validation for deposit
-      if (field.key === "exchangeLoss" && form[field.key] && isDeposit()) {
+      if (field.key === "exchangeLoss" && form[field.key] && isDeposit) {
         const exchangeLossValue = parseFloat(form[field.key]);
         const amountValue = parseFloat(form.amount) || 0;
 
@@ -895,7 +930,7 @@ const AddTransactionModal = ({
     const exchangeLoss = parseFloat(form.exchangeLoss) || 0;
 
     let finalAmount = amount;
-    if (isDeposit()) {
+    if (isDeposit) {
       finalAmount = amount - exchangeLoss;
     }
 
@@ -911,24 +946,25 @@ const AddTransactionModal = ({
       remarks: form.remarks || "",
     };
 
+    console.log('valuesof transactionData', transactionData)
     // Add supplier for payment inward/remittance/outward
-    if (requiresSupplier() || isPaymentOutward()) {
+    if (requiresSupplier || isPaymentOutward) {
       transactionData.supplier = form.supplier;
     }
 
     // Add source/destination based on category type
-    if (requiresSupplier()) {
-      if (isRemittance()) {
+    if (requiresSupplier) {
+      if (isRemittance) {
         // REMITTANCE: supplier + source
         transactionData.source = form.source;
-      } else if (isPaymentInward()) {
+      } else if (isPaymentInward) {
         // PAYMENT INWARD: supplier + destination
         transactionData.destination = form.destination;
       }
-    } else if (isPaymentOutward()) {
+    } else if (isPaymentOutward) {
       // Payment Outward: supplier + source
       transactionData.source = form.source;
-    } else if (isDepositOrWithdraw()) {
+    } else if (isDepositOrWithdraw) {
       // Deposit/Withdraw: source + destination
       transactionData.source = form.source;
       transactionData.destination = form.destination;
@@ -942,10 +978,18 @@ const AddTransactionModal = ({
     }
 
     try {
-      const response = await axios.post(
-        `${backendUrl}/api/transaction`,
-        transactionData
-      );
+      let response;
+      if (isEdit && editData) {
+        response = await axios.put(
+          `${backendUrl}/api/transaction/${editData._id}`,
+          transactionData
+        );
+      } else {
+        response = await axios.post(
+          `${backendUrl}/api/transaction`,
+          transactionData
+        );
+      }
 
       if (response.data.success) {
         onAddTransaction(response.data.data, isEdit);
@@ -960,7 +1004,6 @@ const AddTransactionModal = ({
     }
   };
 
-  // Handle numeric input for text fields
   // Handle numeric input for text fields with validation
   const handleNumericInputChange = (e, field) => {
     const value = e.target.value;
@@ -968,18 +1011,19 @@ const AddTransactionModal = ({
     // Allow only numbers and decimal point
     if (value === "" || /^\d*\.?\d*$/.test(value)) {
       // Additional validation for amount field
-      if (field === "amount" && value && form.source) {
+      if (
+        field === "amount" &&
+        value &&
+        form.source &&
+        (isDeposit || isWithdraw)
+      ) {
         const numericValue = parseFloat(value);
+        const availableBalance = getAvailableBalanceForUpdate();
 
-        // For deposit transactions, validate against source account balance
-        if (
-          isDeposit() &&
-          !isNaN(numericValue) &&
-          numericValue > sourceAccountBalance
-        ) {
+        if (!isNaN(numericValue) && numericValue > availableBalance) {
           setErrors((prev) => ({
             ...prev,
-            amount: `Amount cannot exceed source account balance of $${sourceAccountBalance.toFixed(
+            amount: `Amount cannot exceed available balance of $${availableBalance.toFixed(
               2
             )}`,
           }));
@@ -1026,12 +1070,6 @@ const AddTransactionModal = ({
               disabled={field.disabled || false}
               placeholder={field.placeholder || `Select ${field.label}`}
             />
-            {/* Show source account balance when source is selected */}
-            {field.key === "source" && value && (
-              <div className="mt-1 text-xs text-gray-500">
-                Available Balance: ${sourceAccountBalance.toFixed(2)}
-              </div>
-            )}
           </div>
         );
 
@@ -1067,28 +1105,47 @@ const AddTransactionModal = ({
               type="text"
               value={value}
               onChange={(e) => handleNumericInputChange(e, field.key)}
-              max={
-                field.key === "amount" && form.source
-                  ? sourceAccountBalance
-                  : undefined
-              }
               className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
                 fieldError ? "border-red-500" : "border-gray-300"
               } ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
               disabled={field.disabled || false}
               placeholder={field.placeholder || ""}
             />
-            {/* Show source account balance info below amount field when source is selected */}
-            {field.key === "amount" && form.source && (
-              <div className="mt-1 text-xs text-gray-500">
-                Available Balance: ${sourceAccountBalance.toFixed(2)}
-                {isDeposit() && (
-                  <span className="block text-red-500">
-                    Maximum amount: ${sourceAccountBalance.toFixed(2)}
-                  </span>
-                )}
-              </div>
-            )}
+            {/* Show available balance info below amount field when source is selected */}
+            {field.key === "amount" &&
+              form.source &&
+              (isDeposit || isWithdraw) && (
+                <div className="mt-1 text-xs text-gray-500">
+                  {isEdit ? (
+                    <>
+                      Available Balance: $
+                      {getAvailableBalanceForUpdate().toFixed(2)}
+                      {/* <span className="block text-blue-500">
+                        Original Amount: ${originalAmount.toFixed(2)}
+                      </span> */}
+                      {/* <span className="block text-green-500">
+                        When editing from ${originalAmount.toFixed(2)} to $
+                        {(parseFloat(form.amount) || 0).toFixed(2)}, the balance
+                        will{" "}
+                        {parseFloat(form.amount) < originalAmount
+                          ? "increase"
+                          : "decrease"}{" "}
+                        by $
+                        {Math.abs(
+                          originalAmount - (parseFloat(form.amount) || 0)
+                        ).toFixed(2)}
+                      </span> */}
+                    </>
+                  ) : (
+                    <>
+                      Available Balance: ${sourceAccountBalance.toFixed(2)}
+                      <span className="block text-red-500">
+                        Maximum amount: ${sourceAccountBalance.toFixed(2)}
+                      </span>
+                    </>
+                  )}
+                </div>
+              )}
           </div>
         );
 
@@ -1196,7 +1253,7 @@ const AddTransactionModal = ({
   );
 };
 
-const CashandBank = () => {
+const CashAndBank = () => {
   const [activeTab, setActiveTab] = useState("Cash Balance");
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -1492,19 +1549,15 @@ const CashandBank = () => {
     }
   };
 
-  // Fetch transactions when component mounts or filters change
   useEffect(() => {
     fetchTransactions();
-  }, [activeTab, currentPage]); // Added currentPage to dependencies
+  }, [activeTab, currentPage]);
 
-  // Use data directly from backend (already filtered)
   const currentData = data || [];
 
-  // Handle adding new transaction
   const handleAddTransaction = async (transactionData, isEdit = false) => {
     try {
       if (isEdit && editingTransaction) {
-        // Update transaction
         const response = await axios.put(
           `${backendUrl}/api/transaction/${editingTransaction._id}`,
           transactionData
@@ -1512,13 +1565,13 @@ const CashandBank = () => {
 
         if (response.data.success) {
           showToast("success", "Transaction updated successfully");
-          fetchTransactions(); // Refresh data
-          refetchDropdownOptions(); // Refresh dropdown options with updated balances
+          fetchTransactions();
+          refetchDropdownOptions();
         }
       } else {
         showToast("success", "Transaction added successfully");
-        fetchTransactions(); // Refresh data
-        refetchDropdownOptions(); // Refresh dropdown options with updated balances
+        fetchTransactions();
+        refetchDropdownOptions();
       }
     } catch (error) {
       console.error("Error saving transaction:", error);
@@ -1715,7 +1768,6 @@ const CashandBank = () => {
       return value ? formatDateToReadable(value) : "--";
     }
 
-    // Handle remarks field with proper formatting
     if (field.dbName === "remarks") {
       return value ? (
         <div className="max-w-xs truncate" title={value}>
@@ -1726,11 +1778,9 @@ const CashandBank = () => {
       );
     }
 
-    // Handle all other fields safely
     return value ? value.toString() : "--";
   };
 
-  // Export functionality
   const handleExport = async () => {
     setExportLoading(true);
     try {
@@ -2223,7 +2273,6 @@ const CashandBank = () => {
           currentData={currentData}
         />
 
-        {/* Edit Transaction Modal */}
         <AddTransactionModal
           key="edit-modal"
           isOpen={isEditModalOpen}
@@ -2246,4 +2295,4 @@ const CashandBank = () => {
   );
 };
 
-export default CashandBank;
+export default CashAndBank;

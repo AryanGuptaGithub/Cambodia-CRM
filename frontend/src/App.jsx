@@ -84,7 +84,7 @@ import AddExpense from "./pages/Expense/addExpense";
 
 // Import new Cash and Bank components
 import CashAndBankLayout from "./pages/CashAndBankLayout";
-import HelloCashAndBank from "./pages/Account/HelloCashAndBank";
+import CashAndBank from "./pages/Account/CashAndBank";
 
 function App() {
   return (
@@ -108,7 +108,7 @@ function App() {
 
           {/* Updated Cash and Bank Route with Layout */}
           <Route path="/accountlayout" element={<CashAndBankLayout />}>
-            <Route index element={<HelloCashAndBank />} />
+            <Route index element={<CashAndBank />} />
           </Route>
 
           <Route path="/staffmemberLayout" element={<StaffMemberLayout />}>
