@@ -1,5 +1,5 @@
 import React from "react";
-import { Route, Router, Routes } from "react-router-dom";
+import { Route, Routes } from "react-router-dom";
 import OnlineOrders from "./pages/OnlineOrders";
 import StaffMember from "./pages/StaffMember";
 import StockAdjustment from "./pages/StockAdjustment";
@@ -85,6 +85,12 @@ import AddExpense from "./pages/Expense/addExpense";
 // Import new Cash and Bank components
 import CashAndBankLayout from "./pages/CashAndBankLayout";
 import CashAndBank from "./pages/Account/CashAndBank";
+
+// Import new report components
+import TotalCashSales from "./pages/Reports/TotalCashSales";
+import OutstandingCollection from "./pages/Reports/OutstandingCollection";
+import TotalExpense from "./pages/Reports/TotalExpense";
+import Remittance from "./pages/Reports/Remittance";
 
 function App() {
   return (
@@ -196,6 +202,12 @@ function App() {
             />
 
             <Route path="userreport" element={<UserReport />} />
+            
+            {/* New Report Routes */}
+            <Route path="cashsales" element={<TotalCashSales />} />
+            <Route path="outstandingcollection" element={<OutstandingCollection />} />
+            <Route path="totalexpense" element={<TotalExpense />} />
+            <Route path="remittance" element={<Remittance />} />
           </Route>
 
           <Route path="/utilitylayout" element={<UtilityLayout />}>

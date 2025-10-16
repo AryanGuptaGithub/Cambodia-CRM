@@ -73,7 +73,7 @@ router.get("/customers", async (req, res) => {
 router.get("/customers/provinces", async (req, res) => {
   try {
     const provinces = await Province.find({ isActive: true }).sort({ name: 1 });
-    console.log("values of provinces", provinces);
+
     res.json({
       success: true,
       data: provinces,
@@ -93,10 +93,10 @@ router.get("/customers/provinces", async (req, res) => {
 router.get("/customers/province/:province", async (req, res) => {
   try {
     const { province } = req.params;
-    const customers = await Customer.find({ 
-      province: new RegExp(province, 'i') 
+    const customers = await Customer.find({
+      province: new RegExp(province, "i"),
     });
-    
+
     res.json({
       success: true,
       data: customers,

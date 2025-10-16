@@ -29,6 +29,7 @@ import Accounts from "./routers/accounts/accounts.js";
 import Transaction from "./routers/accounts/transaction.js";
 import addExpenseCategary from "./routers/expenses/addExpenseCategary.js";
 import addExpense from "./routers/expenses/addExpense.js";
+import cashSaleReports from "./routers/reports/cashSaleReports.js";
 
 dotenv.config(); // Load environment variables
 
@@ -91,6 +92,7 @@ app.use("/api", Accounts);
 app.use("/api", Transaction);
 app.use("/api", addExpenseCategary);
 app.use("/api", addExpense);
+app.use("/api", cashSaleReports);
 
 // Server listener
 app.listen(PORT, () => {

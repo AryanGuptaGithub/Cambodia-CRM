@@ -32,6 +32,8 @@ import {
   UsersRound,
   Coins,
   Landmark,
+  Receipt,
+  PieChart,
 } from "lucide-react";
 
 const masterPaths = ["/masterlayout/customer", "/masterlayout/supplier"];
@@ -81,6 +83,10 @@ const reportPaths = [
   "/reportlayout/userreport",
   "/reportlayout/ratelist",
   "/reportlayout/profitloss",
+  "/reportlayout/cashsales", // New report
+  "/reportlayout/outstandingcollection", // New report
+  "/reportlayout/totalexpense", // New report
+  "/reportlayout/remittance", // New report
 ];
 
 const utilityPaths = [
@@ -520,6 +526,36 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               >
                 <DollarSign className="w-4 h-4" />
                 <span className="mx-auto">Profit & Loss</span>
+              </Link>
+              
+              {/* New Report Links */}
+              <Link
+                to="/reportlayout/cashsales"
+                className={getChildLinkClass("/reportlayout/cashsales")}
+              >
+                <DollarSign className="w-4 h-4" />
+                <span className="mx-auto">Total Cash Sales</span>
+              </Link>
+              <Link
+                to="/reportlayout/outstandingcollection"
+                className={getChildLinkClass("/reportlayout/outstandingcollection")}
+              >
+                <Receipt className="w-4 h-4" />
+                <span className="mx-auto">Outstanding Collection</span>
+              </Link>
+              <Link
+                to="/reportlayout/totalexpense"
+                className={getChildLinkClass("/reportlayout/totalexpense")}
+              >
+                <PieChart className="w-4 h-4" />
+                <span className="mx-auto">Total Expense</span>
+              </Link>
+              <Link
+                to="/reportlayout/remittance"
+                className={getChildLinkClass("/reportlayout/remittance")}
+              >
+                <Coins className="w-4 h-4" />
+                <span className="mx-auto">Remittance</span>
               </Link>
             </div>
           )}
