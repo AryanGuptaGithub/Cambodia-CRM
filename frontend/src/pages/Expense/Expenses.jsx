@@ -259,7 +259,10 @@ const Expenses = () => {
 
   const handleUpdateExpense = async (e) => {
     e.preventDefault();
-    if (!editingExpense) return;
+
+    if (!editingExpense) {
+      return;
+    }
 
     const newCat = editForm.category;
     const newAmt = parseFloat(editForm.amount || "0");
@@ -297,40 +300,39 @@ const Expenses = () => {
         editingExpense._id,
         payload
       );
+
       if (updateRes.success) {
         showToast("success", "Expense updated successfully");
 
-        // Update local states
-        setExpenses((prev) =>
-          prev.map((e) =>
+        setExpenses((prev) => {
+          const updated = prev.map((e) =>
             e._id === editingExpense._id ? { ...e, ...payload } : e
-          )
-        );
+          );
 
-        // CORRECTED: Update category balances properly
+          return updated;
+        });
+
         setCategoryBalances((prevBal) => {
           const clone = { ...prevBal };
-          
-          // Add back the old amount to the previous category
+
           if (oldCat) {
             clone[oldCat] = (clone[oldCat] ?? 0) + oldAmt;
           }
-          
-          // Subtract the new amount from the new category
+
           if (newCat) {
             clone[newCat] = (clone[newCat] ?? 0) - newAmt;
           }
-          
+
           return clone;
         });
 
         setIsEditModalOpen(false);
+
         setEditingExpense(null);
       } else {
         throw new Error(updateRes.message || "Update failed");
       }
     } catch (err) {
-      console.error("Update error:", err);
       showToast("error", `Failed to update expense: ${err.message}`);
     } finally {
       setUpdateLoading(false);
@@ -458,6 +460,7 @@ const Expenses = () => {
                       </span>
                     </div>
                   </td>
+
                   <td className="p-3 capitalize">
                     {exp.sourceAccount?.name ?? "N/A"}
                   </td>

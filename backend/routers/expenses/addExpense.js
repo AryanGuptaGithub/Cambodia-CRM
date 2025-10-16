@@ -113,40 +113,98 @@ router.post("/expenses", async (req, res) => {
   }
 });
 
-// Update expense
+// UPDATE EXPENSE
 router.put("/expenses/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const updateData = req.body;
 
-    // Validate required fields if they are being updated
+    // ✅ Validation
     if (
-      updateData.date === "" ||
-      updateData.category === "" ||
-      updateData.amount === ""
+      !updateData.date ||
+      !updateData.category ||
+      !updateData.amount ||
+      !updateData.sourceAccount
     ) {
       return res.status(400).json({
         success: false,
-        message: "Date, category, and amount cannot be empty",
+        message: "Date, category, source account, and amount are required",
       });
     }
 
-    const updatedExpense = await Expense.findByIdAndUpdate(id, updateData, {
-      new: true,
-      runValidators: true,
-    });
+    const newAmount = parseFloat(updateData.amount);
+    if (isNaN(newAmount)) {
+      return res.status(400).json({
+        success: false,
+        message: "Amount must be a valid number",
+      });
+    }
 
-    if (!updatedExpense) {
+    // ✅ Step 1: Find the existing expense
+    const existingExpense = await Expense.findById(id);
+    if (!existingExpense) {
       return res.status(404).json({
         success: false,
         message: "Expense not found",
       });
     }
 
+    const oldAmount = existingExpense.amount || 0;
+    const oldCategoryId = existingExpense.category?.toString();
+    const oldSourceAccountId = existingExpense.sourceAccount?.toString();
+
+    const newCategoryId = updateData.category;
+    const newSourceAccountId = updateData.sourceAccount;
+
+    // ✅ Step 2: Restore old amount to old category's totalAmount
+    if (oldCategoryId) {
+      await Destination.findByIdAndUpdate(oldCategoryId, {
+        $inc: { totalAmount: oldAmount },
+      });
+    }
+
+    // ✅ Step 3: Restore old amount to old source account's totalAmount
+    if (oldSourceAccountId) {
+      await Destination.findByIdAndUpdate(oldSourceAccountId, {
+        $inc: { totalAmount: oldAmount },
+      });
+    }
+
+    // ✅ Step 4: Deduct new amount from new category's totalAmount
+    await Destination.findByIdAndUpdate(newCategoryId, {
+      $inc: { totalAmount: -newAmount },
+    });
+
+    // ✅ Step 5: Deduct new amount from new source account's totalAmount
+    await Destination.findByIdAndUpdate(newSourceAccountId, {
+      $inc: { totalAmount: -newAmount },
+    });
+
+    // ✅ Step 6: Update the expense data (note: avoid saving populated objects)
+    await Expense.findByIdAndUpdate(
+      id,
+      {
+        ...updateData,
+        amount: newAmount,
+        category: newCategoryId,
+        sourceAccount: newSourceAccountId,
+      },
+      {
+        new: false, // we'll fetch fresh with populate
+        runValidators: true,
+      }
+    );
+
+    // ✅ Step 7: Re-fetch the updated expense and populate fields
+    const populatedExpense = await Expense.findById(id)
+      .populate("category")
+      .populate("sourceAccount");
+    console.log("values of populatedExpense", populatedExpense);
+    // ✅ Step 8: Send formatted response
     res.json({
       success: true,
       message: "Expense updated successfully",
-      data: updatedExpense,
+      data: populatedExpense,
     });
   } catch (error) {
     console.error("Error updating expense:", error);
