@@ -126,7 +126,7 @@ const Expenses = () => {
     return expenses.filter((exp) => {
       const catName = exp.category?.category ?? getCategoryName(exp.category);
       const sourceName = exp.sourceAccount?.name ?? "";
-      const desc = exp.description ?? "";
+      const desc = exp.description ?? exp.remarks ?? "";
       const dt = formatDateToReadable(exp.date).toLowerCase();
       return (
         catName.toLowerCase().includes(lower) ||
@@ -250,7 +250,7 @@ const Expenses = () => {
     setEditForm({
       sourceAccount: exp.sourceAccount?._id || "",
       category: exp.category?._id || "",
-      description: exp.description || "",
+      description: exp.description || exp.remarks || "",
       amount: exp.amount?.toString() || "",
       date: exp.date ? new Date(exp.date).toISOString().split("T")[0] : "",
     });
@@ -308,7 +308,6 @@ const Expenses = () => {
           const updated = prev.map((e) =>
             e._id === editingExpense._id ? { ...e, ...payload } : e
           );
-
           return updated;
         });
 
@@ -325,9 +324,8 @@ const Expenses = () => {
 
           return clone;
         });
-
+        await expensesAPI.fetchExpenses();
         setIsEditModalOpen(false);
-
         setEditingExpense(null);
       } else {
         throw new Error(updateRes.message || "Update failed");
@@ -428,6 +426,7 @@ const Expenses = () => {
               <th className="p-3 min-w-[150px] text-sm font-medium">Actions</th>
             </tr>
           </thead>
+
           <tbody>
             {currentExpenses.length === 0 ? (
               <tr>
@@ -438,56 +437,59 @@ const Expenses = () => {
                 </td>
               </tr>
             ) : (
-              currentExpenses.map((exp, idx) => (
-                <tr
-                  key={exp._id}
-                  className={`hover:bg-gray-50 ${
-                    (idx + 1) % expensesPerPage === 0 ||
-                    idx + 1 === currentExpenses.length
-                      ? ""
-                      : "border-b"
-                  }`}
-                >
-                  <td className="p-3 min-w-[120px]">
-                    <div className="flex items-center gap-4">
-                      <input
-                        type="checkbox"
-                        checked={selectedRows.includes(exp._id)}
-                        onChange={() => handleSelectRow(exp._id)}
-                      />
-                      <span>
-                        {(currentPage - 1) * expensesPerPage + idx + 1}
-                      </span>
-                    </div>
-                  </td>
-
-                  <td className="p-3 capitalize">
-                    {exp.sourceAccount?.name ?? "N/A"}
-                  </td>
-                  <td className="p-3">{exp.category?.category ?? "N/A"}</td>
-                  <td className="p-3">{exp.remarks}</td>
-                  <td className="p-3 font-semibold">
-                    {formatCurrency(exp.amount)}
-                  </td>
-                  <td className="p-3">{formatDateToReadable(exp.date)}</td>
-                  <td className="p-3">
-                    <div className="flex items-center justify-center gap-3">
-                      <button
-                        className="text-green-600 hover:text-green-800 cursor-pointer"
-                        onClick={() => handleEdit(exp)}
-                      >
-                        <Edit size={18} />
-                      </button>
-                      <button
-                        className="text-red-600 hover:text-red-800 cursor-pointer"
-                        onClick={() => handleDelete(exp._id)}
-                      >
-                        <Trash2 size={18} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
+              currentExpenses.map((exp, idx) => {
+                return (
+                  <tr
+                    key={exp._id}
+                    className={`hover:bg-gray-50 ${
+                      (idx + 1) % expensesPerPage === 0 ||
+                      idx + 1 === currentExpenses.length
+                        ? ""
+                        : "border-b"
+                    }`}
+                  >
+                    <td className="p-3 min-w-[120px]">
+                      <div className="flex items-center gap-4">
+                        <input
+                          type="checkbox"
+                          checked={selectedRows.includes(exp._id)}
+                          onChange={() => handleSelectRow(exp._id)}
+                        />
+                        <span>
+                          {(currentPage - 1) * expensesPerPage + idx + 1}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="p-3 capitalize">
+                      {exp.sourceAccount?.name ?? "N/A"}
+                    </td>
+                    <td className="p-3">{exp.category?.category ?? "N/A"}</td>
+                    <td className="p-3">
+                      {exp.description || exp.remarks || "N/A"}
+                    </td>
+                    <td className="p-3 font-semibold">
+                      {formatCurrency(exp.amount)}
+                    </td>
+                    <td className="p-3">{formatDateToReadable(exp.date)}</td>
+                    <td className="p-3">
+                      <div className="flex items-center justify-center gap-3">
+                        <button
+                          className="text-green-600 hover:text-green-800 cursor-pointer"
+                          onClick={() => handleEdit(exp)}
+                        >
+                          <Edit size={18} />
+                        </button>
+                        <button
+                          className="text-red-600 hover:text-red-800 cursor-pointer"
+                          onClick={() => handleDelete(exp._id)}
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
@@ -569,7 +571,6 @@ const Expenses = () => {
                 onSubmit={handleUpdateExpense}
                 className="grid grid-cols-1 md:grid-cols-2 gap-4"
               >
-                {/* Source Account */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Source Account
@@ -593,8 +594,6 @@ const Expenses = () => {
                     ))}
                   </select>
                 </div>
-
-                {/* Expense Category */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Expense Category
@@ -615,8 +614,6 @@ const Expenses = () => {
                     ))}
                   </select>
                 </div>
-
-                {/* Amount Field */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Amount ($)
@@ -642,8 +639,6 @@ const Expenses = () => {
                     </p>
                   )}
                 </div>
-
-                {/* Date */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Date
@@ -658,8 +653,6 @@ const Expenses = () => {
                     required
                   />
                 </div>
-
-                {/* Description */}
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Description
@@ -674,8 +667,6 @@ const Expenses = () => {
                     placeholder="Enter expense description..."
                   ></textarea>
                 </div>
-
-                {/* Buttons */}
                 <div className="md:col-span-2 mt-4 flex justify-end gap-3">
                   <button
                     type="button"

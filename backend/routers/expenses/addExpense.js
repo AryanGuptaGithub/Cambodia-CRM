@@ -119,7 +119,6 @@ router.put("/expenses/:id", async (req, res) => {
     const { id } = req.params;
     const updateData = req.body;
 
-    // ✅ Validation
     if (
       !updateData.date ||
       !updateData.category ||
@@ -140,7 +139,6 @@ router.put("/expenses/:id", async (req, res) => {
       });
     }
 
-    // ✅ Step 1: Find the existing expense
     const existingExpense = await Expense.findById(id);
     if (!existingExpense) {
       return res.status(404).json({
@@ -156,32 +154,27 @@ router.put("/expenses/:id", async (req, res) => {
     const newCategoryId = updateData.category;
     const newSourceAccountId = updateData.sourceAccount;
 
-    // ✅ Step 2: Restore old amount to old category's totalAmount
     if (oldCategoryId) {
       await Destination.findByIdAndUpdate(oldCategoryId, {
         $inc: { totalAmount: oldAmount },
       });
     }
 
-    // ✅ Step 3: Restore old amount to old source account's totalAmount
     if (oldSourceAccountId) {
       await Destination.findByIdAndUpdate(oldSourceAccountId, {
         $inc: { totalAmount: oldAmount },
       });
     }
 
-    // ✅ Step 4: Deduct new amount from new category's totalAmount
     await Destination.findByIdAndUpdate(newCategoryId, {
       $inc: { totalAmount: -newAmount },
     });
 
-    // ✅ Step 5: Deduct new amount from new source account's totalAmount
     await Destination.findByIdAndUpdate(newSourceAccountId, {
       $inc: { totalAmount: -newAmount },
     });
 
-    // ✅ Step 6: Update the expense data (note: avoid saving populated objects)
-    await Expense.findByIdAndUpdate(
+    const updatedExpense = await Expense.findByIdAndUpdate(
       id,
       {
         ...updateData,
@@ -190,21 +183,19 @@ router.put("/expenses/:id", async (req, res) => {
         sourceAccount: newSourceAccountId,
       },
       {
-        new: false, // we'll fetch fresh with populate
+        new: true,
         runValidators: true,
       }
-    );
-
-    // ✅ Step 7: Re-fetch the updated expense and populate fields
-    const populatedExpense = await Expense.findById(id)
+    )
       .populate("category")
       .populate("sourceAccount");
-    console.log("values of populatedExpense", populatedExpense);
-    // ✅ Step 8: Send formatted response
+
+    console.log("values of populatedExpense", updatedExpense);
+
     res.json({
       success: true,
       message: "Expense updated successfully",
-      data: populatedExpense,
+      data: updatedExpense,
     });
   } catch (error) {
     console.error("Error updating expense:", error);
