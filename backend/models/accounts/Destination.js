@@ -15,7 +15,7 @@ const destinationSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
-  totalAmount: { // ✅ NEW FIELD
+  totalAmount: {
     type: Number,
     default: 0,
     min: 0,

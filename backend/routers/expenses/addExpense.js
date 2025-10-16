@@ -58,11 +58,24 @@ router.get("/expenses/:id", async (req, res) => {
 router.post("/expenses", async (req, res) => {
   try {
     const expenseData = req.body;
-    if (!expenseData.date || !expenseData.category || !expenseData.amount) {
+
+    // Validate required fields
+    if (
+      !expenseData.date ||
+      !expenseData.category ||
+      !expenseData.amount ||
+      !expenseData.sourceAccount
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Date, category, and amount are required fields",
+        message:
+          "Date, category, amount, and source account are required fields",
       });
+    }
+
+    // Handle optional remarks field - ensure it's not empty string if provided
+    if (expenseData.remarks && expenseData.remarks.trim() === "") {
+      expenseData.remarks = undefined;
     }
 
     const newExpense = new Expense(expenseData);

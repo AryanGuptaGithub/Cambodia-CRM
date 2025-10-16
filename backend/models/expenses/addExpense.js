@@ -8,29 +8,29 @@ const expenseSchema = new mongoose.Schema(
       default: Date.now,
     },
     category: {
-      type: mongoose.Schema.Types.ObjectId, // Changed from String to ObjectId
-      ref: "ExpenseCategory", // Add reference to ExpenseCategory model
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ExpenseCategory",
       required: true,
     },
-    description: {
+    remarks: { // Changed from description to remarks
       type: String,
-      required: true,
       trim: true,
+      // Removed required: true to make it optional
     },
     amount: {
       type: Number,
       required: true,
       min: 0,
     },
-    sourceAccount: { // ADD THIS FIELD - was missing from schema
+    sourceAccount: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Destination", // Reference to your destinations/accounts model
+      ref: "Destination",
       required: true,
     },
-    paymentMethod: { // ADD THIS FIELD - was missing from schema
+    paymentMethod: {
       type: String,
       required: true,
-      enum: ["cash", "card", "bank transfer", "digital wallet", "other"], // Add validation
+      enum: ["cash", "card", "bank transfer", "digital wallet", "other"],
       default: "cash",
     },
     notes: {
@@ -60,8 +60,8 @@ const expenseSchema = new mongoose.Schema(
 // Index for better query performance
 expenseSchema.index({ date: -1 });
 expenseSchema.index({ category: 1 });
-expenseSchema.index({ sourceAccount: 1 }); // ADD THIS INDEX
-expenseSchema.index({ paymentMethod: 1 }); // ADD THIS INDEX
+expenseSchema.index({ sourceAccount: 1 });
+expenseSchema.index({ paymentMethod: 1 });
 expenseSchema.index({ createdAt: -1 });
 
 export default mongoose.model("Expense", expenseSchema);

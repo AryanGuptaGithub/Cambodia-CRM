@@ -119,11 +119,9 @@ const AddExpense = ({
   const [formData, setFormData] = useState({
     date: "",
     amount: "",
-    description: "",
+    remarks: "",
     expenseCategory: "",
     sourceAccount: "",
-    paymentMethod: "cash",
-    notes: "",
   });
   const [errors, setErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -187,11 +185,9 @@ const AddExpense = ({
       setFormData({
         date: initialData.date || "",
         amount: initialData.amount?.toString() || "",
-        description: initialData.description || "",
+        remarks: initialData.remarks || "",
         expenseCategory: initialData.expenseCategory || "",
         sourceAccount: initialData.sourceAccount || "",
-        paymentMethod: initialData.paymentMethod || "cash",
-        notes: initialData.notes || "",
       });
     } else {
       const today = new Date().toISOString().split("T")[0];
@@ -284,10 +280,10 @@ const AddExpense = ({
       newErrors.amount = `Amount exceeds available balance ($${bal})`;
     }
 
-    if (!formData.description?.trim()) {
-      newErrors.description = "Description is required";
-    } else if (formData.description.trim().length < 3) {
-      newErrors.description = "Description must be at least 3 characters long";
+    if (!formData.remarks?.trim()) {
+      newErrors.remarks = "Remarks are required";
+    } else if (formData.remarks.trim().length < 3) {
+      newErrors.remarks = "Remarks must be at least 3 characters long";
     }
 
     if (!formData.expenseCategory) {
@@ -328,11 +324,9 @@ const AddExpense = ({
       const submitData = {
         date: formData.date,
         amount: amt,
-        description: formData.description.trim(),
+        remarks: formData.remarks.trim(),
         category: formData.expenseCategory,
         sourceAccount: formData.sourceAccount,
-        paymentMethod: formData.paymentMethod,
-        notes: formData.notes?.trim() || "",
       };
 
       setIsSubmitting(true);
@@ -474,27 +468,16 @@ const AddExpense = ({
                     </div>
                   )}
                 </div>
-                <div className="md:col-span-2">
-                  <InputField
-                    label="Description"
-                    name="description"
-                    value={formData.description}
-                    onChange={(e) =>
-                      handleInputChange("description", e.target.value)
-                    }
-                    error={errors.description}
-                    placeholder="Enter expense description"
-                    required
-                  />
-                </div>
+
                 <div className="md:col-span-2">
                   <TextAreaField
-                    label="Remarks (Optional)"
-                    name="notes"
-                    value={formData.notes}
-                    onChange={(e) => handleInputChange("notes", e.target.value)}
-                    error={errors.notes}
-                    placeholder="Additional notes about this expense"
+                    label="Remarks"
+                    name="remarks"
+                    value={formData.remarks}
+                    onChange={(e) => handleInputChange("remarks", e.target.value)}
+                    error={errors.remarks}
+                    placeholder="Enter expense remarks"
+                    required
                     rows={3}
                   />
                 </div>
@@ -519,9 +502,12 @@ const AddExpense = ({
               </button>
               <button
                 type="button"
-                onClick={onCancel ?? (() => navigate("/expenselayout/expenses"))}
+                onClick={
+                  onCancel ?? (() => navigate("/expenselayout/expenses"))
+                }
                 disabled={isSubmitting}
-                className="flex items-center gap-2 px-5 py-2.5 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors cursor-pointer disabled:bg-gray-400 disabled:cursor-not-allowed"
+                className="flex items-center gap-2 px-5 py-2.5 bg-gray-500 text-white rounded-lg hover:bg-gray-600
+                 transition-colors cursor-pointer disabled:bg-gray-400 disabled:cursor-not-allowed"
               >
                 Cancel
               </button>
