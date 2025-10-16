@@ -190,7 +190,9 @@ const Expenses = () => {
 
       const result = await confirmDialog({
         title: "Delete Expense",
-        text: `Are you sure you want to delete this expense <b>${exp.category.category}</b> for <b>$${exp.amount}</b> from <b>${sourceName}</b>?`,
+        text: `Are you sure you want to delete this expense <b>${
+          exp.category?.category || "Unknown"
+        }</b> for <b>$${exp.amount}</b> from <b>${sourceName}</b>?`,
         icon: "warning",
         confirmButtonText: "Yes, delete",
         cancelButtonText: "Cancel",
@@ -203,7 +205,11 @@ const Expenses = () => {
           if (delRes.success) {
             showToast(
               "success",
-              `Deleted expense <b>${exp.category.category}</b> of <b>$${exp.amount}</b> from <b>${sourceName}</b> successfully`
+              `Deleted expense <b>${
+                exp.category?.category || "Unknown"
+              }</b> of <b>$${
+                exp.amount
+              }</b> from <b>${sourceName}</b> successfully`
             );
             setExpenses((prev) => prev.filter((e) => e._id !== id));
 
@@ -246,10 +252,11 @@ const Expenses = () => {
   }, [currentExpenses, selectedRows]);
 
   const handleEdit = useCallback((exp) => {
+    console.log("Editing expense:", exp); // Debug log
     setEditingExpense(exp);
     setEditForm({
-      sourceAccount: exp.sourceAccount?._id || "",
-      category: exp.category?._id || "",
+      sourceAccount: exp.sourceAccount?._id || exp.sourceAccount || "",
+      category: exp.category?._id || exp.category || "",
       description: exp.description || exp.remarks || "",
       amount: exp.amount?.toString() || "",
       date: exp.date ? new Date(exp.date).toISOString().split("T")[0] : "",
@@ -324,7 +331,9 @@ const Expenses = () => {
 
           return clone;
         });
-        await expensesAPI.fetchExpenses();
+
+        // Refresh data after update
+        await fetchData();
         setIsEditModalOpen(false);
         setEditingExpense(null);
       } else {
@@ -341,6 +350,17 @@ const Expenses = () => {
     setSearchQuery(e.target.value);
     setCurrentPage(1);
   }, []);
+
+  // Helper function to safely get nested values
+  const getSafeValue = (obj, path, defaultValue = "") => {
+    const keys = path.split(".");
+    let result = obj;
+    for (const key of keys) {
+      result = result?.[key];
+      if (result === undefined || result === null) return defaultValue;
+    }
+    return result;
+  };
 
   if (loading && expenses.length === 0) {
     return (
@@ -461,16 +481,28 @@ const Expenses = () => {
                       </div>
                     </td>
                     <td className="p-3 capitalize">
-                      {exp.sourceAccount?.name ?? "N/A"}
+                      {/* More robust way to get source account name */}
+                      {exp.sourceAccount?.name ||
+                        (typeof exp.sourceAccount === "string"
+                          ? exp.sourceAccount
+                          : getSafeValue(exp, "sourceAccount.name", ""))}
                     </td>
-                    <td className="p-3">{exp.category?.category ?? "N/A"}</td>
                     <td className="p-3">
-                      {exp.description || exp.remarks || "N/A"}
+                      {/* More robust way to get category name */}
+                      {exp.category?.category ||
+                        (typeof exp.category === "string"
+                          ? getCategoryName(exp.category)
+                          : getSafeValue(exp, "category.category", ""))}
+                    </td>
+                    <td className="p-3">
+                      {exp.description || exp.remarks || ""}
                     </td>
                     <td className="p-3 font-semibold">
-                      {formatCurrency(exp.amount)}
+                      {formatCurrency(exp.amount || 0)}
                     </td>
-                    <td className="p-3">{formatDateToReadable(exp.date)}</td>
+                    <td className="p-3">
+                      {exp.date ? formatDateToReadable(exp.date) : ""}
+                    </td>
                     <td className="p-3">
                       <div className="flex items-center justify-center gap-3">
                         <button
@@ -494,38 +526,39 @@ const Expenses = () => {
           </tbody>
         </table>
       </div>
-
-      <div className="mt-6 flex justify-start gap-2 text-sm">
-        <button
-          onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-          disabled={currentPage === 1}
-          className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-        >
-          Prev
-        </button>
-        <div className="flex gap-1">
-          {Array.from({ length: totalPages }, (_, i) => i + 1).map((pg) => (
-            <button
-              key={pg}
-              onClick={() => setCurrentPage(pg)}
-              className={`px-3 py-2 rounded-lg min-w-[40px] cursor-pointer ${
-                currentPage === pg
-                  ? "bg-indigo-600 text-white"
-                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-              }`}
-            >
-              {pg}
-            </button>
-          ))}
+      {currentExpenses.length > 0 && (
+        <div className="mt-6 flex justify-start gap-2 text-sm">
+          <button
+            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            disabled={currentPage === 1}
+            className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          >
+            Prev
+          </button>
+          <div className="flex gap-1">
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map((pg) => (
+              <button
+                key={pg}
+                onClick={() => setCurrentPage(pg)}
+                className={`px-3 py-2 rounded-lg min-w-[40px] cursor-pointer ${
+                  currentPage === pg
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                }`}
+              >
+                {pg}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            disabled={currentPage === totalPages}
+            className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          >
+            Next
+          </button>
         </div>
-        <button
-          onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-          disabled={currentPage === totalPages}
-          className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-        >
-          Next
-        </button>
-      </div>
+      )}
 
       {expenses.length > 0 && (
         <div className="mt-6 p-6 bg-blue-50 rounded-lg border border-blue-200">

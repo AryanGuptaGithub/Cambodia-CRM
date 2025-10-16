@@ -41,7 +41,7 @@ const Customer = () => {
     customerNumber: "",
     address: "",
     zone: "",
-    location: "",
+    province: "",
     remark: "",
     _id: null,
   });
@@ -71,7 +71,7 @@ const Customer = () => {
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm]);
-
+ console.log('valueso f ', customers);
   const filteredCustomers = customers.filter(
     (r) =>
       r.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -79,7 +79,7 @@ const Customer = () => {
       r.medicalRepName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       r.address.toLowerCase().includes(searchTerm.toLowerCase()) ||
       r.zone.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.location.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.province.toLowerCase().includes(searchTerm.toLowerCase()) ||
       r.date.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
@@ -245,7 +245,7 @@ const Customer = () => {
         "customer number",
         "customer address",
         "zone",
-        "location",
+        "province", // Changed from "location" to "province"
         "remark",
       ];
 
@@ -290,6 +290,7 @@ const Customer = () => {
         const cleaned = header.toString().trim().toLowerCase();
         headersMap[index] = cleaned;
       });
+
       // ✅ Parse data rows
       const dataRows = rows.slice(headerRowIndex + 1);
       if (dataRows.length == 0) {
@@ -313,7 +314,7 @@ const Customer = () => {
             customerNumber: item["customer number"],
             address: item["customer address"],
             zone: item["zone"],
-            location: item["location"],
+            province: item["province"],
             remark: item["remark"],
           };
         })
@@ -341,6 +342,7 @@ const Customer = () => {
 
   // Import parsed customers to backend
   const handleImport = async () => {
+    console.log("values of parsed", parsedData);
     if (parsedData.length === 0) {
       showToast("warning", "Please upload a valid file first");
       return;
@@ -521,7 +523,8 @@ const Customer = () => {
               <th className="p-3 text-sm font-medium">medicalRepName</th>
               <th className="p-3 text-sm font-medium">Address</th>
               <th className="p-3 text-sm font-medium">Zone</th>
-              <th className="p-3 text-sm font-medium">Location</th>
+              <th className="p-3 text-sm font-medium">Province</th>{" "}
+              {/* Changed from Location to Province */}
               <th className="p-3 text-sm font-medium">Created At</th>
               <th className="p-3 text-sm font-medium">Status</th>
               <th className="p-3 text-sm font-medium">Action</th>
@@ -553,7 +556,8 @@ const Customer = () => {
                   <td className="p-3 capitalize">{customer.medicalRepName}</td>
                   <td className="p-3 capitalize">{customer.address}</td>
                   <td className="p-3 capitalize">{customer.zone}</td>
-                  <td className="p-3 capitalize">{customer.location}</td>
+                  <td className="p-3 capitalize">{customer.province}</td>{" "}
+                  {/* Changed from location to province */}
                   <td className="p-3">{formatDateToReadable(customer.date)}</td>
                   <td>
                     <button
@@ -567,7 +571,6 @@ const Customer = () => {
                       {customer.enabled ? "Enabled" : "Disabled"}
                     </button>
                   </td>
-
                   <td className="p-3 flex items-center justify-center gap-3">
                     <button className="text-blue-600 hover:text-blue-800 cursor-pointer">
                       <Eye onClick={() => handleView(customer)} size={18} />
@@ -586,7 +589,9 @@ const Customer = () => {
               ))
             ) : (
               <tr>
-                <td colSpan={8} className="p-3 text-center">
+                <td colSpan={9} className="p-3 text-center">
+                  {" "}
+                  {/* Updated colSpan from 8 to 9 */}
                   No customer records found
                 </td>
               </tr>
@@ -847,18 +852,16 @@ const Customer = () => {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium">Location</label>
+                  <label className="block text-sm font-medium">Province</label>
                   <input
                     type="text"
-                    value={form.location}
+                    value={form.province}
                     onChange={(e) =>
-                      setForm({ ...form, location: e.target.value })
+                      setForm({ ...form, province: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg capitalize"
                   />
                 </div>
-
-                {/* Existing Fields */}
 
                 <div>
                   <label className="block text-sm font-medium">Date</label>
@@ -989,10 +992,10 @@ const Customer = () => {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-600">
-                    Location
+                    Province
                   </label>
                   <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.location}
+                    {form.province}
                   </p>
                 </div>
 

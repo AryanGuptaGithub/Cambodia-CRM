@@ -1,6 +1,6 @@
-// routers/master/customers.js
 import express from "express";
 import Customer from "../../models/master/customer.js";
+import Province from "../../models/master/Province.js";
 
 const router = express.Router();
 
@@ -29,6 +29,7 @@ const handleDuplicateError = (res, err) => {
   });
 };
 
+// ✅ GET all customers
 router.get("/customers", async (req, res) => {
   try {
     const customers = await Customer.find();
@@ -38,37 +39,75 @@ router.get("/customers", async (req, res) => {
         $project: {
           customerCodeNumeric: {
             $convert: {
-              input: { $trim: { input: "$customerCode" } }, 
+              input: { $trim: { input: "$customerCode" } },
               to: "int",
               onError: 0,
-              onNull: 0
-            }
-          }
-        }
+              onNull: 0,
+            },
+          },
+        },
       },
       {
-        $sort: { customerCodeNumeric: -1 }
+        $sort: { customerCodeNumeric: -1 },
       },
       {
-        $limit: 1
-      }
+        $limit: 1,
+      },
     ]);
 
     let nextCode = 1;
     if (agg.length > 0 && typeof agg[0].customerCodeNumeric === "number") {
       nextCode = agg[0].customerCodeNumeric + 1;
     }
-    
+
     res.json({
       customers,
-      nextCustomerCode: nextCode.toString()
+      nextCustomerCode: nextCode.toString(),
     });
   } catch (err) {
     handleServerError(res, err);
   }
 });
 
-// ✅ GET customer by ID
+// ✅ GET provinces - MOVE THIS BEFORE THE :id ROUTE
+router.get("/customers/provinces", async (req, res) => {
+  try {
+    const provinces = await Province.find({ isActive: true }).sort({ name: 1 });
+    console.log("values of provinces", provinces);
+    res.json({
+      success: true,
+      data: provinces,
+      count: provinces.length,
+    });
+  } catch (error) {
+    console.error("Error fetching provinces:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch provinces",
+      error: error.message,
+    });
+  }
+});
+
+// ✅ GET customers by province (optional: if you need to filter by province)
+router.get("/customers/province/:province", async (req, res) => {
+  try {
+    const { province } = req.params;
+    const customers = await Customer.find({ 
+      province: new RegExp(province, 'i') 
+    });
+    
+    res.json({
+      success: true,
+      data: customers,
+      count: customers.length,
+    });
+  } catch (error) {
+    handleServerError(res, error, "Failed to fetch customers by province");
+  }
+});
+
+// ✅ GET customer by ID - THIS SHOULD COME AFTER SPECIFIC ROUTES
 router.get("/customers/:id", async (req, res) => {
   try {
     const customer = await Customer.findById(req.params.id);
@@ -133,8 +172,7 @@ router.delete("/customers/:id", async (req, res) => {
 // ✅ DELETE multiple customers
 router.delete("/customers", async (req, res) => {
   try {
-
-    const ids = req.body.ids.map((item) => item.id)
+    const ids = req.body.ids.map((item) => item.id);
     if (!Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ message: "No customer IDs provided" });
     }
@@ -160,16 +198,9 @@ router.post("/customers/import", async (req, res) => {
     }
 
     for (const customer of customers) {
-      // if (!customer.name || !customer.phone || !customer.email || !customer.warehouse) {
-      //   return res.status(400).json({
-      //     message: "Missing required fields in one or more records.",
-      //   });
-      // }
-
       try {
         await Customer.create(customer);
       } catch (err) {
-
         if (err.code === 11000) return handleDuplicateError(res, err);
         return res.status(400).json({
           message: "Invalid data provided",

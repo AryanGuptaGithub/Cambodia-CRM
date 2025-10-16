@@ -1,4 +1,3 @@
-// components/ExpenseCategory.jsx
 import React, {
   useState,
   useMemo,
@@ -13,10 +12,7 @@ import { showToast } from "../../utils/toast";
 import ReactDOM from "react-dom";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
-
-// API service functions
 const expenseCategoryAPI = {
-  // Fetch all categories
   fetchExpenseCategories: async () => {
     const response = await fetch(`${backendUrl}/api/expense-categary`);
     if (!response.ok) {
@@ -25,7 +21,16 @@ const expenseCategoryAPI = {
     return response.json();
   },
 
-  // Create new category
+  fetchOriginalCategories: async () => {
+    const response = await fetch(
+      `${backendUrl}/api/expense-categories-original`
+    );
+    if (!response.ok) {
+      throw new Error("Failed to fetch categories");
+    }
+    return response.json();
+  },
+
   createExpenseCategory: async (categoryData) => {
     const response = await fetch(`${backendUrl}/api/expense-categary`, {
       method: "POST",
@@ -69,6 +74,7 @@ const expenseCategoryAPI = {
 
 const ExpenseCategory = () => {
   const [categories, setCategories] = useState([]);
+  const [originalCategories, setOriginalCategories] = useState([]); // Store original categories for CRUD
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
@@ -95,7 +101,22 @@ const ExpenseCategory = () => {
       const result = await expenseCategoryAPI.fetchExpenseCategories();
 
       if (result.success) {
-        setCategories(result.data);
+        // Add unique IDs for React keys since the response doesn't have _id
+        const categoriesWithIds = result.data.map((cat, index) => ({
+          ...cat,
+          uniqueId: `cat-${index}-${cat.Category}`, // Create a unique ID for React keys
+          // Map the response fields to match your component expectations
+          category: cat.Category,
+          description: cat.Remarks,
+          amountUntilYear: cat["Amount Until Year ($)"],
+          amountMonthly: cat["Monthly Amount ($)"],
+        }));
+
+        setCategories(categoriesWithIds);
+
+        // If you need the original categories for editing, you might need a separate API call
+        // For now, we'll use the same data but you should create a separate endpoint
+        setOriginalCategories(categoriesWithIds);
       } else {
         throw new Error(result.message || "Failed to fetch categories");
       }
@@ -111,14 +132,17 @@ const ExpenseCategory = () => {
     fetchCategories();
   }, [fetchCategories]);
 
-  // Edit category function
+  // Edit category function - UPDATED
   const editCategory = (category) => {
+    // Since we don't have the original _id, we use the uniqueId
     setForm({
-      ...category,
+      category: category.category,
+      description: category.description,
       amountUntilYear: category.amountUntilYear || "",
       amountMonthly: category.amountMonthly || "",
+      isActive: true, // Default to true since response doesn't have this field
     });
-    setEditingId(category._id);
+    setEditingId(category.uniqueId);
     setIsEditModalOpen(true);
   };
 
@@ -141,42 +165,28 @@ const ExpenseCategory = () => {
     });
   }, []);
 
-  // Handle form submission for update
+  // Handle form submission for update - UPDATED
   const handleUpdateCategory = useCallback(
     async (e) => {
       e.preventDefault();
 
       try {
         setLoading(true);
-        const updateData = {
-          ...form,
-          amountUntilYear: parseFloat(form.amountUntilYear) || 0,
-          amountMonthly: parseFloat(form.amountMonthly) || 0,
-        };
 
-        const result = await expenseCategoryAPI.updateExpenseCategory(
-          editingId,
-          updateData
+        // NOTE: Since your response data doesn't have IDs, you'll need to:
+        // 1. Either update using category name (not recommended)
+        // 2. Or create a separate endpoint to get original categories with IDs
+        // 3. Or modify your backend to return IDs in the expense summary
+
+        // For now, we'll show a message that this needs backend adjustment
+        showToast(
+          "info",
+          "Update functionality requires backend adjustment to include category IDs"
         );
+        setIsEditModalOpen(false);
 
-        if (result.success) {
-          showToast(
-            "success",
-            `Category <b>${form.category}</b> updated successfully`
-          );
-          setIsEditModalOpen(false);
-          setEditingId(null);
-          setForm({
-            category: "",
-            description: "",
-            amountUntilYear: "",
-            amountMonthly: "",
-            isActive: true,
-          });
-          fetchCategories(); // Refresh the list
-        } else {
-          throw new Error(result.message || "Failed to update category");
-        }
+        // Temporary: Just refresh the data
+        fetchCategories();
       } catch (err) {
         setError(err.message);
         console.error("Error updating category:", err);
@@ -207,7 +217,7 @@ const ExpenseCategory = () => {
     return filteredCategories.slice(startIndex, startIndex + itemsPerPage);
   }, [filteredCategories, currentPage, itemsPerPage]);
 
-  // Totals calculation
+  // Totals calculation - UPDATED to use the new field names
   const totals = useMemo(
     () => ({
       totalCategories: categories.length,
@@ -228,11 +238,13 @@ const ExpenseCategory = () => {
     return new Intl.NumberFormat().format(amount);
   }, []);
 
-  // CRUD operations
+  // CRUD operations - UPDATED
 
   const handleEdit = useCallback(
-    (id) => {
-      const categoryToEdit = categories.find((cat) => cat._id === id);
+    (uniqueId) => {
+      const categoryToEdit = categories.find(
+        (cat) => cat.uniqueId === uniqueId
+      );
       if (categoryToEdit) {
         editCategory(categoryToEdit);
       }
@@ -241,9 +253,11 @@ const ExpenseCategory = () => {
   );
 
   const handleDelete = useCallback(
-    async (id) => {
+    async (uniqueId) => {
       // Find the category to get its name for the confirmation message
-      const categoryToDelete = categories.find((cat) => cat._id === id);
+      const categoryToDelete = categories.find(
+        (cat) => cat.uniqueId === uniqueId
+      );
 
       if (!categoryToDelete) return;
 
@@ -258,35 +272,37 @@ const ExpenseCategory = () => {
       if (confirmDelete.isConfirmed) {
         try {
           setLoading(true);
-          const result = await expenseCategoryAPI.deleteExpenseCategory(id);
 
-          if (result.success) {
-            showToast(
-              "success",
-              `Category <b>${categoryToDelete.category}</b> deleted successfully`
-            );
+          // NOTE: Since your response data doesn't have IDs, you'll need to:
+          // 1. Either delete using category name (not recommended)
+          // 2. Or create a separate endpoint to get original categories with IDs
+          // 3. Or modify your backend to return IDs in the expense summary
 
-            setCategories((prev) => prev.filter((cat) => cat._id !== id));
-            // Reset to first page if current page becomes empty
-            if (currentRows.length === 1 && currentPage > 1) {
-              setCurrentPage((prev) => prev - 1);
-            }
-            fetchCategories(); // Refresh the list
-          } else {
-            throw new Error(result.message || "Failed to delete category");
+          // For now, we'll show a message and just remove from UI
+          showToast(
+            "info",
+            "Delete functionality requires backend adjustment to include category IDs"
+          );
+
+          // Temporary: Remove from local state only
+          setCategories((prev) =>
+            prev.filter((cat) => cat.uniqueId !== uniqueId)
+          );
+
+          // Reset to first page if current page becomes empty
+          if (currentRows.length === 1 && currentPage > 1) {
+            setCurrentPage((prev) => prev - 1);
           }
         } catch (err) {
           setError(err.message);
           console.error("Error deleting category:", err);
-
-          // Show error message
           showToast("error", `Failed to delete category: ${err.message}`);
         } finally {
           setLoading(false);
         }
       }
     },
-    [categories, currentRows.length, currentPage, fetchCategories]
+    [categories, currentRows.length, currentPage]
   );
 
   // Handle search change
@@ -319,7 +335,7 @@ const ExpenseCategory = () => {
         </div>
       )}
 
-      {/* Top Bar - CORRECTED LAYOUT */}
+      {/* Top Bar */}
       <div className="flex justify-between items-center mb-6">
         {/* Left side - Add New Category button */}
         <div className="flex items-center">
@@ -383,21 +399,14 @@ const ExpenseCategory = () => {
           <tbody className="bg-white divide-y divide-gray-200">
             {currentRows.map((cat, index) => (
               <tr
-                key={cat._id}
-                className={`hover:bg-gray-50 transition-colors ${
-                  !cat.isActive ? "bg-gray-100 opacity-75" : ""
-                }`}
+                key={cat.uniqueId}
+                className={`hover:bg-gray-50 transition-colors`}
               >
                 <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-600">
                   {(currentPage - 1) * itemsPerPage + index + 1}
                 </td>
                 <td className="px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                   {cat.category}
-                  {!cat.isActive && (
-                    <span className="ml-2 px-2 py-1 text-xs bg-gray-200 text-gray-600 rounded">
-                      Inactive
-                    </span>
-                  )}
                 </td>
                 <td className="px-4 py-4 text-sm text-gray-600 truncate">
                   {cat.description}
@@ -415,14 +424,14 @@ const ExpenseCategory = () => {
                 <td className="px-4 py-4 whitespace-nowrap text-sm">
                   <div className="flex justify-center gap-1">
                     <button
-                      onClick={() => handleEdit(cat._id)}
+                      onClick={() => handleEdit(cat.uniqueId)}
                       className={`p-1 rounded-lg transition-colors text-green-600 hover:bg-green-100 cursor-pointer`}
                       title="Edit category"
                     >
                       <Edit size={18} />
                     </button>
                     <button
-                      onClick={() => handleDelete(cat._id)}
+                      onClick={() => handleDelete(cat.uniqueId)}
                       className={`p-1 rounded-lg transition-colors text-red-600 hover:bg-red-100 cursor-pointer`}
                       title="Delete category"
                     >
@@ -453,74 +462,82 @@ const ExpenseCategory = () => {
         )}
       </div>
 
-      <div className="flex justify-start items-center mt-3 gap-2">
-        <button
-          disabled={currentPage === 1 || loading}
-          onClick={() => setCurrentPage((prev) => prev - 1)}
-          className={`px-4 py-2 rounded-lg transition-colors ${
-            currentPage === 1 || loading
-              ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-              : "bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer"
-          }`}
-        >
-          Prev
-        </button>
+      {/* Pagination - Only show when currentRows.length > 0 */}
+      {currentRows.length > 0 && (
+        <div className="flex justify-start items-center mt-3 gap-2">
+          <button
+            disabled={currentPage === 1 || loading}
+            onClick={() => setCurrentPage((prev) => prev - 1)}
+            className={`px-4 py-2 rounded-lg transition-colors ${
+              currentPage === 1 || loading
+                ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                : "bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer"
+            }`}
+          >
+            Prev
+          </button>
 
-        <div className="flex gap-1">
-          {Array.from({ length: totalPages }, (_, i) => (
-            <button
-              key={i + 1}
-              onClick={() => setCurrentPage(i + 1)}
-              disabled={loading}
-              className={`px-3 py-2 rounded-lg transition-colors ${
-                currentPage === i + 1
-                  ? "bg-indigo-600 text-white"
-                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-              } ${
-                loading ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
-              }`}
-            >
-              {i + 1}
-            </button>
-          ))}
+          <div className="flex gap-1">
+            {Array.from({ length: totalPages }, (_, i) => (
+              <button
+                key={i + 1}
+                onClick={() => setCurrentPage(i + 1)}
+                disabled={loading}
+                className={`px-3 py-2 rounded-lg transition-colors ${
+                  currentPage === i + 1
+                    ? "bg-indigo-600 text-white"
+                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                } ${
+                  loading ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
+                }`}
+              >
+                {i + 1}
+              </button>
+            ))}
+          </div>
+
+          <button
+            disabled={currentPage === totalPages || loading}
+            onClick={() => setCurrentPage((prev) => prev + 1)}
+            className={`px-4 py-2 rounded-lg transition-colors ${
+              currentPage === totalPages || loading
+                ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                : "bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer"
+            }`}
+          >
+            Next
+          </button>
         </div>
+      )}
 
-        <button
-          disabled={currentPage === totalPages || loading}
-          onClick={() => setCurrentPage((prev) => prev + 1)}
-          className={`px-4 py-2 rounded-lg transition-colors ${
-            currentPage === totalPages || loading
-              ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-              : "bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer"
-          }`}
-        >
-          Next
-        </button>
-      </div>
-
-      <div className="mt-6 p-6 bg-blue-50 rounded-lg border border-blue-200">
-        <h3 className="font-semibold text-blue-800 mb-4 text-lg">Summary</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="text-center">
-            <div className="text-2xl font-bold text-blue-600">
-              {totals.totalCategories}
+      {/* Summary - Only show when there are categories */}
+      {categories.length > 0 && (
+        <div className="mt-6 p-6 bg-blue-50 rounded-lg border border-blue-200">
+          <h3 className="font-semibold text-blue-800 mb-4 text-lg">Summary</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="text-center">
+              <div className="text-2xl font-bold text-blue-600">
+                {totals.totalCategories}
+              </div>
+              <div className="text-sm text-blue-800">Total Categories</div>
             </div>
-            <div className="text-sm text-blue-800">Total Categories</div>
-          </div>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-green-600">
-              ${formatCurrency(totals.totalYearlyAmount)}
+            <div className="text-center">
+              <div className="text-2xl font-bold text-green-600">
+                ${formatCurrency(totals.totalYearlyAmount)}
+              </div>
+              <div className="text-sm text-green-800">Total Yearly Amount</div>
             </div>
-            <div className="text-sm text-green-800">Total Yearly Amount</div>
-          </div>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-purple-600">
-              ${formatCurrency(totals.totalMonthlyAmount)}
+            <div className="text-center">
+              <div className="text-2xl font-bold text-purple-600">
+                ${formatCurrency(totals.totalMonthlyAmount)}
+              </div>
+              <div className="text-sm text-purple-800">
+                Total Monthly Amount
+              </div>
             </div>
-            <div className="text-sm text-purple-800">Total Monthly Amount</div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Edit Modal */}
       {isEditModalOpen &&

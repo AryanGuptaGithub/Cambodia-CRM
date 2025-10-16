@@ -2,20 +2,79 @@
 import express from "express";
 const router = express.Router();
 import addExpenseCategary from "../../models/expenses/addExpenseCategary.js";
+import Expense from "../../models/expenses/addExpense.js";
 
 router.get("/expense-categary", async (req, res) => {
   try {
+    const currentDate = new Date();
+    const currentYear = currentDate.getFullYear();
+    const currentMonth = currentDate.getMonth(); 
+    const yearStart = new Date(currentYear, 0, 1); 
+    const monthStart = new Date(currentYear, currentMonth, 1); 
+    const monthEnd = new Date(currentYear, currentMonth + 1, 0); 
     const categories = await addExpenseCategary.find().sort({ category: 1 });
+    const ytdExpenses = await Expense.aggregate([
+      {
+        $match: {
+          date: {
+            $gte: yearStart,
+            $lt: monthStart, 
+          },
+        },
+      },
+      {
+        $group: {
+          _id: "$category",
+          amountUntilYear: { $sum: "$amount" },
+        },
+      },
+    ]);
+
+    const monthlyExpenses = await Expense.aggregate([
+      {
+        $match: {
+          date: {
+            $gte: monthStart,
+            $lte: monthEnd, 
+          },
+        },
+      },
+      {
+        $group: {
+          _id: "$category",
+          monthlyAmount: { $sum: "$amount" },
+        },
+      },
+    ]);
+
+    const ytdMap = new Map();
+    ytdExpenses.forEach((exp) => {
+      ytdMap.set(exp._id.toString(), exp.amountUntilYear);
+    });
+
+    const monthlyMap = new Map();
+    monthlyExpenses.forEach((exp) => {
+      monthlyMap.set(exp._id.toString(), exp.monthlyAmount);
+    });
+
+    const responseData = categories.map((category, index) => ({
+      Sr: index + 1,
+      Category: category.category,
+      Remarks: category.description,
+      "Amount Until Year ($)": ytdMap.get(category._id.toString()) || 0,
+      "Monthly Amount ($)": monthlyMap.get(category._id.toString()) || 0,
+    }));
+
     res.json({
       success: true,
-      data: categories,
+      data: responseData,
       count: categories.length,
     });
   } catch (error) {
-    console.error("Error fetching categories:", error);
+    console.error("Error fetching categories with expenses:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to fetch categories",
+      message: "Failed to fetch categories with expense data",
       error: error.message,
     });
   }
@@ -25,7 +84,7 @@ router.get("/expense-categary", async (req, res) => {
 router.post("/expense-categary", async (req, res) => {
   try {
     const categoryData = req.body;
-    
+
     const newCategory = new addExpenseCategary(categoryData);
     const savedCategory = await newCategory.save();
 

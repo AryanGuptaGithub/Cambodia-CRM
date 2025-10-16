@@ -190,8 +190,6 @@ router.put("/expenses/:id", async (req, res) => {
       .populate("category")
       .populate("sourceAccount");
 
-    console.log("values of populatedExpense", updatedExpense);
-
     res.json({
       success: true,
       message: "Expense updated successfully",
