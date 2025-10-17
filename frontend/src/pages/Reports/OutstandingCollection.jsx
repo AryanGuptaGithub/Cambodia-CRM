@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Receipt,
   Download,
@@ -9,6 +9,7 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  Search,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
@@ -41,6 +42,7 @@ const OutstandingCollection = () => {
     customerName: "",
     status: "all",
   });
+  const [searchTerm, setSearchTerm] = useState("");
   const [pagination, setPagination] = useState({
     currentPage: 1,
     totalPages: 1,
@@ -48,6 +50,7 @@ const OutstandingCollection = () => {
     hasNext: false,
     hasPrev: false,
   });
+  const inputRef = useRef(null);
 
   const visiblePages = useVisiblePages(
     pagination.currentPage,
@@ -121,7 +124,7 @@ const OutstandingCollection = () => {
     }
   };
 
-  const fetchOutstandingCollections = async (page = 1) => {
+  const fetchOutstandingCollections = async (page = 1, search = searchTerm) => {
     setLoading(true);
     try {
       const dateRange = getDateRange();
@@ -131,7 +134,6 @@ const OutstandingCollection = () => {
         limit: 7,
       };
 
-      // Only include date range for non-all tabs
       if (selectedTab !== "all") {
         if (
           selectedTab === "custom" &&
@@ -147,14 +149,21 @@ const OutstandingCollection = () => {
         };
       }
 
+      if (search && search.trim() !== "") {
+        params.search = search.trim();
+      }
+
       // Only include customer name and status filters when custom tab is selected
       if (selectedTab === "custom") {
-        params = {
-          ...params,
-          customerName: filter.customerName,
-          status: filter.status,
-        };
+        if (filter.customerName) {
+          params.customerName = filter.customerName;
+        }
+        if (filter.status !== "all") {
+          params.status = filter.status;
+        }
       }
+
+      console.log("API Params:", params); // Debug log
 
       const response = await axios.get(
         `${backendUrl}/api/reports/outstanding-collections`,
@@ -207,6 +216,19 @@ const OutstandingCollection = () => {
     }
   };
 
+
+  const handleSearchChange = (e) => {
+    setSearchTerm(e.target.value);
+    if (e.key === "Enter" || e.type === "click") {
+      fetchOutstandingCollections(1);
+    }
+  };
+
+  const handleClearSearch = () => {
+    setSearchTerm("");
+    fetchOutstandingCollections(1);
+  };
+
   const handleCustomDateChange = (name, date) => {
     setCustomDateRange((prev) => ({ ...prev, [name]: date }));
   };
@@ -215,6 +237,16 @@ const OutstandingCollection = () => {
     const { name, value } = e.target;
     setFilter((prev) => ({ ...prev, [name]: value }));
   };
+
+  useEffect(() => {
+    const delayDebounce = setTimeout(() => {
+      fetchOutstandingCollections(1); // Trigger search on typing/deleting
+    }, 500); // Adjust debounce delay (ms) as needed
+
+    return () => clearTimeout(delayDebounce); // Cleanup
+  }, [searchTerm]);
+
+  const handleSearch = (e) => {};
 
   const handleApplyCustomFilter = () => {
     if (!customDateRange.startDate || !customDateRange.endDate) {
@@ -229,13 +261,24 @@ const OutstandingCollection = () => {
 
     setSelectedTab("custom");
     setShowCustomFilter(false);
-    // Data will be fetched automatically by the useEffect
+    fetchOutstandingCollections(1);
   };
 
   const handleTabChange = (tab) => {
     setSelectedTab(tab);
     if (tab === "custom") {
       setShowCustomFilter(true);
+    } else {
+      // Clear custom filters when switching to other tabs
+      setFilter({
+        customerName: "",
+        status: "all",
+      });
+      setCustomDateRange({
+        startDate: null,
+        endDate: null,
+      });
+      fetchOutstandingCollections(1);
     }
   };
 
@@ -248,6 +291,7 @@ const OutstandingCollection = () => {
       startDate: null,
       endDate: null,
     });
+    setSearchTerm("");
   };
 
   const exportToExcel = () => {
@@ -358,13 +402,40 @@ const OutstandingCollection = () => {
             Outstanding Collection
           </h1>
         </div>
-        <button
-          onClick={exportToExcel}
-          className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-        >
-          <Download size={18} />
-          Export Excel
-        </button>
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Search by customer name or customer code..."
+              value={searchTerm}
+              onChange={handleSearchChange}
+              onKeyPress={handleSearch}
+              className="pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent w-64"
+            />
+            <Search
+              className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+              size={18}
+              onClick={() => inputRef.current?.focus()}
+            />
+            {searchTerm && (
+              <button
+                onClick={handleClearSearch}
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            )}
+          </div>
+
+          <button
+            onClick={exportToExcel}
+            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+          >
+            <Download size={18} />
+            Export Excel
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -457,22 +528,22 @@ const OutstandingCollection = () => {
         </div>
       </div>
 
+      {/* Data Table with Customer Code Column */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
-              <th className="p-3 text-sm font-medium">Customer</th>
+              <th className="p-3 text-sm font-medium">Customer Code</th>
+              <th className="p-3 text-sm font-medium">Customer Name</th>
               <th className="p-3 text-sm font-medium">Contact</th>
               <th className="p-3 text-sm font-medium">Total Outstanding ($)</th>
               <th className="p-3 text-sm font-medium">Overdue Amount ($)</th>
-              <th className="p-3 text-sm font-medium">Last Payment Date</th>
-              <th className="p-3 text-sm font-medium">Status</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan="6" className="p-3 text-center">
+                <td colSpan="7" className="p-3 text-center">
                   Loading...
                 </td>
               </tr>
@@ -485,12 +556,18 @@ const OutstandingCollection = () => {
                   }`}
                 >
                   <td className="p-3">
+                    <div className="text-sm text-gray-600 font-medium">
+                      {customer.customerCode || "N/A"}
+                    </div>
+                  </td>
+                  <td className="p-3">
                     <div>
                       <div className="text-sm font-medium text-gray-900 capitalize">
                         {customer.customerName}
                       </div>
                     </div>
                   </td>
+
                   <td className="p-3">
                     <div className="text-sm text-gray-900 text-center">
                       <div className="flex items-center justify-center gap-1 mb-1">
@@ -500,38 +577,16 @@ const OutstandingCollection = () => {
                     </div>
                   </td>
                   <td className="p-3 text-sm font-semibold text-orange-600">
-                    {customer.netSellingAmount?.toLocaleString()}
+                    {customer.totalOutstandingAmount || 0}
                   </td>
                   <td className="p-3 text-sm font-semibold text-red-600">
-                    
-                    {(customer.deliveryDate < new Date()
-                      ? customer.netSellingAmount
-                      : 0
-                    )?.toLocaleString()}
-                  </td>
-                  <td className="p-3 text-sm text-gray-900">
-                    {customer.deliveryDate
-                      ? formatDateToReadable(customer.deliveryDate)
-                      : "N/A"}
-                  </td>
-                  <td className="p-3">
-                    <span
-                      className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                        customer.deliveryDate < new Date()
-                          ? "bg-red-100 text-red-800"
-                          : "bg-yellow-100 text-yellow-800"
-                      }`}
-                    >
-                      {customer.deliveryDate < new Date()
-                        ? "Overdue"
-                        : "Pending"}
-                    </span>
+                    {customer.overdueAmount || 0}
                   </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan="6" className="p-3 text-center text-gray-500">
+                <td colSpan="7" className="p-3 text-center text-gray-500">
                   {selectedTab === "custom" &&
                   (!customDateRange.startDate || !customDateRange.endDate)
                     ? "Please select start and end dates"
@@ -550,15 +605,11 @@ const OutstandingCollection = () => {
       {showCustomFilter &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            {/* Background Overlay */}
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={() => setShowCustomFilter(false)}
             />
-
-            {/* Modal Content */}
             <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative z-10">
-              {/* Close Button */}
               <button
                 onClick={() => setShowCustomFilter(false)}
                 className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
@@ -571,7 +622,6 @@ const OutstandingCollection = () => {
               </h2>
 
               <div className="space-y-4 mb-6">
-                {/* Date Range */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -613,7 +663,6 @@ const OutstandingCollection = () => {
                   </div>
                 </div>
 
-                {/* Customer Name Filter */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Customer Name
@@ -628,7 +677,6 @@ const OutstandingCollection = () => {
                   />
                 </div>
 
-                {/* Status Filter */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Status

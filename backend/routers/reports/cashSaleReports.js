@@ -94,15 +94,15 @@ router.get("/reports/cash-sales", async (req, res) => {
     });
   }
 });
-
 router.get("/reports/outstanding-collections", async (req, res) => {
   try {
-    const { startDate, endDate, page = 1, limit = 7 } = req.query;
+    const { startDate, endDate, page = 1, limit = 7, search } = req.query;
 
     const matchStage = {
-      paymentStatus: { $regex: /^credit$/i },
+      paymentStatus: { $regex: /^credit$/i }, // Only 'credit' payments
     };
 
+    // Handle optional date filtering
     if (startDate || endDate) {
       matchStage.deliveryDate = {};
 
@@ -125,7 +125,7 @@ router.get("/reports/outstanding-collections", async (req, res) => {
             message: "Invalid endDate format",
           });
         }
-        end.setHours(23, 59, 59, 999); // Include full day
+        end.setHours(23, 59, 59, 999);
         matchStage.deliveryDate.$lte = end;
       }
     }
@@ -133,12 +133,11 @@ router.get("/reports/outstanding-collections", async (req, res) => {
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
+    const now = new Date();
 
-    // Use aggregation to get both summary stats and paginated records
-    const aggregationResult = await Sale.aggregate([
-      {
-        $match: matchStage,
-      },
+    // Build aggregation pipeline
+    const pipeline = [
+      { $match: matchStage },
       {
         $lookup: {
           from: "customers",
@@ -153,90 +152,100 @@ router.get("/reports/outstanding-collections", async (req, res) => {
           preserveNullAndEmptyArrays: true,
         },
       },
+      // Group by customer
       {
-        $facet: {
-          // Summary statistics - using customer name instead of customer code
-          summary: [
-            {
-              $group: {
-                _id: null,
-                totalOutstandingAmount: { $sum: "$netSellingAmount" },
-                totalOverdueAmount: {
-                  $sum: {
-                    $cond: [
-                      { $lt: ["$deliveryDate", new Date()] },
-                      "$netSellingAmount",
-                      0,
-                    ],
-                  },
-                },
-                totalCustomers: {
-                  $addToSet: {
-                    $ifNull: ["$customerInfo.name", "$customerCode"],
-                  },
-                },
-                totalRecords: { $sum: 1 },
-              },
+        $group: {
+          _id: "$customerCode",
+          customerCode: { $first: "$customerCode" },
+          netSellingAmount: { $sum: "$netSellingAmount" },
+          dueAmount: { $sum: "$dueAmount" },
+          overdueAmount: {
+            $sum: {
+              $cond: [{ $lt: ["$deliveryDate", now] }, "$dueAmount", 0],
             },
-            {
-              $project: {
-                _id: 0,
-                totalOutstandingAmount: 1,
-                totalOverdueAmount: 1,
-                totalCustomers: { $size: "$totalCustomers" },
-                totalRecords: 1,
-              },
-            },
-          ],
-          // Paginated records
-          records: [
-            {
-              $sort: { deliveryDate: 1 },
-            },
-            {
-              $skip: skip,
-            },
-            {
-              $limit: limitNum,
-            },
-            {
-              $project: {
-                _id: 1,
-                date: "$deliveryDate",
-                invoiceNumber: 1,
-                customerName: {
-                  $ifNull: ["$customerInfo.name", "$customerCode"],
-                },
-                customerCode: 1,
-                productName: 1,
-                salesQty: 1,
-                amount: 1,
-                netSellingAmount: 1,
-                paymentMethod: "$paymentStatus",
-                deliveryDate: 1,
-                invoiceDate: 1,
-                mrName: 1,
-                // Include customer contact info for display
-                phone: "$customerInfo.customerNumber",
-                email: "$customerInfo.address", // Using address as email if needed
-                lastPaymentDate: "$deliveryDate", // Using delivery date as last payment date for now
-              },
-            },
-          ],
+          },
+          latestDeliveryDate: { $max: "$deliveryDate" },
+          customerInfo: { $first: "$customerInfo" },
         },
       },
-    ]);
+    ];
+
+    // ✅ Apply search by customer name or customer code only
+    if (search && search.trim() !== "") {
+      const searchRegex = new RegExp(search.trim(), "i");
+      pipeline.push({
+        $match: {
+          $or: [
+            { "customerInfo.name": { $regex: searchRegex } },
+            { customerCode: { $regex: searchRegex } },
+          ],
+        },
+      });
+    }
+
+    // Sorting and pagination
+    pipeline.push({ $sort: { latestDeliveryDate: -1 } });
+
+    // Add facet for records and summary
+    pipeline.push({
+      $facet: {
+        summary: [
+          {
+            $group: {
+              _id: null,
+              totalOutstandingAmount: { $sum: "$netSellingAmount" },
+              totalDueAmount: { $sum: "$dueAmount" },
+              totalOverdueAmount: { $sum: "$overdueAmount" },
+              totalCustomers: { $sum: 1 },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              totalOutstandingAmount: 1,
+              totalDueAmount: 1,
+              totalOverdueAmount: 1,
+              totalCustomers: 1,
+              totalRecords: "$totalCustomers",
+            },
+          },
+        ],
+        records: [
+          { $skip: skip },
+          { $limit: limitNum },
+          {
+            $project: {
+              _id: 0,
+              customerCode: 1,
+              customerName: {
+                $ifNull: ["$customerInfo.name", "$customerCode"],
+              },
+              phone: "$customerInfo.customerNumber",
+              email: "$customerInfo.address",
+              totalOutstandingAmount: "$netSellingAmount",
+              dueAmount: 1,
+              overdueAmount: 1,
+              lastTransactionDate: "$latestDeliveryDate",
+            },
+          },
+        ],
+      },
+    });
+
+    // Execute aggregation
+    const aggregationResult = await Sale.aggregate(pipeline);
 
     const result = aggregationResult[0];
     const summary = result.summary[0] || {
       totalOutstandingAmount: 0,
+      totalDueAmount: 0,
       totalOverdueAmount: 0,
       totalCustomers: 0,
       totalRecords: 0,
     };
+
     const records = result.records;
     const totalPages = Math.ceil(summary.totalRecords / limitNum);
-
     return res.json({
       success: true,
       data: {
