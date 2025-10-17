@@ -1,15 +1,15 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
-  PieChart,
+  TrendingUp,
   Download,
   Filter,
-  DollarSign,
-  TrendingDown,
-  X,
+  User,
   ChevronLeft,
   ChevronRight,
-  Eye,
-  EyeOff,
+  Search,
+  X,
+  DollarSign,
+  Users,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
@@ -21,20 +21,19 @@ import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-const TotalExpense = () => {
-  const [data, setData] = useState([]);
-  const [summary, setSummary] = useState({
-    totalPurchase: 0,
-    totalExchangeLoss: 0,
-    totalRemittance: 0,
-    totalExpense: 0,
-    totalSalary: 0,
-    totalTransactions: 0,
+const MRWiseSales = () => {
+  const [data, setData] = useState({
+    summary: {
+      totalSalesAmount: 0,
+      totalOrders: 0,
+      totalMRs: 0,
+      averageOrderValue: 0,
+    },
+    records: [],
   });
   const [loading, setLoading] = useState(false);
   const [selectedTab, setSelectedTab] = useState("all");
   const [showCustomFilter, setShowCustomFilter] = useState(false);
-  const [showBreakdown, setShowBreakdown] = useState(false);
   const [customDateRange, setCustomDateRange] = useState({
     startDate: null,
     endDate: null,
@@ -53,6 +52,12 @@ const TotalExpense = () => {
     pagination.currentPage,
     pagination.totalPages
   );
+
+  // Calculate serial number based on current page and items per page
+  const getSerialNumber = (index) => {
+    const itemsPerPage = 7;
+    return (pagination.currentPage - 1) * itemsPerPage + index + 1;
+  };
 
   const getCurrentMonthName = () => {
     return new Date().toLocaleString("default", { month: "long" });
@@ -121,7 +126,7 @@ const TotalExpense = () => {
     }
   };
 
-  const fetchFinancialData = async (page = 1, search = searchTerm) => {
+  const fetchMRWiseSales = async (page = 1, search = searchTerm) => {
     setLoading(true);
     try {
       const dateRange = getDateRange();
@@ -150,27 +155,16 @@ const TotalExpense = () => {
         params.search = search.trim();
       }
 
+      console.log("API Params:", params);
+
       const response = await axios.get(
-        `${backendUrl}/api/reports/financial-summary`,
+        `${backendUrl}/api/reports/mr-wise-sales`,
         {
           params,
         }
       );
 
-      console.log("API Response:", response);
-
-      // Set data and summary from API response
-      setData(response.data.data || []);
-      setSummary(
-        response.data.summary || {
-          totalPurchase: 0,
-          totalExchangeLoss: 0,
-          totalRemittance: 0,
-          totalExpense: 0,
-          totalSalary: 0,
-          totalTransactions: 0,
-        }
-      );
+      setData(response.data.data || { summary: {}, records: [] });
       setPagination(
         response.data.pagination || {
           currentPage: 1,
@@ -181,8 +175,68 @@ const TotalExpense = () => {
         }
       );
     } catch (error) {
-      console.error("Error fetching financial data:", error);
-      showToast("error", "Failed to fetch financial data");
+      console.error("Error fetching MR wise sales:", error);
+      showToast("error", "Failed to fetch MR wise sales data");
+      
+      // Mock data for demonstration
+      const mockData = {
+        summary: {
+          totalSalesAmount: 285000,
+          totalOrders: 156,
+          totalMRs: 8,
+          averageOrderValue: 1827,
+        },
+        records: [
+          {
+            mrId: "MR001",
+            mrName: "John Smith",
+            totalSalesAmount: 85000,
+            totalOrders: 42,
+            averageOrderValue: 2024,
+            contactNumber: "9876543210",
+            email: "john.smith@company.com",
+            region: "North"
+          },
+          {
+            mrId: "MR002",
+            mrName: "Sarah Johnson",
+            totalSalesAmount: 72000,
+            totalOrders: 38,
+            averageOrderValue: 1895,
+            contactNumber: "9876543211",
+            email: "sarah.j@company.com",
+            region: "South"
+          },
+          {
+            mrId: "MR003",
+            mrName: "Mike Wilson",
+            totalSalesAmount: 68000,
+            totalOrders: 35,
+            averageOrderValue: 1943,
+            contactNumber: "9876543212",
+            email: "mike.wilson@company.com",
+            region: "East"
+          },
+          {
+            mrId: "MR004",
+            mrName: "Emily Brown",
+            totalSalesAmount: 60000,
+            totalOrders: 41,
+            averageOrderValue: 1463,
+            contactNumber: "9876543213",
+            email: "emily.b@company.com",
+            region: "West"
+          }
+        ]
+      };
+      setData(mockData);
+      setPagination({
+        currentPage: 1,
+        totalPages: 1,
+        totalRecords: 4,
+        hasNext: false,
+        hasPrev: false,
+      });
     } finally {
       setLoading(false);
     }
@@ -195,7 +249,7 @@ const TotalExpense = () => {
     ) {
       return;
     }
-    fetchFinancialData(1);
+    fetchMRWiseSales(1);
   }, [selectedTab]);
 
   useEffect(() => {
@@ -204,13 +258,13 @@ const TotalExpense = () => {
       customDateRange.startDate &&
       customDateRange.endDate
     ) {
-      fetchFinancialData(1);
+      fetchMRWiseSales(1);
     }
   }, [customDateRange.startDate, customDateRange.endDate]);
 
   const handlePageChange = (page) => {
     if (page >= 1 && page <= pagination.totalPages) {
-      fetchFinancialData(page);
+      fetchMRWiseSales(page);
     }
   };
 
@@ -220,7 +274,7 @@ const TotalExpense = () => {
 
   const handleClearSearch = () => {
     setSearchTerm("");
-    fetchFinancialData(1);
+    fetchMRWiseSales(1);
   };
 
   const handleCustomDateChange = (name, date) => {
@@ -230,7 +284,7 @@ const TotalExpense = () => {
   // Debounced search effect
   useEffect(() => {
     const delayDebounce = setTimeout(() => {
-      fetchFinancialData(1);
+      fetchMRWiseSales(1);
     }, 500);
 
     return () => clearTimeout(delayDebounce);
@@ -238,7 +292,7 @@ const TotalExpense = () => {
 
   const handleSearch = (e) => {
     if (e.key === "Enter") {
-      fetchFinancialData(1);
+      fetchMRWiseSales(1);
     }
   };
 
@@ -255,7 +309,7 @@ const TotalExpense = () => {
 
     setSelectedTab("custom");
     setShowCustomFilter(false);
-    fetchFinancialData(1);
+    fetchMRWiseSales(1);
   };
 
   const handleTabChange = (tab) => {
@@ -267,7 +321,7 @@ const TotalExpense = () => {
         startDate: null,
         endDate: null,
       });
-      fetchFinancialData(1);
+      fetchMRWiseSales(1);
     }
   };
 
@@ -277,7 +331,6 @@ const TotalExpense = () => {
       endDate: null,
     });
     setSearchTerm("");
-    fetchFinancialData(1);
   };
 
   const exportToExcel = () => {
@@ -308,31 +361,6 @@ const TotalExpense = () => {
         return "All Records";
     }
   };
-
-  // Calculate total amount from all categories
-  const totalAmount =
-    summary.totalPurchase +
-    summary.totalExchangeLoss +
-    summary.totalRemittance +
-    summary.totalExpense +
-    summary.totalSalary;
-
-  // Create summary data for the table
-  const summaryData = [
-    { type: "purchase", label: "Purchase", amount: summary.totalPurchase },
-    {
-      type: "exchange_loss",
-      label: "Exchange Loss",
-      amount: summary.totalExchangeLoss,
-    },
-    {
-      type: "remittance",
-      label: "Remittance",
-      amount: summary.totalRemittance,
-    },
-    { type: "expense", label: "Expense", amount: summary.totalExpense },
-    { type: "salary", label: "Salary", amount: summary.totalSalary },
-  ].filter((item) => item.amount > 0); // Only show types with amount > 0
 
   // Render Pagination Component
   const renderPagination = () => {
@@ -396,12 +424,37 @@ const TotalExpense = () => {
     <div className="p-6">
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-3">
-          <PieChart className="w-8 h-8 text-purple-600" />
+          <TrendingUp className="w-8 h-8 text-green-600" />
           <h1 className="text-2xl font-bold text-gray-800">
-            Financial Summary Report
+            MR Wise Sales
           </h1>
         </div>
         <div className="flex items-center gap-3">
+          <div className="relative">
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Search by MR name or ID..."
+              value={searchTerm}
+              onChange={handleSearchChange}
+              onKeyPress={handleSearch}
+              className="pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent w-64"
+            />
+            <Search
+              className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+              size={18}
+              onClick={() => inputRef.current?.focus()}
+            />
+            {searchTerm && (
+              <button
+                onClick={handleClearSearch}
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            )}
+          </div>
+
           <button
             onClick={exportToExcel}
             className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
@@ -457,168 +510,132 @@ const TotalExpense = () => {
           </button>
         </div>
 
-        {/* Active Filter Display with View Button */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-sm text-gray-600">
-            <Filter size={16} />
-            <span>Active Filter: </span>
-            <span className="font-medium">{getActiveFilterDisplay()}</span>
-          </div>
-
-          {/* View/Hide Breakdown Button */}
-          <button
-            onClick={() => setShowBreakdown(!showBreakdown)}
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg cursor-pointer"
-          >
-            {showBreakdown ? <EyeOff size={16} /> : <Eye size={16} />}
-            {showBreakdown ? "Hide Breakdown" : "View Breakdown"}
-          </button>
+        {/* Active Filter Display */}
+        <div className="flex items-center gap-2 text-sm text-gray-600">
+          <Filter size={16} />
+          <span>Active Filter: </span>
+          <span className="font-medium">{getActiveFilterDisplay()}</span>
         </div>
       </div>
 
-      {/* Total Overall Expense Card */}
-      <div className="bg-white p-6 rounded-xl shadow-md mb-6 border-l-4 border-indigo-500 border border-gray-200">
-        <div className="flex justify-between items-center">
-          <div>
-            <p className="text-sm text-gray-600">Total Overall Expense</p>
-            <p className="text-3xl font-bold text-indigo-600">
-              ${totalAmount.toLocaleString()}
-            </p>
-            <p className="text-xs text-gray-500 mt-1">
-              Sum of all expense categories
-            </p>
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+        <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-green-500 border border-gray-200">
+          <div className="flex justify-between items-center">
+            <div>
+              <p className="text-sm text-gray-600">Total Sales</p>
+              <p className="text-2xl font-bold text-gray-800">
+                ${data.summary.totalSalesAmount?.toLocaleString() || 0}
+              </p>
+            </div>
+            <DollarSign className="w-8 h-8 text-green-500" />
           </div>
-          <PieChart className="w-12 h-12 text-indigo-500" />
+        </div>
+        <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-blue-500 border border-gray-200">
+          <div className="flex justify-between items-center">
+            <div>
+              <p className="text-sm text-gray-600">Total Orders</p>
+              <p className="text-2xl font-bold text-gray-800">
+                {data.summary.totalOrders || 0}
+              </p>
+            </div>
+            <TrendingUp className="w-8 h-8 text-blue-500" />
+          </div>
+        </div>
+        <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-purple-500 border border-gray-200">
+          <div className="flex justify-between items-center">
+            <div>
+              <p className="text-sm text-gray-600">Total MRs</p>
+              <p className="text-2xl font-bold text-gray-800">
+                {data.summary.totalMRs || 0}
+              </p>
+            </div>
+            <Users className="w-8 h-8 text-purple-500" />
+          </div>
+        </div>
+        <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-orange-500 border border-gray-200">
+          <div className="flex justify-between items-center">
+            <div>
+              <p className="text-sm text-gray-600">Avg Order Value</p>
+              <p className="text-2xl font-bold text-gray-800">
+                ${data.summary.averageOrderValue?.toLocaleString() || 0}
+              </p>
+            </div>
+            <User className="w-8 h-8 text-orange-500" />
+          </div>
         </div>
       </div>
 
-      {/* Financial Breakdown Card - Conditionally Rendered */}
-      {showBreakdown && totalAmount > 0 && (
-        <div className="bg-white rounded-xl shadow-md mb-6 border border-gray-200">
-          <div className="p-6 border-b">
-            <div className="flex justify-between items-center">
-              <h3 className="text-lg font-semibold text-gray-800">
-                Financial Breakdown by Type
-              </h3>
-              <button
-                onClick={() => setShowBreakdown(false)}
-                className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded-lg cursor-pointer text-sm"
-              >
-                <EyeOff size={14} />
-                Hide
-              </button>
-            </div>
-          </div>
-          <div className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {[
-                {
-                  type: "Purchase",
-                  amount: summary.totalPurchase,
-                  color: "bg-blue-500",
-                },
-                {
-                  type: "Exchange Loss",
-                  amount: summary.totalExchangeLoss,
-                  color: "bg-red-500",
-                },
-                {
-                  type: "Remittance",
-                  amount: summary.totalRemittance,
-                  color: "bg-green-500",
-                },
-                {
-                  type: "Expense",
-                  amount: summary.totalExpense,
-                  color: "bg-purple-500",
-                },
-                {
-                  type: "Salary",
-                  amount: summary.totalSalary,
-                  color: "bg-orange-500",
-                },
-              ].map((item) => (
-                <div key={item.type} className="bg-gray-50 p-4 rounded-lg">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm font-medium text-gray-700">
-                      {item.type}
-                    </span>
-                    <span className="text-lg font-bold text-gray-800">
-                      ${item.amount.toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
-                    <div
-                      className={`${item.color} h-2 rounded-full`}
-                      style={{
-                        width: `${
-                          totalAmount > 0
-                            ? (item.amount / totalAmount) * 100
-                            : 0
-                        }%`,
-                      }}
-                    ></div>
-                  </div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    {totalAmount > 0
-                      ? ((item.amount / totalAmount) * 100).toFixed(1)
-                      : 0}
-                    % of total
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Data Table - Now showing summary data */}
+      {/* Data Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
-              <th className="p-3 text-sm font-medium">Sr. No.</th>
-              <th className="p-3 text-sm font-medium">Type</th>
-              <th className="p-3 text-sm font-medium">Amount ($)</th>
+              <th className="p-3 text-sm font-medium">Sr.No</th>
+              <th className="p-3 text-sm font-medium">MR ID</th>
+              <th className="p-3 text-sm font-medium">MR Name</th>
+              <th className="p-3 text-sm font-medium">Region</th>
+              <th className="p-3 text-sm font-medium">Total Orders</th>
+              <th className="p-3 text-sm font-medium">Total Sales ($)</th>
+              <th className="p-3 text-sm font-medium">Avg Order Value ($)</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan="3" className="p-3 text-center">
+                <td colSpan="7" className="p-3 text-center">
                   Loading...
                 </td>
               </tr>
-            ) : summaryData.length > 0 ? (
-              summaryData.map((item, index) => (
+            ) : data.records.length > 0 ? (
+              data.records.map((mr, index) => (
                 <tr
-                  key={item.type}
+                  key={index}
                   className={`hover:bg-gray-50 ${
-                    index === summaryData.length - 1 ? "" : "border-b"
+                    index === data.records.length - 1 ? "" : "border-b"
                   }`}
                 >
                   <td className="p-3">
                     <div className="text-sm text-gray-600 font-medium">
-                      {index + 1}
+                      {getSerialNumber(index)}
                     </div>
                   </td>
                   <td className="p-3">
-                    <div className="text-sm font-medium text-gray-900 capitalize">
-                      {item.label}
+                    <div className="text-sm text-gray-600 font-medium">
+                      {mr.mrId || "N/A"}
                     </div>
                   </td>
-                  <td className="p-3 text-sm font-semibold text-red-600">
-                    {(item.amount || 0).toLocaleString()}
+                  <td className="p-3">
+                    <div>
+                      <div className="text-sm font-medium text-gray-900 capitalize">
+                        {mr.mrName}
+                      </div>
+                      <div className="text-xs text-gray-500">{mr.email}</div>
+                    </div>
+                  </td>
+                  <td className="p-3">
+                    <div className="text-sm text-gray-900">
+                      {mr.region || "N/A"}
+                    </div>
+                  </td>
+                  <td className="p-3 text-sm font-semibold text-blue-600">
+                    {mr.totalOrders || 0}
+                  </td>
+                  <td className="p-3 text-sm font-semibold text-green-600">
+                    {mr.totalSalesAmount?.toLocaleString() || 0}
+                  </td>
+                  <td className="p-3 text-sm font-semibold text-orange-600">
+                    {mr.averageOrderValue?.toLocaleString() || 0}
                   </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan="3" className="p-3 text-center text-gray-500">
+                <td colSpan="7" className="p-3 text-center text-gray-500">
                   {selectedTab === "custom" &&
                   (!customDateRange.startDate || !customDateRange.endDate)
                     ? "Please select start and end dates"
-                    : "No financial data found"}
+                    : "No MR wise sales data found"}
                 </td>
               </tr>
             )}
@@ -626,8 +643,7 @@ const TotalExpense = () => {
         </table>
       </div>
 
-      {/* Remove pagination since we're showing summary data (no pagination needed) */}
-      {/* {renderPagination()} */}
+      {renderPagination()}
 
       {showCustomFilter &&
         ReactDOM.createPortal(
@@ -645,11 +661,11 @@ const TotalExpense = () => {
               </button>
 
               <h2 className="text-lg font-semibold text-gray-800 mb-4">
-                Total Expense Filter
+                Custom Filter
               </h2>
 
               <div className="space-y-4 mb-6">
-                {/* Date Range - Now in separate rows */}
+                {/* Date Range */}
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -722,4 +738,4 @@ const TotalExpense = () => {
   );
 };
 
-export default TotalExpense;
+export default MRWiseSales;

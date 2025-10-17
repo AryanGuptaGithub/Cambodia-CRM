@@ -30,6 +30,9 @@ import Transaction from "./routers/accounts/transaction.js";
 import addExpenseCategary from "./routers/expenses/addExpenseCategary.js";
 import addExpense from "./routers/expenses/addExpense.js";
 import cashSaleReports from "./routers/reports/cashSaleReports.js";
+import remittance from "./routers/reports/remittance.js";
+import totalExpense from './routers/reports/totalExpense.js';
+import mrWiseOutStanding from "./routers/reports/mrWiseOutStanding.js";
 
 dotenv.config(); // Load environment variables
 
@@ -93,6 +96,9 @@ app.use("/api", Transaction);
 app.use("/api", addExpenseCategary);
 app.use("/api", addExpense);
 app.use("/api", cashSaleReports);
+app.use("/api", remittance);
+app.use("/api", totalExpense);
+app.use("/api", mrWiseOutStanding);
 
 // Server listener
 app.listen(PORT, () => {

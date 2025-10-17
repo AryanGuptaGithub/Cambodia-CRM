@@ -6,28 +6,36 @@ const SampleExcelDownloadStaff = () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("List");
 
-    // Merge and center "List" across A1:C1
-    worksheet.mergeCells("A1:C1");
+    // Merge and center "List" across A1:D1
+    worksheet.mergeCells("A1:E1");
     const titleCell = worksheet.getCell("A1");
     titleCell.value = "MR List";
     titleCell.font = { bold: true, size: 14 };
     titleCell.alignment = { horizontal: "center", vertical: "middle" };
     worksheet.getRow(1).height = 20;
 
-    // Merge and center "Medical Representative" across A2:C2
-    worksheet.mergeCells("A2:C2");
+    // Merge and center "Medical Representative" across A2:D2
+    worksheet.mergeCells("A2:E2");
     const mrTitleCell = worksheet.getCell("A2");
     mrTitleCell.value = "Medical Representative";
     mrTitleCell.font = { bold: true, size: 12 };
     mrTitleCell.alignment = { horizontal: "center", vertical: "middle" };
     worksheet.getRow(2).height = 18;
 
-    // Header row (No, MR Name, Team)
-    worksheet.getRow(3).values = ["No", "MR Name", "Team"];
+    // Header row (No, MR Name, Team Name, Contact No, Email)
+    worksheet.getRow(3).values = [
+      "No",
+      "MR Name",
+      "Team Name",
+      "Contact No",
+      "Email",
+    ];
     worksheet.columns = [
       { key: "no", width: 5 },
       { key: "mrName", width: 25 },
-      { key: "team", width: 15 },
+      { key: "teamName", width: 15 },
+      { key: "contactNo", width: 25 },
+      { key: "email", width: 30 },
     ];
 
     // Style header row
@@ -49,14 +57,10 @@ const SampleExcelDownloadStaff = () => {
       };
     });
 
-    worksheet.getRow(4).height = 18;
-    worksheet.getRow(5).height = 18;
-
     // Generate and download
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], {
-      type:
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });
     const url = URL.createObjectURL(blob);
 
@@ -71,7 +75,7 @@ const SampleExcelDownloadStaff = () => {
   return (
     <button
       onClick={generateExcel}
-      className="text-blue-600 hover:text text-sm mb-4 block cursor-pointer"
+      className="text-blue-600 hover:text-blue-800 text-sm mb-4 block cursor-pointer"
     >
       Click here to download Medical Representative Excel file
     </button>

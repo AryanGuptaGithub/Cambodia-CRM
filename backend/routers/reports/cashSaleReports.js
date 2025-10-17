@@ -1,6 +1,6 @@
 import express from "express";
 import Sale from "../../models/sale/saleSummary.js";
-import customer from "../../models/master/customer.js";
+import Customer from "../../models/master/customer.js";
 
 const router = express.Router();
 
@@ -34,28 +34,27 @@ router.get("/reports/cash-sales", async (req, res) => {
             message: "Invalid endDate format",
           });
         }
-        end.setHours(23, 59, 59, 999); // Include full day
+        end.setHours(23, 59, 59, 999);
         matchStage.deliveryDate.$lte = end;
       }
     }
 
-    // Use aggregation with $lookup to join with Customer collection
     const sales = await Sale.aggregate([
       {
         $match: matchStage,
       },
       {
         $lookup: {
-          from: "customers", // MongoDB collection name (usually lowercase plural of Customer)
-          localField: "customerCode", // Field in SaleSummary collection
-          foreignField: "customerCode", // Field in Customer collection
+          from: "customers",
+          localField: "customerCode",
+          foreignField: "customerCode",
           as: "customerInfo",
         },
       },
       {
         $unwind: {
           path: "$customerInfo",
-          preserveNullAndEmptyArrays: true, // Include sales even if customer not found
+          preserveNullAndEmptyArrays: true,
         },
       },
       {
@@ -94,15 +93,24 @@ router.get("/reports/cash-sales", async (req, res) => {
     });
   }
 });
+
 router.get("/reports/outstanding-collections", async (req, res) => {
   try {
-    const { startDate, endDate, page = 1, limit = 7, search } = req.query;
+    const { 
+      startDate, 
+      endDate, 
+      page = 1, 
+      limit = 7, 
+      search,
+      customerCode,
+      status 
+    } = req.query;
 
     const matchStage = {
-      paymentStatus: { $regex: /^credit$/i }, // Only 'credit' payments
+      paymentStatus: { $regex: /^credit$/i },
     };
 
-    // Handle optional date filtering
+    // Handle date filtering
     if (startDate || endDate) {
       matchStage.deliveryDate = {};
 
@@ -128,6 +136,16 @@ router.get("/reports/outstanding-collections", async (req, res) => {
         end.setHours(23, 59, 59, 999);
         matchStage.deliveryDate.$lte = end;
       }
+    }
+
+    // Handle customer code filter
+    if (customerCode) {
+      matchStage.customerCode = customerCode;
+    }
+
+    // Handle status filter (if needed in future)
+    if (status && status !== "all") {
+      // Add status filtering logic here if needed
     }
 
     const pageNum = parseInt(page);
@@ -161,7 +179,11 @@ router.get("/reports/outstanding-collections", async (req, res) => {
           dueAmount: { $sum: "$dueAmount" },
           overdueAmount: {
             $sum: {
-              $cond: [{ $lt: ["$deliveryDate", now] }, "$dueAmount", 0],
+              $cond: [
+                { $lt: ["$deliveryDate", now] }, 
+                "$dueAmount", 
+                0
+              ],
             },
           },
           latestDeliveryDate: { $max: "$deliveryDate" },
@@ -170,7 +192,7 @@ router.get("/reports/outstanding-collections", async (req, res) => {
       },
     ];
 
-    // ✅ Apply search by customer name or customer code only
+    // Apply search by customer name or customer code
     if (search && search.trim() !== "") {
       const searchRegex = new RegExp(search.trim(), "i");
       pipeline.push({
@@ -183,7 +205,11 @@ router.get("/reports/outstanding-collections", async (req, res) => {
       });
     }
 
-    // Sorting and pagination
+    // Add count stage before pagination
+    const countPipeline = [...pipeline];
+    countPipeline.push({ $count: "totalCount" });
+
+    // Continue with main pipeline for data
     pipeline.push({ $sort: { latestDeliveryDate: -1 } });
 
     // Add facet for records and summary
@@ -232,8 +258,11 @@ router.get("/reports/outstanding-collections", async (req, res) => {
       },
     });
 
-    // Execute aggregation
-    const aggregationResult = await Sale.aggregate(pipeline);
+    // Execute both pipelines
+    const [aggregationResult, countResult] = await Promise.all([
+      Sale.aggregate(pipeline),
+      Sale.aggregate(countPipeline)
+    ]);
 
     const result = aggregationResult[0];
     const summary = result.summary[0] || {
@@ -245,17 +274,24 @@ router.get("/reports/outstanding-collections", async (req, res) => {
     };
 
     const records = result.records;
-    const totalPages = Math.ceil(summary.totalRecords / limitNum);
+    
+    // Use count from countPipeline for accurate pagination
+    const totalCount = countResult[0]?.totalCount || 0;
+    const totalPages = Math.ceil(totalCount / limitNum);
+
     return res.json({
       success: true,
       data: {
-        summary: summary,
+        summary: {
+          ...summary,
+          totalRecords: totalCount
+        },
         records: records,
       },
       pagination: {
         currentPage: pageNum,
         totalPages: totalPages,
-        totalRecords: summary.totalRecords,
+        totalRecords: totalCount,
         hasNext: pageNum < totalPages,
         hasPrev: pageNum > 1,
       },

@@ -22,6 +22,7 @@ const StaffMember = () => {
   // Filters
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedTab, setSelectedTab] = useState("All");
+  const [error, setError] = useState("");
 
   // UI modals
   const [modals, setModals] = useState({
@@ -42,6 +43,8 @@ const StaffMember = () => {
   const [form, setForm] = useState({
     medicalRepName: "",
     teamName: "",
+    contactNo: "",
+    email: "",
     date: "",
     enabled: "",
     _id: null,
@@ -57,6 +60,7 @@ const StaffMember = () => {
   useEffect(() => {
     const fetchStaffs = async () => {
       try {
+        setLoading(true);
         const response = await fetch(`${backendUrl}/api/staffs`);
         if (!response.ok) throw new Error("Failed to fetch staff");
         const data = await response.json();
@@ -105,8 +109,12 @@ const StaffMember = () => {
 
       const repMatch = s.medicalRepName?.toLowerCase().includes(lowerSearch);
       const teamMatch = s.teamName?.toLowerCase().includes(lowerSearch);
+      const contactMatch = s.contactNo?.toLowerCase().includes(lowerSearch);
+      const emailMatch = s.email?.toLowerCase().includes(lowerSearch);
 
-      return matchesTab && (repMatch || teamMatch);
+      return (
+        matchesTab && (repMatch || teamMatch || contactMatch || emailMatch)
+      );
     });
   }, [staff, selectedTab, searchTerm]);
 
@@ -176,10 +184,14 @@ const StaffMember = () => {
 
   // ⏬ Common fetch function to refresh staff data
   const refreshStaffList = async () => {
-    const res = await fetch(`${backendUrl}/api/staffs`);
-    const data = await res.json();
-    setStaff(data);
-    setSelected([]);
+    try {
+      const res = await fetch(`${backendUrl}/api/staffs`);
+      const data = await res.json();
+      setStaff(data);
+      setSelected([]);
+    } catch (err) {
+      console.error("Error refreshing staff list:", err);
+    }
   };
 
   // ✅ Generic delete handler for single or multiple staff
@@ -221,7 +233,10 @@ const StaffMember = () => {
         await fetchTeams();
       }
     } catch (err) {
-      showToast("error", err?.message || "Failed to delete staff.");
+      showToast(
+        "error",
+        err?.response?.data?.message || "Failed to delete staff."
+      );
     }
   };
 
@@ -241,7 +256,7 @@ const StaffMember = () => {
     });
   };
 
-  // ✅ File upload handler
+  // ✅ CORRECTED File upload handler
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -249,61 +264,84 @@ const StaffMember = () => {
     const reader = new FileReader();
 
     reader.onload = (evt) => {
-      const data = new Uint8Array(evt.target.result);
-      const workbook = XLSX.read(data, { type: "array" });
-      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(worksheet, {
-        header: 1,
-        defval: "",
-      });
+      try {
+        const data = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(data, { type: "array" });
+        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(worksheet, {
+          header: 1,
+          defval: "",
+        });
 
-      let headerRowIndex = -1;
-      let headersMap = {};
+        let headerRowIndex = -1;
+        let headersMap = {};
 
-      // Find the row that contains headers (case-insensitive)
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
-        const normalizedRow = row.map((cell) =>
-          cell.toString().trim().toLowerCase()
-        );
+        // Find the row that contains headers (case-insensitive)
+        for (let i = 0; i < rows.length; i++) {
+          const row = rows[i];
+          const normalizedRow = row.map((cell) =>
+            cell.toString().trim().toLowerCase()
+          );
 
-        if (
-          normalizedRow.includes("no") &&
-          normalizedRow.includes("mr name") &&
-          normalizedRow.includes("team")
-        ) {
-          headerRowIndex = i;
-          headersMap = normalizedRow.reduce((acc, header, index) => {
-            acc[index] = header;
-            return acc;
-          }, {});
-          break;
+          // Match the exact column names from your Excel file
+          if (
+            normalizedRow.includes("no") &&
+            normalizedRow.includes("mr name") &&
+            normalizedRow.includes("team name") && // Fixed: was "team", now "team name"
+            normalizedRow.includes("contact no") &&
+            normalizedRow.includes("email")
+          ) {
+            headerRowIndex = i;
+            headersMap = normalizedRow.reduce((acc, header, index) => {
+              acc[index] = header;
+              return acc;
+            }, {});
+            break;
+          }
         }
+
+        if (headerRowIndex === -1) {
+          console.error("Header row not found.");
+          showToast(
+            "error",
+            "Required headers not found in Excel file. Please ensure columns: No, MR Name, Team Name, Contact No, Email"
+          );
+          return;
+        }
+
+        const mappedData = rows
+          .slice(headerRowIndex + 1)
+          .map((row) => {
+            const item = {};
+            Object.entries(headersMap).forEach(([index, key]) => {
+              item[key] = row[index] || "";
+            });
+
+            return {
+              no: item["no"],
+              medicalRepName: item["mr name"], // Fixed: was mrName, now medicalRepName
+              teamName: item["team name"], // Fixed: was team, now teamName
+              contactNo: item["contact no"],
+              email: item["email"],
+            };
+          })
+          .filter(
+            (entry) =>
+              entry.medicalRepName ||
+              entry.teamName ||
+              entry.contactNo ||
+              entry.email
+          );
+
+        setParsedData(mappedData);
+      } catch (error) {
+        console.error("Error parsing file:", error);
+        showToast("error", "Error parsing Excel file");
       }
+    };
 
-      if (headerRowIndex === -1) {
-        console.error("Header row not found.");
-        showToast("error", "Header row not found in Excel file.");
-        return;
-      }
-
-      const mappedData = rows
-        .slice(headerRowIndex + 1)
-        .map((row) => {
-          const item = {};
-          Object.entries(headersMap).forEach(([index, key]) => {
-            item[key] = row[index] || "";
-          });
-
-          return {
-            no: item["no"],
-            mrName: item["mr name"],
-            teamName: item["team"],
-          };
-        })
-        .filter((entry) => entry.no); // Optional: filter out empty rows
-
-      setParsedData(mappedData);
+    reader.onerror = () => {
+      showToast("error", "Error reading file");
     };
 
     reader.readAsArrayBuffer(file);
@@ -327,6 +365,7 @@ const StaffMember = () => {
           res.data.message || "Staff imported successfully!"
         );
         setShowImportModal(false);
+        setParsedData([]);
         await refreshStaffList();
         await fetchTeams();
       }
@@ -385,9 +424,11 @@ const StaffMember = () => {
   }, [teamSuggestions]);
 
   const handleChange = (e) => {
-    const value = e.target.value;
-    setForm((prev) => ({ ...prev, teamName: value }));
-    setShowSuggestions(true);
+    const { name, value } = e.target;
+    setForm((prev) => ({ ...prev, [name]: value }));
+    if (name === "teamName") {
+      setShowSuggestions(true);
+    }
   };
 
   const handleKeyDown = (e) => {
@@ -514,6 +555,8 @@ const StaffMember = () => {
                 </div>
               </th>
               <th className="p-3">Team</th>
+              <th className="p-3">Contact No</th>
+              <th className="p-3">Email</th>
               <th className="p-3">Created At</th>
               <th className="p-3">Status</th>
               <th className="p-3">Action</th>
@@ -541,6 +584,8 @@ const StaffMember = () => {
                   </div>
                 </td>
                 <td className="p-3">{staff.teamName}</td>
+                <td className="p-3">{staff.contactNo || "--"}</td>
+                <td className="p-3">{staff.email || "--"}</td>
                 <td className="p-3">{formatDateToReadable(staff.createdAt)}</td>
                 <td>
                   <button
@@ -581,8 +626,8 @@ const StaffMember = () => {
             ))}
             {currentStaff.length === 0 && (
               <tr>
-                <td colSpan={6} className="text-center p-6 text-gray-500">
-                  No staff found.
+                <td colSpan={7} className="text-center p-6 text-gray-500">
+                  {loading ? "Loading..." : "No staff found."}
                 </td>
               </tr>
             )}
@@ -636,7 +681,7 @@ const StaffMember = () => {
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
               <div
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setIsOpen(false)}
+                onClick={() => setIsViewModalOpen(false)}
               />
 
               <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
@@ -668,7 +713,22 @@ const StaffMember = () => {
                       {form.teamName || "--"}
                     </p>
                   </div>
-
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Contact No
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                      {form.contactNo || "--"}
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Email
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                      {form.email || "--"}
+                    </p>
+                  </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-600">
                       Created At
@@ -707,7 +767,7 @@ const StaffMember = () => {
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
               <div
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setIsOpen(false)}
+                onClick={() => setIsEditModalOpen(false)}
               />
               <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative max-h-screen overflow-y-auto">
                 {/* Close Button */}
@@ -732,10 +792,9 @@ const StaffMember = () => {
                     </label>
                     <input
                       type="text"
+                      name="medicalRepName"
                       value={form.medicalRepName}
-                      onChange={(e) =>
-                        setForm({ ...form, medicalRepName: e.target.value })
-                      }
+                      onChange={handleChange}
                       className="w-full border px-3 py-2 rounded-lg"
                     />
                   </div>
@@ -747,6 +806,7 @@ const StaffMember = () => {
                     </label>
                     <input
                       type="text"
+                      name="teamName"
                       value={form.teamName}
                       onChange={handleChange}
                       onKeyDown={handleKeyDown}
@@ -755,7 +815,7 @@ const StaffMember = () => {
                       autoComplete="off"
                       onBlur={() =>
                         setTimeout(() => setShowSuggestions(false), 150)
-                      } // to allow click before hiding
+                      }
                     />
 
                     {showSuggestions && teamSuggestions.length > 0 && (
@@ -763,7 +823,7 @@ const StaffMember = () => {
                         {teamSuggestions.map((team, index) => (
                           <li
                             key={index}
-                            onMouseDown={() => handleSelect(team)} // still keep mouse support
+                            onMouseDown={() => handleSelect(team)}
                             className={`px-4 py-2 cursor-pointer ${
                               highlightedIndex === index
                                 ? "bg-blue-100"
@@ -779,6 +839,34 @@ const StaffMember = () => {
                         ))}
                       </ul>
                     )}
+                  </div>
+
+                  {/* Contact No */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Contact No
+                    </label>
+                    <input
+                      type="text"
+                      name="contactNo"
+                      value={form.contactNo}
+                      onChange={handleChange}
+                      className="w-full border px-3 py-2 rounded-lg"
+                    />
+                  </div>
+
+                  {/* Email */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Email
+                    </label>
+                    <input
+                      type="email"
+                      name="email"
+                      value={form.email}
+                      onChange={handleChange}
+                      className="w-full border px-3 py-2 rounded-lg"
+                    />
                   </div>
 
                   {/* Created At */}
@@ -844,7 +932,7 @@ const StaffMember = () => {
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
               <div
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setIsOpen(false)}
+                onClick={() => setShowImportModal(false)}
               />
               <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
                 {/* Close */}
@@ -861,7 +949,6 @@ const StaffMember = () => {
                 </h2>
                 {isSampleFile && <SampleExcelDownloadStaff />}
 
-                {/* File Upload */}
                 <div className="mb-6">
                   <label className="block text-gray-700 mb-2">File</label>
                   <input
@@ -887,14 +974,16 @@ const StaffMember = () => {
                   </button>
                   <button
                     onClick={handleImport}
-                    disabled={isUploading}
+                    disabled={isUploading || parsedData.length === 0}
                     className={`px-5 py-2 rounded-lg cursor-pointer ${
-                      isUploading
+                      isUploading || parsedData.length === 0
                         ? "bg-blue-400 text-white cursor-not-allowed"
                         : "bg-blue-600 hover:bg-blue-700 text-white"
                     }`}
                   >
-                    {isUploading ? "Uploading…" : "Upload"}
+                    {isUploading
+                      ? "Uploading…"
+                      : `Upload (${parsedData.length})`}
                   </button>
                 </div>
               </div>

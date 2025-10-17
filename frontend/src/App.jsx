@@ -92,6 +92,10 @@ import OutstandingCollection from "./pages/Reports/OutstandingCollection";
 import TotalExpense from "./pages/Reports/TotalExpense";
 import Remittance from "./pages/Reports/Remittance";
 
+// Import new MR Wise report components
+import MRWiseOutstanding from "./pages/Reports/MRWiseOutstanding";
+import MRWiseSales from "./pages/Reports/MRWiseSales";
+
 function App() {
   return (
     <>
@@ -208,6 +212,10 @@ function App() {
             <Route path="outstandingcollection" element={<OutstandingCollection />} />
             <Route path="totalexpense" element={<TotalExpense />} />
             <Route path="remittance" element={<Remittance />} />
+            
+            {/* MR Wise Report Routes */}
+            <Route path="mrwiseoutstanding" element={<MRWiseOutstanding />} />
+            <Route path="mrwisesales" element={<MRWiseSales />} />
           </Route>
 
           <Route path="/utilitylayout" element={<UtilityLayout />}>

@@ -275,17 +275,17 @@ const TotalCashSales = () => {
         </div>
       </div>
 
-      {/* Data Table - Updated to match Customer component layout */}
+      {/* Data Table - Updated with Sr.No column and removed Payment Method */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
+              <th className="p-3 text-sm font-medium">Sr.No</th>
               <th className="p-3 text-sm font-medium">Date</th>
               <th className="p-3 text-sm font-medium">Invoice Number</th>
               <th className="p-3 text-sm font-medium">Customer</th>
               <th className="p-3 text-sm font-medium">Product</th>
               <th className="p-3 text-sm font-medium">Amount ($)</th>
-              <th className="p-3 text-sm font-medium">Payment Method</th>
             </tr>
           </thead>
           <tbody>
@@ -303,6 +303,7 @@ const TotalCashSales = () => {
                     index === data.length - 1 ? "" : "border-b"
                   }`}
                 >
+                  <td className="p-3 text-sm text-gray-900">{index + 1}</td>
                   <td className="p-3 text-sm text-gray-900">
                     {formatDateToReadable(sale.deliveryDate)}
                   </td>
@@ -317,9 +318,6 @@ const TotalCashSales = () => {
                   </td>
                   <td className="p-3 text-sm font-semibold text-green-600">
                     {sale.amount?.toLocaleString()}
-                  </td>
-                  <td className="p-3 text-sm text-gray-900 capitalize">
-                    {sale.paymentMethod || "Cash"}
                   </td>
                 </tr>
               ))
@@ -358,7 +356,7 @@ const TotalCashSales = () => {
               </button>
 
               <h2 className="text-lg font-semibold text-gray-800 mb-4">
-                Custom Date Filter
+                Total Cash Sales Filter
               </h2>
 
               <div className="space-y-4 mb-6">

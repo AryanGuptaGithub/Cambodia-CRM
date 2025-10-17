@@ -30,7 +30,6 @@ router.get("/staff/teams", async (_, res) => {
   }
 });
 
-
 router.get("/staffs/:id", async (req, res) => {
   try {
     const staff = await staffSchema.findById(req.params.id);
@@ -41,10 +40,10 @@ router.get("/staffs/:id", async (req, res) => {
   }
 });
 
-// ✅ Route: Create supplier
+// ✅ Route: Create staff
 router.post("/staffs", async (req, res) => {
   try {
-    const { medicalRepName, enabled } = req.body;
+    const { medicalRepName, enabled, contactNo, email } = req.body;
     const existingStaff = await staffSchema.findOne({ medicalRepName });
 
     if (existingStaff) {
@@ -57,7 +56,7 @@ router.post("/staffs", async (req, res) => {
 
     const newStaff = new staffSchema({
       ...req.body,
-      enabled: isEnabled, // <-- boolean value
+      enabled: isEnabled,
     });
 
     const savedStaff = await newStaff.save();
@@ -75,7 +74,7 @@ router.post("/staffs", async (req, res) => {
   }
 });
 
-// ✅ Route: Update supplier
+// ✅ Route: Update staff
 router.put("/staff/:id", async (req, res) => {
   try {
     const updatedStaff = await staffSchema.findByIdAndUpdate(
@@ -97,7 +96,7 @@ router.put("/staff/:id", async (req, res) => {
   }
 });
 
-// ✅ Route: Delete one supplier
+// ✅ Route: Delete multiple staff
 router.delete("/staffs", async (req, res) => {
   const ids = req.body;
   try {
@@ -126,7 +125,7 @@ router.delete("/staff/:id", async (req, res) => {
     }
 
     res.json({
-      message: `Staff <b>${deleted.name}</b> deleted successfully`,
+      message: `Staff <b>${deleted.medicalRepName}</b> deleted successfully`,
       ok: true,
     });
   } catch (err) {
@@ -144,7 +143,7 @@ router.post("/staffs/import", async (req, res) => {
       });
     }
 
-    const requiredFields = ["mrName", "teamName"];
+    const requiredFields = ["medicalRepName", "teamName"]; // Changed from ["mrName", "teamName"]
 
     for (const staff of staffList) {
       for (const field of requiredFields) {
@@ -161,23 +160,25 @@ router.post("/staffs/import", async (req, res) => {
       }
 
       const staffData = {
-        medicalRepName: staff.mrName,
-        teamName: staff.teamName,
+        medicalRepName: staff.medicalRepName, // Direct mapping
+        teamName: staff.teamName, // Direct mapping
+        contactNo: staff.contactNo || "", // Add contactNo field
+        email: staff.email || "", // Add email field
       };
 
-      const existingSupplier = await staffSchema.findOne({
+      const existingStaff = await staffSchema.findOne({
         medicalRepName: staffData.medicalRepName,
-        name: staffData.name,
       });
 
-      if (!existingSupplier) {
+      if (!existingStaff) {
         await staffSchema.create(staffData);
       }
     }
 
     res.status(200).json({ message: "Staff imported successfully." });
   } catch (err) {
-    console.log("values of err", err);
+    console.error("❌ Error importing staff:", err);
+    handleServerError(res, err, "Error importing staff");
   }
 });
 

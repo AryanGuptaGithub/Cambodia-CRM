@@ -77,7 +77,7 @@ router.get("/customers/provinces", async (req, res) => {
     res.json({
       success: true,
       data: provinces,
-      count: provinces.length,
+      // count: provinces.length,
     });
   } catch (error) {
     console.error("Error fetching provinces:", error);

@@ -21,6 +21,126 @@ import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
+// Customer Dropdown Component
+const CustomerDropdown = ({
+  value,
+  onChange,
+  options,
+  placeholder = "Select customer...",
+  disabled = false,
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filteredOptions, setFilteredOptions] = useState(options);
+
+  // Filter options based on search term
+  useEffect(() => {
+    if (searchTerm) {
+      const filtered = options.filter(
+        (option) =>
+          option.label.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (option.code &&
+            option.code.toLowerCase().includes(searchTerm.toLowerCase()))
+      );
+      setFilteredOptions(filtered);
+    } else {
+      setFilteredOptions(options);
+    }
+  }, [searchTerm, options]);
+
+  const handleSelect = (optionValue) => {
+    onChange(optionValue);
+    setIsOpen(false);
+    setSearchTerm("");
+  };
+
+  const handleSearchChange = (e) => {
+    setSearchTerm(e.target.value);
+  };
+
+  const selectedOption = options.find((opt) => opt.value === value);
+
+  return (
+    <div className="relative w-full">
+      <button
+        type="button"
+        onClick={() => !disabled && setIsOpen(!isOpen)}
+        className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 text-left ${
+          disabled
+            ? "bg-gray-200 cursor-not-allowed"
+            : "bg-white cursor-pointer border-gray-300"
+        }`}
+        disabled={disabled}
+      >
+        <div className="flex justify-between items-center">
+          <span className="truncate">
+            {selectedOption ? selectedOption.label : placeholder}
+          </span>
+          <svg
+            className={`w-4 h-4 text-gray-500 transition-transform ${
+              isOpen ? "rotate-180" : ""
+            }`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M19 9l-7 7-7-7"
+            />
+          </svg>
+        </div>
+      </button>
+
+      {isOpen && !disabled && (
+        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-hidden">
+          {/* Search input */}
+          <div className="p-2 border-b">
+            <input
+              type="text"
+              placeholder="Search customers..."
+              value={searchTerm}
+              onChange={handleSearchChange}
+              className="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              autoFocus
+            />
+          </div>
+
+          {/* Options list */}
+          <div className="max-h-48 overflow-y-auto">
+            {filteredOptions.length === 0 ? (
+              <div className="p-2 text-gray-500 text-sm text-center">
+                {searchTerm ? "No customers found" : "No customers available"}
+              </div>
+            ) : (
+              filteredOptions.map((option) => (
+                <div
+                  key={option.value}
+                  onClick={() => handleSelect(option.value)}
+                  className={`p-2 cursor-pointer hover:bg-indigo-50 border-b border-gray-100 ${
+                    value === option.value
+                      ? "bg-indigo-100 text-indigo-700"
+                      : ""
+                  }`}
+                >
+                  <div className="font-medium">{option.label}</div>
+                  {option.code && (
+                    <div className="text-xs text-gray-500">
+                      Customer Code: {option.code}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const OutstandingCollection = () => {
   const [data, setData] = useState({
     summary: {
@@ -52,10 +172,53 @@ const OutstandingCollection = () => {
   });
   const inputRef = useRef(null);
 
+  // Customer dropdown states
+  const [customerOptions, setCustomerOptions] = useState([]);
+  const [loadingCustomers, setLoadingCustomers] = useState(false);
+
   const visiblePages = useVisiblePages(
     pagination.currentPage,
     pagination.totalPages
   );
+
+  // Calculate serial number based on current page and items per page
+  const getSerialNumber = (index) => {
+    const itemsPerPage = 7; // Your current limit
+    return (pagination.currentPage - 1) * itemsPerPage + index + 1;
+  };
+
+  // Fetch ALL customer options from your API
+  const fetchCustomerOptions = async () => {
+    setLoadingCustomers(true);
+    try {
+      const response = await axios.get(`${backendUrl}/api/customers`);
+
+      // Adjust based on your API response structure
+      const customers = response.data.customers || [];
+
+      const options = customers.map((customer) => ({
+        value: customer.customerCode,
+        label: customer.name || "Unnamed Customer",
+        code: customer.customerCode,
+        phone: customer.customerNumber,
+        address: customer.address,
+      }));
+
+      setCustomerOptions(options);
+      console.log(`Loaded ${options.length} customers from API`);
+    } catch (error) {
+      console.error("Error fetching customers:", error);
+      showToast("error", "Failed to fetch customer list");
+      setCustomerOptions([]);
+    } finally {
+      setLoadingCustomers(false);
+    }
+  };
+
+  // Load ALL customers on component mount
+  useEffect(() => {
+    fetchCustomerOptions();
+  }, []);
 
   const getCurrentMonthName = () => {
     return new Date().toLocaleString("default", { month: "long" });
@@ -156,14 +319,14 @@ const OutstandingCollection = () => {
       // Only include customer name and status filters when custom tab is selected
       if (selectedTab === "custom") {
         if (filter.customerName) {
-          params.customerName = filter.customerName;
+          params.customerCode = filter.customerName;
         }
         if (filter.status !== "all") {
           params.status = filter.status;
         }
       }
 
-      console.log("API Params:", params); // Debug log
+      console.log("API Params:", params);
 
       const response = await axios.get(
         `${backendUrl}/api/reports/outstanding-collections`,
@@ -197,7 +360,7 @@ const OutstandingCollection = () => {
     ) {
       return;
     }
-    fetchOutstandingCollections(1); // Reset to page 1 when tab changes
+    fetchOutstandingCollections(1);
   }, [selectedTab]);
 
   useEffect(() => {
@@ -206,7 +369,7 @@ const OutstandingCollection = () => {
       customDateRange.startDate &&
       customDateRange.endDate
     ) {
-      fetchOutstandingCollections(1); // Reset to page 1 when date changes
+      fetchOutstandingCollections(1);
     }
   }, [customDateRange.startDate, customDateRange.endDate]);
 
@@ -216,12 +379,8 @@ const OutstandingCollection = () => {
     }
   };
 
-
   const handleSearchChange = (e) => {
     setSearchTerm(e.target.value);
-    if (e.key === "Enter" || e.type === "click") {
-      fetchOutstandingCollections(1);
-    }
   };
 
   const handleClearSearch = () => {
@@ -238,15 +397,25 @@ const OutstandingCollection = () => {
     setFilter((prev) => ({ ...prev, [name]: value }));
   };
 
+  // Handle customer name change from dropdown
+  const handleCustomerNameChange = (value) => {
+    setFilter((prev) => ({ ...prev, customerName: value }));
+  };
+
+  // Debounced search effect
   useEffect(() => {
     const delayDebounce = setTimeout(() => {
-      fetchOutstandingCollections(1); // Trigger search on typing/deleting
-    }, 500); // Adjust debounce delay (ms) as needed
+      fetchOutstandingCollections(1);
+    }, 500);
 
-    return () => clearTimeout(delayDebounce); // Cleanup
+    return () => clearTimeout(delayDebounce);
   }, [searchTerm]);
 
-  const handleSearch = (e) => {};
+  const handleSearch = (e) => {
+    if (e.key === "Enter") {
+      fetchOutstandingCollections(1);
+    }
+  };
 
   const handleApplyCustomFilter = () => {
     if (!customDateRange.startDate || !customDateRange.endDate) {
@@ -269,7 +438,6 @@ const OutstandingCollection = () => {
     if (tab === "custom") {
       setShowCustomFilter(true);
     } else {
-      // Clear custom filters when switching to other tabs
       setFilter({
         customerName: "",
         status: "all",
@@ -292,6 +460,7 @@ const OutstandingCollection = () => {
       endDate: null,
     });
     setSearchTerm("");
+    fetchCustomerOptions();
   };
 
   const exportToExcel = () => {
@@ -318,7 +487,12 @@ const OutstandingCollection = () => {
 
           // Add customer name filter if applied
           if (filter.customerName) {
-            display += ` | Customer: ${filter.customerName}`;
+            const selectedCustomer = customerOptions.find(
+              (opt) => opt.value === filter.customerName
+            );
+            display += ` | Customer: ${
+              selectedCustomer?.label || filter.customerName
+            }`;
           }
 
           // Add status filter if not "all"
@@ -528,11 +702,12 @@ const OutstandingCollection = () => {
         </div>
       </div>
 
-      {/* Data Table with Customer Code Column */}
+      {/* Data Table with Sr.No Column */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
+              <th className="p-3 text-sm font-medium">Sr.No</th>
               <th className="p-3 text-sm font-medium">Customer Code</th>
               <th className="p-3 text-sm font-medium">Customer Name</th>
               <th className="p-3 text-sm font-medium">Contact</th>
@@ -543,7 +718,7 @@ const OutstandingCollection = () => {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan="7" className="p-3 text-center">
+                <td colSpan="6" className="p-3 text-center">
                   Loading...
                 </td>
               </tr>
@@ -555,6 +730,11 @@ const OutstandingCollection = () => {
                     index === data.records.length - 1 ? "" : "border-b"
                   }`}
                 >
+                  <td className="p-3">
+                    <div className="text-sm text-gray-600 font-medium">
+                      {getSerialNumber(index)}
+                    </div>
+                  </td>
                   <td className="p-3">
                     <div className="text-sm text-gray-600 font-medium">
                       {customer.customerCode || "N/A"}
@@ -577,16 +757,16 @@ const OutstandingCollection = () => {
                     </div>
                   </td>
                   <td className="p-3 text-sm font-semibold text-orange-600">
-                    {customer.totalOutstandingAmount || 0}
+                    {customer.totalOutstandingAmount?.toLocaleString() || 0}
                   </td>
                   <td className="p-3 text-sm font-semibold text-red-600">
-                    {customer.overdueAmount || 0}
+                    {customer.overdueAmount?.toLocaleString() || 0}
                   </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan="7" className="p-3 text-center text-gray-500">
+                <td colSpan="6" className="p-3 text-center text-gray-500">
                   {selectedTab === "custom" &&
                   (!customDateRange.startDate || !customDateRange.endDate)
                     ? "Please select start and end dates"
@@ -598,16 +778,14 @@ const OutstandingCollection = () => {
         </table>
       </div>
 
-      {/* Pagination */}
       {renderPagination()}
 
-      {/* Custom Filter Modal */}
       {showCustomFilter &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setShowCustomFilter(false)}
+              onClick={() => setIsOpen(false)}
             />
             <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative z-10">
               <button
@@ -618,10 +796,11 @@ const OutstandingCollection = () => {
               </button>
 
               <h2 className="text-lg font-semibold text-gray-800 mb-4">
-                Custom Filter
+                Outstanding Collection Filter
               </h2>
 
               <div className="space-y-4 mb-6">
+                {/* Date Range */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -663,35 +842,32 @@ const OutstandingCollection = () => {
                   </div>
                 </div>
 
+                {/* Customer Name Dropdown with Search */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Customer Name
                   </label>
-                  <input
-                    type="text"
-                    name="customerName"
+                  <CustomerDropdown
                     value={filter.customerName}
-                    onChange={handleFilterChange}
-                    placeholder="Search customer..."
-                    className="w-full border rounded-lg px-3 py-2"
+                    onChange={handleCustomerNameChange}
+                    options={customerOptions}
+                    placeholder={
+                      loadingCustomers
+                        ? "Loading customers..."
+                        : "Select or search customer..."
+                    }
+                    disabled={loadingCustomers}
                   />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Status
-                  </label>
-                  <select
-                    name="status"
-                    value={filter.status}
-                    onChange={handleFilterChange}
-                    className="w-full border rounded-lg px-3 py-2"
-                  >
-                    <option value="all">All Status</option>
-                    <option value="overdue">Overdue</option>
-                    <option value="pending">Pending</option>
-                    <option value="paid">Paid</option>
-                  </select>
+                  {loadingCustomers && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Loading customers...
+                    </p>
+                  )}
+                  {!loadingCustomers && customerOptions.length > 0 && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      {customerOptions.length} customers available
+                    </p>
+                  )}
                 </div>
               </div>
 

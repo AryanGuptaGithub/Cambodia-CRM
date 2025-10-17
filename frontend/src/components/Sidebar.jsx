@@ -34,6 +34,8 @@ import {
   Landmark,
   Receipt,
   PieChart,
+  UserSearch,
+  Target,
 } from "lucide-react";
 
 const masterPaths = ["/masterlayout/customer", "/masterlayout/supplier"];
@@ -83,10 +85,12 @@ const reportPaths = [
   "/reportlayout/userreport",
   "/reportlayout/ratelist",
   "/reportlayout/profitloss",
-  "/reportlayout/cashsales", // New report
-  "/reportlayout/outstandingcollection", // New report
-  "/reportlayout/totalexpense", // New report
-  "/reportlayout/remittance", // New report
+  "/reportlayout/mrwiseoutstanding",
+  "/reportlayout/mrwisesales",
+  "/reportlayout/cashsales",
+  "/reportlayout/outstandingcollection",
+  "/reportlayout/totalexpense",
+  "/reportlayout/remittance",
 ];
 
 const utilityPaths = [
@@ -527,7 +531,20 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                 <DollarSign className="w-4 h-4" />
                 <span className="mx-auto">Profit & Loss</span>
               </Link>
-              
+              <Link
+                to="/reportlayout/mrwiseoutstanding"
+                className={getChildLinkClass("/reportlayout/mrwiseoutstanding")}
+              >
+                <UserSearch className="w-4 h-4" />
+                <span className="mx-auto">MR Wise Outstanding</span>
+              </Link>
+              <Link
+                to="/reportlayout/mrwisesales"
+                className={getChildLinkClass("/reportlayout/mrwisesales")}
+              >
+                <Target className="w-4 h-4" />
+                <span className="mx-auto">MR Wise Sales</span>
+              </Link>
               {/* New Report Links */}
               <Link
                 to="/reportlayout/cashsales"
@@ -538,7 +555,9 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               </Link>
               <Link
                 to="/reportlayout/outstandingcollection"
-                className={getChildLinkClass("/reportlayout/outstandingcollection")}
+                className={getChildLinkClass(
+                  "/reportlayout/outstandingcollection"
+                )}
               >
                 <Receipt className="w-4 h-4" />
                 <span className="mx-auto">Outstanding Collection</span>
