@@ -35,22 +35,22 @@ const TotalCashSales = () => {
 
   const getJanToPreviousMonthRange = () => {
     const currentYear = getCurrentYear();
-    const currentMonth = new Date().getMonth(); 
-    
+    const currentMonth = new Date().getMonth();
+
     if (currentMonth === 0) {
       const previousYear = currentYear - 1;
       return {
         startDate: `${previousYear}-01-01`,
         endDate: `${previousYear}-12-31`,
-        label: `Jan - Dec ${previousYear}`
+        label: `Jan - Dec ${previousYear}`,
       };
     }
-    
-    const endDate = new Date(currentYear, currentMonth, 0); 
+
+    const endDate = new Date(currentYear, currentMonth, 0);
     return {
       startDate: `${currentYear}-01-01`,
       endDate: endDate.toISOString().split("T")[0],
-      label: `Jan - ${getPreviousMonthName()} ${currentYear}`
+      label: `Jan - ${getPreviousMonthName()} ${currentYear}`,
     };
   };
 
@@ -72,13 +72,12 @@ const TotalCashSales = () => {
         return getJanToPreviousMonthRange();
 
       case "custom":
-        // Convert Date objects to string format for API
         return {
-          startDate: customDateRange.startDate 
-            ? customDateRange.startDate.toISOString().split("T")[0] 
+          startDate: customDateRange.startDate
+            ? customDateRange.startDate.toISOString().split("T")[0]
             : "",
-          endDate: customDateRange.endDate 
-            ? customDateRange.endDate.toISOString().split("T")[0] 
+          endDate: customDateRange.endDate
+            ? customDateRange.endDate.toISOString().split("T")[0]
             : "",
         };
 
@@ -91,9 +90,11 @@ const TotalCashSales = () => {
     setLoading(true);
     try {
       const dateRange = getDateRange();
-      
-      // Don't fetch if custom range is selected but dates are not set
-      if (selectedTab === "custom" && (!dateRange.startDate || !dateRange.endDate)) {
+
+      if (
+        selectedTab === "custom" &&
+        (!dateRange.startDate || !dateRange.endDate)
+      ) {
         setLoading(false);
         return;
       }
@@ -101,10 +102,10 @@ const TotalCashSales = () => {
       const response = await axios.get(`${backendUrl}/api/reports/cash-sales`, {
         params: {
           startDate: dateRange.startDate,
-          endDate: dateRange.endDate
+          endDate: dateRange.endDate,
         },
       });
-      console.log('API Response:', response);
+      console.log("API Response:", response);
       setData(response.data.data || []);
     } catch (error) {
       console.error("Error fetching cash sales:", error);
@@ -114,18 +115,22 @@ const TotalCashSales = () => {
     }
   };
 
-  // Fetch data whenever selectedTab changes
   useEffect(() => {
-    if (selectedTab === "custom" && (!customDateRange.startDate || !customDateRange.endDate)) {
-      // Don't fetch for custom tab until dates are selected
+    if (
+      selectedTab === "custom" &&
+      (!customDateRange.startDate || !customDateRange.endDate)
+    ) {
       return;
     }
     fetchCashSales();
   }, [selectedTab]);
 
-  // Also fetch when custom dates change (if custom tab is active)
   useEffect(() => {
-    if (selectedTab === "custom" && customDateRange.startDate && customDateRange.endDate) {
+    if (
+      selectedTab === "custom" &&
+      customDateRange.startDate &&
+      customDateRange.endDate
+    ) {
       fetchCashSales();
     }
   }, [customDateRange.startDate, customDateRange.endDate]);
@@ -147,7 +152,6 @@ const TotalCashSales = () => {
 
     setSelectedTab("custom");
     setShowCustomFilter(false);
-    // Data will be fetched automatically by the useEffect
   };
 
   const handleTabChange = (tab) => {
@@ -155,7 +159,6 @@ const TotalCashSales = () => {
     if (tab === "custom") {
       setShowCustomFilter(true);
     }
-    // Data will be fetched automatically by the useEffect
   };
 
   const exportToExcel = () => {
@@ -164,26 +167,26 @@ const TotalCashSales = () => {
 
   const totalAmount = data.reduce((sum, item) => sum + (item.amount || 0), 0);
 
-  // Format date for display
   const formatDateForDisplay = (date) => {
     return date ? formatDateToReadable(date) : "";
   };
 
-  // Get active filter display text
   const getActiveFilterDisplay = () => {
     switch (selectedTab) {
       case "currentMonth":
         return `${getCurrentMonthName()} ${getCurrentYear()}`;
-      
+
       case "janToPreviousMonth":
         return getJanToPreviousMonthRange().label;
-      
+
       case "custom":
         if (customDateRange.startDate && customDateRange.endDate) {
-          return `${formatDateForDisplay(customDateRange.startDate)} to ${formatDateForDisplay(customDateRange.endDate)}`;
+          return `${formatDateForDisplay(
+            customDateRange.startDate
+          )} to ${formatDateForDisplay(customDateRange.endDate)}`;
         }
         return "Select custom dates";
-      
+
       default:
         return "";
     }
@@ -191,14 +194,14 @@ const TotalCashSales = () => {
 
   return (
     <div className="p-6">
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-3">
           <DollarSign className="w-8 h-8 text-green-600" />
           <h1 className="text-2xl font-bold text-gray-800">Total Cash Sales</h1>
         </div>
         <button
           onClick={exportToExcel}
-          className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg"
+          className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
         >
           <Download size={18} />
           Export Excel
@@ -206,7 +209,7 @@ const TotalCashSales = () => {
       </div>
 
       {/* Tabs */}
-      <div className="bg-white p-4 rounded-lg shadow-md mb-6">
+      <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-gray-200">
         <div className="flex flex-wrap gap-2 mb-4">
           <button
             onClick={() => handleTabChange("currentMonth")}
@@ -244,15 +247,13 @@ const TotalCashSales = () => {
         <div className="flex items-center gap-2 text-sm text-gray-600">
           <Filter size={16} />
           <span>Active Filter: </span>
-          <span className="font-medium">
-            {getActiveFilterDisplay()}
-          </span>
+          <span className="font-medium">{getActiveFilterDisplay()}</span>
         </div>
       </div>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-        <div className="bg-white p-6 rounded-lg shadow-md border-l-4 border-green-500">
+        <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-green-500 border border-gray-200">
           <div className="flex justify-between items-center">
             <div>
               <p className="text-sm text-gray-600">Total Cash Sales</p>
@@ -263,7 +264,7 @@ const TotalCashSales = () => {
             <DollarSign className="w-8 h-8 text-green-500" />
           </div>
         </div>
-        <div className="bg-white p-6 rounded-lg shadow-md border-l-4 border-blue-500">
+        <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-blue-500 border border-gray-200">
           <div className="flex justify-between items-center">
             <div>
               <p className="text-sm text-gray-600">Total Transactions</p>
@@ -274,71 +275,66 @@ const TotalCashSales = () => {
         </div>
       </div>
 
-      {/* Data Table */}
-      <div className="bg-white rounded-lg shadow-md overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50">
+      {/* Data Table - Updated to match Customer component layout */}
+      <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
+        <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
+          <thead className="bg-gray-100 text-gray-700 border-b">
+            <tr>
+              <th className="p-3 text-sm font-medium">Date</th>
+              <th className="p-3 text-sm font-medium">Invoice Number</th>
+              <th className="p-3 text-sm font-medium">Customer</th>
+              <th className="p-3 text-sm font-medium">Product</th>
+              <th className="p-3 text-sm font-medium">Amount ($)</th>
+              <th className="p-3 text-sm font-medium">Payment Method</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Date
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Invoice Number
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Customer
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Amount
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Payment Method
-                </th>
+                <td colSpan="6" className="p-3 text-center">
+                  Loading...
+                </td>
               </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {loading ? (
-                <tr>
-                  <td colSpan="5" className="px-6 py-4 text-center">
-                    Loading...
+            ) : data.length > 0 ? (
+              data.map((sale, index) => (
+                <tr
+                  key={index}
+                  className={`hover:bg-gray-50 ${
+                    index === data.length - 1 ? "" : "border-b"
+                  }`}
+                >
+                  <td className="p-3 text-sm text-gray-900">
+                    {formatDateToReadable(sale.deliveryDate)}
+                  </td>
+                  <td className="p-3 text-sm text-gray-900">
+                    {sale.invoiceNumber}
+                  </td>
+                  <td className="p-3 text-sm text-gray-900 capitalize">
+                    {sale.customerName}
+                  </td>
+                  <td className="p-3 text-sm text-gray-900 capitalize">
+                    {sale.productName}
+                  </td>
+                  <td className="p-3 text-sm font-semibold text-green-600">
+                    {sale.amount?.toLocaleString()}
+                  </td>
+                  <td className="p-3 text-sm text-gray-900 capitalize">
+                    {sale.paymentMethod || "Cash"}
                   </td>
                 </tr>
-              ) : data.length > 0 ? (
-                data.map((sale, index) => (
-                  <tr key={index} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {formatDateToReadable(sale.deliveryDate)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {sale.invoiceNumber}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {sale.customerName}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-green-600">
-                      ${sale.amount?.toLocaleString()}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {sale.paymentMethod}
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td
-                    colSpan="5"
-                    className="px-6 py-4 text-center text-gray-500"
-                  >
-                    {selectedTab === "custom" && (!customDateRange.startDate || !customDateRange.endDate)
-                      ? "Please select start and end dates"
-                      : "No cash sales data found for the selected period"}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+              ))
+            ) : (
+              <tr>
+                <td colSpan="6" className="p-3 text-center text-gray-500">
+                  {selectedTab === "custom" &&
+                  (!customDateRange.startDate || !customDateRange.endDate)
+                    ? "Please select start and end dates"
+                    : "No cash sales data found for the selected period"}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
 
       {/* Custom Filter Modal */}
@@ -373,7 +369,9 @@ const TotalCashSales = () => {
                   </label>
                   <DatePicker
                     selected={customDateRange.startDate}
-                    onChange={(date) => handleCustomDateChange("startDate", date)}
+                    onChange={(date) =>
+                      handleCustomDateChange("startDate", date)
+                    }
                     selectsStart
                     startDate={customDateRange.startDate}
                     endDate={customDateRange.endDate}
