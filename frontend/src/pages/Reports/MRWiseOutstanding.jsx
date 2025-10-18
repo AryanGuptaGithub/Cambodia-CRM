@@ -107,7 +107,11 @@ const MRWiseOutstanding = () => {
         };
 
       case "janToPreviousMonth":
-        return getJanToPreviousMonthRange();
+        const janToPrevRange = getJanToPreviousMonthRange();
+        return {
+          startDate: janToPrevRange.startDate,
+          endDate: janToPrevRange.endDate,
+        };
 
       case "custom":
         return {
@@ -134,14 +138,18 @@ const MRWiseOutstanding = () => {
         limit: 7,
       };
 
+      // Only add date parameters for tabs that require them
       if (selectedTab !== "all") {
         if (
           selectedTab === "custom" &&
           (!dateRange.startDate || !dateRange.endDate)
         ) {
           setLoading(false);
+          showToast("warning", "Please select both start and end dates for custom filter");
           return;
         }
+        
+        // Add date parameters for all non-"all" tabs
         params = {
           ...params,
           startDate: dateRange.startDate,
@@ -152,8 +160,6 @@ const MRWiseOutstanding = () => {
       if (search && search.trim() !== "") {
         params.search = search.trim();
       }
-
-      console.log("API Params:", params);
 
       const response = await axios.get(
         `${backendUrl}/api/mr-wise-outstanding`,
@@ -175,54 +181,20 @@ const MRWiseOutstanding = () => {
     } catch (error) {
       console.error("Error fetching MR wise outstanding:", error);
       showToast("error", "Failed to fetch MR wise outstanding data");
-      
-      // Mock data for demonstration
-      const mockData = {
+
+      // Reset data on error
+      setData({
         summary: {
-          totalOutstandingAmount: 125000,
-          totalCustomers: 45,
-          totalMRs: 8,
+          totalOutstandingAmount: 0,
+          totalCustomers: 0,
+          totalMRs: 0,
         },
-        records: [
-          {
-            mrId: "MR001",
-            mrName: "John Smith",
-            totalOutstandingAmount: 45000,
-            totalCustomers: 12,
-            contactNumber: "9876543210",
-            email: "john.smith@company.com"
-          },
-          {
-            mrId: "MR002",
-            mrName: "Sarah Johnson",
-            totalOutstandingAmount: 32000,
-            totalCustomers: 8,
-            contactNumber: "9876543211",
-            email: "sarah.j@company.com"
-          },
-          {
-            mrId: "MR003",
-            mrName: "Mike Wilson",
-            totalOutstandingAmount: 28000,
-            totalCustomers: 10,
-            contactNumber: "9876543212",
-            email: "mike.wilson@company.com"
-          },
-          {
-            mrId: "MR004",
-            mrName: "Emily Brown",
-            totalOutstandingAmount: 20000,
-            totalCustomers: 15,
-            contactNumber: "9876543213",
-            email: "emily.b@company.com"
-          }
-        ]
-      };
-      setData(mockData);
+        records: [],
+      });
       setPagination({
         currentPage: 1,
         totalPages: 1,
-        totalRecords: 4,
+        totalRecords: 0,
         hasNext: false,
         hasPrev: false,
       });
@@ -231,22 +203,32 @@ const MRWiseOutstanding = () => {
     }
   };
 
+  // Fetch data when tab changes
   useEffect(() => {
-    if (
-      selectedTab === "custom" &&
-      (!customDateRange.startDate || !customDateRange.endDate)
-    ) {
-      return;
+    if (selectedTab === "custom") {
+      // For custom tab, don't fetch until dates are selected
+      if (customDateRange.startDate && customDateRange.endDate) {
+        fetchMRWiseOutstanding(1);
+      } else {
+        // Clear data when custom tab is selected but no dates are chosen
+        setData({
+          summary: {
+            totalOutstandingAmount: 0,
+            totalCustomers: 0,
+            totalMRs: 0,
+          },
+          records: [],
+        });
+      }
+    } else {
+      // For other tabs, fetch immediately
+      fetchMRWiseOutstanding(1);
     }
-    fetchMRWiseOutstanding(1);
   }, [selectedTab]);
 
+  // Fetch data when custom dates change (only for custom tab)
   useEffect(() => {
-    if (
-      selectedTab === "custom" &&
-      customDateRange.startDate &&
-      customDateRange.endDate
-    ) {
+    if (selectedTab === "custom" && customDateRange.startDate && customDateRange.endDate) {
       fetchMRWiseOutstanding(1);
     }
   }, [customDateRange.startDate, customDateRange.endDate]);
@@ -298,7 +280,7 @@ const MRWiseOutstanding = () => {
 
     setSelectedTab("custom");
     setShowCustomFilter(false);
-    fetchMRWiseOutstanding(1);
+    // Data will be fetched automatically by the useEffect
   };
 
   const handleTabChange = (tab) => {
@@ -310,7 +292,7 @@ const MRWiseOutstanding = () => {
         startDate: null,
         endDate: null,
       });
-      fetchMRWiseOutstanding(1);
+      // Data will be fetched automatically by the useEffect
     }
   };
 
@@ -320,6 +302,7 @@ const MRWiseOutstanding = () => {
       endDate: null,
     });
     setSearchTerm("");
+    setSelectedTab("all");
   };
 
   const exportToExcel = () => {
@@ -587,12 +570,14 @@ const MRWiseOutstanding = () => {
                       <div className="text-sm font-medium text-gray-900 capitalize">
                         {mr.mrName}
                       </div>
-                      <div className="text-xs text-gray-500">{mr.email}</div>
+                      <div className="text-xs text-gray-500">
+                        {mr.staff.email}
+                      </div>
                     </div>
                   </td>
                   <td className="p-3">
                     <div className="text-sm text-gray-900">
-                      {mr.contactNumber || "N/A"}
+                      {mr.staff.contactNo || "N/A"}
                     </div>
                   </td>
                   <td className="p-3 text-sm font-semibold text-green-600">
