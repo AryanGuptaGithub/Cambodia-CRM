@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 const { Schema } = mongoose;
 
+// Helper function to round numeric values to two decimal places
 const roundToTwo = (value) => {
   if (typeof value !== "number") return value;
   return Math.round(value * 100) / 100;
@@ -14,15 +15,21 @@ const saleSummarySchema = new Schema(
     mrName: { type: String, required: true },
     customerCode: { type: String, required: true },
     productName: { type: String, required: true },
+
     salesQty: { type: Number, required: true },
     bonusQty: { type: Number, default: 0 },
     totalQty: { type: Number, required: true },
+
     sellingPrice: {
       type: Number,
       required: true,
       set: roundToTwo,
     },
-    amount: { type: Number, required: true, set: roundToTwo },
+    amount: {
+      type: Number,
+      required: true,
+      set: roundToTwo,
+    },
     discount: {
       type: Number,
       default: 0,
@@ -38,7 +45,6 @@ const saleSummarySchema = new Schema(
       required: true,
       set: roundToTwo,
     },
-
     lc: {
       type: Number,
       required: true,
@@ -49,28 +55,33 @@ const saleSummarySchema = new Schema(
       default: 0,
       set: roundToTwo,
     },
+
     creditDays: { type: Number, default: null },
     dueDate: { type: Date, required: false },
     deliveryDate: { type: Date, required: false },
     paidAmount: { type: Number, default: 0, set: roundToTwo },
     dueAmount: { type: Number, default: 0, set: roundToTwo },
+
     paymentStatus: {
       type: String,
-      enum: [
-        "Cash",
-        "Credit",
-        "Partial Paid",
-        "Overdue",
-      ],
+      enum: ["Cash", "Credit", "Partial Paid", "Overdue"],
       default: "Credit",
     },
+
     remark: { type: String, default: "" },
+
+    // ✅ New field added
+    isProductAccept: {
+      type: Boolean,
+      default: true, // Default is true as per your requirement
+    },
   },
   {
-    timestamps: true, 
+    timestamps: true, // Automatically adds createdAt and updatedAt
   }
 );
 
+// Model export
 const SaleSummary = mongoose.model("SaleSummary", saleSummarySchema);
 
 export default SaleSummary;

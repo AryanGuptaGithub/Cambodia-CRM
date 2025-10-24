@@ -1036,8 +1036,7 @@ const AddReturnSale = () => {
         showToast("error", "Please add at least one product");
         return;
       }
-      console.log("values of form", form);
-      // Create return sales data array
+
       const returnSalesData = validProducts.map((product) => ({
         recordingDate: form.recordingDate,
         invoiceNumber: form.invoiceNumber,
@@ -1071,7 +1070,6 @@ const AddReturnSale = () => {
       });
 
       const respData = await response.json();
-      console.log("respData", respData);
 
       if (!response.ok) {
         throw new Error(respData.error || "Something went wrong");

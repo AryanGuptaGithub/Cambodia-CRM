@@ -252,7 +252,6 @@ const Expenses = () => {
   }, [currentExpenses, selectedRows]);
 
   const handleEdit = useCallback((exp) => {
-    console.log("Editing expense:", exp); // Debug log
     setEditingExpense(exp);
     setEditForm({
       sourceAccount: exp.sourceAccount?._id || exp.sourceAccount || "",

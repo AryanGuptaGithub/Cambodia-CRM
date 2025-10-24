@@ -36,6 +36,13 @@ import {
   PieChart,
   UserSearch,
   Target,
+  MapPin,
+  Repeat,
+  CheckCircle,
+  Calculator,
+  UserPlus,
+  CalendarDays,
+  CalendarRange,
 } from "lucide-react";
 
 const masterPaths = ["/masterlayout/customer", "/masterlayout/supplier"];
@@ -77,6 +84,13 @@ const expensePaths = [
 const reportPaths = [
   "/reportlayout/payment",
   "/reportlayout/dailyreport",
+  "/reportlayout/averageprice",
+  "/reportlayout/newcustomeraddition",
+  "/reportlayout/customerretention",
+  "/reportlayout/customeracceptance",
+  "/reportlayout/zonewisecustomers",
+  "/reportlayout/monthlyrepeatrate",
+  "/reportlayout/annualrepeatrate",
   "/reportlayout/salesummary",
   "/reportlayout/dailysample",
   "/reportlayout/productsalessummary",
@@ -100,10 +114,20 @@ const utilityPaths = [
 
 const accountPaths = ["/accountlayout"];
 
+// Master Customer Report paths
+const masterCustomerReportPaths = [
+  "/reportlayout/customerretention",
+  "/reportlayout/customeracceptance",
+  "/reportlayout/zonewisecustomers",
+  "/reportlayout/monthlyrepeatrate",
+  "/reportlayout/annualrepeatrate",
+];
+
 function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
   const location = useLocation();
 
   const [activeParentMenu, setActiveParentMenu] = useState(null);
+  const [activeSubMenu, setActiveSubMenu] = useState(null);
 
   useEffect(() => {
     if (location.pathname.startsWith("/masterlayout")) {
@@ -118,6 +142,14 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
       setActiveParentMenu("expense");
     } else if (location.pathname.startsWith("/reportlayout")) {
       setActiveParentMenu("reports");
+      // Check if current path is under master customer reports
+      if (
+        masterCustomerReportPaths.some((path) =>
+          location.pathname.startsWith(path)
+        )
+      ) {
+        setActiveSubMenu("masterCustomerReports");
+      }
     } else if (location.pathname.startsWith("/utilitylayout")) {
       setActiveParentMenu("utility");
     } else if (location.pathname.startsWith("/hrmlayout")) {
@@ -137,6 +169,10 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
 
   const toggleMenu = (menuKey) => {
     setActiveParentMenu((prev) => (prev === menuKey ? null : menuKey));
+  };
+
+  const toggleSubMenu = (subMenuKey) => {
+    setActiveSubMenu((prev) => (prev === subMenuKey ? null : subMenuKey));
   };
 
   const getLinkClass = (path) =>
@@ -159,6 +195,13 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
       (activeParentMenu === key && isChildActive(paths))
         ? "bg-blue-300 text-gray-900 shadow-lg"
         : "hover:bg-gray-700 text-gray-200"
+    }`;
+
+  const getSubDropdownButtonClass = (key, paths) =>
+    `flex items-center justify-between w-full p-2 rounded-md transition-all duration-150 ${
+      activeSubMenu === key || (activeSubMenu === key && isChildActive(paths))
+        ? "bg-blue-200 text-gray-900 shadow-md"
+        : "hover:bg-gray-600 text-gray-200"
     }`;
 
   return (
@@ -465,6 +508,95 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
               >
                 <CreditCard className="w-4 h-4" />
                 <span className="mx-auto">Daily Reports</span>
+              </Link>
+
+              {/* New Report: Average Price Per Product */}
+              <Link
+                to="/reportlayout/averageprice"
+                className={getChildLinkClass("/reportlayout/averageprice")}
+              >
+                <Calculator className="w-4 h-4" />
+                <span className="mx-auto">Average Price Per Product</span>
+              </Link>
+
+              {/* New Report: New Customer Addition */}
+              <Link
+                to="/reportlayout/newcustomeraddition"
+                className={getChildLinkClass(
+                  "/reportlayout/newcustomeraddition"
+                )}
+              >
+                <UserPlus className="w-4 h-4" />
+                <span className="mx-auto">New Customer Addition</span>
+              </Link>
+
+              {/* Master Customer Report with Dropdown */}
+              <div>
+                <button
+                  onClick={() => toggleSubMenu("masterCustomerReports")}
+                  className={getSubDropdownButtonClass(
+                    "masterCustomerReports",
+                    masterCustomerReportPaths
+                  )}
+                >
+                  <span className="flex items-center gap-3">
+                    <Users className="w-4 h-4" />
+                    <span>Master Customer Report</span>
+                  </span>
+                  <ChevronDown
+                    className={`w-4 h-4 transform transition-transform ${
+                      activeSubMenu === "masterCustomerReports"
+                        ? "rotate-180"
+                        : ""
+                    }`}
+                  />
+                </button>
+                {activeSubMenu === "masterCustomerReports" && (
+                  <div className="ml-4 mt-1 space-y-1">
+                    <Link
+                      to="/reportlayout/customerretention"
+                      className={getChildLinkClass(
+                        "/reportlayout/customerretention"
+                      )}
+                    >
+                      <Repeat className="w-4 h-4" />
+                      <span>Customer Retention Rate</span>
+                    </Link>
+                    <Link
+                      to="/reportlayout/customeracceptance"
+                      className={getChildLinkClass(
+                        "/reportlayout/customeracceptance"
+                      )}
+                    >
+                      <CheckCircle className="w-4 h-4" />
+                      <span>Product Acceptance Rate</span>
+                    </Link>
+                    <Link
+                      to="/reportlayout/zonewisecustomers"
+                      className={getChildLinkClass(
+                        "/reportlayout/zonewisecustomers"
+                      )}
+                    >
+                      <MapPin className="w-4 h-4" />
+                      <span>Zone Wise Customers</span>
+                    </Link>
+                  </div>
+                )}
+              </div>
+              <Link
+                to="/reportlayout/monthlyrepeatrate"
+                className={getChildLinkClass("/reportlayout/monthlyrepeatrate")}
+              >
+                <CalendarDays className="w-4 h-4" />
+                <span>Monthly Customer Repeat Rate</span>
+              </Link>
+              {/* New Annual Customer Repeat Rate */}
+              <Link
+                to="/reportlayout/annualrepeatrate"
+                className={getChildLinkClass("/reportlayout/annualrepeatrate")}
+              >
+                <CalendarRange className="w-4 h-4" />
+                <span>Annual Customer Repeat Rate</span>
               </Link>
               <Link
                 to="/reportlayout/payment"

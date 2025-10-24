@@ -96,6 +96,17 @@ import Remittance from "./pages/Reports/Remittance";
 import MRWiseOutstanding from "./pages/Reports/MRWiseOutstanding";
 import MRWiseSales from "./pages/Reports/MRWiseSales";
 
+// Import new report components for the added sidebar items
+import AveragePricePerProduct from "./pages/Reports/AveragePricePerProduct";
+import NewCustomerAddition from "./pages/Reports/NewCustomerAddition";
+import CustomerRetentionRate from "./pages/Reports/CustomerRetentionRate";
+import CustomerProductAcceptanceRate from "./pages/Reports/CustomerProductAcceptanceRate";
+import ZoneWiseCustomers from "./pages/Reports/ZoneWiseCustomers";
+
+// Import new repeat rate components
+import MonthlyCustomerRepeatRate from "./pages/Reports/MonthlyCustomerRepeatRate";
+import AnnualCustomerRepeatRate from "./pages/Reports/AnnualCustomerRepeatRate";
+
 function App() {
   return (
     <>
@@ -186,6 +197,20 @@ function App() {
 
           <Route path="reportlayout" element={<ReportsLayout />}>
             <Route path="dailyreport" element={<AddDailReports />} />
+            
+            {/* New Report Routes - Added after Daily Reports */}
+            <Route path="averageprice" element={<AveragePricePerProduct />} />
+            <Route path="newcustomeraddition" element={<NewCustomerAddition />} />
+            
+            {/* Master Customer Report Routes */}
+            <Route path="customerretention" element={<CustomerRetentionRate />} />
+            <Route path="customeracceptance" element={<CustomerProductAcceptanceRate />} />
+            <Route path="zonewisecustomers" element={<ZoneWiseCustomers />} />
+            
+            {/* New Repeat Rate Routes */}
+            <Route path="monthlyrepeatrate" element={<MonthlyCustomerRepeatRate />} />
+            <Route path="annualrepeatrate" element={<AnnualCustomerRepeatRate />} />
+            
             <Route path="payment" element={<PaymentReports />} />
             <Route path="expensereport" element={<ExpenseReport />} />
             <Route

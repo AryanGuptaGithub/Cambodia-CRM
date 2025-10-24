@@ -834,14 +834,8 @@ const AddSale = () => {
       updateProduct(index, field, value);
 
       if (field === "productName") {
-        // Find the matching product and get its LC
         const lcValue = getProductLC(value);
-        console.log("LC Value:", lcValue);
-
-        // Now correctly update the 'lc' field for the same product index
         updateProduct(index, "lc", lcValue);
-
-        // Handle product suggestion UI
         productSuggestions.setIsOpen(index, true);
         productSuggestions.setDropdownTop(index);
         productSuggestions.setHighlightedIndex(index, 0);

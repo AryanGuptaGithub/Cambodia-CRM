@@ -28,6 +28,7 @@ const MRWiseSales = () => {
       totalOrders: 0,
       totalMRs: 0,
       averageOrderValue: 0,
+      totalCustomers: 0,
     },
     records: [],
   });
@@ -109,7 +110,11 @@ const MRWiseSales = () => {
         };
 
       case "janToPreviousMonth":
-        return getJanToPreviousMonthRange();
+        const janToPrevRange = getJanToPreviousMonthRange();
+        return {
+          startDate: janToPrevRange.startDate,
+          endDate: janToPrevRange.endDate,
+        };
 
       case "custom":
         return {
@@ -136,14 +141,18 @@ const MRWiseSales = () => {
         limit: 7,
       };
 
+      // Only add date parameters for tabs that require them
       if (selectedTab !== "all") {
         if (
           selectedTab === "custom" &&
           (!dateRange.startDate || !dateRange.endDate)
         ) {
           setLoading(false);
+          showToast("warning", "Please select both start and end dates for custom filter");
           return;
         }
+        
+        // Add date parameters for all non-"all" tabs
         params = {
           ...params,
           startDate: dateRange.startDate,
@@ -155,10 +164,8 @@ const MRWiseSales = () => {
         params.search = search.trim();
       }
 
-      console.log("API Params:", params);
-
       const response = await axios.get(
-        `${backendUrl}/api/reports/mr-wise-sales`,
+        `${backendUrl}/api/mr-wise-sales`,
         {
           params,
         }
@@ -177,63 +184,22 @@ const MRWiseSales = () => {
     } catch (error) {
       console.error("Error fetching MR wise sales:", error);
       showToast("error", "Failed to fetch MR wise sales data");
-      
-      // Mock data for demonstration
-      const mockData = {
+
+      // Reset data on error
+      setData({
         summary: {
-          totalSalesAmount: 285000,
-          totalOrders: 156,
-          totalMRs: 8,
-          averageOrderValue: 1827,
+          totalSalesAmount: 0,
+          totalOrders: 0,
+          totalMRs: 0,
+          averageOrderValue: 0,
+          totalCustomers: 0,
         },
-        records: [
-          {
-            mrId: "MR001",
-            mrName: "John Smith",
-            totalSalesAmount: 85000,
-            totalOrders: 42,
-            averageOrderValue: 2024,
-            contactNumber: "9876543210",
-            email: "john.smith@company.com",
-            region: "North"
-          },
-          {
-            mrId: "MR002",
-            mrName: "Sarah Johnson",
-            totalSalesAmount: 72000,
-            totalOrders: 38,
-            averageOrderValue: 1895,
-            contactNumber: "9876543211",
-            email: "sarah.j@company.com",
-            region: "South"
-          },
-          {
-            mrId: "MR003",
-            mrName: "Mike Wilson",
-            totalSalesAmount: 68000,
-            totalOrders: 35,
-            averageOrderValue: 1943,
-            contactNumber: "9876543212",
-            email: "mike.wilson@company.com",
-            region: "East"
-          },
-          {
-            mrId: "MR004",
-            mrName: "Emily Brown",
-            totalSalesAmount: 60000,
-            totalOrders: 41,
-            averageOrderValue: 1463,
-            contactNumber: "9876543213",
-            email: "emily.b@company.com",
-            region: "West"
-          }
-        ]
-      };
-      setData(mockData);
+        records: [],
+      });
       setPagination({
         currentPage: 1,
         totalPages: 1,
-        totalRecords: 4,
+        totalRecords: 0,
         hasNext: false,
         hasPrev: false,
       });
@@ -242,22 +208,34 @@ const MRWiseSales = () => {
     }
   };
 
+  // Fetch data when tab changes
   useEffect(() => {
-    if (
-      selectedTab === "custom" &&
-      (!customDateRange.startDate || !customDateRange.endDate)
-    ) {
-      return;
+    if (selectedTab === "custom") {
+      // For custom tab, don't fetch until dates are selected
+      if (customDateRange.startDate && customDateRange.endDate) {
+        fetchMRWiseSales(1);
+      } else {
+        // Clear data when custom tab is selected but no dates are chosen
+        setData({
+          summary: {
+            totalSalesAmount: 0,
+            totalOrders: 0,
+            totalMRs: 0,
+            averageOrderValue: 0,
+            totalCustomers: 0,
+          },
+          records: [],
+        });
+      }
+    } else {
+      // For other tabs, fetch immediately
+      fetchMRWiseSales(1);
     }
-    fetchMRWiseSales(1);
   }, [selectedTab]);
 
+  // Fetch data when custom dates change (only for custom tab)
   useEffect(() => {
-    if (
-      selectedTab === "custom" &&
-      customDateRange.startDate &&
-      customDateRange.endDate
-    ) {
+    if (selectedTab === "custom" && customDateRange.startDate && customDateRange.endDate) {
       fetchMRWiseSales(1);
     }
   }, [customDateRange.startDate, customDateRange.endDate]);
@@ -309,7 +287,6 @@ const MRWiseSales = () => {
 
     setSelectedTab("custom");
     setShowCustomFilter(false);
-    fetchMRWiseSales(1);
   };
 
   const handleTabChange = (tab) => {
@@ -321,7 +298,6 @@ const MRWiseSales = () => {
         startDate: null,
         endDate: null,
       });
-      fetchMRWiseSales(1);
     }
   };
 
@@ -331,6 +307,7 @@ const MRWiseSales = () => {
       endDate: null,
     });
     setSearchTerm("");
+    setSelectedTab("all");
   };
 
   const exportToExcel = () => {
@@ -506,7 +483,7 @@ const MRWiseSales = () => {
                 : "bg-gray-200 text-gray-700 hover:bg-gray-300"
             }`}
           >
-            Custom Filter
+            MR Wise Sales Filter
           </button>
         </div>
 
@@ -553,7 +530,7 @@ const MRWiseSales = () => {
             <Users className="w-8 h-8 text-purple-500" />
           </div>
         </div>
-        <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-orange-500 border border-gray-200">
+        {/* <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-orange-500 border border-gray-200">
           <div className="flex justify-between items-center">
             <div>
               <p className="text-sm text-gray-600">Avg Order Value</p>
@@ -563,7 +540,7 @@ const MRWiseSales = () => {
             </div>
             <User className="w-8 h-8 text-orange-500" />
           </div>
-        </div>
+        </div> */}
       </div>
 
       {/* Data Table */}

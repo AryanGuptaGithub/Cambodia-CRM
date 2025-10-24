@@ -156,8 +156,6 @@ const useReturnForm = () => {
         (p) => p.invoiceNumber?.toLowerCase() === value.toLowerCase()
       );
 
-      console.log("Found purchase:", purchase);
-
       if (purchase) {
         setForm((prev) => ({
           ...prev,
@@ -309,8 +307,6 @@ const useReturnForm = () => {
   const fetchPurchases = useCallback(async () => {
     try {
       const response = await axios.get(`${backendUrl}/api/purchase`);
-      console.log("values of response", response.data);
-      // Check the structure of your API response
       const purchaseData = response.data.reports || response.data || [];
       setPurchases(purchaseData);
       setFilteredPurchases(purchaseData);

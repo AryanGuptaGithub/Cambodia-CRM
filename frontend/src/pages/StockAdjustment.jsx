@@ -156,8 +156,6 @@ const StockAdjustment = () => {
     }
 
     try {
-      console.log("🔄 Sending bulk delete request with IDs:", selectedIds);
-
       const response = await axios.delete(
         `${backendUrl}/api/stock-adjustments/bulk`,
         {

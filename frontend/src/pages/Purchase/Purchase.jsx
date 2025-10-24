@@ -592,7 +592,6 @@ function Purchase() {
           fetchPurchaseDetails();
         }
       } catch (error) {
-        console.log("values of error", error);
         showToast("error", "Failed to delete purchase.");
       }
     }

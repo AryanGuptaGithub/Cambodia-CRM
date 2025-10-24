@@ -105,7 +105,6 @@ const TotalCashSales = () => {
           endDate: dateRange.endDate,
         },
       });
-      console.log("API Response:", response);
       setData(response.data.data || []);
     } catch (error) {
       console.error("Error fetching cash sales:", error);

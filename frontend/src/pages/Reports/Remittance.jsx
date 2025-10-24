@@ -317,9 +317,7 @@ const Remittance = () => {
           params.search = filter.search;
         }
       }
-
-      console.log("API Params:", params);
-
+      
       const response = await axios.get(`${backendUrl}/api/reports/remittance`, {
         params,
       });

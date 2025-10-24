@@ -2,7 +2,7 @@ import express from "express";
 import SaleSummary from "../../models/sale/saleSummary.js";
 const router = express.Router();
 
-router.get("/mr-wise-outstanding", async (req, res) => {
+router.get("/mr-wise-sales", async (req, res) => {
   try {
     const { page = 1, limit = 7, search, startDate, endDate } = req.query;
 
@@ -10,7 +10,7 @@ router.get("/mr-wise-outstanding", async (req, res) => {
     const limitNum = Math.max(1, parseInt(limit, 10));
     const skip = (pageNum - 1) * limitNum;
 
-    const matchConditions = { dueAmount: { $gt: 0 } };
+    const matchConditions = {};
 
     if (startDate && endDate) {
       const start = new Date(startDate);
@@ -32,18 +32,30 @@ router.get("/mr-wise-outstanding", async (req, res) => {
       matchConditions.mrName = { $regex: search.trim(), $options: "i" };
     }
 
-    // Base aggregation pipeline
+    // Base aggregation pipeline for all sales
     const basePipeline = [
       { $match: matchConditions },
 
+      // Group by MR to get sales summary
       {
         $group: {
           _id: "$mrName",
-          totalOutstandingAmount: { $sum: "$dueAmount" },
+          totalSalesAmount: { $sum: "$netSellingAmount" }, // Use netSellingAmount for total sales
+          totalOrders: { $sum: 1 }, // Count each document as an order
           uniqueCustomers: { $addToSet: "$customerCode" },
         },
       },
 
+      // Calculate average order value
+      {
+        $addFields: {
+          averageOrderValue: {
+            $round: [{ $divide: ["$totalSalesAmount", "$totalOrders"] }, 2]
+          }
+        }
+      },
+
+      // Lookup staff details
       {
         $lookup: {
           from: "staffs",
@@ -72,10 +84,13 @@ router.get("/mr-wise-outstanding", async (req, res) => {
         },
       },
 
+      // Format output
       {
         $project: {
           mrName: "$_id",
-          totalOutstandingAmount: { $round: ["$totalOutstandingAmount", 2] },
+          totalSalesAmount: { $round: ["$totalSalesAmount", 2] },
+          totalOrders: 1,
+          averageOrderValue: 1,
           totalCustomers: { $size: "$uniqueCustomers" },
           staff: {
             $cond: {
@@ -92,55 +107,73 @@ router.get("/mr-wise-outstanding", async (req, res) => {
         },
       },
 
-      { $sort: { totalOutstandingAmount: -1 } },
+      { $sort: { totalSalesAmount: -1 } }, // Sort by sales amount descending
     ];
 
     const [countResult, mrData, summaryResult] = await Promise.all([
+      // Count total records
       SaleSummary.aggregate([...basePipeline, { $count: "totalCount" }]),
       
+      // Get paginated data
       SaleSummary.aggregate([
         ...basePipeline,
         { $skip: skip },
         { $limit: limitNum },
       ]),
       
+      // Get summary data
       SaleSummary.aggregate([
         { $match: matchConditions },
         {
           $group: {
             _id: "$mrName",
-            totalOutstandingAmount: { $sum: "$dueAmount" },
+            totalSalesAmount: { $sum: "$netSellingAmount" },
+            totalOrders: { $sum: 1 },
             uniqueCustomers: { $addToSet: "$customerCode" },
           },
         },
         {
           $group: {
             _id: null,
-            totalOutstandingAmount: {
-              $sum: { $round: ["$totalOutstandingAmount", 2] },
-            },
+            totalSalesAmount: { $sum: { $round: ["$totalSalesAmount", 2] } },
+            totalOrders: { $sum: "$totalOrders" },
             totalCustomers: { $sum: { $size: "$uniqueCustomers" } },
             totalMRs: { $sum: 1 },
           },
         },
+        {
+          $addFields: {
+            averageOrderValue: {
+              $round: [{ $divide: ["$totalSalesAmount", "$totalOrders"] }, 2]
+            }
+          }
+        }
       ]),
     ]);
 
     const totalRecords = countResult[0]?.totalCount || 0;
     const totalPages = Math.ceil(totalRecords / limitNum);
 
+    // Format records with sequential IDs
     const records = mrData.map((mr, index) => ({
       mrId: `MR${String(skip + index + 1).padStart(3, "0")}`,
       mrName: mr.mrName,
-      totalOutstandingAmount: mr.totalOutstandingAmount,
+      totalSalesAmount: mr.totalSalesAmount,
+      totalOrders: mr.totalOrders,
+      averageOrderValue: mr.averageOrderValue,
       totalCustomers: mr.totalCustomers,
       staff: mr.staff,
+      region: mr.staff.teamName || "Not Available", // Use teamName as region
+      email: mr.staff.email,
+      contactNumber: mr.staff.contactNo,
     }));
 
     const summary = summaryResult[0] || {
-      totalOutstandingAmount: 0,
+      totalSalesAmount: 0,
+      totalOrders: 0,
       totalCustomers: 0,
       totalMRs: 0,
+      averageOrderValue: 0,
     };
 
     res.json({
@@ -157,7 +190,7 @@ router.get("/mr-wise-outstanding", async (req, res) => {
       },
     });
   } catch (err) {
-    console.error("Error in /mr-wise-outstanding:", err);
+    console.error("Error in /mr-wise-sales:", err);
     res.status(500).json({
       error: "Internal server error",
       message: err.message,

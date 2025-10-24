@@ -145,10 +145,13 @@ const MRWiseOutstanding = () => {
           (!dateRange.startDate || !dateRange.endDate)
         ) {
           setLoading(false);
-          showToast("warning", "Please select both start and end dates for custom filter");
+          showToast(
+            "warning",
+            "Please select both start and end dates for custom filter"
+          );
           return;
         }
-        
+
         // Add date parameters for all non-"all" tabs
         params = {
           ...params,
@@ -228,7 +231,11 @@ const MRWiseOutstanding = () => {
 
   // Fetch data when custom dates change (only for custom tab)
   useEffect(() => {
-    if (selectedTab === "custom" && customDateRange.startDate && customDateRange.endDate) {
+    if (
+      selectedTab === "custom" &&
+      customDateRange.startDate &&
+      customDateRange.endDate
+    ) {
       fetchMRWiseOutstanding(1);
     }
   }, [customDateRange.startDate, customDateRange.endDate]);
@@ -620,7 +627,7 @@ const MRWiseOutstanding = () => {
               </button>
 
               <h2 className="text-lg font-semibold text-gray-800 mb-4">
-                Custom Filter
+                MR Wise Outstanding Filter
               </h2>
 
               <div className="space-y-4 mb-6">

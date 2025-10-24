@@ -28,9 +28,6 @@ const PurchaseInventoryExcelDownload = ({ data = [] }) => {
     fetchSuppliers();
   }, [fetchSuppliers]);
 
-  console.log("Product names from hook:", productNames);
-  console.log("Suppliers from API:", suppliers);
-
   const generateExcel = async () => {
     try {
       const workbook = new ExcelJS.Workbook();
@@ -127,10 +124,6 @@ const PurchaseInventoryExcelDownload = ({ data = [] }) => {
             .filter((name) => name && name.trim() !== "")
         ),
       ];
-
-      console.log("Unique product names for dropdown:", uniqueProductNames);
-
-      // Process supplier names for dropdown - extract names from API response
       const uniqueSupplierNames = [
         ...new Set(
           suppliers
@@ -145,21 +138,14 @@ const PurchaseInventoryExcelDownload = ({ data = [] }) => {
         ),
       ];
 
-      console.log("Unique supplier names for dropdown:", uniqueSupplierNames);
-
-      // Create hidden dropdown sheets if we have data
       if (uniqueProductNames.length > 0 || uniqueSupplierNames.length > 0) {
         const dropdownSheet = workbook.addWorksheet("DropdownData");
         dropdownSheet.state = "veryHidden";
 
-        // Write product names to dropdown sheet starting from column A
         if (uniqueProductNames.length > 0) {
           uniqueProductNames.forEach((product, index) => {
             dropdownSheet.getCell(`A${index + 1}`).value = product;
           });
-          console.log(
-            `Product dropdown values written: ${uniqueProductNames.length} products`
-          );
         }
 
         // Write supplier names to dropdown sheet starting from column B
@@ -167,9 +153,6 @@ const PurchaseInventoryExcelDownload = ({ data = [] }) => {
           uniqueSupplierNames.forEach((supplier, index) => {
             dropdownSheet.getCell(`B${index + 1}`).value = supplier;
           });
-          console.log(
-            `Supplier dropdown values written: ${uniqueSupplierNames.length} suppliers`
-          );
         }
 
         // Set up dropdown for Product Name column (Column F)
@@ -198,7 +181,6 @@ const PurchaseInventoryExcelDownload = ({ data = [] }) => {
               );
             }
           }
-          console.log("Product name dropdown setup completed");
         }
 
         // Set up dropdown for Supplier Name column (Column G)
@@ -227,13 +209,9 @@ const PurchaseInventoryExcelDownload = ({ data = [] }) => {
               );
             }
           }
-          console.log("Supplier name dropdown setup completed");
         }
-      } else {
-        console.warn("No product or supplier names available for dropdown");
       }
 
-      // === Apply borders to all data cells ===
       for (let i = 4; i <= worksheet.rowCount; i++) {
         const row = worksheet.getRow(i);
         if (row) {

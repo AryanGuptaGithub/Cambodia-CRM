@@ -157,9 +157,6 @@ const TotalExpense = () => {
         }
       );
 
-      console.log("API Response:", response);
-
-      // Set data and summary from API response
       setData(response.data.data || []);
       setSummary(
         response.data.summary || {

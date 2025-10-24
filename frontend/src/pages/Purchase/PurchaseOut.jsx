@@ -332,8 +332,6 @@ const PurchaseOut = () => {
         remarks: newPayment.remarks,
       };
 
-      console.log("Sending payment data:", paymentToAdd);
-
       const response = await axios.post(
         `${backendUrl}/api/payments-out`,
         paymentToAdd
@@ -358,7 +356,6 @@ const PurchaseOut = () => {
         showToast("success", "Payment added successfully");
       }
     } catch (error) {
-      console.log("Error details:", error.response?.data || error.message);
       console.error("Error adding payment:", error);
 
       // Show specific error message from backend if available

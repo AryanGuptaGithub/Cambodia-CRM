@@ -946,8 +946,6 @@ const AddTransactionModal = ({
       remarks: form.remarks || "",
     };
 
-    console.log('valuesof transactionData', transactionData)
-    // Add supplier for payment inward/remittance/outward
     if (requiresSupplier || isPaymentOutward) {
       transactionData.supplier = form.supplier;
     }
@@ -1486,9 +1484,6 @@ const CashAndBank = () => {
     try {
       // Remove all parameters including searchTerm
       const response = await axios.get(`${backendUrl}/api/transaction`);
-
-      console.log("values of response", response);
-
       if (response.data.success) {
         const { data: transactions, destinations } = response.data;
 

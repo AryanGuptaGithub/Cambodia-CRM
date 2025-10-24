@@ -1,6 +1,7 @@
 import express from "express";
 import mongoose from "mongoose";
 import SalesReturn from "../../models/sale/saleReturn.js";
+import SaleSummary from "../../models/sale/saleSummary.js";
 
 const router = express.Router();
 
@@ -37,6 +38,7 @@ router.post("/salesreturn", async (req, res) => {
       "paymentStatus",
     ];
 
+    // Validate and format each record
     const processedData = data.map((record, index) => {
       for (const field of requiredFields) {
         if (record[field] === undefined || record[field] === null) {
@@ -63,10 +65,25 @@ router.post("/salesreturn", async (req, res) => {
       };
     });
 
+    // Save all sales return records
     const savedReturns = await SalesReturn.insertMany(processedData);
 
+    // ✅ Update SaleSummary: set isProductAccept = false
+    const updatePromises = processedData.map((record) =>
+      SaleSummary.updateMany(
+        {
+          invoiceNumber: record.invoiceNumber,
+          productName: record.productName,
+          customerCode: record.customerCode,
+        },
+        { $set: { isProductAccept: false } }
+      )
+    );
+
+    await Promise.all(updatePromises);
+
     return res.status(201).json({
-      message: `${savedReturns.length} sales return records saved successfully.`,
+      message: `${savedReturns.length} sales return records saved successfully, and related sales updated.`,
       data: savedReturns,
     });
   } catch (error) {

@@ -71,7 +71,6 @@ const Customer = () => {
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm]);
- console.log('valueso f ', customers);
   const filteredCustomers = customers.filter(
     (r) =>
       r.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -342,7 +341,6 @@ const Customer = () => {
 
   // Import parsed customers to backend
   const handleImport = async () => {
-    console.log("values of parsed", parsedData);
     if (parsedData.length === 0) {
       showToast("warning", "Please upload a valid file first");
       return;

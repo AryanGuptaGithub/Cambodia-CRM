@@ -205,7 +205,6 @@ const OutstandingCollection = () => {
       }));
 
       setCustomerOptions(options);
-      console.log(`Loaded ${options.length} customers from API`);
     } catch (error) {
       console.error("Error fetching customers:", error);
       showToast("error", "Failed to fetch customer list");
@@ -325,9 +324,7 @@ const OutstandingCollection = () => {
           params.status = filter.status;
         }
       }
-
-      console.log("API Params:", params);
-
+      
       const response = await axios.get(
         `${backendUrl}/api/reports/outstanding-collections`,
         {

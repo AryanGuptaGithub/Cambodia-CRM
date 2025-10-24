@@ -31,7 +31,6 @@ const SampleExcelDownloadCustomer = () => {
 
   const generateExcel = async () => {
     if (provincesLoading) {
-      console.log("Still loading provinces...");
       return;
     }
 

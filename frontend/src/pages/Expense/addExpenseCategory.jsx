@@ -205,7 +205,6 @@ const AddExpenseCategory = ({
         );
       }
 
-      console.log("values of response", response);
       if (response.data.success) {
         showToast("success", `${response.data.message}`);
         navigate("/expenselayout/expensecategories");

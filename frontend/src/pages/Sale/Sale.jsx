@@ -5,7 +5,16 @@ import React, {
   useCallback,
   useRef,
 } from "react";
-import { UserPlus, Trash2, Edit, Upload, X, Eye, Search,Settings } from "lucide-react";
+import {
+  UserPlus,
+  Trash2,
+  Edit,
+  Upload,
+  X,
+  Eye,
+  Search,
+  Settings,
+} from "lucide-react";
 import ReactDOM from "react-dom";
 import SampleExcelDownloadSale from "../../excels/SampleExcelDownloadSale";
 import { handleAxiosError } from "../../utils/errorHandler";
@@ -567,7 +576,6 @@ const Sales = () => {
   const enhancedHandleChange = useCallback(
     (e) => {
       const { name, value } = e.target;
-      console.log("values of name", name, value);
       if (name === "paymentStatus" || name === "productName") {
         updateFormField(name, value);
       } else {
@@ -1349,64 +1357,64 @@ const Sales = () => {
               )}
             </tbody>
           </table>
-        
-        {currentSales.length > 0 && (
-          <div className="mt-4 p-5 flex justify-start gap-2">
-            <button
-              onClick={() => {
-                setCurrentPage((prev) => {
-                  const prevPage = Math.max(prev - 1, 1);
-                  window.scrollTo({ top: 0, behavior: "smooth" });
-                  return prevPage;
-                });
-              }}
-              disabled={currentPage === 1}
-              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-            >
-              Prev
-            </button>
 
-            {visiblePages.map((page, idx) =>
-              page === "..." ? (
-                <span
-                  key={`sales-ellipsis-${idx}`}
-                  className="px-3 py-1 text-gray-500 select-none cursor-pointer"
-                >
-                  ...
-                </span>
-              ) : (
-                <button
-                  key={page}
-                  onClick={() => {
-                    setCurrentPage(page);
+          {currentSales.length > 0 && (
+            <div className="mt-4 p-5 flex justify-start gap-2">
+              <button
+                onClick={() => {
+                  setCurrentPage((prev) => {
+                    const prevPage = Math.max(prev - 1, 1);
                     window.scrollTo({ top: 0, behavior: "smooth" });
-                  }}
-                  className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
-                    currentPage === page
-                      ? "bg-indigo-600 text-white"
-                      : "bg-gray-200 hover:bg-gray-300"
-                  }`}
-                >
-                  {page}
-                </button>
-              )
-            )}
+                    return prevPage;
+                  });
+                }}
+                disabled={currentPage === 1}
+                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+              >
+                Prev
+              </button>
 
-            <button
-              onClick={() => {
-                setCurrentPage((prev) => {
-                  const nextPage = Math.min(prev + 1, totalPages);
-                  window.scrollTo({ top: 0, behavior: "smooth" });
-                  return nextPage;
-                });
-              }}
-              disabled={currentPage === totalPages}
-              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-            >
-              Next
-            </button>
-          </div>
-        )}
+              {visiblePages.map((page, idx) =>
+                page === "..." ? (
+                  <span
+                    key={`sales-ellipsis-${idx}`}
+                    className="px-3 py-1 text-gray-500 select-none cursor-pointer"
+                  >
+                    ...
+                  </span>
+                ) : (
+                  <button
+                    key={page}
+                    onClick={() => {
+                      setCurrentPage(page);
+                      window.scrollTo({ top: 0, behavior: "smooth" });
+                    }}
+                    className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
+                      currentPage === page
+                        ? "bg-indigo-600 text-white"
+                        : "bg-gray-200 hover:bg-gray-300"
+                    }`}
+                  >
+                    {page}
+                  </button>
+                )
+              )}
+
+              <button
+                onClick={() => {
+                  setCurrentPage((prev) => {
+                    const nextPage = Math.min(prev + 1, totalPages);
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                    return nextPage;
+                  });
+                }}
+                disabled={currentPage === totalPages}
+                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+              >
+                Next
+              </button>
+            </div>
+          )}
         </div>
 
         {showImportModal &&
@@ -1975,12 +1983,6 @@ const Sales = () => {
                         )
                       }
                       onSuggestionSelect={(value, isHighlight) => {
-                        console.log(
-                          "Payment status selected:",
-                          value,
-                          "isHighlight:",
-                          isHighlight
-                        );
                         if (isHighlight) {
                           // Just highlight, don't update form
                           handlePaymentStatusHighlight(value, false);
