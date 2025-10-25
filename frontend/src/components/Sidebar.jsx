@@ -9,9 +9,7 @@ import {
   FileText,
   ChevronDown,
   Settings,
-  Building2,
-  Tags,
-  Layers,
+  Truck,
   Boxes,
   Barcode,
   CreditCard,
@@ -19,7 +17,6 @@ import {
   FileBarChart,
   Wallet,
   UserCog,
-  Truck,
   ClipboardList,
   DollarSign,
   Briefcase,
@@ -28,7 +25,6 @@ import {
   ListChecks,
   Calendar,
   Umbrella,
-  UserCheck,
   UsersRound,
   Coins,
   Landmark,
@@ -43,6 +39,15 @@ import {
   UserPlus,
   CalendarDays,
   CalendarRange,
+  Percent,
+  Scale,
+  TrendingDown,
+  Globe,
+  HandCoins,
+  Database,
+  TrendingUp as TrendingUpIcon,
+  PackageSearch,
+  Layers,
 } from "lucide-react";
 
 const masterPaths = ["/masterlayout/customer", "/masterlayout/supplier"];
@@ -105,14 +110,38 @@ const reportPaths = [
   "/reportlayout/outstandingcollection",
   "/reportlayout/totalexpense",
   "/reportlayout/remittance",
+  "/reportlayout/province-wise-sale",
+  "/reportlayout/province-wise-customer",
+  "/reportlayout/pl-report",
+  "/reportlayout/reports-in-hand",
+  "/reportlayout/product-performance",
+  "/reportlayout/stock-movement",
+  "/reportlayout/slow-moving-items",
+  "/reportlayout/product-profitability",
+  "/reportlayout/product-report", // Added the new route
 ];
 
-const utilityPaths = [
-  "/utilitylayout/productcard",
-  "/utilitylayout/frontsettings",
+// Finance Report paths
+const financeReportPaths = [
+  "/reportlayout/sales-salary-ratio",
+  "/reportlayout/salary-cogs-ratio",
+  "/reportlayout/operation-cost-cogs-ratio",
+  "/reportlayout/operation-cost-sales-ratio",
+  "/reportlayout/tour-expense-sales-ratio",
+  "/reportlayout/pl-report",
 ];
 
-const accountPaths = ["/accountlayout"];
+// Reports in Hand paths
+const reportsInHandPaths = ["/reportlayout/reports-in-hand"];
+
+// Product Report paths
+const productReportPaths = [
+  "/reportlayout/product-performance",
+  "/reportlayout/stock-movement",
+  "/reportlayout/slow-moving-items",
+  "/reportlayout/product-profitability",
+  "/reportlayout/product-report", // Added the new route
+];
 
 // Master Customer Report paths
 const masterCustomerReportPaths = [
@@ -123,11 +152,23 @@ const masterCustomerReportPaths = [
   "/reportlayout/annualrepeatrate",
 ];
 
+const utilityPaths = [
+  "/utilitylayout/productcard",
+  "/utilitylayout/frontsettings",
+];
+
+const accountPaths = ["/accountlayout"];
+
 function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
   const location = useLocation();
 
   const [activeParentMenu, setActiveParentMenu] = useState(null);
   const [activeSubMenu, setActiveSubMenu] = useState(null);
+  const [activeFinanceSubMenu, setActiveFinanceSubMenu] = useState(null);
+  const [activeReportsInHandSubMenu, setActiveReportsInHandSubMenu] =
+    useState(null);
+  const [activeProductReportSubMenu, setActiveProductReportSubMenu] =
+    useState(null);
 
   useEffect(() => {
     if (location.pathname.startsWith("/masterlayout")) {
@@ -149,6 +190,23 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
         )
       ) {
         setActiveSubMenu("masterCustomerReports");
+      }
+      // Check if current path is under finance reports
+      if (
+        financeReportPaths.some((path) => location.pathname.startsWith(path))
+      ) {
+        setActiveFinanceSubMenu("financeReports");
+      }
+      // Check if current path is under reports in hand
+      if (
+        reportsInHandPaths.some((path) => location.pathname.startsWith(path))
+      ) {
+        setActiveReportsInHandSubMenu("reportsInHand");
+      }
+      if (
+        productReportPaths.some((path) => location.pathname.startsWith(path))
+      ) {
+        setActiveProductReportSubMenu("productReports");
       }
     } else if (location.pathname.startsWith("/utilitylayout")) {
       setActiveParentMenu("utility");
@@ -173,6 +231,24 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
 
   const toggleSubMenu = (subMenuKey) => {
     setActiveSubMenu((prev) => (prev === subMenuKey ? null : subMenuKey));
+  };
+
+  const toggleFinanceSubMenu = (subMenuKey) => {
+    setActiveFinanceSubMenu((prev) =>
+      prev === subMenuKey ? null : subMenuKey
+    );
+  };
+
+  const toggleReportsInHandSubMenu = (subMenuKey) => {
+    setActiveReportsInHandSubMenu((prev) =>
+      prev === subMenuKey ? null : subMenuKey
+    );
+  };
+
+  const toggleProductReportSubMenu = (subMenuKey) => {
+    setActiveProductReportSubMenu((prev) =>
+      prev === subMenuKey ? null : subMenuKey
+    );
   };
 
   const getLinkClass = (path) =>
@@ -204,6 +280,30 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
         : "hover:bg-gray-600 text-gray-200"
     }`;
 
+  const getFinanceSubDropdownButtonClass = (key, paths) =>
+    `flex items-center justify-between w-full p-2 rounded-md transition-all duration-150 ${
+      activeFinanceSubMenu === key ||
+      (activeFinanceSubMenu === key && isChildActive(paths))
+        ? "bg-blue-200 text-gray-900 shadow-md"
+        : "hover:bg-gray-600 text-gray-200"
+    }`;
+
+  const getReportsInHandSubDropdownButtonClass = (key, paths) =>
+    `flex items-center justify-between w-full p-2 rounded-md transition-all duration-150 ${
+      activeReportsInHandSubMenu === key ||
+      (activeReportsInHandSubMenu === key && isChildActive(paths))
+        ? "bg-blue-200 text-gray-900 shadow-md"
+        : "hover:bg-gray-600 text-gray-200"
+    }`;
+
+  const getProductReportSubDropdownButtonClass = (key, paths) =>
+    `flex items-center justify-between w-full p-2 rounded-md transition-all duration-150 ${
+      activeProductReportSubMenu === key ||
+      (activeProductReportSubMenu === key && isChildActive(paths))
+        ? "bg-blue-200 text-gray-900 shadow-md"
+        : "hover:bg-gray-600 text-gray-200"
+    }`;
+
   return (
     <div
       className={`bg-gray-900 text-white transition-all duration-300 ${
@@ -211,8 +311,12 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
       } flex flex-col`}
     >
       {/* Logo */}
-      <div className="flex items-center justify-center py-4 text-lg font-bold border-b border-gray-700">
-        {isOpen ? "CRM" : "C"}
+      <div className="w-full h-16 flex items-center justify-center border-b border-gray-700 bg-gray-900">
+        <img
+          src="/mainlogo.png"
+          alt="CRM Logo"
+          className={`${isOpen ? "h-10" : "h-8"} object-contain`}
+        />
       </div>
 
       {/* Navigation */}
@@ -598,6 +702,82 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                 <CalendarRange className="w-4 h-4" />
                 <span>Annual Customer Repeat Rate</span>
               </Link>
+
+              {/* Product Reports Link */}
+              <Link
+                to="/reportlayout/product-report"
+                className={getChildLinkClass("/reportlayout/product-report")}
+              >
+                <PackageSearch className="w-4 h-4" />
+                <span className="mx-auto">Product Reports</span>
+              </Link>
+
+              <Link
+                to="/reportlayout/mrwiseoutstanding"
+                className={getChildLinkClass("/reportlayout/mrwiseoutstanding")}
+              >
+                <UserSearch className="w-4 h-4" />
+                <span className="mx-auto">MR Wise Outstanding</span>
+              </Link>
+              <Link
+                to="/reportlayout/mrwisesales"
+                className={getChildLinkClass("/reportlayout/mrwisesales")}
+              >
+                <Target className="w-4 h-4" />
+                <span className="mx-auto">MR Wise Sales</span>
+              </Link>
+              {/* New Report Links */}
+              <Link
+                to="/reportlayout/cashsales"
+                className={getChildLinkClass("/reportlayout/cashsales")}
+              >
+                <DollarSign className="w-4 h-4" />
+                <span className="mx-auto">Total Cash Sales</span>
+              </Link>
+              <Link
+                to="/reportlayout/outstandingcollection"
+                className={getChildLinkClass(
+                  "/reportlayout/outstandingcollection"
+                )}
+              >
+                <Receipt className="w-4 h-4" />
+                <span className="mx-auto">Outstanding Collection</span>
+              </Link>
+              <Link
+                to="/reportlayout/totalexpense"
+                className={getChildLinkClass("/reportlayout/totalexpense")}
+              >
+                <PieChart className="w-4 h-4" />
+                <span className="mx-auto">Total Expense</span>
+              </Link>
+              <Link
+                to="/reportlayout/remittance"
+                className={getChildLinkClass("/reportlayout/remittance")}
+              >
+                <Coins className="w-4 h-4" />
+                <span className="mx-auto">Remittance</span>
+              </Link>
+
+              {/* New Province Wise Reports - Added before Payment */}
+              <Link
+                to="/reportlayout/province-wise-sale"
+                className={getChildLinkClass(
+                  "/reportlayout/province-wise-sale"
+                )}
+              >
+                <Globe className="w-4 h-4" />
+                <span className="mx-auto">Province Wise Sale</span>
+              </Link>
+              <Link
+                to="/reportlayout/province-wise-customer"
+                className={getChildLinkClass(
+                  "/reportlayout/province-wise-customer"
+                )}
+              >
+                <Users className="w-4 h-4" />
+                <span className="mx-auto">Province Wise Customer</span>
+              </Link>
+
               <Link
                 to="/reportlayout/payment"
                 className={getChildLinkClass("/reportlayout/payment")}
@@ -605,6 +785,95 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                 <CreditCard className="w-4 h-4" />
                 <span className="mx-auto">Payments</span>
               </Link>
+
+              {/* Finance Reports Section */}
+              <div>
+                <button
+                  onClick={() => toggleFinanceSubMenu("financeReports")}
+                  className={getFinanceSubDropdownButtonClass(
+                    "financeReports",
+                    financeReportPaths
+                  )}
+                >
+                  <span className="flex items-center gap-3">
+                    <FileBarChart className="w-4 h-4" />
+                    <span>Finance Reports</span>
+                  </span>
+                  <ChevronDown
+                    className={`w-4 h-4 transform transition-transform ${
+                      activeFinanceSubMenu === "financeReports"
+                        ? "rotate-180"
+                        : ""
+                    }`}
+                  />
+                </button>
+                {activeFinanceSubMenu === "financeReports" && (
+                  <div className="ml-4 mt-1 space-y-1">
+                    <Link
+                      to="/reportlayout/sales-salary-ratio"
+                      className={getChildLinkClass(
+                        "/reportlayout/sales-salary-ratio"
+                      )}
+                    >
+                      <Percent className="w-4 h-4" />
+                      <span>Sales / Salary Ratio</span>
+                    </Link>
+                    <Link
+                      to="/reportlayout/salary-cogs-ratio"
+                      className={getChildLinkClass(
+                        "/reportlayout/salary-cogs-ratio"
+                      )}
+                    >
+                      <Scale className="w-4 h-4" />
+                      <span>Salary / COGS Ratio</span>
+                    </Link>
+                    <Link
+                      to="/reportlayout/operation-cost-cogs-ratio"
+                      className={getChildLinkClass(
+                        "/reportlayout/operation-cost-cogs-ratio"
+                      )}
+                    >
+                      <TrendingDown className="w-4 h-4" />
+                      <span>Operation Cost / COGS</span>
+                    </Link>
+                    <Link
+                      to="/reportlayout/operation-cost-sales-ratio"
+                      className={getChildLinkClass(
+                        "/reportlayout/operation-cost-sales-ratio"
+                      )}
+                    >
+                      <BarChart3 className="w-4 h-4" />
+                      <span>Operation Cost / Sales</span>
+                    </Link>
+                    <Link
+                      to="/reportlayout/tour-expense-sales-ratio"
+                      className={getChildLinkClass(
+                        "/reportlayout/tour-expense-sales-ratio"
+                      )}
+                    >
+                      <MapPin className="w-4 h-4" />
+                      <span>Tour Expense / Sales</span>
+                    </Link>
+                    <Link
+                      to="/reportlayout/pl-report"
+                      className={getChildLinkClass("/reportlayout/pl-report")}
+                    >
+                      <FileBarChart className="w-4 h-4" />
+                      <span>P&L Report</span>
+                    </Link>
+                  </div>
+                )}
+              </div>
+
+              {/* Reports in Hand Section - Added after Finance Reports */}
+              <Link
+                to="/reportlayout/reports-in-hand"
+                className={getChildLinkClass("/reportlayout/reports-in-hand")}
+              >
+                <HandCoins className="w-4 h-4" />
+                <span>Reports in Hand</span>
+              </Link>
+
               <Link
                 to="/reportlayout/salesummary"
                 className={getChildLinkClass("/reportlayout/salesummary")}
@@ -663,51 +932,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                 <DollarSign className="w-4 h-4" />
                 <span className="mx-auto">Profit & Loss</span>
               </Link>
-              <Link
-                to="/reportlayout/mrwiseoutstanding"
-                className={getChildLinkClass("/reportlayout/mrwiseoutstanding")}
-              >
-                <UserSearch className="w-4 h-4" />
-                <span className="mx-auto">MR Wise Outstanding</span>
-              </Link>
-              <Link
-                to="/reportlayout/mrwisesales"
-                className={getChildLinkClass("/reportlayout/mrwisesales")}
-              >
-                <Target className="w-4 h-4" />
-                <span className="mx-auto">MR Wise Sales</span>
-              </Link>
-              {/* New Report Links */}
-              <Link
-                to="/reportlayout/cashsales"
-                className={getChildLinkClass("/reportlayout/cashsales")}
-              >
-                <DollarSign className="w-4 h-4" />
-                <span className="mx-auto">Total Cash Sales</span>
-              </Link>
-              <Link
-                to="/reportlayout/outstandingcollection"
-                className={getChildLinkClass(
-                  "/reportlayout/outstandingcollection"
-                )}
-              >
-                <Receipt className="w-4 h-4" />
-                <span className="mx-auto">Outstanding Collection</span>
-              </Link>
-              <Link
-                to="/reportlayout/totalexpense"
-                className={getChildLinkClass("/reportlayout/totalexpense")}
-              >
-                <PieChart className="w-4 h-4" />
-                <span className="mx-auto">Total Expense</span>
-              </Link>
-              <Link
-                to="/reportlayout/remittance"
-                className={getChildLinkClass("/reportlayout/remittance")}
-              >
-                <Coins className="w-4 h-4" />
-                <span className="mx-auto">Remittance</span>
-              </Link>
             </div>
           )}
         </div>
@@ -759,13 +983,11 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
           )}
         </div>
 
-        {/* Online Orders */}
         <Link to="/onlineorder" className={getLinkClass("/onlineorder")}>
           <ShoppingCart className="w-5 h-5" />
           {isOpen && <span className="mx-auto">Online Orders</span>}
         </Link>
 
-        {/* HRM */}
         <div>
           <button
             onClick={() => toggleMenu("hrm")}
@@ -831,7 +1053,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
           )}
         </div>
 
-        {/* Settings */}
         <button
           onClick={openSettingsSidebar}
           className="flex items-center gap-15 w-full p-2 rounded-md hover:bg-gray-700 text-gray-200"

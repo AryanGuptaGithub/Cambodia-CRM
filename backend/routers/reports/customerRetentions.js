@@ -3,6 +3,7 @@ import Customer from "../../models/master/customer.js";
 import SaleSummary from "../../models/sale/saleSummary.js";
 const router = express.Router();
 
+// Customer Retention by Zone (original endpoint - keep as is)
 router.get("/customer-retention", async (req, res) => {
   try {
     const { page = 1, limit = 7, search = "", period = "all" } = req.query;
@@ -10,43 +11,35 @@ router.get("/customer-retention", async (req, res) => {
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
 
-    // Calculate date range based on period
+    // Date filter
     let dateFilter = {};
     if (period === "last_month") {
       const now = new Date();
       const firstDayOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       const lastDayOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
-      
-      dateFilter = {
-        invoiceDate: {
-          $gte: firstDayOfLastMonth,
-          $lte: lastDayOfLastMonth
-        }
-      };
+      dateFilter = { invoiceDate: { $gte: firstDayOfLastMonth, $lte: lastDayOfLastMonth } };
     }
 
-    // Build search condition
+    // Search filter
     let searchCondition = {};
-    if (search && search.trim() !== "") {
-      const searchRegex = new RegExp(search.trim(), "i");
+    if (search.trim() !== "") {
+      const regex = new RegExp(search.trim(), "i");
       searchCondition = {
         $or: [
-          { zone: searchRegex },
-          { name: searchRegex },
-          { customerCode: searchRegex },
-          { medicalRepName: searchRegex },
-          { province: searchRegex },
+          { zone: regex },
+          { name: regex },
+          { customerCode: regex },
+          { medicalRepName: regex },
+          { province: regex },
         ],
       };
     }
 
-    const retentionPipeline = [
-      // Match based on search condition
-      ...(Object.keys(searchCondition).length > 0
-        ? [{ $match: searchCondition }]
-        : []),
+    console.time("⏱️ customer-retention-query");
 
-      // Lookup sales for each customer using customerCode with date filter
+    // Single pipeline using $facet for both pagination + summary
+    const pipeline = [
+      ...(Object.keys(searchCondition).length > 0 ? [{ $match: searchCondition }] : []),
       {
         $lookup: {
           from: "salesummaries",
@@ -55,184 +48,15 @@ router.get("/customer-retention", async (req, res) => {
           as: "sales",
           pipeline: [
             ...(Object.keys(dateFilter).length > 0 ? [{ $match: dateFilter }] : []),
-            { $project: { invoiceDate: 1 } }
-          ]
+            { $project: { invoiceDate: 1 } },
+          ],
         },
       },
-      // Group by zone and calculate metrics
-      {
-        $group: {
-          _id: "$zone",
-          zoneName: { $first: "$zone" },
-          totalCustomers: { $sum: 1 },
-          customerDetails: {
-            $push: {
-              customerId: "$_id",
-              customerName: "$name",
-              customerCode: "$customerCode",
-              typeOfBusiness: "$typeOfBusiness",
-              contactNumber: "$customerNumber",
-              province: "$province",
-              address: "$address",
-              medicalRepName: "$medicalRepName",
-              totalSales: { $size: "$sales" },
-              firstPurchaseDate: { $min: "$sales.invoiceDate" },
-              lastPurchaseDate: { $max: "$sales.invoiceDate" },
-              isRepeatCustomer: {
-                $cond: [{ $gt: [{ $size: "$sales" }, 1] }, true, false],
-              },
-              isActiveCustomer: {
-                $cond: [
-                  {
-                    $and: [
-                      { $ne: [{ $max: "$sales.invoiceDate" }, null] },
-                      {
-                        $gte: [
-                          { $max: "$sales.invoiceDate" },
-                          new Date(Date.now() - 90 * 24 * 60 * 60 * 1000),
-                        ],
-                      },
-                    ],
-                  },
-                  true,
-                  false,
-                ],
-              },
-            },
-          },
-        },
-      },
-      // Calculate retention metrics
       {
         $addFields: {
-          retainedCustomers: {
-            $size: {
-              $filter: {
-                input: "$customerDetails",
-                as: "customer",
-                cond: { $eq: ["$$customer.isActiveCustomer", true] },
-              },
-            },
-          },
-          repeatCustomers: {
-            $size: {
-              $filter: {
-                input: "$customerDetails",
-                as: "customer",
-                cond: { $eq: ["$$customer.isRepeatCustomer", true] },
-              },
-            },
-          },
-          retentionRate: {
-            $cond: [
-              { $gt: ["$totalCustomers", 0] },
-              {
-                $multiply: [
-                  {
-                    $divide: [
-                      {
-                        $size: {
-                          $filter: {
-                            input: "$customerDetails",
-                            as: "customer",
-                            cond: {
-                              $eq: ["$$customer.isActiveCustomer", true],
-                            },
-                          },
-                        },
-                      },
-                      "$totalCustomers",
-                    ],
-                  },
-                  100,
-                ],
-              },
-              0,
-            ],
-          },
-        },
-      },
-      // Project final fields
-      {
-        $project: {
-          zoneId: "$_id",
-          zoneName: 1,
-          totalCustomers: 1,
-          retainedCustomers: 1,
-          repeatCustomers: 1,
-          retentionRate: { $round: ["$retentionRate", 2] },
-          customers: {
-            $map: {
-              input: "$customerDetails",
-              as: "customer",
-              in: {
-                customerId: "$$customer.customerId",
-                customerName: "$$customer.customerName",
-                customerCode: "$$customer.customerCode",
-                typeOfBusiness: "$$customer.typeOfBusiness",
-                contactNumber: "$$customer.contactNumber",
-                province: "$$customer.province",
-                address: "$$customer.address",
-                medicalRepName: "$$customer.medicalRepName",
-                totalSales: "$$customer.totalSales",
-                firstPurchaseDate: "$$customer.firstPurchaseDate",
-                lastPurchaseDate: "$$customer.lastPurchaseDate",
-                isRepeatCustomer: "$$customer.isRepeatCustomer",
-                isActiveCustomer: "$$customer.isActiveCustomer",
-              },
-            },
-          },
-        },
-      },
-      // Sort by retention rate and total customers
-      {
-        $sort: {
-          retentionRate: -1,
-          totalCustomers: -1,
-        },
-      },
-    ];
-
-    // Get total count for pagination
-    const totalCountAggregation = [
-      ...retentionPipeline.slice(0, -2), // Remove sort and project for count
-      { $count: "totalCount" },
-    ];
-
-    const totalCountResult = await Customer.aggregate(totalCountAggregation);
-    const totalCount = totalCountResult[0]?.totalCount || 0;
-    const totalPages = Math.ceil(totalCount / limitNum);
-
-    // Add pagination to main pipeline
-    const paginatedPipeline = [
-      ...retentionPipeline,
-      { $skip: skip },
-      { $limit: limitNum },
-    ];
-
-    // Execute the aggregation pipeline
-    const records = await Customer.aggregate(paginatedPipeline);
-
-    // Calculate overall summary with date filter
-    const summaryPipeline = [
-      // Lookup sales for all customers with date filter
-      {
-        $lookup: {
-          from: "salesummaries",
-          localField: "customerCode",
-          foreignField: "customerCode",
-          as: "sales",
-          pipeline: [
-            ...(Object.keys(dateFilter).length > 0 ? [{ $match: dateFilter }] : []),
-            { $project: { invoiceDate: 1 } }
-          ]
-        },
-      },
-      // Calculate customer metrics
-      {
-        $project: {
           totalSales: { $size: "$sales" },
-          lastSaleDate: { $max: "$sales.invoiceDate" },
+          firstPurchaseDate: { $min: "$sales.invoiceDate" },
+          lastPurchaseDate: { $max: "$sales.invoiceDate" },
           isRepeatCustomer: { $gt: [{ $size: "$sales" }, 1] },
           isActiveCustomer: {
             $cond: [
@@ -253,101 +77,130 @@ router.get("/customer-retention", async (req, res) => {
           },
         },
       },
-      // Group to get overall statistics
       {
-        $group: {
-          _id: null,
-          totalCustomers: { $sum: 1 },
-          repeatCustomers: {
-            $sum: { $cond: ["$isRepeatCustomer", 1, 0] },
-          },
-          retainedCustomers: {
-            $sum: { $cond: ["$isActiveCustomer", 1, 0] },
-          },
-        },
-      },
-      // Calculate rates
-      {
-        $project: {
-          totalCustomers: 1,
-          repeatCustomers: 1,
-          retainedCustomers: 1,
-          retentionRate: {
-            $cond: [
-              { $gt: ["$totalCustomers", 0] },
-              {
-                $multiply: [
-                  { $divide: ["$retainedCustomers", "$totalCustomers"] },
-                  100,
-                ],
+        $facet: {
+          paginated: [
+            {
+              $group: {
+                _id: "$zone",
+                zoneName: { $first: "$zone" },
+                totalCustomers: { $sum: 1 },
+                retainedCustomers: {
+                  $sum: { $cond: ["$isActiveCustomer", 1, 0] },
+                },
+                repeatCustomers: {
+                  $sum: { $cond: ["$isRepeatCustomer", 1, 0] },
+                },
+                customers: {
+                  $push: {
+                    customerId: "$_id",
+                    customerName: "$name",
+                    customerCode: "$customerCode",
+                    typeOfBusiness: "$typeOfBusiness",
+                    contactNumber: "$customerNumber",
+                    province: "$province",
+                    address: "$address",
+                    medicalRepName: "$medicalRepName",
+                    totalSales: "$totalSales",
+                    firstPurchaseDate: "$firstPurchaseDate",
+                    lastPurchaseDate: "$lastPurchaseDate",
+                    isRepeatCustomer: "$isRepeatCustomer",
+                    isActiveCustomer: "$isActiveCustomer",
+                  },
+                },
               },
-              0,
-            ],
-          },
-          repeatRate: {
-            $cond: [
-              { $gt: ["$totalCustomers", 0] },
-              {
-                $multiply: [
-                  { $divide: ["$repeatCustomers", "$totalCustomers"] },
-                  100,
-                ],
+            },
+            {
+              $addFields: {
+                retentionRate: {
+                  $cond: [
+                    { $gt: ["$totalCustomers", 0] },
+                    {
+                      $round: [
+                        {
+                          $multiply: [
+                            { $divide: ["$retainedCustomers", "$totalCustomers"] },
+                            100,
+                          ],
+                        },
+                        2,
+                      ],
+                    },
+                    0,
+                  ],
+                },
               },
-              0,
-            ],
-          },
+            },
+            { $sort: { retentionRate: -1, totalCustomers: -1 } },
+            { $skip: skip },
+            { $limit: limitNum },
+          ],
+          summary: [
+            {
+              $group: {
+                _id: null,
+                totalCustomers: { $sum: 1 },
+                retainedCustomers: { $sum: { $cond: ["$isActiveCustomer", 1, 0] } },
+                repeatCustomers: { $sum: { $cond: ["$isRepeatCustomer", 1, 0] } },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                totalCustomers: 1,
+                retainedCustomers: 1,
+                repeatCustomers: 1,
+                retentionRate: {
+                  $cond: [
+                    { $gt: ["$totalCustomers", 0] },
+                    {
+                      $round: [
+                        {
+                          $multiply: [
+                            { $divide: ["$retainedCustomers", "$totalCustomers"] },
+                            100,
+                          ],
+                        },
+                        2,
+                      ],
+                    },
+                    0,
+                  ],
+                },
+              },
+            },
+          ],
+          totalCount: [{ $count: "count" }],
         },
       },
     ];
 
-    const summaryResult = await Customer.aggregate(summaryPipeline);
-    const summary = summaryResult[0] || {
-      totalCustomers: 0,
-      retainedCustomers: 0,
-      repeatCustomers: 0,
-      retentionRate: 0,
-      repeatRate: 0,
-    };
+    const result = await Customer.aggregate(pipeline);
+    console.timeEnd("⏱️ customer-retention-query");
 
-    const responseData = {
+    const summary = result[0].summary[0] || {};
+    const records = result[0].paginated || [];
+    const totalCount = result[0].totalCount[0]?.count || 0;
+    const totalPages = Math.ceil(totalCount / limitNum);
+
+    res.json({
       success: true,
-      data: {
-        summary: {
-          totalCustomers: summary.totalCustomers,
-          retainedCustomers: summary.retainedCustomers,
-          retentionRate: Math.round(summary.retentionRate * 100) / 100,
-          repeatCustomers: summary.repeatCustomers,
-        },
-        records: records.map((record) => ({
-          zoneId: record.zoneId,
-          zoneName: record.zoneName,
-          totalCustomers: record.totalCustomers,
-          retainedCustomers: record.retainedCustomers,
-          repeatCustomers: record.repeatCustomers,
-          retentionRate: record.retentionRate,
-          customers: record.customers || [],
-        })),
-      },
+      data: { summary, records },
       pagination: {
         currentPage: pageNum,
-        totalPages: totalPages,
+        totalPages,
         totalRecords: totalCount,
         hasNext: pageNum < totalPages,
         hasPrev: pageNum > 1,
       },
-    };
-
-    res.json(responseData);
-  } catch (error) {
-    console.error("Error in customer retention API:", error);
-    res.status(500).json({
-      success: false,
-      error: "Failed to fetch customer retention data",
-      message: error.message,
     });
+  } catch (error) {
+    console.error("❌ Error in /customer-retention:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
+// Annual Customer Repeat Rate (individual customer records)
 router.get("/annual-customer-repeat-rate", async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -367,17 +220,6 @@ router.get("/annual-customer-repeat-rate", async (req, res) => {
           $gte: firstDayOfLastYear,
           $lte: lastDayOfLastYear,
         },
-      };
-    } else if (period === "last_month") {
-      const now = new Date();
-      const firstDayOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const lastDayOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
-      
-      dateFilter = {
-        invoiceDate: {
-          $gte: firstDayOfLastMonth,
-          $lte: lastDayOfLastMonth
-        }
       };
     }
 
@@ -546,6 +388,200 @@ router.get("/annual-customer-repeat-rate", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Server error while fetching annual customer repeat rate data",
+      error: error.message,
+    });
+  }
+});
+
+// Monthly Customer Repeat Rate (similar to annual but for monthly period)
+router.get("/monthly-customer-repeat-rate", async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 7;
+    const search = req.query.search?.trim() || "";
+    const period = req.query.period || "last_month";
+
+    // Calculate date range based on period
+    let dateFilter = {};
+    if (period === "last_month") {
+      const now = new Date();
+      const firstDayOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const lastDayOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+
+      dateFilter = {
+        invoiceDate: {
+          $gte: firstDayOfLastMonth,
+          $lte: lastDayOfLastMonth,
+        },
+      };
+    }
+
+    // 🔍 Match filter for search and date
+    const matchQuery = { ...dateFilter };
+    if (search) {
+      matchQuery.$or = [
+        { "customerDetails.name": { $regex: search, $options: "i" } },
+        { "customerDetails.customerCode": { $regex: search, $options: "i" } },
+        { mrName: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    // 🧮 Aggregation pipeline for monthly repeat rate
+    const pipeline = [
+      { $match: matchQuery },
+      {
+        $lookup: {
+          from: "customers",
+          localField: "customerCode",
+          foreignField: "customerCode",
+          as: "customerDetails",
+        },
+      },
+      {
+        $unwind: {
+          path: "$customerDetails",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $group: {
+          _id: "$customerCode",
+          customerName: { $first: "$customerDetails.name" },
+          customerCode: { $first: "$customerCode" },
+          totalPurchases: { $sum: 1 },
+          firstPurchaseDate: { $min: "$invoiceDate" },
+          lastPurchaseDate: { $max: "$invoiceDate" },
+          totalAmount: { $sum: "$totalAmount" },
+        },
+      },
+      {
+        $addFields: {
+          isRepeatCustomer: {
+            $cond: {
+              if: { $gte: ["$totalPurchases", 2] },
+              then: true,
+              else: false,
+            },
+          },
+        },
+      },
+      { $sort: { totalPurchases: -1, lastPurchaseDate: -1 } },
+    ];
+
+    // Get total count for pagination
+    const countPipeline = [...pipeline];
+    countPipeline.push({ $count: "total" });
+
+    const countResult = await SaleSummary.aggregate(countPipeline);
+    const totalRecords = countResult.length > 0 ? countResult[0].total : 0;
+    const totalPages = Math.ceil(totalRecords / limit);
+
+    // Apply pagination to main pipeline
+    pipeline.push({ $skip: (page - 1) * limit }, { $limit: limit });
+
+    const records = await SaleSummary.aggregate(pipeline);
+
+    // 📊 Calculate summary statistics
+    const summaryPipeline = [
+      { $match: matchQuery },
+      {
+        $lookup: {
+          from: "customers",
+          localField: "customerCode",
+          foreignField: "customerCode",
+          as: "customerDetails",
+        },
+      },
+      {
+        $group: {
+          _id: "$customerCode",
+          totalPurchases: { $sum: 1 },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalCustomers: { $sum: 1 },
+          repeatCustomers: {
+            $sum: {
+              $cond: [{ $gte: ["$totalPurchases", 2] }, 1, 0],
+            },
+          },
+          newCustomers: {
+            $sum: {
+              $cond: [{ $eq: ["$totalPurchases", 1] }, 1, 0],
+            },
+          },
+        },
+      },
+      {
+        $project: {
+          totalCustomers: 1,
+          repeatCustomers: 1,
+          newCustomers: 1,
+          repeatRate: {
+            $cond: [
+              { $eq: ["$totalCustomers", 0] },
+              0,
+              {
+                $multiply: [
+                  { $divide: ["$repeatCustomers", "$totalCustomers"] },
+                  100,
+                ],
+              },
+            ],
+          },
+        },
+      },
+    ];
+
+    const summaryResult = await SaleSummary.aggregate(summaryPipeline);
+    const summary =
+      summaryResult.length > 0
+        ? summaryResult[0]
+        : {
+            totalCustomers: 0,
+            repeatCustomers: 0,
+            newCustomers: 0,
+            repeatRate: 0,
+          };
+
+    // ✅ Format the response records
+    const formattedRecords = records.map((record) => ({
+      customerCode: record.customerCode,
+      customerName: record.customerName || "N/A",
+      totalPurchases: record.totalPurchases,
+      firstPurchaseDate: record.firstPurchaseDate,
+      lastPurchaseDate: record.lastPurchaseDate,
+      isRepeatCustomer: record.isRepeatCustomer,
+      totalAmount: record.totalAmount || 0,
+    }));
+
+    // ✅ Send response
+    res.status(200).json({
+      success: true,
+      data: {
+        summary: {
+          totalCustomers: summary.totalCustomers,
+          repeatCustomers: summary.repeatCustomers,
+          repeatRate: parseFloat(summary.repeatRate.toFixed(2)),
+          newCustomers: summary.newCustomers,
+        },
+        records: formattedRecords,
+      },
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalRecords,
+        hasNext: page < totalPages,
+        hasPrev: page > 1,
+      },
+    });
+  } catch (error) {
+    console.error("❌ Error fetching monthly customer repeat rate data:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error while fetching monthly customer repeat rate data",
       error: error.message,
     });
   }

@@ -38,6 +38,9 @@ import newCustomer from "./routers/reports/newCustomer.js";
 import zoneWiseCustomer from "./routers/reports/zoneWiseCustomer.js";
 import customerRetention from "./routers/reports/customerRetentions.js";
 import customerExpentationRatio from "./routers/reports/customerExpentationRatio.js";
+import provinceWiseSaleRoutes from './routers/reports/provinceWiseSale.js';
+import provinceWiseCustomerRoutes from './routers/reports/provinceWiseCustomer.js';
+import stockInHand from "./routers/reports/stockInHand.js";
 
 dotenv.config(); // Load environment variables
 
@@ -109,6 +112,10 @@ app.use("/api", newCustomer);
 app.use("/api",zoneWiseCustomer);
 app.use("/api", customerRetention);
 app.use("/api", customerExpentationRatio);
+app.use("/api", provinceWiseSaleRoutes);
+app.use("/api", provinceWiseCustomerRoutes);
+app.use("/api", stockInHand);
+
 // Server listener
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);

@@ -68,8 +68,6 @@ const CustomerProductAcceptanceRate = () => {
         { params }
       );
 
-      console.log("📊 Backend Response:", response.data);
-
       setData(
         response.data.data || {
           summary: {

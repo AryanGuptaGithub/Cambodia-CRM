@@ -61,12 +61,9 @@ const AveragePricePerProduct = () => {
       const response = await axios.get(`${backendUrl}/api/products`, {
         params,
       });
-      console.log("values of response", response);
-
-      // Transform the API response to match your frontend structure
+ 
       const products = response.data || [];
 
-      // Calculate summary statistics
       const totalProducts = products.length;
       const averagePrice =
         totalProducts > 0
@@ -294,7 +291,6 @@ const AveragePricePerProduct = () => {
         </div>
       </td>
       <td className="p-3 text-sm font-semibold text-blue-600">
-        {console.log(product)}
         {(product.averagePrice || product.lc || 0)?.toLocaleString(
           undefined,
           { maximumFractionDigits: 2 }

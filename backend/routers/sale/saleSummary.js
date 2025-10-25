@@ -5,6 +5,7 @@ import Product from "../../models/projectManger/product.js";
 import customer from "../../models/master/customer.js";
 import ExcelJS from "exceljs";
 import SalesReturn from "../../models/sale/saleReturn.js";
+import ReportInHand from "../../models/reports/reportsInHand.js";
 
 const router = express.Router();
 
@@ -32,6 +33,127 @@ const formatDateToReadable = (isoString) => {
   }).format(date);
 };
 
+// Function to update ReportInHand inventory after sale
+const updateReportInHandAfterSale = async (productName, salesQty, bonusQty) => {
+  try {
+    const totalQtyToDeduct = salesQty + bonusQty;
+    
+    if (totalQtyToDeduct <= 0) return;
+
+    // Find the product in ReportInHand
+    const existingProduct = await ReportInHand.findOne({ 
+      productName: productName 
+    });
+
+    if (!existingProduct) {
+      console.warn(`⚠️ Product "${productName}" not found in ReportInHand inventory`);
+      return 0; // Return 0 as LC value
+    }
+
+    // Check if there's enough stock
+    if (existingProduct.quantity.totalPieces < totalQtyToDeduct) {
+      throw new Error(`Insufficient stock for product "${productName}". Available: ${existingProduct.quantity.totalPieces}, Required: ${totalQtyToDeduct}`);
+    }
+
+    // Calculate how many boxes and pieces to deduct
+    const piecesPerBox = existingProduct.quantity.piecesPerBox || 1;
+    let remainingPiecesToDeduct = totalQtyToDeduct;
+    
+    // Calculate boxes to deduct
+    const boxesToDeduct = Math.floor(remainingPiecesToDeduct / piecesPerBox);
+    remainingPiecesToDeduct -= boxesToDeduct * piecesPerBox;
+
+    // Update the inventory
+    const updatedBoxes = existingProduct.quantity.boxes - boxesToDeduct;
+    const updatedTotalPieces = existingProduct.quantity.totalPieces - totalQtyToDeduct;
+
+    // Update status based on new total quantity
+    let updatedStatus = 'In Stock';
+    if (updatedTotalPieces === 0) {
+      updatedStatus = 'Out of Stock';
+    } else if (updatedTotalPieces < 10) {
+      updatedStatus = 'Critical';
+    } else if (updatedTotalPieces < 25) {
+      updatedStatus = 'Low Stock';
+    }
+
+    await ReportInHand.findByIdAndUpdate(
+      existingProduct._id,
+      {
+        $set: {
+          'quantity.boxes': updatedBoxes,
+          'quantity.totalPieces': updatedTotalPieces,
+          'status': updatedStatus
+        }
+      }
+    );
+
+    console.log(`✅ Updated inventory for "${productName}": Deducted ${totalQtyToDeduct} pieces (${boxesToDeduct} boxes)`);
+    
+    // Return the LC value for profit/loss calculation
+    return existingProduct.lc || 0;
+    
+  } catch (error) {
+    console.error(`❌ Error updating ReportInHand for product "${productName}":`, error.message);
+    throw error;
+  }
+};
+
+// Function to restore inventory when sale is deleted
+const restoreReportInHandAfterSaleDeletion = async (productName, salesQty, bonusQty) => {
+  try {
+    const totalQtyToRestore = salesQty + bonusQty;
+    
+    if (totalQtyToRestore <= 0) return;
+
+    const existingProduct = await ReportInHand.findOne({ 
+      productName: productName 
+    });
+
+    if (!existingProduct) {
+      console.warn(`⚠️ Product "${productName}" not found in ReportInHand inventory during restoration`);
+      return;
+    }
+
+    const piecesPerBox = existingProduct.quantity.piecesPerBox || 1;
+    let remainingPiecesToRestore = totalQtyToRestore;
+    
+    // Calculate boxes to restore
+    const boxesToRestore = Math.floor(remainingPiecesToRestore / piecesPerBox);
+    remainingPiecesToRestore -= boxesToRestore * piecesPerBox;
+
+    const updatedBoxes = existingProduct.quantity.boxes + boxesToRestore;
+    const updatedTotalPieces = existingProduct.quantity.totalPieces + totalQtyToRestore;
+
+    // Update status based on new total quantity
+    let updatedStatus = 'In Stock';
+    if (updatedTotalPieces === 0) {
+      updatedStatus = 'Out of Stock';
+    } else if (updatedTotalPieces < 10) {
+      updatedStatus = 'Critical';
+    } else if (updatedTotalPieces < 25) {
+      updatedStatus = 'Low Stock';
+    }
+
+    await ReportInHand.findByIdAndUpdate(
+      existingProduct._id,
+      {
+        $set: {
+          'quantity.boxes': updatedBoxes,
+          'quantity.totalPieces': updatedTotalPieces,
+          'status': updatedStatus
+        }
+      }
+    );
+
+    console.log(`✅ Restored inventory for "${productName}": Added ${totalQtyToRestore} pieces (${boxesToRestore} boxes)`);
+    
+  } catch (error) {
+    console.error(`❌ Error restoring ReportInHand for product "${productName}":`, error.message);
+    throw error;
+  }
+};
+
 router.post("/sale/import", async (req, res) => {
   try {
     const parsedData = req.body;
@@ -48,18 +170,6 @@ router.post("/sale/import", async (req, res) => {
       const date = new Date(Math.round((value - 25569) * 86400 * 1000));
       return isNaN(date.getTime()) ? null : date;
     };
-
-    // Preload products with lc in a map for efficiency
-    const allProducts = await Product.find(
-      {},
-      { productName: 1, lc: 1 }
-    ).lean();
-    const lcMap = {};
-    allProducts.forEach((p) => {
-      if (p.productName) {
-        lcMap[p.productName.trim().toLowerCase()] = p.lc;
-      }
-    });
 
     parsedData.forEach((item, index) => {
       const rowNumber = index + 2;
@@ -89,29 +199,21 @@ router.post("/sale/import", async (req, res) => {
         return addSkip("Missing or invalid 'invoiceDate'");
       }
 
-      // Fetch lc from product map
-      const lookupName = item.productName
-        ? item.productName.trim().toLowerCase()
-        : "";
-      const lcFromProduct = lcMap[lookupName];
-      if (lcFromProduct === undefined || lcFromProduct === null) {
-        return addSkip(
-          `Could not find 'lc' for productName '${item.productName}'`
-        );
-      }
-
       // === Conversions and calculations ===
       const salesQty = Number(item.salesQty) || 0;
       const bonusQty = Number(item.bonusQty) || 0;
       const totalQty = salesQty + bonusQty;
       const sellingPrice = Number(item.sellingPrice) || 0;
       const discount = Number(item.discount) || 0;
-      const lc = Number(lcFromProduct) || 0; // using fetched lc
       const paidAmount = Number(item.paidAmount) || 0;
 
       const amount = salesQty * sellingPrice;
       const netSellingAmount = amount - discount;
       const averageUnitPrice = totalQty > 0 ? netSellingAmount / totalQty : 0;
+      
+      // LC will be fetched from ReportInHand during inventory update
+      const lc = 0; // Placeholder, will be updated after inventory update
+      
       const profitLoss = netSellingAmount - totalQty * lc;
       const dueAmount = netSellingAmount - paidAmount;
 
@@ -137,9 +239,9 @@ router.post("/sale/import", async (req, res) => {
         amount,
         discount,
         netSellingAmount,
-        lc,
+        lc, // Will be updated after inventory update
         averageUnitPrice,
-        profitLoss,
+        profitLoss, // Will be recalculated after LC is set
         creditDays,
         dueDate,
         deliveryDate,
@@ -153,18 +255,60 @@ router.post("/sale/import", async (req, res) => {
     if (validDocs.length === 0) {
       return res.status(400).json({
         message:
-          "❌ No valid rows to import. Please check required fields and product lc mapping.",
+          "❌ No valid rows to import. Please check required fields.",
         skippedRows,
       });
     }
 
-    const inserted = await SaleSummary.insertMany(validDocs);
+    // Insert sales records and update inventory
+    const insertedSales = [];
+    const inventoryUpdates = [];
+
+    for (const saleData of validDocs) {
+      if (saleData.salesQty > 0 || saleData.bonusQty > 0) {
+        try {
+          // Update inventory and get LC value
+          const lcValue = await updateReportInHandAfterSale(
+            saleData.productName, 
+            saleData.salesQty, 
+            saleData.bonusQty
+          );
+          
+          // Update sale data with actual LC and recalculate profit/loss
+          saleData.lc = lcValue || 0;
+          saleData.profitLoss = saleData.netSellingAmount - (saleData.totalQty * saleData.lc);
+
+          const insertedSale = await SaleSummary.create(saleData);
+          insertedSales.push(insertedSale);
+          
+          inventoryUpdates.push({
+            productName: saleData.productName,
+            status: 'success',
+            deducted: saleData.salesQty + saleData.bonusQty,
+            lc: lcValue
+          });
+        } catch (error) {
+          inventoryUpdates.push({
+            productName: saleData.productName,
+            status: 'failed',
+            error: error.message
+          });
+          // Skip this sale record if inventory update fails
+          continue;
+        }
+      } else {
+        // Insert sale without inventory update
+        const insertedSale = await SaleSummary.create(saleData);
+        insertedSales.push(insertedSale);
+      }
+    }
 
     return res.status(200).json({
-      message: `<b>${inserted.length}</b> sale summary records imported successfully.`,
-      insertedCount: inserted.length,
+      message: `<b>${insertedSales.length}</b> sale summary records imported successfully.`,
+      insertedCount: insertedSales.length,
       skippedCount: skippedRows.length,
       skippedRows,
+      inventoryUpdates
     });
   } catch (error) {
     console.error("❌ Error importing sale summary:", error);
@@ -177,7 +321,7 @@ router.get("/sales", async (req, res) => {
     const summaries = await SaleSummary.aggregate([
       {
         $lookup: {
-          from: "customers", // 👈 the MongoDB collection name (should be lowercase and plural)
+          from: "customers",
           localField: "customerCode",
           foreignField: "customerCode",
           as: "customerInfo",
@@ -186,7 +330,7 @@ router.get("/sales", async (req, res) => {
       {
         $unwind: {
           path: "$customerInfo",
-          preserveNullAndEmptyArrays: true, // if you want to include sales even if customer not found
+          preserveNullAndEmptyArrays: true,
         },
       },
       {
@@ -198,10 +342,7 @@ router.get("/sales", async (req, res) => {
 
     res.status(200).json(summaries);
   } catch (error) {
-    console.error(
-      "❌ Error fetching sale summaries with customer info:",
-      error
-    );
+    console.error("❌ Error fetching sale summaries with customer info:", error);
     res.status(500).json({ message: "Failed to fetch sale summaries." });
   }
 });
@@ -210,6 +351,22 @@ router.put("/sales/:id", async (req, res) => {
   const { id } = req.params;
 
   try {
+    // Get original sale data
+    const originalSale = await SaleSummary.findById(id);
+    if (!originalSale) {
+      return res.status(404).json({ error: "Sales record not found." });
+    }
+
+    // Restore original inventory first
+    if (originalSale.salesQty > 0 || originalSale.bonusQty > 0) {
+      await restoreReportInHandAfterSaleDeletion(
+        originalSale.productName,
+        originalSale.salesQty,
+        originalSale.bonusQty
+      );
+    }
+
+    // Update the sale
     const updatedSale = await SaleSummary.findByIdAndUpdate(id, req.body, {
       new: true,
       runValidators: true,
@@ -217,6 +374,20 @@ router.put("/sales/:id", async (req, res) => {
 
     if (!updatedSale) {
       return res.status(404).json({ error: "Sales record not found." });
+    }
+
+    // Update inventory with new quantities
+    if (updatedSale.salesQty > 0 || updatedSale.bonusQty > 0) {
+      const lcValue = await updateReportInHandAfterSale(
+        updatedSale.productName,
+        updatedSale.salesQty,
+        updatedSale.bonusQty
+      );
+      
+      // Update LC and profit/loss with actual values
+      updatedSale.lc = lcValue;
+      updatedSale.profitLoss = updatedSale.netSellingAmount - (updatedSale.totalQty * lcValue);
+      await updatedSale.save();
     }
 
     res.status(200).json(updatedSale);
@@ -230,13 +401,27 @@ router.delete("/sales/:id", async (req, res) => {
   const { id } = req.params;
 
   try {
-    const deletedSale = await SaleSummary.findByIdAndDelete(id);
-
-    if (!deletedSale) {
+    const saleToDelete = await SaleSummary.findById(id);
+    
+    if (!saleToDelete) {
       return res.status(404).json({ error: "Sales record not found." });
     }
 
-    res.status(200).json({ message: "Sales record deleted successfully." });
+    // ✅ Restore inventory before deleting the sale
+    if (saleToDelete.salesQty > 0 || saleToDelete.bonusQty > 0) {
+      await restoreReportInHandAfterSaleDeletion(
+        saleToDelete.productName, 
+        saleToDelete.salesQty, 
+        saleToDelete.bonusQty
+      );
+    }
+
+    const deletedSale = await SaleSummary.findByIdAndDelete(id);
+
+    res.status(200).json({ 
+      message: "Sales record deleted successfully and inventory restored.",
+      deletedSale 
+    });
   } catch (err) {
     console.error("Error deleting sale:", err);
     res.status(500).json({ error: "Failed to delete sales record." });
@@ -255,10 +440,28 @@ router.delete("/sales", async (req, res) => {
       ids = ids.map((item) => item.id);
     }
 
+    // Get sales data before deletion for inventory restoration
+    const salesToDelete = await SaleSummary.find({ _id: { $in: ids } });
+
+    // Restore inventory for all sales being deleted
+    for (const sale of salesToDelete) {
+      if (sale.salesQty > 0 || sale.bonusQty > 0) {
+        try {
+          await restoreReportInHandAfterSaleDeletion(
+            sale.productName, 
+            sale.salesQty, 
+            sale.bonusQty
+          );
+        } catch (error) {
+          console.error(`Failed to restore inventory for sale ${sale._id}:`, error);
+        }
+      }
+    }
+
     const result = await SaleSummary.deleteMany({ _id: { $in: ids } });
 
     return res.status(200).json({
-      message: `${result.deletedCount} sale(s) deleted successfully.`,
+      message: `${result.deletedCount} sale(s) deleted successfully and inventory restored.`,
     });
   } catch (error) {
     console.error("Error deleting sales:", error);
@@ -287,27 +490,61 @@ router.post("/sales", async (req, res) => {
       discount: Number(item.discount) || 0,
       netSellingAmount: Number(item.netSellingAmount),
       averageUnitPrice: Number(item.averageUnitPrice),
-      lc: Number(item.lc),
-      profitLoss: Number(item.profitLoss) || 0,
+      lc: Number(item.lc) || 0, // Will be updated with actual value
+      profitLoss: Number(item.profitLoss) || 0, // Will be recalculated
       creditDays: item.creditDays ? Number(item.creditDays) : null,
       dueDate: item.dueDate ? new Date(item.dueDate) : null,
       deliveryDate: item.deliveryDate ? new Date(item.deliveryDate) : null,
       paidAmount: Number(item.paidAmount) || 0,
       dueAmount: Number(item.dueAmount) || 0,
-      totalAmount: Number(item.totalAmount), // If used in schema or elsewhere
+      totalAmount: Number(item.totalAmount),
       paymentStatus: item.paymentStatus,
       remark: item.remark || "",
     }));
 
-    // If your schema expects one document per sale item:
-    // You can save each item separately or use insertMany for bulk insert
+    // Insert sales records and update inventory
+    const savedSales = [];
+    const inventoryUpdates = [];
 
-    // Example with insertMany
-    const savedSales = await SaleSummary.insertMany(newSaleData);
+    for (const sale of newSaleData) {
+      if (sale.salesQty > 0 || sale.bonusQty > 0) {
+        try {
+          // Update inventory and get LC value
+          const lcValue = await updateReportInHandAfterSale(sale.productName, sale.salesQty, sale.bonusQty);
+          
+          // Update sale with actual LC and recalculate profit/loss
+          sale.lc = lcValue;
+          sale.profitLoss = sale.netSellingAmount - (sale.totalQty * lcValue);
+
+          const savedSale = await SaleSummary.create(sale);
+          savedSales.push(savedSale);
+          
+          inventoryUpdates.push({
+            productName: sale.productName,
+            status: 'success',
+            deducted: sale.salesQty + sale.bonusQty,
+            lc: lcValue
+          });
+        } catch (error) {
+          inventoryUpdates.push({
+            productName: sale.productName,
+            status: 'failed',
+            error: error.message
+          });
+          // Skip this sale if inventory update fails
+          continue;
+        }
+      } else {
+        // Insert sale without inventory update
+        const savedSale = await SaleSummary.create(sale);
+        savedSales.push(savedSale);
+      }
+    }
 
     res.status(201).json({
       message: `Sales added successfully`,
       sales: savedSales,
+      inventoryUpdates
     });
   } catch (error) {
     console.error("Sale creation error:", error);
@@ -568,7 +805,5 @@ router.post("/sales/download-excel", async (req, res) => {
     });
   }
 });
-
-
 
 export default router;

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import {formatDateToReadable} from '../../utils/dateUtil.js';
 import {
   TrendingUp,
   Download,
@@ -68,7 +69,7 @@ const AnnualCustomerRepeatRate = () => {
         `${backendUrl}/api/annual-customer-repeat-rate`,
         { params }
       );
-      console.log(response);
+
       setData(
         response.data.data || {
           summary: {
@@ -364,12 +365,12 @@ const AnnualCustomerRepeatRate = () => {
                   </td>
                   <td className="p-3 text-sm text-gray-600">
                     {record.firstPurchaseDate
-                      ? new Date(record.firstPurchaseDate).toLocaleDateString()
+                      ? formatDateToReadable(record.firstPurchaseDate)
                       : "N/A"}
                   </td>
                   <td className="p-3 text-sm text-gray-600">
                     {record.lastPurchaseDate
-                      ? new Date(record.lastPurchaseDate).toLocaleDateString()
+                      ? formatDateToReadable(record.lastPurchaseDate)
                       : "N/A"}
                   </td>
                   <td
