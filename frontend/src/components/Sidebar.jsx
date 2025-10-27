@@ -48,6 +48,8 @@ import {
   TrendingUp as TrendingUpIcon,
   PackageSearch,
   Layers,
+  Building,
+  Eye,
 } from "lucide-react";
 
 const masterPaths = ["/masterlayout/customer", "/masterlayout/supplier"];
@@ -118,7 +120,7 @@ const reportPaths = [
   "/reportlayout/stock-movement",
   "/reportlayout/slow-moving-items",
   "/reportlayout/product-profitability",
-  "/reportlayout/product-report", // Added the new route
+  "/reportlayout/product-report",
 ];
 
 // Finance Report paths
@@ -140,7 +142,7 @@ const productReportPaths = [
   "/reportlayout/stock-movement",
   "/reportlayout/slow-moving-items",
   "/reportlayout/product-profitability",
-  "/reportlayout/product-report", // Added the new route
+  "/reportlayout/product-report",
 ];
 
 // Master Customer Report paths
@@ -152,12 +154,18 @@ const masterCustomerReportPaths = [
   "/reportlayout/annualrepeatrate",
 ];
 
-const utilityPaths = [
-  "/utilitylayout/productcard",
-  "/utilitylayout/frontsettings",
+const settingsPaths = [
+  "/settinglayout/companyprofile",
+  "/settinglayout/tabHideView",
 ];
 
 const accountPaths = ["/accountlayout"];
+
+// Define utility paths - updated to settings paths
+const utilityPaths = [
+  "/utilitylayout/companyprofile",
+  "/utilitylayout/tabHideView",
+];
 
 function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
   const location = useLocation();
@@ -169,6 +177,25 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
     useState(null);
   const [activeProductReportSubMenu, setActiveProductReportSubMenu] =
     useState(null);
+
+  // Add visibleTabs state with default values
+  const [visibleTabs, setVisibleTabs] = useState({
+    dashboard: true,
+    master: true,
+    settings: true,
+    products: true,
+    purchase: true,
+    sales: true,
+    stockAdjustment: true,
+    stockTransfer: true,
+    accounts: true,
+    expense: true,
+    reports: true,
+    staff: true,
+    utility: true,
+    onlineOrders: true,
+    hrm: true,
+  });
 
   useEffect(() => {
     if (location.pathname.startsWith("/masterlayout")) {
@@ -214,8 +241,8 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
       setActiveParentMenu("hrm");
     } else if (location.pathname.startsWith("/accountlayout")) {
       setActiveParentMenu("accounts");
-    } else if (location.pathname.startsWith("/settinglayout")) {
-      setActiveParentMenu("hrm");
+    } else if (location.pathname.startsWith("/settingslayout")) {
+      setActiveParentMenu("settings");
     } else {
       setActiveParentMenu(null);
     }
@@ -249,6 +276,13 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
     setActiveProductReportSubMenu((prev) =>
       prev === subMenuKey ? null : subMenuKey
     );
+  };
+
+  const handleTabVisibilityChange = (tabId) => {
+    setVisibleTabs((prev) => ({
+      ...prev,
+      [tabId]: !prev[tabId],
+    }));
   };
 
   const getLinkClass = (path) =>
@@ -304,6 +338,9 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
         : "hover:bg-gray-600 text-gray-200"
     }`;
 
+  // Filter navigation items based on visible tabs
+  const shouldShowTab = (tabId) => visibleTabs[tabId];
+
   return (
     <div
       className={`bg-gray-900 text-white transition-all duration-300 ${
@@ -321,745 +358,777 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
 
       {/* Navigation */}
       <nav className="flex-1 px-2 py-4 space-y-2">
-        {/* Dashboard */}
-        <Link to="/" className={getLinkClass("/")}>
-          <Home className="w-5 h-5" />
-          {isOpen && <span className="mx-auto">Dashboard</span>}
-        </Link>
+        {/* Dashboard - Conditionally rendered */}
+        {shouldShowTab("dashboard") && (
+          <Link to="/" className={getLinkClass("/")}>
+            <Home className="w-5 h-5" />
+            {isOpen && <span className="mx-auto">Dashboard</span>}
+          </Link>
+        )}
 
-        {/* Master */}
-        <div>
-          <button
-            onClick={() => toggleMenu("master")}
-            className={getDropdownButtonClass("master", masterPaths)}
-          >
-            <span className="flex items-center gap-3">
-              <Users className="w-5 h-5" />
-            </span>
-            <span>{isOpen && "Master"}</span>
-            {isOpen && (
-              <ChevronDown
-                className={`w-4 h-4 transform transition-transform ${
-                  activeParentMenu === "master" ? "rotate-180" : ""
-                }`}
-              />
-            )}
-          </button>
-          {activeParentMenu === "master" && isOpen && (
-            <div className="ml-6 mt-1 space-y-1">
-              <Link
-                to="/masterlayout/customer"
-                className={getChildLinkClass("/masterlayout/customer")}
-              >
-                <Users className="w-4 h-4" />
-                <span className="mx-auto">Customers</span>
-              </Link>
-              <Link
-                to="/masterlayout/supplier"
-                className={getChildLinkClass("/masterlayout/supplier")}
-              >
-                <Truck className="w-4 h-4" />
-                <span className="mx-auto">Suppliers</span>
-              </Link>
-            </div>
-          )}
-        </div>
-
-        {/* Product Manager */}
-        <div>
-          <button
-            onClick={() => toggleMenu("products")}
-            className={getDropdownButtonClass("products", productPaths)}
-          >
-            <span className="flex items-center gap-3">
-              <Package className="w-5 h-5" />
-            </span>
-            <span>{isOpen && "Product Manager"}</span>
-            {isOpen && (
-              <ChevronDown
-                className={`w-4 h-4 transform transition-transform ${
-                  activeParentMenu === "products" ? "rotate-180" : ""
-                }`}
-              />
-            )}
-          </button>
-
-          {activeParentMenu === "products" && isOpen && (
-            <div className="ml-6 mt-1 space-y-1">
-              <Link
-                to="/productmanagerlayout/product"
-                className={getChildLinkClass("/productmanagerlayout/product")}
-              >
-                <Boxes className="w-4 h-4" />
-                <span className="mx-auto">Products</span>
-              </Link>
-
-              <Link
-                to="/productmanagerlayout/pricelist"
-                className={getChildLinkClass("/productmanagerlayout/pricelist")}
-              >
-                <ClipboardList className="w-4 h-4" />
-                <span className="mx-auto">Price List</span>
-              </Link>
-
-              <Link
-                to="/productmanagerlayout/printbarcode"
-                className={getChildLinkClass(
-                  "/productmanagerlayout/printbarcode"
-                )}
-              >
-                <Barcode className="w-4 h-4" />
-                <span className="mx-auto">Print Barcode</span>
-              </Link>
-            </div>
-          )}
-        </div>
-
-        {/* Purchase */}
-        <div>
-          <button
-            onClick={() => toggleMenu("purchase")}
-            className={getDropdownButtonClass("purchase", purchasePaths)}
-          >
-            <span className="flex items-center gap-3">
-              <ShoppingCart className="w-5 h-5" />
-            </span>
-            <span>{isOpen && "Purchase"}</span>
-            {isOpen && (
-              <ChevronDown
-                className={`w-4 h-4 transform transition-transform ${
-                  activeParentMenu === "purchase" ? "rotate-180" : ""
-                }`}
-              />
-            )}
-          </button>
-
-          {activeParentMenu === "purchase" && isOpen && (
-            <div className="ml-6 mt-1 space-y-1">
-              <Link
-                to="/purchaselayout/purchase"
-                className={getChildLinkClass("/purchaselayout/purchase")}
-              >
-                <Package className="w-4 h-4" />
-                <span className="mx-auto">Purchase</span>
-              </Link>
-              <Link
-                to="/purchaselayout/purchasereturn"
-                className={getChildLinkClass("/purchaselayout/purchasereturn")}
-              >
-                <FileText className="w-4 h-4" />
-                <span className="mx-auto">Purchase/Cr.Note</span>
-              </Link>
-
-              <Link
-                to="/purchaselayout/purchaseout"
-                className={getChildLinkClass("/purchaselayout/purchaseout")}
-              >
-                <Truck className="w-4 h-4" />
-                <span className="mx-auto">Purchase Out</span>
-              </Link>
-            </div>
-          )}
-        </div>
-
-        {/* Sales */}
-        <div>
-          <button
-            onClick={() => toggleMenu("sales")}
-            className={getDropdownButtonClass("sales", salesPaths)}
-          >
-            <span className="flex items-center gap-3">
-              <TrendingUp className="w-5 h-5" />
-            </span>
-            <span>{isOpen && "Sales"}</span>
-            {isOpen && (
-              <ChevronDown
-                className={`w-4 h-4 transform transition-transform ${
-                  activeParentMenu === "sales" ? "rotate-180" : ""
-                }`}
-              />
-            )}
-          </button>
-
-          {activeParentMenu === "sales" && isOpen && (
-            <div className="ml-6 mt-1 space-y-1">
-              <Link
-                to="/salelayout/sale"
-                className={getChildLinkClass("/salelayout/sale")}
-              >
-                <DollarSign className="w-4 h-4" />
-                <span className="mx-auto">Sale</span>
-              </Link>
-
-              <Link
-                to="/salelayout/salereturn"
-                className={getChildLinkClass("/salelayout/salereturn")}
-              >
-                <FileText className="w-4 h-4" />
-                <span className="mx-auto">Sale Return/Cr.Note</span>
-              </Link>
-            </div>
-          )}
-        </div>
-
-        {/* Stock Adjustment */}
-        <Link
-          to="/stockadjustment"
-          className={getLinkClass("/stockadjustment")}
-        >
-          <ListChecks className="w-5 h-5" />
-          {isOpen && <span className="mx-auto">Stock Adjustment</span>}
-        </Link>
-
-        {/* Stock Transfer */}
-        <Link to="/stocktransfer" className={getLinkClass("/stocktransfer")}>
-          <Truck className="w-5 h-5" />
-          {isOpen && <span className="mx-auto">Stock Transfer</span>}
-        </Link>
-        <div>
-          <button
-            onClick={() => toggleMenu("accounts")}
-            className={getDropdownButtonClass("accounts", accountPaths)}
-          >
-            <span className="flex items-center gap-3">
-              <Landmark className="w-5 h-5" />
-            </span>
-            <span>{isOpen && "Accounts"}</span>
-            {isOpen && (
-              <ChevronDown
-                className={`w-4 h-4 transform transition-transform ${
-                  activeParentMenu === "accounts" ? "rotate-180" : ""
-                }`}
-              />
-            )}
-          </button>
-          {activeParentMenu === "accounts" && isOpen && (
-            <div className="ml-6 mt-1 space-y-1">
-              <Link
-                to="/accountlayout"
-                className={getChildLinkClass("/accountlayout")}
-              >
-                <Wallet className="w-4 h-4" />
-                <span className="mx-auto">Cash & Bank</span>
-              </Link>
-            </div>
-          )}
-        </div>
-        <div>
-          <button
-            onClick={() => toggleMenu("expense")}
-            className={getDropdownButtonClass("expense", expensePaths)}
-          >
-            <span className="flex items-center gap-3">
-              <FileText className="w-5 h-5" />
-            </span>
-            <span>{isOpen && "Expense"}</span>
-            {isOpen && (
-              <ChevronDown
-                className={`w-4 h-4 transform transition-transform ${
-                  activeParentMenu === "expense" ? "rotate-180" : ""
-                }`}
-              />
-            )}
-          </button>
-
-          {activeParentMenu === "expense" && isOpen && (
-            <div className="ml-6 mt-1 space-y-1">
-              <Link
-                to="/expenselayout/expensecategories"
-                className={getChildLinkClass(
-                  "/expenselayout/expensecategories"
-                )}
-              >
-                <Layers className="w-4 h-4" />
-                <span className="mx-auto">Expense Categories</span>
-              </Link>
-              <Link
-                to="/expenselayout/expenses"
-                className={getChildLinkClass("/expenselayout/expenses")}
-              >
-                <DollarSign className="w-4 h-4" />
-                <span className="mx-auto">Expenses</span>
-              </Link>
-            </div>
-          )}
-        </div>
-
-        {/* Reports */}
-        <div>
-          <button
-            onClick={() => toggleMenu("reports")}
-            className={getDropdownButtonClass("reports", reportPaths)}
-          >
-            <span className="flex items-center gap-3">
-              <BarChart3 className="w-5 h-5" />
-            </span>
-            <span>{isOpen && "Reports"}</span>
-            {isOpen && (
-              <ChevronDown
-                className={`w-4 h-4 transform transition-transform ${
-                  activeParentMenu === "reports" ? "rotate-180" : ""
-                }`}
-              />
-            )}
-          </button>
-
-          {activeParentMenu === "reports" && isOpen && (
-            <div className="ml-6 mt-1 space-y-1">
-              <Link
-                to="/reportlayout/dailyreport"
-                className={getChildLinkClass("/reportlayout/dailyreport")}
-              >
-                <CreditCard className="w-4 h-4" />
-                <span className="mx-auto">Daily Reports</span>
-              </Link>
-
-              {/* New Report: Average Price Per Product */}
-              <Link
-                to="/reportlayout/averageprice"
-                className={getChildLinkClass("/reportlayout/averageprice")}
-              >
-                <Calculator className="w-4 h-4" />
-                <span className="mx-auto">Average Price Per Product</span>
-              </Link>
-
-              {/* New Report: New Customer Addition */}
-              <Link
-                to="/reportlayout/newcustomeraddition"
-                className={getChildLinkClass(
-                  "/reportlayout/newcustomeraddition"
-                )}
-              >
-                <UserPlus className="w-4 h-4" />
-                <span className="mx-auto">New Customer Addition</span>
-              </Link>
-
-              {/* Master Customer Report with Dropdown */}
-              <div>
-                <button
-                  onClick={() => toggleSubMenu("masterCustomerReports")}
-                  className={getSubDropdownButtonClass(
-                    "masterCustomerReports",
-                    masterCustomerReportPaths
-                  )}
+        {/* Master - Conditionally rendered */}
+        {shouldShowTab("master") && (
+          <div>
+            <button
+              onClick={() => toggleMenu("master")}
+              className={getDropdownButtonClass("master", masterPaths)}
+            >
+              <span className="flex items-center gap-3">
+                <Users className="w-5 h-5" />
+              </span>
+              <span>{isOpen && "Master"}</span>
+              {isOpen && (
+                <ChevronDown
+                  className={`w-4 h-4 transform transition-transform ${
+                    activeParentMenu === "master" ? "rotate-180" : ""
+                  }`}
+                />
+              )}
+            </button>
+            {activeParentMenu === "master" && isOpen && (
+              <div className="ml-6 mt-1 space-y-1">
+                <Link
+                  to="/masterlayout/customer"
+                  className={getChildLinkClass("/masterlayout/customer")}
                 >
-                  <span className="flex items-center gap-3">
-                    <Users className="w-4 h-4" />
-                    <span>Master Customer Report</span>
-                  </span>
-                  <ChevronDown
-                    className={`w-4 h-4 transform transition-transform ${
-                      activeSubMenu === "masterCustomerReports"
-                        ? "rotate-180"
-                        : ""
-                    }`}
-                  />
-                </button>
-                {activeSubMenu === "masterCustomerReports" && (
-                  <div className="ml-4 mt-1 space-y-1">
-                    <Link
-                      to="/reportlayout/customerretention"
-                      className={getChildLinkClass(
-                        "/reportlayout/customerretention"
-                      )}
-                    >
-                      <Repeat className="w-4 h-4" />
-                      <span>Customer Retention Rate</span>
-                    </Link>
-                    <Link
-                      to="/reportlayout/customeracceptance"
-                      className={getChildLinkClass(
-                        "/reportlayout/customeracceptance"
-                      )}
-                    >
-                      <CheckCircle className="w-4 h-4" />
-                      <span>Product Acceptance Rate</span>
-                    </Link>
-                    <Link
-                      to="/reportlayout/zonewisecustomers"
-                      className={getChildLinkClass(
-                        "/reportlayout/zonewisecustomers"
-                      )}
-                    >
-                      <MapPin className="w-4 h-4" />
-                      <span>Zone Wise Customers</span>
-                    </Link>
-                  </div>
-                )}
+                  <Users className="w-4 h-4" />
+                  <span className="mx-auto">Customers</span>
+                </Link>
+                <Link
+                  to="/masterlayout/supplier"
+                  className={getChildLinkClass("/masterlayout/supplier")}
+                >
+                  <Truck className="w-4 h-4" />
+                  <span className="mx-auto">Suppliers</span>
+                </Link>
               </div>
-              <Link
-                to="/reportlayout/monthlyrepeatrate"
-                className={getChildLinkClass("/reportlayout/monthlyrepeatrate")}
-              >
-                <CalendarDays className="w-4 h-4" />
-                <span>Monthly Customer Repeat Rate</span>
-              </Link>
-              {/* New Annual Customer Repeat Rate */}
-              <Link
-                to="/reportlayout/annualrepeatrate"
-                className={getChildLinkClass("/reportlayout/annualrepeatrate")}
-              >
-                <CalendarRange className="w-4 h-4" />
-                <span>Annual Customer Repeat Rate</span>
-              </Link>
+            )}
+          </div>
+        )}
 
-              {/* Product Reports Link */}
-              <Link
-                to="/reportlayout/product-report"
-                className={getChildLinkClass("/reportlayout/product-report")}
-              >
-                <PackageSearch className="w-4 h-4" />
-                <span className="mx-auto">Product Reports</span>
-              </Link>
-
-              <Link
-                to="/reportlayout/mrwiseoutstanding"
-                className={getChildLinkClass("/reportlayout/mrwiseoutstanding")}
-              >
-                <UserSearch className="w-4 h-4" />
-                <span className="mx-auto">MR Wise Outstanding</span>
-              </Link>
-              <Link
-                to="/reportlayout/mrwisesales"
-                className={getChildLinkClass("/reportlayout/mrwisesales")}
-              >
-                <Target className="w-4 h-4" />
-                <span className="mx-auto">MR Wise Sales</span>
-              </Link>
-              {/* New Report Links */}
-              <Link
-                to="/reportlayout/cashsales"
-                className={getChildLinkClass("/reportlayout/cashsales")}
-              >
-                <DollarSign className="w-4 h-4" />
-                <span className="mx-auto">Total Cash Sales</span>
-              </Link>
-              <Link
-                to="/reportlayout/outstandingcollection"
-                className={getChildLinkClass(
-                  "/reportlayout/outstandingcollection"
-                )}
-              >
-                <Receipt className="w-4 h-4" />
-                <span className="mx-auto">Outstanding Collection</span>
-              </Link>
-              <Link
-                to="/reportlayout/totalexpense"
-                className={getChildLinkClass("/reportlayout/totalexpense")}
-              >
-                <PieChart className="w-4 h-4" />
-                <span className="mx-auto">Total Expense</span>
-              </Link>
-              <Link
-                to="/reportlayout/remittance"
-                className={getChildLinkClass("/reportlayout/remittance")}
-              >
-                <Coins className="w-4 h-4" />
-                <span className="mx-auto">Remittance</span>
-              </Link>
-
-              {/* New Province Wise Reports - Added before Payment */}
-              <Link
-                to="/reportlayout/province-wise-sale"
-                className={getChildLinkClass(
-                  "/reportlayout/province-wise-sale"
-                )}
-              >
-                <Globe className="w-4 h-4" />
-                <span className="mx-auto">Province Wise Sale</span>
-              </Link>
-              <Link
-                to="/reportlayout/province-wise-customer"
-                className={getChildLinkClass(
-                  "/reportlayout/province-wise-customer"
-                )}
-              >
-                <Users className="w-4 h-4" />
-                <span className="mx-auto">Province Wise Customer</span>
-              </Link>
-
-              <Link
-                to="/reportlayout/payment"
-                className={getChildLinkClass("/reportlayout/payment")}
-              >
-                <CreditCard className="w-4 h-4" />
-                <span className="mx-auto">Payments</span>
-              </Link>
-
-              {/* Finance Reports Section */}
-              <div>
-                <button
-                  onClick={() => toggleFinanceSubMenu("financeReports")}
-                  className={getFinanceSubDropdownButtonClass(
-                    "financeReports",
-                    financeReportPaths
+        {/* Settings - Conditionally rendered */}
+        {shouldShowTab("settings") && (
+          <div>
+            <button
+              onClick={() => toggleMenu("settings")}
+              className={getDropdownButtonClass("settings", [
+                "/settingslayout/company-profile",
+                "/settingslayout/tab-manipulation",
+              ])}
+            >
+              <span className="flex items-center gap-3">
+                <Settings className="w-5 h-5" />
+              </span>
+              <span>{isOpen && "Settings"}</span>
+              {isOpen && (
+                <ChevronDown
+                  className={`w-4 h-4 transform transition-transform ${
+                    activeParentMenu === "settings" ? "rotate-180" : ""
+                  }`}
+                />
+              )}
+            </button>
+            {activeParentMenu === "settings" && isOpen && (
+              <div className="ml-6 mt-1 space-y-1">
+                <Link
+                  to="/settingslayout/company-profile"
+                  className={getChildLinkClass(
+                    "/settingslayout/company-profile"
                   )}
                 >
-                  <span className="flex items-center gap-3">
-                    <FileBarChart className="w-4 h-4" />
-                    <span>Finance Reports</span>
-                  </span>
-                  <ChevronDown
-                    className={`w-4 h-4 transform transition-transform ${
-                      activeFinanceSubMenu === "financeReports"
-                        ? "rotate-180"
-                        : ""
-                    }`}
-                  />
-                </button>
-                {activeFinanceSubMenu === "financeReports" && (
-                  <div className="ml-4 mt-1 space-y-1">
-                    <Link
-                      to="/reportlayout/sales-salary-ratio"
-                      className={getChildLinkClass(
-                        "/reportlayout/sales-salary-ratio"
-                      )}
-                    >
-                      <Percent className="w-4 h-4" />
-                      <span>Sales / Salary Ratio</span>
-                    </Link>
-                    <Link
-                      to="/reportlayout/salary-cogs-ratio"
-                      className={getChildLinkClass(
-                        "/reportlayout/salary-cogs-ratio"
-                      )}
-                    >
-                      <Scale className="w-4 h-4" />
-                      <span>Salary / COGS Ratio</span>
-                    </Link>
-                    <Link
-                      to="/reportlayout/operation-cost-cogs-ratio"
-                      className={getChildLinkClass(
-                        "/reportlayout/operation-cost-cogs-ratio"
-                      )}
-                    >
-                      <TrendingDown className="w-4 h-4" />
-                      <span>Operation Cost / COGS</span>
-                    </Link>
-                    <Link
-                      to="/reportlayout/operation-cost-sales-ratio"
-                      className={getChildLinkClass(
-                        "/reportlayout/operation-cost-sales-ratio"
-                      )}
-                    >
-                      <BarChart3 className="w-4 h-4" />
-                      <span>Operation Cost / Sales</span>
-                    </Link>
-                    <Link
-                      to="/reportlayout/tour-expense-sales-ratio"
-                      className={getChildLinkClass(
-                        "/reportlayout/tour-expense-sales-ratio"
-                      )}
-                    >
-                      <MapPin className="w-4 h-4" />
-                      <span>Tour Expense / Sales</span>
-                    </Link>
-                    <Link
-                      to="/reportlayout/pl-report"
-                      className={getChildLinkClass("/reportlayout/pl-report")}
-                    >
+                  <Building className="w-4 h-4" />
+                  <span className="mx-auto">Company Profile</span>
+                </Link>
+                <Link
+                  to="/settingslayout/tab-manipulation"
+                  className={getChildLinkClass(
+                    "/settingslayout/tab-manipulation"
+                  )}
+                >
+                  <Eye className="w-4 h-4" />
+                  <span className="mx-auto">Tab Manipulation</span>
+                </Link>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Product Manager - Conditionally rendered */}
+        {shouldShowTab("products") && (
+          <div>
+            <button
+              onClick={() => toggleMenu("products")}
+              className={getDropdownButtonClass("products", productPaths)}
+            >
+              <span className="flex items-center gap-3">
+                <Package className="w-5 h-5" />
+              </span>
+              <span>{isOpen && "Product Manager"}</span>
+              {isOpen && (
+                <ChevronDown
+                  className={`w-4 h-4 transform transition-transform ${
+                    activeParentMenu === "products" ? "rotate-180" : ""
+                  }`}
+                />
+              )}
+            </button>
+
+            {activeParentMenu === "products" && isOpen && (
+              <div className="ml-6 mt-1 space-y-1">
+                <Link
+                  to="/productmanagerlayout/product"
+                  className={getChildLinkClass("/productmanagerlayout/product")}
+                >
+                  <Boxes className="w-4 h-4" />
+                  <span className="mx-auto">Products</span>
+                </Link>
+
+                <Link
+                  to="/productmanagerlayout/pricelist"
+                  className={getChildLinkClass(
+                    "/productmanagerlayout/pricelist"
+                  )}
+                >
+                  <ClipboardList className="w-4 h-4" />
+                  <span className="mx-auto">Price List</span>
+                </Link>
+
+                <Link
+                  to="/productmanagerlayout/printbarcode"
+                  className={getChildLinkClass(
+                    "/productmanagerlayout/printbarcode"
+                  )}
+                >
+                  <Barcode className="w-4 h-4" />
+                  <span className="mx-auto">Print Barcode</span>
+                </Link>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Purchase - Conditionally rendered */}
+        {shouldShowTab("purchase") && (
+          <div>
+            <button
+              onClick={() => toggleMenu("purchase")}
+              className={getDropdownButtonClass("purchase", purchasePaths)}
+            >
+              <span className="flex items-center gap-3">
+                <ShoppingCart className="w-5 h-5" />
+              </span>
+              <span>{isOpen && "Purchase"}</span>
+              {isOpen && (
+                <ChevronDown
+                  className={`w-4 h-4 transform transition-transform ${
+                    activeParentMenu === "purchase" ? "rotate-180" : ""
+                  }`}
+                />
+              )}
+            </button>
+
+            {activeParentMenu === "purchase" && isOpen && (
+              <div className="ml-6 mt-1 space-y-1">
+                <Link
+                  to="/purchaselayout/purchase"
+                  className={getChildLinkClass("/purchaselayout/purchase")}
+                >
+                  <Package className="w-4 h-4" />
+                  <span className="mx-auto">Purchase</span>
+                </Link>
+                <Link
+                  to="/purchaselayout/purchasereturn"
+                  className={getChildLinkClass(
+                    "/purchaselayout/purchasereturn"
+                  )}
+                >
+                  <FileText className="w-4 h-4" />
+                  <span className="mx-auto">Purchase/Cr.Note</span>
+                </Link>
+
+                <Link
+                  to="/purchaselayout/purchaseout"
+                  className={getChildLinkClass("/purchaselayout/purchaseout")}
+                >
+                  <Truck className="w-4 h-4" />
+                  <span className="mx-auto">Purchase Out</span>
+                </Link>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Sales - Conditionally rendered */}
+        {shouldShowTab("sales") && (
+          <div>
+            <button
+              onClick={() => toggleMenu("sales")}
+              className={getDropdownButtonClass("sales", salesPaths)}
+            >
+              <span className="flex items-center gap-3">
+                <TrendingUp className="w-5 h-5" />
+              </span>
+              <span>{isOpen && "Sales"}</span>
+              {isOpen && (
+                <ChevronDown
+                  className={`w-4 h-4 transform transition-transform ${
+                    activeParentMenu === "sales" ? "rotate-180" : ""
+                  }`}
+                />
+              )}
+            </button>
+
+            {activeParentMenu === "sales" && isOpen && (
+              <div className="ml-6 mt-1 space-y-1">
+                <Link
+                  to="/salelayout/sale"
+                  className={getChildLinkClass("/salelayout/sale")}
+                >
+                  <DollarSign className="w-4 h-4" />
+                  <span className="mx-auto">Sale</span>
+                </Link>
+
+                <Link
+                  to="/salelayout/salereturn"
+                  className={getChildLinkClass("/salelayout/salereturn")}
+                >
+                  <FileText className="w-4 h-4" />
+                  <span className="mx-auto">Sale Return/Cr.Note</span>
+                </Link>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Stock Adjustment - Conditionally rendered */}
+        {shouldShowTab("stockAdjustment") && (
+          <Link
+            to="/stockadjustment"
+            className={getLinkClass("/stockadjustment")}
+          >
+            <ListChecks className="w-5 h-5" />
+            {isOpen && <span className="mx-auto">Stock Adjustment</span>}
+          </Link>
+        )}
+
+        {/* Stock Transfer - Conditionally rendered */}
+        {shouldShowTab("stockTransfer") && (
+          <Link to="/stocktransfer" className={getLinkClass("/stocktransfer")}>
+            <Truck className="w-5 h-5" />
+            {isOpen && <span className="mx-auto">Stock Transfer</span>}
+          </Link>
+        )}
+
+        {/* Accounts - Conditionally rendered */}
+        {shouldShowTab("accounts") && (
+          <div>
+            <button
+              onClick={() => toggleMenu("accounts")}
+              className={getDropdownButtonClass("accounts", accountPaths)}
+            >
+              <span className="flex items-center gap-3">
+                <Landmark className="w-5 h-5" />
+              </span>
+              <span>{isOpen && "Accounts"}</span>
+              {isOpen && (
+                <ChevronDown
+                  className={`w-4 h-4 transform transition-transform ${
+                    activeParentMenu === "accounts" ? "rotate-180" : ""
+                  }`}
+                />
+              )}
+            </button>
+            {activeParentMenu === "accounts" && isOpen && (
+              <div className="ml-6 mt-1 space-y-1">
+                <Link
+                  to="/accountlayout"
+                  className={getChildLinkClass("/accountlayout")}
+                >
+                  <Wallet className="w-4 h-4" />
+                  <span className="mx-auto">Cash & Bank</span>
+                </Link>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Expense - Conditionally rendered */}
+        {shouldShowTab("expense") && (
+          <div>
+            <button
+              onClick={() => toggleMenu("expense")}
+              className={getDropdownButtonClass("expense", expensePaths)}
+            >
+              <span className="flex items-center gap-3">
+                <FileText className="w-5 h-5" />
+              </span>
+              <span>{isOpen && "Expense"}</span>
+              {isOpen && (
+                <ChevronDown
+                  className={`w-4 h-4 transform transition-transform ${
+                    activeParentMenu === "expense" ? "rotate-180" : ""
+                  }`}
+                />
+              )}
+            </button>
+
+            {activeParentMenu === "expense" && isOpen && (
+              <div className="ml-6 mt-1 space-y-1">
+                <Link
+                  to="/expenselayout/expensecategories"
+                  className={getChildLinkClass(
+                    "/expenselayout/expensecategories"
+                  )}
+                >
+                  <Layers className="w-4 h-4" />
+                  <span className="mx-auto">Expense Categories</span>
+                </Link>
+                <Link
+                  to="/expenselayout/expenses"
+                  className={getChildLinkClass("/expenselayout/expenses")}
+                >
+                  <DollarSign className="w-4 h-4" />
+                  <span className="mx-auto">Expenses</span>
+                </Link>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Reports - Conditionally rendered */}
+        {shouldShowTab("reports") && (
+          <div>
+            <button
+              onClick={() => toggleMenu("reports")}
+              className={getDropdownButtonClass("reports", reportPaths)}
+            >
+              <span className="flex items-center gap-3">
+                <BarChart3 className="w-5 h-5" />
+              </span>
+              <span>{isOpen && "Reports"}</span>
+              {isOpen && (
+                <ChevronDown
+                  className={`w-4 h-4 transform transition-transform ${
+                    activeParentMenu === "reports" ? "rotate-180" : ""
+                  }`}
+                />
+              )}
+            </button>
+
+            {activeParentMenu === "reports" && isOpen && (
+              <div className="ml-6 mt-1 space-y-1">
+                {/* Reports content remains the same */}
+                <Link
+                  to="/reportlayout/dailyreport"
+                  className={getChildLinkClass("/reportlayout/dailyreport")}
+                >
+                  <CreditCard className="w-4 h-4" />
+                  <span className="mx-auto">Daily Reports</span>
+                </Link>
+
+                <Link
+                  to="/reportlayout/averageprice"
+                  className={getChildLinkClass("/reportlayout/averageprice")}
+                >
+                  <Calculator className="w-4 h-4" />
+                  <span className="mx-auto">Average Price Per Product</span>
+                </Link>
+
+                <Link
+                  to="/reportlayout/newcustomeraddition"
+                  className={getChildLinkClass(
+                    "/reportlayout/newcustomeraddition"
+                  )}
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span className="mx-auto">New Customer Addition</span>
+                </Link>
+
+                {/* Master Customer Report with Dropdown */}
+                <div>
+                  <button
+                    onClick={() => toggleSubMenu("masterCustomerReports")}
+                    className={getSubDropdownButtonClass(
+                      "masterCustomerReports",
+                      masterCustomerReportPaths
+                    )}
+                  >
+                    <span className="flex items-center gap-3">
+                      <Users className="w-4 h-4" />
+                      <span>Master Customer Report</span>
+                    </span>
+                    <ChevronDown
+                      className={`w-4 h-4 transform transition-transform ${
+                        activeSubMenu === "masterCustomerReports"
+                          ? "rotate-180"
+                          : ""
+                      }`}
+                    />
+                  </button>
+                  {activeSubMenu === "masterCustomerReports" && (
+                    <div className="ml-4 mt-1 space-y-1">
+                      <Link
+                        to="/reportlayout/customerretention"
+                        className={getChildLinkClass(
+                          "/reportlayout/customerretention"
+                        )}
+                      >
+                        <Repeat className="w-4 h-4" />
+                        <span>Customer Retention Rate</span>
+                      </Link>
+                      <Link
+                        to="/reportlayout/customeracceptance"
+                        className={getChildLinkClass(
+                          "/reportlayout/customeracceptance"
+                        )}
+                      >
+                        <CheckCircle className="w-4 h-4" />
+                        <span>Product Acceptance Rate</span>
+                      </Link>
+                      <Link
+                        to="/reportlayout/zonewisecustomers"
+                        className={getChildLinkClass(
+                          "/reportlayout/zonewisecustomers"
+                        )}
+                      >
+                        <MapPin className="w-4 h-4" />
+                        <span>Zone Wise Customers</span>
+                      </Link>
+                    </div>
+                  )}
+                </div>
+                <Link
+                  to="/reportlayout/monthlyrepeatrate"
+                  className={getChildLinkClass(
+                    "/reportlayout/monthlyrepeatrate"
+                  )}
+                >
+                  <CalendarDays className="w-4 h-4" />
+                  <span>Monthly Customer Repeat Rate</span>
+                </Link>
+                <Link
+                  to="/reportlayout/annualrepeatrate"
+                  className={getChildLinkClass(
+                    "/reportlayout/annualrepeatrate"
+                  )}
+                >
+                  <CalendarRange className="w-4 h-4" />
+                  <span>Annual Customer Repeat Rate</span>
+                </Link>
+
+                <Link
+                  to="/reportlayout/product-report"
+                  className={getChildLinkClass("/reportlayout/product-report")}
+                >
+                  <PackageSearch className="w-4 h-4" />
+                  <span className="mx-auto">Product Reports</span>
+                </Link>
+
+                <Link
+                  to="/reportlayout/mrwiseoutstanding"
+                  className={getChildLinkClass(
+                    "/reportlayout/mrwiseoutstanding"
+                  )}
+                >
+                  <UserSearch className="w-4 h-4" />
+                  <span className="mx-auto">MR Wise Outstanding</span>
+                </Link>
+                <Link
+                  to="/reportlayout/mrwisesales"
+                  className={getChildLinkClass("/reportlayout/mrwisesales")}
+                >
+                  <Target className="w-4 h-4" />
+                  <span className="mx-auto">MR Wise Sales</span>
+                </Link>
+                <Link
+                  to="/reportlayout/cashsales"
+                  className={getChildLinkClass("/reportlayout/cashsales")}
+                >
+                  <DollarSign className="w-4 h-4" />
+                  <span className="mx-auto">Total Cash Sales</span>
+                </Link>
+                <Link
+                  to="/reportlayout/outstandingcollection"
+                  className={getChildLinkClass(
+                    "/reportlayout/outstandingcollection"
+                  )}
+                >
+                  <Receipt className="w-4 h-4" />
+                  <span className="mx-auto">Outstanding Collection</span>
+                </Link>
+                <Link
+                  to="/reportlayout/totalexpense"
+                  className={getChildLinkClass("/reportlayout/totalexpense")}
+                >
+                  <PieChart className="w-4 h-4" />
+                  <span className="mx-auto">Total Expense</span>
+                </Link>
+                <Link
+                  to="/reportlayout/remittance"
+                  className={getChildLinkClass("/reportlayout/remittance")}
+                >
+                  <Coins className="w-4 h-4" />
+                  <span className="mx-auto">Remittance</span>
+                </Link>
+
+                <Link
+                  to="/reportlayout/province-wise-sale"
+                  className={getChildLinkClass(
+                    "/reportlayout/province-wise-sale"
+                  )}
+                >
+                  <Globe className="w-4 h-4" />
+                  <span className="mx-auto">Province Wise Sale</span>
+                </Link>
+                <Link
+                  to="/reportlayout/province-wise-customer"
+                  className={getChildLinkClass(
+                    "/reportlayout/province-wise-customer"
+                  )}
+                >
+                  <Users className="w-4 h-4" />
+                  <span className="mx-auto">Province Wise Customer</span>
+                </Link>
+
+                <Link
+                  to="/reportlayout/payment"
+                  className={getChildLinkClass("/reportlayout/payment")}
+                >
+                  <CreditCard className="w-4 h-4" />
+                  <span className="mx-auto">Payments</span>
+                </Link>
+
+                {/* Finance Reports Section */}
+                <div>
+                  <button
+                    onClick={() => toggleFinanceSubMenu("financeReports")}
+                    className={getFinanceSubDropdownButtonClass(
+                      "financeReports",
+                      financeReportPaths
+                    )}
+                  >
+                    <span className="flex items-center gap-3">
                       <FileBarChart className="w-4 h-4" />
-                      <span>P&L Report</span>
-                    </Link>
-                  </div>
-                )}
+                      <span>Finance Reports</span>
+                    </span>
+                    <ChevronDown
+                      className={`w-4 h-4 transform transition-transform ${
+                        activeFinanceSubMenu === "financeReports"
+                          ? "rotate-180"
+                          : ""
+                      }`}
+                    />
+                  </button>
+                  {activeFinanceSubMenu === "financeReports" && (
+                    <div className="ml-4 mt-1 space-y-1">
+                      <Link
+                        to="/reportlayout/sales-salary-ratio"
+                        className={getChildLinkClass(
+                          "/reportlayout/sales-salary-ratio"
+                        )}
+                      >
+                        <Percent className="w-4 h-4" />
+                        <span>Sales / Salary Ratio</span>
+                      </Link>
+                      <Link
+                        to="/reportlayout/salary-cogs-ratio"
+                        className={getChildLinkClass(
+                          "/reportlayout/salary-cogs-ratio"
+                        )}
+                      >
+                        <Scale className="w-4 h-4" />
+                        <span>Salary / COGS Ratio</span>
+                      </Link>
+                      <Link
+                        to="/reportlayout/operation-cost-cogs-ratio"
+                        className={getChildLinkClass(
+                          "/reportlayout/operation-cost-cogs-ratio"
+                        )}
+                      >
+                        <TrendingDown className="w-4 h-4" />
+                        <span>Operation Cost / COGS</span>
+                      </Link>
+                      <Link
+                        to="/reportlayout/operation-cost-sales-ratio"
+                        className={getChildLinkClass(
+                          "/reportlayout/operation-cost-sales-ratio"
+                        )}
+                      >
+                        <BarChart3 className="w-4 h-4" />
+                        <span>Operation Cost / Sales</span>
+                      </Link>
+                      <Link
+                        to="/reportlayout/tour-expense-sales-ratio"
+                        className={getChildLinkClass(
+                          "/reportlayout/tour-expense-sales-ratio"
+                        )}
+                      >
+                        <MapPin className="w-4 h-4" />
+                        <span>Tour Expense / Sales</span>
+                      </Link>
+                      <Link
+                        to="/reportlayout/pl-report"
+                        className={getChildLinkClass("/reportlayout/pl-report")}
+                      >
+                        <FileBarChart className="w-4 h-4" />
+                        <span>P&L Report</span>
+                      </Link>
+                    </div>
+                  )}
+                </div>
+
+                <Link
+                  to="/reportlayout/reports-in-hand"
+                  className={getChildLinkClass("/reportlayout/reports-in-hand")}
+                >
+                  <HandCoins className="w-4 h-4" />
+                  <span>Reports in Hand</span>
+                </Link>
+
+                <Link
+                  to="/reportlayout/salesummary"
+                  className={getChildLinkClass("/reportlayout/salesummary")}
+                >
+                  <TrendingUp className="w-4 h-4" />
+                  <span className="mx-auto">Sale Summary</span>
+                </Link>
+                <Link
+                  to="/reportlayout/dailysample"
+                  className={getChildLinkClass("/reportlayout/dailysample")}
+                >
+                  <Boxes className="w-4 h-4" />
+                  <span className="mx-auto">Daily Sample</span>
+                </Link>
+                <Link
+                  to="/reportlayout/profitloss"
+                  className={getChildLinkClass("/reportlayout/profitloss")}
+                >
+                  <DollarSign className="w-4 h-4" />
+                  <span className="mx-auto">Profit & Loss</span>
+                </Link>
               </div>
-
-              {/* Reports in Hand Section - Added after Finance Reports */}
-              <Link
-                to="/reportlayout/reports-in-hand"
-                className={getChildLinkClass("/reportlayout/reports-in-hand")}
-              >
-                <HandCoins className="w-4 h-4" />
-                <span>Reports in Hand</span>
-              </Link>
-
-              <Link
-                to="/reportlayout/salesummary"
-                className={getChildLinkClass("/reportlayout/salesummary")}
-              >
-                <TrendingUp className="w-4 h-4" />
-                <span className="mx-auto">Sale Summary</span>
-              </Link>
-              <Link
-                to="/reportlayout/dailysample"
-                className={getChildLinkClass("/reportlayout/dailysample")}
-              >
-                <Boxes className="w-4 h-4" />
-                <span className="mx-auto">Daily Sample</span>
-              </Link>
-              <Link
-                to="/reportlayout/productsalessummary"
-                className={getChildLinkClass(
-                  "/reportlayout/productsalessummary"
-                )}
-              >
-                <Package className="w-4 h-4" />
-                <span className="mx-auto">Product Sales</span>
-              </Link>
-              <Link
-                to="/reportlayout/stockalert"
-                className={getChildLinkClass("/reportlayout/stockalert")}
-              >
-                <AlertTriangle className="w-4 h-4" />
-                <span className="mx-auto">Stock Alert</span>
-              </Link>
-              <Link
-                to="/reportlayout/expensereport"
-                className={getChildLinkClass("/reportlayout/expensereport")}
-              >
-                <FileBarChart className="w-4 h-4" />
-                <span className="mx-auto">Expenses Report</span>
-              </Link>
-              <Link
-                to="/reportlayout/userreport"
-                className={getChildLinkClass("/reportlayout/userreport")}
-              >
-                <UsersRound className="w-4 h-4" />
-                <span className="mx-auto">User Report</span>
-              </Link>
-              <Link
-                to="/reportlayout/ratelist"
-                className={getChildLinkClass("/reportlayout/ratelist")}
-              >
-                <ListChecks className="w-4 h-4" />
-                <span className="mx-auto">Rate List</span>
-              </Link>
-              <Link
-                to="/reportlayout/profitloss"
-                className={getChildLinkClass("/reportlayout/profitloss")}
-              >
-                <DollarSign className="w-4 h-4" />
-                <span className="mx-auto">Profit & Loss</span>
-              </Link>
-            </div>
-          )}
-        </div>
-
-        {/* Staff Members */}
-        <Link
-          to="/staffmemberLayout/staffmember"
-          className={getLinkClass("/staffmemberLayout")}
-        >
-          <UserCog className="w-5 h-5" />
-          {isOpen && <span className="mx-auto">Staff Members</span>}
-        </Link>
-
-        {/* Utility */}
-        <div>
-          <button
-            onClick={() => toggleMenu("utility")}
-            className={getDropdownButtonClass("utility", utilityPaths)}
-          >
-            <span className="flex items-center gap-3">
-              <Briefcase className="w-5 h-5" />
-            </span>
-            <span>{isOpen && "Utility"}</span>
-            {isOpen && (
-              <ChevronDown
-                className={`w-4 h-4 transform transition-transform ${
-                  activeParentMenu === "utility" ? "rotate-180" : ""
-                }`}
-              />
             )}
-          </button>
-          {activeParentMenu === "utility" && isOpen && (
-            <div className="ml-6 mt-1 space-y-1">
-              <Link
-                to="/utilitylayout/productcard"
-                className={getChildLinkClass("/utilitylayout/productcard")}
-              >
-                <Package className="w-4 h-4" />
-                <span className="mx-auto">Product Card</span>
-              </Link>
-              <Link
-                to="/utilitylayout/frontsettings"
-                className={getChildLinkClass("/utilitylayout/frontsettings")}
-              >
-                <Settings className="w-4 h-4" />
-                <span className="mx-auto">Front Settings</span>
-              </Link>
-            </div>
-          )}
-        </div>
+          </div>
+        )}
 
-        <Link to="/onlineorder" className={getLinkClass("/onlineorder")}>
-          <ShoppingCart className="w-5 h-5" />
-          {isOpen && <span className="mx-auto">Online Orders</span>}
-        </Link>
-
-        <div>
-          <button
-            onClick={() => toggleMenu("hrm")}
-            className={getDropdownButtonClass("hrm", hrmPaths)}
+        {/* Staff Members - Conditionally rendered */}
+        {shouldShowTab("staff") && (
+          <Link
+            to="/staffmemberLayout/staffmember"
+            className={getLinkClass("/staffmemberLayout")}
           >
-            <span className="flex items-center gap-3">
-              <UserCog className="w-5 h-5" />
-            </span>
-            <span>{isOpen && "HRM"}</span>
-            {isOpen && (
-              <ChevronDown
-                className={`w-4 h-4 transform transition-transform ${
-                  activeParentMenu === "hrm" ? "rotate-180" : ""
-                }`}
-              />
-            )}
-          </button>
-          {activeParentMenu === "hrm" && isOpen && (
-            <div className="ml-6 mt-1 space-y-1">
-              <Link
-                to="/hrmlayout/dashboard"
-                className={getChildLinkClass("/hrmlayout/dashboard")}
-              >
-                <Home className="w-4 h-4" />
-                <span className="mx-auto">Dashboard</span>
-              </Link>
-              <Link
-                to="/hrmlayout/holidays"
-                className={getChildLinkClass("/hrmlayout/holidays")}
-              >
-                <Umbrella className="w-4 h-4" />
-                <span className="mx-auto">Holidays</span>
-              </Link>
-              <Link
-                to="/hrmlayout/leaves"
-                className={getChildLinkClass("/hrmlayout/leaves")}
-              >
-                <Calendar className="w-4 h-4" />
-                <span className="mx-auto">Leaves</span>
-              </Link>
-              <Link
-                to="/hrmlayout/attendance"
-                className={getChildLinkClass("/hrmlayout/attendance")}
-              >
-                <Calendar className="w-4 h-4" />
-                <span className="mx-auto">Attendance</span>
-              </Link>
-              <Link
-                to="/hrmlayout/payroll"
-                className={getChildLinkClass("/hrmlayout/payroll")}
-              >
-                <DollarSign className="w-4 h-4" />
-                <span className="mx-auto">Payroll</span>
-              </Link>
-              <Link
-                to="/hrmlayout/hrmsetting"
-                className={getChildLinkClass("/hrmlayout/hrmsetting")}
-              >
-                <Settings className="w-4 h-4" />
-                <span className="mx-auto">HRM Settings</span>
-              </Link>
-            </div>
-          )}
-        </div>
+            <UserCog className="w-5 h-5" />
+            {isOpen && <span className="mx-auto">Staff Members</span>}
+          </Link>
+        )}
 
-        <button
-          onClick={openSettingsSidebar}
-          className="flex items-center gap-15 w-full p-2 rounded-md hover:bg-gray-700 text-gray-200"
-        >
-          <Settings className="w-5 h-5" />
-          {isOpen && "Settings"}
-        </button>
+        {/* Utility - Changed to Settings */}
+        {shouldShowTab("utility") && (
+          <div>
+            <button
+              onClick={() => toggleMenu("utility")}
+              className={getDropdownButtonClass("utility", utilityPaths)}
+            >
+              <span className="flex items-center gap-3">
+                <Settings className="w-5 h-5" />
+              </span>
+              <span>{isOpen && "Settings"}</span>
+              {isOpen && (
+                <ChevronDown
+                  className={`w-4 h-4 transform transition-transform ${
+                    activeParentMenu === "utility" ? "rotate-180" : ""
+                  }`}
+                />
+              )}
+            </button>
+            {activeParentMenu === "utility" && isOpen && (
+              <div className="ml-6 mt-1 space-y-1">
+                <Link
+                  to="/utilitylayout/companyprofile"
+                  className={getChildLinkClass("/utilitylayout/companyprofile")}
+                >
+                  <Building className="w-4 h-4" />
+                  <span className="mx-auto">Company Profile</span>
+                </Link>
+                <Link
+                  to="/utilitylayout/tabHideView"
+                  className={getChildLinkClass("/utilitylayout/tabHideView")}
+                >
+                  <Eye className="w-4 h-4" />
+                  <span className="mx-auto">Tab Hide and Show</span>
+                </Link>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* HRM - Conditionally rendered */}
+        {shouldShowTab("hrm") && (
+          <div>
+            <button
+              onClick={() => toggleMenu("hrm")}
+              className={getDropdownButtonClass("hrm", hrmPaths)}
+            >
+              <span className="flex items-center gap-3">
+                <UserCog className="w-5 h-5" />
+              </span>
+              <span>{isOpen && "HRM"}</span>
+              {isOpen && (
+                <ChevronDown
+                  className={`w-4 h-4 transform transition-transform ${
+                    activeParentMenu === "hrm" ? "rotate-180" : ""
+                  }`}
+                />
+              )}
+            </button>
+            {activeParentMenu === "hrm" && isOpen && (
+              <div className="ml-6 mt-1 space-y-1">
+                <Link
+                  to="/hrmlayout/dashboard"
+                  className={getChildLinkClass("/hrmlayout/dashboard")}
+                >
+                  <Home className="w-4 h-4" />
+                  <span className="mx-auto">Dashboard</span>
+                </Link>
+                <Link
+                  to="/hrmlayout/holidays"
+                  className={getChildLinkClass("/hrmlayout/holidays")}
+                >
+                  <Umbrella className="w-4 h-4" />
+                  <span className="mx-auto">Holidays</span>
+                </Link>
+                <Link
+                  to="/hrmlayout/leaves"
+                  className={getChildLinkClass("/hrmlayout/leaves")}
+                >
+                  <Calendar className="w-4 h-4" />
+                  <span className="mx-auto">Leaves</span>
+                </Link>
+                <Link
+                  to="/hrmlayout/attendance"
+                  className={getChildLinkClass("/hrmlayout/attendance")}
+                >
+                  <Calendar className="w-4 h-4" />
+                  <span className="mx-auto">Attendance</span>
+                </Link>
+                <Link
+                  to="/hrmlayout/payroll"
+                  className={getChildLinkClass("/hrmlayout/payroll")}
+                >
+                  <DollarSign className="w-4 h-4" />
+                  <span className="mx-auto">Payroll</span>
+                </Link>
+                <Link
+                  to="/hrmlayout/hrmsetting"
+                  className={getChildLinkClass("/hrmlayout/hrmsetting")}
+                >
+                  <Settings className="w-4 h-4" />
+                  <span className="mx-auto">HRM Settings</span>
+                </Link>
+              </div>
+            )}
+          </div>
+        )}
       </nav>
     </div>
   );

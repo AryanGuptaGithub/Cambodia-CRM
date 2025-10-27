@@ -1,27 +1,16 @@
-import React from 'react'
-import { Outlet, useLocation } from "react-router-dom";
-import { ChevronRight } from "lucide-react";
-const SettingsLayout = () => {
-      const location = useLocation();
-    
-    // Extract last segment of URL for breadcrumb
-    const current = location.pathname.split("/").pop();
+import React from "react";
+import { Outlet } from "react-router-dom";
+import SettingsSidebar from "../components/SettingsSidebar";
+
+function SettingsLayout() {
   return (
-       <div className="flex flex-col gap-4">
-           {/* Breadcrumbs */}
-           <div className="flex items-center text-sm text-gray-600 font-medium">
-             <span>Dashboard</span>
-             <ChevronRight className="w-4 h-4 mx-1" />
-             <span>Settings</span>
-             <ChevronRight className="w-4 h-4 mx-1" />
-             <span className="capitalize text-gray-900">{current}</span>
-           </div>
-     
-           {/* Nested page (Order/Invoice/etc.) */}
-           <Outlet />
-         </div>
-    )
-  
+    <div className="flex min-h-screen">
+      <SettingsSidebar />
+      <div className="flex-1 p-6">
+        <Outlet />
+      </div>
+    </div>
+  );
 }
 
-export default SettingsLayout
+export default SettingsLayout;

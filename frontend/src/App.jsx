@@ -6,6 +6,7 @@ import ProtectedRoute from "./components/ProtectedRoute";
 // Layout components
 import DashboardLayout from "./pages/DashboardLayout";
 import MasterLayout from "./pages/MasterLayout";
+import SettingsLayout from "./pages/SettingsLayout";
 import ProductManagerLayout from "./pages/ProductManagerLayout";
 import PurchaseLayout from "./pages/PurchaseLayout";
 import SaleLayout from "./pages/SaleLayout";
@@ -13,7 +14,6 @@ import ExepenseLayout from "./pages/ExepenseLayout";
 import ReportsLayout from "./pages/ReportsLayout";
 import UtilityLayout from "./pages/UtilityLayout";
 import HrmLayout from "./pages/HrmLayout";
-import SettingsLayout from "./pages/SettingsLayout";
 import CashAndBankLayout from "./pages/CashAndBankLayout";
 import StaffMemberLayout from "./pages/Utility/StaffMemberLayout";
 
@@ -30,6 +30,10 @@ import Customer from "./pages/Master/Customer";
 import Supplier from "./pages/Master/Supplier";
 import AddSupplier from "./pages/Master/addsupplier";
 import AddCustomer from "./pages/Master/addcustomer";
+
+// Settings pages
+import CompanyProfile from "./pages/Settings/CompanyProfile";
+import HTabsManipulation from "./pages/Settings/HTabsManipulation";
 
 // Product Manager pages
 import Brands from "./pages/ProductManager/Brands";
@@ -94,7 +98,7 @@ import PLReport from "./pages/Reports/PLReport";
 import ProvinceWiseSale from "./pages/Reports/ProvinceWiseSale";
 import ProvinceWiseCustomer from "./pages/Reports/ProvinceWiseCustomer";
 import ReportsInHand from "./pages/Reports/ReportsInHand";
-import ProductReport from "./pages/Reports/ProductReport"; // Add this import
+import ProductReport from "./pages/Reports/ProductReport";
 
 // Report form pages
 import AddDailReports from "./pages/Reports/AddDailyReports";
@@ -112,23 +116,6 @@ import Holidays from "./pages/HRM/Holidays";
 import Leaves from "./pages/HRM/Leaves";
 import Payroll from "./pages/HRM/Payroll";
 import HRMSetting from "./pages/HRM/HRMSetting";
-
-// Settings pages
-import CompanySetting from "./pages/Settings/CompanySetting";
-import Currencies from "./pages/Settings/Currencies";
-import CustomFields from "./pages/Settings/CustomFields";
-import EmailSetting from "./pages/Settings/EmailSetting";
-import Modules from "./pages/Settings/Modules";
-import Profile from "./pages/Settings/Profile";
-import DatabaseBackup from "./pages/Settings/DatabaseBackup";
-import PaymentSetting from "./pages/Settings/PaymentSetting";
-import RolesPermission from "./pages/Settings/RolesPermission";
-import StorageSeting from "./pages/Settings/StorageSeting";
-import Settings from "./pages/Settings/Settings";
-import Taxes from "./pages/Settings/Taxes";
-import Translation from "./pages/Settings/Translation";
-import Units from "./pages/Settings/Units";
-import Warehouse from "./pages/Settings/Warehouse";
 
 // Account pages
 import CashAndBank from "./pages/Account/CashAndBank";
@@ -177,6 +164,13 @@ function App() {
             <Route path="customer/new" element={<AddCustomer />} />
             <Route path="supplier" element={<Supplier />} />
             <Route path="supplier/new" element={<AddSupplier />} />
+          </Route>
+
+          {/* Settings routes - Moved inside DashboardLayout */}
+          <Route path="settingslayout" element={<SettingsLayout />}>
+            <Route index element={<CompanyProfile />} />
+            <Route path="company-profile" element={<CompanyProfile />} />
+            <Route path="tab-manipulation" element={<HTabsManipulation />} />
           </Route>
 
           {/* Product Manager routes */}
@@ -236,53 +230,86 @@ function App() {
           <Route path="reportlayout" element={<ReportsLayout />}>
             <Route index element={<AddDailReports />} />
             <Route path="dailyreport" element={<AddDailReports />} />
-            
+
             {/* New Report Routes */}
             <Route path="averageprice" element={<AveragePricePerProduct />} />
-            <Route path="newcustomeraddition" element={<NewCustomerAddition />} />
-            
+            <Route
+              path="newcustomeraddition"
+              element={<NewCustomerAddition />}
+            />
+
             {/* Master Customer Report Routes */}
-            <Route path="customerretention" element={<CustomerRetentionRate />} />
-            <Route path="customeracceptance" element={<CustomerProductAcceptanceRate />} />
+            <Route
+              path="customerretention"
+              element={<CustomerRetentionRate />}
+            />
+            <Route
+              path="customeracceptance"
+              element={<CustomerProductAcceptanceRate />}
+            />
             <Route path="zonewisecustomers" element={<ZoneWiseCustomers />} />
-            
+
             {/* Repeat Rate Routes */}
-            <Route path="monthlyrepeatrate" element={<MonthlyCustomerRepeatRate />} />
-            <Route path="annualrepeatrate" element={<AnnualCustomerRepeatRate />} />
-            
+            <Route
+              path="monthlyrepeatrate"
+              element={<MonthlyCustomerRepeatRate />}
+            />
+            <Route
+              path="annualrepeatrate"
+              element={<AnnualCustomerRepeatRate />}
+            />
+
             {/* Product Reports */}
             <Route path="product-report" element={<ProductReport />} />
-            
+
             {/* MR Wise Reports */}
             <Route path="mrwiseoutstanding" element={<MRWiseOutstanding />} />
             <Route path="mrwisesales" element={<MRWiseSales />} />
-            
+
             {/* Financial Reports */}
             <Route path="cashsales" element={<TotalCashSales />} />
-            <Route path="outstandingcollection" element={<OutstandingCollection />} />
+            <Route
+              path="outstandingcollection"
+              element={<OutstandingCollection />}
+            />
             <Route path="totalexpense" element={<TotalExpense />} />
             <Route path="remittance" element={<Remittance />} />
 
             {/* Province Wise Reports */}
             <Route path="province-wise-sale" element={<ProvinceWiseSale />} />
-            <Route path="province-wise-customer" element={<ProvinceWiseCustomer />} />
+            <Route
+              path="province-wise-customer"
+              element={<ProvinceWiseCustomer />}
+            />
 
             {/* Reports in Hand */}
             <Route path="reports-in-hand" element={<ReportsInHand />} />
 
             <Route path="payment" element={<PaymentReports />} />
-            
+
             {/* Financial Ratio Reports */}
             <Route path="sales-salary-ratio" element={<SalesSalaryRatio />} />
             <Route path="salary-cogs-ratio" element={<SalaryCOGSRatio />} />
-            <Route path="operation-cost-cogs-ratio" element={<OperationCostCOGSRatio />} />
-            <Route path="operation-cost-sales-ratio" element={<OperationCostSalesRatio />} />
-            <Route path="tour-expense-sales-ratio" element={<TourExpenseSalesRatio />} />
+            <Route
+              path="operation-cost-cogs-ratio"
+              element={<OperationCostCOGSRatio />}
+            />
+            <Route
+              path="operation-cost-sales-ratio"
+              element={<OperationCostSalesRatio />}
+            />
+            <Route
+              path="tour-expense-sales-ratio"
+              element={<TourExpenseSalesRatio />}
+            />
             <Route path="pl-report" element={<PLReport />} />
-            
+
             {/* Other Reports */}
             <Route path="expensereport" element={<ExpenseReport />} />
-            <Route path="productsalessummary" element={<ProductSalesSummary />} />
+            <Route
+              path="productsalessummary"
+              element={<ProductSalesSummary />}
+            />
             <Route path="stockalert" element={<StockAlert />} />
 
             <Route path="dailysample">
@@ -292,7 +319,7 @@ function App() {
 
             <Route path="ratelist" element={<RateList />} />
             <Route path="profitloss" element={<ProfitLoss />} />
-            
+
             <Route path="salesummary">
               <Route index element={<SaleSummary />} />
               <Route path="new" element={<AddDailySummaryReports />} />
@@ -304,8 +331,8 @@ function App() {
           {/* Utility routes */}
           <Route path="utilitylayout" element={<UtilityLayout />}>
             <Route index element={<ProductCard />} />
-            <Route path="frontsettings" element={<FrontSettings />} />
-            <Route path="productcard" element={<ProductCard />} />
+            <Route path="companyprofile" element={<CompanyProfile />} />
+            <Route path="tabhideview" element={<HTabsManipulation />} />
           </Route>
 
           {/* HRM routes */}
@@ -317,26 +344,6 @@ function App() {
             <Route path="leaves" element={<Leaves />} />
             <Route path="payroll" element={<Payroll />} />
             <Route path="hrmsetting" element={<HRMSetting />} />
-          </Route>
-
-          {/* Settings routes */}
-          <Route path="settinglayout" element={<SettingsLayout />}>
-            <Route index element={<Profile />} />
-            <Route path="companysetting" element={<CompanySetting />} />
-            <Route path="currencies" element={<Currencies />} />
-            <Route path="customfields" element={<CustomFields />} />
-            <Route path="emailsetting" element={<EmailSetting />} />
-            <Route path="modules" element={<Modules />} />
-            <Route path="profile" element={<Profile />} />
-            <Route path="databasebackup" element={<DatabaseBackup />} />
-            <Route path="payment" element={<PaymentSetting />} />
-            <Route path="rolepermission" element={<RolesPermission />} />
-            <Route path="storageseting" element={<StorageSeting />} />
-            <Route path="settings" element={<Settings />} />
-            <Route path="taxes" element={<Taxes />} />
-            <Route path="translation" element={<Translation />} />
-            <Route path="units" element={<Units />} />
-            <Route path="warehouse" element={<Warehouse />} />
           </Route>
         </Route>
       </Routes>

@@ -2,11 +2,10 @@ import React, { useState, useEffect } from "react";
 import { Outlet } from "react-router-dom";
 import { Menu, LogOut } from "lucide-react";
 import Sidebar from "../components/Sidebar";
-import SettingsSidebar from "../components/SettingsSidebar";
 import { useNavigate } from "react-router-dom";
+
 function DashboardLayout() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [dateTime, setDateTime] = useState(new Date());
   const navigate = useNavigate();
 
@@ -32,13 +31,7 @@ function DashboardLayout() {
       <Sidebar
         isOpen={isSidebarOpen}
         toggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
-        openSettingsSidebar={() => setIsSettingsOpen(true)}
       />
-
-      {/* Settings Sidebar (slides beside main sidebar) */}
-      {isSettingsOpen && (
-        <SettingsSidebar onClose={() => setIsSettingsOpen(false)} />
-      )}
 
       {/* Main content */}
       <div className="flex flex-col flex-1">
@@ -79,7 +72,7 @@ function DashboardLayout() {
         </header>
 
         {/* Page Outlet */}
-        <main className="flex-1  p-4">
+        <main className="flex-1 p-4">
           <Outlet />
         </main>
       </div>

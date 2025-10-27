@@ -66,7 +66,151 @@ const Sales = () => {
     "amount",
     "paymentStatus",
     "actions",
-  ]); // Default visible columns
+  ]);
+
+  // Add the missing allFields definition
+  const allFields = useMemo(
+    () => [
+      {
+        id: "invoiceNumber",
+        name: "Invoice No",
+        dbName: "invoiceNumber",
+      },
+      {
+        id: "invoiceDate",
+        name: "Invoice Date",
+        dbName: "invoiceDate",
+      },
+      {
+        id: "productName",
+        name: "Product Name",
+        dbName: "productName",
+      },
+      { id: "mrName", name: "MR Name", dbName: "mrName" },
+      {
+        id: "customerName",
+        name: "Customer Name",
+        dbName: "customerInfo.name",
+      },
+      {
+        id: "salesQty",
+        name: "Sales Qty",
+        dbName: "salesQty",
+      },
+      {
+        id: "totalQty",
+        name: "Total Qty",
+        dbName: "totalQty",
+      },
+      {
+        id: "bonusQty",
+        name: "Bonus Qty",
+        dbName: "bonusQty",
+      },
+      {
+        id: "sellingPrice",
+        name: "Selling Price (USD)",
+        dbName: "sellingPrice",
+      },
+      {
+        id: "averageUnitPrice",
+        name: "Average Unit Price (USD)",
+        dbName: "averageUnitPrice",
+      },
+      {
+        id: "discount",
+        name: "Discount (USD)",
+        dbName: "discount",
+      },
+      {
+        id: "netSellingAmount",
+        name: "Net Selling Amount (USD)",
+        dbName: "netSellingAmount",
+      },
+      {
+        id: "amount",
+        name: "Total Amount ($)",
+        dbName: "amount",
+      },
+      {
+        id: "profitLoss",
+        name: "Prof/Loss",
+        dbName: "profitLoss",
+      },
+      { id: "lc", name: "LC", dbName: "lc" },
+      {
+        id: "paidAmount",
+        name: "Paid Amount",
+        dbName: "paidAmount",
+      },
+      {
+        id: "dueAmount",
+        name: "Due Amount",
+        dbName: "dueAmount",
+      },
+      {
+        id: "paymentStatus",
+        name: "Payment Status",
+        dbName: "paymentStatus",
+      },
+      {
+        id: "creditDays",
+        name: "Credit (Days)",
+        dbName: "creditDays",
+      },
+      {
+        id: "recordingDate",
+        name: "Recording Date",
+        dbName: "recordingDate",
+      },
+      { id: "dueDate", name: "Due Date", dbName: "dueDate" },
+      {
+        id: "deliveryDate",
+        name: "Delivery Date",
+        dbName: "deliveryDate",
+      },
+      { id: "remark", name: "Remark", dbName: "remark" },
+      {
+        id: "customerCode",
+        name: "Customer Code",
+        dbName: "customerCode",
+      },
+      {
+        id: "actions",
+        name: "Actions",
+        dbName: "actions",
+      },
+    ],
+    []
+  );
+
+  const requiredColumns = [
+    "invoiceNumber",
+    "invoiceDate",
+    "productName",
+    "actions",
+  ];
+
+  // Get available columns for Add tab (columns not currently in table)
+  const availableColumns = useMemo(() => {
+    return allFields.filter((item) => !tableColumns.includes(item.id));
+  }, [allFields, tableColumns]);
+
+  const removableColumns = useMemo(() => {
+    return allFields.filter(
+      (item) =>
+        tableColumns.includes(item.id) && !requiredColumns.includes(item.id)
+    );
+  }, [allFields, tableColumns]);
+
+  const chunkedItems = useMemo(() => {
+    const items = activeTab === "add" ? availableColumns : removableColumns;
+    const chunks = [];
+    for (let i = 0; i < items.length; i += 2) {
+      chunks.push(items.slice(i, i + 2));
+    }
+    return chunks;
+  }, [activeTab, availableColumns, removableColumns]);
 
   const [form, setForm] = useState({
     _id: null,
@@ -93,6 +237,9 @@ const Sales = () => {
     paymentStatus: "",
     remark: "",
   });
+
+  // Constants for pagination
+  const SALES_PER_PAGE = 9;
 
   // Add the missing function to fix the ReferenceError
   const handleProductNameHighlight = useCallback(
@@ -220,148 +367,150 @@ const Sales = () => {
     form.productName
   );
 
-  const salesPerPage = 9;
+  // Helper function to capitalize first letter
+  const capitalizeFirstLetter = (string) => {
+    if (!string) return "--";
+    return string.charAt(0).toUpperCase() + string.slice(1);
+  };
 
-  const allFields = useMemo(
-    () => [
-      {
-        id: "invoiceNumber",
-        name: "Invoice No",
-        dbName: "invoiceNumber",
-      },
-      {
-        id: "invoiceDate",
-        name: "Invoice Date",
-        dbName: "invoiceDate",
-      },
-      {
-        id: "productName",
-        name: "Product Name",
-        dbName: "productName",
-      },
-      { id: "mrName", name: "MR Name", dbName: "mrName" },
-      {
-        id: "customerName",
-        name: "Customer Name",
-        dbName: "customerInfo.name",
-      },
-      {
-        id: "salesQty",
-        name: "Sales Qty",
-        dbName: "salesQty",
-      },
-      {
-        id: "totalQty",
-        name: "Total Qty",
-        dbName: "totalQty",
-      },
-      {
-        id: "bonusQty",
-        name: "Bonus Qty",
-        dbName: "bonusQty",
-      },
-      {
-        id: "sellingPrice",
-        name: "Selling Price (USD)",
-        dbName: "sellingPrice",
-      },
-      {
-        id: "averageUnitPrice",
-        name: "Average Unit Price (USD)",
-        dbName: "averageUnitPrice",
-      },
-      {
-        id: "discount",
-        name: "Discount (USD)",
-        dbName: "discount",
-      },
-      {
-        id: "netSellingAmount",
-        name: "Net Selling Amount (USD)",
-        dbName: "netSellingAmount",
-      },
-      {
-        id: "amount",
-        name: "Total Amount ($)",
-        dbName: "amount",
-      },
-      {
-        id: "profitLoss",
-        name: "Prof/Loss",
-        dbName: "profitLoss",
-      },
-      { id: "lc", name: "LC", dbName: "lc" },
-      {
-        id: "paidAmount",
-        name: "Paid Amount",
-        dbName: "paidAmount",
-      },
-      {
-        id: "dueAmount",
-        name: "Due Amount",
-        dbName: "dueAmount",
-      },
-      {
-        id: "paymentStatus",
-        name: "Payment Status",
-        dbName: "paymentStatus",
-      },
-      {
-        id: "creditDays",
-        name: "Credit (Days)",
-        dbName: "creditDays",
-      },
-      {
-        id: "recordingDate",
-        name: "Recording Date",
-        dbName: "recordingDate",
-      },
-      { id: "dueDate", name: "Due Date", dbName: "dueDate" },
-      {
-        id: "deliveryDate",
-        name: "Delivery Date",
-        dbName: "deliveryDate",
-      },
-      { id: "remark", name: "Remark", dbName: "remark" },
-      {
-        id: "customerCode",
-        name: "Customer Code",
-        dbName: "customerCode",
-      },
-      {
-        id: "actions",
-        name: "Actions",
-        dbName: "actions",
-      },
-    ],
-    []
-  );
-  const requiredColumns = [
-    "invoiceNumber",
-    "invoiceDate",
-    "productName",
-    "actions",
-  ];
-  // Get available columns for Add tab (columns not currently in table)
-  const availableColumns = useMemo(() => {
-    return allFields.filter((item) => !tableColumns.includes(item.id));
-  }, [allFields, tableColumns]);
-
-  const removableColumns = useMemo(() => {
-    return allFields.filter(
-      (item) =>
-        tableColumns.includes(item.id) && !requiredColumns.includes(item.id)
-    );
-  }, [allFields, tableColumns]);
-
-  const chunkedItems = useMemo(() => {
-    const items = activeTab === "add" ? availableColumns : removableColumns;
-    const chunks = [];
-    for (let i = 0; i < items.length; i += 2) {
-      chunks.push(items.slice(i, i + 2));
+  // Get field value from sale object
+  const getFieldValue = (sale, dbName) => {
+    if (dbName === "customerInfo.name") {
+      return sale.customerInfo?.name || "--";
     }
-    return chunks;
-  }, [activeTab, availableColumns, removableColumns]);
+
+    if (
+      ["recordingDate", "dueDate", "deliveryDate", "invoiceDate"].includes(
+        dbName
+      )
+    ) {
+      return formatDateToReadable(sale[dbName]) || "--";
+    }
+
+    if (dbName === "amount") {
+      return Math.ceil(sale.amount || 0);
+    }
+
+    if (
+      dbName === "salesQty" ||
+      dbName === "totalQty" ||
+      dbName === "bonusQty"
+    ) {
+      return Math.ceil(sale[dbName] || 0);
+    }
+
+    return sale[dbName] ?? "--";
+  };
+
+  // CORRECTED fetch function
+  const fetchSaleSummaries = async () => {
+    try {
+      const res = await fetch(`${backendUrl}/api/sales`);
+      if (!res.ok) throw new Error("Failed to fetch sale summaries");
+
+      const data = await res.json();
+      console.log("API response data:", data);
+
+      // Extract the sales array from the response
+      const salesData = data.summaries || data;
+      console.log("Sales data to set:", salesData);
+
+      const uniqueTypes = Array.from(
+        new Set(salesData.map((item) => item.paymentStatus?.toLowerCase()))
+      );
+
+      setTypes(["All", ...uniqueTypes]);
+      setSales(salesData); // Set the actual array, not the response object
+    } catch (error) {
+      console.error("❌ Fetch error:", error);
+      showToast("error", error.message || "Error fetching sale summaries");
+    } finally {
+      setLoadingData(false);
+    }
+  };
+
+  // Fetch data on mount
+  useEffect(() => {
+    fetchSaleSummaries();
+  }, []);
+
+  // Memoized filtered sales - WITH SAFETY CHECK
+  const filteredSales = useMemo(() => {
+    // Safety check - ensure sales is an array
+    if (!Array.isArray(sales)) {
+      console.warn("Sales is not an array:", sales);
+      return [];
+    }
+
+    const lowerSearch = searchTerm.trim().toLowerCase();
+    const selectedTabLower = selectedTab.toLowerCase();
+
+    return sales.filter((sale) => {
+      const paymentStatus = (sale.paymentStatus || "pending").toLowerCase();
+
+      // Tab filter
+      if (selectedTabLower !== "all" && selectedTabLower !== paymentStatus) {
+        return false;
+      }
+
+      if (!lowerSearch) {
+        return true;
+      }
+
+      // Prepare searchable values
+      const fields = [
+        sale.invoiceNumber,
+        sale.customerInfo?.name,
+        sale.productName,
+      ];
+
+      return fields.some((f) =>
+        (f ?? "").toString().toLowerCase().includes(lowerSearch)
+      );
+    });
+  }, [sales, searchTerm, selectedTab]);
+
+  // Current page sales - ONLY SHOW 9 RECORDS
+  const currentSales = useMemo(() => {
+    const start = (currentPage - 1) * SALES_PER_PAGE;
+    return filteredSales.slice(start, start + SALES_PER_PAGE);
+  }, [filteredSales, currentPage]);
+
+  // Total pages calculation
+  const totalPages = useMemo(() => {
+    return Math.ceil(filteredSales.length / SALES_PER_PAGE);
+  }, [filteredSales.length]);
+
+  // Visible pages for pagination
+  const visiblePages = useMemo(() => {
+    return getVisiblePages(currentPage, totalPages);
+  }, [currentPage, totalPages]);
+
+  // Reset to first page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, selectedTab]);
+
+  const toggleSelect = (sale) => {
+    setSelected((prev) => {
+      const exists = prev.some((c) => c.id === sale._id);
+
+      if (exists) {
+        return prev.filter((c) => c.id !== sale._id);
+      } else {
+        return [...prev, { id: sale._id }];
+      }
+    });
+  };
+
+  const toggleSelectAll = (checked) => {
+    if (checked) {
+      const allSelected = currentSales.map((s) => ({ id: s._id }));
+      setSelected(allSelected);
+    } else {
+      setSelected([]);
+    }
+  };
 
   // Toggle item selection
   const toggleItem = (id) => {
@@ -433,41 +582,6 @@ const Sales = () => {
     setIsModalOpen(false);
   };
 
-  // Get field value from sale object
-  const getFieldValue = (sale, dbName) => {
-    if (dbName === "customerInfo.name") {
-      return sale.customerInfo?.name || "--";
-    }
-
-    if (
-      ["recordingDate", "dueDate", "deliveryDate", "invoiceDate"].includes(
-        dbName
-      )
-    ) {
-      return formatDateToReadable(sale[dbName]) || "--";
-    }
-
-    if (dbName === "amount") {
-      return Math.ceil(sale.amount || 0);
-    }
-
-    if (
-      dbName === "salesQty" ||
-      dbName === "totalQty" ||
-      dbName === "bonusQty"
-    ) {
-      return Math.ceil(sale[dbName] || 0);
-    }
-
-    return sale[dbName] ?? "--";
-  };
-
-  // Helper function to capitalize first letter
-  const capitalizeFirstLetter = (string) => {
-    if (!string) return "--";
-    return string.charAt(0).toUpperCase() + string.slice(1);
-  };
-
   // Update allSelected state when individual selections change
   useEffect(() => {
     const currentItems = chunkedItems.flat();
@@ -480,6 +594,288 @@ const Sales = () => {
       setAllSelected(false);
     }
   }, [selectedItems, chunkedItems]);
+
+  // Add the rest of your missing functions here...
+  const handleView = (sale) => {
+    setForm({ ...sale });
+    setIsOpen(true);
+    setIsViewModalOpen(true);
+  };
+
+  const editSale = (sale) => {
+    setForm({ ...sale });
+    setIsOpen(true);
+    setIsEditModalOpen(true);
+  };
+
+  const handleUpdateSales = async (e, sale) => {
+    e.preventDefault();
+    try {
+      const res = await axios.put(`${backendUrl}/api/sales/${sale._id}`, sale);
+      if (res.status === 200) {
+        showToast("success", "Sales record updated successfully");
+        setIsEditModalOpen(false);
+        fetchSaleSummaries();
+      }
+    } catch (err) {
+      showToast("error", "Failed to update sales record.");
+    }
+  };
+
+  const deleteSale = async (sale) => {
+    if (!sale._id) return;
+    const confirmDelete = await confirmDialog({
+      title: "Delete",
+      text: `Are you sure you want to delete <b>${sale.invoiceNumber}</b>?`,
+      icon: "warning",
+      confirmButtonText: "Yes, delete",
+      cancelButtonText: "Cancel",
+    });
+
+    if (confirmDelete.isConfirmed) {
+      try {
+        const res = await axios.delete(`${backendUrl}/api/sales/${sale._id}`);
+        if (res.status === 200) {
+          showToast(
+            "success",
+            `Customer <b>${sale.invoiceNumber}</b> deleted successfully`
+          );
+          fetchSaleSummaries();
+        }
+      } catch (error) {
+        showToast("error", "Failed to delete customer.");
+      }
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    const confirm = await confirmDialog({
+      text: `Are you sure you want to delete <b>${selected.length}</b> sales`,
+      icon: "warning",
+      confirmButtonText: "Yes, delete",
+      cancelButtonText: "Cancel",
+      selected,
+    });
+
+    if (confirm.isConfirmed) {
+      try {
+        const res = await axios.delete(`${backendUrl}/api/sales`, {
+          data: { ids: selected },
+        });
+
+        if (res.status === 200) {
+          showToast("success", "Selected Sales deleted successfully");
+          fetchSaleSummaries();
+          setSelected([]);
+        }
+      } catch (error) {
+        showToast("error", "Failed to delete selected customers.");
+      }
+    } else {
+      setSelected([]);
+    }
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const data = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(data, { type: "array" });
+        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(worksheet, {
+          header: 1,
+          defval: "",
+        });
+
+        if (rows.length === 0) {
+          showToast("warning", "Excel file is empty");
+          return;
+        }
+
+        let headerRowIndex = -1;
+        let headersMap = {};
+
+        const headerPatterns = [
+          "no",
+          "recording date",
+          "invoice #",
+          "invoice date",
+          "mr name",
+        ];
+
+        for (let i = 0; i < Math.min(rows.length, 10); i++) {
+          const row = rows[i].map((cell) =>
+            (cell || "").toString().trim().toLowerCase()
+          );
+
+          const matches = headerPatterns.filter((pattern) =>
+            row.some((cell) => cell.includes(pattern))
+          );
+
+          if (matches.length >= 3) {
+            headerRowIndex = i;
+            break;
+          }
+        }
+
+        if (headerRowIndex === -1) {
+          showToast("error", "❌ Could not identify header row in Excel file");
+          return;
+        }
+
+        const rawHeaders = rows[headerRowIndex];
+
+        const columnMapping = [
+          { index: 0, key: "no" },
+          { index: 1, key: "recordingDate" },
+          { index: 2, key: "invoiceNumber" },
+          { index: 3, key: "invoiceDate" },
+          { index: 4, key: "mrName" },
+          { index: 5, key: "customerCode" },
+          { index: 6, key: "productName" },
+          { index: 7, key: "salesQty" },
+          { index: 8, key: "bonusQty" },
+          { index: 9, key: "sellingPrice" },
+          { index: 10, key: "discount" },
+          { index: 11, key: "creditDays" },
+          { index: 12, key: "paidAmount" },
+          { index: 13, key: "paymentStatus" },
+          { index: 14, key: "remark" },
+        ];
+
+        columnMapping.forEach(({ index, key }) => {
+          if (index < rawHeaders.length) {
+            headersMap[index] = key;
+          }
+        });
+
+        const essentialHeaders = [
+          "productName",
+          "salesQty",
+          "sellingPrice",
+          "paymentStatus",
+        ];
+        const missingEssential = essentialHeaders.filter(
+          (header) => !Object.values(headersMap).includes(header)
+        );
+
+        if (missingEssential.length > 0) {
+          showToast(
+            "error",
+            `❌ Missing essential columns: ${missingEssential.join(", ")}`
+          );
+          return;
+        }
+
+        const dataRows = rows.slice(headerRowIndex + 1);
+
+        const mappedData = dataRows
+          .map((row, index) => {
+            if (
+              !row ||
+              row.length === 0 ||
+              row.every((cell) => !cell || cell.toString().trim() === "")
+            ) {
+              return null;
+            }
+
+            const item = {};
+            Object.entries(headersMap).forEach(([colIndex, key]) => {
+              const colIndexNum = parseInt(colIndex);
+              const value = row[colIndexNum] ?? "";
+
+              if (
+                [
+                  "salesQty",
+                  "bonusQty",
+                  "sellingPrice",
+                  "discount",
+                  "paidAmount",
+                  "creditDays",
+                ].includes(key)
+              ) {
+                const numValue = parseFloat(value);
+                item[key] = !isNaN(numValue) ? numValue : 0;
+              } else {
+                item[key] = value.toString().trim();
+              }
+            });
+
+            if (!item.productName || item.productName === "") {
+              return null;
+            }
+
+            return {
+              recordingDate: item.recordingDate,
+              invoiceNumber: item.invoiceNumber || "",
+              invoiceDate: item.invoiceDate,
+              mrName: item.mrName || "",
+              customerCode: item.customerCode || "",
+              productName: item.productName,
+              salesQty: item.salesQty || 0,
+              bonusQty: item.bonusQty || 0,
+              sellingPrice: item.sellingPrice || 0,
+              discount: item.discount || 0,
+              creditDays: item.creditDays || 0,
+              paidAmount: item.paidAmount || 0,
+              paymentStatus: item.paymentStatus || "",
+              remark: item.remark || "",
+              _rowIndex: headerRowIndex + index + 2,
+            };
+          })
+          .filter((entry) => entry !== null);
+
+        if (mappedData.length === 0) {
+          showToast("warning", "No valid data records found in the Excel file");
+          return;
+        }
+
+        setParsedData(mappedData);
+      } catch (error) {
+        console.error("Error reading Excel file:", error);
+        showToast("error", "Failed to process the Excel file");
+      }
+    };
+
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleProductImport = async () => {
+    if (parsedData.length === 0) {
+      showToast("warning", "Please upload a valid file first");
+      return;
+    }
+
+    setIsUploading(true);
+
+    try {
+      const res = await axios.post(`${backendUrl}/api/sale/import`, parsedData);
+
+      if (res.status === 200) {
+        showToast(
+          "success",
+          res.data.message || "Sale Summary imported successfully!"
+        );
+        setShowImportModal(false);
+        fetchSaleSummaries();
+      }
+    } catch (err) {
+      handleAxiosError(err, showToast);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleNumericInputChange = (e, updateFunc) => {
+    const value = e.target.value;
+    if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+      updateFunc(e);
+    }
+  };
 
   // Form change handlers
   const updateFormField = useCallback((name, value) => {
@@ -595,112 +991,6 @@ const Sales = () => {
     },
     [updateFormField, paymentStatusSuggestions, productNameSuggestions]
   );
-
-  // Fetch function
-  const fetchSaleSummaries = async () => {
-    try {
-      const res = await fetch(`${backendUrl}/api/sales`);
-      if (!res.ok) throw new Error("Failed to fetch sale summaries");
-
-      const data = await res.json();
-      const uniqueTypes = Array.from(
-        new Set(data.map((item) => item.paymentStatus?.toLowerCase()))
-      );
-
-      setTypes(["All", ...uniqueTypes]);
-      setSales(data);
-    } catch (error) {
-      console.error("❌ Fetch error:", error);
-      showToast("error", error.message || "Error fetching sale summaries");
-    } finally {
-      setLoadingData(false);
-    }
-  };
-
-  const handleView = (sale) => {
-    setForm({ ...sale });
-    setIsOpen(true);
-    setIsViewModalOpen(true);
-  };
-  const editSale = (sale) => {
-    setForm({ ...sale });
-    setIsOpen(true);
-    setIsEditModalOpen(true);
-  };
-  // Memoized filtered sales
-  const filteredSales = useMemo(() => {
-    const lowerSearch = searchTerm.trim().toLowerCase();
-    const selectedTabLower = selectedTab.toLowerCase();
-
-    return sales.filter((sale) => {
-      const paymentStatus = (sale.paymentStatus || "pending").toLowerCase();
-
-      // Tab filter
-      if (selectedTabLower !== "all" && selectedTabLower !== paymentStatus) {
-        return false;
-      }
-
-      if (!lowerSearch) {
-        return true;
-      }
-
-      // Prepare searchable values
-      const fields = [
-        sale.invoiceNumber,
-        sale.customerInfo?.name,
-        sale.productName,
-      ];
-
-      return fields.some((f) =>
-        (f ?? "").toString().toLowerCase().includes(lowerSearch)
-      );
-    });
-  }, [sales, searchTerm, selectedTab]);
-
-  const currentSales = useMemo(() => {
-    const start = (currentPage - 1) * salesPerPage;
-    return filteredSales.slice(start, start + salesPerPage);
-  }, [filteredSales, currentPage, salesPerPage]);
-
-  const totalPages = useMemo(
-    () => Math.ceil(filteredSales.length / salesPerPage),
-    [filteredSales, salesPerPage]
-  );
-  const visiblePages = useMemo(
-    () => getVisiblePages(currentPage, totalPages),
-    [currentPage, totalPages]
-  );
-
-  // Reset page when search or tab changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm, selectedTab]);
-
-  // Fetch data on mount
-  useEffect(() => {
-    fetchSaleSummaries();
-  }, []);
-
-  const toggleSelect = (sale) => {
-    setSelected((prev) => {
-      const exists = prev.some((c) => c.id === sale._id);
-
-      if (exists) {
-        return prev.filter((c) => c.id !== sale._id);
-      } else {
-        return [...prev, { id: sale._id }];
-      }
-    });
-  };
-
-  const toggleSelectAll = (checked) => {
-    if (checked) {
-      const allSelected = currentSales.map((s) => ({ id: s._id }));
-      setSelected(allSelected);
-    } else {
-      setSelected([]);
-    }
-  };
 
   const handleDateChange = (date, fieldName) => {
     setForm((prev) => {
@@ -884,277 +1174,6 @@ const Sales = () => {
     );
   }
 
-  const handleUpdateSales = async (e, sale) => {
-    e.preventDefault();
-
-    try {
-      const res = await axios.put(`${backendUrl}/api/sales/${sale._id}`, sale);
-      if (res.status === 200) {
-        showToast("success", "Sales record updated successfully");
-        setIsEditModalOpen(false);
-        fetchSaleSummaries();
-      }
-    } catch (err) {
-      showToast("error", "Failed to update sales record.");
-    }
-  };
-
-  const deleteSale = async (sale) => {
-    if (!sale._id) return;
-    const confirmDelete = await confirmDialog({
-      title: "Delete",
-      text: `Are you sure you want to delete <b>${sale.invoiceNumber}</b>?`,
-      icon: "warning",
-      confirmButtonText: "Yes, delete",
-      cancelButtonText: "Cancel",
-    });
-
-    if (confirmDelete.isConfirmed) {
-      try {
-        const res = await axios.delete(`${backendUrl}/api/sales/${sale._id}`);
-        if (res.status === 200) {
-          showToast(
-            "success",
-            `Customer <b>${sale.invoiceNumber}</b> deleted successfully`
-          );
-          fetchSaleSummaries();
-        }
-      } catch (error) {
-        showToast("error", "Failed to delete customer.");
-      }
-    }
-  };
-
-  const handleDeleteSelected = async () => {
-    const confirm = await confirmDialog({
-      text: `Are you sure you want to delete <b>${selected.length}</b> sales`,
-      icon: "warning",
-      confirmButtonText: "Yes, delete",
-      cancelButtonText: "Cancel",
-      selected,
-    });
-
-    if (confirm.isConfirmed) {
-      try {
-        const res = await axios.delete(`${backendUrl}/api/sales`, {
-          data: { ids: selected },
-        });
-
-        if (res.status === 200) {
-          showToast("success", "Selected Sales deleted successfully");
-          fetchSaleSummaries();
-          setSelected([]);
-        }
-      } catch (error) {
-        showToast("error", "Failed to delete selected customers.");
-      }
-    } else {
-      setSelected([]);
-    }
-  };
-
-  const handleFileUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const data = new Uint8Array(evt.target.result);
-        const workbook = XLSX.read(data, { type: "array" });
-        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(worksheet, {
-          header: 1,
-          defval: "",
-        });
-
-        if (rows.length === 0) {
-          showToast("warning", "Excel file is empty");
-          return;
-        }
-
-        let headerRowIndex = -1;
-        let headersMap = {};
-
-        const headerPatterns = [
-          "no",
-          "recording date",
-          "invoice #",
-          "invoice date",
-          "mr name",
-        ];
-
-        for (let i = 0; i < Math.min(rows.length, 10); i++) {
-          const row = rows[i].map((cell) =>
-            (cell || "").toString().trim().toLowerCase()
-          );
-
-          const matches = headerPatterns.filter((pattern) =>
-            row.some((cell) => cell.includes(pattern))
-          );
-
-          if (matches.length >= 3) {
-            headerRowIndex = i;
-            break;
-          }
-        }
-
-        if (headerRowIndex === -1) {
-          showToast("error", "❌ Could not identify header row in Excel file");
-          return;
-        }
-
-        const rawHeaders = rows[headerRowIndex];
-
-        // 🧹 Removed 'lc' from mapping
-        const columnMapping = [
-          { index: 0, key: "no" },
-          { index: 1, key: "recordingDate" },
-          { index: 2, key: "invoiceNumber" },
-          { index: 3, key: "invoiceDate" },
-          { index: 4, key: "mrName" },
-          { index: 5, key: "customerCode" },
-          { index: 6, key: "productName" },
-          { index: 7, key: "salesQty" },
-          { index: 8, key: "bonusQty" },
-          { index: 9, key: "sellingPrice" },
-          { index: 10, key: "discount" },
-          { index: 11, key: "creditDays" },
-          { index: 12, key: "paidAmount" },
-          { index: 13, key: "paymentStatus" },
-          { index: 14, key: "remark" },
-        ];
-
-        columnMapping.forEach(({ index, key }) => {
-          if (index < rawHeaders.length) {
-            headersMap[index] = key;
-          }
-        });
-
-        const essentialHeaders = [
-          "productName",
-          "salesQty",
-          "sellingPrice",
-          "paymentStatus",
-        ];
-        const missingEssential = essentialHeaders.filter(
-          (header) => !Object.values(headersMap).includes(header)
-        );
-
-        if (missingEssential.length > 0) {
-          showToast(
-            "error",
-            `❌ Missing essential columns: ${missingEssential.join(", ")}`
-          );
-          return;
-        }
-
-        const dataRows = rows.slice(headerRowIndex + 1);
-
-        const mappedData = dataRows
-          .map((row, index) => {
-            if (
-              !row ||
-              row.length === 0 ||
-              row.every((cell) => !cell || cell.toString().trim() === "")
-            ) {
-              return null;
-            }
-
-            const item = {};
-            Object.entries(headersMap).forEach(([colIndex, key]) => {
-              const colIndexNum = parseInt(colIndex);
-              const value = row[colIndexNum] ?? "";
-
-              if (
-                [
-                  "salesQty",
-                  "bonusQty",
-                  "sellingPrice",
-                  "discount",
-                  "paidAmount",
-                  "creditDays",
-                ].includes(key)
-              ) {
-                const numValue = parseFloat(value);
-                item[key] = !isNaN(numValue) ? numValue : 0;
-              } else {
-                item[key] = value.toString().trim();
-              }
-            });
-
-            if (!item.productName || item.productName === "") {
-              return null;
-            }
-
-            return {
-              recordingDate: item.recordingDate,
-              invoiceNumber: item.invoiceNumber || "",
-              invoiceDate: item.invoiceDate,
-              mrName: item.mrName || "",
-              customerCode: item.customerCode || "",
-              productName: item.productName,
-              salesQty: item.salesQty || 0,
-              bonusQty: item.bonusQty || 0,
-              sellingPrice: item.sellingPrice || 0,
-              discount: item.discount || 0,
-              creditDays: item.creditDays || 0,
-              paidAmount: item.paidAmount || 0,
-              paymentStatus: item.paymentStatus || "",
-              remark: item.remark || "",
-              _rowIndex: headerRowIndex + index + 2,
-            };
-          })
-          .filter((entry) => entry !== null);
-
-        if (mappedData.length === 0) {
-          showToast("warning", "No valid data records found in the Excel file");
-          return;
-        }
-
-        setParsedData(mappedData);
-      } catch (error) {
-        console.error("Error reading Excel file:", error);
-        showToast("error", "Failed to process the Excel file");
-      }
-    };
-
-    reader.readAsArrayBuffer(file);
-  };
-
-  const handleProductImport = async () => {
-    if (parsedData.length === 0) {
-      showToast("warning", "Please upload a valid file first");
-      return;
-    }
-
-    setIsUploading(true);
-
-    try {
-      const res = await axios.post(`${backendUrl}/api/sale/import`, parsedData);
-
-      if (res.status === 200) {
-        showToast(
-          "success",
-          res.data.message || "Sale Summary imported successfully!"
-        );
-        setShowImportModal(false);
-        fetchSaleSummaries();
-      }
-    } catch (err) {
-      handleAxiosError(err, showToast);
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
-  const handleNumericInputChange = (e, updateFunc) => {
-    const value = e.target.value;
-    if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
-      updateFunc(e);
-    }
-  };
-
   return (
     <div className="p-6">
       <div className="container">
@@ -1224,9 +1243,17 @@ const Sales = () => {
             <p className="text-lg font-semibold text-gray-700">
               Total Count:{" "}
               <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-                {filteredSales.length}
+                {filteredSales.length}{" "}
+                {filteredSales.length === 1 ? "record" : "records"}
               </span>
+              {filteredSales.length > SALES_PER_PAGE && (
+                <span className="ml-2 text-sm text-gray-600">
+                  (Showing {Math.min(SALES_PER_PAGE, currentSales.length)} of{" "}
+                  {filteredSales.length} on page {currentPage})
+                </span>
+              )}
             </p>
+
             <div className="relative w-full md:w-72">
               <Search
                 className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
@@ -1290,7 +1317,7 @@ const Sales = () => {
                     colSpan={tableColumns.length}
                     className="p-4 text-center text-gray-500"
                   >
-                    No Sales found.
+                    {loadingData ? "Loading..." : "No Sales found."}
                   </td>
                 </tr>
               ) : (
@@ -1298,10 +1325,7 @@ const Sales = () => {
                   <tr
                     key={sale._id}
                     className={`hover:bg-gray-50 ${
-                      (index + 1) % salesPerPage === 0 ||
-                      index + 1 === currentSales.length
-                        ? ""
-                        : "border-b"
+                      index < currentSales.length - 1 ? "border-b" : ""
                     }`}
                   >
                     {allFields
@@ -1358,61 +1382,70 @@ const Sales = () => {
             </tbody>
           </table>
 
-          {currentSales.length > 0 && (
-            <div className="mt-4 p-5 flex justify-start gap-2">
-              <button
-                onClick={() => {
-                  setCurrentPage((prev) => {
-                    const prevPage = Math.max(prev - 1, 1);
-                    window.scrollTo({ top: 0, behavior: "smooth" });
-                    return prevPage;
-                  });
-                }}
-                disabled={currentPage === 1}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-              >
-                Prev
-              </button>
+          {/* Enhanced Pagination Controls */}
+          {filteredSales.length > SALES_PER_PAGE && (
+            <div className="mt-4 p-5 flex flex-col sm:flex-row justify-between items-center gap-4 bg-gray-50 border-t">
+              <div className="text-sm text-gray-600">
+                Showing {(currentPage - 1) * SALES_PER_PAGE + 1} to{" "}
+                {Math.min(currentPage * SALES_PER_PAGE, filteredSales.length)}{" "}
+                of {filteredSales.length} entries
+              </div>
 
-              {visiblePages.map((page, idx) =>
-                page === "..." ? (
-                  <span
-                    key={`sales-ellipsis-${idx}`}
-                    className="px-3 py-1 text-gray-500 select-none cursor-pointer"
-                  >
-                    ...
-                  </span>
-                ) : (
-                  <button
-                    key={page}
-                    onClick={() => {
-                      setCurrentPage(page);
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setCurrentPage((prev) => {
+                      const prevPage = Math.max(prev - 1, 1);
                       window.scrollTo({ top: 0, behavior: "smooth" });
-                    }}
-                    className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
-                      currentPage === page
-                        ? "bg-indigo-600 text-white"
-                        : "bg-gray-200 hover:bg-gray-300"
-                    }`}
-                  >
-                    {page}
-                  </button>
-                )
-              )}
+                      return prevPage;
+                    });
+                  }}
+                  disabled={currentPage === 1}
+                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer flex items-center gap-1"
+                >
+                  ← Prev
+                </button>
 
-              <button
-                onClick={() => {
-                  setCurrentPage((prev) => {
-                    const nextPage = Math.min(prev + 1, totalPages);
-                    window.scrollTo({ top: 0, behavior: "smooth" });
-                    return nextPage;
-                  });
-                }}
-                disabled={currentPage === totalPages}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-              >
-                Next
-              </button>
+                {visiblePages.map((page, idx) =>
+                  page === "..." ? (
+                    <span
+                      key={`sales-ellipsis-${idx}`}
+                      className="px-3 py-1 text-gray-500 select-none"
+                    >
+                      ...
+                    </span>
+                  ) : (
+                    <button
+                      key={page}
+                      onClick={() => {
+                        setCurrentPage(page);
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }}
+                      className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
+                        currentPage === page
+                          ? "bg-indigo-600 text-white"
+                          : "bg-gray-200 hover:bg-gray-300"
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  )
+                )}
+
+                <button
+                  onClick={() => {
+                    setCurrentPage((prev) => {
+                      const nextPage = Math.min(prev + 1, totalPages);
+                      window.scrollTo({ top: 0, behavior: "smooth" });
+                      return nextPage;
+                    });
+                  }}
+                  disabled={currentPage === totalPages}
+                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer flex items-center gap-1"
+                >
+                  Next →
+                </button>
+              </div>
             </div>
           )}
         </div>

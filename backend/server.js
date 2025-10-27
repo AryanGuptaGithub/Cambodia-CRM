@@ -41,6 +41,7 @@ import customerExpentationRatio from "./routers/reports/customerExpentationRatio
 import provinceWiseSaleRoutes from './routers/reports/provinceWiseSale.js';
 import provinceWiseCustomerRoutes from './routers/reports/provinceWiseCustomer.js';
 import stockInHand from "./routers/reports/stockInHand.js";
+import companyProfile from "./routers/settings/companyProfile.js";
 
 dotenv.config(); // Load environment variables
 
@@ -115,6 +116,7 @@ app.use("/api", customerExpentationRatio);
 app.use("/api", provinceWiseSaleRoutes);
 app.use("/api", provinceWiseCustomerRoutes);
 app.use("/api", stockInHand);
+app.use("/api", companyProfile);
 
 // Server listener
 app.listen(PORT, () => {

@@ -316,7 +316,111 @@ router.post("/sale/import", async (req, res) => {
   }
 });
 
+// Updated GET /sales endpoint with pagination support
 router.get("/sales", async (req, res) => {
+  try {
+    const { page = 1, limit = 9, search = "", tab = "All" } = req.query;
+    
+    // Convert page and limit to numbers
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Build match conditions for filtering
+    const matchConditions = {};
+    
+    // Search filter
+    if (search && search.trim() !== "") {
+      const searchRegex = new RegExp(search.trim(), 'i');
+      matchConditions.$or = [
+        { invoiceNumber: searchRegex },
+        { 'customerInfo.name': searchRegex },
+        { productName: searchRegex }
+      ];
+    }
+
+    // Tab filter (payment status)
+    if (tab && tab !== "All") {
+      matchConditions.paymentStatus = new RegExp(`^${tab}$`, 'i');
+    }
+
+    // Get total count for pagination
+    const totalCountAggregate = await SaleSummary.aggregate([
+      {
+        $lookup: {
+          from: "customers",
+          localField: "customerCode",
+          foreignField: "customerCode",
+          as: "customerInfo",
+        },
+      },
+      {
+        $unwind: {
+          path: "$customerInfo",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $match: matchConditions
+      },
+      {
+        $count: "totalCount"
+      }
+    ]);
+
+    const totalCount = totalCountAggregate.length > 0 ? totalCountAggregate[0].totalCount : 0;
+    const totalPages = Math.ceil(totalCount / limitNum);
+
+    // Get paginated data
+    const summaries = await SaleSummary.aggregate([
+      {
+        $lookup: {
+          from: "customers",
+          localField: "customerCode",
+          foreignField: "customerCode",
+          as: "customerInfo",
+        },
+      },
+      {
+        $unwind: {
+          path: "$customerInfo",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $match: matchConditions
+      },
+      {
+        $sort: {
+          recordingDate: -1,
+        },
+      },
+      {
+        $skip: skip
+      },
+      {
+        $limit: limitNum
+      }
+    ]);
+
+    res.status(200).json({
+      summaries,
+      pagination: {
+        currentPage: pageNum,
+        totalPages,
+        totalCount,
+        hasNext: pageNum < totalPages,
+        hasPrev: pageNum > 1
+      }
+    });
+  } catch (error) {
+    console.error("❌ Error fetching sale summaries with customer info:", error);
+    res.status(500).json({ message: "Failed to fetch sale summaries." });
+  }
+});
+
+// Keep the original endpoint for backward compatibility
+router.get("/sales/all", async (req, res) => {
   try {
     const summaries = await SaleSummary.aggregate([
       {
@@ -342,7 +446,7 @@ router.get("/sales", async (req, res) => {
 
     res.status(200).json(summaries);
   } catch (error) {
-    console.error("❌ Error fetching sale summaries with customer info:", error);
+    console.error("❌ Error fetching all sale summaries:", error);
     res.status(500).json({ message: "Failed to fetch sale summaries." });
   }
 });
