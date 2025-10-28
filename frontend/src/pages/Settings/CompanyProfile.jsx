@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Eye, Edit, Trash2, UserPlus, Download, Search, X } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { Eye, Edit, Trash2, UserPlus, Download, X } from "lucide-react";
 import * as XLSX from "xlsx";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
@@ -9,22 +8,17 @@ import { formatDateToReadable } from "../../utils/dateUtil";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import ReactDOM from "react-dom";
+import ExcelJS from "exceljs";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
-
 const companiesPerPage = 7;
 
 const CompanyProfile = () => {
-  const navigate = useNavigate();
-
   const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
-  const [selected, setSelected] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
-  const inputRef = useRef(null);
 
   const [form, setForm] = useState({
     companyCode: "",
@@ -76,7 +70,6 @@ const CompanyProfile = () => {
       company.email?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  // Check if company profile already exists
   const hasCompanyProfile = companies.length > 0;
 
   // Pagination calculations
@@ -91,72 +84,130 @@ const CompanyProfile = () => {
     if (totalPages <= 5) {
       return Array.from({ length: totalPages }, (_, i) => i + 1);
     }
-
     if (currentPage <= 3) {
       return [1, 2, 3, "...", totalPages];
     }
-
     if (currentPage >= totalPages - 2) {
       return [1, "...", totalPages - 2, totalPages - 1, totalPages];
     }
-
     return [1, "...", currentPage, "...", totalPages];
   }
 
-  // Select/unselect a company by id
-  const toggleSelect = (company) => {
-    setSelected((prev) => {
-      const exists = prev.some((c) => c.id === company._id);
-
-      if (exists) {
-        return prev.filter((c) => c.id !== company._id);
-      } else {
-        return [...prev, { id: company._id, name: company.companyName }];
-      }
-    });
-  };
-
-  const toggleSelectAll = (checked) => {
-    if (checked) {
-      const allSelected = currentCompanies.map((s) => ({
-        id: s._id,
-        name: s.companyName,
-      }));
-      setSelected(allSelected);
-    } else {
-      setSelected([]);
+  const downloadExcel = async () => {
+    if (filteredCompanies.length === 0) {
+      showToast("warning", "No data to download");
+      return;
     }
-  };
 
-  const handleDeleteSelected = async () => {
-    const confirm = await confirmDialog({
-      text: `Are you sure you want to delete <b>${selected.length}</b> companies`,
-      icon: "warning",
-      confirmButtonText: "Yes, delete",
-      cancelButtonText: "Cancel",
-      selected,
-    });
+    try {
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet("Company Profile");
+      worksheet.mergeCells("A1:J1");
+      const titleCell = worksheet.getCell("A1");
+      titleCell.value = "HEALTHCARE SOUTH EAST ASIA";
+      titleCell.font = { bold: true, size: 16 };
+      titleCell.alignment = { vertical: "middle", horizontal: "center" };
+      worksheet.getRow(1).height = 30;
 
-    if (confirm.isConfirmed) {
-      try {
-        const res = await axios.delete(`${backendUrl}/api/company-profile`, {
-          data: { ids: selected.map((s) => s.id) },
+      const headerRow = worksheet.getRow(2);
+      const headers = [
+        "Company Code",
+        "Company Name",
+        "Registration Number",
+        "Address",
+        "Phone",
+        "Email",
+        "Website",
+        "Tax Number",
+        "Established Date",
+        "Description",
+      ];
+      headerRow.values = headers;
+      headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      headerRow.alignment = { horizontal: "center", vertical: "middle" };
+      headerRow.height = 22;
+      headerRow.eachCell((cell) => {
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "4472C4" },
+        };
+        cell.border = {
+          top: { style: "thin" },
+          left: { style: "thin" },
+          bottom: { style: "thin" },
+          right: { style: "thin" },
+        };
+      });
+
+      const colWidths = [15, 25, 20, 30, 15, 25, 20, 15, 18, 40];
+      colWidths.forEach((w, i) => {
+        worksheet.getColumn(i + 1).width = w;
+      });
+
+      filteredCompanies.forEach((company) => {
+        worksheet.addRow([
+          company.companyCode || "",
+          company.companyName || "",
+          company.registrationNumber || "",
+          company.address || "",
+          company.phone || "",
+          company.email || "",
+          company.website || "",
+          company.taxNumber || "",
+          company.establishedDate
+            ? formatDateToReadable(company.establishedDate)
+            : "",
+          company.description || "",
+        ]);
+      });
+
+      worksheet.eachRow((row, rowNumber) => {
+        if (rowNumber <= 2) return; 
+
+        row.height = 20;
+        row.alignment = { horizontal: "center", vertical: "middle" };
+
+        row.eachCell((cell) => {
+          cell.border = {
+            top: { style: "thin" },
+            left: { style: "thin" },
+            bottom: { style: "thin" },
+            right: { style: "thin" },
+          };
         });
 
-        if (res.status === 200) {
-          showToast("success", "Selected companies deleted successfully");
-          fetchCompanies();
-          setSelected([]);
+        if ((rowNumber - 2) % 2 === 1) {
+          row.eachCell((cell) => {
+            cell.fill = {
+              type: "pattern",
+              pattern: "solid",
+              fgColor: { argb: "F2F2F2" },
+            };
+          });
         }
-      } catch (error) {
-        showToast("error", "Failed to delete selected companies.");
-      }
-    } else {
-      setSelected([]);
+      });
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "companiesProfile.xlsx";
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 100);
+
+      showToast(
+        "success",
+        `Downloaded companies profile successfully`
+      );
+    } catch (error) {
+      console.error("Error downloading Excel:", error);
+      showToast("error", "Failed to generate Excel file");
     }
   };
-
-  // Open edit modal with selected company data
   const editCompany = (company) => {
     setForm({
       ...company,
@@ -165,7 +216,6 @@ const CompanyProfile = () => {
     setIsEditModalOpen(true);
   };
 
-  // Open view modal with selected company data
   const handleView = (company) => {
     setForm({
       ...company,
@@ -174,7 +224,6 @@ const CompanyProfile = () => {
     setIsViewModalOpen(true);
   };
 
-  // Open add modal with empty form
   const openAddModal = () => {
     setForm({
       companyCode: "",
@@ -214,7 +263,6 @@ const CompanyProfile = () => {
             `Company <b>${company.companyName}</b> deleted successfully`
           );
           fetchCompanies();
-          setSelected([]);
         }
       } catch (error) {
         showToast("error", "Failed to delete company.");
@@ -222,55 +270,6 @@ const CompanyProfile = () => {
     }
   };
 
-  // Download Excel functionality
-  const downloadExcel = () => {
-    if (filteredCompanies.length === 0) {
-      showToast("warning", "No data to download");
-      return;
-    }
-
-    try {
-      // Prepare data for Excel
-      const excelData = filteredCompanies.map((company) => ({
-        "Company Code": company.companyCode || "",
-        "Company Name": company.companyName || "",
-        "Registration Number": company.registrationNumber || "",
-        Address: company.address || "",
-        Phone: company.phone || "",
-        Email: company.email || "",
-        Website: company.website || "",
-        "Tax Number": company.taxNumber || "",
-        "Established Date": company.establishedDate
-          ? formatDateToReadable(company.establishedDate)
-          : "",
-        Description: company.description || "",
-        Status: company.enabled ? "Enabled" : "Disabled",
-      }));
-
-      // Create workbook and worksheet
-      const wb = XLSX.utils.book_new();
-      const ws = XLSX.utils.json_to_sheet(excelData);
-
-      // Add worksheet to workbook
-      XLSX.utils.book_append_sheet(wb, ws, "Companies");
-
-      // Generate Excel file and download
-      XLSX.writeFile(
-        wb,
-        `companies_${new Date().toISOString().split("T")[0]}.xlsx`
-      );
-
-      showToast(
-        "success",
-        `Downloaded ${filteredCompanies.length} companies successfully`
-      );
-    } catch (error) {
-      console.error("Error downloading Excel:", error);
-      showToast("error", "Failed to download Excel file");
-    }
-  };
-
-  // Update company on backend
   const handleUpdateCompany = async (e) => {
     e.preventDefault();
     try {
@@ -291,7 +290,6 @@ const CompanyProfile = () => {
     }
   };
 
-  // Create new company
   const handleCreateCompany = async (e) => {
     e.preventDefault();
     try {
@@ -309,40 +307,6 @@ const CompanyProfile = () => {
     }
   };
 
-  const handleEnabledCompany = async (id) => {
-    try {
-      const company = companies.find((c) => c._id === id);
-      if (!company) return;
-      const updatedCompany = { ...company, enabled: !company.enabled };
-      const response = await fetch(`${backendUrl}/api/company-profile/${id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ enabled: updatedCompany.enabled }),
-      });
-
-      if (!response.ok) throw new Error("Failed to update company");
-
-      const data = await response.json();
-      setCompanies((prev) =>
-        prev.map((c) => (c._id === id ? { ...c, enabled: data.enabled } : c))
-      );
-    } catch (err) {
-      console.error("Error updating company:", err);
-    }
-  };
-
-  const handleIconClick = () => {
-    if (inputRef.current) {
-      inputRef.current.focus();
-      inputRef.current.classList.add("highlight");
-      setTimeout(() => {
-        inputRef.current.classList.remove("highlight");
-      }, 1000);
-    }
-  };
-
   if (loading) return <div className="p-6 text-center">Loading...</div>;
   if (error) return <div className="p-6 text-red-500 text-center">{error}</div>;
 
@@ -350,17 +314,6 @@ const CompanyProfile = () => {
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
         <div className="flex gap-3">
-          {/* Only show Add New Company button if no company exists */}
-          {!hasCompanyProfile && (
-            <button
-              onClick={openAddModal}
-              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer transition-colors"
-            >
-              <UserPlus size={18} /> Add Company Profile
-            </button>
-          )}
-
-          {/* Download Excel button - Only show when there are companies */}
           {hasCompanyProfile && (
             <button
               onClick={downloadExcel}
@@ -372,13 +325,12 @@ const CompanyProfile = () => {
         </div>
       </div>
 
-      {/* Table - Only show when there are companies */}
       {hasCompanyProfile ? (
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
           <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
             <thead className="bg-gray-100 text-gray-700 border-b">
               <tr>
-                <th className="p-3 text-sm font-medium w-25">Sr No.</th>
+                <th className="p-3 text-sm font-medium">Sr No.</th>
                 <th className="p-3 text-sm font-medium">Company Name</th>
                 <th className="p-3 text-sm font-medium">Registration Number</th>
                 <th className="p-3 text-sm font-medium">Address</th>
@@ -409,7 +361,6 @@ const CompanyProfile = () => {
                     <td className="p-3">
                       {formatDateToReadable(company.establishedDate)}
                     </td>
-
                     <td className="p-3 flex items-center justify-center gap-3">
                       <button
                         onClick={() => handleView(company)}
@@ -486,7 +437,6 @@ const CompanyProfile = () => {
           )}
         </div>
       ) : (
-        // Empty state when no company exists
         <div className="text-center py-12 bg-white rounded-2xl shadow border border-gray-200">
           <UserPlus size={48} className="mx-auto text-gray-400 mb-4" />
           <h3 className="text-lg font-semibold text-gray-700 mb-2">
@@ -508,10 +458,6 @@ const CompanyProfile = () => {
       {isAddModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            <div
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsAddModalOpen(false)}
-            />
             <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
               <button
                 onClick={() => setIsAddModalOpen(false)}
@@ -525,10 +471,11 @@ const CompanyProfile = () => {
               <form
                 onSubmit={handleCreateCompany}
                 className="grid grid-cols-1 md:grid-cols-2 gap-4"
+                autoComplete="off"
               >
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Company Code *
+                    Company Code
                   </label>
                   <input
                     type="text"
@@ -538,11 +485,12 @@ const CompanyProfile = () => {
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
                     required
+                    autoComplete="new-password"
                   />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Company Name *
+                    Company Name
                   </label>
                   <input
                     type="text"
@@ -552,6 +500,7 @@ const CompanyProfile = () => {
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
                     required
+                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -565,6 +514,7 @@ const CompanyProfile = () => {
                       setForm({ ...form, registrationNumber: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
+                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -578,6 +528,7 @@ const CompanyProfile = () => {
                       setForm({ ...form, taxNumber: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
+                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -585,12 +536,13 @@ const CompanyProfile = () => {
                     Phone
                   </label>
                   <input
-                    type="text"
+                    type="tel"
                     value={form.phone}
                     onChange={(e) =>
                       setForm({ ...form, phone: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
+                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -604,6 +556,7 @@ const CompanyProfile = () => {
                       setForm({ ...form, email: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
+                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -611,12 +564,13 @@ const CompanyProfile = () => {
                     Website
                   </label>
                   <input
-                    type="text"
+                    type="url"
                     value={form.website}
                     onChange={(e) =>
                       setForm({ ...form, website: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
+                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -630,6 +584,7 @@ const CompanyProfile = () => {
                       setForm({ ...form, address: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
+                    autoComplete="new-password"
                   />
                 </div>
                 <div className="md:col-span-2">
@@ -643,6 +598,7 @@ const CompanyProfile = () => {
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
                     rows="3"
+                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -666,6 +622,7 @@ const CompanyProfile = () => {
                     dateFormat="yyyy-MM-dd"
                     placeholderText="Select a date"
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
+                    autoComplete="new-password"
                   />
                 </div>
               </form>
@@ -680,7 +637,7 @@ const CompanyProfile = () => {
                   onClick={handleCreateCompany}
                   className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg cursor-pointer transition-colors"
                 >
-                  Create Company
+                  Submit
                 </button>
               </div>
             </div>
@@ -692,10 +649,6 @@ const CompanyProfile = () => {
       {isEditModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            <div
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsEditModalOpen(false)}
-            />
             <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
               <button
                 onClick={() => setIsEditModalOpen(false)}
@@ -709,6 +662,7 @@ const CompanyProfile = () => {
               <form
                 onSubmit={handleUpdateCompany}
                 className="grid grid-cols-1 md:grid-cols-2 gap-4"
+                autoComplete="off"
               >
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -717,16 +671,13 @@ const CompanyProfile = () => {
                   <input
                     type="text"
                     value={form.companyCode}
-                    onChange={(e) =>
-                      setForm({ ...form, companyCode: e.target.value })
-                    }
                     className="w-full border px-3 py-2 rounded-lg bg-gray-100 text-gray-500 cursor-not-allowed"
                     disabled
                   />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Company Name *
+                    Company Name
                   </label>
                   <input
                     type="text"
@@ -736,6 +687,7 @@ const CompanyProfile = () => {
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
                     required
+                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -749,6 +701,7 @@ const CompanyProfile = () => {
                       setForm({ ...form, registrationNumber: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
+                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -762,6 +715,7 @@ const CompanyProfile = () => {
                       setForm({ ...form, taxNumber: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
+                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -769,12 +723,13 @@ const CompanyProfile = () => {
                     Phone
                   </label>
                   <input
-                    type="text"
+                    type="tel"
                     value={form.phone}
                     onChange={(e) =>
                       setForm({ ...form, phone: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
+                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -788,6 +743,7 @@ const CompanyProfile = () => {
                       setForm({ ...form, email: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
+                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -795,12 +751,13 @@ const CompanyProfile = () => {
                     Website
                   </label>
                   <input
-                    type="text"
+                    type="url"
                     value={form.website}
                     onChange={(e) =>
                       setForm({ ...form, website: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
+                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -814,6 +771,7 @@ const CompanyProfile = () => {
                       setForm({ ...form, address: e.target.value })
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
+                    autoComplete="new-password"
                   />
                 </div>
                 <div className="md:col-span-2">
@@ -827,6 +785,7 @@ const CompanyProfile = () => {
                     }
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
                     rows="3"
+                    autoComplete="new-password"
                   />
                 </div>
                 <div>
@@ -850,6 +809,7 @@ const CompanyProfile = () => {
                     dateFormat="yyyy-MM-dd"
                     placeholderText="Select a date"
                     className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 outline-none transition-colors"
+                    autoComplete="new-password"
                   />
                 </div>
               </form>
@@ -876,10 +836,6 @@ const CompanyProfile = () => {
       {isViewModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            <div
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsViewModalOpen(false)}
-            />
             <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
               <button
                 onClick={() => setIsViewModalOpen(false)}
