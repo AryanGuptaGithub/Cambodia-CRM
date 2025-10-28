@@ -37,119 +37,123 @@ const formatDateToReadable = (isoString) => {
 const updateReportInHandAfterSale = async (productName, salesQty, bonusQty) => {
   try {
     const totalQtyToDeduct = salesQty + bonusQty;
-    
+
     if (totalQtyToDeduct <= 0) return;
 
     // Find the product in ReportInHand
-    const existingProduct = await ReportInHand.findOne({ 
-      productName: productName 
+    const existingProduct = await ReportInHand.findOne({
+      productName: productName,
     });
 
     if (!existingProduct) {
-      console.warn(`⚠️ Product "${productName}" not found in ReportInHand inventory`);
+      console.warn(
+        `⚠️ Product "${productName}" not found in ReportInHand inventory`
+      );
       return 0; // Return 0 as LC value
     }
 
     // Check if there's enough stock
     if (existingProduct.quantity.totalPieces < totalQtyToDeduct) {
-      throw new Error(`Insufficient stock for product "${productName}". Available: ${existingProduct.quantity.totalPieces}, Required: ${totalQtyToDeduct}`);
+      throw new Error(
+        `Insufficient stock for product "${productName}". Available: ${existingProduct.quantity.totalPieces}, Required: ${totalQtyToDeduct}`
+      );
     }
 
     // Calculate how many boxes and pieces to deduct
     const piecesPerBox = existingProduct.quantity.piecesPerBox || 1;
     let remainingPiecesToDeduct = totalQtyToDeduct;
-    
+
     // Calculate boxes to deduct
     const boxesToDeduct = Math.floor(remainingPiecesToDeduct / piecesPerBox);
     remainingPiecesToDeduct -= boxesToDeduct * piecesPerBox;
 
     // Update the inventory
     const updatedBoxes = existingProduct.quantity.boxes - boxesToDeduct;
-    const updatedTotalPieces = existingProduct.quantity.totalPieces - totalQtyToDeduct;
+    const updatedTotalPieces =
+      existingProduct.quantity.totalPieces - totalQtyToDeduct;
 
     // Update status based on new total quantity
-    let updatedStatus = 'In Stock';
+    let updatedStatus = "In Stock";
     if (updatedTotalPieces === 0) {
-      updatedStatus = 'Out of Stock';
+      updatedStatus = "Out of Stock";
     } else if (updatedTotalPieces < 10) {
-      updatedStatus = 'Critical';
+      updatedStatus = "Critical";
     } else if (updatedTotalPieces < 25) {
-      updatedStatus = 'Low Stock';
+      updatedStatus = "Low Stock";
     }
 
-    await ReportInHand.findByIdAndUpdate(
-      existingProduct._id,
-      {
-        $set: {
-          'quantity.boxes': updatedBoxes,
-          'quantity.totalPieces': updatedTotalPieces,
-          'status': updatedStatus
-        }
-      }
-    );
+    await ReportInHand.findByIdAndUpdate(existingProduct._id, {
+      $set: {
+        "quantity.boxes": updatedBoxes,
+        "quantity.totalPieces": updatedTotalPieces,
+        status: updatedStatus,
+      },
+    });
 
-    console.log(`✅ Updated inventory for "${productName}": Deducted ${totalQtyToDeduct} pieces (${boxesToDeduct} boxes)`);
-    
-    // Return the LC value for profit/loss calculation
     return existingProduct.lc || 0;
-    
   } catch (error) {
-    console.error(`❌ Error updating ReportInHand for product "${productName}":`, error.message);
+    console.error(
+      `❌ Error updating ReportInHand for product "${productName}":`,
+      error.message
+    );
     throw error;
   }
 };
 
-// Function to restore inventory when sale is deleted
-const restoreReportInHandAfterSaleDeletion = async (productName, salesQty, bonusQty) => {
+const restoreReportInHandAfterSaleDeletion = async (
+  productName,
+  salesQty,
+  bonusQty
+) => {
   try {
     const totalQtyToRestore = salesQty + bonusQty;
-    
+
     if (totalQtyToRestore <= 0) return;
 
-    const existingProduct = await ReportInHand.findOne({ 
-      productName: productName 
+    const existingProduct = await ReportInHand.findOne({
+      productName: productName,
     });
 
     if (!existingProduct) {
-      console.warn(`⚠️ Product "${productName}" not found in ReportInHand inventory during restoration`);
+      console.warn(
+        `⚠️ Product "${productName}" not found in ReportInHand inventory during restoration`
+      );
       return;
     }
 
     const piecesPerBox = existingProduct.quantity.piecesPerBox || 1;
     let remainingPiecesToRestore = totalQtyToRestore;
-    
+
     // Calculate boxes to restore
     const boxesToRestore = Math.floor(remainingPiecesToRestore / piecesPerBox);
     remainingPiecesToRestore -= boxesToRestore * piecesPerBox;
 
     const updatedBoxes = existingProduct.quantity.boxes + boxesToRestore;
-    const updatedTotalPieces = existingProduct.quantity.totalPieces + totalQtyToRestore;
+    const updatedTotalPieces =
+      existingProduct.quantity.totalPieces + totalQtyToRestore;
 
     // Update status based on new total quantity
-    let updatedStatus = 'In Stock';
+    let updatedStatus = "In Stock";
     if (updatedTotalPieces === 0) {
-      updatedStatus = 'Out of Stock';
+      updatedStatus = "Out of Stock";
     } else if (updatedTotalPieces < 10) {
-      updatedStatus = 'Critical';
+      updatedStatus = "Critical";
     } else if (updatedTotalPieces < 25) {
-      updatedStatus = 'Low Stock';
+      updatedStatus = "Low Stock";
     }
 
-    await ReportInHand.findByIdAndUpdate(
-      existingProduct._id,
-      {
-        $set: {
-          'quantity.boxes': updatedBoxes,
-          'quantity.totalPieces': updatedTotalPieces,
-          'status': updatedStatus
-        }
-      }
-    );
-
-    console.log(`✅ Restored inventory for "${productName}": Added ${totalQtyToRestore} pieces (${boxesToRestore} boxes)`);
-    
+    await ReportInHand.findByIdAndUpdate(existingProduct._id, {
+      $set: {
+        "quantity.boxes": updatedBoxes,
+        "quantity.totalPieces": updatedTotalPieces,
+        status: updatedStatus,
+      },
+    });
   } catch (error) {
-    console.error(`❌ Error restoring ReportInHand for product "${productName}":`, error.message);
+    console.error(
+      `❌ Error restoring ReportInHand for product "${productName}":`,
+      error.message
+    );
     throw error;
   }
 };
@@ -210,10 +214,10 @@ router.post("/sale/import", async (req, res) => {
       const amount = salesQty * sellingPrice;
       const netSellingAmount = amount - discount;
       const averageUnitPrice = totalQty > 0 ? netSellingAmount / totalQty : 0;
-      
+
       // LC will be fetched from ReportInHand during inventory update
       const lc = 0; // Placeholder, will be updated after inventory update
-      
+
       const profitLoss = netSellingAmount - totalQty * lc;
       const dueAmount = netSellingAmount - paidAmount;
 
@@ -254,8 +258,7 @@ router.post("/sale/import", async (req, res) => {
 
     if (validDocs.length === 0) {
       return res.status(400).json({
-        message:
-          "❌ No valid rows to import. Please check required fields.",
+        message: "❌ No valid rows to import. Please check required fields.",
         skippedRows,
       });
     }
@@ -269,29 +272,30 @@ router.post("/sale/import", async (req, res) => {
         try {
           // Update inventory and get LC value
           const lcValue = await updateReportInHandAfterSale(
-            saleData.productName, 
-            saleData.salesQty, 
+            saleData.productName,
+            saleData.salesQty,
             saleData.bonusQty
           );
-          
+
           // Update sale data with actual LC and recalculate profit/loss
           saleData.lc = lcValue || 0;
-          saleData.profitLoss = saleData.netSellingAmount - (saleData.totalQty * saleData.lc);
+          saleData.profitLoss =
+            saleData.netSellingAmount - saleData.totalQty * saleData.lc;
 
           const insertedSale = await SaleSummary.create(saleData);
           insertedSales.push(insertedSale);
-          
+
           inventoryUpdates.push({
             productName: saleData.productName,
-            status: 'success',
+            status: "success",
             deducted: saleData.salesQty + saleData.bonusQty,
-            lc: lcValue
+            lc: lcValue,
           });
         } catch (error) {
           inventoryUpdates.push({
             productName: saleData.productName,
-            status: 'failed',
-            error: error.message
+            status: "failed",
+            error: error.message,
           });
           // Skip this sale record if inventory update fails
           continue;
@@ -308,7 +312,7 @@ router.post("/sale/import", async (req, res) => {
       insertedCount: insertedSales.length,
       skippedCount: skippedRows.length,
       skippedRows,
-      inventoryUpdates
+      inventoryUpdates,
     });
   } catch (error) {
     console.error("❌ Error importing sale summary:", error);
@@ -320,7 +324,7 @@ router.post("/sale/import", async (req, res) => {
 router.get("/sales", async (req, res) => {
   try {
     const { page = 1, limit = 9, search = "", tab = "All" } = req.query;
-    
+
     // Convert page and limit to numbers
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
@@ -328,20 +332,20 @@ router.get("/sales", async (req, res) => {
 
     // Build match conditions for filtering
     const matchConditions = {};
-    
+
     // Search filter
     if (search && search.trim() !== "") {
-      const searchRegex = new RegExp(search.trim(), 'i');
+      const searchRegex = new RegExp(search.trim(), "i");
       matchConditions.$or = [
         { invoiceNumber: searchRegex },
-        { 'customerInfo.name': searchRegex },
-        { productName: searchRegex }
+        { "customerInfo.name": searchRegex },
+        { productName: searchRegex },
       ];
     }
 
     // Tab filter (payment status)
     if (tab && tab !== "All") {
-      matchConditions.paymentStatus = new RegExp(`^${tab}$`, 'i');
+      matchConditions.paymentStatus = new RegExp(`^${tab}$`, "i");
     }
 
     // Get total count for pagination
@@ -361,14 +365,15 @@ router.get("/sales", async (req, res) => {
         },
       },
       {
-        $match: matchConditions
+        $match: matchConditions,
       },
       {
-        $count: "totalCount"
-      }
+        $count: "totalCount",
+      },
     ]);
 
-    const totalCount = totalCountAggregate.length > 0 ? totalCountAggregate[0].totalCount : 0;
+    const totalCount =
+      totalCountAggregate.length > 0 ? totalCountAggregate[0].totalCount : 0;
     const totalPages = Math.ceil(totalCount / limitNum);
 
     // Get paginated data
@@ -388,7 +393,7 @@ router.get("/sales", async (req, res) => {
         },
       },
       {
-        $match: matchConditions
+        $match: matchConditions,
       },
       {
         $sort: {
@@ -396,11 +401,11 @@ router.get("/sales", async (req, res) => {
         },
       },
       {
-        $skip: skip
+        $skip: skip,
       },
       {
-        $limit: limitNum
-      }
+        $limit: limitNum,
+      },
     ]);
 
     res.status(200).json({
@@ -410,11 +415,14 @@ router.get("/sales", async (req, res) => {
         totalPages,
         totalCount,
         hasNext: pageNum < totalPages,
-        hasPrev: pageNum > 1
-      }
+        hasPrev: pageNum > 1,
+      },
     });
   } catch (error) {
-    console.error("❌ Error fetching sale summaries with customer info:", error);
+    console.error(
+      "❌ Error fetching sale summaries with customer info:",
+      error
+    );
     res.status(500).json({ message: "Failed to fetch sale summaries." });
   }
 });
@@ -487,10 +495,11 @@ router.put("/sales/:id", async (req, res) => {
         updatedSale.salesQty,
         updatedSale.bonusQty
       );
-      
+
       // Update LC and profit/loss with actual values
       updatedSale.lc = lcValue;
-      updatedSale.profitLoss = updatedSale.netSellingAmount - (updatedSale.totalQty * lcValue);
+      updatedSale.profitLoss =
+        updatedSale.netSellingAmount - updatedSale.totalQty * lcValue;
       await updatedSale.save();
     }
 
@@ -506,7 +515,7 @@ router.delete("/sales/:id", async (req, res) => {
 
   try {
     const saleToDelete = await SaleSummary.findById(id);
-    
+
     if (!saleToDelete) {
       return res.status(404).json({ error: "Sales record not found." });
     }
@@ -514,17 +523,17 @@ router.delete("/sales/:id", async (req, res) => {
     // ✅ Restore inventory before deleting the sale
     if (saleToDelete.salesQty > 0 || saleToDelete.bonusQty > 0) {
       await restoreReportInHandAfterSaleDeletion(
-        saleToDelete.productName, 
-        saleToDelete.salesQty, 
+        saleToDelete.productName,
+        saleToDelete.salesQty,
         saleToDelete.bonusQty
       );
     }
 
     const deletedSale = await SaleSummary.findByIdAndDelete(id);
 
-    res.status(200).json({ 
+    res.status(200).json({
       message: "Sales record deleted successfully and inventory restored.",
-      deletedSale 
+      deletedSale,
     });
   } catch (err) {
     console.error("Error deleting sale:", err);
@@ -552,12 +561,15 @@ router.delete("/sales", async (req, res) => {
       if (sale.salesQty > 0 || sale.bonusQty > 0) {
         try {
           await restoreReportInHandAfterSaleDeletion(
-            sale.productName, 
-            sale.salesQty, 
+            sale.productName,
+            sale.salesQty,
             sale.bonusQty
           );
         } catch (error) {
-          console.error(`Failed to restore inventory for sale ${sale._id}:`, error);
+          console.error(
+            `Failed to restore inventory for sale ${sale._id}:`,
+            error
+          );
         }
       }
     }
@@ -614,26 +626,30 @@ router.post("/sales", async (req, res) => {
       if (sale.salesQty > 0 || sale.bonusQty > 0) {
         try {
           // Update inventory and get LC value
-          const lcValue = await updateReportInHandAfterSale(sale.productName, sale.salesQty, sale.bonusQty);
-          
+          const lcValue = await updateReportInHandAfterSale(
+            sale.productName,
+            sale.salesQty,
+            sale.bonusQty
+          );
+
           // Update sale with actual LC and recalculate profit/loss
           sale.lc = lcValue;
-          sale.profitLoss = sale.netSellingAmount - (sale.totalQty * lcValue);
+          sale.profitLoss = sale.netSellingAmount - sale.totalQty * lcValue;
 
           const savedSale = await SaleSummary.create(sale);
           savedSales.push(savedSale);
-          
+
           inventoryUpdates.push({
             productName: sale.productName,
-            status: 'success',
+            status: "success",
             deducted: sale.salesQty + sale.bonusQty,
-            lc: lcValue
+            lc: lcValue,
           });
         } catch (error) {
           inventoryUpdates.push({
             productName: sale.productName,
-            status: 'failed',
-            error: error.message
+            status: "failed",
+            error: error.message,
           });
           // Skip this sale if inventory update fails
           continue;
@@ -648,7 +664,7 @@ router.post("/sales", async (req, res) => {
     res.status(201).json({
       message: `Sales added successfully`,
       sales: savedSales,
-      inventoryUpdates
+      inventoryUpdates,
     });
   } catch (error) {
     console.error("Sale creation error:", error);

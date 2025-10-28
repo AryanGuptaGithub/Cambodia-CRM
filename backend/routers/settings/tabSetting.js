@@ -431,17 +431,11 @@ export const deleteTab = async (req, res) => {
 // Get tab hierarchy
 export const getTabHierarchy = async (req, res) => {
   try {
-    console.log("Fetching active tabs from DB...");
-
     const tabs = await HTab.find({ isActive: true })
       .sort({ level: 1, sequence: 1 })
       .select("tabId name parentTabId sequence level isActive") // Select only needed fields
       .lean();
 
-    console.log(`Found ${tabs.length} active tabs:`);
-    console.log(tabs); // raw docs
-
-    // ---------- Build hierarchy ----------
     const buildHierarchy = (parentId = null) => {
       const children = tabs
         .filter((tab) => tab.parentTabId === parentId)
@@ -454,17 +448,11 @@ export const getTabHierarchy = async (req, res) => {
           children: buildHierarchy(tab.tabId), // Use tabId as parent reference
         }))
         .sort((a, b) => a.sequence - b.sequence);
-
-      console.log(`Parent ${parentId ?? "ROOT"} → ${children.length} children`);
       return children;
     };
 
     const hierarchy = buildHierarchy();
 
-    console.log("Final hierarchy built:");
-    console.log(JSON.stringify(hierarchy, null, 2)); // pretty-print
-
-    // ---------- Response ----------
     res.status(200).json({
       success: true,
       data: {
