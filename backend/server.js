@@ -1,4 +1,4 @@
-// server.js
+// server.js - Fix the import and route registration
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
@@ -42,8 +42,9 @@ import provinceWiseSaleRoutes from './routers/reports/provinceWiseSale.js';
 import provinceWiseCustomerRoutes from './routers/reports/provinceWiseCustomer.js';
 import stockInHand from "./routers/reports/stockInHand.js";
 import companyProfile from "./routers/settings/companyProfile.js";
+import hTabsRoutes from './routers/settings/tabSetting.js'; 
 
-dotenv.config(); // Load environment variables
+dotenv.config();
 
 const app = express();
 app.use(bodyParser.json({ limit: "10mb" }));
@@ -60,9 +61,7 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: function (origin, callback) {
-      // Allow requests with no origin (like mobile apps or curl)
       if (!origin) return callback(null, true);
-
       if (allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
@@ -73,13 +72,9 @@ app.use(
   })
 );
 
-// Connect to MongoDB
 connectDB(process.env.MONGODB_URI);
-
-// Middleware
 app.use(express.json());
 
-// Routes
 app.use("/api", customerRoutes);
 app.use("/api", suppilerRoutes);
 app.use("/api", brand);
@@ -110,15 +105,15 @@ app.use("/api", totalExpense);
 app.use("/api", mrWiseOutStanding);
 app.use("/api", mrWiseSale);
 app.use("/api", newCustomer);
-app.use("/api",zoneWiseCustomer);
+app.use("/api", zoneWiseCustomer);
 app.use("/api", customerRetention);
 app.use("/api", customerExpentationRatio);
 app.use("/api", provinceWiseSaleRoutes);
 app.use("/api", provinceWiseCustomerRoutes);
 app.use("/api", stockInHand);
 app.use("/api", companyProfile);
+app.use("/api/h-tabs", hTabsRoutes); 
 
-// Server listener
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
 });

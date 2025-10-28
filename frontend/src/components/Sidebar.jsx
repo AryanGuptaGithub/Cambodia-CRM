@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
-
 import {
   Home,
   Users,
@@ -52,6 +51,168 @@ import {
   Eye,
 } from "lucide-react";
 
+const backendUrl = import.meta.env.VITE_BACKEND_URL;
+
+// API service for tab management
+const tabService = {
+  async getVisibleTabs() {
+    try {
+      const response = await fetch(`${backendUrl}/api/h-tabs/visible`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+
+      console.log("Raw API response:", data);
+
+      // If we get array data with isVisible property, transform it
+      if (Array.isArray(data.data) || Array.isArray(data)) {
+        const tabsArray = Array.isArray(data.data) ? data.data : data;
+        const transformed = {};
+
+        tabsArray.forEach((tab) => {
+          if (tab.tabId && tab.isVisible !== undefined) {
+            transformed[tab.tabId] = {
+              visible: tab.isVisible,
+              sequence: tab.sequence || 0,
+            };
+          }
+        });
+
+        console.log("Transformed tabs:", transformed);
+        return transformed;
+      }
+
+      // If it's already in the expected format
+      if (data.data && typeof data.data === "object") {
+        return data.data;
+      }
+
+      return data.data || {};
+    } catch (error) {
+      console.error("Error fetching visible tabs:", error);
+      return this.getDefaultVisibleTabs();
+    }
+  },
+
+  async updateTabVisibility(tabUpdates) {
+    try {
+      const response = await fetch(`${backendUrl}/api/h-tabs/visibility`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ updates: tabUpdates }),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      return await response.json();
+    } catch (error) {
+      console.error("Error updating tab visibility:", error);
+      throw error;
+    }
+  },
+
+  getDefaultVisibleTabs() {
+    return {
+      // Main tabs
+      dashboard: { visible: true, sequence: 1 },
+      master: { visible: true, sequence: 2 },
+      settings: { visible: true, sequence: 3 },
+      products: { visible: true, sequence: 4 },
+      purchase: { visible: true, sequence: 5 },
+      sales: { visible: true, sequence: 6 },
+      stockAdjustment: { visible: true, sequence: 7 },
+      stockTransfer: { visible: true, sequence: 8 },
+      accounts: { visible: true, sequence: 9 },
+      expense: { visible: true, sequence: 10 },
+      reports: { visible: true, sequence: 11 },
+      staff: { visible: true, sequence: 12 },
+      utility: { visible: true, sequence: 13 },
+      onlineOrders: { visible: true, sequence: 14 },
+      hrm: { visible: true, sequence: 15 },
+
+      // Master sub-tabs
+      master_customers: { visible: true, sequence: 1 },
+      master_suppliers: { visible: true, sequence: 2 },
+
+      // Products sub-tabs
+      products_products: { visible: true, sequence: 1 },
+      products_pricelist: { visible: true, sequence: 2 },
+      products_printbarcode: { visible: true, sequence: 3 },
+
+      // Purchase sub-tabs
+      purchase_purchase: { visible: true, sequence: 1 },
+      purchase_purchasereturn: { visible: true, sequence: 2 },
+      purchase_purchaseout: { visible: true, sequence: 3 },
+
+      // Sales sub-tabs
+      sales_sale: { visible: true, sequence: 1 },
+      sales_salereturn: { visible: true, sequence: 2 },
+
+      // Expense sub-tabs
+      expense_categories: { visible: true, sequence: 1 },
+      expense_expenses: { visible: true, sequence: 2 },
+
+      // Reports sub-tabs
+      reports_dailyreport: { visible: true, sequence: 1 },
+      reports_averageprice: { visible: true, sequence: 2 },
+      reports_newcustomeraddition: { visible: true, sequence: 3 },
+      reports_masterCustomerReports: { visible: true, sequence: 4 },
+      reports_monthlyrepeatrate: { visible: true, sequence: 5 },
+      reports_annualrepeatrate: { visible: true, sequence: 6 },
+      reports_productreport: { visible: true, sequence: 7 },
+      reports_mrwiseoutstanding: { visible: true, sequence: 8 },
+      reports_mrwisesales: { visible: true, sequence: 9 },
+      reports_cashsales: { visible: true, sequence: 10 },
+      reports_outstandingcollection: { visible: true, sequence: 11 },
+      reports_totalexpense: { visible: true, sequence: 12 },
+      reports_remittance: { visible: true, sequence: 13 },
+      reports_provincewisesale: { visible: true, sequence: 14 },
+      reports_provincewisecustomer: { visible: true, sequence: 15 },
+      reports_payment: { visible: true, sequence: 16 },
+      reports_financeReports: { visible: true, sequence: 17 },
+      reports_reportsinhand: { visible: true, sequence: 18 },
+      reports_salesummary: { visible: true, sequence: 19 },
+      reports_dailysample: { visible: true, sequence: 20 },
+      reports_profitloss: { visible: true, sequence: 21 },
+
+      // Master Customer Report sub-tabs
+      masterCustomerReports_retention: { visible: true, sequence: 1 },
+      masterCustomerReports_acceptance: { visible: true, sequence: 2 },
+      masterCustomerReports_zonewise: { visible: true, sequence: 3 },
+
+      // Finance Reports sub-tabs
+      financeReports_salessalary: { visible: true, sequence: 1 },
+      financeReports_salarycogs: { visible: true, sequence: 2 },
+      financeReports_operationcostcogs: { visible: true, sequence: 3 },
+      financeReports_operationcostsales: { visible: true, sequence: 4 },
+      financeReports_tourexpensesales: { visible: true, sequence: 5 },
+      financeReports_plreport: { visible: true, sequence: 6 },
+
+      // Settings sub-tabs
+      settings_companyprofile: { visible: true, sequence: 1 },
+      settings_tabmanipulation: { visible: true, sequence: 2 },
+
+      // Utility sub-tabs
+      utility_companyprofile: { visible: true, sequence: 1 },
+      utility_tabhideview: { visible: true, sequence: 2 },
+
+      // HRM sub-tabs
+      hrm_dashboard: { visible: true, sequence: 1 },
+      hrm_holidays: { visible: true, sequence: 2 },
+      hrm_leaves: { visible: true, sequence: 3 },
+      hrm_attendance: { visible: true, sequence: 4 },
+      hrm_payroll: { visible: true, sequence: 5 },
+      hrm_settings: { visible: true, sequence: 6 },
+    };
+  },
+};
+
+// ... (your path constants remain the same)
 const masterPaths = ["/masterlayout/customer", "/masterlayout/supplier"];
 const purchasePaths = [
   "/purchaselayout/purchase",
@@ -177,25 +338,34 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
     useState(null);
   const [activeProductReportSubMenu, setActiveProductReportSubMenu] =
     useState(null);
+  const [visibleTabs, setVisibleTabs] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [lastUpdate, setLastUpdate] = useState(Date.now());
 
-  // Add visibleTabs state with default values
-  const [visibleTabs, setVisibleTabs] = useState({
-    dashboard: true,
-    master: true,
-    settings: true,
-    products: true,
-    purchase: true,
-    sales: true,
-    stockAdjustment: true,
-    stockTransfer: true,
-    accounts: true,
-    expense: true,
-    reports: true,
-    staff: true,
-    utility: true,
-    onlineOrders: true,
-    hrm: true,
-  });
+  // Function to refresh tab data
+  const refreshTabData = React.useCallback(() => {
+    console.log("Refreshing tab data...");
+    setLastUpdate(Date.now());
+  }, []);
+
+  // Load visible tabs on component mount and when lastUpdate changes
+  useEffect(() => {
+    const loadVisibleTabs = async () => {
+      setLoading(true);
+      try {
+        const tabs = await tabService.getVisibleTabs();
+        console.log("Final visible tabs:", tabs);
+        setVisibleTabs(tabs);
+      } catch (error) {
+        console.error("Error loading visible tabs:", error);
+        setVisibleTabs(tabService.getDefaultVisibleTabs());
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadVisibleTabs();
+  }, [lastUpdate]);
 
   useEffect(() => {
     if (location.pathname.startsWith("/masterlayout")) {
@@ -248,6 +418,37 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
     }
   }, [location.pathname]);
 
+  // Add event listener for tab visibility changes
+  useEffect(() => {
+    const handleTabVisibilityChange = (event) => {
+      console.log("Tab visibility change detected, refreshing sidebar...", event.detail);
+      refreshTabData();
+    };
+
+    // Listen for custom event
+    window.addEventListener('tabVisibilityChanged', handleTabVisibilityChange);
+
+    return () => {
+      window.removeEventListener('tabVisibilityChanged', handleTabVisibilityChange);
+    };
+  }, [refreshTabData]);
+
+  // Also listen for storage changes as backup
+  useEffect(() => {
+    const handleStorageChange = (event) => {
+      if (event.key === 'tabVisibilityUpdated') {
+        console.log("Storage change detected, refreshing sidebar...");
+        refreshTabData();
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, [refreshTabData]);
+
   const isActive = (path) => location.pathname === path;
   const isChildActive = (paths) =>
     paths.some((p) => location.pathname.startsWith(p));
@@ -278,11 +479,31 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
     );
   };
 
-  const handleTabVisibilityChange = (tabId) => {
-    setVisibleTabs((prev) => ({
-      ...prev,
-      [tabId]: !prev[tabId],
-    }));
+  const shouldShowTab = (tabId) => {
+    if (loading) {
+      console.log(`Loading - showing tab ${tabId}`);
+      return true; // Show all tabs while loading
+    }
+
+    const tabConfig = visibleTabs[tabId];
+    console.log(`Checking tab ${tabId}:`, tabConfig);
+
+    // If tab is not configured at all, don't show it
+    if (tabConfig === undefined || tabConfig === null) {
+      console.log(`Tab ${tabId} not found in configuration - hiding`);
+      return false;
+    }
+
+    // Handle object structure with visible property
+    if (typeof tabConfig === "object" && tabConfig !== null) {
+      const shouldShow = tabConfig.visible === true;
+      console.log(`Tab ${tabId} visibility:`, shouldShow);
+      return shouldShow;
+    }
+
+    // For backward compatibility - if it's a direct boolean
+    console.log(`Tab ${tabId} direct boolean:`, tabConfig);
+    return tabConfig === true;
   };
 
   const getLinkClass = (path) =>
@@ -338,8 +559,44 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
         : "hover:bg-gray-600 text-gray-200"
     }`;
 
-  // Filter navigation items based on visible tabs
-  const shouldShowTab = (tabId) => visibleTabs[tabId];
+  const getSortedTabs = (tabIds) => {
+    const filteredTabs = tabIds
+      .filter((tabId) => {
+        const shouldShow = shouldShowTab(tabId);
+        return shouldShow;
+      })
+      .sort((a, b) => {
+        const seqA = visibleTabs[a]?.sequence || 0;
+        const seqB = visibleTabs[b]?.sequence || 0;
+
+        return seqA - seqB;
+      });
+
+    return filteredTabs;
+  };
+
+  if (loading) {
+    return (
+      <div
+        className={`bg-gray-900 text-white transition-all duration-300 ${
+          isOpen ? "w-64" : "w-16"
+        } flex flex-col`}
+      >
+        <div className="w-full h-16 flex items-center justify-center border-b border-gray-700 bg-gray-900">
+          <img
+            src="/mainlogo.png"
+            alt="CRM Logo"
+            className={`${isOpen ? "h-10" : "h-8"} object-contain`}
+          />
+        </div>
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-gray-400">Loading...</div>
+        </div>
+      </div>
+    );
+  }
+
+  console.log("Rendering sidebar with visibleTabs:", visibleTabs);
 
   return (
     <div
@@ -358,7 +615,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
 
       {/* Navigation */}
       <nav className="flex-1 px-2 py-4 space-y-2">
-        {/* Dashboard - Conditionally rendered */}
+        {/* Dashboard */}
         {shouldShowTab("dashboard") && (
           <Link to="/" className={getLinkClass("/")}>
             <Home className="w-5 h-5" />
@@ -366,7 +623,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
           </Link>
         )}
 
-        {/* Master - Conditionally rendered */}
+        {/* Master */}
         {shouldShowTab("master") && (
           <div>
             <button
@@ -387,26 +644,30 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
             </button>
             {activeParentMenu === "master" && isOpen && (
               <div className="ml-6 mt-1 space-y-1">
-                <Link
-                  to="/masterlayout/customer"
-                  className={getChildLinkClass("/masterlayout/customer")}
-                >
-                  <Users className="w-4 h-4" />
-                  <span className="mx-auto">Customers</span>
-                </Link>
-                <Link
-                  to="/masterlayout/supplier"
-                  className={getChildLinkClass("/masterlayout/supplier")}
-                >
-                  <Truck className="w-4 h-4" />
-                  <span className="mx-auto">Suppliers</span>
-                </Link>
+                {shouldShowTab("master_customers") && (
+                  <Link
+                    to="/masterlayout/customer"
+                    className={getChildLinkClass("/masterlayout/customer")}
+                  >
+                    <Users className="w-4 h-4" />
+                    <span className="mx-auto">Customers</span>
+                  </Link>
+                )}
+                {shouldShowTab("master_suppliers") && (
+                  <Link
+                    to="/masterlayout/supplier"
+                    className={getChildLinkClass("/masterlayout/supplier")}
+                  >
+                    <Truck className="w-4 h-4" />
+                    <span className="mx-auto">Suppliers</span>
+                  </Link>
+                )}
               </div>
             )}
           </div>
         )}
 
-        {/* Settings - Conditionally rendered */}
+        {/* Settings */}
         {shouldShowTab("settings") && (
           <div>
             <button
@@ -430,30 +691,34 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
             </button>
             {activeParentMenu === "settings" && isOpen && (
               <div className="ml-6 mt-1 space-y-1">
-                <Link
-                  to="/settingslayout/company-profile"
-                  className={getChildLinkClass(
-                    "/settingslayout/company-profile"
-                  )}
-                >
-                  <Building className="w-4 h-4" />
-                  <span className="mx-auto">Company Profile</span>
-                </Link>
-                <Link
-                  to="/settingslayout/tab-manipulation"
-                  className={getChildLinkClass(
-                    "/settingslayout/tab-manipulation"
-                  )}
-                >
-                  <Eye className="w-4 h-4" />
-                  <span className="mx-auto">Tab Manipulation</span>
-                </Link>
+                {shouldShowTab("settings_companyprofile") && (
+                  <Link
+                    to="/settingslayout/company-profile"
+                    className={getChildLinkClass(
+                      "/settingslayout/company-profile"
+                    )}
+                  >
+                    <Building className="w-4 h-4" />
+                    <span className="mx-auto">Company Profile</span>
+                  </Link>
+                )}
+                {shouldShowTab("settings_tabmanipulation") && (
+                  <Link
+                    to="/settingslayout/tab-manipulation"
+                    className={getChildLinkClass(
+                      "/settingslayout/tab-manipulation"
+                    )}
+                  >
+                    <Eye className="w-4 h-4" />
+                    <span className="mx-auto">Tab Manipulation</span>
+                  </Link>
+                )}
               </div>
             )}
           </div>
         )}
 
-        {/* Product Manager - Conditionally rendered */}
+        {/* Product Manager */}
         {shouldShowTab("products") && (
           <div>
             <button
@@ -475,39 +740,59 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
 
             {activeParentMenu === "products" && isOpen && (
               <div className="ml-6 mt-1 space-y-1">
-                <Link
-                  to="/productmanagerlayout/product"
-                  className={getChildLinkClass("/productmanagerlayout/product")}
-                >
-                  <Boxes className="w-4 h-4" />
-                  <span className="mx-auto">Products</span>
-                </Link>
-
-                <Link
-                  to="/productmanagerlayout/pricelist"
-                  className={getChildLinkClass(
-                    "/productmanagerlayout/pricelist"
-                  )}
-                >
-                  <ClipboardList className="w-4 h-4" />
-                  <span className="mx-auto">Price List</span>
-                </Link>
-
-                <Link
-                  to="/productmanagerlayout/printbarcode"
-                  className={getChildLinkClass(
-                    "/productmanagerlayout/printbarcode"
-                  )}
-                >
-                  <Barcode className="w-4 h-4" />
-                  <span className="mx-auto">Print Barcode</span>
-                </Link>
+                {getSortedTabs([
+                  "products_products",
+                  "products_pricelist",
+                  "products_printbarcode",
+                ]).map((tabId) => {
+                  if (tabId === "products_products") {
+                    return (
+                      <Link
+                        key={tabId}
+                        to="/productmanagerlayout/product"
+                        className={getChildLinkClass(
+                          "/productmanagerlayout/product"
+                        )}
+                      >
+                        <Boxes className="w-4 h-4" />
+                        <span className="mx-auto">Products</span>
+                      </Link>
+                    );
+                  } else if (tabId === "products_pricelist") {
+                    return (
+                      <Link
+                        key={tabId}
+                        to="/productmanagerlayout/pricelist"
+                        className={getChildLinkClass(
+                          "/productmanagerlayout/pricelist"
+                        )}
+                      >
+                        <ClipboardList className="w-4 h-4" />
+                        <span className="mx-auto">Price List</span>
+                      </Link>
+                    );
+                  } else if (tabId === "products_printbarcode") {
+                    return (
+                      <Link
+                        key={tabId}
+                        to="/productmanagerlayout/printbarcode"
+                        className={getChildLinkClass(
+                          "/productmanagerlayout/printbarcode"
+                        )}
+                      >
+                        <Barcode className="w-4 h-4" />
+                        <span className="mx-auto">Print Barcode</span>
+                      </Link>
+                    );
+                  }
+                  return null;
+                })}
               </div>
             )}
           </div>
         )}
 
-        {/* Purchase - Conditionally rendered */}
+        {/* Purchase */}
         {shouldShowTab("purchase") && (
           <div>
             <button
@@ -529,36 +814,59 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
 
             {activeParentMenu === "purchase" && isOpen && (
               <div className="ml-6 mt-1 space-y-1">
-                <Link
-                  to="/purchaselayout/purchase"
-                  className={getChildLinkClass("/purchaselayout/purchase")}
-                >
-                  <Package className="w-4 h-4" />
-                  <span className="mx-auto">Purchase</span>
-                </Link>
-                <Link
-                  to="/purchaselayout/purchasereturn"
-                  className={getChildLinkClass(
-                    "/purchaselayout/purchasereturn"
-                  )}
-                >
-                  <FileText className="w-4 h-4" />
-                  <span className="mx-auto">Purchase/Cr.Note</span>
-                </Link>
-
-                <Link
-                  to="/purchaselayout/purchaseout"
-                  className={getChildLinkClass("/purchaselayout/purchaseout")}
-                >
-                  <Truck className="w-4 h-4" />
-                  <span className="mx-auto">Purchase Out</span>
-                </Link>
+                {getSortedTabs([
+                  "purchase_purchase",
+                  "purchase_purchasereturn",
+                  "purchase_purchaseout",
+                ]).map((tabId) => {
+                  if (tabId === "purchase_purchase") {
+                    return (
+                      <Link
+                        key={tabId}
+                        to="/purchaselayout/purchase"
+                        className={getChildLinkClass(
+                          "/purchaselayout/purchase"
+                        )}
+                      >
+                        <Package className="w-4 h-4" />
+                        <span className="mx-auto">Purchase</span>
+                      </Link>
+                    );
+                  } else if (tabId === "purchase_purchasereturn") {
+                    return (
+                      <Link
+                        key={tabId}
+                        to="/purchaselayout/purchasereturn"
+                        className={getChildLinkClass(
+                          "/purchaselayout/purchasereturn"
+                        )}
+                      >
+                        <FileText className="w-4 h-4" />
+                        <span className="mx-auto">Purchase/Cr.Note</span>
+                      </Link>
+                    );
+                  } else if (tabId === "purchase_purchaseout") {
+                    return (
+                      <Link
+                        key={tabId}
+                        to="/purchaselayout/purchaseout"
+                        className={getChildLinkClass(
+                          "/purchaselayout/purchaseout"
+                        )}
+                      >
+                        <Truck className="w-4 h-4" />
+                        <span className="mx-auto">Purchase Out</span>
+                      </Link>
+                    );
+                  }
+                  return null;
+                })}
               </div>
             )}
           </div>
         )}
 
-        {/* Sales - Conditionally rendered */}
+        {/* Sales */}
         {shouldShowTab("sales") && (
           <div>
             <button
@@ -580,27 +888,42 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
 
             {activeParentMenu === "sales" && isOpen && (
               <div className="ml-6 mt-1 space-y-1">
-                <Link
-                  to="/salelayout/sale"
-                  className={getChildLinkClass("/salelayout/sale")}
-                >
-                  <DollarSign className="w-4 h-4" />
-                  <span className="mx-auto">Sale</span>
-                </Link>
-
-                <Link
-                  to="/salelayout/salereturn"
-                  className={getChildLinkClass("/salelayout/salereturn")}
-                >
-                  <FileText className="w-4 h-4" />
-                  <span className="mx-auto">Sale Return/Cr.Note</span>
-                </Link>
+                {getSortedTabs(["sales_sale", "sales_salereturn"]).map(
+                  (tabId) => {
+                    if (tabId === "sales_sale") {
+                      return (
+                        <Link
+                          key={tabId}
+                          to="/salelayout/sale"
+                          className={getChildLinkClass("/salelayout/sale")}
+                        >
+                          <DollarSign className="w-4 h-4" />
+                          <span className="mx-auto">Sale</span>
+                        </Link>
+                      );
+                    } else if (tabId === "sales_salereturn") {
+                      return (
+                        <Link
+                          key={tabId}
+                          to="/salelayout/salereturn"
+                          className={getChildLinkClass(
+                            "/salelayout/salereturn"
+                          )}
+                        >
+                          <FileText className="w-4 h-4" />
+                          <span className="mx-auto">Sale Return/Cr.Note</span>
+                        </Link>
+                      );
+                    }
+                    return null;
+                  }
+                )}
               </div>
             )}
           </div>
         )}
 
-        {/* Stock Adjustment - Conditionally rendered */}
+        {/* Stock Adjustment */}
         {shouldShowTab("stockAdjustment") && (
           <Link
             to="/stockadjustment"
@@ -611,7 +934,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
           </Link>
         )}
 
-        {/* Stock Transfer - Conditionally rendered */}
+        {/* Stock Transfer */}
         {shouldShowTab("stockTransfer") && (
           <Link to="/stocktransfer" className={getLinkClass("/stocktransfer")}>
             <Truck className="w-5 h-5" />
@@ -619,7 +942,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
           </Link>
         )}
 
-        {/* Accounts - Conditionally rendered */}
+        {/* Accounts */}
         {shouldShowTab("accounts") && (
           <div>
             <button
@@ -652,7 +975,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
           </div>
         )}
 
-        {/* Expense - Conditionally rendered */}
+        {/* Expense */}
         {shouldShowTab("expense") && (
           <div>
             <button
@@ -674,28 +997,44 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
 
             {activeParentMenu === "expense" && isOpen && (
               <div className="ml-6 mt-1 space-y-1">
-                <Link
-                  to="/expenselayout/expensecategories"
-                  className={getChildLinkClass(
-                    "/expenselayout/expensecategories"
-                  )}
-                >
-                  <Layers className="w-4 h-4" />
-                  <span className="mx-auto">Expense Categories</span>
-                </Link>
-                <Link
-                  to="/expenselayout/expenses"
-                  className={getChildLinkClass("/expenselayout/expenses")}
-                >
-                  <DollarSign className="w-4 h-4" />
-                  <span className="mx-auto">Expenses</span>
-                </Link>
+                {getSortedTabs(["expense_categories", "expense_expenses"]).map(
+                  (tabId) => {
+                    if (tabId === "expense_categories") {
+                      return (
+                        <Link
+                          key={tabId}
+                          to="/expenselayout/expensecategories"
+                          className={getChildLinkClass(
+                            "/expenselayout/expensecategories"
+                          )}
+                        >
+                          <Layers className="w-4 h-4" />
+                          <span className="mx-auto">Expense Categories</span>
+                        </Link>
+                      );
+                    } else if (tabId === "expense_expenses") {
+                      return (
+                        <Link
+                          key={tabId}
+                          to="/expenselayout/expenses"
+                          className={getChildLinkClass(
+                            "/expenselayout/expenses"
+                          )}
+                        >
+                          <DollarSign className="w-4 h-4" />
+                          <span className="mx-auto">Expenses</span>
+                        </Link>
+                      );
+                    }
+                    return null;
+                  }
+                )}
               </div>
             )}
           </div>
         )}
 
-        {/* Reports - Conditionally rendered */}
+        {/* Reports */}
         {shouldShowTab("reports") && (
           <div>
             <button
@@ -717,301 +1056,282 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
 
             {activeParentMenu === "reports" && isOpen && (
               <div className="ml-6 mt-1 space-y-1">
-                {/* Reports content remains the same */}
-                <Link
-                  to="/reportlayout/dailyreport"
-                  className={getChildLinkClass("/reportlayout/dailyreport")}
-                >
-                  <CreditCard className="w-4 h-4" />
-                  <span className="mx-auto">Daily Reports</span>
-                </Link>
-
-                <Link
-                  to="/reportlayout/averageprice"
-                  className={getChildLinkClass("/reportlayout/averageprice")}
-                >
-                  <Calculator className="w-4 h-4" />
-                  <span className="mx-auto">Average Price Per Product</span>
-                </Link>
-
-                <Link
-                  to="/reportlayout/newcustomeraddition"
-                  className={getChildLinkClass(
-                    "/reportlayout/newcustomeraddition"
-                  )}
-                >
-                  <UserPlus className="w-4 h-4" />
-                  <span className="mx-auto">New Customer Addition</span>
-                </Link>
-
-                {/* Master Customer Report with Dropdown */}
-                <div>
-                  <button
-                    onClick={() => toggleSubMenu("masterCustomerReports")}
-                    className={getSubDropdownButtonClass(
-                      "masterCustomerReports",
-                      masterCustomerReportPaths
-                    )}
-                  >
-                    <span className="flex items-center gap-3">
-                      <Users className="w-4 h-4" />
-                      <span>Master Customer Report</span>
-                    </span>
-                    <ChevronDown
-                      className={`w-4 h-4 transform transition-transform ${
-                        activeSubMenu === "masterCustomerReports"
-                          ? "rotate-180"
-                          : ""
-                      }`}
-                    />
-                  </button>
-                  {activeSubMenu === "masterCustomerReports" && (
-                    <div className="ml-4 mt-1 space-y-1">
-                      <Link
-                        to="/reportlayout/customerretention"
-                        className={getChildLinkClass(
-                          "/reportlayout/customerretention"
+                {/* Render sorted report tabs */}
+                {getSortedTabs([
+                  "reports_dailyreport",
+                  "reports_averageprice",
+                  "reports_newcustomeraddition",
+                  "reports_masterCustomerReports",
+                  "reports_monthlyrepeatrate",
+                  "reports_annualrepeatrate",
+                  "reports_productreport",
+                  "reports_mrwiseoutstanding",
+                  "reports_mrwisesales",
+                  "reports_cashsales",
+                  "reports_outstandingcollection",
+                  "reports_totalexpense",
+                  "reports_remittance",
+                  "reports_provincewisesale",
+                  "reports_provincewisecustomer",
+                  "reports_payment",
+                  "reports_financeReports",
+                  "reports_reportsinhand",
+                  "reports_salesummary",
+                  "reports_dailysample",
+                  "reports_profitloss",
+                ]).map((tabId) => {
+                  // Handle master customer reports dropdown
+                  if (
+                    tabId === "reports_masterCustomerReports" &&
+                    shouldShowTab("reports_masterCustomerReports")
+                  ) {
+                    return (
+                      <div key={tabId}>
+                        <button
+                          onClick={() => toggleSubMenu("masterCustomerReports")}
+                          className={getSubDropdownButtonClass(
+                            "masterCustomerReports",
+                            masterCustomerReportPaths
+                          )}
+                        >
+                          <span className="flex items-center gap-3">
+                            <Users className="w-4 h-4" />
+                            <span>Master Customer Report</span>
+                          </span>
+                          <ChevronDown
+                            className={`w-4 h-4 transform transition-transform ${
+                              activeSubMenu === "masterCustomerReports"
+                                ? "rotate-180"
+                                : ""
+                            }`}
+                          />
+                        </button>
+                        {activeSubMenu === "masterCustomerReports" && (
+                          <div className="ml-4 mt-1 space-y-1">
+                            {getSortedTabs([
+                              "masterCustomerReports_retention",
+                              "masterCustomerReports_acceptance",
+                              "masterCustomerReports_zonewise",
+                            ]).map((subTabId) => {
+                              if (
+                                subTabId === "masterCustomerReports_retention"
+                              ) {
+                                return (
+                                  <Link
+                                    key={subTabId}
+                                    to="/reportlayout/customerretention"
+                                    className={getChildLinkClass(
+                                      "/reportlayout/customerretention"
+                                    )}
+                                  >
+                                    <Repeat className="w-4 h-4" />
+                                    <span>Customer Retention Rate</span>
+                                  </Link>
+                                );
+                              } else if (
+                                subTabId === "masterCustomerReports_acceptance"
+                              ) {
+                                return (
+                                  <Link
+                                    key={subTabId}
+                                    to="/reportlayout/customeracceptance"
+                                    className={getChildLinkClass(
+                                      "/reportlayout/customeracceptance"
+                                    )}
+                                  >
+                                    <CheckCircle className="w-4 h-4" />
+                                    <span>Product Acceptance Rate</span>
+                                  </Link>
+                                );
+                              } else if (
+                                subTabId === "masterCustomerReports_zonewise"
+                              ) {
+                                return (
+                                  <Link
+                                    key={subTabId}
+                                    to="/reportlayout/zonewisecustomers"
+                                    className={getChildLinkClass(
+                                      "/reportlayout/zonewisecustomers"
+                                    )}
+                                  >
+                                    <MapPin className="w-4 h-4" />
+                                    <span>Zone Wise Customers</span>
+                                  </Link>
+                                );
+                              }
+                              return null;
+                            })}
+                          </div>
                         )}
-                      >
-                        <Repeat className="w-4 h-4" />
-                        <span>Customer Retention Rate</span>
-                      </Link>
-                      <Link
-                        to="/reportlayout/customeracceptance"
-                        className={getChildLinkClass(
-                          "/reportlayout/customeracceptance"
-                        )}
-                      >
-                        <CheckCircle className="w-4 h-4" />
-                        <span>Product Acceptance Rate</span>
-                      </Link>
-                      <Link
-                        to="/reportlayout/zonewisecustomers"
-                        className={getChildLinkClass(
-                          "/reportlayout/zonewisecustomers"
-                        )}
-                      >
-                        <MapPin className="w-4 h-4" />
-                        <span>Zone Wise Customers</span>
-                      </Link>
-                    </div>
-                  )}
-                </div>
-                <Link
-                  to="/reportlayout/monthlyrepeatrate"
-                  className={getChildLinkClass(
-                    "/reportlayout/monthlyrepeatrate"
-                  )}
-                >
-                  <CalendarDays className="w-4 h-4" />
-                  <span>Monthly Customer Repeat Rate</span>
-                </Link>
-                <Link
-                  to="/reportlayout/annualrepeatrate"
-                  className={getChildLinkClass(
-                    "/reportlayout/annualrepeatrate"
-                  )}
-                >
-                  <CalendarRange className="w-4 h-4" />
-                  <span>Annual Customer Repeat Rate</span>
-                </Link>
+                      </div>
+                    );
+                  }
 
-                <Link
-                  to="/reportlayout/product-report"
-                  className={getChildLinkClass("/reportlayout/product-report")}
-                >
-                  <PackageSearch className="w-4 h-4" />
-                  <span className="mx-auto">Product Reports</span>
-                </Link>
+                  // Handle finance reports dropdown
+                  if (
+                    tabId === "reports_financeReports" &&
+                    shouldShowTab("reports_financeReports")
+                  ) {
+                    return (
+                      <div key={tabId}>
+                        <button
+                          onClick={() => toggleFinanceSubMenu("financeReports")}
+                          className={getFinanceSubDropdownButtonClass(
+                            "financeReports",
+                            financeReportPaths
+                          )}
+                        >
+                          <span className="flex items-center gap-3">
+                            <FileBarChart className="w-4 h-4" />
+                            <span>Finance Reports</span>
+                          </span>
+                          <ChevronDown
+                            className={`w-4 h-4 transform transition-transform ${
+                              activeFinanceSubMenu === "financeReports"
+                                ? "rotate-180"
+                                : ""
+                            }`}
+                          />
+                        </button>
+                        {activeFinanceSubMenu === "financeReports" && (
+                          <div className="ml-4 mt-1 space-y-1">
+                            {getSortedTabs([
+                              "financeReports_salessalary",
+                              "financeReports_salarycogs",
+                              "financeReports_operationcostcogs",
+                              "financeReports_operationcostsales",
+                              "financeReports_tourexpensesales",
+                              "financeReports_plreport",
+                            ]).map((subTabId) => {
+                              const linkMap = {
+                                financeReports_salessalary:
+                                  "/reportlayout/sales-salary-ratio",
+                                financeReports_salarycogs:
+                                  "/reportlayout/salary-cogs-ratio",
+                                financeReports_operationcostcogs:
+                                  "/reportlayout/operation-cost-cogs-ratio",
+                                financeReports_operationcostsales:
+                                  "/reportlayout/operation-cost-sales-ratio",
+                                financeReports_tourexpensesales:
+                                  "/reportlayout/tour-expense-sales-ratio",
+                                financeReports_plreport:
+                                  "/reportlayout/pl-report",
+                              };
 
-                <Link
-                  to="/reportlayout/mrwiseoutstanding"
-                  className={getChildLinkClass(
-                    "/reportlayout/mrwiseoutstanding"
-                  )}
-                >
-                  <UserSearch className="w-4 h-4" />
-                  <span className="mx-auto">MR Wise Outstanding</span>
-                </Link>
-                <Link
-                  to="/reportlayout/mrwisesales"
-                  className={getChildLinkClass("/reportlayout/mrwisesales")}
-                >
-                  <Target className="w-4 h-4" />
-                  <span className="mx-auto">MR Wise Sales</span>
-                </Link>
-                <Link
-                  to="/reportlayout/cashsales"
-                  className={getChildLinkClass("/reportlayout/cashsales")}
-                >
-                  <DollarSign className="w-4 h-4" />
-                  <span className="mx-auto">Total Cash Sales</span>
-                </Link>
-                <Link
-                  to="/reportlayout/outstandingcollection"
-                  className={getChildLinkClass(
-                    "/reportlayout/outstandingcollection"
-                  )}
-                >
-                  <Receipt className="w-4 h-4" />
-                  <span className="mx-auto">Outstanding Collection</span>
-                </Link>
-                <Link
-                  to="/reportlayout/totalexpense"
-                  className={getChildLinkClass("/reportlayout/totalexpense")}
-                >
-                  <PieChart className="w-4 h-4" />
-                  <span className="mx-auto">Total Expense</span>
-                </Link>
-                <Link
-                  to="/reportlayout/remittance"
-                  className={getChildLinkClass("/reportlayout/remittance")}
-                >
-                  <Coins className="w-4 h-4" />
-                  <span className="mx-auto">Remittance</span>
-                </Link>
+                              const iconMap = {
+                                financeReports_salessalary: Percent,
+                                financeReports_salarycogs: Scale,
+                                financeReports_operationcostcogs: TrendingDown,
+                                financeReports_operationcostsales: BarChart3,
+                                financeReports_tourexpensesales: MapPin,
+                                financeReports_plreport: FileBarChart,
+                              };
 
-                <Link
-                  to="/reportlayout/province-wise-sale"
-                  className={getChildLinkClass(
-                    "/reportlayout/province-wise-sale"
-                  )}
-                >
-                  <Globe className="w-4 h-4" />
-                  <span className="mx-auto">Province Wise Sale</span>
-                </Link>
-                <Link
-                  to="/reportlayout/province-wise-customer"
-                  className={getChildLinkClass(
-                    "/reportlayout/province-wise-customer"
-                  )}
-                >
-                  <Users className="w-4 h-4" />
-                  <span className="mx-auto">Province Wise Customer</span>
-                </Link>
+                              const IconComponent = iconMap[subTabId];
+                              const path = linkMap[subTabId];
 
-                <Link
-                  to="/reportlayout/payment"
-                  className={getChildLinkClass("/reportlayout/payment")}
-                >
-                  <CreditCard className="w-4 h-4" />
-                  <span className="mx-auto">Payments</span>
-                </Link>
-
-                {/* Finance Reports Section */}
-                <div>
-                  <button
-                    onClick={() => toggleFinanceSubMenu("financeReports")}
-                    className={getFinanceSubDropdownButtonClass(
-                      "financeReports",
-                      financeReportPaths
-                    )}
-                  >
-                    <span className="flex items-center gap-3">
-                      <FileBarChart className="w-4 h-4" />
-                      <span>Finance Reports</span>
-                    </span>
-                    <ChevronDown
-                      className={`w-4 h-4 transform transition-transform ${
-                        activeFinanceSubMenu === "financeReports"
-                          ? "rotate-180"
-                          : ""
-                      }`}
-                    />
-                  </button>
-                  {activeFinanceSubMenu === "financeReports" && (
-                    <div className="ml-4 mt-1 space-y-1">
-                      <Link
-                        to="/reportlayout/sales-salary-ratio"
-                        className={getChildLinkClass(
-                          "/reportlayout/sales-salary-ratio"
+                              return (
+                                <Link
+                                  key={subTabId}
+                                  to={path}
+                                  className={getChildLinkClass(path)}
+                                >
+                                  <IconComponent className="w-4 h-4" />
+                                  <span>
+                                    {subTabId
+                                      .split("_")[1]
+                                      .replace(/([A-Z])/g, " $1")
+                                      .trim()}
+                                  </span>
+                                </Link>
+                              );
+                            })}
+                          </div>
                         )}
-                      >
-                        <Percent className="w-4 h-4" />
-                        <span>Sales / Salary Ratio</span>
-                      </Link>
-                      <Link
-                        to="/reportlayout/salary-cogs-ratio"
-                        className={getChildLinkClass(
-                          "/reportlayout/salary-cogs-ratio"
-                        )}
-                      >
-                        <Scale className="w-4 h-4" />
-                        <span>Salary / COGS Ratio</span>
-                      </Link>
-                      <Link
-                        to="/reportlayout/operation-cost-cogs-ratio"
-                        className={getChildLinkClass(
-                          "/reportlayout/operation-cost-cogs-ratio"
-                        )}
-                      >
-                        <TrendingDown className="w-4 h-4" />
-                        <span>Operation Cost / COGS</span>
-                      </Link>
-                      <Link
-                        to="/reportlayout/operation-cost-sales-ratio"
-                        className={getChildLinkClass(
-                          "/reportlayout/operation-cost-sales-ratio"
-                        )}
-                      >
-                        <BarChart3 className="w-4 h-4" />
-                        <span>Operation Cost / Sales</span>
-                      </Link>
-                      <Link
-                        to="/reportlayout/tour-expense-sales-ratio"
-                        className={getChildLinkClass(
-                          "/reportlayout/tour-expense-sales-ratio"
-                        )}
-                      >
-                        <MapPin className="w-4 h-4" />
-                        <span>Tour Expense / Sales</span>
-                      </Link>
-                      <Link
-                        to="/reportlayout/pl-report"
-                        className={getChildLinkClass("/reportlayout/pl-report")}
-                      >
-                        <FileBarChart className="w-4 h-4" />
-                        <span>P&L Report</span>
-                      </Link>
-                    </div>
-                  )}
-                </div>
+                      </div>
+                    );
+                  }
 
-                <Link
-                  to="/reportlayout/reports-in-hand"
-                  className={getChildLinkClass("/reportlayout/reports-in-hand")}
-                >
-                  <HandCoins className="w-4 h-4" />
-                  <span>Reports in Hand</span>
-                </Link>
+                  // Handle regular report links
+                  const linkMap = {
+                    reports_dailyreport: "/reportlayout/dailyreport",
+                    reports_averageprice: "/reportlayout/averageprice",
+                    reports_newcustomeraddition:
+                      "/reportlayout/newcustomeraddition",
+                    reports_monthlyrepeatrate:
+                      "/reportlayout/monthlyrepeatrate",
+                    reports_annualrepeatrate: "/reportlayout/annualrepeatrate",
+                    reports_productreport: "/reportlayout/product-report",
+                    reports_mrwiseoutstanding:
+                      "/reportlayout/mrwiseoutstanding",
+                    reports_mrwisesales: "/reportlayout/mrwisesales",
+                    reports_cashsales: "/reportlayout/cashsales",
+                    reports_outstandingcollection:
+                      "/reportlayout/outstandingcollection",
+                    reports_totalexpense: "/reportlayout/totalexpense",
+                    reports_remittance: "/reportlayout/remittance",
+                    reports_provincewisesale:
+                      "/reportlayout/province-wise-sale",
+                    reports_provincewisecustomer:
+                      "/reportlayout/province-wise-customer",
+                    reports_payment: "/reportlayout/payment",
+                    reports_reportsinhand: "/reportlayout/reports-in-hand",
+                    reports_salesummary: "/reportlayout/salesummary",
+                    reports_dailysample: "/reportlayout/dailysample",
+                    reports_profitloss: "/reportlayout/profitloss",
+                  };
 
-                <Link
-                  to="/reportlayout/salesummary"
-                  className={getChildLinkClass("/reportlayout/salesummary")}
-                >
-                  <TrendingUp className="w-4 h-4" />
-                  <span className="mx-auto">Sale Summary</span>
-                </Link>
-                <Link
-                  to="/reportlayout/dailysample"
-                  className={getChildLinkClass("/reportlayout/dailysample")}
-                >
-                  <Boxes className="w-4 h-4" />
-                  <span className="mx-auto">Daily Sample</span>
-                </Link>
-                <Link
-                  to="/reportlayout/profitloss"
-                  className={getChildLinkClass("/reportlayout/profitloss")}
-                >
-                  <DollarSign className="w-4 h-4" />
-                  <span className="mx-auto">Profit & Loss</span>
-                </Link>
+                  const iconMap = {
+                    reports_dailyreport: CreditCard,
+                    reports_averageprice: Calculator,
+                    reports_newcustomeraddition: UserPlus,
+                    reports_monthlyrepeatrate: CalendarDays,
+                    reports_annualrepeatrate: CalendarRange,
+                    reports_productreport: PackageSearch,
+                    reports_mrwiseoutstanding: UserSearch,
+                    reports_mrwisesales: Target,
+                    reports_cashsales: DollarSign,
+                    reports_outstandingcollection: Receipt,
+                    reports_totalexpense: PieChart,
+                    reports_remittance: Coins,
+                    reports_provincewisesale: Globe,
+                    reports_provincewisecustomer: Users,
+                    reports_payment: CreditCard,
+                    reports_reportsinhand: HandCoins,
+                    reports_salesummary: TrendingUp,
+                    reports_dailysample: Boxes,
+                    reports_profitloss: DollarSign,
+                  };
+
+                  const IconComponent = iconMap[tabId];
+                  const path = linkMap[tabId];
+
+                  if (IconComponent && path) {
+                    return (
+                      <Link
+                        key={tabId}
+                        to={path}
+                        className={getChildLinkClass(path)}
+                      >
+                        <IconComponent className="w-4 h-4" />
+                        <span>
+                          {tabId
+                            .split("_")[1]
+                            .replace(/([A-Z])/g, " $1")
+                            .trim()}
+                        </span>
+                      </Link>
+                    );
+                  }
+
+                  return null;
+                })}
               </div>
             )}
           </div>
         )}
 
-        {/* Staff Members - Conditionally rendered */}
+        {/* Staff Members */}
         {shouldShowTab("staff") && (
           <Link
             to="/staffmemberLayout/staffmember"
@@ -1022,7 +1342,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
           </Link>
         )}
 
-        {/* Utility - Changed to Settings */}
+        {/* Utility */}
         {shouldShowTab("utility") && (
           <div>
             <button
@@ -1043,26 +1363,45 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
             </button>
             {activeParentMenu === "utility" && isOpen && (
               <div className="ml-6 mt-1 space-y-1">
-                <Link
-                  to="/utilitylayout/companyprofile"
-                  className={getChildLinkClass("/utilitylayout/companyprofile")}
-                >
-                  <Building className="w-4 h-4" />
-                  <span className="mx-auto">Company Profile</span>
-                </Link>
-                <Link
-                  to="/utilitylayout/tabHideView"
-                  className={getChildLinkClass("/utilitylayout/tabHideView")}
-                >
-                  <Eye className="w-4 h-4" />
-                  <span className="mx-auto">Tab Hide and Show</span>
-                </Link>
+                {getSortedTabs([
+                  "utility_companyprofile",
+                  "utility_tabhideview",
+                ]).map((tabId) => {
+                  if (tabId === "utility_companyprofile") {
+                    return (
+                      <Link
+                        key={tabId}
+                        to="/utilitylayout/companyprofile"
+                        className={getChildLinkClass(
+                          "/utilitylayout/companyprofile"
+                        )}
+                      >
+                        <Building className="w-4 h-4" />
+                        <span className="mx-auto">Company Profile</span>
+                      </Link>
+                    );
+                  } else if (tabId === "utility_tabhideview") {
+                    return (
+                      <Link
+                        key={tabId}
+                        to="/utilitylayout/tabHideView"
+                        className={getChildLinkClass(
+                          "/utilitylayout/tabHideView"
+                        )}
+                      >
+                        <Eye className="w-4 h-4" />
+                        <span className="mx-auto">Tab Hide and Show</span>
+                      </Link>
+                    );
+                  }
+                  return null;
+                })}
               </div>
             )}
           </div>
         )}
 
-        {/* HRM - Conditionally rendered */}
+        {/* HRM */}
         {shouldShowTab("hrm") && (
           <div>
             <button
@@ -1083,48 +1422,49 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
             </button>
             {activeParentMenu === "hrm" && isOpen && (
               <div className="ml-6 mt-1 space-y-1">
-                <Link
-                  to="/hrmlayout/dashboard"
-                  className={getChildLinkClass("/hrmlayout/dashboard")}
-                >
-                  <Home className="w-4 h-4" />
-                  <span className="mx-auto">Dashboard</span>
-                </Link>
-                <Link
-                  to="/hrmlayout/holidays"
-                  className={getChildLinkClass("/hrmlayout/holidays")}
-                >
-                  <Umbrella className="w-4 h-4" />
-                  <span className="mx-auto">Holidays</span>
-                </Link>
-                <Link
-                  to="/hrmlayout/leaves"
-                  className={getChildLinkClass("/hrmlayout/leaves")}
-                >
-                  <Calendar className="w-4 h-4" />
-                  <span className="mx-auto">Leaves</span>
-                </Link>
-                <Link
-                  to="/hrmlayout/attendance"
-                  className={getChildLinkClass("/hrmlayout/attendance")}
-                >
-                  <Calendar className="w-4 h-4" />
-                  <span className="mx-auto">Attendance</span>
-                </Link>
-                <Link
-                  to="/hrmlayout/payroll"
-                  className={getChildLinkClass("/hrmlayout/payroll")}
-                >
-                  <DollarSign className="w-4 h-4" />
-                  <span className="mx-auto">Payroll</span>
-                </Link>
-                <Link
-                  to="/hrmlayout/hrmsetting"
-                  className={getChildLinkClass("/hrmlayout/hrmsetting")}
-                >
-                  <Settings className="w-4 h-4" />
-                  <span className="mx-auto">HRM Settings</span>
-                </Link>
+                {getSortedTabs([
+                  "hrm_dashboard",
+                  "hrm_holidays",
+                  "hrm_leaves",
+                  "hrm_attendance",
+                  "hrm_payroll",
+                  "hrm_settings",
+                ]).map((tabId) => {
+                  const linkMap = {
+                    hrm_dashboard: "/hrmlayout/dashboard",
+                    hrm_holidays: "/hrmlayout/holidays",
+                    hrm_leaves: "/hrmlayout/leaves",
+                    hrm_attendance: "/hrmlayout/attendance",
+                    hrm_payroll: "/hrmlayout/payroll",
+                    hrm_settings: "/hrmlayout/hrmsetting",
+                  };
+
+                  const iconMap = {
+                    hrm_dashboard: Home,
+                    hrm_holidays: Umbrella,
+                    hrm_leaves: Calendar,
+                    hrm_attendance: Calendar,
+                    hrm_payroll: DollarSign,
+                    hrm_settings: Settings,
+                  };
+
+                  const IconComponent = iconMap[tabId];
+                  const path = linkMap[tabId];
+
+                  return (
+                    <Link
+                      key={tabId}
+                      to={path}
+                      className={getChildLinkClass(path)}
+                    >
+                      <IconComponent className="w-4 h-4" />
+                      <span className="mx-auto">
+                        {tabId.split("_")[1].charAt(0).toUpperCase() +
+                          tabId.split("_")[1].slice(1)}
+                      </span>
+                    </Link>
+                  );
+                })}
               </div>
             )}
           </div>
