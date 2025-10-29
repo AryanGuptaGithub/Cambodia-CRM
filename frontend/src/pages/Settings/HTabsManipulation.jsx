@@ -1,26 +1,116 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   Eye,
   EyeOff,
   ChevronDown,
+  ChevronUp,
   ChevronRight as ChevronRightIcon,
+  ArrowUp,
+  ArrowDown,
+  Edit,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
+// Custom Dropdown Component (replacing SequenceDropdown)
+const CustomDropdown = ({
+  value,
+  onChange,
+  options,
+  disabled,
+  placeholder = "Select Sequence",
+  required = false,
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const selectedOption = options.find((opt) => opt.value === value);
+
+  return (
+    <div className="relative w-full" ref={dropdownRef}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => !disabled && setIsOpen(!isOpen)}
+        className={`w-full border border-gray-300 rounded-md px-3 py-2 text-left focus:outline-none focus:ring-2
+           focus:ring-indigo-500 disabled:bg-gray-100 flex justify-between items-center ${
+             disabled
+               ? "cursor-not-allowed opacity-60"
+               : "cursor-pointer hover:border-gray-400"
+           } ${!value ? "text-gray-500" : "text-gray-900"}`}
+      >
+        <span className="truncate">
+          {selectedOption ? selectedOption.label : placeholder}
+        </span>
+        {!disabled && (
+          <span className="text-gray-400 flex-shrink-0 ml-2">
+            {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </span>
+        )}
+      </button>
+
+      {isOpen && !disabled && (
+        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+          {options.length === 0 ? (
+            <div className="px-3 py-2 text-gray-500 text-sm">
+              No options available
+            </div>
+          ) : (
+            options.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => {
+                  if (!option.disabled) {
+                    onChange(option.value);
+                    setIsOpen(false);
+                  }
+                }}
+                className={`w-full px-3 py-2 text-left hover:bg-indigo-50 hover:text-indigo-900 transition-colors duration-150 ${
+                  value === option.value
+                    ? "bg-indigo-100 text-indigo-900 font-medium"
+                    : "text-gray-900"
+                } ${option.disabled ? "opacity-50 cursor-not-allowed" : ""}`}
+                disabled={option.disabled}
+              >
+                {option.label}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const HTabsManipulation = () => {
   const [tabs, setTabs] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [sequenceLoading, setSequenceLoading] = useState(false);
   const [reportTypes, setReportTypes] = useState([
     "Hide/Show Tabs",
     "Sequence Number",
   ]);
-  const [selectedReportType, setSelectedReportType] = useState("Hide/Show Tabs");
+  const [selectedReportType, setSelectedReportType] =
+    useState("Hide/Show Tabs");
   const [expandedTabs, setExpandedTabs] = useState({});
   const [tabHierarchy, setTabHierarchy] = useState([]);
+  const [sequenceData, setSequenceData] = useState({});
   const [initialized, setInitialized] = useState(false);
+  const [editingTab, setEditingTab] = useState(null);
 
   const removeDuplicateTabs = (tabsArray) => {
     const seen = new Set();
@@ -37,10 +127,10 @@ const HTabsManipulation = () => {
     const uniqueTabs = removeDuplicateTabs(flatTabs);
 
     uniqueTabs.forEach((tab) => {
-      tabsMap.set(tab.tabId, { 
-        ...tab, 
+      tabsMap.set(tab.tabId, {
+        ...tab,
         children: [],
-        isVisible: tab.isVisible !== undefined ? tab.isVisible : true
+        isVisible: tab.isVisible !== undefined ? tab.isVisible : true,
       });
     });
 
@@ -58,148 +148,203 @@ const HTabsManipulation = () => {
     return roots.sort((a, b) => a.sequence - b.sequence);
   };
 
-  // ✅ FIXED: Calculate parent checkbox state for UI only
   const calculateParentCheckboxState = (children) => {
     if (!children || children.length === 0) return false;
-    
-    const visibleChildren = children.filter(child => child.isVisible === true);
-    
+
+    const visibleChildren = children.filter(
+      (child) => child.isVisible === true
+    );
+
     if (visibleChildren.length === 0) {
-      return false; // All children unchecked
+      return false;
     } else if (visibleChildren.length === children.length) {
-      return true; // All children checked
+      return true;
     } else {
-      return "indeterminate"; // Some children checked
+      return "indeterminate";
     }
   };
 
-  // ✅ FIXED: Update parent checkbox states only (for UI), don't change parent visibility
-  const updateParentCheckboxStates = (tabsArray) => {
-    return tabsArray.map(tab => {
+  const updateParentStates = (tabsArray) => {
+    return tabsArray.map((tab) => {
       if (tab.children && tab.children.length > 0) {
-        const updatedChildren = updateParentCheckboxStates(tab.children);
-        const parentCheckboxState = calculateParentCheckboxState(updatedChildren);
-        
+        const updatedChildren = updateParentStates(tab.children);
+        const parentCheckboxState =
+          calculateParentCheckboxState(updatedChildren);
+
+        const hasAnyVisibleChild = updatedChildren.some(
+          (child) => child.isVisible === true
+        );
+        const shouldParentBeVisible = hasAnyVisibleChild;
+
         return {
           ...tab,
           children: updatedChildren,
-          // ✅ CRITICAL FIX: Keep the original isVisible for parent, only update checkbox state for UI
-          _checkboxState: parentCheckboxState
+          _checkboxState: parentCheckboxState,
+          isVisible: shouldParentBeVisible,
         };
       }
-      
+
       return tab;
     });
   };
 
-  // ✅ FIXED: Enhanced hierarchy fetch
+  // Build hierarchy from sequence data
+  const buildHierarchyFromSequenceData = (sequenceData) => {
+    if (!sequenceData || !sequenceData.groups) return [];
+
+    const allTabs = [];
+    const groups = sequenceData.groups;
+
+    // Flatten all tabs from all groups
+    const flattenTabs = (tabs, parentId = null) => {
+      tabs.forEach((tab) => {
+        allTabs.push({
+          ...tab,
+          parentTabId: parentId,
+        });
+
+        if (tab.children && tab.children.length > 0) {
+          flattenTabs(tab.children, tab.tabId);
+        }
+      });
+    };
+
+    Object.keys(groups).forEach((groupName) => {
+      const groupTabs = groups[groupName];
+      flattenTabs(groupTabs, groupName === "root" ? null : groupName);
+    });
+
+    // Now build hierarchy using the same logic as before
+    return buildHierarchy(allTabs);
+  };
+
   const fetchTabHierarchy = async () => {
     try {
       setLoading(true);
-      
-      // First fetch current visibility state
-      const visibleResponse = await axios.get(`${backendUrl}/api/h-tabs/visible`);
-      let visibilityMap = {};
-      
-      console.log("Visibility API Response:", visibleResponse.data);
 
-      if (visibleResponse.data?.data && typeof visibleResponse.data.data === 'object') {
-        visibilityMap = visibleResponse.data.data;
-      } else if (Array.isArray(visibleResponse.data?.data)) {
-        visibleResponse.data.data.forEach(tab => {
-          if (tab.tabId) {
-            visibilityMap[tab.tabId] = { 
-              visible: tab.isVisible === true,
-              isVisible: tab.isVisible === true 
-            };
-          }
-        });
-      }
+      if (selectedReportType === "Hide/Show Tabs") {
+        const visibleResponse = await axios.get(
+          `${backendUrl}/api/h-tabs/visible`
+        );
+        let visibilityMap = {};
 
-      console.log("Processed Visibility Map:", visibilityMap);
-
-      // Then fetch hierarchy structure
-      const hierarchyResponse = await axios.get(`${backendUrl}/api/h-tabs/hierarchy`);
-      let hierarchyData = [];
-      
-      if (hierarchyResponse.data.success) {
-        hierarchyData = hierarchyResponse.data.data?.hierarchy || [];
-      } else {
-        const fallback = await axios.get(`${backendUrl}/api/h-tabs`);
-        const tabsData = fallback.data?.data?.tabs || fallback.data?.tabs || [];
-        hierarchyData = buildHierarchy(tabsData);
-      }
-
-      // Enhanced visibility merging with strict boolean handling
-      const mergeVisibility = (tabs) => {
-        return tabs.map(tab => {
-          const tabVisibility = visibilityMap[tab.tabId];
-          
-          // Strict boolean handling - only true if explicitly true
-          let isVisible = false;
-          if (tabVisibility) {
-            if (tabVisibility.visible !== undefined) {
-              isVisible = tabVisibility.visible === true;
-            } else if (tabVisibility.isVisible !== undefined) {
-              isVisible = tabVisibility.isVisible === true;
+        if (
+          visibleResponse.data?.data &&
+          typeof visibleResponse.data.data === "object"
+        ) {
+          visibilityMap = visibleResponse.data.data;
+        } else if (Array.isArray(visibleResponse.data?.data)) {
+          visibleResponse.data.data.forEach((tab) => {
+            if (tab.tabId) {
+              visibilityMap[tab.tabId] = {
+                visible: tab.isVisible === true,
+                isVisible: tab.isVisible === true,
+              };
             }
-          }
-          
-          // If no visibility data found, default to false (hidden)
-          if (tabVisibility === undefined) {
-            isVisible = false;
-          }
-
-          console.log(`Tab ${tab.tabId} visibility:`, { 
-            tabId: tab.tabId, 
-            name: tab.name,
-            tabVisibility,
-            finalVisibility: isVisible 
           });
+        }
 
-          return {
-            ...tab,
-            isVisible: isVisible,
-            children: tab.children ? mergeVisibility(tab.children) : []
-          };
-        });
-      };
+        const hierarchyResponse = await axios.get(
+          `${backendUrl}/api/h-tabs/hierarchy`
+        );
+        let hierarchyData = [];
 
-      const mergedHierarchy = mergeVisibility(hierarchyData);
-      
-      // ✅ FIXED: Update parent checkbox states only (for UI)
-      const hierarchyWithParentStates = updateParentCheckboxStates(mergedHierarchy);
-      
-      setTabHierarchy(hierarchyWithParentStates);
-      setInitialized(true);
-      
-      console.log("Final Tab Hierarchy:", hierarchyWithParentStates);
-      
-    } catch (error) {
-      console.error("Error fetching hierarchy:", error);
-      
-      // Fallback: fetch basic tabs and build hierarchy
-      try {
-        const fallback = await axios.get(`${backendUrl}/api/h-tabs`);
-        const tabsData = fallback.data?.data?.tabs || fallback.data?.tabs || [];
-        const hierarchy = buildHierarchy(tabsData);
-        const hierarchyWithParentStates = updateParentCheckboxStates(hierarchy);
+        if (hierarchyResponse.data.success) {
+          hierarchyData = hierarchyResponse.data.data?.hierarchy || [];
+        } else {
+          const fallback = await axios.get(`${backendUrl}/api/h-tabs`);
+          const tabsData =
+            fallback.data?.data?.tabs || fallback.data?.tabs || [];
+          hierarchyData = buildHierarchy(tabsData);
+        }
+
+        const mergeVisibility = (tabs) => {
+          return tabs.map((tab) => {
+            const tabVisibility = visibilityMap[tab.tabId];
+
+            let isVisible = false;
+            if (tabVisibility) {
+              if (tabVisibility.visible !== undefined) {
+                isVisible = tabVisibility.visible === true;
+              } else if (tabVisibility.isVisible !== undefined) {
+                isVisible = tabVisibility.isVisible === true;
+              }
+            }
+
+            if (tabVisibility === undefined) {
+              isVisible = false;
+            }
+
+            return {
+              ...tab,
+              isVisible: isVisible,
+              children: tab.children ? mergeVisibility(tab.children) : [],
+            };
+          });
+        };
+
+        const mergedHierarchy = mergeVisibility(hierarchyData);
+        const hierarchyWithParentStates = updateParentStates(mergedHierarchy);
+
         setTabHierarchy(hierarchyWithParentStates);
-      } catch (fallbackError) {
-        console.error("Fallback fetch failed:", fallbackError);
-        showToast("error", "Failed to load tab hierarchy");
+      } else if (selectedReportType === "Sequence Number") {
+        const sequenceResponse = await axios.get(
+          `${backendUrl}/api/h-tabs/virtual-sequences`
+        );
+
+        console.log("Sequence response:", sequenceResponse);
+        if (
+          sequenceResponse.data?.success &&
+          sequenceResponse.data?.data?.groups
+        ) {
+          // Build hierarchy from sequence data for consistent display
+          const sequenceHierarchy = buildHierarchyFromSequenceData(
+            sequenceResponse.data.data
+          );
+          setTabHierarchy(sequenceHierarchy);
+          // Also store the raw sequence data for sequence operations
+          setSequenceData(sequenceResponse.data.data);
+          console.log("Sequence hierarchy built:", sequenceHierarchy);
+        } else {
+          console.warn("Using fallback structure for sequence data");
+          setSequenceData(sequenceResponse.data || {});
+        }
       }
+
+      setInitialized(true);
+    } catch (error) {
+      showToast("error", "Failed to load tab data");
     } finally {
       setLoading(false);
     }
   };
 
-  // ✅ FIXED: Enhanced Parent Toggle - now properly sets parent isVisible to false when unchecked
-  const handleParentTabToggle = async (parentTab, newState) => {
-    try {
-      console.log(`Toggling parent tab ${parentTab.name} to:`, newState);
+  const updateAllChildrenVisibility = (tab, isVisible) => {
+    const updatedTab = {
+      ...tab,
+      isVisible: isVisible,
+      _checkboxState: isVisible,
+    };
 
-      // Get all child tabs recursively
+    if (tab.children && tab.children.length > 0) {
+      updatedTab.children = tab.children.map((child) =>
+        updateAllChildrenVisibility(child, isVisible)
+      );
+    }
+
+    return updatedTab;
+  };
+
+  const handleParentTabToggle = async (parentTab, newState) => {
+    if (selectedReportType !== "Hide/Show Tabs") {
+      showToast(
+        "warning",
+        "Parent toggle is only available in Hide/Show Tabs mode"
+      );
+      return;
+    }
+
+    try {
       const getAllChildTabs = (tab) => {
         let children = [];
         if (tab.children && tab.children.length > 0) {
@@ -211,171 +356,264 @@ const HTabsManipulation = () => {
         return children;
       };
 
-      const childTabs = getAllChildTabs(parentTab);
+      const allChildTabs = getAllChildTabs(parentTab);
       const isVisible = newState === true;
 
-      // Update UI state immediately
       setTabHierarchy((prevTabs) => {
         const updateVisibility = (tabs) => {
           return tabs.map((tab) => {
             if (tab.tabId === parentTab.tabId) {
-              // ✅ CRITICAL FIX: Update parent isVisible to the new state
-              const updatedChildren = (tab.children || []).map(child => ({
-                ...child,
-                isVisible: isVisible
-              }));
+              return updateAllChildrenVisibility(tab, isVisible);
+            }
+
+            if (tab.children && tab.children.length > 0) {
               return {
                 ...tab,
-                isVisible: isVisible, // ✅ Parent visibility changes with checkbox
-                _checkboxState: isVisible,
-                children: updatedChildren
+                children: updateVisibility(tab.children),
               };
             }
-            
-            // Check children recursively
-            if (tab.children && tab.children.length > 0) {
-              const updatedChildren = updateVisibility(tab.children);
-              
-              // Recalculate checkbox state for this parent
-              const parentCheckboxState = calculateParentCheckboxState(updatedChildren);
-              
-              return { 
-                ...tab, 
-                children: updatedChildren,
-                // ✅ FIXED: Keep the original isVisible for other parents, only update checkbox state
-                _checkboxState: parentCheckboxState
-              };
-            }
-            
+
             return tab;
           });
         };
-        
+
         const updatedTabs = updateVisibility(prevTabs);
-        return updateParentCheckboxStates(updatedTabs);
+        return updateParentStates(updatedTabs);
       });
 
-      // ✅ FIXED: Prepare backend payload - include parent AND children
       const parentUpdate = { tabId: parentTab.tabId, isVisible: isVisible };
-      const childUpdates = childTabs.map((child) => ({
-        tabId: child.tabId, 
-        isVisible: isVisible
+      const childUpdates = allChildTabs.map((child) => ({
+        tabId: child.tabId,
+        isVisible: isVisible,
       }));
 
       const allUpdates = [parentUpdate, ...childUpdates];
 
-      console.log("Sending updates to backend:", allUpdates);
-
-      // Send update to backend
       await axios.put(`${backendUrl}/api/h-tabs/visibility`, {
         updates: allUpdates,
       });
 
-      // Enhanced event dispatch for immediate sidebar refresh
-      window.dispatchEvent(new CustomEvent('tabVisibilityChanged', { 
-        detail: { 
-          source: 'hTabsManipulation',
-          updates: allUpdates,
-          timestamp: Date.now()
-        } 
-      }));
-      
-      // Multiple backup mechanisms
-      localStorage.setItem('tabVisibilityUpdated', Date.now().toString());
-      sessionStorage.setItem('forceSidebarRefresh', Date.now().toString());
+      window.dispatchEvent(
+        new CustomEvent("tabVisibilityChanged", {
+          detail: {
+            source: "hTabsManipulation",
+            updates: allUpdates,
+            timestamp: Date.now(),
+          },
+        })
+      );
+
+      localStorage.setItem("tabVisibilityUpdated", Date.now().toString());
+      sessionStorage.setItem("forceSidebarRefresh", Date.now().toString());
 
       showToast(
         "success",
-        `${parentTab.name} and all child tabs ${isVisible ? "shown" : "hidden"}`
+        `${parentTab.name} and ALL child tabs ${isVisible ? "shown" : "hidden"}`
       );
-      
     } catch (error) {
-      console.error("Error updating parent tab visibility:", error);
       showToast("error", "Failed to update parent tab visibility");
-      
-      // Revert state on error
       fetchTabHierarchy();
     }
   };
 
-  // ✅ FIXED: Enhanced Child Toggle with parent checkbox state recalculation
   const handleChildTabToggle = async (childTab, isVisible) => {
-    try {
-      console.log(`Toggling child tab ${childTab.name} to:`, isVisible);
+    if (selectedReportType !== "Hide/Show Tabs") {
+      showToast(
+        "warning",
+        "Tab visibility toggle is only available in Hide/Show Tabs mode"
+      );
+      return;
+    }
 
-      // Update UI state immediately
+    try {
       setTabHierarchy((prevTabs) => {
-        const updateVisibility = (tabs) => {
+        const updateChildVisibility = (tabs) => {
           return tabs.map((tab) => {
             if (tab.tabId === childTab.tabId) {
-              return { 
-                ...tab, 
-                isVisible: isVisible
+              return {
+                ...tab,
+                isVisible: isVisible,
               };
             }
-            
-            // Check children recursively
+
             if (tab.children && tab.children.length > 0) {
-              const updatedChildren = updateVisibility(tab.children);
-              const parentCheckboxState = calculateParentCheckboxState(updatedChildren);
-              
-              return { 
-                ...tab, 
-                children: updatedChildren,
-                // ✅ FIXED: Only update checkbox state, keep isVisible as is for parents
-                _checkboxState: parentCheckboxState
+              return {
+                ...tab,
+                children: updateChildVisibility(tab.children),
               };
             }
-            
+
             return tab;
           });
         };
-        
-        const updatedTabs = updateVisibility(prevTabs);
-        return updateParentCheckboxStates(updatedTabs);
+
+        const updatedTabs = updateChildVisibility(prevTabs);
+        return updateParentStates(updatedTabs);
       });
 
-      const updatePayload = [{ 
-        tabId: childTab.tabId, 
-        isVisible: isVisible
-      }];
+      const updatePayload = [
+        {
+          tabId: childTab.tabId,
+          isVisible: isVisible,
+        },
+      ];
 
-      console.log("Sending child update to backend:", updatePayload);
-
-      // Send update to backend
       await axios.put(`${backendUrl}/api/h-tabs/visibility`, {
         updates: updatePayload,
       });
 
-      // Enhanced event dispatch for immediate sidebar refresh
-      window.dispatchEvent(new CustomEvent('tabVisibilityChanged', { 
-        detail: { 
-          source: 'hTabsManipulation',
-          updates: updatePayload,
-          timestamp: Date.now()
-        } 
-      }));
-      
-      // Multiple backup mechanisms
-      localStorage.setItem('tabVisibilityUpdated', Date.now().toString());
-      sessionStorage.setItem('forceSidebarRefresh', Date.now().toString());
+      window.dispatchEvent(
+        new CustomEvent("tabVisibilityChanged", {
+          detail: {
+            source: "hTabsManipulation",
+            updates: updatePayload,
+            timestamp: Date.now(),
+          },
+        })
+      );
+
+      localStorage.setItem("tabVisibilityUpdated", Date.now().toString());
+      sessionStorage.setItem("forceSidebarRefresh", Date.now().toString());
 
       showToast(
         "success",
         `${childTab.name} ${isVisible ? "shown" : "hidden"}`
       );
-      
     } catch (error) {
-      console.error("Error updating child tab visibility:", error);
       showToast("error", "Failed to update child tab visibility");
-      
-      // Revert state on error
       fetchTabHierarchy();
     }
   };
 
-  // ✅ FIXED: Enhanced render with proper checkbox state handling
-  const renderEnhancedTabHierarchy = (tabsArray, level = 0) => {
+  // Get available sequences for a tab within its siblings - CORRECTED
+  const getAvailableSequencesForTab = (tab, siblings) => {
+    if (!siblings || siblings.length === 0) return [];
+
+    const assignedSequences = new Set();
+    siblings.forEach((sibling) => {
+      if (sibling.virtualSequence) {
+        assignedSequences.add(sibling.virtualSequence);
+      }
+    });
+
+    // Find the maximum virtual sequence number in this group
+    const maxSequence = Math.max(
+      ...siblings.map((sibling) => sibling.virtualSequence || 0),
+      0
+    );
+
+    // Generate all possible sequences - ensure we have enough options
+    const totalPossibleSequences = Math.max(maxSequence, siblings.length); // Add buffer
+    const allPossibleSequences = Array.from(
+      { length: totalPossibleSequences },
+      (_, i) => i + 1
+    );
+
+    return allPossibleSequences.map((seq) => ({
+      value: seq,
+      label: seq.toString(),
+
+      disabled: assignedSequences.has(seq) && seq !== tab.virtualSequence,
+    }));
+  };
+
+  // Get siblings for a tab
+  const getSiblingsForTab = (tab, tabsArray, level = 0) => {
+    if (level === 0) {
+      // Root level tabs - all root tabs are siblings
+      return tabsArray.filter((t) => !t.parentTabId);
+    } else {
+      // Child tabs - siblings are other children of the same parent
+      return tabsArray.filter((t) => t.parentTabId === tab.parentTabId);
+    }
+  };
+
+  // Handle sequence change with proper backend integration
+  const handleSequenceChange = async (tab, newSequence, siblings) => {
+    try {
+      setSequenceLoading(true);
+
+      // Find if any other tab in the same siblings has the target virtualSequence
+      const existingTabWithSequence = siblings.find(
+        (sibling) =>
+          sibling.tabId !== tab.tabId &&
+          sibling.virtualSequence === parseInt(newSequence)
+      );
+
+      if (existingTabWithSequence) {
+        // Swap virtual sequences - call swap endpoint
+        const swapResponse = await axios.post(
+          `${backendUrl}/api/h-tabs/swap-sequences`,
+          {
+            tabId1: tab.tabId,
+            tabId2: existingTabWithSequence.tabId,
+          }
+        );
+
+        if (swapResponse.data.success) {
+          showToast(
+            "success",
+            swapResponse.data.message || "Sequences swapped successfully"
+          );
+        } else {
+          showToast(
+            "error",
+            swapResponse.data.message || "Failed to swap sequences"
+          );
+        }
+      } else {
+        // Simple sequence update - call update endpoint
+        const updateResponse = await axios.put(
+          `${backendUrl}/api/h-tabs/virtual-sequence`,
+          {
+            updates: [
+              {
+                tabId: tab.tabId,
+                virtualSequence: parseInt(newSequence),
+              },
+            ],
+          }
+        );
+
+        if (updateResponse.data.success) {
+          showToast(
+            "success",
+            updateResponse.data.message || "Sequence updated successfully"
+          );
+        } else {
+          showToast(
+            "error",
+            updateResponse.data.message || "Failed to update sequence"
+          );
+        }
+      }
+
+      // Refresh the data
+      await fetchTabHierarchy();
+    } catch (error) {
+      console.error("Error updating sequence:", error);
+      const errorMessage =
+        error.response?.data?.message || "Failed to update sequence";
+      showToast("error", errorMessage);
+    } finally {
+      setSequenceLoading(false);
+    }
+  };
+
+  const moveSequenceUp = async (tab, siblings) => {
+    if (tab.virtualSequence <= 1) return;
+    await handleSequenceChange(tab, tab.virtualSequence - 1, siblings);
+  };
+
+  const moveSequenceDown = async (tab, siblings) => {
+    const maxVirtualSequence = Math.max(
+      ...siblings.map((sibling) => sibling.virtualSequence)
+    );
+    if (tab.virtualSequence >= maxVirtualSequence) return;
+    await handleSequenceChange(tab, tab.virtualSequence + 1, siblings);
+  };
+
+  const renderHideShowTabHierarchy = (tabsArray, level = 0) => {
     if (!tabsArray || tabsArray.length === 0) {
       return (
         <div className="text-center py-6 text-gray-500">
@@ -387,11 +625,8 @@ const HTabsManipulation = () => {
 
     return tabsArray.map((tab) => {
       const isParent = tab.children && tab.children.length > 0;
-      
-      // ✅ CRITICAL FIX: For parents, use _checkboxState for UI, but isVisible for actual visibility
-      // For children, use isVisible directly
       const checkboxState = isParent ? tab._checkboxState : tab.isVisible;
-      
+
       return (
         <div key={tab._id || tab.tabId} className="mb-1">
           <div
@@ -399,9 +634,7 @@ const HTabsManipulation = () => {
               level === 0
                 ? "bg-white border border-gray-300 shadow-sm hover:shadow-md"
                 : "bg-gray-50 border border-gray-200 hover:bg-gray-100"
-            } ${
-              !tab.isVisible ? "opacity-70 bg-gray-100" : ""
-            }`}
+            } ${!tab.isVisible ? "opacity-70 bg-gray-100" : ""}`}
             style={{ marginLeft: `${level * 24}px` }}
           >
             {isParent ? (
@@ -422,7 +655,6 @@ const HTabsManipulation = () => {
               </div>
             )}
 
-            {/* ✅ FIXED: Enhanced checkbox with proper state handling */}
             <input
               type="checkbox"
               checked={checkboxState === true}
@@ -435,8 +667,6 @@ const HTabsManipulation = () => {
               }}
               onChange={(e) => {
                 const newValue = e.target.checked;
-                console.log(`Toggling ${tab.name} (${tab.tabId}) from ${checkboxState} to:`, newValue);
-                
                 if (isParent) {
                   handleParentTabToggle(tab, newValue);
                 } else {
@@ -449,15 +679,13 @@ const HTabsManipulation = () => {
 
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <label 
+                <label
                   htmlFor={`checkbox-${tab.tabId}`}
                   className={`font-semibold truncate cursor-pointer ${
                     level === 0
                       ? "text-gray-900 text-base"
                       : "text-gray-800 text-sm"
-                  } ${
-                    !tab.isVisible ? "text-gray-500" : ""
-                  }`}
+                  } ${!tab.isVisible ? "text-gray-500" : ""}`}
                 >
                   {tab.name}
                 </label>
@@ -474,9 +702,11 @@ const HTabsManipulation = () => {
               </div>
 
               {tab.description && (
-                <div className={`text-sm mt-1 ${
-                  !tab.isVisible ? "text-gray-400" : "text-gray-600"
-                } line-clamp-2`}>
+                <div
+                  className={`text-sm mt-1 ${
+                    !tab.isVisible ? "text-gray-400" : "text-gray-600"
+                  } line-clamp-2`}
+                >
                   {tab.description}
                 </div>
               )}
@@ -510,7 +740,120 @@ const HTabsManipulation = () => {
 
           {isParent && expandedTabs[tab.tabId] && (
             <div className="mt-1">
-              {renderEnhancedTabHierarchy(tab.children, level + 1)}
+              {renderHideShowTabHierarchy(tab.children, level + 1)}
+            </div>
+          )}
+        </div>
+      );
+    });
+  };
+
+  // Recursive function to render sequence hierarchy with expandable parents
+  const renderSequenceNumberHierarchy = (tabsArray, level = 0) => {
+    if (!tabsArray || tabsArray.length === 0) {
+      return (
+        <div className="text-center py-6 text-gray-500">
+          <EyeOff size={32} className="mx-auto mb-2 text-gray-400" />
+          <p>No tabs available for sequence management</p>
+        </div>
+      );
+    }
+
+    return tabsArray.map((tab) => {
+      const isParent = tab.children && tab.children.length > 0;
+      const siblings = getSiblingsForTab(tab, tabsArray, level);
+      const availableSequences = getAvailableSequencesForTab(tab, siblings);
+
+      return (
+        <div key={tab._id || tab.tabId} className="mb-1">
+          <div
+            className={`flex items-center gap-3 p-3 rounded-lg transition-all duration-200 group ${
+              level === 0
+                ? "bg-white border border-gray-300 shadow-sm hover:shadow-md"
+                : "bg-gray-50 border border-gray-200 hover:bg-gray-100"
+            }`}
+            style={{ marginLeft: `${level * 24}px` }}
+          >
+            {isParent ? (
+              <button
+                onClick={() => toggleExpand(tab.tabId)}
+                className="flex items-center justify-center w-6 h-6 rounded hover:bg-gray-200 transition-colors flex-shrink-0"
+                title={expandedTabs[tab.tabId] ? "Collapse" : "Expand"}
+              >
+                {expandedTabs[tab.tabId] ? (
+                  <ChevronDown size={16} />
+                ) : (
+                  <ChevronRightIcon size={16} />
+                )}
+              </button>
+            ) : (
+              <div className="w-6 h-6 flex items-center justify-center">
+                <div className="w-1 h-1 bg-gray-400 rounded-full"></div>
+              </div>
+            )}
+
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span
+                  className={`font-semibold truncate ${
+                    level === 0
+                      ? "text-gray-900 text-base"
+                      : "text-gray-800 text-sm"
+                  }`}
+                >
+                  {tab.name}
+                </span>
+                {isParent && (
+                  <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
+                    {tab.children.length} children
+                  </span>
+                )}
+              </div>
+
+              {tab.description && (
+                <div className="text-sm mt-1 text-gray-600 line-clamp-2">
+                  {tab.description}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-3 flex-shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="min-w-[120px]">
+                  <div className="text-xs text-gray-500 mb-1">Set Sequence</div>
+                  <CustomDropdown
+                    value={tab.virtualSequence}
+                    onChange={(value) =>
+                      handleSequenceChange(tab, value, siblings)
+                    }
+                    options={availableSequences}
+                    placeholder="Select sequence"
+                    disabled={sequenceLoading}
+                  />
+                </div>
+              </div>
+
+              <div className="text-center">
+                <div className="text-xs text-gray-500 mb-1">Current</div>
+                <div className="px-3 py-1 bg-blue-100 text-blue-800 rounded text-sm font-medium">
+                  {tab.virtualSequence}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-center mt-5">
+                <Edit
+                  size={30}
+                  className="cursor-pointer text-indigo-600 hover:text-indigo-800"
+                  title="Edit sequence"
+                  onClick={() => editSequence(tab)}
+                />
+              </div>
+            </div>
+          </div>
+
+          {isParent && expandedTabs[tab.tabId] && (
+            <div className="mt-1">
+              {renderSequenceNumberHierarchy(tab.children, level + 1)}
             </div>
           )}
         </div>
@@ -519,18 +862,26 @@ const HTabsManipulation = () => {
   };
 
   const handleResetToDefault = async () => {
-    if (confirm("Are you sure you want to reset all tabs to default visibility?")) {
+    if (selectedReportType !== "Hide/Show Tabs") {
+      showToast("warning", "Reset is only available in Hide/Show Tabs mode");
+      return;
+    }
+
+    if (
+      confirm("Are you sure you want to reset all tabs to default visibility?")
+    ) {
       try {
         setLoading(true);
         await axios.post(`${backendUrl}/api/h-tabs/reset-visibility`);
         showToast("success", "All tabs reset to default visibility");
         fetchTabHierarchy();
-        
-        window.dispatchEvent(new CustomEvent('tabVisibilityChanged', { 
-          detail: { reset: true, timestamp: Date.now() } 
-        }));
+
+        window.dispatchEvent(
+          new CustomEvent("tabVisibilityChanged", {
+            detail: { reset: true, timestamp: Date.now() },
+          })
+        );
       } catch (error) {
-        console.error("Error resetting tabs:", error);
         showToast("error", "Failed to reset tabs");
       } finally {
         setLoading(false);
@@ -546,7 +897,7 @@ const HTabsManipulation = () => {
     if (tabHierarchy.length > 0 && !initialized) {
       const expandAll = (tabs) => {
         const expanded = {};
-        tabs.forEach(tab => {
+        tabs.forEach((tab) => {
           if (tab.children && tab.children.length > 0) {
             expanded[tab.tabId] = true;
             const childExpanded = expandAll(tab.children);
@@ -555,7 +906,7 @@ const HTabsManipulation = () => {
         });
         return expanded;
       };
-      
+
       setExpandedTabs(expandAll(tabHierarchy));
       setInitialized(true);
     }
@@ -599,41 +950,83 @@ const HTabsManipulation = () => {
             </button>
           ))}
         </div>
-        
-        {/* Status Information */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-          <div className="flex items-center gap-2 text-blue-800">
-            <Eye size={16} />
-            <span className="font-medium">Visibility Status:</span>
-            <span>Checked = Visible on Sidebar, Unchecked = Hidden from Sidebar</span>
+
+        {selectedReportType === "Hide/Show Tabs" && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <div className="flex items-center gap-2 text-blue-800">
+              <Eye size={16} />
+              <span className="font-medium">Visibility Status:</span>
+              <span>
+                Checked = Visible on Sidebar, Unchecked = Hidden from Sidebar
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-yellow-800 mt-1">
+              <span className="font-medium">Partial Selection:</span>
+              <span>Some children visible, some hidden</span>
+            </div>
+            <div className="flex items-center gap-2 text-green-800 mt-1">
+              <span className="font-medium">Auto Parent Hide:</span>
+              <span>
+                Parent automatically hides when all children are hidden
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-purple-800 mt-1">
+              <span className="font-medium">Cascade Effect:</span>
+              <span>Parent toggle affects ALL children and sub-children</span>
+            </div>
           </div>
-          <div className="flex items-center gap-2 text-yellow-800 mt-1">
-            <span className="font-medium">Partial Selection:</span>
-            <span>Some children visible, some hidden</span>
+        )}
+
+        {selectedReportType === "Sequence Number" && (
+          <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+            <div className="flex items-center gap-2 text-purple-800">
+              <span className="font-medium">Sequence Management:</span>
+              <span>
+                Use dropdown to set sequences - already used sequences are
+                disabled
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-blue-800 mt-1">
+              <span className="font-medium">Auto Swap:</span>
+              <span>
+                Selecting an occupied sequence will automatically swap with that
+                tab
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-green-800 mt-1">
+              <span className="font-medium">Hierarchical View:</span>
+              <span>
+                Tabs are organized in expandable hierarchy for better management
+              </span>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
-      {/* Hierarchy */}
       <div className="bg-white rounded-xl shadow-md border border-gray-200 mb-6">
         <div className="p-4 border-b border-gray-200">
           <h2 className="text-lg font-semibold text-gray-800">
-            Tab Hierarchy Management
+            {selectedReportType === "Hide/Show Tabs"
+              ? "Tab Visibility Management"
+              : "Tab Sequence Management"}
           </h2>
           <p className="text-sm text-gray-600 mt-1">
-            Manage tab visibility using the checkbox hierarchy. Parent tabs control their children.
-            Changes are reflected immediately.
+            {selectedReportType === "Hide/Show Tabs"
+              ? "Manage tab visibility using the checkbox hierarchy. Parent tabs automatically hide when all children are hidden and affect ALL nested children."
+              : "Manage tab sequences in hierarchical view. Expand parent tabs to see and manage child tab sequences within their groups."}
           </p>
         </div>
-        
+
         {loading ? (
           <div className="p-8 text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="text-gray-600 mt-2">Loading tab hierarchy...</p>
+            <p className="text-gray-600 mt-2">Loading tab data...</p>
           </div>
         ) : (
           <div className="p-4 max-h-[600px] overflow-y-auto">
-            {renderEnhancedTabHierarchy(tabHierarchy)}
+            {selectedReportType === "Hide/Show Tabs"
+              ? renderHideShowTabHierarchy(tabHierarchy)
+              : renderSequenceNumberHierarchy(tabHierarchy)}
           </div>
         )}
       </div>

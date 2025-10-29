@@ -112,7 +112,7 @@ app.use("/api", provinceWiseSaleRoutes);
 app.use("/api", provinceWiseCustomerRoutes);
 app.use("/api", stockInHand);
 app.use("/api", companyProfile);
-app.use("/api/h-tabs", hTabsRoutes); 
+app.use("/api", hTabsRoutes); 
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);

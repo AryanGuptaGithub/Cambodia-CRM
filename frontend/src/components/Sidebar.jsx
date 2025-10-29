@@ -62,10 +62,6 @@ const tabService = {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       const data = await response.json();
-
-      console.log("Raw API response:", data);
-
-      // If we get array data with isVisible property, transform it
       if (Array.isArray(data.data) || Array.isArray(data)) {
         const tabsArray = Array.isArray(data.data) ? data.data : data;
         const transformed = {};
@@ -79,7 +75,6 @@ const tabService = {
           }
         });
 
-        console.log("Transformed tabs:", transformed);
         return transformed;
       }
 
@@ -90,7 +85,6 @@ const tabService = {
 
       return data.data || {};
     } catch (error) {
-      console.error("Error fetching visible tabs:", error);
       return this.getDefaultVisibleTabs();
     }
   },
@@ -111,7 +105,6 @@ const tabService = {
       
       return await response.json();
     } catch (error) {
-      console.error("Error updating tab visibility:", error);
       throw error;
     }
   },
@@ -212,7 +205,7 @@ const tabService = {
   },
 };
 
-// ... (your path constants remain the same)
+// ... (path constants remain the same)
 const masterPaths = ["/masterlayout/customer", "/masterlayout/supplier"];
 const purchasePaths = [
   "/purchaselayout/purchase",
@@ -344,7 +337,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
 
   // Function to refresh tab data
   const refreshTabData = React.useCallback(() => {
-    console.log("Refreshing tab data...");
     setLastUpdate(Date.now());
   }, []);
 
@@ -354,10 +346,8 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
       setLoading(true);
       try {
         const tabs = await tabService.getVisibleTabs();
-        console.log("Final visible tabs:", tabs);
         setVisibleTabs(tabs);
       } catch (error) {
-        console.error("Error loading visible tabs:", error);
         setVisibleTabs(tabService.getDefaultVisibleTabs());
       } finally {
         setLoading(false);
@@ -420,8 +410,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
 
   // Add event listener for tab visibility changes
   useEffect(() => {
-    const handleTabVisibilityChange = (event) => {
-      console.log("Tab visibility change detected, refreshing sidebar...", event.detail);
+    const handleTabVisibilityChange = () => {
       refreshTabData();
     };
 
@@ -437,7 +426,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
   useEffect(() => {
     const handleStorageChange = (event) => {
       if (event.key === 'tabVisibilityUpdated') {
-        console.log("Storage change detected, refreshing sidebar...");
         refreshTabData();
       }
     };
@@ -481,28 +469,22 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
 
   const shouldShowTab = (tabId) => {
     if (loading) {
-      console.log(`Loading - showing tab ${tabId}`);
       return true; // Show all tabs while loading
     }
 
     const tabConfig = visibleTabs[tabId];
-    console.log(`Checking tab ${tabId}:`, tabConfig);
 
     // If tab is not configured at all, don't show it
     if (tabConfig === undefined || tabConfig === null) {
-      console.log(`Tab ${tabId} not found in configuration - hiding`);
       return false;
     }
 
     // Handle object structure with visible property
     if (typeof tabConfig === "object" && tabConfig !== null) {
-      const shouldShow = tabConfig.visible === true;
-      console.log(`Tab ${tabId} visibility:`, shouldShow);
-      return shouldShow;
+      return tabConfig.visible === true;
     }
 
     // For backward compatibility - if it's a direct boolean
-    console.log(`Tab ${tabId} direct boolean:`, tabConfig);
     return tabConfig === true;
   };
 
@@ -595,8 +577,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
       </div>
     );
   }
-
-  console.log("Rendering sidebar with visibleTabs:", visibleTabs);
 
   return (
     <div
