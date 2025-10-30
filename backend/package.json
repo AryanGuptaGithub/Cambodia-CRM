@@ -21,6 +21,7 @@
     "excel-date-to-js": "^1.1.5",
     "exceljs": "^4.4.0",
     "express": "^5.1.0",
+    "express-validator": "^7.3.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.18.1",
     "mongoose-auto-increment-plugin": "^1.0.2",

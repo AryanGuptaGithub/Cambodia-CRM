@@ -43,6 +43,7 @@ import provinceWiseCustomerRoutes from './routers/reports/provinceWiseCustomer.j
 import stockInHand from "./routers/reports/stockInHand.js";
 import companyProfile from "./routers/settings/companyProfile.js";
 import hTabsRoutes from './routers/settings/tabSetting.js'; 
+import Holiday from "./routers/hrm/Holiday.js";
 
 dotenv.config();
 
@@ -112,7 +113,9 @@ app.use("/api", provinceWiseSaleRoutes);
 app.use("/api", provinceWiseCustomerRoutes);
 app.use("/api", stockInHand);
 app.use("/api", companyProfile);
-app.use("/api", hTabsRoutes); 
+app.use("/api", hTabsRoutes);
+app.use("/api", Holiday); 
+
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
