@@ -1,33 +1,36 @@
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 
-const holidaySchema = new mongoose.Schema({
-  holidayCode: {
-    type: String,
-    required: true,
-    unique: true,
-    trim: true,
-    uppercase: true,
+const holidaySchema = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    startDate: {
+      type: Date,
+      required: true,
+    },
+    endDate: {
+      type: Date,
+      required: true,
+    },
+    description: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    enabled: {
+      type: Boolean,
+      default: true,
+    },
   },
-  holidayName: {
-    type: String,
-    required: true,
-    trim: true,
-  },
-  holidayDate: {
-    type: Date,
-    required: true,
-  },
-  createdAt: { type: Date, default: Date.now },
-  updatedAt: { type: Date, default: Date.now },
-});
+  { timestamps: true }
+);
 
-holidaySchema.pre('save', function (next) {
-  this.updatedAt = Date.now();
-  next();
-});
+// Indexes for faster search
+holidaySchema.index({ startDate: 1 });
+holidaySchema.index({ endDate: 1 });
 
-holidaySchema.index({ holidayDate: 1 });
-holidaySchema.index({ holidayCode: 1 });
-
-const Holiday = mongoose.model('Holiday', holidaySchema);
+const Holiday = mongoose.model("Holiday", holidaySchema);
 export default Holiday;

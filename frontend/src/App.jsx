@@ -115,9 +115,7 @@ import Dashboard from "./pages/HRM/Dashboard";
 import Holidays from "./pages/HRM/Holidays";
 import Leaves from "./pages/HRM/Leaves";
 import Payroll from "./pages/HRM/Payroll";
-import HRMSetting from "./pages/HRM/HRMSetting";
 
-// Account pages
 import CashAndBank from "./pages/Account/CashAndBank";
 
 // Other components
@@ -343,7 +341,6 @@ function App() {
             <Route path="holidays" element={<Holidays />} />
             <Route path="leaves" element={<Leaves />} />
             <Route path="payroll" element={<Payroll />} />
-            <Route path="hrmsetting" element={<HRMSetting />} />
           </Route>
         </Route>
       </Routes>

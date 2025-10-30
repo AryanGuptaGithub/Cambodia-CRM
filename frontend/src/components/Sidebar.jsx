@@ -98,11 +98,11 @@ const tabService = {
         },
         body: JSON.stringify({ updates: tabUpdates }),
       });
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      
+
       return await response.json();
     } catch (error) {
       throw error;
@@ -227,7 +227,6 @@ const hrmPaths = [
   "/hrmlayout/leaves",
   "/hrmlayout/attendance",
   "/hrmlayout/payroll",
-  "/hrmlayout/hrmsetting",
 ];
 
 const salesPaths = [
@@ -415,25 +414,28 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
     };
 
     // Listen for custom event
-    window.addEventListener('tabVisibilityChanged', handleTabVisibilityChange);
+    window.addEventListener("tabVisibilityChanged", handleTabVisibilityChange);
 
     return () => {
-      window.removeEventListener('tabVisibilityChanged', handleTabVisibilityChange);
+      window.removeEventListener(
+        "tabVisibilityChanged",
+        handleTabVisibilityChange
+      );
     };
   }, [refreshTabData]);
 
   // Also listen for storage changes as backup
   useEffect(() => {
     const handleStorageChange = (event) => {
-      if (event.key === 'tabVisibilityUpdated') {
+      if (event.key === "tabVisibilityUpdated") {
         refreshTabData();
       }
     };
 
-    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener("storage", handleStorageChange);
 
     return () => {
-      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener("storage", handleStorageChange);
     };
   }, [refreshTabData]);
 
@@ -1408,7 +1410,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                   "hrm_leaves",
                   "hrm_attendance",
                   "hrm_payroll",
-                  "hrm_settings",
                 ]).map((tabId) => {
                   const linkMap = {
                     hrm_dashboard: "/hrmlayout/dashboard",
@@ -1416,7 +1417,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                     hrm_leaves: "/hrmlayout/leaves",
                     hrm_attendance: "/hrmlayout/attendance",
                     hrm_payroll: "/hrmlayout/payroll",
-                    hrm_settings: "/hrmlayout/hrmsetting",
                   };
 
                   const iconMap = {
@@ -1425,7 +1425,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                     hrm_leaves: Calendar,
                     hrm_attendance: Calendar,
                     hrm_payroll: DollarSign,
-                    hrm_settings: Settings,
                   };
 
                   const IconComponent = iconMap[tabId];

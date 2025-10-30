@@ -794,6 +794,25 @@ export const getTabsGroupedByParentWithSequence = async (req, res) => {
   }
 };
 
+// Reset sequences to default
+router.post("/reset-sequences", async (req, res) => {
+  try {
+    // Your logic to reset sequences to default values
+    // This could set all sequences to 1,2,3... in order or use some default configuration
+    await HTab.updateMany({}, { $set: { sequence: 1 } }); // Example
+    res.status(200).json({
+      success: true,
+      message: "Sequences reset to default successfully"
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to reset sequences",
+      error: error.message
+    });
+  }
+});
+
 router.get("/h-tabs/visible", getVisibleTabs);
 router.get("/h-tabs/hierarchy", getTabHierarchy);
 router.put("/h-tabs/visibility", updateTabVisibility);
