@@ -685,11 +685,6 @@ const Attendance = () => {
   };
 
   const handleAddAttendance = () => {
-    if (!selectedAttendanceMr) {
-      alert("Please select an MR first");
-      return;
-    }
-
     setShowAddAttendanceModal(true);
 
     // Check if user is currently logged in
