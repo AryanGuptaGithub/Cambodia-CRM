@@ -45,6 +45,7 @@ import companyProfile from "./routers/settings/companyProfile.js";
 import hTabsRoutes from './routers/settings/tabSetting.js'; 
 import Holiday from "./routers/hrm/Holiday.js";
 import Attendance from "./routers/hrm/Attendance.js";
+import Payroll from './routers/hrm/payroll.js';
 
 dotenv.config();
 
@@ -117,6 +118,7 @@ app.use("/api", companyProfile);
 app.use("/api", hTabsRoutes);
 app.use("/api", Holiday); 
 app.use("/api", Attendance);
+app.use("/api", Payroll);
 
 
 app.listen(PORT, () => {

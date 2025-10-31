@@ -1,4 +1,4 @@
-import mongoose from "mongoose";
+import mongoose from 'mongoose';
 
 const payrollSchema = new mongoose.Schema({
   employeeName: {
@@ -58,4 +58,6 @@ payrollSchema.index({ employeeName: 1 });
 payrollSchema.index({ department: 1 });
 payrollSchema.index({ designation: 1 });
 
-module.exports = mongoose.model('Payroll', payrollSchema);
+const Payroll = mongoose.model('Payroll', payrollSchema);
+
+export default Payroll;

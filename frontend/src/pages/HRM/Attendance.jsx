@@ -8,10 +8,94 @@ import {
   Clock,
   LogIn,
   LogOut,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import axios from "axios";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
+
+// Custom Dropdown Component
+const CustomDropdown = ({
+  value,
+  onChange,
+  options,
+  disabled,
+  placeholder = "Select MR",
+  required = false,
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = React.useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const selectedOption = options.find((opt) => opt.value === value);
+
+  return (
+    <div className="relative w-full" ref={dropdownRef}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => !disabled && setIsOpen(!isOpen)}
+        className={`w-full border border-gray-300 rounded-md px-3 py-2 text-left focus:outline-none focus:ring-2
+           focus:ring-indigo-500 disabled:bg-gray-100 flex justify-between items-center ${
+             disabled
+               ? "cursor-not-allowed opacity-60"
+               : "cursor-pointer hover:border-gray-400"
+           } ${!value ? "text-gray-500" : "text-gray-900"}`}
+      >
+        <span className="truncate">
+          {selectedOption ? selectedOption.label : placeholder}
+        </span>
+        {!disabled && (
+          <span className="text-gray-400 flex-shrink-0 ml-2">
+            {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </span>
+        )}
+      </button>
+
+      {isOpen && !disabled && (
+        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+          {options.length === 0 ? (
+            <div className="px-3 py-2 text-gray-500 text-sm">
+              No options available
+            </div>
+          ) : (
+            options.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => {
+                  if (!option.disabled) {
+                    onChange(option.value);
+                    setIsOpen(false);
+                  }
+                }}
+                className={`w-full px-3 py-2 text-left hover:bg-indigo-50 hover:text-indigo-900 transition-colors duration-150 ${
+                  value === option.value
+                    ? "bg-indigo-100 text-indigo-900 font-medium"
+                    : "text-gray-900"
+                } ${option.disabled ? "opacity-50 cursor-not-allowed" : ""}`}
+                disabled={option.disabled}
+              >
+                {option.label}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const Attendance = () => {
   const [mrList, setMrList] = useState([]);
@@ -38,6 +122,10 @@ const Attendance = () => {
   const [currentAttendanceId, setCurrentAttendanceId] = useState(null);
   const [loginTime, setLoginTime] = useState(null);
   const [attendanceLoading, setAttendanceLoading] = useState(false);
+  
+  // New state for date range in modal
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
 
   useEffect(() => {
     fetchMRList();
@@ -64,6 +152,12 @@ const Attendance = () => {
       console.error("Failed to fetch attendance records:", err);
     }
   };
+
+  // Convert mrList to dropdown options
+  const mrOptions = mrList.map((mr) => ({
+    value: mr._id,
+    label: `${mr.medicalRepName} (${mr.MRId})`,
+  }));
 
   // Filter MR list based on search
   const filteredMRList = mrList.filter(
@@ -190,7 +284,12 @@ const Attendance = () => {
       return recordDate >= yearStart && recordDate <= yearEnd;
     }).length;
 
-    
+    // Calculate attendance percentage (based on working days)
+    const totalWorkingDays = getWorkingDaysInMonth(currentYear, currentMonth);
+    const attendancePercentage = totalWorkingDays > 0 
+      ? ((monthlyAttendance / totalWorkingDays) * 100).toFixed(1)
+      : 0;
+
     const today = new Date();
     const todayRecord = mrRecords.find((record) => {
       const recordDate = new Date(record.loginTime);
@@ -202,32 +301,38 @@ const Attendance = () => {
     return {
       monthly: monthlyAttendance,
       annual: annualAttendance,
+      percentage: attendancePercentage,
       currentStatus: todayRecord ? "Logged In" : "Logged Out",
       currentAttendanceId: todayRecord?._id,
     };
+  };
+
+  // Helper function to get working days in a month (excluding Sundays)
+  const getWorkingDaysInMonth = (year, month) => {
+    const startDate = new Date(year, month, 1);
+    const endDate = new Date(year, month + 1, 0);
+    let workingDays = 0;
+
+    for (let date = new Date(startDate); date <= endDate; date.setDate(date.getDate() + 1)) {
+      if (date.getDay() !== 0) { // Not Sunday
+        workingDays++;
+      }
+    }
+
+    return workingDays;
   };
 
   // Render monthly calendar
   const renderMonthlyCalendar = () => {
     const days = getDaysInMonth();
     const monthNames = [
-      "January",
-      "February",
-      "March",
-      "April",
-      "May",
-      "June",
-      "July",
-      "August",
-      "September",
-      "October",
-      "November",
-      "December",
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"
     ];
 
     const attendanceStats = selectedMr
       ? getAttendanceStats(selectedMr._id)
-      : { monthly: 0, annual: 0, currentStatus: "Logged Out" };
+      : { monthly: 0, annual: 0, percentage: 0, currentStatus: "Logged Out" };
 
     const today = new Date();
     const isCurrentMonthAndYear =
@@ -237,7 +342,7 @@ const Attendance = () => {
       <div className="bg-white rounded-2xl shadow border border-gray-200 p-6">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-bold text-gray-800">
-            {selectedMr?.medicalRepName} - Attendance
+            {selectedMr?.medicalRepName} - Attendance Calendar
           </h2>
 
           <div className="flex items-center gap-3">
@@ -371,9 +476,15 @@ const Attendance = () => {
           {/* Summary */}
           <div className="flex flex-col sm:flex-row items-center gap-6">
             <div className="text-lg font-semibold text-gray-700">
-              Annual Attendance :{" "}
+              Annual Attendance:{" "}
               <span className="text-2xl font-bold text-green-600">
                 {attendanceStats.annual}
+              </span>
+            </div>
+            <div className="text-lg font-semibold text-gray-700">
+              Attendance %:{" "}
+              <span className="text-2xl font-bold text-blue-600">
+                {attendanceStats.percentage}%
               </span>
             </div>
           </div>
@@ -385,23 +496,13 @@ const Attendance = () => {
   // Render annual calendar
   const renderAnnualCalendar = () => {
     const monthNames = [
-      "Jan",
-      "Feb",
-      "Mar",
-      "Apr",
-      "May",
-      "Jun",
-      "Jul",
-      "Aug",
-      "Sep",
-      "Oct",
-      "Nov",
-      "Dec",
+      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
     ];
 
     const attendanceStats = selectedMr
       ? getAttendanceStats(selectedMr._id)
-      : { monthly: 0, annual: 0, currentStatus: "Logged Out" };
+      : { monthly: 0, annual: 0, percentage: 0, currentStatus: "Logged Out" };
 
     const today = new Date();
     const currentYearToday = today.getFullYear();
@@ -410,7 +511,7 @@ const Attendance = () => {
       <div className="bg-white rounded-2xl shadow border border-gray-200 p-6">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-bold text-gray-800">
-            {selectedMr?.medicalRepName} - Attendance
+            {selectedMr?.medicalRepName} - Attendance Calendar
           </h2>
 
           <div className="flex items-center gap-3">
@@ -558,15 +659,19 @@ const Attendance = () => {
   };
 
   // Handle add attendance action
-  const handleAddAttendance = (mr) => {
-    setSelectedAttendanceMr(mr);
+  const handleAddAttendance = () => {
+    if (!selectedAttendanceMr) {
+      alert("Please select an MR first");
+      return;
+    }
+    
     setShowAddAttendanceModal(true);
     
     // Check if user is currently logged in
     const todayRecord = attendanceRecords.find((record) => {
       const recordDate = new Date(record.loginTime);
       return (
-        record.userId?._id === mr._id &&
+        record.userId?._id === selectedAttendanceMr &&
         recordDate.toDateString() === new Date().toDateString() &&
         !record.logoutTime
       );
@@ -579,6 +684,12 @@ const Attendance = () => {
       setCurrentAttendanceId(null);
       setLoginTime(null);
     }
+
+    // Set default dates to today
+    const today = new Date();
+    const todayString = today.toISOString().split('T')[0];
+    setStartDate(todayString);
+    setEndDate(todayString);
   };
 
   // Handle login
@@ -590,7 +701,7 @@ const Attendance = () => {
       const now = new Date();
       
       const loginData = {
-        userId: selectedAttendanceMr._id,
+        userId: selectedAttendanceMr,
         loginTime: now.toISOString()
       };
 
@@ -671,9 +782,49 @@ const Attendance = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
             <h2 className="text-xl font-bold mb-4">
-              Record Attendance - {selectedAttendanceMr?.medicalRepName}
+              Record Attendance
             </h2>
             
+            {/* MR Selection Dropdown */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Select Medical Representative
+              </label>
+              <CustomDropdown
+                value={selectedAttendanceMr}
+                onChange={setSelectedAttendanceMr}
+                options={mrOptions}
+                placeholder="Select MR"
+                required={true}
+              />
+            </div>
+
+            {/* Date Range Selection */}
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Start Date
+                </label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  End Date
+                </label>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+            </div>
+
             <div className="mb-4">
               <p>
                 Current Status:{" "}
@@ -690,9 +841,9 @@ const Attendance = () => {
             <div className="flex gap-3 mb-4">
               <button
                 onClick={handleLogin}
-                disabled={!!currentAttendanceId || attendanceLoading}
+                disabled={!!currentAttendanceId || attendanceLoading || !selectedAttendanceMr}
                 className={`flex-1 py-2 px-4 rounded-lg flex items-center justify-center gap-2 ${
-                  currentAttendanceId || attendanceLoading
+                  currentAttendanceId || attendanceLoading || !selectedAttendanceMr
                     ? "bg-gray-400 cursor-not-allowed"
                     : "bg-green-600 hover:bg-green-700"
                 } text-white`}
@@ -703,9 +854,9 @@ const Attendance = () => {
               
               <button
                 onClick={handleLogout}
-                disabled={!currentAttendanceId || attendanceLoading}
+                disabled={!currentAttendanceId || attendanceLoading || !selectedAttendanceMr}
                 className={`flex-1 py-2 px-4 rounded-lg flex items-center justify-center gap-2 ${
-                  !currentAttendanceId || attendanceLoading
+                  !currentAttendanceId || attendanceLoading || !selectedAttendanceMr
                     ? "bg-gray-400 cursor-not-allowed"
                     : "bg-red-600 hover:bg-red-700"
                 } text-white`}
@@ -729,7 +880,7 @@ const Attendance = () => {
 
       {!showCalendarView && (
         <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-bold text-gray-800">MR Attendance</h1>
+          <h1 className="text-2xl font-bold text-gray-800">MR Attendance Records</h1>
 
           <div className="flex items-center gap-4">
             <p className="text-lg font-semibold text-gray-700">
@@ -738,6 +889,16 @@ const Attendance = () => {
                 {filteredMRList.length}
               </span>
             </p>
+            
+            {/* Add Attendance Button */}
+            <button
+              onClick={handleAddAttendance}
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg cursor-pointer"
+            >
+              <Clock size={16} />
+              Add Attendance
+            </button>
+
             <div className="relative w-72">
               <Search
                 className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
@@ -869,31 +1030,18 @@ const Attendance = () => {
                       </td>
 
                       <td className="p-3">
-                        <span
-                          className={`px-2 py-1 rounded-full text-sm font-medium ${
-                            attendanceStats.currentStatus === "Logged In"
-                              ? "bg-green-100 text-green-800"
-                              : "bg-red-100 text-red-800"
-                          }`}
-                        >
-                          {attendanceStats.currentStatus}
+                        <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded-full text-sm font-medium">
+                          {attendanceStats.percentage}%
                         </span>
                       </td>
 
                       <td className="p-3 flex items-center justify-center gap-3">
                         <button
-                          onClick={() => handleAddAttendance(mr)}
-                          className="flex items-center gap-1 bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-lg cursor-pointer text-sm"
-                          title="Add Attendance"
-                        >
-                          <Clock size={16} /> Add Attendance
-                        </button>
-                        <button
                           onClick={() => handleView(mr)}
                           className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-lg cursor-pointer text-sm"
                           title="View Calendar"
                         >
-                          <Eye size={16} /> View Calendar
+                          <Calendar size={16} /> View Calendar
                         </button>
                       </td>
                     </tr>
