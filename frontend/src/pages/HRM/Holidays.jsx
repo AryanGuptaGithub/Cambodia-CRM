@@ -61,7 +61,7 @@ const Holidays = () => {
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
   
-  // Upcoming holidays pagination - CHANGED: Now per month
+  // Upcoming holidays pagination
   const [upcomingHolidaysPage, setUpcomingHolidaysPage] = useState(1);
 
   useEffect(() => {
@@ -84,6 +84,16 @@ const Holidays = () => {
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm]);
+
+  // Add this function to format dates as "01 Nov 2025"
+  const formatDateToShort = (dateString) => {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = date.toLocaleString('default', { month: 'short' });
+    const year = date.getFullYear();
+    return `${day} ${month} ${year}`;
+  };
 
   const filteredHolidays = holidays.filter(
     (r) =>
@@ -739,9 +749,9 @@ const Holidays = () => {
       <div className="bg-white rounded-2xl shadow border border-gray-200 p-6">
         {/* Calendar Header */}
         <div className="flex justify-between items-center mb-6">
-          {/* Upcoming Holidays Section - CHANGED: Only current month */}
+          {/* Upcoming Holidays Section */}
           <div className="flex-1 max-w-md">
-            <div className="flex items-center justify-between mb-4">
+            {/* <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-800">
                 {monthNames[currentMonth]} {currentYear} Holidays
                 {currentMonthHolidays.length > 0 && (
@@ -751,7 +761,7 @@ const Holidays = () => {
                 )}
               </h3>
               
-              {/* Pagination only shown if more than 3 holidays in current month */}
+         
               {currentMonthHolidays.length > upcomingHolidaysPerPage && (
                 <div className="flex items-center gap-3">
                   <button
@@ -785,7 +795,7 @@ const Holidays = () => {
               )}
             </div>
 
-            {/* Current Month Holidays List */}
+{/*         
             <div className="space-y-3">
               {currentMonthHolidaysToShow.length > 0 ? (
                 Object.entries(currentMonthHolidaysByWeek).map(([weekKey, weekHolidays]) => (
@@ -830,7 +840,6 @@ const Holidays = () => {
               )}
             </div>
 
-            {/* Next Month Preview */}
             {hasNextMonthHolidays && (
               <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
                 <div className="flex items-center justify-between mb-2">
@@ -849,10 +858,10 @@ const Holidays = () => {
                   {nextMonthHolidays.length} holiday{nextMonthHolidays.length !== 1 ? 's' : ''} in {monthNames[currentMonth === 11 ? 0 : currentMonth + 1]}
                 </p>
               </div>
-            )}
+            )}   */}
           </div>
 
-          {/* Calendar Navigation */}
+
           <div className="flex gap-3 items-center">
             <button
               onClick={prevMonth}
@@ -976,7 +985,7 @@ const Holidays = () => {
 
             {/* Current Month Holidays List */}
             <div className="space-y-3">
-              {currentMonthHolidaysToShow.length > 0 ? (
+              {/* {currentMonthHolidaysToShow.length > 0 ? (
                 Object.entries(currentMonthHolidaysByWeek).map(([weekKey, weekHolidays]) => (
                   <div key={weekKey} className="mb-4">
                     <h4 className="text-sm font-semibold text-gray-700 mb-2 border-b pb-1">
@@ -1016,7 +1025,7 @@ const Holidays = () => {
                   <Calendar size={24} className="mx-auto mb-2 text-gray-400" />
                   <p className="text-sm">No holidays in {monthNames[currentMonth]} {currentYear}</p>
                 </div>
-              )}
+              )} */}
             </div>
           </div>
 
@@ -1240,7 +1249,7 @@ const Holidays = () => {
             : renderAnnualCalendar()}
         </>
       ) : (
-        /* Table View */
+        /* Table View - UPDATED HOLIDAY LIST DISPLAY */
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
           <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
             <thead className="bg-gray-100 text-gray-700 border-b">
@@ -1269,69 +1278,99 @@ const Holidays = () => {
             </thead>
             <tbody>
               {currentHolidays.length > 0 ? (
-                currentHolidays.map((holiday, index) => (
-                  <tr
-                    key={holiday._id}
-                    className={`hover:bg-gray-50 ${
-                      (index + 1) % holidaysPerPage === 0 ||
-                      index + 1 === currentHolidays.length
-                        ? ""
-                        : "border-b"
-                    }`}
-                  >
-                    <td className="p-3">
-                      <div className="flex items-center gap-4">
-                        <input
-                          type="checkbox"
-                          checked={selected.some((s) => s.id === holiday._id)}
-                          onChange={() => toggleSelect(holiday)}
-                        />
-                        <span className="capitalize">{holiday.name}</span>
-                      </div>
-                    </td>
-                    <td className="p-3">
-                      {formatDateToReadable(holiday.startDate)}
-                    </td>
-                    <td className="p-3">
-                      {formatDateToReadable(holiday.endDate || holiday.startDate)}
-                    </td>
-                    <td className="p-3 capitalize">
-                      {holiday.description || "No description"}
-                    </td>
-                    <td>
-                      <button
-                        onClick={() => handlerEnabledHoliday(holiday._id)}
-                        className={`px-3 py-1 rounded-full text-sm cursor-pointer ${
-                          holiday.enabled
-                            ? "bg-green-100 text-green-600"
-                            : "bg-gray-200 text-gray-600"
+                currentHolidays.map((holiday, index) => {
+                  const startDate = new Date(holiday.startDate);
+                  const monthYear = startDate.toLocaleString('default', { month: 'long', year: 'numeric' });
+                  const formattedDate = formatDateToShort(holiday.startDate);
+                  
+                  // Check if this is the first holiday of the month to show month header
+                  const showMonthHeader = index === 0 || 
+                    new Date(currentHolidays[index - 1].startDate).getMonth() !== startDate.getMonth();
+
+                  return (
+                    <React.Fragment key={holiday._id}>
+                      {showMonthHeader && (
+                        <tr className="bg-gray-50 border-b">
+                          <td colSpan={6} className="p-3">
+                            <div className="flex items-center gap-2">
+                              <Calendar size={16} className="text-blue-600" />
+                              <span className="font-semibold text-blue-800 text-lg">
+                                {monthYear}
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      <tr
+                        className={`hover:bg-gray-50 ${
+                          (index + 1) % holidaysPerPage === 0 ||
+                          index + 1 === currentHolidays.length
+                            ? ""
+                            : "border-b"
                         }`}
                       >
-                        {holiday.enabled ? "Enabled" : "Disabled"}
-                      </button>
-                    </td>
-                    <td className="p-3 flex items-center justify-center gap-3">
-                      <button 
-                        onClick={() => handleView(holiday)}
-                        className="text-blue-600 hover:text-blue-800 cursor-pointer"
-                      >
-                        <Eye size={18} />
-                      </button>
-                      <button 
-                        onClick={() => editHoliday(holiday)}
-                        className="text-green-600 hover:text-green-800 cursor-pointer"
-                      >
-                        <Edit size={18} />
-                      </button>
-                      <button
-                        onClick={() => deleteHoliday(holiday)}
-                        className="text-red-600 hover:text-red-800 cursor-pointer"
-                      >
-                        <Trash2 size={18} />
-                      </button>
-                    </td>
-                  </tr>
-                ))
+                        <td className="p-3">
+                          <div className="flex items-center gap-4">
+                            <input
+                              type="checkbox"
+                              checked={selected.some((s) => s.id === holiday._id)}
+                              onChange={() => toggleSelect(holiday)}
+                            />
+                            <div className="flex flex-col">
+                              <span className="capitalize font-medium text-gray-800">
+                                {holiday.name}
+                              </span>
+                              <span className="text-sm text-gray-500">
+                                ({formattedDate})
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="p-3">
+                          {formatDateToReadable(holiday.startDate)}
+                        </td>
+                        <td className="p-3">
+                          {formatDateToReadable(holiday.endDate || holiday.startDate)}
+                        </td>
+                        <td className="p-3 capitalize">
+                          {holiday.description || "No description"}
+                        </td>
+                        <td>
+                          <button
+                            onClick={() => handlerEnabledHoliday(holiday._id)}
+                            className={`px-3 py-1 rounded-full text-sm cursor-pointer ${
+                              holiday.enabled
+                                ? "bg-green-100 text-green-600"
+                                : "bg-gray-200 text-gray-600"
+                            }`}
+                          >
+                            {holiday.enabled ? "Enabled" : "Disabled"}
+                          </button>
+                        </td>
+                        <td className="p-3 flex items-center justify-center gap-3">
+                          <button 
+                            onClick={() => handleView(holiday)}
+                            className="text-blue-600 hover:text-blue-800 cursor-pointer"
+                          >
+                            <Eye size={18} />
+                          </button>
+                          <button 
+                            onClick={() => editHoliday(holiday)}
+                            className="text-green-600 hover:text-green-800 cursor-pointer"
+                          >
+                            <Edit size={18} />
+                          </button>
+                          <button
+                            onClick={() => deleteHoliday(holiday)}
+                            className="text-red-600 hover:text-red-800 cursor-pointer"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </td>
+                      </tr>
+                    </React.Fragment>
+                  );
+                })
               ) : (
                 <tr>
                   <td colSpan={6} className="p-3 text-center">
@@ -1641,7 +1680,7 @@ const Holidays = () => {
           document.body
         )}
 
-      {/* View Holiday Modal */}
+      {/* View Holiday Modal - UPDATED */}
       {isViewModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -1665,7 +1704,7 @@ const Holidays = () => {
                     Holiday Name
                   </label>
                   <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.name}
+                    {form.name} ({formatDateToShort(form.startDate)})
                   </p>
                 </div>
                 <div>
