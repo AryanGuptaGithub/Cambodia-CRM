@@ -1,241 +1,950 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from "react";
+import {
+  Eye,
+  Calendar,
+  Search,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  LogIn,
+  LogOut,
+} from "lucide-react";
+import axios from "axios";
+
+const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
 const Attendance = () => {
-  const [activeTab, setActiveTab] = useState('add');
-  const [loginTime, setLoginTime] = useState(null);
-  const [attendanceRecords, setAttendanceRecords] = useState([]);
-  const [currentUser, setCurrentUser] = useState('');
+  const [mrList, setMrList] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(10);
 
-  // Load data from localStorage on component mount
+  // Calendar view states
+  const [selectedMr, setSelectedMr] = useState(null);
+  const [showCalendarView, setShowCalendarView] = useState(false);
+  const [calendarViewType, setCalendarViewType] = useState("monthly");
+
+  // Set initial state to current date
+  const currentDate = new Date();
+  const [currentMonth, setCurrentMonth] = useState(currentDate.getMonth());
+  const [currentYear, setCurrentYear] = useState(currentDate.getFullYear());
+
+  // Attendance data
+  const [attendanceRecords, setAttendanceRecords] = useState([]);
+  const [showAddAttendanceModal, setShowAddAttendanceModal] = useState(false);
+  const [selectedAttendanceMr, setSelectedAttendanceMr] = useState(null);
+  const [currentAttendanceId, setCurrentAttendanceId] = useState(null);
+  const [loginTime, setLoginTime] = useState(null);
+  const [attendanceLoading, setAttendanceLoading] = useState(false);
+
   useEffect(() => {
-    const savedRecords = localStorage.getItem('attendanceRecords');
-    const savedUser = localStorage.getItem('currentUser');
-    
-    if (savedRecords) {
-      setAttendanceRecords(JSON.parse(savedRecords));
-    }
-    if (savedUser) {
-      setCurrentUser(savedUser);
-    }
+    fetchMRList();
+    fetchAttendanceRecords();
   }, []);
 
-  // Save to localStorage whenever records change
-  useEffect(() => {
-    localStorage.setItem('attendanceRecords', JSON.stringify(attendanceRecords));
-  }, [attendanceRecords]);
-
-  const handleLogin = () => {
-    if (!currentUser.trim()) {
-      alert('Please enter your name first');
-      return;
+  const fetchMRList = async () => {
+    try {
+      setLoading(true);
+      const response = await axios.get(`${backendUrl}/api/staffs`);
+      setMrList(response.data || []);
+    } catch (err) {
+      setError(err.message || "Failed to fetch MR list");
+    } finally {
+      setLoading(false);
     }
-
-    const now = new Date();
-    setLoginTime(now);
-    
-    // Create new attendance record
-    const newRecord = {
-      id: Date.now(),
-      user: currentUser,
-      loginTime: now.toLocaleString(),
-      logoutTime: null,
-      totalTime: null
-    };
-    
-    setAttendanceRecords(prev => [...prev, newRecord]);
-    alert(`Login recorded at ${now.toLocaleTimeString()}`);
   };
 
-  const handleLogout = () => {
-    if (!loginTime) {
-      alert('You are not logged in!');
-      return;
+  const fetchAttendanceRecords = async () => {
+    try {
+      const response = await axios.get(`${backendUrl}/api/attendance`);
+      setAttendanceRecords(response.data || []);
+    } catch (err) {
+      console.error("Failed to fetch attendance records:", err);
+    }
+  };
+
+  // Filter MR list based on search
+  const filteredMRList = mrList.filter(
+    (mr) =>
+      mr.medicalRepName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      mr.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      mr.contactNo?.includes(searchTerm)
+  );
+
+  // Pagination
+  const totalPages = Math.ceil(filteredMRList.length / itemsPerPage);
+  const currentMRs = filteredMRList.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
+  // Calendar functions
+  const isSunday = (date) => date.getDay() === 0;
+
+  const getAttendanceForDate = (date, mrId) => {
+    if (!mrId) return null;
+    const dateString = date.toISOString().split("T")[0];
+    const records = attendanceRecords.filter(
+      (record) =>
+        record.userId?._id === mrId &&
+        new Date(record.loginTime).toDateString() === date.toDateString()
+    );
+    return records.length > 0 ? records[0] : null;
+  };
+
+  const isFutureDate = (date) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return date > today;
+  };
+
+  const getDaysInMonth = (year = currentYear, month = currentMonth) => {
+    const days = [];
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+
+    for (let i = 0; i < firstDay.getDay(); i++) {
+      days.push(null);
     }
 
-    const now = new Date();
-    const loginTimestamp = new Date(loginTime);
-    const timeDiff = now - loginTimestamp; // in milliseconds
-    
-    // Convert milliseconds to hours, minutes, seconds
-    const hours = Math.floor(timeDiff / (1000 * 60 * 60));
-    const minutes = Math.floor((timeDiff % (1000 * 60 * 60)) / (1000 * 60));
-    const seconds = Math.floor((timeDiff % (1000 * 60)) / 1000);
-    
-    const totalTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    for (let i = 1; i <= lastDay.getDate(); i++) {
+      days.push(new Date(year, month, i));
+    }
 
-    // Update the latest record with logout time and total time
-    setAttendanceRecords(prev => {
-      const updatedRecords = [...prev];
-      const lastRecordIndex = updatedRecords.length - 1;
-      
-      if (lastRecordIndex >= 0) {
-        updatedRecords[lastRecordIndex] = {
-          ...updatedRecords[lastRecordIndex],
-          logoutTime: now.toLocaleString(),
-          totalTime: totalTime
-        };
+    return days;
+  };
+
+  // Check if navigation to next month/year is allowed (not beyond current date)
+  const canNavigateNext = (direction, type = "monthly") => {
+    const today = new Date();
+    const currentYearToday = today.getFullYear();
+    const currentMonthToday = today.getMonth();
+
+    if (type === "monthly") {
+      if (direction === "next") {
+        return (
+          currentYear < currentYearToday ||
+          (currentYear === currentYearToday && currentMonth < currentMonthToday)
+        );
       }
-      
-      return updatedRecords;
+    } else {
+      if (direction === "next") {
+        return currentYear < currentYearToday;
+      }
+    }
+    return true;
+  };
+
+  const navigateMonth = (direction) => {
+    if (direction === "prev") {
+      if (currentMonth === 0) {
+        setCurrentMonth(11);
+        setCurrentYear(currentYear - 1);
+      } else {
+        setCurrentMonth(currentMonth - 1);
+      }
+    } else {
+      if (canNavigateNext("next", "monthly")) {
+        if (currentMonth === 11) {
+          setCurrentMonth(0);
+          setCurrentYear(currentYear + 1);
+        } else {
+          setCurrentMonth(currentMonth + 1);
+        }
+      }
+    }
+  };
+
+  const navigateYear = (direction) => {
+    if (direction === "prev") {
+      setCurrentYear(currentYear - 1);
+    } else {
+      if (canNavigateNext("next", "annual")) {
+        setCurrentYear(currentYear + 1);
+      }
+    }
+  };
+
+  // Calculate attendance statistics
+  const getAttendanceStats = (mrId) => {
+    const mrRecords = attendanceRecords.filter(
+      (record) => record.userId?._id === mrId
+    );
+
+    const currentMonthStart = new Date(currentYear, currentMonth, 1);
+    const currentMonthEnd = new Date(currentYear, currentMonth + 1, 0);
+    const yearStart = new Date(currentYear, 0, 1);
+    const yearEnd = new Date(currentYear, 11, 31);
+
+    // Monthly attendance count
+    const monthlyAttendance = mrRecords.filter((record) => {
+      const recordDate = new Date(record.loginTime);
+      return recordDate >= currentMonthStart && recordDate <= currentMonthEnd;
+    }).length;
+
+    // Annual attendance count
+    const annualAttendance = mrRecords.filter((record) => {
+      const recordDate = new Date(record.loginTime);
+      return recordDate >= yearStart && recordDate <= yearEnd;
+    }).length;
+
+    
+    const today = new Date();
+    const todayRecord = mrRecords.find((record) => {
+      const recordDate = new Date(record.loginTime);
+      return (
+        recordDate.toDateString() === today.toDateString() && !record.logoutTime
+      );
     });
 
-    setLoginTime(null);
-    alert(`Logout recorded at ${now.toLocaleTimeString()}\nTotal time: ${totalTime}`);
+    return {
+      monthly: monthlyAttendance,
+      annual: annualAttendance,
+      currentStatus: todayRecord ? "Logged In" : "Logged Out",
+      currentAttendanceId: todayRecord?._id,
+    };
   };
 
-  const handleUserChange = (e) => {
-    setCurrentUser(e.target.value);
-    localStorage.setItem('currentUser', e.target.value);
+  // Render monthly calendar
+  const renderMonthlyCalendar = () => {
+    const days = getDaysInMonth();
+    const monthNames = [
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December",
+    ];
+
+    const attendanceStats = selectedMr
+      ? getAttendanceStats(selectedMr._id)
+      : { monthly: 0, annual: 0, currentStatus: "Logged Out" };
+
+    const today = new Date();
+    const isCurrentMonthAndYear =
+      currentMonth === today.getMonth() && currentYear === today.getFullYear();
+
+    return (
+      <div className="bg-white rounded-2xl shadow border border-gray-200 p-6">
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-xl font-bold text-gray-800">
+            {selectedMr?.medicalRepName} - Attendance
+          </h2>
+
+          <div className="flex items-center gap-3">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
+              <div className="text-sm font-medium text-blue-800">
+                Monthly Attendance: {attendanceStats.monthly}
+              </div>
+            </div>
+            <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-2">
+              <div className="text-sm font-medium text-green-800">
+                Current Status: {attendanceStats.currentStatus}
+              </div>
+            </div>
+            <button
+              onClick={() => navigateMonth("prev")}
+              className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer transition-colors"
+            >
+              <ChevronLeft size={20} />
+            </button>
+            <span className="text-lg font-semibold">
+              {monthNames[currentMonth]} {currentYear}
+              {isCurrentMonthAndYear}
+            </span>
+            <button
+              onClick={() => navigateMonth("next")}
+              disabled={!canNavigateNext("next", "monthly")}
+              className={`p-2 rounded-lg cursor-pointer transition-colors ${
+                canNavigateNext("next", "monthly")
+                  ? "bg-gray-100 hover:bg-gray-200"
+                  : "bg-gray-100 opacity-40 cursor-not-allowed"
+              }`}
+            >
+              <ChevronRight size={20} />
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-7 gap-2 mb-6">
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
+            <div
+              key={day}
+              className={`text-center font-semibold py-2 ${
+                day === "Sun" ? "text-red-600" : "text-gray-700"
+              }`}
+            >
+              {day}
+            </div>
+          ))}
+
+          {days.map((date, index) => {
+            if (date === null) {
+              return <div key={`empty-${index}`} className="h-12" />;
+            }
+
+            const attendance = getAttendanceForDate(date, selectedMr?._id);
+            const isSundayDay = isSunday(date);
+            const isCurrentMonth = date.getMonth() === currentMonth;
+            const isToday = date.toDateString() === new Date().toDateString();
+            const isFuture = isFutureDate(date);
+
+            // Determine cell style based on conditions
+            let cellStyle =
+              "h-12 flex items-center justify-center rounded-lg border-2 ";
+
+            if (attendance) {
+              // Attendance recorded - green
+              cellStyle += "bg-green-500 text-white border-green-600 ";
+            } else if (isSundayDay) {
+              // Sundays - gray
+              cellStyle += "bg-gray-400 text-white border-gray-500 ";
+            } else if (isToday) {
+              // Today - blue highlight
+              cellStyle += "border-blue-500 bg-blue-50 ";
+            } else {
+              // Normal working days
+              cellStyle += "border-gray-200 bg-gray-50 ";
+            }
+
+            if (!isCurrentMonth) {
+              cellStyle += "opacity-40 ";
+            }
+
+            return (
+              <div
+                key={date.toISOString()}
+                className={cellStyle.trim()}
+                title={
+                  attendance
+                    ? `Login: ${new Date(
+                        attendance.loginTime
+                      ).toLocaleTimeString()} ${
+                        attendance.logoutTime
+                          ? `\nLogout: ${new Date(
+                              attendance.logoutTime
+                            ).toLocaleTimeString()}`
+                          : ""
+                      }`
+                    : "No attendance"
+                }
+              >
+                {date.getDate()}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="mt-6 flex flex-col md:flex-row justify-between items-center bg-gray-50 rounded-lg p-4 gap-6">
+          {/* Legend */}
+          <div className="flex flex-wrap gap-4 items-center text-sm">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <div className="w-4 h-4 bg-green-500 rounded border-2 border-green-600"></div>
+              <span>Present</span>
+            </label>
+
+            <label className="flex items-center gap-2 cursor-pointer">
+              <div className="w-4 h-4 bg-gray-400 rounded border-2 border-gray-500"></div>
+              <span>Sunday</span>
+            </label>
+
+            <label className="flex items-center gap-2 cursor-pointer">
+              <div className="w-4 h-4 bg-gray-50 rounded border-2 border-gray-200"></div>
+              <span>Working Day</span>
+            </label>
+
+            <label className="flex items-center gap-2 cursor-pointer">
+              <div className="w-4 h-4 bg-blue-50 rounded border-2 border-blue-500"></div>
+              <span>Today</span>
+            </label>
+          </div>
+
+          {/* Summary */}
+          <div className="flex flex-col sm:flex-row items-center gap-6">
+            <div className="text-lg font-semibold text-gray-700">
+              Annual Attendance :{" "}
+              <span className="text-2xl font-bold text-green-600">
+                {attendanceStats.annual}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   };
 
-  const clearRecords = () => {
-    if (window.confirm('Are you sure you want to clear all attendance records?')) {
-      setAttendanceRecords([]);
-      localStorage.removeItem('attendanceRecords');
+  // Render annual calendar
+  const renderAnnualCalendar = () => {
+    const monthNames = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
+
+    const attendanceStats = selectedMr
+      ? getAttendanceStats(selectedMr._id)
+      : { monthly: 0, annual: 0, currentStatus: "Logged Out" };
+
+    const today = new Date();
+    const currentYearToday = today.getFullYear();
+
+    return (
+      <div className="bg-white rounded-2xl shadow border border-gray-200 p-6">
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-xl font-bold text-gray-800">
+            {selectedMr?.medicalRepName} - Attendance
+          </h2>
+
+          <div className="flex items-center gap-3">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
+              <div className="text-sm font-medium text-blue-800">
+                Annual Attendance: {attendanceStats.annual}
+              </div>
+            </div>
+
+            <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-2">
+              <div className="text-sm font-medium text-green-800">
+                Current Status: {attendanceStats.currentStatus}
+              </div>
+            </div>
+
+            <button
+              onClick={() => navigateYear("prev")}
+              className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer transition-colors"
+            >
+              <ChevronLeft size={20} />
+            </button>
+            <span className="text-lg font-semibold">
+              {currentYear}
+              {currentYear === currentYearToday}
+            </span>
+            <button
+              onClick={() => navigateYear("next")}
+              disabled={!canNavigateNext("next", "annual")}
+              className={`p-2 rounded-lg cursor-pointer transition-colors ${
+                canNavigateNext("next", "annual")
+                  ? "bg-gray-100 hover:bg-gray-200"
+                  : "bg-gray-100 opacity-40 cursor-not-allowed"
+              }`}
+            >
+              <ChevronRight size={20} />
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {monthNames.map((monthName, monthIndex) => {
+            const monthDays = getDaysInMonth(currentYear, monthIndex);
+            const today = new Date();
+            const isCurrentMonth =
+              monthIndex === today.getMonth() &&
+              currentYear === today.getFullYear();
+            const isFutureYear = currentYear > today.getFullYear();
+            const isFutureMonth =
+              currentYear === today.getFullYear() &&
+              monthIndex > today.getMonth();
+
+            return (
+              <div
+                key={monthName}
+                className={`border rounded-lg p-4 ${
+                  isCurrentMonth
+                    ? "border-blue-500 bg-blue-50 shadow-md"
+                    : "border-gray-200 bg-white"
+                } ${isFutureMonth || isFutureYear ? "opacity-50" : ""}`}
+              >
+                <h3
+                  className={`text-lg font-semibold text-center mb-3 ${
+                    isCurrentMonth ? "text-blue-800" : "text-gray-800"
+                  }`}
+                >
+                  {monthName}
+                  {isCurrentMonth && (
+                    <span className="block text-xs font-normal text-blue-600 mt-1">
+                      (Current)
+                    </span>
+                  )}
+                </h3>
+
+                <div className="grid grid-cols-7 gap-1 mb-2">
+                  {["S", "M", "T", "W", "T", "F", "S"].map((day, index) => (
+                    <div
+                      key={day}
+                      className={`text-center text-xs font-medium ${
+                        index === 0 ? "text-red-600" : "text-gray-600"
+                      }`}
+                    >
+                      {day}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-7 gap-1">
+                  {monthDays.map((date, index) => {
+                    if (date === null) {
+                      return <div key={`empty-${index}`} className="h-6" />;
+                    }
+
+                    const attendance = getAttendanceForDate(
+                      date,
+                      selectedMr?._id
+                    );
+                    const isSundayDay = isSunday(date);
+                    const isToday =
+                      date.toDateString() === new Date().toDateString();
+                    const isFuture = isFutureDate(date);
+
+                    // Determine cell style
+                    let cellStyle =
+                      "h-6 flex items-center justify-center rounded text-xs ";
+
+                    if (isFuture) {
+                      cellStyle += "bg-gray-100 opacity-40 ";
+                    } else if (attendance) {
+                      cellStyle += "bg-green-500 text-white ";
+                    } else if (isSundayDay) {
+                      cellStyle += "bg-gray-400 text-white ";
+                    } else if (isToday) {
+                      cellStyle += "bg-blue-500 text-white ";
+                    } else {
+                      cellStyle += "bg-gray-100 ";
+                    }
+
+                    return (
+                      <div
+                        key={date.toISOString()}
+                        className={cellStyle.trim()}
+                      >
+                        {date.getDate()}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  // Handle view action - open calendar for specific MR
+  const handleView = (mr) => {
+    setSelectedMr(mr);
+    setShowCalendarView(true);
+    setCalendarViewType("monthly");
+    // Set to current date when opening calendar view
+    const today = new Date();
+    setCurrentMonth(today.getMonth());
+    setCurrentYear(today.getFullYear());
+  };
+
+  // Handle add attendance action
+  const handleAddAttendance = (mr) => {
+    setSelectedAttendanceMr(mr);
+    setShowAddAttendanceModal(true);
+    
+    // Check if user is currently logged in
+    const todayRecord = attendanceRecords.find((record) => {
+      const recordDate = new Date(record.loginTime);
+      return (
+        record.userId?._id === mr._id &&
+        recordDate.toDateString() === new Date().toDateString() &&
+        !record.logoutTime
+      );
+    });
+
+    if (todayRecord) {
+      setCurrentAttendanceId(todayRecord._id);
+      setLoginTime(new Date(todayRecord.loginTime));
+    } else {
+      setCurrentAttendanceId(null);
+      setLoginTime(null);
     }
   };
 
-  return (
-    <div style={{ padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
-      <h1 style={{ textAlign: 'center', color: '#333' }}>Attendance System</h1>
+  // Handle login
+  const handleLogin = async () => {
+    if (!selectedAttendanceMr) return;
+
+    try {
+      setAttendanceLoading(true);
+      const now = new Date();
       
-      {/* User Input */}
-      <div style={{ marginBottom: '20px' }}>
-        <label htmlFor="userName" style={{ marginRight: '10px' }}>Your Name:</label>
-        <input
-          id="userName"
-          type="text"
-          value={currentUser}
-          onChange={handleUserChange}
-          placeholder="Enter your name"
-          style={{ padding: '8px', width: '200px', borderRadius: '4px', border: '1px solid #ccc' }}
-        />
-      </div>
+      const loginData = {
+        userId: selectedAttendanceMr._id,
+        loginTime: now.toISOString()
+      };
 
-      {/* Tabs */}
-      <div style={{ marginBottom: '20px' }}>
-        <button
-          onClick={() => setActiveTab('add')}
-          style={{
-            padding: '10px 20px',
-            marginRight: '10px',
-            backgroundColor: activeTab === 'add' ? '#007bff' : '#6c757d',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer'
-          }}
-        >
-          Add Attendance
-        </button>
-        <button
-          onClick={() => setActiveTab('view')}
-          style={{
-            padding: '10px 20px',
-            backgroundColor: activeTab === 'view' ? '#007bff' : '#6c757d',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer'
-          }}
-        >
-          View Attendance
-        </button>
-      </div>
+      const response = await axios.post(`${backendUrl}/api/attendance/login`, loginData);
+      
+      if (response.data.success) {
+        setLoginTime(now);
+        setCurrentAttendanceId(response.data.attendance._id);
+        alert(`Login recorded at ${now.toLocaleTimeString()}`);
+        
+        // Refresh attendance records
+        fetchAttendanceRecords();
+      }
+    } catch (err) {
+      alert("Failed to record login: " + (err.response?.data?.message || err.message));
+    } finally {
+      setAttendanceLoading(false);
+    }
+  };
 
-      {/* Tab Content */}
-      {activeTab === 'add' && (
-        <div style={{ textAlign: 'center', padding: '20px', border: '1px solid #ddd', borderRadius: '4px' }}>
-          <h2>Record Attendance</h2>
-          <div style={{ marginBottom: '20px' }}>
-            <p>Current Status: <strong>{loginTime ? 'Logged In' : 'Logged Out'}</strong></p>
-            {loginTime && (
-              <p>Login Time: <strong>{new Date(loginTime).toLocaleString()}</strong></p>
-            )}
-          </div>
-          <div>
-            <button
-              onClick={handleLogin}
-              disabled={!!loginTime}
-              style={{
-                padding: '10px 20px',
-                marginRight: '10px',
-                backgroundColor: loginTime ? '#6c757d' : '#28a745',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: loginTime ? 'not-allowed' : 'pointer'
-              }}
-            >
-              Login
-            </button>
-            <button
-              onClick={handleLogout}
-              disabled={!loginTime}
-              style={{
-                padding: '10px 20px',
-                backgroundColor: !loginTime ? '#6c757d' : '#dc3545',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: !loginTime ? 'not-allowed' : 'pointer'
-              }}
-            >
-              Logout
-            </button>
+  // Handle logout
+  const handleLogout = async () => {
+    if (!currentAttendanceId) {
+      alert("You are not logged in!");
+      return;
+    }
+
+    try {
+      setAttendanceLoading(true);
+      const now = new Date();
+      
+      const logoutData = {
+        logoutTime: now.toISOString()
+      };
+
+      const response = await axios.put(
+        `${backendUrl}/api/attendance/logout/${currentAttendanceId}`, 
+        logoutData
+      );
+      
+      if (response.data.success) {
+        setLoginTime(null);
+        setCurrentAttendanceId(null);
+        
+        const totalTime = response.data.attendance.totalTime;
+        alert(`Logout recorded at ${now.toLocaleTimeString()}\nTotal time: ${totalTime}`);
+        
+        // Refresh attendance records
+        fetchAttendanceRecords();
+      }
+    } catch (err) {
+      alert("Failed to record logout: " + (err.response?.data?.message || err.message));
+    } finally {
+      setAttendanceLoading(false);
+    }
+  };
+
+  // Clear all records
+  const clearRecords = async () => {
+    if (window.confirm("Are you sure you want to clear all attendance records?")) {
+      try {
+        await axios.delete(`${backendUrl}/api/attendance`);
+        setAttendanceRecords([]);
+        alert("All attendance records cleared successfully");
+      } catch (err) {
+        alert("Failed to clear records: " + err.response?.data?.message);
+      }
+    }
+  };
+
+  if (loading) return <div className="p-6 text-center">Loading MR List...</div>;
+  if (error) return <div className="p-6 text-red-500 text-center">{error}</div>;
+
+  return (
+    <div className="p-6">
+      {/* Add Attendance Modal */}
+      {showAddAttendanceModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
+            <h2 className="text-xl font-bold mb-4">
+              Record Attendance - {selectedAttendanceMr?.medicalRepName}
+            </h2>
+            
+            <div className="mb-4">
+              <p>
+                Current Status:{" "}
+                <strong>{currentAttendanceId ? "Logged In" : "Logged Out"}</strong>
+              </p>
+              {loginTime && (
+                <p>
+                  Login Time:{" "}
+                  <strong>{new Date(loginTime).toLocaleString()}</strong>
+                </p>
+              )}
+            </div>
+
+            <div className="flex gap-3 mb-4">
+              <button
+                onClick={handleLogin}
+                disabled={!!currentAttendanceId || attendanceLoading}
+                className={`flex-1 py-2 px-4 rounded-lg flex items-center justify-center gap-2 ${
+                  currentAttendanceId || attendanceLoading
+                    ? "bg-gray-400 cursor-not-allowed"
+                    : "bg-green-600 hover:bg-green-700"
+                } text-white`}
+              >
+                <LogIn size={16} />
+                {attendanceLoading ? "Processing..." : "Login"}
+              </button>
+              
+              <button
+                onClick={handleLogout}
+                disabled={!currentAttendanceId || attendanceLoading}
+                className={`flex-1 py-2 px-4 rounded-lg flex items-center justify-center gap-2 ${
+                  !currentAttendanceId || attendanceLoading
+                    ? "bg-gray-400 cursor-not-allowed"
+                    : "bg-red-600 hover:bg-red-700"
+                } text-white`}
+              >
+                <LogOut size={16} />
+                {attendanceLoading ? "Processing..." : "Logout"}
+              </button>
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setShowAddAttendanceModal(false)}
+                className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {activeTab === 'view' && (
+      {!showCalendarView && (
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-2xl font-bold text-gray-800">MR Attendance</h1>
+
+          <div className="flex items-center gap-4">
+            <p className="text-lg font-semibold text-gray-700">
+              Total Count:{" "}
+              <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">
+                {filteredMRList.length}
+              </span>
+            </p>
+            <div className="relative w-72">
+              <Search
+                className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
+                size={16}
+              />
+              <input
+                type="text"
+                placeholder="Search MRs..."
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCalendarView ? (
+        /* Calendar View */
         <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-            <h2>Attendance Records</h2>
+          {/* Back Button and Tabs */}
+          <div className="flex justify-between items-center mb-4 bg-white rounded-2xl shadow border border-gray-200 p-4">
+            <button
+              onClick={() => setShowCalendarView(false)}
+              className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg cursor-pointer"
+            >
+              <ChevronLeft size={18} /> Back to MR List
+            </button>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setCalendarViewType("monthly")}
+                className={`px-4 py-2 rounded-lg font-medium cursor-pointer ${
+                  calendarViewType === "monthly"
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                }`}
+              >
+                Monthly View
+              </button>
+              <button
+                onClick={() => setCalendarViewType("annual")}
+                className={`px-4 py-2 rounded-lg font-medium cursor-pointer ${
+                  calendarViewType === "annual"
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                }`}
+              >
+                Annual View
+              </button>
+            </div>
+          </div>
+
+          {/* Calendar Display */}
+          {calendarViewType === "monthly"
+            ? renderMonthlyCalendar()
+            : renderAnnualCalendar()}
+        </div>
+      ) : (
+        /* Table View */
+        <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
+          <div className="flex justify-between items-center p-4 bg-gray-50 border-b">
+            <h2 className="text-lg font-semibold">Attendance Records</h2>
             {attendanceRecords.length > 0 && (
               <button
                 onClick={clearRecords}
-                style={{
-                  padding: '8px 16px',
-                  backgroundColor: '#dc3545',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer'
-                }}
+                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg cursor-pointer"
               >
                 Clear All Records
               </button>
             )}
           </div>
-          
-          {attendanceRecords.length === 0 ? (
-            <p style={{ textAlign: 'center', color: '#666' }}>No attendance records found.</p>
-          ) : (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', border: '1px solid #ddd' }}>
-                <thead>
-                  <tr style={{ backgroundColor: '#f8f9fa' }}>
-                    <th style={{ padding: '12px', border: '1px solid #ddd', textAlign: 'left' }}>User</th>
-                    <th style={{ padding: '12px', border: '1px solid #ddd', textAlign: 'left' }}>Login Time</th>
-                    <th style={{ padding: '12px', border: '1px solid #ddd', textAlign: 'left' }}>Logout Time</th>
-                    <th style={{ padding: '12px', border: '1px solid #ddd', textAlign: 'left' }}>Total Time</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {attendanceRecords.map(record => (
-                    <tr key={record.id}>
-                      <td style={{ padding: '12px', border: '1px solid #ddd' }}>{record.user}</td>
-                      <td style={{ padding: '12px', border: '1px solid #ddd' }}>{record.loginTime}</td>
-                      <td style={{ padding: '12px', border: '1px solid #ddd' }}>
-                        {record.logoutTime || 'Not logged out yet'}
+
+          <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
+            <thead className="bg-gray-100 text-gray-700 border-b text-sm">
+              <tr>
+                <th className="p-3">Sr No</th>
+                <th className="p-3">MR Name</th>
+                <th className="p-3">MR Email</th>
+                <th className="p-3">MR Contact</th>
+                <th className="p-3">Attendance (Monthly)</th>
+                <th className="p-3">Attendance (Annual)</th>
+                <th className="p-3">Attendance Percent</th>
+                <th className="p-3">Actions</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {currentMRs.length > 0 ? (
+                currentMRs.map((mr, index) => {
+                  const attendanceStats = getAttendanceStats(mr._id);
+
+                  return (
+                    <tr
+                      key={mr._id}
+                      className={`hover:bg-gray-50 ${
+                        (index + 1) % itemsPerPage === 0 ||
+                        index + 1 === currentMRs.length
+                          ? ""
+                          : "border-b"
+                      }`}
+                    >
+                      <td className="p-3">
+                        {(currentPage - 1) * itemsPerPage + index + 1}
                       </td>
-                      <td style={{ padding: '12px', border: '1px solid #ddd' }}>
-                        {record.totalTime || '--:--:--'}
+
+                      <td className="p-3">
+                        <span className="font-medium text-gray-800 capitalize">
+                          {mr.medicalRepName}
+                        </span>
+                      </td>
+
+                      <td className="p-3 text-gray-600">{mr.email}</td>
+                      <td className="p-3 text-gray-600">{mr.contactNo}</td>
+
+                      <td className="p-3">
+                        <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-sm font-medium">
+                          {attendanceStats.monthly}
+                        </span>
+                      </td>
+
+                      <td className="p-3">
+                        <span className="bg-green-100 text-green-800 px-2 py-1 rounded-full text-sm font-medium">
+                          {attendanceStats.annual}
+                        </span>
+                      </td>
+
+                      <td className="p-3">
+                        <span
+                          className={`px-2 py-1 rounded-full text-sm font-medium ${
+                            attendanceStats.currentStatus === "Logged In"
+                              ? "bg-green-100 text-green-800"
+                              : "bg-red-100 text-red-800"
+                          }`}
+                        >
+                          {attendanceStats.currentStatus}
+                        </span>
+                      </td>
+
+                      <td className="p-3 flex items-center justify-center gap-3">
+                        <button
+                          onClick={() => handleAddAttendance(mr)}
+                          className="flex items-center gap-1 bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-lg cursor-pointer text-sm"
+                          title="Add Attendance"
+                        >
+                          <Clock size={16} /> Add Attendance
+                        </button>
+                        <button
+                          onClick={() => handleView(mr)}
+                          className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-lg cursor-pointer text-sm"
+                          title="View Calendar"
+                        >
+                          <Eye size={16} /> View Calendar
+                        </button>
                       </td>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan={8} className="p-3 text-center text-gray-500">
+                    No MR records found
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+
+          {/* Pagination */}
+          {currentMRs.length > 0 && (
+            <div className="mt-4 p-5 flex gap-2">
+              <button
+                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+              >
+                Prev
+              </button>
+
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map(
+                (page) => (
+                  <button
+                    key={page}
+                    onClick={() => setCurrentPage(page)}
+                    className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
+                      currentPage === page
+                        ? "bg-indigo-600 text-white"
+                        : "bg-gray-200 hover:bg-gray-300"
+                    }`}
+                  >
+                    {page}
+                  </button>
+                )
+              )}
+
+              <button
+                onClick={() =>
+                  setCurrentPage((prev) => Math.min(prev + 1, totalPages))
+                }
+                disabled={currentPage === totalPages}
+                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+              >
+                Next
+              </button>
             </div>
           )}
         </div>

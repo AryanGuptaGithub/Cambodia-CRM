@@ -1049,8 +1049,10 @@ const Holidays = () => {
               <div
                 key={date.toISOString()}
                 className={`h-12 flex items-center justify-center rounded-lg border-2 cursor-pointer transition-all ${
-                  isHolidayDay || isSundayDay
-                    ? "bg-red-500 text-white border-red-600"
+                  isHolidayDay
+                    ? "bg-red-500 text-white border-red-600" // Holidays: red
+                    : isSundayDay
+                    ? "bg-gray-400 text-white border-gray-500" // Sundays: gray
                     : isToday
                     ? "border-blue-500 bg-blue-50"
                     : "border-gray-200 bg-gray-50 hover:bg-gray-100"
@@ -1232,9 +1234,9 @@ const Holidays = () => {
                         key={date.toISOString()}
                         className={`h-6 flex items-center justify-center rounded text-xs cursor-pointer ${
                           isHolidayDay
-                            ? "bg-red-500 text-white"
+                            ? "bg-red-500 text-white" // Holidays: red
                             : isSundayDay
-                            ? "bg-red-500 text-white"
+                            ? "bg-gray-400 text-white" // Sundays: gray
                             : isToday
                             ? "bg-blue-500 text-white"
                             : "bg-gray-100"
@@ -1354,7 +1356,11 @@ const Holidays = () => {
             <div className="flex gap-6 text-sm flex-wrap justify-center">
               <div className="flex items-center gap-2">
                 <div className="w-4 h-4 bg-red-500 rounded border-2 border-red-600"></div>
-                <span>Holiday & Sunday</span>
+                <span>Holiday</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 bg-gray-400 rounded border-2 border-gray-500"></div>
+                <span>Sunday</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-4 h-4 bg-gray-50 rounded border-2 border-gray-200"></div>

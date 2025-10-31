@@ -566,11 +566,10 @@ const Leaves = () => {
 
   return (
     <div className="p-6">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-800">MR List</h1>
+      {!showCalendarView && (
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-2xl font-bold text-gray-800">MR List</h1>
 
-        {!showCalendarView && (
           <div className="flex items-center gap-4">
             <p className="text-lg font-semibold text-gray-700">
               Total Count:{" "}
@@ -595,8 +594,8 @@ const Leaves = () => {
               />
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {showCalendarView ? (
         /* Calendar View */
@@ -664,16 +663,15 @@ const Leaves = () => {
                   const remainingPaid = getRemainingPaidLeaves(mr._id);
 
                   return (
-                    <tr key={mr._id} 
-                     className={`hover:bg-gray-50 ${
+                    <tr
+                      key={mr._id}
+                      className={`hover:bg-gray-50 ${
                         (index + 1) % itemsPerPage === 0 ||
                         index + 1 === currentMRs.length
                           ? ""
                           : "border-b"
                       }`}
                     >
-
-
                       <td className="p-3">
                         {(currentPage - 1) * itemsPerPage + index + 1}
                       </td>

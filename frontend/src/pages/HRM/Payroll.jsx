@@ -1,5 +1,14 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Eye, Edit, Trash2, UserPlus, Upload, X, Search, DollarSign } from "lucide-react";
+import {
+  Eye,
+  Edit,
+  Trash2,
+  UserPlus,
+  Upload,
+  X,
+  Search,
+  DollarSign,
+} from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import axios from "axios";
@@ -33,8 +42,6 @@ const Payroll = () => {
   const inputRef = useRef(null);
 
   const [form, setForm] = useState({
-    payrollCode: "",
-    date: "",
     employeeName: "",
     department: "",
     designation: "",
@@ -42,10 +49,6 @@ const Payroll = () => {
     allowances: "",
     deductions: "",
     netSalary: "",
-    paymentMethod: "",
-    bankAccount: "",
-    paymentDate: "",
-    status: "pending",
     remarks: "",
     _id: null,
   });
@@ -75,7 +78,7 @@ const Payroll = () => {
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm]);
-  
+
   const filteredPayrolls = payrolls.filter(
     (r) =>
       r.employeeName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -253,7 +256,7 @@ const Payroll = () => {
         "bank account",
         "payment date",
         "status",
-        "remarks"
+        "remarks",
       ];
 
       let headerRowIndex = -1;
@@ -439,7 +442,7 @@ const Payroll = () => {
       console.error("Error updating payroll:", err);
     }
   };
-  
+
   const handleIconClick = () => {
     if (inputRef.current) {
       inputRef.current.focus();
@@ -452,9 +455,9 @@ const Payroll = () => {
 
   // Format currency
   const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD'
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
     }).format(amount);
   };
 
@@ -523,7 +526,21 @@ const Payroll = () => {
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
-              <th className="p-3 text-sm font-medium"><div className="flex items-center gap-4">{currentPayrolls.length > 0 && (<input type="checkbox" checked={selected.length === currentPayrolls.length && currentPayrolls.length > 0} onChange={(e) => toggleSelectAll(e.target.checked)} />)}<span>Employee</span></div></th>
+              <th className="p-3 text-sm font-medium">
+                <div className="flex items-center gap-4">
+                  {currentPayrolls.length > 0 && (
+                    <input
+                      type="checkbox"
+                      checked={
+                        selected.length === currentPayrolls.length &&
+                        currentPayrolls.length > 0
+                      }
+                      onChange={(e) => toggleSelectAll(e.target.checked)}
+                    />
+                  )}
+                  <span>Employee</span>
+                </div>
+              </th>
               <th className="p-3 text-sm font-medium">Department</th>
               <th className="p-3 text-sm font-medium">Designation</th>
               <th className="p-3 text-sm font-medium">Basic Salary</th>
@@ -538,118 +555,539 @@ const Payroll = () => {
           <tbody>
             {currentPayrolls.length > 0 ? (
               currentPayrolls.map((payroll, index) => (
-                <tr key={payroll._id} className={`hover:bg-gray-50 ${(index + 1) % payrollsPerPage === 0 || index + 1 === currentPayrolls.length ? "" : "border-b"}`}>
-                  <td className="p-3"><div className="flex items-center gap-4"><input type="checkbox" checked={selected.some((s) => s.id === payroll._id)} onChange={() => toggleSelect(payroll)} /><span className="capitalize">{payroll.employeeName}</span></div></td>
+                <tr
+                  key={payroll._id}
+                  className={`hover:bg-gray-50 ${
+                    (index + 1) % payrollsPerPage === 0 ||
+                    index + 1 === currentPayrolls.length
+                      ? ""
+                      : "border-b"
+                  }`}
+                >
+                  <td className="p-3">
+                    <div className="flex items-center gap-4">
+                      <input
+                        type="checkbox"
+                        checked={selected.some((s) => s.id === payroll._id)}
+                        onChange={() => toggleSelect(payroll)}
+                      />
+                      <span className="capitalize">{payroll.employeeName}</span>
+                    </div>
+                  </td>
                   <td className="p-3 capitalize">{payroll.department}</td>
                   <td className="p-3 capitalize">{payroll.designation}</td>
                   <td className="p-3">{formatCurrency(payroll.basicSalary)}</td>
                   <td className="p-3">{formatCurrency(payroll.allowances)}</td>
                   <td className="p-3">{formatCurrency(payroll.deductions)}</td>
-                  <td className="p-3 font-semibold">{formatCurrency(payroll.netSalary)}</td>
-                  <td className="p-3">{formatDateToReadable(payroll.paymentDate)}</td>
-                  <td><button onClick={() => handlerEnabledPayroll(payroll._id)} className={`px-3 py-1 rounded-full text-sm cursor-pointer ${payroll.enabled ? "bg-green-100 text-green-600" : "bg-gray-200 text-gray-600"}`}>{payroll.enabled ? "Enabled" : "Disabled"}</button></td>
+                  <td className="p-3 font-semibold">
+                    {formatCurrency(payroll.netSalary)}
+                  </td>
+                  <td className="p-3">
+                    {formatDateToReadable(payroll.paymentDate)}
+                  </td>
+                  <td>
+                    <button
+                      onClick={() => handlerEnabledPayroll(payroll._id)}
+                      className={`px-3 py-1 rounded-full text-sm cursor-pointer ${
+                        payroll.enabled
+                          ? "bg-green-100 text-green-600"
+                          : "bg-gray-200 text-gray-600"
+                      }`}
+                    >
+                      {payroll.enabled ? "Enabled" : "Disabled"}
+                    </button>
+                  </td>
                   <td className="p-3 flex items-center justify-center gap-3">
-                    <button className="text-blue-600 hover:text-blue-800 cursor-pointer"><Eye onClick={() => handleView(payroll)} size={18} /></button>
-                    <button className="text-green-600 hover:text-green-800 cursor-pointer"><Edit onClick={() => editPayroll(payroll)} size={18} /></button>
-                    <button onClick={() => deletePayroll(payroll)} className="text-red-600 hover:text-red-800 cursor-pointer"><Trash2 size={18} /></button>
+                    <button className="text-blue-600 hover:text-blue-800 cursor-pointer">
+                      <Eye onClick={() => handleView(payroll)} size={18} />
+                    </button>
+                    <button className="text-green-600 hover:text-green-800 cursor-pointer">
+                      <Edit onClick={() => editPayroll(payroll)} size={18} />
+                    </button>
+                    <button
+                      onClick={() => deletePayroll(payroll)}
+                      className="text-red-600 hover:text-red-800 cursor-pointer"
+                    >
+                      <Trash2 size={18} />
+                    </button>
                   </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={10} className="p-3 text-center">No payroll records found</td>
+                <td colSpan={10} className="p-3 text-center">
+                  No payroll records found
+                </td>
               </tr>
             )}
           </tbody>
         </table>
         {currentPayrolls.length > 0 && (
           <div className="mt-4 p-5 flex justify-start gap-2">
-            <button onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))} disabled={currentPage === 1} className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer">Prev</button>
-            {visiblePages.map((page, idx) => page === "..." ? (<span key={`ellipsis-${idx}`} className="px-3 py-1 text-gray-500 select-none cursor-pointer">...</span>) : (<button key={page} onClick={() => setCurrentPage(page)} className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${currentPage === page ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}>{page}</button>))}
-            <button onClick={() => { setCurrentPage((prev) => Math.min(prev + 1, totalPages)); window.scrollTo({ top: 0, behavior: "smooth" }); }} disabled={currentPage === totalPages} className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer">Next</button>
+            <button
+              onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+            >
+              Prev
+            </button>
+            {visiblePages.map((page, idx) =>
+              page === "..." ? (
+                <span
+                  key={`ellipsis-${idx}`}
+                  className="px-3 py-1 text-gray-500 select-none cursor-pointer"
+                >
+                  ...
+                </span>
+              ) : (
+                <button
+                  key={page}
+                  onClick={() => setCurrentPage(page)}
+                  className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
+                    currentPage === page
+                      ? "bg-indigo-600 text-white"
+                      : "bg-gray-200 hover:bg-gray-300"
+                  }`}
+                >
+                  {page}
+                </button>
+              )
+            )}
+            <button
+              onClick={() => {
+                setCurrentPage((prev) => Math.min(prev + 1, totalPages));
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }}
+              disabled={currentPage === totalPages}
+              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+            >
+              Next
+            </button>
           </div>
         )}
       </div>
 
-      {showImportModal && ReactDOM.createPortal(
-        <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsOpen(false)} />
-          <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
-            <button onClick={() => setShowImportModal(false)} className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer" disabled={isUploading}><X size={20} /></button>
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">Import Payroll</h2>
-            {isSampleFile && <SampleExcelDownloadPayroll />}
-            <div className="mb-6">
-              <label className="block text-gray-700 mb-2">File</label>
-              <input type="file" accept=".csv, .xlsx" onChange={handleFileUpload} className="block w-full border rounded-lg px-3 py-2 cursor-pointer" />
+      {showImportModal &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setIsOpen(false)}
+            />
+            <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
+              <button
+                onClick={() => setShowImportModal(false)}
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                disabled={isUploading}
+              >
+                <X size={20} />
+              </button>
+              <h2 className="text-lg font-semibold text-gray-800 mb-4">
+                Import Payroll
+              </h2>
+              {isSampleFile && <SampleExcelDownloadPayroll />}
+              <div className="mb-6">
+                <label className="block text-gray-700 mb-2">File</label>
+                <input
+                  type="file"
+                  accept=".csv, .xlsx"
+                  onChange={handleFileUpload}
+                  className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
+                />
+              </div>
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setShowImportModal(false)}
+                  disabled={isUploading}
+                  className={`px-5 py-2 rounded-lg cursor-pointer ${
+                    isUploading
+                      ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                      : "bg-gray-300 hover:bg-gray-400 text-gray-700"
+                  }`}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleImport}
+                  disabled={isUploading}
+                  className={`px-5 py-2 rounded-lg cursor-pointer ${
+                    isUploading
+                      ? "bg-blue-400 text-white cursor-not-allowed"
+                      : "bg-blue-600 hover:bg-blue-700 text-white"
+                  }`}
+                >
+                  {isUploading ? "Uploading…" : "Upload"}
+                </button>
+              </div>
             </div>
-            <div className="flex justify-end gap-3">
-              <button onClick={() => setShowImportModal(false)} disabled={isUploading} className={`px-5 py-2 rounded-lg cursor-pointer ${isUploading ? "bg-gray-300 text-gray-500 cursor-not-allowed" : "bg-gray-300 hover:bg-gray-400 text-gray-700"}`}>Cancel</button>
-              <button onClick={handleImport} disabled={isUploading} className={`px-5 py-2 rounded-lg cursor-pointer ${isUploading ? "bg-blue-400 text-white cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700 text-white"}`}>{isUploading ? "Uploading…" : "Upload"}</button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+          </div>,
+          document.body
+        )}
 
       {/* Edit Payroll Modal */}
-      {isEditModalOpen && ReactDOM.createPortal(
-        <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsOpen(false)} />
-          <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
-            <button onClick={() => setIsEditModalOpen(false)} className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"><X size={20} /></button>
-            <h2 className="text-xl font-semibold text-gray-800 mb-4">Edit Payroll</h2>
-            <form onSubmit={handleUpdatePayroll} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div><label className="block text-sm font-medium text-gray-700">Payroll Code</label><input type="text" value={form.payrollCode} onChange={(e) => setForm({ ...form, payrollCode: e.target.value })} className="w-full border px-3 py-2 rounded-lg bg-gray-100 text-gray-500 cursor-not-allowed" disabled /></div>
-              <div><label className="block text-sm font-medium">Employee Name</label><input type="text" value={form.employeeName} onChange={(e) => setForm({ ...form, employeeName: e.target.value })} className="w-full border px-3 py-2 rounded-lg capitalize" /></div>
-              <div><label className="block text-sm font-medium">Department</label><input type="text" value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} className="w-full border px-3 py-2 rounded-lg capitalize" /></div>
-              <div><label className="block text-sm font-medium">Designation</label><input type="text" value={form.designation} onChange={(e) => setForm({ ...form, designation: e.target.value })} className="w-full border px-3 py-2 rounded-lg capitalize" /></div>
-              <div><label className="block text-sm font-medium">Basic Salary</label><input type="number" value={form.basicSalary} onChange={(e) => setForm({ ...form, basicSalary: e.target.value })} className="w-full border px-3 py-2 rounded-lg" /></div>
-              <div><label className="block text-sm font-medium">Allowances</label><input type="number" value={form.allowances} onChange={(e) => setForm({ ...form, allowances: e.target.value })} className="w-full border px-3 py-2 rounded-lg" /></div>
-              <div><label className="block text-sm font-medium">Deductions</label><input type="number" value={form.deductions} onChange={(e) => setForm({ ...form, deductions: e.target.value })} className="w-full border px-3 py-2 rounded-lg" /></div>
-              <div><label className="block text-sm font-medium">Net Salary</label><input type="number" value={form.netSalary} onChange={(e) => setForm({ ...form, netSalary: e.target.value })} className="w-full border px-3 py-2 rounded-lg bg-gray-100" disabled /></div>
-              <div><label className="block text-sm font-medium">Payment Method</label><select value={form.paymentMethod} onChange={(e) => setForm({ ...form, paymentMethod: e.target.value })} className="w-full border px-3 py-2 rounded-lg"><option value="cash">Cash</option><option value="bank">Bank Transfer</option><option value="check">Check</option></select></div>
-              <div><label className="block text-sm font-medium">Bank Account</label><input type="text" value={form.bankAccount} onChange={(e) => setForm({ ...form, bankAccount: e.target.value })} className="w-full border px-3 py-2 rounded-lg" /></div>
-              <div><label className="block text-sm font-medium">Payment Date</label><DatePicker selected={form.paymentDate ? new Date(form.paymentDate) : null} onChange={(date) => date ? setForm({ ...form, paymentDate: date.toISOString() }) : null} dateFormat="yyyy-MM-dd" placeholderText="Select payment date" className="w-full border px-3 py-2 rounded-lg" /></div>
-              <div><label className="block text-sm font-medium">Status</label><select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className="w-full border px-3 py-2 rounded-lg"><option value="pending">Pending</option><option value="paid">Paid</option><option value="cancelled">Cancelled</option></select></div>
-              <div className="md:col-span-2"><label className="block text-sm font-medium">Remarks</label><textarea value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} className="w-full border px-3 py-2 rounded-lg" rows="3" /></div>
-            </form>
-            <div className="mt-6 flex justify-end gap-3">
-              <button onClick={() => setIsEditModalOpen(false)} className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer">Cancel</button>
-              <button type="submit" onClick={handleUpdatePayroll} className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer">Update</button>
+      {isEditModalOpen &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setIsOpen(false)}
+            />
+            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+              <button
+                onClick={() => setIsEditModalOpen(false)}
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+              <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                Edit Payroll
+              </h2>
+              <form
+                onSubmit={handleUpdatePayroll}
+                className="grid grid-cols-1 md:grid-cols-2 gap-4"
+              >
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Payroll Code
+                  </label>
+                  <input
+                    type="text"
+                    value={form.payrollCode}
+                    onChange={(e) =>
+                      setForm({ ...form, payrollCode: e.target.value })
+                    }
+                    className="w-full border px-3 py-2 rounded-lg bg-gray-100 text-gray-500 cursor-not-allowed"
+                    disabled
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">
+                    Employee Name
+                  </label>
+                  <input
+                    type="text"
+                    value={form.employeeName}
+                    onChange={(e) =>
+                      setForm({ ...form, employeeName: e.target.value })
+                    }
+                    className="w-full border px-3 py-2 rounded-lg capitalize"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">
+                    Department
+                  </label>
+                  <input
+                    type="text"
+                    value={form.department}
+                    onChange={(e) =>
+                      setForm({ ...form, department: e.target.value })
+                    }
+                    className="w-full border px-3 py-2 rounded-lg capitalize"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">
+                    Designation
+                  </label>
+                  <input
+                    type="text"
+                    value={form.designation}
+                    onChange={(e) =>
+                      setForm({ ...form, designation: e.target.value })
+                    }
+                    className="w-full border px-3 py-2 rounded-lg capitalize"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">
+                    Basic Salary
+                  </label>
+                  <input
+                    type="number"
+                    value={form.basicSalary}
+                    onChange={(e) =>
+                      setForm({ ...form, basicSalary: e.target.value })
+                    }
+                    className="w-full border px-3 py-2 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">
+                    Allowances
+                  </label>
+                  <input
+                    type="number"
+                    value={form.allowances}
+                    onChange={(e) =>
+                      setForm({ ...form, allowances: e.target.value })
+                    }
+                    className="w-full border px-3 py-2 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">
+                    Deductions
+                  </label>
+                  <input
+                    type="number"
+                    value={form.deductions}
+                    onChange={(e) =>
+                      setForm({ ...form, deductions: e.target.value })
+                    }
+                    className="w-full border px-3 py-2 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">
+                    Net Salary
+                  </label>
+                  <input
+                    type="number"
+                    value={form.netSalary}
+                    onChange={(e) =>
+                      setForm({ ...form, netSalary: e.target.value })
+                    }
+                    className="w-full border px-3 py-2 rounded-lg bg-gray-100"
+                    disabled
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">
+                    Payment Method
+                  </label>
+                  <select
+                    value={form.paymentMethod}
+                    onChange={(e) =>
+                      setForm({ ...form, paymentMethod: e.target.value })
+                    }
+                    className="w-full border px-3 py-2 rounded-lg"
+                  >
+                    <option value="cash">Cash</option>
+                    <option value="bank">Bank Transfer</option>
+                    <option value="check">Check</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">
+                    Bank Account
+                  </label>
+                  <input
+                    type="text"
+                    value={form.bankAccount}
+                    onChange={(e) =>
+                      setForm({ ...form, bankAccount: e.target.value })
+                    }
+                    className="w-full border px-3 py-2 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">
+                    Payment Date
+                  </label>
+                  <DatePicker
+                    selected={
+                      form.paymentDate ? new Date(form.paymentDate) : null
+                    }
+                    onChange={(date) =>
+                      date
+                        ? setForm({ ...form, paymentDate: date.toISOString() })
+                        : null
+                    }
+                    dateFormat="yyyy-MM-dd"
+                    placeholderText="Select payment date"
+                    className="w-full border px-3 py-2 rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">Status</label>
+                  <select
+                    value={form.status}
+                    onChange={(e) =>
+                      setForm({ ...form, status: e.target.value })
+                    }
+                    className="w-full border px-3 py-2 rounded-lg"
+                  >
+                    <option value="pending">Pending</option>
+                    <option value="paid">Paid</option>
+                    <option value="cancelled">Cancelled</option>
+                  </select>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium">Remarks</label>
+                  <textarea
+                    value={form.remarks}
+                    onChange={(e) =>
+                      setForm({ ...form, remarks: e.target.value })
+                    }
+                    className="w-full border px-3 py-2 rounded-lg"
+                    rows="3"
+                  />
+                </div>
+              </form>
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  onClick={() => setIsEditModalOpen(false)}
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  onClick={handleUpdatePayroll}
+                  className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+                >
+                  Update
+                </button>
+              </div>
             </div>
-          </div>
-        </div>,
-        document.body
-      )}
+          </div>,
+          document.body
+        )}
 
-      {isViewModalOpen && ReactDOM.createPortal(
-        <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsOpen(false)} />
-          <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
-            <button onClick={() => setIsViewModalOpen(false)} className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"><X size={20} /></button>
-            <h2 className="text-xl font-semibold text-gray-800 mb-4">View Payroll</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div><label className="block text-sm font-medium text-gray-600">Payroll Code</label><p className="border px-3 py-2 rounded-lg bg-gray-100">{form.payrollCode}</p></div>
-              <div><label className="block text-sm font-medium text-gray-600">Employee Name</label><p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">{form.employeeName}</p></div>
-              <div><label className="block text-sm font-medium text-gray-600">Department</label><p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">{form.department}</p></div>
-              <div><label className="block text-sm font-medium text-gray-600">Designation</label><p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">{form.designation}</p></div>
-              <div><label className="block text-sm font-medium text-gray-600">Basic Salary</label><p className="border px-3 py-2 rounded-lg bg-gray-100">{formatCurrency(form.basicSalary)}</p></div>
-              <div><label className="block text-sm font-medium text-gray-600">Allowances</label><p className="border px-3 py-2 rounded-lg bg-gray-100">{formatCurrency(form.allowances)}</p></div>
-              <div><label className="block text-sm font-medium text-gray-600">Deductions</label><p className="border px-3 py-2 rounded-lg bg-gray-100">{formatCurrency(form.deductions)}</p></div>
-              <div><label className="block text-sm font-medium text-gray-600">Net Salary</label><p className="border px-3 py-2 rounded-lg bg-gray-100 font-semibold">{formatCurrency(form.netSalary)}</p></div>
-              <div><label className="block text-sm font-medium text-gray-600">Payment Method</label><p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">{form.paymentMethod}</p></div>
-              <div><label className="block text-sm font-medium text-gray-600">Bank Account</label><p className="border px-3 py-2 rounded-lg bg-gray-100">{form.bankAccount || "N/A"}</p></div>
-              <div><label className="block text-sm font-medium text-gray-600">Payment Date</label><p className="border px-3 py-2 rounded-lg bg-gray-100">{formatDateToReadable(form.paymentDate)}</p></div>
-              <div><label className="block text-sm font-medium text-gray-600">Status</label><p className={`border px-3 py-2 rounded-lg bg-gray-100 capitalize ${form.status === 'paid' ? 'text-green-600' : form.status === 'pending' ? 'text-yellow-600' : 'text-red-600'}`}>{form.status}</p></div>
-              <div className="md:col-span-2"><label className="block text-sm font-medium text-gray-600">Remarks</label><p className="border px-3 py-2 rounded-lg bg-gray-100 min-h-[80px]">{form.remarks?.trim() ? form.remarks : "No Remarks"}</p></div>
+      {isViewModalOpen &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setIsOpen(false)}
+            />
+            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+              <button
+                onClick={() => setIsViewModalOpen(false)}
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+              <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                View Payroll
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Payroll Code
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {form.payrollCode}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Employee Name
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {form.employeeName}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Department
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {form.department}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Designation
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {form.designation}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Basic Salary
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {formatCurrency(form.basicSalary)}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Allowances
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {formatCurrency(form.allowances)}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Deductions
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {formatCurrency(form.deductions)}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Net Salary
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 font-semibold">
+                    {formatCurrency(form.netSalary)}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Payment Method
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {form.paymentMethod}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Bank Account
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {form.bankAccount || "N/A"}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Payment Date
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {formatDateToReadable(form.paymentDate)}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Status
+                  </label>
+                  <p
+                    className={`border px-3 py-2 rounded-lg bg-gray-100 capitalize ${
+                      form.status === "paid"
+                        ? "text-green-600"
+                        : form.status === "pending"
+                        ? "text-yellow-600"
+                        : "text-red-600"
+                    }`}
+                  >
+                    {form.status}
+                  </p>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-600">
+                    Remarks
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 min-h-[80px]">
+                    {form.remarks?.trim() ? form.remarks : "No Remarks"}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-6 flex justify-end">
+                <button
+                  onClick={() => setIsViewModalOpen(false)}
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
             </div>
-            <div className="mt-6 flex justify-end">
-              <button onClick={() => setIsViewModalOpen(false)} className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer">Close</button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+          </div>,
+          document.body
+        )}
     </div>
   );
 };
