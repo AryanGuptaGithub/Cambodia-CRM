@@ -122,7 +122,7 @@ const Attendance = () => {
   const [currentAttendanceId, setCurrentAttendanceId] = useState(null);
   const [loginTime, setLoginTime] = useState(null);
   const [attendanceLoading, setAttendanceLoading] = useState(false);
-  
+
   // New state for date range in modal
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -286,9 +286,10 @@ const Attendance = () => {
 
     // Calculate attendance percentage (based on working days)
     const totalWorkingDays = getWorkingDaysInMonth(currentYear, currentMonth);
-    const attendancePercentage = totalWorkingDays > 0 
-      ? ((monthlyAttendance / totalWorkingDays) * 100).toFixed(1)
-      : 0;
+    const attendancePercentage =
+      totalWorkingDays > 0
+        ? ((monthlyAttendance / totalWorkingDays) * 100).toFixed(1)
+        : 0;
 
     const today = new Date();
     const todayRecord = mrRecords.find((record) => {
@@ -313,8 +314,13 @@ const Attendance = () => {
     const endDate = new Date(year, month + 1, 0);
     let workingDays = 0;
 
-    for (let date = new Date(startDate); date <= endDate; date.setDate(date.getDate() + 1)) {
-      if (date.getDay() !== 0) { // Not Sunday
+    for (
+      let date = new Date(startDate);
+      date <= endDate;
+      date.setDate(date.getDate() + 1)
+    ) {
+      if (date.getDay() !== 0) {
+        // Not Sunday
         workingDays++;
       }
     }
@@ -326,8 +332,18 @@ const Attendance = () => {
   const renderMonthlyCalendar = () => {
     const days = getDaysInMonth();
     const monthNames = [
-      "January", "February", "March", "April", "May", "June",
-      "July", "August", "September", "October", "November", "December"
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December",
     ];
 
     const attendanceStats = selectedMr
@@ -496,8 +512,18 @@ const Attendance = () => {
   // Render annual calendar
   const renderAnnualCalendar = () => {
     const monthNames = [
-      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
     ];
 
     const attendanceStats = selectedMr
@@ -658,15 +684,14 @@ const Attendance = () => {
     setCurrentYear(today.getFullYear());
   };
 
-  // Handle add attendance action
   const handleAddAttendance = () => {
     if (!selectedAttendanceMr) {
       alert("Please select an MR first");
       return;
     }
-    
+
     setShowAddAttendanceModal(true);
-    
+
     // Check if user is currently logged in
     const todayRecord = attendanceRecords.find((record) => {
       const recordDate = new Date(record.loginTime);
@@ -687,7 +712,7 @@ const Attendance = () => {
 
     // Set default dates to today
     const today = new Date();
-    const todayString = today.toISOString().split('T')[0];
+    const todayString = today.toISOString().split("T")[0];
     setStartDate(todayString);
     setEndDate(todayString);
   };
@@ -699,24 +724,30 @@ const Attendance = () => {
     try {
       setAttendanceLoading(true);
       const now = new Date();
-      
+
       const loginData = {
         userId: selectedAttendanceMr,
-        loginTime: now.toISOString()
+        loginTime: now.toISOString(),
       };
 
-      const response = await axios.post(`${backendUrl}/api/attendance/login`, loginData);
-      
+      const response = await axios.post(
+        `${backendUrl}/api/attendance/login`,
+        loginData
+      );
+
       if (response.data.success) {
         setLoginTime(now);
         setCurrentAttendanceId(response.data.attendance._id);
         alert(`Login recorded at ${now.toLocaleTimeString()}`);
-        
+
         // Refresh attendance records
         fetchAttendanceRecords();
       }
     } catch (err) {
-      alert("Failed to record login: " + (err.response?.data?.message || err.message));
+      alert(
+        "Failed to record login: " +
+          (err.response?.data?.message || err.message)
+      );
     } finally {
       setAttendanceLoading(false);
     }
@@ -732,28 +763,33 @@ const Attendance = () => {
     try {
       setAttendanceLoading(true);
       const now = new Date();
-      
+
       const logoutData = {
-        logoutTime: now.toISOString()
+        logoutTime: now.toISOString(),
       };
 
       const response = await axios.put(
-        `${backendUrl}/api/attendance/logout/${currentAttendanceId}`, 
+        `${backendUrl}/api/attendance/logout/${currentAttendanceId}`,
         logoutData
       );
-      
+
       if (response.data.success) {
         setLoginTime(null);
         setCurrentAttendanceId(null);
-        
+
         const totalTime = response.data.attendance.totalTime;
-        alert(`Logout recorded at ${now.toLocaleTimeString()}\nTotal time: ${totalTime}`);
-        
+        alert(
+          `Logout recorded at ${now.toLocaleTimeString()}\nTotal time: ${totalTime}`
+        );
+
         // Refresh attendance records
         fetchAttendanceRecords();
       }
     } catch (err) {
-      alert("Failed to record logout: " + (err.response?.data?.message || err.message));
+      alert(
+        "Failed to record logout: " +
+          (err.response?.data?.message || err.message)
+      );
     } finally {
       setAttendanceLoading(false);
     }
@@ -761,7 +797,9 @@ const Attendance = () => {
 
   // Clear all records
   const clearRecords = async () => {
-    if (window.confirm("Are you sure you want to clear all attendance records?")) {
+    if (
+      window.confirm("Are you sure you want to clear all attendance records?")
+    ) {
       try {
         await axios.delete(`${backendUrl}/api/attendance`);
         setAttendanceRecords([]);
@@ -777,14 +815,11 @@ const Attendance = () => {
 
   return (
     <div className="p-6">
-      {/* Add Attendance Modal */}
       {showAddAttendanceModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
-            <h2 className="text-xl font-bold mb-4">
-              Record Attendance
-            </h2>
-            
+            <h2 className="text-xl font-bold mb-4">Record Attendance</h2>
+
             {/* MR Selection Dropdown */}
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -828,7 +863,9 @@ const Attendance = () => {
             <div className="mb-4">
               <p>
                 Current Status:{" "}
-                <strong>{currentAttendanceId ? "Logged In" : "Logged Out"}</strong>
+                <strong>
+                  {currentAttendanceId ? "Logged In" : "Logged Out"}
+                </strong>
               </p>
               {loginTime && (
                 <p>
@@ -841,9 +878,15 @@ const Attendance = () => {
             <div className="flex gap-3 mb-4">
               <button
                 onClick={handleLogin}
-                disabled={!!currentAttendanceId || attendanceLoading || !selectedAttendanceMr}
+                disabled={
+                  !!currentAttendanceId ||
+                  attendanceLoading ||
+                  !selectedAttendanceMr
+                }
                 className={`flex-1 py-2 px-4 rounded-lg flex items-center justify-center gap-2 ${
-                  currentAttendanceId || attendanceLoading || !selectedAttendanceMr
+                  currentAttendanceId ||
+                  attendanceLoading ||
+                  !selectedAttendanceMr
                     ? "bg-gray-400 cursor-not-allowed"
                     : "bg-green-600 hover:bg-green-700"
                 } text-white`}
@@ -851,12 +894,18 @@ const Attendance = () => {
                 <LogIn size={16} />
                 {attendanceLoading ? "Processing..." : "Login"}
               </button>
-              
+
               <button
                 onClick={handleLogout}
-                disabled={!currentAttendanceId || attendanceLoading || !selectedAttendanceMr}
+                disabled={
+                  !currentAttendanceId ||
+                  attendanceLoading ||
+                  !selectedAttendanceMr
+                }
                 className={`flex-1 py-2 px-4 rounded-lg flex items-center justify-center gap-2 ${
-                  !currentAttendanceId || attendanceLoading || !selectedAttendanceMr
+                  !currentAttendanceId ||
+                  attendanceLoading ||
+                  !selectedAttendanceMr
                     ? "bg-gray-400 cursor-not-allowed"
                     : "bg-red-600 hover:bg-red-700"
                 } text-white`}
@@ -880,7 +929,9 @@ const Attendance = () => {
 
       {!showCalendarView && (
         <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-bold text-gray-800">MR Attendance Records</h1>
+          <h1 className="text-2xl font-bold text-gray-800">
+            MR Attendance Records
+          </h1>
 
           <div className="flex items-center gap-4">
             <p className="text-lg font-semibold text-gray-700">
@@ -889,15 +940,6 @@ const Attendance = () => {
                 {filteredMRList.length}
               </span>
             </p>
-            
-            {/* Add Attendance Button */}
-            <button
-              onClick={handleAddAttendance}
-              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg cursor-pointer"
-            >
-              <Clock size={16} />
-              Add Attendance
-            </button>
 
             <div className="relative w-72">
               <Search
@@ -964,15 +1006,13 @@ const Attendance = () => {
         /* Table View */
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
           <div className="flex justify-between items-center p-4 bg-gray-50 border-b">
-            <h2 className="text-lg font-semibold">Attendance Records</h2>
-            {attendanceRecords.length > 0 && (
-              <button
-                onClick={clearRecords}
-                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg cursor-pointer"
-              >
-                Clear All Records
-              </button>
-            )}
+            <button
+              onClick={handleAddAttendance}
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg cursor-pointer"
+            >
+              <Clock size={16} />
+              Add Attendance
+            </button>
           </div>
 
           <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
