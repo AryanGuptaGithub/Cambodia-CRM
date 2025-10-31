@@ -26,7 +26,7 @@ const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
 const holidaysPerPage = 7;
-const upcomingHolidaysPerPage = 4;
+const upcomingHolidaysPerPage = 3;
 
 const Holidays = () => {
   const navigate = useNavigate();
@@ -42,6 +42,8 @@ const Holidays = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [isUploading, setIsUploading] = useState(false);
   const inputRef = useRef(null);
+  const fileInputRef = useRef(null); // Add ref for file input
+  const [isOpen, setIsOpen] = useState(false);
 
   const [form, setForm] = useState({
     startDate: "",
@@ -60,7 +62,7 @@ const Holidays = () => {
   const [calendarViewType, setCalendarViewType] = useState("monthly");
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
-  
+
   // Upcoming holidays pagination
   const [upcomingHolidaysPage, setUpcomingHolidaysPage] = useState(1);
 
@@ -85,12 +87,11 @@ const Holidays = () => {
     setCurrentPage(1);
   }, [searchTerm]);
 
-  // Add this function to format dates as "01 Nov 2025"
   const formatDateToShort = (dateString) => {
-    if (!dateString) return '';
+    if (!dateString) return "";
     const date = new Date(dateString);
-    const day = String(date.getDate()).padStart(2, '0');
-    const month = date.toLocaleString('default', { month: 'short' });
+    const day = String(date.getDate()).padStart(2, "0");
+    const month = date.toLocaleString("default", { month: "short" });
     const year = date.getFullYear();
     return `${day} ${month} ${year}`;
   };
@@ -99,15 +100,15 @@ const Holidays = () => {
     (r) =>
       r.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       r.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (r.startDate && r.startDate.toLowerCase().includes(searchTerm.toLowerCase()))
+      (r.startDate &&
+        r.startDate.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   // Get upcoming holidays for CURRENT MONTH only (excluding Sundays)
   const currentMonthHolidays = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
-    // Get start and end of current month
+
     const startOfMonth = new Date(currentYear, currentMonth, 1);
     const endOfMonth = new Date(currentYear, currentMonth + 1, 0);
     endOfMonth.setHours(23, 59, 59, 999);
@@ -117,20 +118,65 @@ const Holidays = () => {
         if (!holiday.startDate) return false;
         const holidayDate = new Date(holiday.startDate);
         holidayDate.setHours(0, 0, 0, 0);
-        
-        // Exclude Sundays and past holidays, include only current month
-        return holidayDate >= today && 
-               holidayDate <= endOfMonth && 
-               holidayDate.getDay() !== 0;
+
+        return (
+          holidayDate >= today &&
+          holidayDate <= endOfMonth &&
+          holidayDate.getDay() !== 0
+        );
       })
       .sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
   }, [holidays, currentMonth, currentYear]);
 
-  // Get holidays for NEXT MONTH (for navigation)
+  // Get holidays for calendar display (current displayed month)
+  const currentCalendarMonthHolidays = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const startOfMonth = new Date(currentYear, currentMonth, 1);
+    const endOfMonth = new Date(currentYear, currentMonth + 1, 0);
+    endOfMonth.setHours(23, 59, 59, 999);
+
+    return holidays
+      .filter((holiday) => {
+        if (!holiday.startDate) return false;
+        const holidayDate = new Date(holiday.startDate);
+        holidayDate.setHours(0, 0, 0, 0);
+
+        return (
+          holidayDate >= startOfMonth &&
+          holidayDate <= endOfMonth &&
+          holidayDate.getDay() !== 0
+        );
+      })
+      .sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+  }, [holidays, currentMonth, currentYear]);
+
+  // Get holidays for the entire year
+  const currentYearHolidays = useMemo(() => {
+    const startOfYear = new Date(currentYear, 0, 1);
+    const endOfYear = new Date(currentYear, 11, 31);
+    endOfYear.setHours(23, 59, 59, 999);
+
+    return holidays
+      .filter((holiday) => {
+        if (!holiday.startDate) return false;
+        const holidayDate = new Date(holiday.startDate);
+        holidayDate.setHours(0, 0, 0, 0);
+
+        return (
+          holidayDate >= startOfYear &&
+          holidayDate <= endOfYear &&
+          holidayDate.getDay() !== 0
+        );
+      })
+      .sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
+  }, [holidays, currentYear]);
+
   const nextMonthHolidays = useMemo(() => {
     const nextMonth = currentMonth === 11 ? 0 : currentMonth + 1;
     const nextMonthYear = currentMonth === 11 ? currentYear + 1 : currentYear;
-    
+
     const startOfNextMonth = new Date(nextMonthYear, nextMonth, 1);
     const endOfNextMonth = new Date(nextMonthYear, nextMonth + 1, 0);
     endOfNextMonth.setHours(23, 59, 59, 999);
@@ -140,54 +186,65 @@ const Holidays = () => {
         if (!holiday.startDate) return false;
         const holidayDate = new Date(holiday.startDate);
         holidayDate.setHours(0, 0, 0, 0);
-        
-        return holidayDate >= startOfNextMonth && 
-               holidayDate <= endOfNextMonth && 
-               holidayDate.getDay() !== 0;
+
+        return (
+          holidayDate >= startOfNextMonth &&
+          holidayDate <= endOfNextMonth &&
+          holidayDate.getDay() !== 0
+        );
       })
       .sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
   }, [holidays, currentMonth, currentYear]);
 
   // Pagination for current month holidays
-  const currentMonthHolidaysTotalPages = Math.ceil(currentMonthHolidays.length / upcomingHolidaysPerPage);
+  const currentMonthHolidaysTotalPages = Math.ceil(
+    currentMonthHolidays.length / upcomingHolidaysPerPage
+  );
   const currentMonthHolidaysToShow = currentMonthHolidays.slice(
     (upcomingHolidaysPage - 1) * upcomingHolidaysPerPage,
     upcomingHolidaysPage * upcomingHolidaysPerPage
   );
 
+  // Pagination for calendar month holidays
+  const currentCalendarMonthHolidaysTotalPages = Math.ceil(
+    currentCalendarMonthHolidays.length / upcomingHolidaysPerPage
+  );
+  const currentCalendarMonthHolidaysToShow = currentCalendarMonthHolidays.slice(
+    (upcomingHolidaysPage - 1) * upcomingHolidaysPerPage,
+    upcomingHolidaysPage * upcomingHolidaysPerPage
+  );
+
+  // Pagination for year holidays
+  const currentYearHolidaysTotalPages = Math.ceil(
+    currentYearHolidays.length / upcomingHolidaysPerPage
+  );
+  const currentYearHolidaysToShow = currentYearHolidays.slice(
+    (upcomingHolidaysPage - 1) * upcomingHolidaysPerPage,
+    upcomingHolidaysPage * upcomingHolidaysPerPage
+  );
+
   const nextUpcomingHolidaysPage = () => {
-    if (upcomingHolidaysPage < currentMonthHolidaysTotalPages) {
-      setUpcomingHolidaysPage(prev => prev + 1);
+    if (calendarViewType === "monthly") {
+      if (upcomingHolidaysPage < currentCalendarMonthHolidaysTotalPages) {
+        setUpcomingHolidaysPage((prev) => prev + 1);
+      }
+    } else {
+      if (upcomingHolidaysPage < currentYearHolidaysTotalPages) {
+        setUpcomingHolidaysPage((prev) => prev + 1);
+      }
     }
   };
 
   const prevUpcomingHolidaysPage = () => {
     if (upcomingHolidaysPage > 1) {
-      setUpcomingHolidaysPage(prev => prev - 1);
+      setUpcomingHolidaysPage((prev) => prev - 1);
     }
   };
 
-  // Reset pagination when month changes
+  // Reset pagination when month/year changes
   useEffect(() => {
     setUpcomingHolidaysPage(1);
-  }, [currentMonth, currentYear]);
-
-  // Group current month holidays by week for better organization
-  const currentMonthHolidaysByWeek = useMemo(() => {
-    const grouped = {};
-    currentMonthHolidaysToShow.forEach(holiday => {
-      if (!holiday.startDate) return;
-      const date = new Date(holiday.startDate);
-      const weekNumber = Math.ceil(date.getDate() / 7);
-      const weekKey = `Week ${weekNumber}`;
-      
-      if (!grouped[weekKey]) {
-        grouped[weekKey] = [];
-      }
-      grouped[weekKey].push(holiday);
-    });
-    return grouped;
-  }, [currentMonthHolidaysToShow]);
+  }, [currentMonth, currentYear, calendarViewType]);
 
   // Pagination calculations for main table
   const totalPages = Math.ceil(filteredHolidays.length / holidaysPerPage);
@@ -222,11 +279,12 @@ const Holidays = () => {
     });
   };
 
+  // Toggle select all with proper ID handling
   const toggleSelectAll = (checked) => {
     if (checked) {
-      const allSelected = currentHolidays.map((s) => ({
-        id: s._id,
-        name: s.name,
+      const allSelected = currentHolidays.map((holiday) => ({
+        id: holiday._id,
+        name: holiday.name,
       }));
       setSelected(allSelected);
     } else {
@@ -234,50 +292,63 @@ const Holidays = () => {
     }
   };
 
+  // Delete selected holidays function
   const handleDeleteSelected = async () => {
+    if (selected.length === 0) {
+      showToast("warning", "Please select holidays to delete");
+      return;
+    }
+
     const confirm = await confirmDialog({
-      text: `Are you sure you want to delete <b>${selected.length}</b> holidays`,
+      title: "Delete Selected Holidays",
+      text: `Are you sure you want to delete <b>${selected.length}</b> holiday${
+        selected.length > 1 ? "s" : ""
+      }?`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
-      selected,
+      selected: selected.map((s) => s.name),
     });
 
     if (confirm.isConfirmed) {
       try {
         const res = await axios.delete(`${backendUrl}/api/holidays`, {
-          data: { ids: selected.map(s => s.id) },
+          data: { ids: selected.map((s) => s.id) },
         });
 
         if (res.status === 200) {
-          showToast("success", "Selected holidays deleted successfully");
+          showToast(
+            "success",
+            `${selected.length} holiday${
+              selected.length > 1 ? "s" : ""
+            } deleted successfully`
+          );
           fetchHolidays();
           setSelected([]);
         }
       } catch (error) {
+        console.error("Delete selected error:", error);
         showToast("error", "Failed to delete selected holidays.");
       }
-    } else {
-      setSelected([]);
     }
   };
 
   // Open edit modal with selected holiday data
   const editHoliday = (holiday) => {
-    setForm({ 
+    setForm({
       ...holiday,
       startDate: holiday.startDate || "",
-      endDate: holiday.endDate || holiday.startDate || ""
+      endDate: holiday.endDate || holiday.startDate || "",
     });
     setIsEditModalOpen(true);
   };
 
   // Open view modal with selected holiday data
   const handleView = (holiday) => {
-    setForm({ 
+    setForm({
       ...holiday,
       startDate: holiday.startDate || "",
-      endDate: holiday.endDate || holiday.startDate || ""
+      endDate: holiday.endDate || holiday.startDate || "",
     });
     setIsViewModalOpen(true);
   };
@@ -312,13 +383,13 @@ const Holidays = () => {
     }
   };
 
-  // Add holiday from calendar with proper date format
+  // Calendar date click - only opens view modal for existing holidays
   const handleCalendarDateClick = (date) => {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, "0");
     const day = String(date.getDate()).padStart(2, "0");
     const dateString = `${year}-${month}-${day}`;
-    
+
     // Check if holiday already exists for this date
     const existingHoliday = holidays.find((h) => {
       if (!h.startDate) return false;
@@ -328,23 +399,25 @@ const Holidays = () => {
     });
 
     if (existingHoliday) {
-      setForm({ 
+      setForm({
         ...existingHoliday,
         startDate: existingHoliday.startDate || "",
-        endDate: existingHoliday.endDate || existingHoliday.startDate || ""
+        endDate: existingHoliday.endDate || existingHoliday.startDate || "",
       });
       setIsViewModalOpen(true);
-    } else {
-      const isoDateString = `${dateString}T00:00:00.000Z`;
-      setForm({
-        startDate: isoDateString,
-        endDate: isoDateString,
-        name: "",
-        description: "",
-        _id: null,
-      });
-      setIsAddModalOpen(true);
     }
+  };
+
+  // Add holiday function - reset form when opening modal
+  const handleAddButtonClick = () => {
+    setForm({
+      startDate: "",
+      endDate: "",
+      name: "",
+      description: "",
+      _id: null,
+    });
+    setIsAddModalOpen(true);
   };
 
   // Handle add holiday with proper date format
@@ -360,7 +433,7 @@ const Holidays = () => {
       // Ensure end date is not before start date
       const startDate = new Date(form.startDate);
       const endDate = new Date(form.endDate || form.startDate);
-      
+
       if (endDate < startDate) {
         showToast("error", "End date cannot be before start date");
         return;
@@ -387,8 +460,11 @@ const Holidays = () => {
         fetchHolidays();
       }
     } catch (err) {
-      console.error('Add holiday error:', err);
-      showToast("error", err.response?.data?.message || "Failed to add holiday.");
+      console.error("Add holiday error:", err);
+      showToast(
+        "error",
+        err.response?.data?.message || "Failed to add holiday."
+      );
     }
   };
 
@@ -403,7 +479,7 @@ const Holidays = () => {
 
       const startDate = new Date(form.startDate);
       const endDate = new Date(form.endDate || form.startDate);
-      
+
       if (endDate < startDate) {
         showToast("error", "End date cannot be before start date");
         return;
@@ -429,36 +505,50 @@ const Holidays = () => {
         fetchHolidays();
       }
     } catch (err) {
-      console.error('Update holiday error:', err);
-      showToast("error", err.response?.data?.message || "Failed to update holiday.");
+      console.error("Update holiday error:", err);
+      showToast(
+        "error",
+        err.response?.data?.message || "Failed to update holiday."
+      );
     }
   };
 
-  // DatePicker change handlers - FIXED
+  // DatePicker change handlers
   const handleStartDateChange = (date) => {
     if (date) {
       // Create date in local timezone but store as UTC
-      const localDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      const localDate = new Date(
+        date.getFullYear(),
+        date.getMonth(),
+        date.getDate()
+      );
       const isoDateString = localDate.toISOString();
-      
-      setForm(prev => ({ 
-        ...prev, 
+
+      setForm((prev) => ({
+        ...prev,
         startDate: isoDateString,
         // If end date is not set or is before start date, update end date
-        endDate: !prev.endDate || new Date(prev.endDate) < date ? isoDateString : prev.endDate
+        endDate:
+          !prev.endDate || new Date(prev.endDate) < date
+            ? isoDateString
+            : prev.endDate,
       }));
     } else {
-      setForm(prev => ({ ...prev, startDate: "" }));
+      setForm((prev) => ({ ...prev, startDate: "" }));
     }
   };
 
   const handleEndDateChange = (date) => {
     if (date) {
-      const localDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      const localDate = new Date(
+        date.getFullYear(),
+        date.getMonth(),
+        date.getDate()
+      );
       const isoDateString = localDate.toISOString();
-      setForm(prev => ({ ...prev, endDate: isoDateString }));
+      setForm((prev) => ({ ...prev, endDate: isoDateString }));
     } else {
-      setForm(prev => ({ ...prev, endDate: "" }));
+      setForm((prev) => ({ ...prev, endDate: "" }));
     }
   };
 
@@ -499,7 +589,60 @@ const Holidays = () => {
     }
   };
 
-  // File upload and parsing logic for import - UPDATED
+  // Parse date in "dd-mmm-yyyy" format (like "31-Oct-2025")
+  const parseCustomDate = (dateString) => {
+    if (!dateString) return null;
+
+    // If it's already a Date object or number
+    if (dateString instanceof Date) return dateString;
+    if (typeof dateString === "number") return new Date(dateString);
+
+    // Handle "dd-mmm-yyyy" format (e.g., "31-Oct-2025")
+    const match = dateString
+      .toString()
+      .match(/^(\d{1,2})-([a-zA-Z]{3})-(\d{4})$/);
+    if (match) {
+      const day = parseInt(match[1], 10);
+      const monthStr = match[2].toLowerCase();
+      const year = parseInt(match[3], 10);
+
+      const monthMap = {
+        jan: 0,
+        feb: 1,
+        mar: 2,
+        apr: 3,
+        may: 4,
+        jun: 5,
+        jul: 6,
+        aug: 7,
+        sep: 8,
+        oct: 9,
+        nov: 10,
+        dec: 11,
+      };
+
+      const month = monthMap[monthStr];
+      if (month !== undefined) {
+        return new Date(year, month, day);
+      }
+    }
+
+    // Try parsing as regular date string
+    const parsed = new Date(dateString);
+    return isNaN(parsed.getTime()) ? null : parsed;
+  };
+
+  // Handle closing import modal
+  const handleCloseImportModal = () => {
+    if (!isUploading) {
+      setShowImportModal(false);
+      setParsedData([]); // Reset parsed data when modal closes
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ""; // Reset file input
+      }
+    }
+  };
+
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -515,6 +658,7 @@ const Holidays = () => {
       const rows = XLSX.utils.sheet_to_json(worksheet, {
         header: 1,
         defval: "",
+        raw: false,
       });
 
       if (rows.length === 0) {
@@ -522,83 +666,119 @@ const Holidays = () => {
         return;
       }
 
-      // Expected headers
-      const requiredHeaders = ["start date", "end date", "name", "description"];
+      const possibleHeaders = {
+        "holiday name": ["holiday name", "holiday", "name", "holidayname"],
+        "start date": ["start date", "startdate", "start", "date"],
+        "end date": ["end date", "enddate", "end", "to date"],
+        description: ["description", "desc", "details", "note"],
+      };
 
       let headerRowIndex = -1;
-      let matchedHeaders = [];
+      let headerMapping = {};
 
-      // Find header row
       for (let i = 0; i < Math.min(rows.length, 10); i++) {
         const row = rows[i].map((cell) =>
           cell?.toString().trim().toLowerCase()
         );
-        const matched = requiredHeaders.filter((header) =>
-          row.includes(header)
-        );
-        if (matched.length >= 2) {
+
+        const foundHeaders = {};
+        Object.entries(possibleHeaders).forEach(([mainHeader, variations]) => {
+          const foundVariation = variations.find((variation) =>
+            row.includes(variation)
+          );
+          if (foundVariation) {
+            const columnIndex = row.indexOf(foundVariation);
+            foundHeaders[mainHeader] = columnIndex;
+          }
+        });
+
+        if (Object.keys(foundHeaders).length >= 2) {
           headerRowIndex = i;
-          matchedHeaders = matched;
+          headerMapping = foundHeaders;
           break;
         }
       }
 
-      if (headerRowIndex === -1 || matchedHeaders.length < requiredHeaders.length) {
-        const missingHeaders = requiredHeaders.filter(
-          (header) => !matchedHeaders.includes(header)
-        );
-        showToast("error", `Missing required headers: ${missingHeaders.join(", ")}`);
+      if (headerRowIndex === -1) {
+        showToast("error", "Could not find valid headers in the Excel file");
         return;
       }
 
-      // Map header keys to column indexes
-      const rawHeaders = rows[headerRowIndex];
-      const headersMap = {};
-      rawHeaders.forEach((header, index) => {
-        if (!header) return;
-        const cleaned = header.toString().trim().toLowerCase();
-        headersMap[index] = cleaned;
-      });
-
-      // Parse data rows
       const dataRows = rows.slice(headerRowIndex + 1);
       if (dataRows.length === 0) {
         showToast("warning", "No data found in Excel file");
         return;
       }
 
+      // Validate each row, and if any startDate is Sunday, show error and return early
+      for (let i = 0; i < dataRows.length; i++) {
+        const row = dataRows[i];
+        const item = {};
+
+        Object.entries(headerMapping).forEach(([header, columnIndex]) => {
+          if (
+            typeof columnIndex === "number" &&
+            columnIndex >= 0 &&
+            columnIndex < row.length
+          ) {
+            item[header] = row[columnIndex] || "";
+          } else {
+            item[header] = "";
+          }
+        });
+
+        const startDate = parseCustomDate(item["start date"]);
+        if (!startDate) continue; // Skip invalid dates here
+
+        if (startDate.getDay() === 0) {
+          showToast(
+            "error",
+            `Holiday "<b>${
+              item["holiday name"] || "Unnamed"
+            }</b>" cannot be on Sunday (${item["start date"]})`
+          );
+          return;
+        }
+      }
+
+      // If validation passed, map the data normally
       const mappedData = dataRows
         .map((row, rowIndex) => {
           const item = {};
-          Object.entries(headersMap).forEach(([index, key]) => {
-            item[key] = row[index] || "";
+
+          Object.entries(headerMapping).forEach(([header, columnIndex]) => {
+            if (
+              typeof columnIndex === "number" &&
+              columnIndex >= 0 &&
+              columnIndex < row.length
+            ) {
+              item[header] = row[columnIndex] || "";
+            } else {
+              item[header] = "";
+            }
           });
 
-          // Parse dates
-          const startDate = parseExcelDate(item["start date"]);
-          const endDate = parseExcelDate(item["end date"]) || startDate;
+          const startDate = parseCustomDate(item["start date"]);
+          const endDate = parseCustomDate(item["end date"]) || startDate;
 
           if (!startDate) {
-            console.warn(`Invalid start date in row ${rowIndex + 1}`);
             return null;
           }
 
           return {
             startDate: startDate.toISOString(),
             endDate: endDate.toISOString(),
-            name: item["name"]?.toString().trim(),
+            name: item["holiday name"]?.toString().trim() || "",
             description: item["description"]?.toString().trim() || "",
           };
         })
-        .filter(entry => entry && entry.name);
+        .filter((entry) => entry !== null);
 
       if (mappedData.length === 0) {
         showToast("warning", "No valid holiday data found in file");
         return;
       }
-
       setParsedData(mappedData);
-      showToast("success", `Found ${mappedData.length} valid holidays to import`);
     };
 
     reader.onerror = () => {
@@ -608,34 +788,13 @@ const Holidays = () => {
     reader.readAsArrayBuffer(file);
   };
 
-  // Parse Excel date function - IMPROVED
-  const parseExcelDate = (value) => {
-    if (!value) return null;
-
-    // If it's an Excel serial number
-    if (typeof value === "number") {
-      // Excel date (number of days since 1900-01-01)
-      const utcDate = new Date(Math.round((value - 25569) * 86400 * 1000));
-      return new Date(utcDate.getFullYear(), utcDate.getMonth(), utcDate.getDate());
-    }
-
-    // Try parsing as date string
-    const parsed = new Date(value);
-    if (!isNaN(parsed.getTime())) {
-      return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
-    }
-
-    return null;
-  };
-
-  // Import parsed holidays to backend
   const handleImport = async () => {
     if (parsedData.length === 0) {
       showToast("warning", "Please upload a valid file first");
       return;
     }
     setIsUploading(true);
-
+    console.log("values of pares", parsedData);
     try {
       const res = await axios.post(
         `${backendUrl}/api/holidays/import`,
@@ -653,7 +812,8 @@ const Holidays = () => {
       }
     } catch (err) {
       console.error("Import error:", err);
-      const errorMessage = err.response?.data?.message || "Failed to import holidays.";
+      const errorMessage =
+        err.response?.data?.message || "Failed to import holidays.";
       showToast("error", errorMessage.replace(/<[^>]+>/g, ""));
     } finally {
       setIsUploading(false);
@@ -671,10 +831,10 @@ const Holidays = () => {
       if (!holiday.startDate) return false;
       const holidayStart = new Date(holiday.startDate);
       const holidayEnd = new Date(holiday.endDate || holiday.startDate);
-      
+
       const holidayStartString = holidayStart.toISOString().split("T")[0];
       const holidayEndString = holidayEnd.toISOString().split("T")[0];
-      
+
       return dateString >= holidayStartString && dateString <= holidayEndString;
     });
   };
@@ -726,44 +886,53 @@ const Holidays = () => {
       if (!h.startDate) return false;
       const holidayStart = new Date(h.startDate);
       const holidayEnd = new Date(h.endDate || h.startDate);
-      
+
       const holidayStartString = holidayStart.toISOString().split("T")[0];
       const holidayEndString = holidayEnd.toISOString().split("T")[0];
-      
+
       return dateString >= holidayStartString && dateString <= holidayEndString;
     });
     return holiday ? holiday.name : "";
   };
 
+  // Clear selections when holidays data changes significantly
+  useEffect(() => {
+    // Clear selections if all selected holidays are no longer in currentHolidays
+    const shouldClearSelections = selected.some(
+      (selectedHoliday) =>
+        !currentHolidays.some((holiday) => holiday._id === selectedHoliday.id)
+    );
+
+    if (shouldClearSelections) {
+      setSelected([]);
+    }
+  }, [currentHolidays, selected]);
+
   // Render monthly calendar
   const renderMonthlyCalendar = () => {
     const days = getDaysInMonth();
     const monthNames = [
-      "January", "February", "March", "April", "May", "June",
-      "July", "August", "September", "October", "November", "December"
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December",
     ];
-
-    const hasNextMonthHolidays = nextMonthHolidays.length > 0;
 
     return (
       <div className="bg-white rounded-2xl shadow border border-gray-200 p-6">
-        {/* Calendar Header */}
         <div className="flex justify-between items-center mb-6">
-          {/* Upcoming Holidays Section */}
-          <div className="flex-1 max-w-md">
-            {/* <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-800">
-                {monthNames[currentMonth]} {currentYear} Holidays
-                {currentMonthHolidays.length > 0 && (
-                  <span className="text-sm font-normal text-gray-600 ml-2">
-                    ({currentMonthHolidays.length} holiday{currentMonthHolidays.length !== 1 ? 's' : ''})
-                  </span>
-                )}
-              </h3>
-              
-         
-              {currentMonthHolidays.length > upcomingHolidaysPerPage && (
-                <div className="flex items-center gap-3">
+          <div className="flex items-center gap-4">
+            <div className="flex">
+              <div className="flex gap-3">
+                {currentCalendarMonthHolidays.length > 0 && (
                   <button
                     onClick={prevUpcomingHolidaysPage}
                     disabled={upcomingHolidaysPage === 1}
@@ -775,109 +944,78 @@ const Holidays = () => {
                   >
                     <ChevronLeft size={16} />
                   </button>
-                  
-                  <span className="text-sm font-medium text-gray-600 min-w-[80px] text-center">
-                    Page {upcomingHolidaysPage} of {currentMonthHolidaysTotalPages}
-                  </span>
-                  
+                )}
+
+                <div className="flex px-0.9">
+                  {currentCalendarMonthHolidaysToShow.length > 0 ? (
+                    <div className="flex gap-2">
+                      {currentCalendarMonthHolidaysToShow.map((holiday) => (
+                        <div
+                          key={holiday._id}
+                          className="inline-block bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 hover:bg-blue-100 transition-colors whitespace-nowrap"
+                        >
+                          <div className="font-medium text-blue-800 text-sm">
+                            {holiday.name} (
+                            {formatDateToReadable(holiday.startDate)})
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-gray-500 text-sm py-2">
+                      No holidays in {monthNames[currentMonth]} {currentYear}
+                    </div>
+                  )}
+                </div>
+                {currentCalendarMonthHolidays.length > 0 && (
                   <button
                     onClick={nextUpcomingHolidaysPage}
-                    disabled={upcomingHolidaysPage === currentMonthHolidaysTotalPages}
+                    disabled={
+                      upcomingHolidaysPage ===
+                      currentCalendarMonthHolidaysTotalPages
+                    }
                     className={`p-2 rounded-lg border ${
-                      upcomingHolidaysPage === currentMonthHolidaysTotalPages
+                      upcomingHolidaysPage ===
+                      currentCalendarMonthHolidaysTotalPages
                         ? "bg-gray-100 text-gray-400 cursor-not-allowed"
                         : "bg-white text-gray-700 hover:bg-gray-50 cursor-pointer border-gray-300"
                     }`}
                   >
                     <ChevronRight size={16} />
                   </button>
-                </div>
-              )}
-            </div>
-
-{/*         
-            <div className="space-y-3">
-              {currentMonthHolidaysToShow.length > 0 ? (
-                Object.entries(currentMonthHolidaysByWeek).map(([weekKey, weekHolidays]) => (
-                  <div key={weekKey} className="mb-4">
-                    <h4 className="text-sm font-semibold text-gray-700 mb-2 border-b pb-1">
-                      {weekKey}
-                    </h4>
-                    <div className="space-y-2">
-                      {weekHolidays.map((holiday) => (
-                        <div
-                          key={holiday._id}
-                          className="bg-blue-50 border border-blue-200 rounded-lg p-3 hover:bg-blue-100 transition-colors"
-                        >
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <div className="font-medium text-blue-800 text-sm">
-                                {holiday.name}
-                              </div>
-                              <div className="text-blue-600 text-xs mt-1">
-                                {formatDateToReadable(holiday.startDate)}
-                                {holiday.endDate && holiday.endDate !== holiday.startDate && 
-                                  ` to ${formatDateToReadable(holiday.endDate)}`
-                                }
-                              </div>
-                            </div>
-                            {holiday.description && (
-                              <div className="text-xs text-blue-500 max-w-[120px] truncate" title={holiday.description}>
-                                {holiday.description}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="text-center py-4 text-gray-500">
-                  <Calendar size={24} className="mx-auto mb-2 text-gray-400" />
-                  <p className="text-sm">No holidays in {monthNames[currentMonth]} {currentYear}</p>
-                </div>
-              )}
-            </div>
-
-            {hasNextMonthHolidays && (
-              <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-sm font-semibold text-green-800">
-                    Next Month Preview
-                  </h4>
-                  <button
-                    onClick={nextMonth}
-                    className="text-green-600 hover:text-green-800 text-sm font-medium flex items-center gap-1 cursor-pointer"
-                  >
-                    View {monthNames[currentMonth === 11 ? 0 : currentMonth + 1]} {currentMonth === 11 ? currentYear + 1 : currentYear}
-                    <ChevronRight size={14} />
-                  </button>
-                </div>
-                <p className="text-xs text-green-600">
-                  {nextMonthHolidays.length} holiday{nextMonthHolidays.length !== 1 ? 's' : ''} in {monthNames[currentMonth === 11 ? 0 : currentMonth + 1]}
-                </p>
+                )}
               </div>
-            )}   */}
+            </div>
           </div>
 
+          {/* Month Navigation with Holiday Count */}
+          <div className="flex items-center gap-4">
+            {/* Holiday Count Display */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
+              <div className="text-sm font-medium text-blue-800">
+                {currentCalendarMonthHolidays.length} holiday
+                {currentCalendarMonthHolidays.length !== 1 ? "s" : ""}
+              </div>
+            </div>
 
-          <div className="flex gap-3 items-center">
-            <button
-              onClick={prevMonth}
-              className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer transition-colors"
-            >
-              <ChevronLeft size={20} />
-            </button>
-            <h2 className="text-xl font-bold text-gray-800 min-w-[200px] text-center">
-              {monthNames[currentMonth]} {currentYear}
-            </h2>
-            <button
-              onClick={nextMonth}
-              className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer transition-colors"
-            >
-              <ChevronRight size={20} />
-            </button>
+            {/* Month Navigation Buttons */}
+            <div className="flex items-center gap-3">
+              <button
+                onClick={prevMonth}
+                className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer transition-colors"
+              >
+                <ChevronLeft size={20} />
+              </button>
+              <h2 className="text-xl font-bold text-gray-800 min-w-[200px] text-center">
+                {monthNames[currentMonth]} {currentYear}
+              </h2>
+              <button
+                onClick={nextMonth}
+                className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer transition-colors"
+              >
+                <ChevronRight size={20} />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -903,7 +1041,9 @@ const Holidays = () => {
             const isSundayDay = isSunday(date);
             const isCurrentMonth = date.getMonth() === currentMonth;
             const isToday = date.toDateString() === new Date().toDateString();
-            const holidayName = getHolidayName(date.toISOString().split("T")[0]);
+            const holidayName = getHolidayName(
+              date.toISOString().split("T")[0]
+            );
 
             return (
               <div
@@ -927,31 +1067,30 @@ const Holidays = () => {
     );
   };
 
-  // Render annual calendar with current month focus
+  // Render annual calendar with same layout as monthly
   const renderAnnualCalendar = () => {
     const monthNames = [
-      "January", "February", "March", "April", "May", "June",
-      "July", "August", "September", "October", "November", "December"
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December",
     ];
 
     return (
       <div className="bg-white rounded-2xl shadow border border-gray-200 p-6">
-        {/* Annual Calendar Header */}
         <div className="flex justify-between items-center mb-6">
-          {/* Current Month Holidays Section */}
-          <div className="flex-1 max-w-md">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-800">
-                {monthNames[currentMonth]} {currentYear} Holidays
-                {currentMonthHolidays.length > 0 && (
-                  <span className="text-sm font-normal text-gray-600 ml-2">
-                    ({currentMonthHolidays.length} holiday{currentMonthHolidays.length !== 1 ? 's' : ''})
-                  </span>
-                )}
-              </h3>
-              
-              {currentMonthHolidays.length > upcomingHolidaysPerPage && (
-                <div className="flex items-center gap-3">
+          <div className="flex items-center gap-4">
+            <div className="flex">
+              <div className="flex gap-3">
+                {currentYearHolidays.length > 0 && (
                   <button
                     onClick={prevUpcomingHolidaysPage}
                     disabled={upcomingHolidaysPage === 1}
@@ -963,88 +1102,76 @@ const Holidays = () => {
                   >
                     <ChevronLeft size={16} />
                   </button>
-                  
-                  <span className="text-sm font-medium text-gray-600 min-w-[80px] text-center">
-                    Page {upcomingHolidaysPage} of {currentMonthHolidaysTotalPages}
-                  </span>
-                  
+                )}
+
+                <div className="flex px-0.9">
+                  {currentYearHolidaysToShow.length > 0 ? (
+                    <div className="flex gap-2">
+                      {currentYearHolidaysToShow.map((holiday) => (
+                        <div
+                          key={holiday._id}
+                          className="inline-block bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 hover:bg-blue-100 transition-colors whitespace-nowrap"
+                        >
+                          <div className="font-medium text-blue-800 text-sm">
+                            {holiday.name} (
+                            {formatDateToReadable(holiday.startDate)})
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-gray-500 text-sm py-2">
+                      No holidays in {currentYear}
+                    </div>
+                  )}
+                </div>
+                {currentYearHolidays.length > 0 && (
                   <button
                     onClick={nextUpcomingHolidaysPage}
-                    disabled={upcomingHolidaysPage === currentMonthHolidaysTotalPages}
+                    disabled={
+                      upcomingHolidaysPage === currentYearHolidaysTotalPages
+                    }
                     className={`p-2 rounded-lg border ${
-                      upcomingHolidaysPage === currentMonthHolidaysTotalPages
+                      upcomingHolidaysPage === currentYearHolidaysTotalPages
                         ? "bg-gray-100 text-gray-400 cursor-not-allowed"
                         : "bg-white text-gray-700 hover:bg-gray-50 cursor-pointer border-gray-300"
                     }`}
                   >
                     <ChevronRight size={16} />
                   </button>
-                </div>
-              )}
-            </div>
-
-            {/* Current Month Holidays List */}
-            <div className="space-y-3">
-              {/* {currentMonthHolidaysToShow.length > 0 ? (
-                Object.entries(currentMonthHolidaysByWeek).map(([weekKey, weekHolidays]) => (
-                  <div key={weekKey} className="mb-4">
-                    <h4 className="text-sm font-semibold text-gray-700 mb-2 border-b pb-1">
-                      {weekKey}
-                    </h4>
-                    <div className="space-y-2">
-                      {weekHolidays.map((holiday) => (
-                        <div
-                          key={holiday._id}
-                          className="bg-blue-50 border border-blue-200 rounded-lg p-3 hover:bg-blue-100 transition-colors"
-                        >
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <div className="font-medium text-blue-800 text-sm">
-                                {holiday.name}
-                              </div>
-                              <div className="text-blue-600 text-xs mt-1">
-                                {formatDateToReadable(holiday.startDate)}
-                                {holiday.endDate && holiday.endDate !== holiday.startDate && 
-                                  ` to ${formatDateToReadable(holiday.endDate)}`
-                                }
-                              </div>
-                            </div>
-                            {holiday.description && (
-                              <div className="text-xs text-blue-500 max-w-[120px] truncate" title={holiday.description}>
-                                {holiday.description}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="text-center py-4 text-gray-500">
-                  <Calendar size={24} className="mx-auto mb-2 text-gray-400" />
-                  <p className="text-sm">No holidays in {monthNames[currentMonth]} {currentYear}</p>
-                </div>
-              )} */}
+                )}
+              </div>
             </div>
           </div>
 
-          <div className="flex gap-3 items-center">
-            <button
-              onClick={prevYear}
-              className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer transition-colors"
-            >
-              <ChevronLeft size={20} />
-            </button>
-            <h2 className="text-xl font-bold text-gray-800 min-w-[100px] text-center">
-              {currentYear}
-            </h2>
-            <button
-              onClick={nextYear}
-              className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer transition-colors"
-            >
-              <ChevronRight size={20} />
-            </button>
+          {/* Year Navigation with Holiday Count */}
+          <div className="flex items-center gap-4">
+            {/* Holiday Count Display */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
+              <div className="text-sm font-medium text-blue-800">
+                {currentYearHolidays.length} holiday
+                {currentYearHolidays.length !== 1 ? "s" : ""} in {currentYear}
+              </div>
+            </div>
+
+            {/* Year Navigation Buttons */}
+            <div className="flex items-center gap-3">
+              <button
+                onClick={prevYear}
+                className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer transition-colors"
+              >
+                <ChevronLeft size={20} />
+              </button>
+              <h2 className="text-xl font-bold text-gray-800 min-w-[100px] text-center">
+                {currentYear}
+              </h2>
+              <button
+                onClick={nextYear}
+                className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer transition-colors"
+              >
+                <ChevronRight size={20} />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1052,20 +1179,22 @@ const Holidays = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {monthNames.map((monthName, monthIndex) => {
             const monthDays = getDaysInMonth(currentYear, monthIndex);
-            const isCurrentMonth = monthIndex === currentMonth;
+            const isCurrentMonth = monthIndex === new Date().getMonth();
 
             return (
               <div
                 key={monthName}
                 className={`border rounded-lg p-4 ${
-                  isCurrentMonth 
-                    ? "border-blue-500 bg-blue-50 shadow-md" 
+                  isCurrentMonth
+                    ? "border-blue-500 bg-blue-50 shadow-md"
                     : "border-gray-200 bg-white"
                 }`}
               >
-                <h3 className={`text-lg font-semibold text-center mb-3 ${
-                  isCurrentMonth ? "text-blue-800" : "text-gray-800"
-                }`}>
+                <h3
+                  className={`text-lg font-semibold text-center mb-3 ${
+                    isCurrentMonth ? "text-blue-800" : "text-gray-800"
+                  }`}
+                >
                   {monthName}
                   {isCurrentMonth && (
                     <span className="block text-xs font-normal text-blue-600 mt-1">
@@ -1095,7 +1224,8 @@ const Holidays = () => {
 
                     const isHolidayDay = isHoliday(date);
                     const isSundayDay = isSunday(date);
-                    const isToday = date.toDateString() === new Date().toDateString();
+                    const isToday =
+                      date.toDateString() === new Date().toDateString();
 
                     return (
                       <div
@@ -1133,7 +1263,7 @@ const Holidays = () => {
       <div className="flex justify-between items-center mb-4">
         <div className="flex gap-3">
           <button
-            onClick={() => setIsAddModalOpen(true)}
+            onClick={handleAddButtonClick}
             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
           >
             <Plus size={18} /> Add New Holiday
@@ -1239,8 +1369,6 @@ const Holidays = () => {
                 <span>Current Month</span>
               </div>
             </div>
-
-            <div className="w-24"></div>
           </div>
 
           {/* Calendar Display */}
@@ -1249,13 +1377,14 @@ const Holidays = () => {
             : renderAnnualCalendar()}
         </>
       ) : (
-        /* Table View - UPDATED HOLIDAY LIST DISPLAY */
+        /* Table View */
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
           <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
-            <thead className="bg-gray-100 text-gray-700 border-b">
+            {/* Table Header with Checkbox */}
+            <thead className="bg-gray-100 text-gray-700 border-b text-sm">
               <tr>
-                <th className="p-3 text-sm font-medium">
-                  <div className="flex items-center gap-4">
+                <th className="p-3">
+                  <div className="flex items-center gap-3">
                     {currentHolidays.length > 0 && (
                       <input
                         type="checkbox"
@@ -1264,116 +1393,105 @@ const Holidays = () => {
                           currentHolidays.length > 0
                         }
                         onChange={(e) => toggleSelectAll(e.target.checked)}
+                        className="cursor-pointer"
                       />
                     )}
-                    <span>Holiday Name</span>
+                    <span>Sr No</span>
                   </div>
                 </th>
-                <th className="p-3 text-sm font-medium">Start Date</th>
-                <th className="p-3 text-sm font-medium">End Date</th>
-                <th className="p-3 text-sm font-medium">Description</th>
-                <th className="p-3 text-sm font-medium">Status</th>
-                <th className="p-3 text-sm font-medium">Actions</th>
+                <th className="p-3">Holiday Name</th>
+                <th className="p-3">Start Date</th>
+                <th className="p-3">End Date</th>
+                <th className="p-3">Description</th>
+                <th className="p-3">Actions</th>
               </tr>
             </thead>
+
             <tbody>
               {currentHolidays.length > 0 ? (
                 currentHolidays.map((holiday, index) => {
-                  const startDate = new Date(holiday.startDate);
-                  const monthYear = startDate.toLocaleString('default', { month: 'long', year: 'numeric' });
-                  const formattedDate = formatDateToShort(holiday.startDate);
-                  
-                  // Check if this is the first holiday of the month to show month header
-                  const showMonthHeader = index === 0 || 
-                    new Date(currentHolidays[index - 1].startDate).getMonth() !== startDate.getMonth();
+                  const formattedStartDate = formatDateToReadable(
+                    holiday.startDate
+                  );
+                  const formattedEndDate = formatDateToReadable(
+                    holiday.endDate || holiday.startDate
+                  );
+
+                  // Check if holiday is selected
+                  const isSelected = selected.some((s) => s.id === holiday._id);
 
                   return (
-                    <React.Fragment key={holiday._id}>
-                      {showMonthHeader && (
-                        <tr className="bg-gray-50 border-b">
-                          <td colSpan={6} className="p-3">
-                            <div className="flex items-center gap-2">
-                              <Calendar size={16} className="text-blue-600" />
-                              <span className="font-semibold text-blue-800 text-lg">
-                                {monthYear}
-                              </span>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                      <tr
-                        className={`hover:bg-gray-50 ${
-                          (index + 1) % holidaysPerPage === 0 ||
-                          index + 1 === currentHolidays.length
-                            ? ""
-                            : "border-b"
-                        }`}
-                      >
-                        <td className="p-3">
-                          <div className="flex items-center gap-4">
-                            <input
-                              type="checkbox"
-                              checked={selected.some((s) => s.id === holiday._id)}
-                              onChange={() => toggleSelect(holiday)}
-                            />
-                            <div className="flex flex-col">
-                              <span className="capitalize font-medium text-gray-800">
-                                {holiday.name}
-                              </span>
-                              <span className="text-sm text-gray-500">
-                                ({formattedDate})
-                              </span>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="p-3">
-                          {formatDateToReadable(holiday.startDate)}
-                        </td>
-                        <td className="p-3">
-                          {formatDateToReadable(holiday.endDate || holiday.startDate)}
-                        </td>
-                        <td className="p-3 capitalize">
-                          {holiday.description || "No description"}
-                        </td>
-                        <td>
-                          <button
-                            onClick={() => handlerEnabledHoliday(holiday._id)}
-                            className={`px-3 py-1 rounded-full text-sm cursor-pointer ${
-                              holiday.enabled
-                                ? "bg-green-100 text-green-600"
-                                : "bg-gray-200 text-gray-600"
-                            }`}
-                          >
-                            {holiday.enabled ? "Enabled" : "Disabled"}
-                          </button>
-                        </td>
-                        <td className="p-3 flex items-center justify-center gap-3">
-                          <button 
-                            onClick={() => handleView(holiday)}
-                            className="text-blue-600 hover:text-blue-800 cursor-pointer"
-                          >
-                            <Eye size={18} />
-                          </button>
-                          <button 
-                            onClick={() => editHoliday(holiday)}
-                            className="text-green-600 hover:text-green-800 cursor-pointer"
-                          >
-                            <Edit size={18} />
-                          </button>
-                          <button
-                            onClick={() => deleteHoliday(holiday)}
-                            className="text-red-600 hover:text-red-800 cursor-pointer"
-                          >
-                            <Trash2 size={18} />
-                          </button>
-                        </td>
-                      </tr>
-                    </React.Fragment>
+                    <tr
+                      key={holiday._id}
+                      className={`hover:bg-gray-50 ${
+                        (index + 1) % holidaysPerPage === 0 ||
+                        index + 1 === currentHolidays.length
+                          ? ""
+                          : "border-b"
+                      } ${isSelected ? "bg-blue-50" : ""}`}
+                    >
+                      {/* Checkbox Cell */}
+                      <td className="p-3">
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelect(holiday)}
+                            className="cursor-pointer"
+                          />
+                          <span>
+                            {(currentPage - 1) * holidaysPerPage + index + 1}
+                          </span>
+                        </div>
+                      </td>
+
+                      <td className="p-3">
+                        <div className="flex flex-col">
+                          <span className="capitalize font-medium text-gray-800">
+                            {holiday.name}
+                          </span>
+                          <span className="text-sm text-gray-500">
+                            ({formattedStartDate})
+                          </span>
+                        </div>
+                      </td>
+
+                      <td className="p-3">{formattedStartDate}</td>
+                      <td className="p-3">{formattedEndDate}</td>
+
+                      <td className="p-3 capitalize">
+                        {holiday.description || "No description"}
+                      </td>
+
+                      <td className="p-3 flex items-center justify-center gap-3">
+                        <button
+                          onClick={() => handleView(holiday)}
+                          className="text-blue-600 hover:text-blue-800 cursor-pointer"
+                          title="View"
+                        >
+                          <Eye size={18} />
+                        </button>
+                        <button
+                          onClick={() => editHoliday(holiday)}
+                          className="text-green-600 hover:text-green-800 cursor-pointer"
+                          title="Edit"
+                        >
+                          <Edit size={18} />
+                        </button>
+                        <button
+                          onClick={() => deleteHoliday(holiday)}
+                          className="text-red-600 hover:text-red-800 cursor-pointer"
+                          title="Delete"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </td>
+                    </tr>
                   );
                 })
               ) : (
                 <tr>
-                  <td colSpan={6} className="p-3 text-center">
+                  <td colSpan={6} className="p-3 text-center text-gray-500">
                     No holiday records found
                   </td>
                 </tr>
@@ -1433,11 +1551,11 @@ const Holidays = () => {
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => !isUploading && setShowImportModal(false)}
+              onClick={() => setIsOpen(false)}
             />
             <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
               <button
-                onClick={() => !isUploading && setShowImportModal(false)}
+                onClick={handleCloseImportModal}
                 className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
                 disabled={isUploading}
               >
@@ -1448,8 +1566,11 @@ const Holidays = () => {
               </h2>
               {isSampleFile && <SampleExcelDownloadHolidays />}
               <div className="mb-6">
-                <label className="block text-gray-700 mb-2">Upload Excel File</label>
+                <label className="block text-gray-700 mb-2">
+                  Upload Excel File
+                </label>
                 <input
+                  ref={fileInputRef}
                   type="file"
                   accept=".xlsx, .xls, .csv"
                   onChange={handleFileUpload}
@@ -1460,7 +1581,7 @@ const Holidays = () => {
                   Supported formats: Excel (.xlsx, .xls)
                 </p>
               </div>
-              
+
               {parsedData.length > 0 && (
                 <div className="mb-4 p-3 bg-green-50 rounded-lg">
                   <p className="text-green-700 text-sm">
@@ -1471,7 +1592,7 @@ const Holidays = () => {
 
               <div className="flex justify-end gap-3">
                 <button
-                  onClick={() => setShowImportModal(false)}
+                  onClick={handleCloseImportModal}
                   disabled={isUploading}
                   className={`px-5 py-2 rounded-lg cursor-pointer ${
                     isUploading
@@ -1504,7 +1625,7 @@ const Holidays = () => {
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsAddModalOpen(false)}
+              onClick={() => setIsOpen(false)}
             />
             <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
               <button
@@ -1522,7 +1643,7 @@ const Holidays = () => {
               >
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium">
-                    Holiday Name *
+                    Holiday Name <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
@@ -1534,7 +1655,9 @@ const Holidays = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium">Start Date *</label>
+                  <label className="block text-sm font-medium">
+                    Start Date <span className="text-red-500">*</span>
+                  </label>
                   <DatePicker
                     selected={form.startDate ? new Date(form.startDate) : null}
                     onChange={handleStartDateChange}
@@ -1545,7 +1668,9 @@ const Holidays = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium">End Date *</label>
+                  <label className="block text-sm font-medium">
+                    End Date <span className="text-red-500">*</span>
+                  </label>
                   <DatePicker
                     selected={form.endDate ? new Date(form.endDate) : null}
                     onChange={handleEndDateChange}
@@ -1596,7 +1721,7 @@ const Holidays = () => {
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsEditModalOpen(false)}
+              onClick={() => setIsOpen(false)}
             />
             <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
               <button
@@ -1613,8 +1738,9 @@ const Holidays = () => {
                 className="grid grid-cols-1 md:grid-cols-2 gap-4"
               >
                 <div className="md:col-span-2">
+                
                   <label className="block text-sm font-medium">
-                    Holiday Name *
+                    Holiday Name <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
@@ -1625,7 +1751,9 @@ const Holidays = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium">Start Date *</label>
+                  <label className="block text-sm font-medium">
+                    Start Date <span className="text-red-500">*</span>
+                  </label>
                   <DatePicker
                     selected={form.startDate ? new Date(form.startDate) : null}
                     onChange={handleStartDateChange}
@@ -1636,7 +1764,9 @@ const Holidays = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium">End Date *</label>
+                  <label className="block text-sm font-medium">
+                    End Date <span className="text-red-500">*</span>
+                  </label>
                   <DatePicker
                     selected={form.endDate ? new Date(form.endDate) : null}
                     onChange={handleEndDateChange}
@@ -1680,13 +1810,13 @@ const Holidays = () => {
           document.body
         )}
 
-      {/* View Holiday Modal - UPDATED */}
+      {/* View Holiday Modal */}
       {isViewModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsViewModalOpen(false)}
+              onClick={() => setIsOpen(false)}
             />
             <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
               <button

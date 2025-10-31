@@ -184,9 +184,7 @@ router.delete("/holidays", async (req, res) => {
   }
 });
 
-/** =========================
- *   POST /api/holidays/import
- * ========================= */
+
 router.post("/holidays/import", async (req, res) => {
   try {
     const holidaysData = req.body;
@@ -201,61 +199,106 @@ router.post("/holidays/import", async (req, res) => {
     const results = {
       success: 0,
       failed: 0,
-      errors: []
+      errors: [],
+      importedHolidays: []
     };
 
     // Process each holiday
-    for (const holidayData of holidaysData) {
+    for (const [index, holidayData] of holidaysData.entries()) {
       try {
         const { name, startDate, endDate, description } = holidayData;
 
         // Validate required fields
         if (!name || !startDate) {
           results.failed++;
-          results.errors.push(`Missing required fields for holiday: ${name}`);
+          results.errors.push(`Row ${index + 1}: Missing required fields - name and start date are required`);
           continue;
         }
 
-        // Check if holiday already exists
+        // Validate date formats
+        const start = new Date(startDate);
+        const end = new Date(endDate || startDate);
+
+        if (isNaN(start.getTime())) {
+          results.failed++;
+          results.errors.push(`Row ${index + 1}: Invalid start date format - ${startDate}`);
+          continue;
+        }
+
+        if (isNaN(end.getTime())) {
+          results.failed++;
+          results.errors.push(`Row ${index + 1}: Invalid end date format - ${endDate}`);
+          continue;
+        }
+
+        // Validate end date is not before start date
+        if (end < start) {
+          results.failed++;
+          results.errors.push(`Row ${index + 1}: End date cannot be before start date`);
+          continue;
+        }
+
+        // Check if holiday already exists (by name and start date)
         const existing = await Holiday.findOne({
-          name,
-          startDate: new Date(startDate)
+          name: name.trim(),
+          startDate: start
         });
 
         if (existing) {
           results.failed++;
-          results.errors.push(`Holiday "${name}" on ${startDate} already exists`);
+          results.errors.push(`Row ${index + 1}: Holiday "${name.trim()}" on ${start.toDateString()} already exists`);
           continue;
         }
 
+        // Create holiday according to your model schema
         const holiday = new Holiday({
-          name,
-          startDate: new Date(startDate),
-          endDate: new Date(endDate || startDate),
-          description: description || "",
-          type: "General",
-          enabled: true
+          name: name.trim(),
+          startDate: start,
+          endDate: end,
+          description: description ? description.trim() : "",
+          enabled: true // Default from model, but explicitly setting
         });
 
-        await holiday.save();
+        const savedHoliday = await holiday.save();
         results.success++;
+        results.importedHolidays.push({
+          name: savedHoliday.name,
+          startDate: savedHoliday.startDate,
+          endDate: savedHoliday.endDate,
+          description: savedHoliday.description
+        });
+
       } catch (error) {
         results.failed++;
-        results.errors.push(`Error processing holiday: ${error.message}`);
+        results.errors.push(`Row ${index + 1}: ${error.message}`);
       }
     }
 
+    // Prepare response message
+    let message;
+    if (results.success === holidaysData.length) {
+      message = `All ${results.success} holidays imported successfully`;
+    } else if (results.success > 0) {
+      message = `Import partially completed: ${results.success} successful, ${results.failed} failed`;
+    } else {
+      message = `Import failed: All ${results.failed} holidays failed to import`;
+    }
+
     res.json({
-      success: true,
-      message: `Import completed: ${results.success} successful, ${results.failed} failed`,
-      details: results
+      success: results.success > 0,
+      message: message,
+      importedCount: results.success,
+      failedCount: results.failed,
+      errors: results.errors,
+      importedHolidays: results.importedHolidays
     });
 
   } catch (error) {
     console.error("Error importing holidays:", error);
     res.status(500).json({ 
       success: false, 
-      message: "Server error while importing holidays" 
+      message: "Server error while importing holidays",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
