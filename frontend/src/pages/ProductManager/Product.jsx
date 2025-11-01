@@ -536,7 +536,7 @@ const Product = () => {
                     </td>
                     <td className="p-3">{product.type}</td>
                     <td className="p-3">{product.packing}</td>
-                    <td className="p-3">{product.qtyPerBox}</td>
+                    <td className="p-3">{product.qtyPerBoxStrip}</td>
                     <td className="p-3">
                       {capitalizeFirstLetter(product.supplierName) || "--"}
                     </td>
@@ -848,27 +848,13 @@ const Product = () => {
 
                   <div>
                     <label className="block text-sm font-medium">
-                      Qty per Box
+                      Quantity per Box/Strip
                     </label>
                     <input
                       type="number"
                       value={form.qtyPerBox}
                       onChange={(e) =>
                         setForm({ ...form, qtyPerBox: e.target.value })
-                      }
-                      className="w-full border px-3 py-2 rounded-lg"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Qty per Carton
-                    </label>
-                    <input
-                      type="number"
-                      value={form.qtyPerCarton}
-                      onChange={(e) =>
-                        setForm({ ...form, qtyPerCarton: e.target.value })
                       }
                       className="w-full border px-3 py-2 rounded-lg"
                     />

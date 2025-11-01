@@ -115,9 +115,6 @@ const restoreReportInHandAfterSaleDeletion = async (
     });
 
     if (!existingProduct) {
-      console.warn(
-        `⚠️ Product "${productName}" not found in ReportInHand inventory during restoration`
-      );
       return;
     }
 

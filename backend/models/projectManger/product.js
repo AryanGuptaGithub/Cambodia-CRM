@@ -6,10 +6,10 @@ const productSchema = new mongoose.Schema(
     type: { type: String, required: true },
     packing: { type: String, required: true },
     sellingPrice: { type: Number },
-    lc: { type: String },
+    lc: { type: Number }, // Changed to Number for USD
+    fob: { type: Number }, // Changed to Number for USD
     taxSellingPrice: { type: Number },
-    qtyPerBox: { type: Number, required: true },
-    qtyPerCarton: { type: Number, required: false },
+    qtyPerBoxStrip: { type: Number, required: true }, // Updated field name
     supplierName: { type: String, required: false },
     drugLicense: { type: String, required: false },
     licenseValidityDate: { type: Date, required: false },

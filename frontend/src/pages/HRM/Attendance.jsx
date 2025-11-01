@@ -1,13 +1,10 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import {
-  Eye,
   Calendar,
   Search,
   ChevronLeft,
   ChevronRight,
   Clock,
-  LogIn,
-  LogOut,
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
@@ -15,7 +12,7 @@ import axios from "axios";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-// Custom Dropdown Component
+// Custom Dropdown Component (unchanged)
 const CustomDropdown = ({
   value,
   onChange,
@@ -119,17 +116,20 @@ const Attendance = () => {
   const [attendanceRecords, setAttendanceRecords] = useState([]);
   const [showAddAttendanceModal, setShowAddAttendanceModal] = useState(false);
   const [selectedAttendanceMr, setSelectedAttendanceMr] = useState(null);
-  const [currentAttendanceId, setCurrentAttendanceId] = useState(null);
-  const [loginTime, setLoginTime] = useState(null);
   const [attendanceLoading, setAttendanceLoading] = useState(false);
 
-  // New state for date range in modal
+  // State for date range in modal
   const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
+
+  // Holiday state - ensure it's always an array
+  const [holidays, setHolidays] = useState([]);
 
   useEffect(() => {
     fetchMRList();
     fetchAttendanceRecords();
+    fetchHolidays();
   }, []);
 
   const fetchMRList = async () => {
@@ -151,6 +151,110 @@ const Attendance = () => {
     } catch (err) {
       console.error("Failed to fetch attendance records:", err);
     }
+  };
+
+  const fetchHolidays = async () => {
+    try {
+      const response = await axios.get(`${backendUrl}/api/holidays`);
+      const holidaysData = response.data.holidays;
+      if (Array.isArray(holidaysData)) {
+        setHolidays(holidaysData);
+      } else {
+        console.warn("Holidays API did not return an array:", holidaysData);
+        setHolidays([]);
+      }
+    } catch (err) {
+      console.error("Failed to fetch holidays:", err);
+      setHolidays([]);
+    }
+  };
+
+  // NEW FUNCTION: Calculate all dates between start and end date
+  const getDatesBetween = (startDateStr, endDateStr) => {
+    const start = new Date(startDateStr);
+    const end = new Date(endDateStr);
+    const dates = [];
+    
+    // If start and end date are the same, return just that date
+    if (start.toDateString() === end.toDateString()) {
+      return [start];
+    }
+    
+    // Add all dates between start and end (inclusive)
+    const current = new Date(start);
+    while (current <= end) {
+      dates.push(new Date(current));
+      current.setDate(current.getDate() + 1);
+    }
+    
+    return dates;
+  };
+
+  // Check if date is Sunday
+  const isSunday = (date) => {
+    const day = new Date(date).getDay();
+    return day === 0;
+  };
+
+  // UPDATED: Check if date is holiday - with proper date comparison
+  const isHoliday = (date) => {
+    if (!Array.isArray(holidays) || holidays.length === 0) {
+      return false;
+    }
+
+    const checkDate = new Date(date);
+    checkDate.setHours(0, 0, 0, 0);
+
+    return holidays.some((holiday) => {
+      if (!holiday || !holiday.date) return false;
+      
+      const holidayDate = new Date(holiday.date);
+      holidayDate.setHours(0, 0, 0, 0);
+
+      return holidayDate.getTime() === checkDate.getTime();
+    });
+  };
+
+  // UPDATED: Check if any date in range is holiday
+  const isDateRangeHasHoliday = (startDateStr, endDateStr) => {
+    const datesInRange = getDatesBetween(startDateStr, endDateStr);
+    return datesInRange.some(date => isHoliday(date));
+  };
+
+  // Get holiday name for a date - with proper date comparison
+  const getHolidayName = (date) => {
+    if (!Array.isArray(holidays) || holidays.length === 0) {
+      return null;
+    }
+
+    const checkDate = new Date(date);
+    checkDate.setHours(0, 0, 0, 0);
+
+    const holiday = holidays.find((holiday) => {
+      if (!holiday || !holiday.date) return false;
+
+      const holidayDate = new Date(holiday.date);
+      holidayDate.setHours(0, 0, 0, 0);
+
+      return holidayDate.getTime() === checkDate.getTime();
+    });
+
+    return holiday ? holiday.name : null;
+  };
+
+  // Get all holiday names in date range
+  const getHolidayNamesInRange = (startDateStr, endDateStr) => {
+    const datesInRange = getDatesBetween(startDateStr, endDateStr);
+    const holidayNames = [];
+    
+    datesInRange.forEach(date => {
+      const holidayName = getHolidayName(date);
+      if (holidayName && !holidayNames.includes(holidayName)) {
+        holidayNames.push(holidayName);
+      }
+    });
+    
+    return holidayNames;
   };
 
   // Convert mrList to dropdown options
@@ -175,8 +279,6 @@ const Attendance = () => {
   );
 
   // Calendar functions
-  const isSunday = (date) => date.getDay() === 0;
-
   const getAttendanceForDate = (date, mrId) => {
     if (!mrId) return null;
     const dateString = date.toISOString().split("T")[0];
@@ -328,7 +430,87 @@ const Attendance = () => {
     return workingDays;
   };
 
-  // Render monthly calendar
+  // UPDATED: Handle manual attendance record
+  const handleRecordAttendance = async () => {
+    if (!selectedAttendanceMr || !startDate || !startTime || !endTime) {
+      alert("Please fill all fields");
+      return;
+    }
+
+    // Validate time
+    if (startTime >= endTime) {
+      alert("End time must be after start time");
+      return;
+    }
+
+    // Check if any date in range is Sunday
+    const loginDateTime = new Date(`${startDate}T${startTime}`);
+    const logoutDateTime = new Date(`${startDate}T${endTime}`);
+    
+    // If it's a single day, check if it's Sunday
+    if (isSunday(startDate)) {
+      alert("Cannot record attendance on Sunday");
+      return;
+    }
+
+    // Check if any date in range is holiday
+    if (isDateRangeHasHoliday(startDate, startDate)) { // For single day, start and end are same
+      const holidayNames = getHolidayNamesInRange(startDate, startDate);
+      alert(`Cannot record attendance on holiday: ${holidayNames.join(", ")}`);
+      return;
+    }
+
+    try {
+      setAttendanceLoading(true);
+
+      const attendanceData = {
+        userId: selectedAttendanceMr,
+        loginTime: loginDateTime.toISOString(),
+        logoutTime: logoutDateTime.toISOString(),
+      };
+
+      const response = await axios.post(
+        `${backendUrl}/api/attendance/record`,
+        attendanceData
+      );
+
+      if (response.data.success) {
+        alert("Attendance recorded successfully!");
+        setShowAddAttendanceModal(false);
+        setSelectedAttendanceMr(null);
+        setStartDate("");
+        setStartTime("");
+        setEndTime("");
+
+        // Refresh attendance records
+        fetchAttendanceRecords();
+      }
+    } catch (err) {
+      alert(
+        "Failed to record attendance: " +
+          (err.response?.data?.message || err.message)
+      );
+    } finally {
+      setAttendanceLoading(false);
+    }
+  };
+
+  // Initialize modal with current date when opened
+  const handleAddAttendance = () => {
+    setShowAddAttendanceModal(true);
+    setSelectedAttendanceMr(null);
+
+    // Set default dates to today
+    const today = new Date();
+    const todayString = today.toISOString().split("T")[0];
+    setStartDate(todayString);
+
+    // Set default times (9 AM to 5 PM)
+    setStartTime("09:00");
+    setEndTime("17:00");
+  };
+
+  // UPDATED: Render monthly calendar with holiday highlighting
   const renderMonthlyCalendar = () => {
     const days = getDaysInMonth();
     const monthNames = [
@@ -415,6 +597,8 @@ const Attendance = () => {
 
             const attendance = getAttendanceForDate(date, selectedMr?._id);
             const isSundayDay = isSunday(date);
+            const isHolidayDay = isHoliday(date);
+
             const isCurrentMonth = date.getMonth() === currentMonth;
             const isToday = date.toDateString() === new Date().toDateString();
             const isFuture = isFutureDate(date);
@@ -427,7 +611,10 @@ const Attendance = () => {
               // Attendance recorded - green
               cellStyle += "bg-green-500 text-white border-green-600 ";
             } else if (isSundayDay) {
-              // Sundays - gray
+              // Sundays - red
+              cellStyle += "bg-red-400 text-white border-red-500 ";
+            } else if (isHolidayDay) {
+              // Holidays - gray
               cellStyle += "bg-gray-400 text-white border-gray-500 ";
             } else if (isToday) {
               // Today - blue highlight
@@ -446,7 +633,9 @@ const Attendance = () => {
                 key={date.toISOString()}
                 className={cellStyle.trim()}
                 title={
-                  attendance
+                  isHolidayDay
+                    ? `Holiday: ${getHolidayName(date)}`
+                    : attendance
                     ? `Login: ${new Date(
                         attendance.loginTime
                       ).toLocaleTimeString()} ${
@@ -456,6 +645,8 @@ const Attendance = () => {
                             ).toLocaleTimeString()}`
                           : ""
                       }`
+                    : isSundayDay
+                    ? "Sunday"
                     : "No attendance"
                 }
               >
@@ -474,8 +665,13 @@ const Attendance = () => {
             </label>
 
             <label className="flex items-center gap-2 cursor-pointer">
-              <div className="w-4 h-4 bg-gray-400 rounded border-2 border-gray-500"></div>
+              <div className="w-4 h-4 bg-red-400 rounded border-2 border-red-500"></div>
               <span>Sunday</span>
+            </label>
+
+            <label className="flex items-center gap-2 cursor-pointer">
+              <div className="w-4 h-4 bg-gray-400 rounded border-2 border-gray-500"></div>
+              <span>Holiday</span>
             </label>
 
             <label className="flex items-center gap-2 cursor-pointer">
@@ -509,7 +705,7 @@ const Attendance = () => {
     );
   };
 
-  // Render annual calendar
+  // Render annual calendar (unchanged)
   const renderAnnualCalendar = () => {
     const monthNames = [
       "Jan",
@@ -635,6 +831,7 @@ const Attendance = () => {
                       selectedMr?._id
                     );
                     const isSundayDay = isSunday(date);
+                    const isHolidayDay = isHoliday(date);
                     const isToday =
                       date.toDateString() === new Date().toDateString();
                     const isFuture = isFutureDate(date);
@@ -648,6 +845,8 @@ const Attendance = () => {
                     } else if (attendance) {
                       cellStyle += "bg-green-500 text-white ";
                     } else if (isSundayDay) {
+                      cellStyle += "bg-red-400 text-white ";
+                    } else if (isHolidayDay) {
                       cellStyle += "bg-gray-400 text-white ";
                     } else if (isToday) {
                       cellStyle += "bg-blue-500 text-white ";
@@ -659,6 +858,15 @@ const Attendance = () => {
                       <div
                         key={date.toISOString()}
                         className={cellStyle.trim()}
+                        title={
+                          isHolidayDay
+                            ? `Holiday: ${getHolidayName(date)}`
+                            : isSundayDay
+                            ? "Sunday"
+                            : attendance
+                            ? "Present"
+                            : "Absent"
+                        }
                       >
                         {date.getDate()}
                       </div>
@@ -682,127 +890,6 @@ const Attendance = () => {
     const today = new Date();
     setCurrentMonth(today.getMonth());
     setCurrentYear(today.getFullYear());
-  };
-
-  const handleAddAttendance = () => {
-    setShowAddAttendanceModal(true);
-
-    // Check if user is currently logged in
-    const todayRecord = attendanceRecords.find((record) => {
-      const recordDate = new Date(record.loginTime);
-      return (
-        record.userId?._id === selectedAttendanceMr &&
-        recordDate.toDateString() === new Date().toDateString() &&
-        !record.logoutTime
-      );
-    });
-
-    if (todayRecord) {
-      setCurrentAttendanceId(todayRecord._id);
-      setLoginTime(new Date(todayRecord.loginTime));
-    } else {
-      setCurrentAttendanceId(null);
-      setLoginTime(null);
-    }
-
-    // Set default dates to today
-    const today = new Date();
-    const todayString = today.toISOString().split("T")[0];
-    setStartDate(todayString);
-    setEndDate(todayString);
-  };
-
-  // Handle login
-  const handleLogin = async () => {
-    if (!selectedAttendanceMr) return;
-
-    try {
-      setAttendanceLoading(true);
-      const now = new Date();
-
-      const loginData = {
-        userId: selectedAttendanceMr,
-        loginTime: now.toISOString(),
-      };
-
-      const response = await axios.post(
-        `${backendUrl}/api/attendance/login`,
-        loginData
-      );
-
-      if (response.data.success) {
-        setLoginTime(now);
-        setCurrentAttendanceId(response.data.attendance._id);
-        alert(`Login recorded at ${now.toLocaleTimeString()}`);
-
-        // Refresh attendance records
-        fetchAttendanceRecords();
-      }
-    } catch (err) {
-      alert(
-        "Failed to record login: " +
-          (err.response?.data?.message || err.message)
-      );
-    } finally {
-      setAttendanceLoading(false);
-    }
-  };
-
-  // Handle logout
-  const handleLogout = async () => {
-    if (!currentAttendanceId) {
-      alert("You are not logged in!");
-      return;
-    }
-
-    try {
-      setAttendanceLoading(true);
-      const now = new Date();
-
-      const logoutData = {
-        logoutTime: now.toISOString(),
-      };
-
-      const response = await axios.put(
-        `${backendUrl}/api/attendance/logout/${currentAttendanceId}`,
-        logoutData
-      );
-
-      if (response.data.success) {
-        setLoginTime(null);
-        setCurrentAttendanceId(null);
-
-        const totalTime = response.data.attendance.totalTime;
-        alert(
-          `Logout recorded at ${now.toLocaleTimeString()}\nTotal time: ${totalTime}`
-        );
-
-        // Refresh attendance records
-        fetchAttendanceRecords();
-      }
-    } catch (err) {
-      alert(
-        "Failed to record logout: " +
-          (err.response?.data?.message || err.message)
-      );
-    } finally {
-      setAttendanceLoading(false);
-    }
-  };
-
-  // Clear all records
-  const clearRecords = async () => {
-    if (
-      window.confirm("Are you sure you want to clear all attendance records?")
-    ) {
-      try {
-        await axios.delete(`${backendUrl}/api/attendance`);
-        setAttendanceRecords([]);
-        alert("All attendance records cleared successfully");
-      } catch (err) {
-        alert("Failed to clear records: " + err.response?.data?.message);
-      }
-    }
   };
 
   if (loading) return <div className="p-6 text-center">Loading MR List...</div>;
@@ -829,84 +916,99 @@ const Attendance = () => {
               />
             </div>
 
-            {/* Date Range Selection */}
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Start Date
-                </label>
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  End Date
-                </label>
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-            </div>
-
+            {/* Date Selection */}
             <div className="mb-4">
-              <p>
-                Current Status:{" "}
-                <strong>
-                  {currentAttendanceId ? "Logged In" : "Logged Out"}
-                </strong>
-              </p>
-              {loginTime && (
-                <p>
-                  Login Time:{" "}
-                  <strong>{new Date(loginTime).toLocaleString()}</strong>
-                </p>
-              )}
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Date
+              </label>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
             </div>
 
+            {/* Date Validation Message */}
+            {startDate && (
+              <div className="mb-4">
+                {isSunday(startDate) ? (
+                  <div className="bg-red-50 border border-red-200 rounded-md p-3">
+                    <p className="text-red-700 text-sm font-medium">
+                      ⚠️ Cannot record attendance on Sunday
+                    </p>
+                  </div>
+                ) : isHoliday(startDate) ? (
+                  <div className="bg-red-50 border border-red-200 rounded-md p-3">
+                    <p className="text-red-700 text-sm font-medium">
+                      ⚠️ Cannot record attendance on holiday:{" "}
+                      {getHolidayName(startDate)}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="bg-green-50 border border-green-200 rounded-md p-3">
+                    <p className="text-green-700 text-sm font-medium">
+                      ✅ Valid working day
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Start & End Time */}
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Start Time
+                </label>
+                <input
+                  type="time"
+                  value={startTime}
+                  onChange={(e) => setStartTime(e.target.value)}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  End Time
+                </label>
+                <input
+                  type="time"
+                  value={endTime}
+                  onChange={(e) => setEndTime(e.target.value)}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+            </div>
+
+            {/* Attendance Button */}
             <div className="flex gap-3 mb-4">
               <button
-                onClick={handleLogin}
+                onClick={handleRecordAttendance}
                 disabled={
-                  !!currentAttendanceId ||
                   attendanceLoading ||
-                  !selectedAttendanceMr
+                  !selectedAttendanceMr ||
+                  !startDate ||
+                  !startTime ||
+                  !endTime ||
+                  isSunday(startDate) ||
+                  isHoliday(startDate)
                 }
                 className={`flex-1 py-2 px-4 rounded-lg flex items-center justify-center gap-2 ${
-                  currentAttendanceId ||
                   attendanceLoading ||
-                  !selectedAttendanceMr
+                  !selectedAttendanceMr ||
+                  !startDate ||
+                  !startTime ||
+                  !endTime ||
+                  isSunday(startDate) ||
+                  isHoliday(startDate)
                     ? "bg-gray-400 cursor-not-allowed"
                     : "bg-green-600 hover:bg-green-700"
                 } text-white`}
               >
-                <LogIn size={16} />
-                {attendanceLoading ? "Processing..." : "Login"}
-              </button>
-
-              <button
-                onClick={handleLogout}
-                disabled={
-                  !currentAttendanceId ||
-                  attendanceLoading ||
-                  !selectedAttendanceMr
-                }
-                className={`flex-1 py-2 px-4 rounded-lg flex items-center justify-center gap-2 ${
-                  !currentAttendanceId ||
-                  attendanceLoading ||
-                  !selectedAttendanceMr
-                    ? "bg-gray-400 cursor-not-allowed"
-                    : "bg-red-600 hover:bg-red-700"
-                } text-white`}
-              >
-                <LogOut size={16} />
-                {attendanceLoading ? "Processing..." : "Logout"}
+                <Clock size={16} />
+                {attendanceLoading ? "Recording..." : "Record Attendance"}
               </button>
             </div>
 
@@ -1006,7 +1108,7 @@ const Attendance = () => {
               className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg cursor-pointer"
             >
               <Clock size={16} />
-              Add Attendance
+              Record Attendance
             </button>
           </div>
 

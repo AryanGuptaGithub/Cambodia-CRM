@@ -180,7 +180,7 @@ async function seedHTabs() {
       category: "main",
       reportType: "Hide/Show Tabs",
     },
-    
+
     {
       tabId: "products",
       name: "Product Manager",
@@ -972,7 +972,7 @@ async function runSeeders() {
     console.error("❌ Seeding error:", error);
   } finally {
     await mongoose.disconnect();
-    console.log("🔌 MongoDB disconnected");
+
     process.exit(0);
   }
 }

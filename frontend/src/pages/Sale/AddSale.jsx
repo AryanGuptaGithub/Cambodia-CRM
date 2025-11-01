@@ -11,6 +11,7 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { useInitialSaleData } from "./IntialLoading.jsx";
 import { PlusSquare, MinusSquare } from "lucide-react";
+import axios from "axios";
 
 const INITIAL_PRODUCT_STATE = {
   productName: "",
@@ -32,6 +33,7 @@ const INITIAL_FORM_STATE = {
   invoiceNumber: "",
   invoiceDate: "",
   mrName: "",
+  mrId: "", // Add mrId to store the selected MR ID
   customerCode: "",
   paymentStatus: "",
   remark: "",
@@ -52,6 +54,141 @@ const INITIAL_FORM_STATE = {
     },
   ],
 };
+
+// Searchable Dropdown Component (from AddCustomer)
+const SearchableDropdown = React.memo(
+  ({
+    value,
+    onChange,
+    options,
+    disabled,
+    placeholder = "Select option",
+    required = false,
+    loading = false,
+    error = "",
+    label = "",
+  }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const [searchTerm, setSearchTerm] = useState("");
+    const dropdownRef = React.useRef(null);
+
+    useEffect(() => {
+      const handleClickOutside = (event) => {
+        if (
+          dropdownRef.current &&
+          !dropdownRef.current.contains(event.target)
+        ) {
+          setIsOpen(false);
+          setSearchTerm("");
+        }
+      };
+
+      document.addEventListener("mousedown", handleClickOutside);
+      return () =>
+        document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
+    const filteredOptions = useMemo(() => {
+      if (!searchTerm) return options;
+      const filtered = options.filter((option) =>
+        option.label.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+      return filtered.length > 0
+        ? filtered
+        : [{ value: "", label: "No options found", disabled: true }];
+    }, [options, searchTerm]);
+
+    const selectedOption = options.find((opt) => opt.value === value);
+
+    const handleSelect = (optionValue) => {
+      onChange(optionValue);
+      setIsOpen(false);
+      setSearchTerm("");
+    };
+
+    return (
+      <div className="flex flex-col">
+        {label && (
+          <label className="text-sm font-medium text-gray-700 mb-1">
+            {label}
+            {required && <span className="text-red-500 ml-1">*</span>}
+          </label>
+        )}
+
+        <div className="relative w-full" ref={dropdownRef}>
+          <button
+            type="button"
+            disabled={disabled || loading}
+            onClick={() => !disabled && !loading && setIsOpen(!isOpen)}
+            className={`w-full border rounded-md px-3 py-2 text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+              error ? "border-red-500" : "border-gray-300"
+            } ${
+              disabled || loading
+                ? "bg-gray-100 cursor-not-allowed opacity-60"
+                : "bg-white cursor-pointer hover:border-gray-400"
+            } ${!value ? "text-gray-500" : "text-gray-900"}`}
+          >
+            {loading ? (
+              <span className="text-gray-500">Loading...</span>
+            ) : (
+              <span className="truncate">
+                {selectedOption ? selectedOption.label : placeholder}
+              </span>
+            )}
+          </button>
+
+          {isOpen && !disabled && !loading && (
+            <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-hidden">
+              {/* Search Input */}
+              <div className="p-2 border-b border-gray-200">
+                <input
+                  type="text"
+                  placeholder="Search..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      setIsOpen(false);
+                      setSearchTerm("");
+                    }
+                  }}
+                />
+              </div>
+
+              {/* Options List */}
+              <div className="max-h-48 overflow-y-auto">
+                {filteredOptions.map((option) => (
+                  <button
+                    key={option.value || `option-${option.label}`}
+                    type="button"
+                    onClick={() =>
+                      !option.disabled && handleSelect(option.value)
+                    }
+                    className={`w-full px-3 py-2 text-left transition-colors duration-150 ${
+                      option.disabled
+                        ? "text-gray-400 cursor-not-allowed bg-gray-50"
+                        : "hover:bg-blue-50 hover:text-blue-900 text-gray-900 cursor-pointer"
+                    } ${
+                      value === option.value
+                        ? "bg-blue-100 text-blue-900 font-medium"
+                        : ""
+                    }`}
+                    disabled={option.disabled}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
+      </div>
+    );
+  }
+);
 
 // Custom hook for suggestions
 const useSuggestions = (items, filterField = "type", inputValue = "") => {
@@ -310,10 +447,27 @@ const useSaleForm = (initialCustomerCode = "") => {
   });
   const [errors, setErrors] = useState({});
   const [expandedProductIndex, setExpandedProductIndex] = useState(0);
+  const [mrList, setMrList] = useState([]);
+  const [mrListLoading, setMrListLoading] = useState(true);
 
   const parseNumber = useCallback((val) => {
     const num = parseFloat(val);
     return isNaN(num) ? 0 : num;
+  }, []);
+
+  // Fetch MR list
+  const fetchMRList = useCallback(async () => {
+    try {
+      setMrListLoading(true);
+      const backendUrl = import.meta.env.VITE_BACKEND_URL;
+      const response = await axios.get(`${backendUrl}/api/staffs`);
+      setMrList(response.data || []);
+    } catch (error) {
+      console.error("Error fetching MR list:", error);
+      showToast("error", "Failed to load Medical Representatives");
+    } finally {
+      setMrListLoading(false);
+    }
   }, []);
 
   // Calculate total amount from all products
@@ -335,6 +489,22 @@ const useSaleForm = (initialCustomerCode = "") => {
   const updateFormField = useCallback((name, value) => {
     setForm((prev) => ({ ...prev, [name]: value }));
   }, []);
+
+  // Handle MR selection
+  const handleMRChange = useCallback(
+    (mrId) => {
+      const selectedMR = mrList.find((mr) => mr._id === mrId);
+      if (selectedMR) {
+        setForm((prevForm) => ({
+          ...prevForm,
+          mrId: mrId,
+          mrName: selectedMR.medicalRepName,
+        }));
+      }
+      setErrors((prev) => ({ ...prev, mrName: "" }));
+    },
+    [mrList]
+  );
 
   // Toggle product view - only one product can be expanded at a time
   const toggleView = useCallback((index) => {
@@ -375,7 +545,6 @@ const useSaleForm = (initialCustomerCode = "") => {
     return products.some((product) => product.productName.trim() !== "");
   }, []);
 
-  // Add new product
   const addProduct = useCallback(() => {
     setForm((prev) => {
       const newProducts = [
@@ -584,9 +753,13 @@ const useSaleForm = (initialCustomerCode = "") => {
   return {
     form,
     errors,
+    mrList,
+    mrListLoading,
     handleChange,
     validate,
     updateFormField,
+    handleMRChange,
+    fetchMRList,
     addProduct,
     removeProduct,
     updateProduct,
@@ -783,9 +956,13 @@ const AddSale = () => {
   const {
     form,
     errors,
+    mrList,
+    mrListLoading,
     handleChange,
     validate,
     updateFormField,
+    handleMRChange,
+    fetchMRList,
     addProduct,
     removeProduct,
     updateProduct,
@@ -796,8 +973,23 @@ const AddSale = () => {
     hasAtLeastOneProduct,
   } = useSaleForm(customerCode);
   const { statuses, products, productNames, loading } = useInitialSaleData();
+  console.log("values of products:", products);
 
-  // Usage
+  // Fetch MR list on component mount
+  useEffect(() => {
+    fetchMRList();
+  }, [fetchMRList]);
+
+  // Memoized MR options for dropdown
+  const mrOptions = useMemo(() => {
+    return [
+      { value: "", label: "Select Medical Representative" },
+      ...mrList.map((mr) => ({
+        value: mr._id,
+        label: `${mr.medicalRepName}`,
+      })),
+    ];
+  }, [mrList]);
 
   // Payment Status Suggestions
   const paymentStatusSuggestions = useSuggestions(
@@ -929,6 +1121,7 @@ const AddSale = () => {
         invoiceNumber: form.invoiceNumber,
         invoiceDate: form.invoiceDate,
         mrName: form.mrName,
+        mrId: form.mrId, // Include MR ID
         customerCode: form.customerCode,
         productName: product.productName,
         salesQty: product.salesQty,
@@ -982,6 +1175,7 @@ const AddSale = () => {
       </div>
     );
   }
+
   const handleNumericInputChange = (e, updateFunc) => {
     const value = e.target.value;
     if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
@@ -1009,227 +1203,259 @@ const AddSale = () => {
       </div>
 
       <div className="mb-6">
-        {form.products.map((product, index) => (
-          <div key={index} className="border p-4 mb-4 rounded shadow-sm">
-            <div className="flex justify-between items-center mb-2">
-              <h3 className="text-lg font-semibold">
-                {product.productName || `Product ${index + 1}`}
-              </h3>
-              <button
-                type="button"
-                onClick={() => toggleView(index)}
-                className="text-blue-600 underline"
-              >
-                {isProductExpanded(index) ? "Hide" : "View"}
-              </button>
-            </div>
+        {form.products.map((product, index) => {
+          // Find the product data to get stock information
+          const productData = products.find(
+            (p) => p.productName === product.productName
+          );
+          const stockInfo = productData?.inStock;
 
-            {isProductExpanded(index) && (
-              <div className="border rounded-lg p-4 mt-2">
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className="text-lg font-semibold text-gray-800">
-                    Product Details
+          return (
+            <div key={index} className="border p-4 mb-4 rounded shadow-sm">
+              <div className="flex justify-between items-center mb-2">
+                <div className="flex items-center gap-4">
+                  <h3 className="text-lg font-semibold">
+                    {product.productName || `Product ${index + 1}`}
                   </h3>
-                  {form.products.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeProduct(index)}
-                      className="text-red-600 hover:text-red-800"
-                    >
-                      <MinusSquare className="w-5 h-5" />
-                    </button>
+                  {/* Stock information display */}
+                  {product.productName && stockInfo && (
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`text-sm px-2 py-1 rounded ${
+                          stockInfo.status === "Out of Stock"
+                            ? "bg-red-100 text-red-800 border border-red-300"
+                            : stockInfo.status === "Low Stock" ||
+                              stockInfo.status === "Critical"
+                            ? "bg-yellow-100 text-yellow-800 border border-yellow-300"
+                            : "bg-green-100 text-green-800 border border-green-300"
+                        }`}
+                      >
+                        Available: {stockInfo.boxes} boxes
+                      </span>
+                    </div>
                   )}
                 </div>
+                <button
+                  type="button"
+                  onClick={() => toggleView(index)}
+                  className="text-blue-600 hover:text-blue-800 font-medium"
+                >
+                  {isProductExpanded(index) ? "Hide" : "View"}
+                </button>
+              </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <div className="relative flex flex-col">
-                    <label className="text-sm font-medium text-gray-700 mb-1">
-                      Product Name
-                      <span className="text-red-500 ml-1">*</span>
-                    </label>
-                    <input
-                      ref={productSuggestions.getInputRef(index)}
-                      type="text"
-                      value={product.productName}
-                      onChange={(e) =>
-                        enhancedProductChange(
-                          index,
-                          "productName",
-                          e.target.value
-                        )
-                      }
-                      onKeyDown={(e) => handleProductNameKeyDown(index, e)}
-                      onFocus={() => handleProductNameFocus(index)}
-                      onBlur={() =>
-                        setTimeout(
-                          () => productSuggestions.setIsOpen(index, false),
-                          150
-                        )
-                      }
-                      className={`border rounded-md px-2 py-1 ${
-                        errors[`productName_${index}`]
-                          ? "border-red-500"
-                          : "border-gray-300"
-                      }`}
-                      placeholder="Type to search or click to see all options"
-                      autoComplete="off"
-                    />
-                    {productSuggestions.suggestionsList[index]?.isOpen &&
-                      productSuggestions.filteredItems[index]?.length > 0 && (
-                        <ul
-                          className="absolute z-10 bg-white border border-gray-300 w-full rounded-md max-h-60 overflow-auto shadow-lg"
-                          style={{
-                            top: productSuggestions.suggestionsList[index]
-                              .dropdownTop,
-                          }}
-                        >
-                          {productSuggestions.filteredItems[index].map(
-                            (item, idx) => (
-                              <li
-                                key={
-                                  typeof item === "object"
-                                    ? item._id ?? idx
-                                    : idx
-                                }
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={() =>
-                                  productSuggestions.selectSuggestion(
-                                    index,
-                                    typeof item === "string" ? item : item.name,
-                                    (value) =>
-                                      enhancedProductChange(
-                                        index,
-                                        "productName",
-                                        value
-                                      )
-                                  )
-                                }
-                                onMouseEnter={() =>
-                                  handleProductRowHighlight(index, idx)
-                                }
-                                className={`cursor-pointer px-3 py-2 ${
-                                  productSuggestions.suggestionsList[index]
-                                    .highlightedIndex === idx
-                                    ? "bg-blue-600 text-white"
-                                    : "bg-white text-gray-900 hover:bg-gray-100"
-                                }`}
-                              >
-                                {typeof item === "string" ? item : item.name}
-                              </li>
-                            )
-                          )}
-                        </ul>
-                      )}
-                    {errors[`productName_${index}`] && (
-                      <p className="text-red-500 text-xs mt-0.5">
-                        {errors[`productName_${index}`]}
-                      </p>
+              {isProductExpanded(index) && (
+                <div className="border rounded-lg p-4 mt-2">
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="text-lg font-semibold text-gray-800">
+                      Product Details
+                    </h3>
+
+                    {form.products.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeProduct(index)}
+                        className="text-red-600 hover:text-red-800"
+                      >
+                        <MinusSquare className="w-5 h-5" />
+                      </button>
                     )}
                   </div>
 
-                  <InputField
-                    label="Sales Quantity"
-                    name={`salesQty_${index}`}
-                    type="text"
-                    value={product.salesQty}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
-                        updateProduct(index, "salesQty", value);
-                      }
-                    }}
-                    error={errors[`salesQty_${index}`]}
-                    required
-                  />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {/* Product Name Input */}
+                    <div className="relative flex flex-col">
+                      <label className="text-sm font-medium text-gray-700 mb-1">
+                        Product Name
+                        <span className="text-red-500 ml-1">*</span>
+                      </label>
+                      <input
+                        ref={productSuggestions.getInputRef(index)}
+                        type="text"
+                        value={product.productName}
+                        onChange={(e) =>
+                          enhancedProductChange(
+                            index,
+                            "productName",
+                            e.target.value
+                          )
+                        }
+                        onKeyDown={(e) => handleProductNameKeyDown(index, e)}
+                        onFocus={() => handleProductNameFocus(index)}
+                        onBlur={() =>
+                          setTimeout(
+                            () => productSuggestions.setIsOpen(index, false),
+                            150
+                          )
+                        }
+                        className={`border rounded-md px-2 py-1 ${
+                          errors[`productName_${index}`]
+                            ? "border-red-500"
+                            : "border-gray-300"
+                        }`}
+                        placeholder="Type to search or click to see all options"
+                        autoComplete="off"
+                      />
+                      {productSuggestions.suggestionsList[index]?.isOpen &&
+                        productSuggestions.filteredItems[index]?.length > 0 && (
+                          <ul
+                            className="absolute z-10 bg-white border border-gray-300 w-full rounded-md max-h-60 overflow-auto shadow-lg"
+                            style={{
+                              top: productSuggestions.suggestionsList[index]
+                                .dropdownTop,
+                            }}
+                          >
+                            {productSuggestions.filteredItems[index].map(
+                              (item, idx) => (
+                                <li
+                                  key={
+                                    typeof item === "object"
+                                      ? item._id ?? idx
+                                      : idx
+                                  }
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() =>
+                                    productSuggestions.selectSuggestion(
+                                      index,
+                                      typeof item === "string"
+                                        ? item
+                                        : item.name,
+                                      (value) =>
+                                        enhancedProductChange(
+                                          index,
+                                          "productName",
+                                          value
+                                        )
+                                    )
+                                  }
+                                  onMouseEnter={() =>
+                                    handleProductRowHighlight(index, idx)
+                                  }
+                                  className={`cursor-pointer px-3 py-2 ${
+                                    productSuggestions.suggestionsList[index]
+                                      .highlightedIndex === idx
+                                      ? "bg-blue-600 text-white"
+                                      : "bg-white text-gray-900 hover:bg-gray-100"
+                                  }`}
+                                >
+                                  {typeof item === "string" ? item : item.name}
+                                </li>
+                              )
+                            )}
+                          </ul>
+                        )}
+                      {errors[`productName_${index}`] && (
+                        <p className="text-red-500 text-xs mt-0.5">
+                          {errors[`productName_${index}`]}
+                        </p>
+                      )}
+                    </div>
 
-                  <InputField
-                    label="Bonus Quantity"
-                    name={`bonusQty_${index}`}
-                    type="text"
-                    value={product.bonusQty}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
-                        updateProduct(index, "bonusQty", value);
-                      }
-                    }}
-                    error={errors[`bonusQty_${index}`]}
-                  />
+                    <InputField
+                      label="Sales Quantity"
+                      name={`salesQty_${index}`}
+                      type="text"
+                      value={product.salesQty}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+                          updateProduct(index, "salesQty", value);
+                        }
+                      }}
+                      error={errors[`salesQty_${index}`]}
+                      required
+                    />
 
-                  <InputField
-                    label="Selling Price"
-                    name={`sellingPrice_${index}`}
-                    type="text"
-                    value={product.sellingPrice}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
-                        updateProduct(index, "sellingPrice", value);
-                      }
-                    }}
-                    error={errors[`sellingPrice_${index}`]}
-                    required
-                  />
+                    <InputField
+                      label="Bonus Quantity"
+                      name={`bonusQty_${index}`}
+                      type="text"
+                      value={product.bonusQty}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+                          updateProduct(index, "bonusQty", value);
+                        }
+                      }}
+                      error={errors[`bonusQty_${index}`]}
+                    />
 
-                  <InputField
-                    label="Discount"
-                    name={`discount_${index}`}
-                    type="text"
-                    value={product.discount}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
-                        updateProduct(index, "discount", value);
-                      }
-                    }}
-                    error={errors[`discount_${index}`]}
-                  />
+                    <InputField
+                      label="Selling Price"
+                      name={`sellingPrice_${index}`}
+                      type="text"
+                      value={product.sellingPrice}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+                          updateProduct(index, "sellingPrice", value);
+                        }
+                      }}
+                      error={errors[`sellingPrice_${index}`]}
+                      required
+                    />
 
-                  <InputField
-                    label="LC"
-                    name={`lc_${index}`}
-                    value={product.lc}
-                    readOnly
-                  />
+                    <InputField
+                      label="Discount"
+                      name={`discount_${index}`}
+                      type="text"
+                      value={product.discount}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+                          updateProduct(index, "discount", value);
+                        }
+                      }}
+                      error={errors[`discount_${index}`]}
+                    />
 
-                  {/* Calculated Fields */}
-                  <InputField
-                    label="Total Quantity"
-                    name={`totalQty_${index}`}
-                    value={product.totalQty}
-                    readOnly
-                  />
-                  <InputField
-                    label="Amount"
-                    name={`amount_${index}`}
-                    value={product.amount}
-                    readOnly
-                  />
-                  <InputField
-                    label="Net Selling Amount"
-                    name={`netSellingAmount_${index}`}
-                    value={product.netSellingAmount}
-                    readOnly
-                  />
-                  <InputField
-                    label="Average Unit Price"
-                    name={`averageUnitPrice_${index}`}
-                    value={product.averageUnitPrice}
-                    readOnly
-                  />
-                  <InputField
-                    label="Profit / Loss"
-                    name={`profitLoss_${index}`}
-                    value={product.profitLoss}
-                    readOnly
-                  />
+                    <InputField
+                      label="LC"
+                      name={`lc_${index}`}
+                      value={product.lc}
+                      readOnly
+                    />
+
+                    {/* Calculated Fields */}
+                    <InputField
+                      label="Total Quantity"
+                      name={`totalQty_${index}`}
+                      value={product.totalQty}
+                      readOnly
+                    />
+                    <InputField
+                      label="Amount"
+                      name={`amount_${index}`}
+                      value={product.amount}
+                      readOnly
+                    />
+                    <InputField
+                      label="Net Selling Amount"
+                      name={`netSellingAmount_${index}`}
+                      value={product.netSellingAmount}
+                      readOnly
+                    />
+                    <InputField
+                      label="Average Unit Price"
+                      name={`averageUnitPrice_${index}`}
+                      value={product.averageUnitPrice}
+                      readOnly
+                    />
+                    <InputField
+                      label="Profit / Loss"
+                      name={`profitLoss_${index}`}
+                      value={product.profitLoss}
+                      readOnly
+                    />
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
-        ))}
+              )}
+            </div>
+          );
+        })}
       </div>
 
+      {/* Rest of the form */}
       <form onSubmit={handleSubmit}>
         {/* Common Fields */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
@@ -1259,14 +1485,19 @@ const AddSale = () => {
             required
             placeholder="Select invoice date"
           />
-          <InputField
-            label="Medical Representative Name"
-            name="mrName"
-            value={form.mrName}
-            onChange={enhancedHandleChange}
+
+          {/* Medical Representative Dropdown */}
+          <SearchableDropdown
+            value={form.mrId}
+            onChange={handleMRChange}
+            options={mrOptions}
+            placeholder="Select Medical Representative"
+            required={true}
+            loading={mrListLoading}
             error={errors.mrName}
-            required
+            label="Medical Representative"
           />
+
           <InputField
             label="Customer Code"
             name="customerCode"

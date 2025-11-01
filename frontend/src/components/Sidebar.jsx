@@ -1313,7 +1313,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
           </div>
         )}
 
-        {/* Staff Members */}
         {shouldShowTab("staff") && (
           <Link
             to="/staffmemberLayout/staffmember"

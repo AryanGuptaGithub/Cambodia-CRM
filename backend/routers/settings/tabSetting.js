@@ -580,98 +580,46 @@ export const updateVirtualSequence = async (req, res) => {
 };
 
 export const swapVirtualSequences = async (req, res) => {
-
   try {
-    console.log("2. Extracting tabId1 and tabId2 from req.body:", req.body);
     const { tabId1, tabId2 } = req.body;
 
-    console.log("3. Validating required parameters");
     if (!tabId1 || !tabId2) {
-      console.log("4. Validation failed: Missing tabId1 or tabId2");
       return res.status(400).json({
         success: false,
         message: "Both tabId1 and tabId2 are required",
       });
     }
-    console.log("5. Parameters validation passed");
 
-    console.log("6. Starting MongoDB session");
     const session = await mongoose.startSession();
-    console.log("7. Starting transaction");
+
     session.startTransaction();
 
     try {
-      console.log("8. Fetching both tabs from database");
       const [tab1, tab2] = await HTab.find({
         tabId: { $in: [tabId1, tabId2] },
       }).session(session);
 
-      console.log("9. Retrieved tabs:", {
-        tab1: tab1
-          ? { tabId: tab1.tabId, name: tab1.name, sequence: tab1.sequence }
-          : null,
-        tab2: tab2
-          ? { tabId: tab2.tabId, name: tab2.name, sequence: tab2.sequence }
-          : null,
-      });
-
-      console.log("10. Checking if both tabs exist");
       if (!tab1 || !tab2) {
-        console.log("11. One or both tabs not found - aborting transaction");
         await session.abortTransaction();
-        console.log("12. Ending session");
+
         session.endSession();
         return res.status(404).json({
           success: false,
           message: "One or both tabs not found",
         });
       }
-      console.log("13. Both tabs found successfully");
-
-      console.log("14. Checking if tabs have same parent");
-      console.log("15. Tab1 parentTabId:", tab1.parentTabId);
-      console.log("16. Tab2 parentTabId:", tab2.parentTabId);
-
-      // REMOVED PARENT CHECK - Allow swapping across different groups
-      console.log("17. Parent check bypassed - allowing cross-group swapping");
-
-      console.log("18. SWAPPING SEQUENCES:");
-      console.log(
-        "19. Before swap - Tab1 sequence:",
-        tab1.sequence,
-        "Tab2 sequence:",
-        tab2.sequence
-      );
 
       // Swap the sequence values
       const tempSequence = tab1.sequence;
       tab1.sequence = tab2.sequence;
       tab2.sequence = tempSequence;
 
-      console.log(
-        "20. After swap - Tab1 sequence:",
-        tab1.sequence,
-        "Tab2 sequence:",
-        tab2.sequence
-      );
-
-      console.log("21. Saving tab1 with new sequence:", tab1.sequence);
       await tab1.save({ session });
-      console.log("22. Tab1 saved successfully");
-
-      console.log("23. Saving tab2 with new sequence:", tab2.sequence);
       await tab2.save({ session });
-      console.log("24. Tab2 saved successfully");
-
-      console.log("25. Committing transaction");
       await session.commitTransaction();
-      console.log("26. Transaction committed successfully");
 
-      console.log("27. Ending session");
       session.endSession();
-      console.log("28. Session ended");
 
-      console.log("29. Sending success response");
       res.status(200).json({
         success: true,
         message: `Sequences swapped successfully between ${tab1.name} and ${tab2.name}`,
@@ -688,30 +636,20 @@ export const swapVirtualSequences = async (req, res) => {
           },
         },
       });
-      console.log("30. Response sent successfully");
     } catch (error) {
-      console.log("31. Error in transaction block:", error.message);
-      console.log("32. Aborting transaction due to error");
       await session.abortTransaction();
-      console.log("33. Ending session after abort");
+
       session.endSession();
-      console.log("34. Re-throwing error to outer catch block");
+
       throw error;
     }
   } catch (error) {
-    console.log(
-      "35. Outer catch block - Error swapping virtual sequences:",
-      error
-    );
-    console.log("36. Sending error response");
     res.status(500).json({
       success: false,
       message: "Failed to swap sequences",
       error: error.message,
     });
-    console.log("37. Error response sent");
   }
-  console.log("38. swapVirtualSequences function completed");
 };
 export const getTabsGroupedByParentWithSequence = async (req, res) => {
   try {
@@ -802,13 +740,13 @@ router.post("/reset-sequences", async (req, res) => {
     await HTab.updateMany({}, { $set: { sequence: 1 } }); // Example
     res.status(200).json({
       success: true,
-      message: "Sequences reset to default successfully"
+      message: "Sequences reset to default successfully",
     });
   } catch (error) {
     res.status(500).json({
       success: false,
       message: "Failed to reset sequences",
-      error: error.message
+      error: error.message,
     });
   }
 });

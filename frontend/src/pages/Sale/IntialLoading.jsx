@@ -38,27 +38,40 @@ export const useInitialSaleData = () => {
       try {
         const [statusesData, productsData] = await Promise.all([
           fetchData("/api/sales/payment-status"),
-          fetchData("/api/products"), // Changed endpoint to get full product data
+          fetchData("/api/products-with-in-stock"),
         ]);
 
         setStatuses(statusesData);
+        console.log('Full products data from API:', productsData);
 
-        // Get unique products by productName with LC
+        // Keep the full product data including stock information
         const uniqueProducts = Array.from(
           new Map(
             (productsData || []).map((product) => [
               product.productName?.trim().toLowerCase(),
               {
+                ...product, 
                 productName: product.productName?.trim(),
                 lc: product.lc,
+                boxes: product.inStock?.boxes || 0, // Extract boxes from inStock
+                status: product.inStock?.status || 'Out of Stock'
               },
             ])
           ).values()
         ).filter((product) => product.productName);
 
+        console.log('Processed unique products:', uniqueProducts);
         setProducts(uniqueProducts);
-        const names = uniqueProducts.map((product) => product.productName);
-        setProductNames(names);
+        
+        // Create product names with stock information for display
+        const namesWithStock = uniqueProducts.map((product) => ({
+          name: product.productName,
+          displayName: `${product.productName} (total available stock: ${product.boxes})`,
+          boxes: product.boxes,
+          lc: product.lc
+        }));
+        
+        setProductNames(namesWithStock);
       } catch (error) {
         console.error("Error fetching initial data:", error);
         showToast("error", "Failed to load initial data");

@@ -151,8 +151,8 @@ function App() {
 
           {/* Staff Member routes */}
           <Route path="staffmemberLayout" element={<StaffMemberLayout />}>
-            <Route index element={<StaffMember />} />
-            <Route path="add" element={<AddStaffMember />} />
+            <Route path="staffmember" element={<StaffMember />} />
+            <Route path="staffmember/add" element={<AddStaffMember />} />
           </Route>
 
           {/* Master routes */}

@@ -77,7 +77,6 @@ router.get("/customers/provinces", async (req, res) => {
     res.json({
       success: true,
       data: provinces,
-      // count: provinces.length,
     });
   } catch (error) {
     console.error("Error fetching provinces:", error);
@@ -89,7 +88,7 @@ router.get("/customers/provinces", async (req, res) => {
   }
 });
 
-// ✅ GET customers by province (optional: if you need to filter by province)
+// ✅ GET customers by province
 router.get("/customers/province/:province", async (req, res) => {
   try {
     const { province } = req.params;
@@ -107,7 +106,7 @@ router.get("/customers/province/:province", async (req, res) => {
   }
 });
 
-// ✅ GET customer by ID - THIS SHOULD COME AFTER SPECIFIC ROUTES
+// ✅ GET customer by ID
 router.get("/customers/:id", async (req, res) => {
   try {
     const customer = await Customer.findById(req.params.id);
@@ -184,35 +183,6 @@ router.delete("/customers", async (req, res) => {
     });
   } catch (err) {
     handleServerError(res, err);
-  }
-});
-
-// ✅ POST import customers (bulk)
-router.post("/customers/import", async (req, res) => {
-  try {
-    const customers = req.body;
-    if (!Array.isArray(customers)) {
-      return res.status(400).json({
-        message: "Invalid data format. Expected an array of customers.",
-      });
-    }
-
-    for (const customer of customers) {
-      try {
-        await Customer.create(customer);
-      } catch (err) {
-        if (err.code === 11000) return handleDuplicateError(res, err);
-        return res.status(400).json({
-          message: "Invalid data provided",
-          error: err.message,
-          ok: false,
-        });
-      }
-    }
-
-    res.status(200).json({ message: "Customers imported successfully." });
-  } catch (err) {
-    handleServerError(res, err, "Failed to import customers");
   }
 });
 
