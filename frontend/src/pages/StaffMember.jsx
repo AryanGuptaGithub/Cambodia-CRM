@@ -557,7 +557,7 @@ const StaffMember = () => {
               <th className="p-3">Team</th>
               <th className="p-3">Contact No</th>
               <th className="p-3">Email</th>
-              <th className="p-3">Created At</th>
+              <th className="p-3">Joining Date</th>
               <th className="p-3">Status</th>
               <th className="p-3">Action</th>
             </tr>
@@ -586,7 +586,7 @@ const StaffMember = () => {
                 <td className="p-3">{staff.teamName}</td>
                 <td className="p-3">{staff.contactNo || "--"}</td>
                 <td className="p-3">{staff.email || "--"}</td>
-                <td className="p-3">{formatDateToReadable(staff.createdAt)}</td>
+                <td className="p-3">{formatDateToReadable(staff.date)}</td>
                 <td>
                   <button
                     onClick={() => handlerEnabledStaff(staff._id)}

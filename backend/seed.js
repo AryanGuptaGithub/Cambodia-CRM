@@ -9,6 +9,8 @@ import CategoryType from "./models/accounts/CategoryType.js";
 import TransactionType from "./models/accounts/TransactionType.js";
 import Province from "./models/master/Province.js";
 import HTab from "./models/settings/tabSetting.js";
+import Zone from "./models/master/zone.js"; // Import Zone model
+import BusinessType from "./models/master/businessTypes.js"; // Fixed import name
 
 dotenv.config();
 
@@ -103,6 +105,24 @@ async function seedProvinces() {
   await Province.insertMany(provinces);
 }
 
+async function seedZones() {
+  await Zone.deleteMany({});
+  const zones = [
+    { name: "North Zone", code: "north_zone" },
+    { name: "South Zone", code: "south_zone" },
+    { name: "East Zone", code: "east_zone" },
+    { name: "West Zone", code: "west_zone" },
+    { name: "Central Zone", code: "central_zone" },
+    { name: "Metro Zone", code: "metro_zone" },
+    { name: "Urban Zone", code: "urban_zone" },
+    { name: "Rural Zone", code: "rural_zone" },
+    { name: "Commercial Zone", code: "commercial_zone" },
+    { name: "Industrial Zone", code: "industrial_zone" },
+  ];
+
+  await Zone.insertMany(zones);
+}
+
 async function seedSaleTypes() {
   await SaleType.deleteMany({});
   const saleTypes = [
@@ -114,18 +134,7 @@ async function seedSaleTypes() {
   await SaleType.insertMany(saleTypes);
 }
 
-async function seedWarehouses() {
-  await Warehouse.deleteMany({});
-  const warehouses = [
-    { name: "Phnom Penh", code: "PP" },
-    { name: "Siem Reap", code: "SR" },
-    { name: "Battambang", code: "BTB" },
-    { name: "Kampot", code: "KPT" },
-    { name: "Kep", code: "KEP" },
-  ];
 
-  await Warehouse.insertMany(warehouses);
-}
 
 async function seedOrderStatuses() {
   await OrderStatus.deleteMany({});
@@ -153,6 +162,16 @@ async function seedOrderStatuses() {
   ];
 
   await OrderStatus.insertMany(orderStatuses);
+}
+
+async function seedBusinessTypes() {
+  await BusinessType.deleteMany({});
+  const businessTypes = [
+    { name: "Pharmacy", code: "pharmacy" },
+    { name: "Cosmetic", code: "cosmetic" },
+  ];
+
+  await BusinessType.insertMany(businessTypes);
 }
 
 async function seedHTabs() {
@@ -961,18 +980,18 @@ async function runSeeders() {
   try {
     await seedUsers();
     await seedSaleTypes();
-    await seedWarehouses();
     await seedOrderStatuses();
     await seedDestinations();
     await seedCategoryTypes();
     await seedTransactionTypes();
     await seedProvinces();
-    await seedHTabs(); // Add HTabs seeder
+    await seedZones(); 
+    await seedBusinessTypes(); 
+    await seedHTabs();
   } catch (error) {
     console.error("❌ Seeding error:", error);
   } finally {
     await mongoose.disconnect();
-
     process.exit(0);
   }
 }

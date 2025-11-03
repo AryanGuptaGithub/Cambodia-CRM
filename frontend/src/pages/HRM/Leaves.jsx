@@ -40,9 +40,8 @@ const Leaves = () => {
   const fetchMRList = async () => {
     try {
       setLoading(true);
-      // Replace with actual API endpoint
       const response = await axios.get(`${backendUrl}/api/staffs`);
-
+      console.log('values of response', response);
       setMrList(response.data || []);
 
       // Mock leave data - replace with actual leave API calls
@@ -62,6 +61,30 @@ const Leaves = () => {
   const generateMockLeaves = () => {
     const leaves = [];
     return leaves;
+  };
+
+  // Calculate months of service for paid leave calculation
+  const getMonthsOfService = (joinDate) => {
+    if (!joinDate) return 0;
+    
+    const join = new Date(joinDate);
+    const today = new Date();
+    
+    // Calculate difference in months
+    const months = (today.getFullYear() - join.getFullYear()) * 12 + 
+                   (today.getMonth() - join.getMonth());
+    
+    // Only count months after 30 days (1 month) of service
+    const daysInMonth = today.getDate() - join.getDate();
+    const adjustedMonths = daysInMonth >= 30 ? months : Math.max(0, months - 1);
+    
+    return Math.max(0, adjustedMonths);
+  };
+
+  // Calculate paid leaves based on months of service (1.25 days per month)
+  const calculatePaidLeaves = (joinDate) => {
+    const monthsOfService = getMonthsOfService(joinDate);
+    return (monthsOfService * 1.25).toFixed(2);
   };
 
   // Filter MR list based on search
@@ -168,7 +191,7 @@ const Leaves = () => {
   };
 
   // Fixed leave counts calculation
-  const getLeaveCounts = (mrId) => {
+  const getLeaveCounts = (mrId, joinDate) => {
     const leaves = mrLeaves[mrId] || [];
     const currentDate = new Date();
     currentDate.setHours(0, 0, 0, 0);
@@ -197,9 +220,8 @@ const Leaves = () => {
       return date >= yearStart && date <= yearEnd;
     }).length;
 
-    // Calculate paid leaves (1.25 days per month)
-    const currentMonthNumber = new Date().getMonth() + 1; // Current month (1–12)
-    const paidLeaves = (currentMonthNumber * 1.25).toFixed(2);
+    // Calculate paid leaves based on months of service (1.25 days per month)
+    const paidLeaves = calculatePaidLeaves(joinDate);
 
     return {
       monthly: monthlyLeaves,
@@ -209,8 +231,8 @@ const Leaves = () => {
   };
 
   // Calculate remaining paid leaves
-  const getRemainingPaidLeaves = (mrId) => {
-    const leaveCounts = getLeaveCounts(mrId);
+  const getRemainingPaidLeaves = (mrId, joinDate) => {
+    const leaveCounts = getLeaveCounts(mrId, joinDate);
     const remaining = leaveCounts.paid - leaveCounts.annual;
     return Math.max(0, remaining).toFixed(2);
   };
@@ -234,10 +256,10 @@ const Leaves = () => {
     ];
 
     const leaveCounts = selectedMr
-      ? getLeaveCounts(selectedMr._id)
+      ? getLeaveCounts(selectedMr._id, selectedMr.date)
       : { monthly: 0, annual: 0, paid: 0 };
     const remainingPaid = selectedMr
-      ? getRemainingPaidLeaves(selectedMr._id)
+      ? getRemainingPaidLeaves(selectedMr._id, selectedMr.date)
       : 0;
 
     const today = new Date();
@@ -404,10 +426,10 @@ const Leaves = () => {
     ];
 
     const leaveCounts = selectedMr
-      ? getLeaveCounts(selectedMr._id)
+      ? getLeaveCounts(selectedMr._id, selectedMr.date)
       : { monthly: 0, annual: 0, paid: 0 };
     const remainingPaid = selectedMr
-      ? getRemainingPaidLeaves(selectedMr._id)
+      ? getRemainingPaidLeaves(selectedMr._id, selectedMr.date)
       : 0;
 
     const today = new Date();
@@ -646,8 +668,8 @@ const Leaves = () => {
               <tr>
                 <th className="p-3">Sr No</th>
                 <th className="p-3">MR Name</th>
-                <th className="p-3">MR Email</th>
-                <th className="p-3">MR Contact</th>
+                <th className="p-3">Join Date</th>
+                <th className="p-3">Months of Service</th>
                 <th className="p-3">Leave Count (Annual)</th>
                 <th className="p-3">Leave Count (Monthly)</th>
                 <th className="p-3">Paid Leave</th>
@@ -659,8 +681,9 @@ const Leaves = () => {
             <tbody>
               {currentMRs.length > 0 ? (
                 currentMRs.map((mr, index) => {
-                  const leaveCounts = getLeaveCounts(mr._id);
-                  const remainingPaid = getRemainingPaidLeaves(mr._id);
+                  const monthsOfService = getMonthsOfService(mr.date);
+                  const leaveCounts = getLeaveCounts(mr._id, mr.date);
+                  const remainingPaid = getRemainingPaidLeaves(mr._id, mr.date);
 
                   return (
                     <tr
@@ -682,8 +705,15 @@ const Leaves = () => {
                         </span>
                       </td>
 
-                      <td className="p-3 text-gray-600">{mr.email}</td>
-                      <td className="p-3 text-gray-600">{mr.contactNo}</td>
+                      <td className="p-3 text-gray-600">
+                        {mr.date ? new Date(mr.date).toLocaleDateString() : 'N/A'}
+                      </td>
+
+                      <td className="p-3">
+                        <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded-full text-sm font-medium">
+                          {monthsOfService} months
+                        </span>
+                      </td>
 
                       <td className="p-3">
                         <span className="bg-red-100 text-red-800 px-2 py-1 rounded-full text-sm font-medium">

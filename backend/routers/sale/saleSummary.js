@@ -34,11 +34,12 @@ const formatDateToReadable = (isoString) => {
 };
 
 // Function to update ReportInHand inventory after sale
+// Function to update ReportInHand inventory after sale
 const updateReportInHandAfterSale = async (productName, salesQty, bonusQty) => {
   try {
     const totalQtyToDeduct = salesQty + bonusQty;
 
-    if (totalQtyToDeduct <= 0) return;
+    if (totalQtyToDeduct <= 0) return 0;
 
     // Find the product in ReportInHand
     const existingProduct = await ReportInHand.findOne({
@@ -52,15 +53,56 @@ const updateReportInHandAfterSale = async (productName, salesQty, bonusQty) => {
       return 0; // Return 0 as LC value
     }
 
+    // Handle case where piecesPerBox is 0 or invalid
+    const piecesPerBox = existingProduct.quantity.piecesPerBox || 1;
+
+    // If piecesPerBox is 0, we cannot calculate boxes properly
+    // So we'll work directly with totalPieces
+    if (piecesPerBox === 0) {
+      console.warn(
+        `⚠️ Product "${productName}" has piecesPerBox = 0, working with totalPieces only`
+      );
+
+      // Check if there's enough stock
+      if (existingProduct.quantity.totalPieces < totalQtyToDeduct) {
+        throw new Error(
+          `Insufficient stock for product "${productName}". Available: ${existingProduct.quantity.totalPieces}, Required: ${totalQtyToDeduct}`
+        );
+      }
+
+      // Update the inventory - only update totalPieces since boxes calculation is invalid
+      const updatedTotalPieces =
+        existingProduct.quantity.totalPieces - totalQtyToDeduct;
+
+      // Update status based on new total quantity
+      let updatedStatus = "In Stock";
+      if (updatedTotalPieces === 0) {
+        updatedStatus = "Out of Stock";
+      } else if (updatedTotalPieces < 10) {
+        updatedStatus = "Critical";
+      } else if (updatedTotalPieces < 25) {
+        updatedStatus = "Low Stock";
+      }
+
+      await ReportInHand.findByIdAndUpdate(existingProduct._id, {
+        $set: {
+          "quantity.totalPieces": updatedTotalPieces,
+          status: updatedStatus,
+        },
+      });
+
+      return existingProduct.lc || 0;
+    }
+
+    // Normal case: piecesPerBox is valid (not 0)
     // Check if there's enough stock
-    if (existingProduct.quantity.totalPieces < totalQtyToDeduct) {
+    if (existingProduct.quantity.boxes < totalQtyToDeduct) {
       throw new Error(
         `Insufficient stock for product "${productName}". Available: ${existingProduct.quantity.totalPieces}, Required: ${totalQtyToDeduct}`
       );
     }
 
     // Calculate how many boxes and pieces to deduct
-    const piecesPerBox = existingProduct.quantity.piecesPerBox || 1;
     let remainingPiecesToDeduct = totalQtyToDeduct;
 
     // Calculate boxes to deduct
@@ -119,6 +161,33 @@ const restoreReportInHandAfterSaleDeletion = async (
     }
 
     const piecesPerBox = existingProduct.quantity.piecesPerBox || 1;
+    
+    // Handle case where piecesPerBox is 0
+    if (piecesPerBox === 0) {
+      console.warn(`⚠️ Product "${productName}" has piecesPerBox = 0, working with totalPieces only`);
+      
+      const updatedTotalPieces = existingProduct.quantity.totalPieces + totalQtyToRestore;
+
+      // Update status based on new total quantity
+      let updatedStatus = "In Stock";
+      if (updatedTotalPieces === 0) {
+        updatedStatus = "Out of Stock";
+      } else if (updatedTotalPieces < 10) {
+        updatedStatus = "Critical";
+      } else if (updatedTotalPieces < 25) {
+        updatedStatus = "Low Stock";
+      }
+
+      await ReportInHand.findByIdAndUpdate(existingProduct._id, {
+        $set: {
+          "quantity.totalPieces": updatedTotalPieces,
+          status: updatedStatus,
+        },
+      });
+      return;
+    }
+
+    // Normal case: piecesPerBox is valid
     let remainingPiecesToRestore = totalQtyToRestore;
 
     // Calculate boxes to restore
@@ -126,8 +195,7 @@ const restoreReportInHandAfterSaleDeletion = async (
     remainingPiecesToRestore -= boxesToRestore * piecesPerBox;
 
     const updatedBoxes = existingProduct.quantity.boxes + boxesToRestore;
-    const updatedTotalPieces =
-      existingProduct.quantity.totalPieces + totalQtyToRestore;
+    const updatedTotalPieces = existingProduct.quantity.totalPieces + totalQtyToRestore;
 
     // Update status based on new total quantity
     let updatedStatus = "In Stock";

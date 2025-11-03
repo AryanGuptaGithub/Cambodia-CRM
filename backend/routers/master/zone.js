@@ -1,14 +1,12 @@
-const express = require('express');
+import express from "express";
+import Zone from "../../models/master/zone.js";
+
 const router = express.Router();
-const Zone = require('../models/Zone');
 
 // GET all zones
-router.get('/zone', async (req, res) => {
+router.get('/zones', async (req, res) => {
   try {
-    const zones = await Zone.find({ isActive: true })
-      .select('zoneName zoneCode states description')
-      .sort({ zoneName: 1 });
-    
+    const zones = await Zone.find().sort({ name: 1 });
     res.json(zones);
   } catch (error) {
     console.error('Error fetching zones:', error);
@@ -21,17 +19,15 @@ router.get('/zone', async (req, res) => {
 });
 
 // GET zone by ID
-router.get('/zone:id', async (req, res) => {
+router.get('/zone/:id', async (req, res) => {
   try {
     const zone = await Zone.findById(req.params.id);
-    
     if (!zone) {
       return res.status(404).json({ 
         success: false, 
         message: 'Zone not found' 
       });
     }
-    
     res.json(zone);
   } catch (error) {
     console.error('Error fetching zone:', error);
@@ -43,62 +39,30 @@ router.get('/zone:id', async (req, res) => {
   }
 });
 
-// GET states by zone code
-router.get('/:zoneCode/states', async (req, res) => {
-  try {
-    const zone = await Zone.findOne({ 
-      zoneCode: req.params.zoneCode.toUpperCase(),
-      isActive: true 
-    });
-    
-    if (!zone) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Zone not found' 
-      });
-    }
-    
-    res.json({
-      success: true,
-      zone: zone.zoneName,
-      states: zone.states
-    });
-  } catch (error) {
-    console.error('Error fetching states:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Server error while fetching states',
-      error: error.message 
-    });
-  }
-});
-
-// POST create new zone (Admin only)
+// POST create new zone
 router.post('/zone', async (req, res) => {
   try {
-    const { zoneName, zoneCode, states, description } = req.body;
-    
+    const { name } = req.body;
+
+    if (!name) {
+      return res.status(400).json({
+        success: false,
+        message: 'Zone name is required'
+      });
+    }
+
     // Check if zone already exists
-    const existingZone = await Zone.findOne({
-      $or: [{ zoneName }, { zoneCode: zoneCode.toUpperCase() }]
-    });
-    
+    const existingZone = await Zone.findOne({ name: name.trim() });
     if (existingZone) {
       return res.status(400).json({
         success: false,
-        message: 'Zone with this name or code already exists'
+        message: 'Zone with this name already exists'
       });
     }
-    
-    const newZone = new Zone({
-      zoneName,
-      zoneCode: zoneCode.toUpperCase(),
-      states: states || [],
-      description
-    });
-    
+
+    const newZone = new Zone({ name: name.trim() });
     const savedZone = await newZone.save();
-    
+
     res.status(201).json({
       success: true,
       message: 'Zone created successfully',
@@ -115,21 +79,29 @@ router.post('/zone', async (req, res) => {
 });
 
 // PUT update zone
-router.put('/zone:id', async (req, res) => {
+router.put('/zone/:id', async (req, res) => {
   try {
+    const { name } = req.body;
+    if (!name) {
+      return res.status(400).json({
+        success: false,
+        message: 'Zone name is required'
+      });
+    }
+
     const updatedZone = await Zone.findByIdAndUpdate(
       req.params.id,
-      { $set: req.body },
+      { name: name.trim() },
       { new: true, runValidators: true }
     );
-    
+
     if (!updatedZone) {
       return res.status(404).json({ 
         success: false, 
         message: 'Zone not found' 
       });
     }
-    
+
     res.json({
       success: true,
       message: 'Zone updated successfully',
@@ -145,22 +117,18 @@ router.put('/zone:id', async (req, res) => {
   }
 });
 
-// DELETE zone (soft delete)
-router.delete('/zone:id', async (req, res) => {
+// DELETE zone
+router.delete('/zone/:id', async (req, res) => {
   try {
-    const deletedZone = await Zone.findByIdAndUpdate(
-      req.params.id,
-      { isActive: false },
-      { new: true }
-    );
-    
+    const deletedZone = await Zone.findByIdAndDelete(req.params.id);
+
     if (!deletedZone) {
       return res.status(404).json({ 
         success: false, 
         message: 'Zone not found' 
       });
     }
-    
+
     res.json({
       success: true,
       message: 'Zone deleted successfully'

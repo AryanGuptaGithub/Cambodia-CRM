@@ -19,9 +19,9 @@ router.get("/staffs", async (_, res) => {
 
 router.get("/staff/teams", async (_, res) => {
   try {
-    const staff = await staffSchema.find({}, "teamName"); 
+    const staff = await staffSchema.find({}, "teamName");
     const teams = [
-      ...new Set(staff.map((s) => s.teamName?.trim()).filter(Boolean))
+      ...new Set(staff.map((s) => s.teamName?.trim()).filter(Boolean)),
     ];
 
     res.json(teams);
@@ -43,34 +43,42 @@ router.get("/staffs/:id", async (req, res) => {
 // ✅ Route: Create staff
 router.post("/staffs", async (req, res) => {
   try {
-    const { medicalRepName, enabled, contactNo, email } = req.body;
-    const existingStaff = await staffSchema.findOne({ medicalRepName });
+    const { medicalRepName, teamName, contactNo, email, date, enabled } =
+      req.body;
 
-    if (existingStaff) {
-      return res.status(409).json({
-        message: `Staff member with name <b>${medicalRepName}</b> already exists.`,
-        ok: false,
-      });
-    }
+    const existingStaff = await staffSchema.findOne({ medicalRepName });
+    if (existingStaff)
+      return res
+        .status(409)
+        .json({ message: `Staff member ${medicalRepName} already exists.` });
+
     const isEnabled = enabled === "enabled";
 
     const newStaff = new staffSchema({
-      ...req.body,
+      medicalRepName,
+      teamName,
+      contactNo,
+      email,
+      date, // ✅ Joining date saved
       enabled: isEnabled,
     });
 
     const savedStaff = await newStaff.save();
 
-    res.status(201).json({
-      message: `Staff member <b>${savedStaff.medicalRepName}</b> created successfully`,
-      ok: true,
-    });
+    res
+      .status(201)
+      .json({
+        message: `Staff member ${savedStaff.medicalRepName} created successfully`,
+        ok: true,
+      });
   } catch (err) {
-    res.status(400).json({
-      message: "Invalid data provided",
-      error: err.message,
-      ok: false,
-    });
+    res
+      .status(400)
+      .json({
+        message: "Invalid data provided",
+        error: err.message,
+        ok: false,
+      });
   }
 });
 

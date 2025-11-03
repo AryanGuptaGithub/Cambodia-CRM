@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import {Plus,Trash2,Edit,Save,Search,X,} from "lucide-react";
+import { Plus, Trash2, Edit, Save, Search, X } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../utils/toast";
 import { getVisiblePages } from "../utils/useVisiblePages";
@@ -28,8 +28,6 @@ const CONFIG = {
   },
 };
 
-// Custom Dropdown Component
-
 // Helper function to validate MongoDB ObjectId
 const isValidObjectId = (id) => {
   return /^[0-9a-fA-F]{24}$/.test(id);
@@ -44,15 +42,14 @@ const StockAdjustment = () => {
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingAdjustment, setEditingAdjustment] = useState(null);
-  const [selected, setSelected] = useState([]);
   const inputRef = useRef(null);
 
   const [formData, setFormData] = useState({
     product: "",
-    boxQuantity: 0,
-    quantityPerCarton: 0,
+    boxQuantity: "",
+    quantityPerCarton: "",
     adjustmentType: "add",
-    notes: "",
+    remarks: "",
   });
 
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
@@ -82,13 +79,12 @@ const StockAdjustment = () => {
 
   const fetchProducts = async () => {
     try {
-      const response = await fetch(`${backendUrl}/api/products`);
+      const response = await fetch(`${backendUrl}/api/products-with-in-stock`);
       const data = await response.json();
-
       setProducts(data);
-      setSelected([]);
     } catch (err) {
-      handleError(err);
+      console.error("Fetch products error:", err);
+      showToast("error", "Failed to fetch products");
     }
   };
 
@@ -105,7 +101,7 @@ const StockAdjustment = () => {
         adj.adjustmentType,
         adj.totalQuantity,
         adj.productId?.productName,
-        adj.notes,
+        adj.remarks,
       ];
 
       return fields.some((field) =>
@@ -130,13 +126,40 @@ const StockAdjustment = () => {
     return getVisiblePages(currentPage, totalPages);
   }, [currentPage, totalPages]);
 
+  // Get current stock for a product
+  const getCurrentStock = (productId) => {
+    if (!productId) return "-";
+    const product = products.find((p) => p._id === productId);
+    if (!product) return "-";
+
+    if (product.inStock) {
+      return `${product.inStock.boxes}`;
+    }
+
+    return product.currentStock || "-";
+  };
+
+  // Prepare product options for dropdown with current stock
+  const productOptions = useMemo(() => {
+    return [
+      { value: "", label: "Select Product" },
+      ...products.map((product) => {
+        const stockInfo = getCurrentStock(product._id);
+        return {
+          value: product._id,
+          label: `${product.productName}`,
+          product: product,
+        };
+      }),
+    ];
+  }, [products]);
+
   // Selection handlers
   const handleSelect = (id) => {
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
     );
   };
-
 
   const handleBulkDelete = async () => {
     if (selectedIds.length === 0) {
@@ -215,7 +238,7 @@ const StockAdjustment = () => {
       boxQuantity: adjustment.boxQuantity || 0,
       quantityPerCarton: adjustment.quantityPerCarton || 0,
       adjustmentType: adjustment.adjustmentType,
-      notes: adjustment.notes || "",
+      remarks: adjustment.remarks || "",
     });
     setModalVisible(true);
   };
@@ -296,15 +319,10 @@ const StockAdjustment = () => {
       boxQuantity: 0,
       quantityPerCarton: 0,
       adjustmentType: "add",
-      notes: "",
+      remarks: "",
     });
     setModalVisible(false);
     setEditingAdjustment(null);
-  };
-
-  const getCurrentStock = (productId) => {
-    const product = products.find((p) => p._id === productId);
-    return product ? product.currentStock : "-";
   };
 
   // Get quantity display with sign
@@ -316,15 +334,6 @@ const StockAdjustment = () => {
   const getQuantityColor = (quantity) => {
     return quantity < 0 ? "text-red-600" : "text-green-600";
   };
-
-  // Prepare product options for dropdown
-  const productOptions = [
-    { value: "", label: "Select Product" },
-    ...products.map((product) => ({
-      value: product._id,
-      label: product.productName,
-    })),
-  ];
 
   const handleModalSubmit = async (e) => {
     e.preventDefault();
@@ -361,7 +370,7 @@ const StockAdjustment = () => {
         totalQuantity:
           formData.adjustmentType === "remove" ? -totalQuantity : totalQuantity,
         adjustmentType: formData.adjustmentType,
-        notes: formData.notes,
+        remarks: formData.remarks,
       };
 
       if (editingAdjustment) {
@@ -432,7 +441,7 @@ const StockAdjustment = () => {
     { id: "openPieces", name: "Open Pieces" },
     { id: "totalQuantity", name: "Total Quantity" },
     { id: "adjustmentType", name: "Type" },
-    { id: "notes", name: "Notes" },
+    { id: "remarks", name: "Remarks" },
     { id: "actions", name: "Actions" },
   ];
 
@@ -442,7 +451,7 @@ const StockAdjustment = () => {
     "openPieces",
     "totalQuantity",
     "adjustmentType",
-    "notes",
+    "remarks",
     "actions",
   ];
 
@@ -598,8 +607,8 @@ const StockAdjustment = () => {
                             >
                               {adj.adjustmentType}
                             </span>
-                          ) : item.id === "notes" ? (
-                            adj.notes || "-"
+                          ) : item.id === "remarks" ? (
+                            adj.remarks || "-"
                           ) : item.id === "actions" ? (
                             <div className="flex items-center justify-center gap-3 min-w-[150px]">
                               <button
@@ -688,133 +697,22 @@ const StockAdjustment = () => {
               </div>
 
               <form onSubmit={handleModalSubmit} className="p-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Product <span className="text-red-500">*</span>
-                      </label>
-                      <CustomDropdown
-                        value={formData.product}
-                        onChange={(value) => handleFormChange("product", value)}
-                        disabled={!!editingAdjustment}
-                        placeholder="Select Product"
-                        options={productOptions}
-                        required
-                      />
-                    </div>
-
-                    {/* Current Stock */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Current Stock
-                      </label>
-                      <input
-                        type="text"
-                        value={
-                          formData.product
-                            ? getCurrentStock(formData.product)
-                            : "-"
-                        }
-                        readOnly
-                        disabled
-                        className="w-full border border-gray-300 rounded-md px-3 py-2 bg-gray-100 text-gray-700 cursor-not-allowed"
-                      />
-                    </div>
-
-                    {/* Pieces per Box - Read Only */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Pieces per Box
-                      </label>
-                      <input
-                        type="text"
-                        value={getQtyPerCarton()}
-                        readOnly
-                        disabled
-                        className="w-full border border-gray-300 rounded-md px-3 py-2 bg-gray-100 text-gray-700 cursor-not-allowed"
-                      />
-                      <p className="text-xs text-gray-500 mt-1">
-                        This value is automatically set from the selected
-                        product
-                      </p>
-                    </div>
+                {/* First Row: Product and Adjustment Type */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Product <span className="text-red-500">*</span>
+                    </label>
+                    <CustomDropdown
+                      value={formData.product}
+                      onChange={(value) => handleFormChange("product", value)}
+                      disabled={!!editingAdjustment}
+                      placeholder="Select Product"
+                      options={productOptions}
+                      required
+                    />
                   </div>
 
-                  {/* Right Column */}
-                  <div className="space-y-4">
-                    {/* Box Quantity */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Box Quantity <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={formData.boxQuantity}
-                        onChange={(e) =>
-                          handleNumericInput("boxQuantity", e.target.value)
-                        }
-                        onBlur={(e) =>
-                          handleNumericBlur("boxQuantity", e.target.value)
-                        }
-                        className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                        placeholder="Enter box quantity"
-                        required
-                      />
-                    </div>
-
-                    {/* Open Pieces */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Open Pieces <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={formData.quantityPerCarton}
-                        onChange={(e) =>
-                          handleNumericInput(
-                            "quantityPerCarton",
-                            e.target.value
-                          )
-                        }
-                        onBlur={(e) =>
-                          handleNumericBlur("quantityPerCarton", e.target.value)
-                        }
-                        className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                        placeholder="Enter open pieces"
-                        required
-                      />
-                      <p className="text-xs text-gray-500 mt-1">
-                        Enter the number of individual pieces (not in boxes)
-                      </p>
-                    </div>
-
-                    {/* Total Quantity Display */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Total Quantity
-                      </label>
-                      <div
-                        className={`w-full border border-gray-300 rounded-md px-3 py-2 bg-gray-50 font-medium ${
-                          calculateTotalQuantity() < 0
-                            ? "text-red-600"
-                            : "text-green-600"
-                        }`}
-                      >
-                        {getQuantityDisplay(calculateTotalQuantity())}
-                        <div className="text-xs text-gray-500 mt-1">
-                          (Box Qty: {formData.boxQuantity} × Pieces/Box:{" "}
-                          {getQtyPerCarton()}) + Open Pieces:{" "}
-                          {formData.quantityPerCarton}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Full width fields */}
-                <div className="mt-6 space-y-4">
-                  {/* Adjustment Type */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       Adjustment Type <span className="text-red-500">*</span>
@@ -834,22 +732,61 @@ const StockAdjustment = () => {
                       ))}
                     </select>
                   </div>
+                </div>
 
-                  {/* Notes */}
+                {/* Second Row: Current Stock and Box Quantity */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Notes
+                      Current Stock
                     </label>
-                    <textarea
-                      value={formData.notes}
-                      onChange={(e) =>
-                        handleFormChange("notes", e.target.value)
+                    <input
+                      type="text"
+                      value={
+                        formData.product
+                          ? getCurrentStock(formData.product)
+                          : "-"
                       }
-                      rows="3"
-                      className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-vertical"
-                      placeholder="Enter notes (optional)"
+                      readOnly
+                      disabled
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 bg-gray-100 text-gray-700 cursor-not-allowed"
                     />
                   </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Box Quantity <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.boxQuantity}
+                      onChange={(e) =>
+                        handleNumericInput("boxQuantity", e.target.value)
+                      }
+                      onBlur={(e) =>
+                        handleNumericBlur("boxQuantity", e.target.value)
+                      }
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      placeholder="Enter box quantity"
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* Remarks Field - Full Width */}
+                <div className="mb-6">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Remarks
+                  </label>
+                  <textarea
+                    value={formData.remarks}
+                    onChange={(e) =>
+                      handleFormChange("remarks", e.target.value)
+                    }
+                    rows="3"
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-vertical"
+                    placeholder="Enter remarks (optional)"
+                  />
                 </div>
 
                 {/* Buttons */}

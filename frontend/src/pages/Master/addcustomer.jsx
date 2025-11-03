@@ -1,7 +1,16 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+// AddCustomer.jsx
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { showToast } from "../../utils/toast";
 import axios from "axios";
+import SearchableDropdown from "../../components/common/SearchableDropdown";
+import InputField from "../../components/common/InputField";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -19,131 +28,6 @@ const initialFormState = {
   remark: "",
 };
 
-// Searchable Dropdown Component (Consistent with first file)
-const SearchableDropdown = React.memo(({
-  value,
-  onChange,
-  options,
-  disabled,
-  placeholder = "Select option",
-  required = false,
-  loading = false,
-  error = "",
-  label = "",
-}) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
-  const dropdownRef = React.useRef(null);
-
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-        setIsOpen(false);
-        setSearchTerm("");
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  const filteredOptions = useMemo(() => {
-    if (!searchTerm) return options;
-    const filtered = options.filter(option =>
-      option.label.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-    return filtered.length > 0 ? filtered : [{ value: "", label: "No options found", disabled: true }];
-  }, [options, searchTerm]);
-
-  const selectedOption = options.find((opt) => opt.value === value);
-
-  const handleSelect = (optionValue) => {
-    onChange(optionValue);
-    setIsOpen(false);
-    setSearchTerm("");
-  };
-
-  return (
-    <div className="flex flex-col">
-      {label && (
-        <label className="text-sm font-medium text-gray-700 mb-1">
-          {label}
-          {required && <span className="text-red-500 ml-1">*</span>}
-        </label>
-      )}
-      
-      <div className="relative w-full" ref={dropdownRef}>
-        <button
-          type="button"
-          disabled={disabled || loading}
-          onClick={() => !disabled && !loading && setIsOpen(!isOpen)}
-          className={`w-full border rounded-md px-3 py-2 text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-            error ? "border-red-500" : "border-gray-300"
-          } ${
-            disabled || loading
-              ? "bg-gray-100 cursor-not-allowed opacity-60"
-              : "bg-white cursor-pointer hover:border-gray-400"
-          } ${!value ? "text-gray-500" : "text-gray-900"}`}
-        >
-          {loading ? (
-            <span className="text-gray-500">Loading...</span>
-          ) : (
-            <span className="truncate">
-              {selectedOption ? selectedOption.label : placeholder}
-            </span>
-          )}
-        </button>
-
-        {isOpen && !disabled && !loading && (
-          <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-hidden">
-            {/* Search Input */}
-            <div className="p-2 border-b border-gray-200">
-              <input
-                type="text"
-                placeholder="Search..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                autoFocus
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") {
-                    setIsOpen(false);
-                    setSearchTerm("");
-                  }
-                }}
-              />
-            </div>
-
-            {/* Options List */}
-            <div className="max-h-48 overflow-y-auto">
-              {filteredOptions.map((option) => (
-                <button
-                  key={option.value || `option-${option.label}`}
-                  type="button"
-                  onClick={() => !option.disabled && handleSelect(option.value)}
-                  className={`w-full px-3 py-2 text-left transition-colors duration-150 ${
-                    option.disabled 
-                      ? "text-gray-400 cursor-not-allowed bg-gray-50" 
-                      : "hover:bg-blue-50 hover:text-blue-900 text-gray-900 cursor-pointer"
-                  } ${
-                    value === option.value
-                      ? "bg-blue-100 text-blue-900 font-medium"
-                      : ""
-                  }`}
-                  disabled={option.disabled}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-      {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
-    </div>
-  );
-});
-
 const useCustomerForm = (initialCustomerCode = "") => {
   const [form, setForm] = useState({
     ...initialFormState,
@@ -153,18 +37,22 @@ const useCustomerForm = (initialCustomerCode = "") => {
   const [provinces, setProvinces] = useState([]);
   const [mrList, setMrList] = useState([]);
   const [zones, setZones] = useState([]);
+  const [businessTypes, setBusinessTypes] = useState([]);
   const [loading, setLoading] = useState(false);
   const [provincesLoading, setProvincesLoading] = useState(true);
   const [mrListLoading, setMrListLoading] = useState(true);
   const [zonesLoading, setZonesLoading] = useState(true);
+  const [businessTypesLoading, setBusinessTypesLoading] = useState(true);
+  const [isMrListEmpty, setIsMrListEmpty] = useState(false);
   const navigate = useNavigate();
+  const isMrListEmptyRef = useRef(false);
 
   // Get today's date in YYYY-MM-DD format for max date
   const getTodayDate = () => {
     const today = new Date();
     const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, '0');
-    const day = String(today.getDate()).padStart(2, '0');
+    const month = String(today.getMonth() + 1).padStart(2, "0");
+    const day = String(today.getDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
   };
 
@@ -175,20 +63,26 @@ const useCustomerForm = (initialCustomerCode = "") => {
     else {
       const selectedDate = new Date(form.date);
       const today = new Date();
-      today.setHours(0, 0, 0, 0); // Reset time part for accurate comparison
-      
+      today.setHours(0, 0, 0, 0);
+
       if (selectedDate > today) {
         newErrors.date = "Future dates are not allowed";
       }
     }
-    
-    if (!form.medicalRepId) newErrors.medicalRepName = "Medical Representative is required";
+
+    if (!form.medicalRepId)
+      newErrors.medicalRepName = "Medical Representative is required";
     if (!form.name.trim()) newErrors.name = "Customer Name is required";
-    if (!form.typeOfBusiness.trim()) newErrors.typeOfBusiness = "Type of Business is required";
-    if (!form.customerNumber.trim()) newErrors.customerNumber = "Customer Number is required";
-    if (!form.address.trim()) newErrors.address = "Customer Address is required";
+    if (!form.typeOfBusiness.trim())
+      newErrors.typeOfBusiness = "Type of Business is required";
+    // Removed address validation to make it optional
     if (!form.zone) newErrors.zone = "Zone is required";
     if (!form.province) newErrors.province = "Province is required";
+
+    // Customer Number validation - only numbers allowed
+    if (form.customerNumber && !/^\d+$/.test(form.customerNumber)) {
+      newErrors.customerNumber = "Customer Number must contain only numbers";
+    }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -196,32 +90,48 @@ const useCustomerForm = (initialCustomerCode = "") => {
 
   const handleChange = useCallback((e) => {
     const { name, value } = e.target;
-    
-    // Special validation for date field
+
     if (name === "date" && value) {
       const selectedDate = new Date(value);
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      
+
       if (selectedDate > today) {
-        setErrors((prev) => ({ 
-          ...prev, 
-          date: "Future dates are not allowed" 
+        setErrors((prev) => ({
+          ...prev,
+          date: "Future dates are not allowed",
         }));
-        return; // Don't update the form if it's a future date
+        return;
       }
     }
-    
-    setForm((prevForm) => ({
-      ...prevForm,
-      [name]: value,
-    }));
 
-    // Clear error when user starts typing
+    // Handle Customer Number - only allow numbers
+    if (name === "customerNumber") {
+      // Allow only numbers, remove any non-digit characters
+      const numericValue = value.replace(/[^\d]/g, "");
+      setForm((prevForm) => ({
+        ...prevForm,
+        [name]: numericValue,
+      }));
+    } else {
+      setForm((prevForm) => ({
+        ...prevForm,
+        [name]: value,
+      }));
+    }
+
     setErrors((prev) => ({ ...prev, [name]: "" }));
   }, []);
 
-  // Updated to store province name directly
+  // Handle business type change
+  const handleBusinessTypeChange = useCallback((businessType) => {
+    setForm((prevForm) => ({
+      ...prevForm,
+      typeOfBusiness: businessType,
+    }));
+    setErrors((prev) => ({ ...prev, typeOfBusiness: "" }));
+  }, []);
+
   const handleProvinceChange = useCallback((provinceName) => {
     setForm((prevForm) => ({
       ...prevForm,
@@ -230,17 +140,20 @@ const useCustomerForm = (initialCustomerCode = "") => {
     setErrors((prev) => ({ ...prev, province: "" }));
   }, []);
 
-  const handleMRChange = useCallback((mrId) => {
-    const selectedMR = mrList.find((mr) => mr._id === mrId);
-    if (selectedMR) {
-      setForm((prevForm) => ({
-        ...prevForm,
-        medicalRepId: mrId,
-        medicalRepName: selectedMR.medicalRepName,
-      }));
-    }
-    setErrors((prev) => ({ ...prev, medicalRepName: "" }));
-  }, [mrList]);
+  const handleMRChange = useCallback(
+    (mrId) => {
+      const selectedMR = mrList.find((mr) => mr._id === mrId);
+      if (selectedMR) {
+        setForm((prevForm) => ({
+          ...prevForm,
+          medicalRepId: mrId,
+          medicalRepName: selectedMR.medicalRepName,
+        }));
+      }
+      setErrors((prev) => ({ ...prev, medicalRepName: "" }));
+    },
+    [mrList]
+  );
 
   const handleZoneChange = useCallback((zoneName) => {
     setForm((prevForm) => ({
@@ -254,7 +167,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
     try {
       setProvincesLoading(true);
       const response = await axios.get(`${backendUrl}/api/customers/provinces`);
-      
+
       if (response.data.success) {
         setProvinces(response.data.data || []);
       } else {
@@ -272,10 +185,27 @@ const useCustomerForm = (initialCustomerCode = "") => {
     try {
       setMrListLoading(true);
       const response = await axios.get(`${backendUrl}/api/staffs`);
-      setMrList(response.data || []);
+      const mrData = response.data || [];
+      setMrList(mrData);
+
+      if (mrData.length === 0) {
+        if (!isMrListEmptyRef.current) {
+          setIsMrListEmpty(true);
+          isMrListEmptyRef.current = true;
+          showToast(
+            "error",
+            "No Medical Representatives found. Please add at least one MR first."
+          );
+        }
+      } else {
+        setIsMrListEmpty(false);
+        isMrListEmptyRef.current = false;
+      }
     } catch (error) {
       console.error("Error fetching MR list:", error);
       showToast("error", "Failed to load Medical Representatives");
+      setIsMrListEmpty(true);
+      isMrListEmptyRef.current = true;
     } finally {
       setMrListLoading(false);
     }
@@ -284,19 +214,11 @@ const useCustomerForm = (initialCustomerCode = "") => {
   const fetchZones = useCallback(async () => {
     try {
       setZonesLoading(true);
-      const commonZones = [
-        "North Zone",
-        "South Zone", 
-        "East Zone",
-        "West Zone",
-        "Central Zone",
-        "Metro Zone",
-        "Urban Zone",
-        "Rural Zone",
-        "Commercial Zone",
-        "Industrial Zone"
-      ];
-      setZones(commonZones);
+      const response = await axios.get(`${backendUrl}/api/zones`);
+      console.log("Zones API response:", response);
+
+      const zonesData = response.data || [];
+      setZones(zonesData);
     } catch (error) {
       console.error("Error fetching zones:", error);
       showToast("error", "Failed to load zones");
@@ -305,8 +227,55 @@ const useCustomerForm = (initialCustomerCode = "") => {
     }
   }, []);
 
+  const fetchBusinessTypes = useCallback(async () => {
+    try {
+      setBusinessTypesLoading(true);
+      const response = await axios.get(`${backendUrl}/api/business-types`);
+      console.log("Business Types API response:", response);
+
+      // Handle different response structures
+      let businessTypesData = [];
+
+      if (response.data && Array.isArray(response.data)) {
+        // If response.data is directly an array
+        businessTypesData = response.data;
+      } else if (
+        response.data &&
+        response.data.data &&
+        Array.isArray(response.data.data)
+      ) {
+        // If response.data has a data property that is an array
+        businessTypesData = response.data.data;
+      } else if (
+        response.data &&
+        response.data.success &&
+        Array.isArray(response.data.data)
+      ) {
+        // If response follows the success/data pattern
+        businessTypesData = response.data.data;
+      }
+
+      setBusinessTypes(businessTypesData);
+    } catch (error) {
+      console.error("Error fetching business types:", error);
+      showToast("error", "Failed to load business types");
+    
+    } finally {
+      setBusinessTypesLoading(false);
+    }
+  }, []);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    if (isMrListEmpty) {
+      showToast(
+        "error",
+        "Cannot add customer. No Medical Representatives available."
+      );
+      return;
+    }
+
     if (!validate()) return;
 
     try {
@@ -346,11 +315,15 @@ const useCustomerForm = (initialCustomerCode = "") => {
     provinces,
     mrList,
     zones,
+    businessTypes,
     loading,
     provincesLoading,
     mrListLoading,
     zonesLoading,
+    businessTypesLoading,
+    isMrListEmpty,
     handleChange,
+    handleBusinessTypeChange,
     handleProvinceChange,
     handleMRChange,
     handleZoneChange,
@@ -359,51 +332,12 @@ const useCustomerForm = (initialCustomerCode = "") => {
     fetchProvinces,
     fetchMRList,
     fetchZones,
+    fetchBusinessTypes,
     setForm,
     updateFormField,
     getTodayDate,
   };
 };
-
-// Reusable Input Component
-const InputField = React.memo(
-  ({
-    label,
-    name,
-    type = "text",
-    value,
-    onChange,
-    error,
-    placeholder = "",
-    required = false,
-    disabled = false,
-    className = "",
-    max = "", // Add max prop for date input
-    ...props
-  }) => (
-    <div className="flex flex-col">
-      <label className="text-sm font-medium text-gray-700 mb-1">
-        {label}
-        {required && <span className="text-red-500 ml-1">*</span>}
-      </label>
-      <input
-        type={type}
-        name={name}
-        value={value}
-        onChange={onChange}
-        placeholder={placeholder}
-        disabled={disabled}
-        max={max} // Pass max attribute
-        className={`w-full border rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-          error ? "border-red-500" : "border-gray-300"
-        } ${disabled ? "bg-gray-100" : ""} ${className}`}
-        autoComplete="off"
-        {...props}
-      />
-      {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
-    </div>
-  )
-);
 
 const AddCustomer = () => {
   const navigate = useNavigate();
@@ -416,11 +350,15 @@ const AddCustomer = () => {
     provinces,
     mrList,
     zones,
+    businessTypes,
     loading,
     provincesLoading,
     mrListLoading,
     zonesLoading,
+    businessTypesLoading,
+    isMrListEmpty,
     handleChange,
+    handleBusinessTypeChange,
     handleProvinceChange,
     handleMRChange,
     handleZoneChange,
@@ -428,6 +366,7 @@ const AddCustomer = () => {
     fetchProvinces,
     fetchMRList,
     fetchZones,
+    fetchBusinessTypes,
     updateFormField,
     getTodayDate,
   } = useCustomerForm(customerCode);
@@ -445,6 +384,16 @@ const AddCustomer = () => {
 
   // Memoized MR options for dropdown
   const mrOptions = useMemo(() => {
+    if (isMrListEmpty) {
+      return [
+        {
+          value: "",
+          label: "No MR Available",
+          disabled: true,
+        },
+      ];
+    }
+
     return [
       { value: "", label: "Select MR" },
       ...mrList.map((mr) => ({
@@ -452,18 +401,43 @@ const AddCustomer = () => {
         label: `${mr.medicalRepName}`,
       })),
     ];
-  }, [mrList]);
+  }, [mrList, isMrListEmpty]);
 
   // Memoized zone options for dropdown
   const zoneOptions = useMemo(() => {
     return [
       { value: "", label: "Select Zone" },
       ...zones.map((zone) => ({
-        value: zone,
-        label: zone,
+        value: zone.name,
+        label: zone.name,
       })),
     ];
   }, [zones]);
+
+  // Memoized business type options for dropdown
+  const businessTypeOptions = useMemo(() => {
+    return [
+      { value: "", label: "Select Business Type" },
+      ...businessTypes
+        .map((type) => {
+          // Handle both string and object formats
+          if (typeof type === "string") {
+            return {
+              value: type,
+              label: type,
+            };
+          } else if (type && typeof type === "object") {
+            // If business types are objects with name property
+            return {
+              value: type.name || type.value || type._id,
+              label: type.name || type.label || type.value,
+            };
+          }
+          return { value: "", label: "Invalid type" };
+        })
+        .filter((option) => option.value !== ""),
+    ];
+  }, [businessTypes]);
 
   // Set initial customer code and fetch data
   useEffect(() => {
@@ -473,27 +447,71 @@ const AddCustomer = () => {
     fetchProvinces();
     fetchMRList();
     fetchZones();
-  }, [customerCode, fetchProvinces, fetchMRList, fetchZones, updateFormField]);
+    fetchBusinessTypes();
+  }, [
+    customerCode,
+    fetchProvinces,
+    fetchMRList,
+    fetchZones,
+    fetchBusinessTypes,
+    updateFormField,
+  ]);
 
   // Check if form is valid for submission
   const isFormValid = useMemo(() => {
     return (
+      !isMrListEmpty &&
       form.date &&
       form.medicalRepId &&
       form.name.trim() &&
       form.typeOfBusiness.trim() &&
-      form.customerNumber.trim() &&
-      form.address.trim() &&
       form.zone &&
-      form.province
+      form.province &&
+      !errors.customerNumber // Ensure customer number is valid if provided
     );
-  }, [form]);
+  }, [form, isMrListEmpty, errors.customerNumber]);
+
+  // Check if any field should be disabled
+  const isFormDisabled = isMrListEmpty;
 
   return (
     <div className="max-w-3xl mx-auto p-8 bg-white rounded-3xl shadow-lg">
-      <h2 className="text-3xl font-bold mb-8 text-gray-800 text-center">
+      <h2 className="text-xl font-semibold text-gray-800 mb-4">
+        {" "}
         Add New Customer
       </h2>
+
+      {/* Warning message if MR list is empty */}
+      {isMrListEmpty && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <div className="flex items-center">
+            <div className="flex-shrink-0">
+              <svg
+                className="h-5 w-5 text-red-400"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </div>
+            <div className="ml-3">
+              <h3 className="text-sm font-medium text-red-800">
+                No Medical Representatives Available
+              </h3>
+              <div className="mt-2 text-sm text-red-700">
+                <p>
+                  You need to add at least one Medical Representative before
+                  creating customers. Add MRs in the staff management section.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit}>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -507,32 +525,30 @@ const AddCustomer = () => {
               disabled={true}
               className="bg-gray-100 text-gray-700"
             />
-            
+
             <InputField
-              label="Date"
+              label="Joining Date"
               name="date"
               type="date"
               value={form.date}
               onChange={handleChange}
               error={errors.date}
               required
-              max={getTodayDate()} // Prevent future date selection
+              max={getTodayDate()}
+              disabled={isFormDisabled}
             />
-            
-            {/* Medical Representative Dropdown */}
             <SearchableDropdown
               value={form.medicalRepId}
               onChange={handleMRChange}
               options={mrOptions}
-              placeholder="Select MR"
+              placeholder={isMrListEmpty ? "No MRs Available" : "Select MR"}
               required={true}
               loading={mrListLoading}
               error={errors.medicalRepName}
               label="Medical Representative"
+              disabled={isMrListEmpty}
             />
           </div>
-
-          {/* Column 2 */}
           <div className="space-y-6">
             <InputField
               label="Customer Name in English"
@@ -541,38 +557,49 @@ const AddCustomer = () => {
               onChange={handleChange}
               error={errors.name}
               required
+              disabled={isFormDisabled}
             />
-            
-            <InputField
-              label="Types of Business"
-              name="typeOfBusiness"
+
+            <SearchableDropdown
               value={form.typeOfBusiness}
-              onChange={handleChange}
+              onChange={handleBusinessTypeChange}
+              options={businessTypeOptions}
+              placeholder="Select Business Type"
+              required={true}
+              loading={businessTypesLoading}
               error={errors.typeOfBusiness}
-              required
+              label="Types of Business"
+              disabled={isFormDisabled}
             />
-            
+
+            {/* Customer Number - Optional, Numbers Only */}
             <InputField
               label="Customer Number"
               name="customerNumber"
               value={form.customerNumber}
               onChange={handleChange}
+              placeholder="Enter numbers only"
               error={errors.customerNumber}
-              required
+              disabled={isFormDisabled}
+              type="tel" // Use tel type for better mobile keyboard
+              inputMode="numeric" // Show numeric keyboard on mobile
+              pattern="[0-9]*" // HTML5 pattern for numbers only
             />
           </div>
 
           {/* Column 3 */}
           <div className="space-y-6">
+            {/* Customer Address - Now Optional */}
             <InputField
               label="Customer Address"
               name="address"
               value={form.address}
               onChange={handleChange}
               error={errors.address}
-              required
+              placeholder="Optional"
+              disabled={isFormDisabled}
             />
-            
+
             {/* Zone Dropdown */}
             <SearchableDropdown
               value={form.zone}
@@ -583,8 +610,9 @@ const AddCustomer = () => {
               loading={zonesLoading}
               error={errors.zone}
               label="Zone"
+              disabled={isFormDisabled}
             />
-            
+
             {/* Province Dropdown */}
             <SearchableDropdown
               value={form.province}
@@ -595,6 +623,7 @@ const AddCustomer = () => {
               loading={provincesLoading}
               error={errors.province}
               label="Province"
+              disabled={isFormDisabled}
             />
           </div>
         </div>
@@ -611,7 +640,10 @@ const AddCustomer = () => {
               onChange={handleChange}
               placeholder="Additional notes or comments"
               rows={4}
-              className="w-full border border-gray-300 rounded-md px-3 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-vertical"
+              disabled={isFormDisabled}
+              className={`w-full border border-gray-300 rounded-md px-3 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-vertical ${
+                isFormDisabled ? "bg-gray-100 cursor-not-allowed" : ""
+              }`}
             />
           </div>
         </div>
@@ -620,9 +652,23 @@ const AddCustomer = () => {
         <div className="flex justify-end mt-10 gap-4">
           <button
             type="submit"
-            disabled={loading || provincesLoading || mrListLoading || zonesLoading || !isFormValid}
-            className={`px-8 py-3 rounded-lg shadow transition-colors text-lg font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 ${
-              loading || provincesLoading || mrListLoading || zonesLoading || !isFormValid
+            disabled={
+              loading ||
+              provincesLoading ||
+              mrListLoading ||
+              zonesLoading ||
+              businessTypesLoading ||
+              !isFormValid ||
+              isMrListEmpty
+            }
+            className={`px-4 py-3 rounded-lg shadow transition-colors text-lg font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+              loading ||
+              provincesLoading ||
+              mrListLoading ||
+              zonesLoading ||
+              businessTypesLoading ||
+              !isFormValid ||
+              isMrListEmpty
                 ? "bg-gray-400 text-gray-200 cursor-not-allowed focus:ring-gray-300"
                 : "bg-green-600 hover:bg-green-700 text-white cursor-pointer transform hover:scale-105 transition-transform focus:ring-green-500"
             }`}
@@ -632,8 +678,7 @@ const AddCustomer = () => {
           <button
             type="button"
             onClick={() => navigate("/masterlayout/customer")}
-            className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-8 py-3 rounded-lg cursor-pointer transition-colors text-lg font-medium transform
-             hover:scale-105 transition-transform focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
+            className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-3 rounded-lg cursor-pointer transition-colors text-lg font-medium transform hover:scale-105 transition-transform focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
           >
             Cancel
           </button>

@@ -1,58 +1,17 @@
-const mongoose = require('mongoose');
+import mongoose from "mongoose";
 
+// Schema for Zones
 const zoneSchema = new mongoose.Schema({
-  zoneName: {
+  name: {           // Name of the zone (e.g., "North", "South", etc.)
     type: String,
     required: true,
-    unique: true,
-    trim: true
+    unique: true,   // Ensures no duplicate zones
+    trim: true,
   },
-  zoneCode: {
-    type: String,
-    required: true,
-    unique: true,
-    uppercase: true,
-    trim: true
+  createdAt: {      // Optional timestamp
+    type: Date,
+    default: Date.now,
   },
-  states: [{
-    stateName: {
-      type: String,
-      required: true,
-      trim: true
-    },
-    stateCode: {
-      type: String,
-      required: true,
-      trim: true
-    },
-    districts: [{
-      districtName: {
-        type: String,
-        required: true,
-        trim: true
-      },
-      districtCode: {
-        type: String,
-        required: true,
-        trim: true
-      }
-    }]
-  }],
-  isActive: {
-    type: Boolean,
-    default: true
-  },
-  description: {
-    type: String,
-    trim: true
-  }
-}, {
-  timestamps: true
 });
 
-// Index for efficient searching
-zoneSchema.index({ zoneName: 1, zoneCode: 1 });
-zoneSchema.index({ 'states.stateName': 1 });
-zoneSchema.index({ 'states.districts.districtName': 1 });
-
-module.exports = mongoose.model('Zone', zoneSchema);
+export default mongoose.model("Zone", zoneSchema);

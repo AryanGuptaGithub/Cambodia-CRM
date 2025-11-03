@@ -206,8 +206,6 @@ const ReportsInHand = () => {
         Product: item.name,
         Supplier: item.supplierName,
         Boxes: item.boxes,
-        "Pieces/Box": item.piecesPerBox,
-        "Total Pieces": item.currentStock,
         "Min Stock": item.minStock,
         Status: item.status,
         "Price/Piece ($)": item.lc?.toFixed(2) || "0.00",
@@ -227,8 +225,6 @@ const ReportsInHand = () => {
         { wch: 20 }, // Product
         { wch: 20 }, // Supplier
         { wch: 10 }, // Boxes
-        { wch: 12 }, // Pieces/Box
-        { wch: 14 }, // Total Pieces
         { wch: 10 }, // Min Stock
         { wch: 12 }, // Status
         { wch: 15 }, // Price/Piece ($)
@@ -484,8 +480,6 @@ const ReportsInHand = () => {
               <th className="p-3 text-sm font-medium">Date</th>
               <th className="p-3 text-sm font-medium">Product</th>
               <th className="p-3 text-sm font-medium">Boxes</th>
-              <th className="p-3 text-sm font-medium">Pieces/Box</th>
-              <th className="p-3 text-sm font-medium">Total Pieces</th>
               <th className="p-3 text-sm font-medium">Min Stock</th>
               <th className="p-3 text-sm font-medium">Status</th>
               <th className="p-3 text-sm font-medium">Price/Piece ($)</th>
@@ -523,16 +517,7 @@ const ReportsInHand = () => {
                       {product.boxes}
                     </div>
                   </td>
-                  <td className="p-3">
-                    <div className="text-sm text-gray-900">
-                      {product.piecesPerBox}
-                    </div>
-                  </td>
-                  <td className="p-3">
-                    <div className="text-sm font-medium text-gray-900">
-                      {product.currentStock}
-                    </div>
-                  </td>
+
                   <td className="p-3">
                     <div className="text-sm text-gray-900">
                       {product.minStock}

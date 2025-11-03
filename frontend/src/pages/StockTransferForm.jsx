@@ -12,22 +12,20 @@ const INITIAL_PRODUCT_ITEM = {
   id: null,
   productId: "",
   productName: "",
-  boxQuantity: 0,
-  openPieces: 0,
-  qtyPerCarton: 0,
-  totalPieces: 0,
-  expenses: 0,
+  boxQuantity: "",
+  expenses: "",
 };
 
 const INITIAL_FORM_STATE = {
   invoiceNumber: "",
   transferDate: "",
   product: "",
-  remarks: "", // Changed from terms
-  notes: "", // Keep notes as is
+  remarks: "",
   orderStatus: "",
   shipping: "",
-  transferType: "send", // Added transfer type
+  transferType: "send",
+  destination: "", // New field for Send
+  source: "", // New field for Receive
   items: [],
 };
 
@@ -53,7 +51,7 @@ const useStockTransferForm = () => {
     setForm((prev) => ({ ...prev, [name]: value }));
   }, []);
 
-  const validate = useCallback(() => {
+  const validate = useCallback((products = []) => {
     const newErrors = {};
 
     if (!form.transferDate)
@@ -61,6 +59,15 @@ const useStockTransferForm = () => {
     if (!form.orderStatus) newErrors.orderStatus = "Order status is required";
     if (!form.transferType)
       newErrors.transferType = "Transfer type is required";
+
+    // Conditional validation for destination/source
+    if (form.transferType === "send" && !form.destination) {
+      newErrors.destination = "Destination is required for Send transfers";
+    }
+    if (form.transferType === "receive" && !form.source) {
+      newErrors.source = "Source is required for Receive transfers";
+    }
+
     if (items.length === 0)
       newErrors.items = "At least one product item is required";
 
@@ -70,10 +77,23 @@ const useStockTransferForm = () => {
           index + 1
         } is required`;
       }
-      if (!item.boxQuantity || parseNumber(item.boxQuantity) < 0) {
+      
+      const boxQuantity = parseNumber(item.boxQuantity);
+      if (!item.boxQuantity || boxQuantity < 0) {
         newErrors[`boxQuantity_${index}`] = `Box quantity for item ${
           index + 1
         } must be non-negative`;
+      }
+
+      // Stock validation - ONLY for send transfers
+      if (form.transferType === "send" && item.productId && item.boxQuantity) {
+        const product = products.find(p => p._id === item.productId);
+        if (product && product.inStock) {
+          const availableStock = product.inStock.boxes;
+          if (boxQuantity > availableStock) {
+            newErrors[`boxQuantity_${index}`] = `Box quantity cannot exceed available stock (${availableStock} boxes)`;
+          }
+        }
       }
     });
 
@@ -90,30 +110,16 @@ const useStockTransferForm = () => {
   }, []);
 
   const updateItem = useCallback(
-    (id, field, value, products = []) => {
+    (id, field, value) => {
       setItems((prev) =>
         prev.map((item) => {
           if (item.id === id) {
             const updatedItem = {
               ...item,
-              [field]: ["boxQuantity", "openPieces", "expenses"].includes(field)
+              [field]: ["boxQuantity", "expenses"].includes(field)
                 ? parseNumber(value) || 0
                 : value,
             };
-
-            // Calculate Total Pieces when box quantity or open pieces change
-            if (["boxQuantity", "openPieces"].includes(field)) {
-              // Find the product to get qtyPerCarton
-              const selectedProduct = products.find(
-                (p) => p._id === item.productId
-              );
-              const qtyPerCarton = selectedProduct?.qtyPerCarton || 0;
-
-              updatedItem.totalPieces =
-                parseNumber(updatedItem.boxQuantity) *
-                  parseNumber(qtyPerCarton) +
-                parseNumber(updatedItem.openPieces);
-            }
 
             return updatedItem;
           }
@@ -320,9 +326,34 @@ const TextAreaField = React.memo(
   )
 );
 
+// Custom hook to fetch products with stock data
+const useProductsWithStock = () => {
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchProducts = useCallback(async () => {
+    try {
+      setLoading(true);
+      const backendUrl = import.meta.env.VITE_BACKEND_URL;
+      const response = await axios.get(`${backendUrl}/api/products-with-in-stock`);
+      setProducts(response.data || []);
+    } catch (err) {
+      console.error("Error fetching products:", err);
+      showToast("error", "Failed to fetch products");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchProducts();
+  }, [fetchProducts]);
+
+  return { products, loading, refetch: fetchProducts };
+};
+
 const StockTransferForm = () => {
   const navigate = useNavigate();
-  const [products, setProducts] = useState([]);
   const [orderStatuses, setOrderStatuses] = useState([]);
 
   const {
@@ -341,20 +372,32 @@ const StockTransferForm = () => {
     calculateTotals,
   } = useStockTransferForm();
 
+  const { products, loading } = useProductsWithStock();
   const { totalExpenses, shipping, grandTotal } = calculateTotals();
 
-  // Memoized options
-  const productOptions = useMemo(
-    () => [
+  // Memoized options with stock information
+  const productOptions = useMemo(() => {
+    if (!products || products.length === 0) {
+      return [{ value: "", label: "Loading products..." }];
+    }
+
+    return [
       { value: "", label: "Select Product" },
-      ...products.map((product) => ({
-        value: product._id,
-        label: product.productName,
-        qtyPerCarton: product.qtyPerCarton,
-      })),
-    ],
-    [products]
-  );
+      ...products.map((product) => {
+        const stockInfo = product.inStock;
+        // Only show stock info in dropdown for send transfers
+        const stockLabel = form.transferType === "send" && stockInfo
+          ? `${product.productName}`
+          : product.productName;
+
+        return {
+          value: product._id,
+          label: stockLabel,
+          product: product, // Include full product data for stock info
+        };
+      }),
+    ];
+  }, [products, form.transferType]);
 
   const orderStatusOptions = useMemo(
     () => [
@@ -366,17 +409,12 @@ const StockTransferForm = () => {
     [orderStatuses]
   );
 
-  // API calls
-  const fetchProducts = useCallback(async () => {
-    try {
-      const response = await axios.get(`${backendUrl}/api/products`);
-      setProducts(response.data);
-    } catch (err) {
-      console.error("Error fetching products:", err);
-      showToast("error", "Failed to fetch products");
-    }
-  }, []);
+  // Helper function to get product details including stock
+  const getProductDetails = (productId) => {
+    return products.find((p) => p._id === productId);
+  };
 
+  // API calls
   const fetchOrderStatuses = useCallback(async () => {
     try {
       const response = await axios.get(`${backendUrl}/api/order-statuses`);
@@ -388,9 +426,8 @@ const StockTransferForm = () => {
   }, []);
 
   useEffect(() => {
-    fetchProducts();
     fetchOrderStatuses();
-  }, [fetchProducts, fetchOrderStatuses]);
+  }, [fetchOrderStatuses]);
 
   const handleFormChange = useCallback(
     (field, value) => {
@@ -405,30 +442,52 @@ const StockTransferForm = () => {
       return;
     }
 
-    const selectedProduct = products.find((p) => p._id === form.product);
+    const selectedProduct = getProductDetails(form.product);
+    if (!selectedProduct) {
+      showToast("error", "Selected product not found");
+      return;
+    }
+
     const newItem = {
       ...INITIAL_PRODUCT_ITEM,
       id: Date.now(),
       productId: form.product,
-      productName: selectedProduct?.productName || `Product ${form.product}`,
-      qtyPerCarton: selectedProduct?.qtyPerCarton || 0,
+      productName: selectedProduct.productName,
     };
 
     addItem(newItem);
     handleFormChange("product", "");
   }, [form.product, products, addItem, handleFormChange]);
 
-  // Pass products to updateItem
   const handleItemChange = useCallback(
     (id, field, value) => {
-      updateItem(id, field, value, products);
+      if (field === "boxQuantity" && form.transferType === "send") {
+        const item = items.find(item => item.id === id);
+        if (item && item.productId) {
+          const product = getProductDetails(item.productId);
+          if (product && product.inStock) {
+            const availableStock = product.inStock.boxes;
+            const requestedQuantity = parseFloat(value);
+            
+            if (requestedQuantity > availableStock) {
+              showToast("error", `Cannot exceed available stock (${availableStock} boxes)`);
+              // You can choose to either block the input or allow it but show error
+              // For now, we'll allow the input but validation will catch it on submit
+            }
+          }
+        }
+      }
+      
+      updateItem(id, field, value);
     },
-    [updateItem, products]
+    [updateItem, items, products, form.transferType]
   );
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!validate()) {
+    
+    // Pass products to validate for stock validation
+    if (!validate(products)) {
       showToast("error", "Please fix the form errors before submitting");
       return;
     }
@@ -442,18 +501,16 @@ const StockTransferForm = () => {
         productId: item.productId,
         productName: item.productName,
         boxQuantity: parseFloat(item.boxQuantity || 0),
-        openPieces: parseFloat(item.openPieces || 0),
-        qtyPerCarton: parseFloat(item.qtyPerCarton || 0),
-        totalPieces: parseFloat(item.totalPieces || 0),
         expenses: parseFloat(item.expenses || 0),
       })),
-      remarks: form.remarks || "", // Changed from terms to remarks
-      notes: form.notes || "",
+      remarks: form.remarks || "",
       status: form.orderStatus,
-      transferType: form.transferType, // Added transfer type
+      transferType: form.transferType,
       shipping: parseFloat(form.shipping || 0),
       totalExpenses: parseFloat(totalExpenses || 0),
       grandTotal: parseFloat(grandTotal || 0),
+      destination: form.destination || "", // Include destination in payload
+      source: form.source || "", // Include source in payload
     };
 
     try {
@@ -506,13 +563,22 @@ const StockTransferForm = () => {
       form.orderStatus &&
       form.orderStatus.trim() !== "" &&
       form.transferType &&
-      form.transferType.trim() !== "",
+      form.transferType.trim() !== "" &&
+      // Additional validation for destination/source
+      ((form.transferType === "send" &&
+        form.destination &&
+        form.destination.trim() !== "") ||
+        (form.transferType === "receive" &&
+          form.source &&
+          form.source.trim() !== "")),
     [
       form.product,
       form.shipping,
       form.transferDate,
       form.orderStatus,
       form.transferType,
+      form.destination,
+      form.source,
     ]
   );
 
@@ -565,6 +631,32 @@ const StockTransferForm = () => {
             placeholder="Select Transfer Type"
             required
           />
+
+          {/* Conditional Destination/Source Field */}
+          {form.transferType === "send" && (
+            <InputField
+              label="Destination"
+              name="destination"
+              value={form.destination}
+              onChange={handleChange}
+              error={errors.destination}
+              placeholder="Enter destination"
+              required
+            />
+          )}
+
+          {form.transferType === "receive" && (
+            <InputField
+              label="Source"
+              name="source"
+              value={form.source}
+              onChange={handleChange}
+              error={errors.source}
+              placeholder="Enter source"
+              required
+            />
+          )}
+
           <InputField
             label="Shipping ($)"
             name="shipping"
@@ -583,13 +675,19 @@ const StockTransferForm = () => {
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Product <span className="text-red-500">*</span>
               </label>
-              <CustomDropdown
-                value={form.product}
-                onChange={(value) => handleFormChange("product", value)}
-                placeholder="Select Product"
-                options={productOptions}
-                required
-              />
+              {loading ? (
+                <div className="border rounded-lg px-3 py-2 bg-gray-100 text-gray-500">
+                  Loading products...
+                </div>
+              ) : (
+                <CustomDropdown
+                  value={form.product}
+                  onChange={(value) => handleFormChange("product", value)}
+                  placeholder="Select Product"
+                  options={productOptions}
+                  required
+                />
+              )}
             </div>
             <button
               type="button"
@@ -611,27 +709,49 @@ const StockTransferForm = () => {
 
         {items.length > 0 && (
           <div className="mb-6">
-            <h3 className="text-lg font-semibold">Product Items</h3>
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse border border-gray-300 text-center">
-                <thead>
-                  <tr className="bg-gray-100">
-                    <th className="border border-gray-300">Product</th>
-                    <th className="border border-gray-300">Box Quantity</th>
-                    <th className="border border-gray-300">Qty Per Carton</th>
-                    <th className="border border-gray-300">Open Pieces</th>
-                    <th className="border border-gray-300">Total Pieces</th>
-                    <th className="border border-gray-300">Expenses ($)</th>
-                    <th className="border border-gray-300">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((item) => (
-                    <tr key={item.id}>
-                      <td className="border border-gray-300 px-4 py-2">
-                        {item.productName}
-                      </td>
-                      <td className="border border-gray-300 px-4 py-2">
+            <h3 className="text-lg font-semibold mb-4">Product Items</h3>
+            <div className="space-y-4">
+              {items.map((item, index) => {
+                const product = getProductDetails(item.productId);
+                const stockInfo = product?.inStock;
+                
+                return (
+                  <div key={item.id} className="border border-gray-300 rounded-lg p-4 bg-gray-50">
+                    <div className="flex justify-between items-start mb-3">
+                      <div className="flex items-center gap-4">
+                        <h4 className="text-md font-semibold text-gray-800">
+                          {item.productName}
+                        </h4>
+                        {/* Stock information display - ONLY for send transfers */}
+                        {form.transferType === "send" && stockInfo && (
+                          <span
+                            className={`text-sm px-2 py-1 rounded ${
+                              stockInfo.status === "Out of Stock"
+                                ? "bg-red-100 text-red-800 border border-red-300"
+                                : stockInfo.status === "Low Stock" ||
+                                  stockInfo.status === "Critical"
+                                ? "bg-yellow-100 text-yellow-800 border border-yellow-300"
+                                : "bg-green-100 text-green-800 border border-green-300"
+                            }`}
+                          >
+                            Available: {stockInfo.boxes} boxes
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeItem(item.id)}
+                        className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm transition-colors"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="flex flex-col">
+                        <label className="text-sm font-medium text-gray-700 mb-1">
+                          Box Quantity <span className="text-red-500">*</span>
+                        </label>
                         <input
                           type="text"
                           value={item.boxQuantity}
@@ -642,30 +762,29 @@ const StockTransferForm = () => {
                               e.target.value
                             )
                           }
-                          className="w-20 border border-gray-300 rounded px-2 py-1"
+                          className={`w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                            errors[`boxQuantity_${index}`] ? "border-red-500" : "border-gray-300"
+                          }`}
+                          placeholder="Enter box quantity"
+                          max={form.transferType === "send" ? stockInfo?.boxes : undefined} // Only set max for send transfers
                         />
-                      </td>
-                      <td className="border border-gray-300 px-4 py-2 font-semibold">
-                        {item.qtyPerCarton}
-                      </td>
-                      <td className="border border-gray-300 px-4 py-2">
-                        <input
-                          type="text"
-                          value={item.openPieces}
-                          onChange={(e) =>
-                            handleItemChange(
-                              item.id,
-                              "openPieces",
-                              e.target.value
-                            )
-                          }
-                          className="w-20 border border-gray-300 rounded px-2 py-1"
-                        />
-                      </td>
-                      <td className="border border-gray-300 px-4 py-2 font-semibold">
-                        {item.totalPieces}
-                      </td>
-                      <td className="border border-gray-300 px-4 py-2">
+                        {errors[`boxQuantity_${index}`] && (
+                          <p className="text-red-500 text-xs mt-1">
+                            {errors[`boxQuantity_${index}`]}
+                          </p>
+                        )}
+                        {/* Show maximum allowed ONLY for send transfers */}
+                        {form.transferType === "send" && stockInfo && (
+                          <p className="text-xs text-gray-500 mt-1">
+                            Maximum allowed: {stockInfo.boxes} boxes
+                          </p>
+                        )}
+                      </div>
+                      
+                      <div className="flex flex-col">
+                        <label className="text-sm font-medium text-gray-700 mb-1">
+                          Expenses ($)
+                        </label>
                         <input
                           type="text"
                           value={item.expenses}
@@ -676,43 +795,28 @@ const StockTransferForm = () => {
                               e.target.value
                             )
                           }
-                          className="w-24 border border-gray-300 rounded px-2 py-1"
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          placeholder="Enter expenses"
                         />
-                      </td>
-                      <td className="border border-gray-300 px-4 py-2">
-                        <button
-                          type="button"
-                          onClick={() => removeItem(item.id)}
-                          className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm transition-colors"
-                        >
-                          Remove
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
 
-        {/* Text Areas */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-3">
+        {/* Remarks Field - Full Width */}
+        <div className="mb-6">
           <TextAreaField
-            label="Remarks" // Changed from "Terms & Conditions"
-            name="remarks" // Changed from "terms"
+            label="Remarks"
+            name="remarks"
             value={form.remarks}
             onChange={handleChange}
-            placeholder="Remarks"
-            rows={3}
-          />
-          <TextAreaField
-            label="Notes"
-            name="notes"
-            value={form.notes}
-            onChange={handleChange}
-            placeholder="Notes"
-            rows={3}
+            placeholder="Enter remarks or additional information"
+            rows={4}
+            className="w-full"
           />
         </div>
 

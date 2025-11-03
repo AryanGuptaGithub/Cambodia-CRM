@@ -42,35 +42,33 @@ export const useInitialSaleData = () => {
         ]);
 
         setStatuses(statusesData);
-        console.log('Full products data from API:', productsData);
 
-        // Keep the full product data including stock information
         const uniqueProducts = Array.from(
           new Map(
             (productsData || []).map((product) => [
               product.productName?.trim().toLowerCase(),
               {
-                ...product, 
+                ...product,
                 productName: product.productName?.trim(),
                 lc: product.lc,
                 boxes: product.inStock?.boxes || 0, // Extract boxes from inStock
-                status: product.inStock?.status || 'Out of Stock'
+                status: product.inStock?.status || "Out of Stock",
               },
             ])
           ).values()
         ).filter((product) => product.productName);
 
-        console.log('Processed unique products:', uniqueProducts);
         setProducts(uniqueProducts);
-        
+
         // Create product names with stock information for display
         const namesWithStock = uniqueProducts.map((product) => ({
           name: product.productName,
           displayName: `${product.productName} (total available stock: ${product.boxes})`,
           boxes: product.boxes,
-          lc: product.lc
+          lc: product.lc,
+          sellingPrice: product.sellingPrice,
         }));
-        
+
         setProductNames(namesWithStock);
       } catch (error) {
         console.error("Error fetching initial data:", error);

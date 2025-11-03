@@ -11,6 +11,10 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import ReactDOM from "react-dom";
 
+// Import the reusable components
+import SearchableDropdown from "../../components/common/SearchableDropdown";
+import InputField from "../../components/common/InputField";
+
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
@@ -31,11 +35,21 @@ const Customer = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [nextCustomerCode, setNextCustomerCode] = useState(null);
   const inputRef = useRef(null);
+  const [isOpen, setIsOpen] = useState(false);
+
+  // State for dropdown data
+  const [provinces, setProvinces] = useState([]);
+  const [mrList, setMrList] = useState([]);
+  const [zones, setZones] = useState([]);
+  const [provincesLoading, setProvincesLoading] = useState(false);
+  const [mrListLoading, setMrListLoading] = useState(false);
+  const [zonesLoading, setZonesLoading] = useState(false);
 
   const [form, setForm] = useState({
     customerCode: "",
     date: "",
     medicalRepName: "",
+    medicalRepId: "",
     name: "",
     typeOfBusiness: "",
     customerNumber: "",
@@ -48,39 +62,127 @@ const Customer = () => {
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  const [isOpen, setIsOpen] = useState(false);
+  // State for business types
+  const [businessTypes, setBusinessTypes] = useState([]);
+  const [businessTypesLoading, setBusinessTypesLoading] = useState(false);
 
+  // Fetch business types from backend
+  const fetchBusinessTypes = async () => {
+    try {
+      setBusinessTypesLoading(true);
+      const response = await axios.get(`${backendUrl}/api/business-types`);
+      const data = response.data?.data || response.data || [];
+      setBusinessTypes(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error("Error fetching business types:", error);
+      showToast("error", "Failed to load business types");
+      setBusinessTypes([]); // fallback
+    } finally {
+      setBusinessTypesLoading(false);
+    }
+  };
+
+  // Call it in useEffect
   useEffect(() => {
-    (async () => {
-      try {
-        const response = await fetch(`${backendUrl}/api/customers`);
-        if (!response.ok) throw new Error("Failed to fetch customers");
-        const data = await response.json();
-        setCustomers(data.customers);
-        if (data.nextCustomerCode) {
-          setNextCustomerCode(data.nextCustomerCode);
-        }
-      } catch (err) {
-        setError(err.message || "Something went wrong");
-      } finally {
-        setLoading(false);
-      }
-    })();
+    fetchCustomers();
+    fetchProvinces();
+    fetchMRList();
+    fetchZones();
+    fetchBusinessTypes();
   }, []);
+
+  // Business type options
+  const businessTypeOptions = useMemo(() => {
+    const options = [{ value: "", label: "Select Business Type" }];
+
+    if (Array.isArray(businessTypes)) {
+      businessTypes.forEach((type) => {
+        const name =
+          typeof type === "string"
+            ? type
+            : type.name || type.label || "Unknown";
+        options.push({
+          value: name,
+          label: name,
+        });
+      });
+    }
+
+    return options;
+  }, [businessTypes]);
+
+  // Fetch dropdown data
+  const fetchProvinces = async () => {
+    try {
+      setProvincesLoading(true);
+      const response = await axios.get(`${backendUrl}/api/customers/provinces`);
+      if (response.data.success) {
+        setProvinces(response.data.data || []);
+      }
+    } catch (error) {
+      console.error("Error fetching provinces:", error);
+    } finally {
+      setProvincesLoading(false);
+    }
+  };
+
+  const fetchMRList = async () => {
+    try {
+      setMrListLoading(true);
+      const response = await axios.get(`${backendUrl}/api/staffs`);
+      const data = response.data?.data || response.data || [];
+      setMrList(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error("Error fetching MR list:", error);
+      setMrList([]);
+    } finally {
+      setMrListLoading(false);
+    }
+  };
+
+  const fetchZones = async () => {
+    try {
+      setZonesLoading(true);
+      const response = await axios.get(`${backendUrl}/api/zones`);
+      const zonesData = response.data?.data || response.data || [];
+      setZones(Array.isArray(zonesData) ? zonesData : []);
+    } catch (error) {
+      console.error("Error fetching zones:", error);
+      setZones([]);
+    } finally {
+      setZonesLoading(false);
+    }
+  };
+
+  const fetchCustomers = async () => {
+    try {
+      const response = await fetch(`${backendUrl}/api/customers`);
+      if (!response.ok) throw new Error("Failed to fetch customers");
+      const data = await response.json();
+      setCustomers(data.customers || []);
+      if (data.nextCustomerCode) {
+        setNextCustomerCode(data.nextCustomerCode);
+      }
+    } catch (err) {
+      setError(err.message || "Something went wrong");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm]);
-  
+
   const filteredCustomers = customers.filter(
     (r) =>
-      r.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.typeOfBusiness.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.medicalRepName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.address.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.zone.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.province.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.date.toLowerCase().includes(searchTerm.toLowerCase())
+      r.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.typeOfBusiness?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.medicalRepName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.address?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.zone?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.province?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.date?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   // Pagination calculations
@@ -107,16 +209,45 @@ const Customer = () => {
     return [1, "...", currentPage, "...", totalPages];
   }
 
+  // Memoized dropdown options
+  const provinceOptions = useMemo(() => {
+    return [
+      { value: "", label: "Select Province" },
+      ...provinces.map((province) => ({
+        value: province.name || province,
+        label: province.name || province,
+      })),
+    ];
+  }, [provinces]);
+
+  const mrOptions = useMemo(() => {
+    return [
+      { value: "", label: "Select MR" },
+      ...mrList.map((mr) => ({
+        value: mr._id,
+        label: `${mr.medicalRepName || mr.name || "Unknown"}`,
+      })),
+    ];
+  }, [mrList]);
+
+  const zoneOptions = useMemo(() => {
+    return [
+      { value: "", label: "Select Zone" },
+      ...zones.map((zone, index) => ({
+        value: typeof zone === "string" ? zone : zone.name || `Zone ${index}`,
+        label: typeof zone === "string" ? zone : zone.name || `Zone ${index}`,
+      })),
+    ];
+  }, [zones]);
+
   // Select/unselect a customer by id
   const toggleSelect = (customer) => {
     setSelected((prev) => {
       const exists = prev.some((c) => c.id === customer._id);
 
       if (exists) {
-        // If already selected, remove it
         return prev.filter((c) => c.id !== customer._id);
       } else {
-        // If not selected, add it
         return [...prev, { id: customer._id, name: customer.name }];
       }
     });
@@ -153,7 +284,7 @@ const Customer = () => {
           showToast("success", "Selected customers deleted successfully");
           const updated = await fetch(`${backendUrl}/api/customers`);
           const data = await updated.json();
-          setCustomers(data.customers);
+          setCustomers(data.customers || []);
           setNextCustomerCode(data.nextCustomerCode);
           setSelected([]);
         }
@@ -165,17 +296,28 @@ const Customer = () => {
     }
   };
 
-  // Open edit modal with selected customer data
+  // Open edit modal with selected customer data - FIXED
   const editCustomer = (customer) => {
-    setForm({ ...customer });
-    setIsOpen(true);
+    setForm({
+      customerCode: customer.customerCode || "",
+      date: customer.date || "",
+      medicalRepName: customer.medicalRepName || "",
+      medicalRepId: customer.medicalRepId || "",
+      name: customer.name || "",
+      typeOfBusiness: customer.typeOfBusiness || "",
+      customerNumber: customer.customerNumber || "",
+      address: customer.address || "",
+      zone: customer.zone || "",
+      province: customer.province || "",
+      remark: customer.remark || "",
+      _id: customer._id || null,
+    });
     setIsEditModalOpen(true);
   };
 
   // Open view modal with selected customer data
   const handleView = (customer) => {
     setForm({ ...customer });
-    setIsOpen(true);
     setIsViewModalOpen(true);
   };
 
@@ -201,7 +343,7 @@ const Customer = () => {
             `Customer <b>${customer.name}</b> deleted successfully`
           );
           const updated = await axios.get(`${backendUrl}/api/customers`);
-          const customers = updated.data.customers;
+          const customers = updated.data.customers || [];
           setCustomers(customers);
           setNextCustomerCode(updated.data.nextCustomerCode);
           setSelected([]);
@@ -235,7 +377,6 @@ const Customer = () => {
         return;
       }
 
-      // ✅ Expected headers
       const requiredHeaders = [
         "customer code",
         "date",
@@ -252,7 +393,6 @@ const Customer = () => {
       let headerRowIndex = -1;
       let matchedHeaders = [];
 
-      // ✅ Find header row (first 10 rows max)
       for (let i = 0; i < Math.min(rows.length, 10); i++) {
         const row = rows[i].map((cell) =>
           cell?.toString().trim().toLowerCase()
@@ -267,7 +407,6 @@ const Customer = () => {
         }
       }
 
-      // ❌ If required headers not found
       if (
         headerRowIndex === -1 ||
         matchedHeaders.length < requiredHeaders.length
@@ -282,7 +421,6 @@ const Customer = () => {
         return;
       }
 
-      // ✅ Map header keys to column indexes
       const rawHeaders = rows[headerRowIndex];
       const headersMap = {};
       rawHeaders.forEach((header, index) => {
@@ -291,7 +429,6 @@ const Customer = () => {
         headersMap[index] = cleaned;
       });
 
-      // ✅ Parse data rows
       const dataRows = rows.slice(headerRowIndex + 1);
       if (dataRows.length == 0) {
         showToast("warning", "Excel file is empty");
@@ -354,7 +491,6 @@ const Customer = () => {
         parsedData
       );
 
-      // If import is successful
       if (res.status === 200) {
         showToast(
           "success",
@@ -363,7 +499,7 @@ const Customer = () => {
         setShowImportModal(false);
         const response = await fetch(`${backendUrl}/api/customers`);
         const data = await response.json();
-        setCustomers(data.customers);
+        setCustomers(data.customers || []);
         setNextCustomerCode(data.nextCustomerCode);
       }
     } catch (err) {
@@ -378,30 +514,6 @@ const Customer = () => {
       }
     } finally {
       setIsUploading(false);
-    }
-  };
-
-  // Update customer on backend
-  const handleUpdateCustomer = async (e) => {
-    e.preventDefault();
-    try {
-      const res = await axios.put(
-        `${backendUrl}/api/customers/${form._id}`,
-        form
-      );
-      if (res.status === 200) {
-        showToast(
-          "success",
-          `Customer <b>${form.name}</b> updated successfully`
-        );
-        setIsEditModalOpen(false);
-        const updated = await fetch(`${backendUrl}/api/customers`);
-        const data = await updated.json();
-        setCustomers(data.customers);
-        setNextCustomerCode(data.nextCustomerCode);
-      }
-    } catch (err) {
-      showToast("error", "Failed to update customer.");
     }
   };
 
@@ -428,7 +540,7 @@ const Customer = () => {
       console.error("Error updating customer:", err);
     }
   };
-  
+
   const handleIconClick = () => {
     if (inputRef.current) {
       inputRef.current.focus();
@@ -436,6 +548,96 @@ const Customer = () => {
       setTimeout(() => {
         inputRef.current.classList.remove("highlight");
       }, 1000);
+    }
+  };
+
+  // ✅ Safe, unified handler for all inputs
+  const handleInputChange = (nameOrEvent, maybeValue) => {
+    if (nameOrEvent?.target) {
+      const { name, value } = nameOrEvent.target;
+      setForm((prev) => ({ ...prev, [name]: value }));
+    } else {
+      const name = nameOrEvent;
+      const value = maybeValue;
+      setForm((prev) => ({ ...prev, [name]: value }));
+    }
+  };
+
+  // ✅ Handle Medical Representative selection - FIXED
+  const handleMRChange = (mrId) => {
+    const selectedMR = mrList.find((mr) => mr._id === mrId);
+    if (selectedMR) {
+      setForm((prev) => ({
+        ...prev,
+        medicalRepId: mrId,
+        medicalRepName: selectedMR.medicalRepName || selectedMR.name,
+      }));
+    } else {
+      setForm((prev) => ({
+        ...prev,
+        medicalRepId: "",
+        medicalRepName: "",
+      }));
+    }
+  };
+
+  // ✅ Validate and update customer
+  const handleUpdateCustomer = async (e) => {
+    e.preventDefault();
+
+    // Validation for required fields
+    if (!form.zone) {
+      showToast("error", "Zone is required.");
+      return;
+    }
+    if (!form.province) {
+      showToast("error", "Province is required.");
+      return;
+    }
+    if (!form.typeOfBusiness) {
+      showToast("error", "Type of Business is required.");
+      return;
+    }
+    if (!form.medicalRepId) {
+      showToast("error", "Medical Representative is required.");
+      return;
+    }
+
+    try {
+      const updatePayload = {
+        customerCode: form.customerCode,
+        date: form.date,
+        medicalRepName: form.medicalRepName,
+        medicalRepId: form.medicalRepId,
+        name: form.name,
+        typeOfBusiness: form.typeOfBusiness,
+        customerNumber: form.customerNumber,
+        address: form.address,
+        zone: form.zone,
+        province: form.province,
+        remark: form.remark,
+      };
+
+      const res = await axios.put(
+        `${backendUrl}/api/customers/${form._id}`,
+        updatePayload
+      );
+
+      if (res.status === 200) {
+        showToast(
+          "success",
+          `Customer <b>${form.name}</b> updated successfully`
+        );
+        setIsEditModalOpen(false);
+
+        const updated = await fetch(`${backendUrl}/api/customers`);
+        const data = await updated.json();
+        setCustomers(data.customers || []);
+        setNextCustomerCode(data.nextCustomerCode);
+      }
+    } catch (err) {
+      console.error("Update error:", err);
+      showToast("error", "Failed to update customer.");
     }
   };
 
@@ -504,13 +706,27 @@ const Customer = () => {
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
-              <th className="p-3 text-sm font-medium"><div className="flex items-center gap-4">{currentCustomers.length > 0 && (<input type="checkbox" checked={selected.length === currentCustomers.length && currentCustomers.length > 0} onChange={(e) => toggleSelectAll(e.target.checked)} />)}<span>Name</span></div></th>
+              <th className="p-3 text-sm font-medium">
+                <div className="flex items-center gap-4">
+                  {currentCustomers.length > 0 && (
+                    <input
+                      type="checkbox"
+                      checked={
+                        selected.length === currentCustomers.length &&
+                        currentCustomers.length > 0
+                      }
+                      onChange={(e) => toggleSelectAll(e.target.checked)}
+                    />
+                  )}
+                  <span>Name</span>
+                </div>
+              </th>
               <th className="p-3 text-sm font-medium">Business</th>
               <th className="p-3 text-sm font-medium">medicalRepName</th>
               <th className="p-3 text-sm font-medium">Address</th>
               <th className="p-3 text-sm font-medium">Zone</th>
               <th className="p-3 text-sm font-medium">Province</th>
-              <th className="p-3 text-sm font-medium">Created At</th>
+              <th className="p-3 text-sm font-medium">Joining Date</th>
               <th className="p-3 text-sm font-medium">Status</th>
               <th className="p-3 text-sm font-medium">Action</th>
             </tr>
@@ -518,125 +734,453 @@ const Customer = () => {
           <tbody>
             {currentCustomers.length > 0 ? (
               currentCustomers.map((customer, index) => (
-                <tr key={customer._id} className={`hover:bg-gray-50 ${(index + 1) % customersPerPage === 0 || index + 1 === currentCustomers.length ? "" : "border-b"}`}>
-                  <td className="p-3"><div className="flex items-center gap-4"><input type="checkbox" checked={selected.some((s) => s.id === customer._id)} onChange={() => toggleSelect(customer)} /><span className="capitalize">{customer.name}</span></div></td>
+                <tr
+                  key={customer._id || index}
+                  className={`hover:bg-gray-50 ${
+                    (index + 1) % customersPerPage === 0 ||
+                    index + 1 === currentCustomers.length
+                      ? ""
+                      : "border-b"
+                  }`}
+                >
+                  <td className="p-3">
+                    <div className="flex items-center gap-4">
+                      <input
+                        type="checkbox"
+                        checked={selected.some((s) => s.id === customer._id)}
+                        onChange={() => toggleSelect(customer)}
+                      />
+                      <span className="capitalize">{customer.name}</span>
+                    </div>
+                  </td>
                   <td className="p-3">{customer.typeOfBusiness}</td>
                   <td className="p-3 capitalize">{customer.medicalRepName}</td>
                   <td className="p-3 capitalize">{customer.address}</td>
                   <td className="p-3 capitalize">{customer.zone}</td>
                   <td className="p-3 capitalize">{customer.province}</td>
                   <td className="p-3">{formatDateToReadable(customer.date)}</td>
-                  <td><button onClick={() => handlerEnabledCustomer(customer._id)} className={`px-3 py-1 rounded-full text-sm cursor-pointer ${customer.enabled ? "bg-green-100 text-green-600" : "bg-gray-200 text-gray-600"}`}>{customer.enabled ? "Enabled" : "Disabled"}</button></td>
+                  <td>
+                    <button
+                      onClick={() => handlerEnabledCustomer(customer._id)}
+                      className={`px-3 py-1 rounded-full text-sm cursor-pointer ${
+                        customer.enabled
+                          ? "bg-green-100 text-green-600"
+                          : "bg-gray-200 text-gray-600"
+                      }`}
+                    >
+                      {customer.enabled ? "Enabled" : "Disabled"}
+                    </button>
+                  </td>
                   <td className="p-3 flex items-center justify-center gap-3">
-                    <button className="text-blue-600 hover:text-blue-800 cursor-pointer"><Eye onClick={() => handleView(customer)} size={18} /></button>
-                    <button className="text-green-600 hover:text-green-800 cursor-pointer"><Edit onClick={() => editCustomer(customer)} size={18} /></button>
-                    <button onClick={() => deleteCustomer(customer)} className="text-red-600 hover:text-red-800 cursor-pointer"><Trash2 size={18} /></button>
+                    <button
+                      onClick={() => handleView(customer)}
+                      className="text-blue-600 hover:text-blue-800 cursor-pointer"
+                    >
+                      <Eye size={18} />
+                    </button>
+                    <button
+                      onClick={() => editCustomer(customer)}
+                      className="text-green-600 hover:text-green-800 cursor-pointer"
+                    >
+                      <Edit size={18} />
+                    </button>
+                    <button
+                      onClick={() => deleteCustomer(customer)}
+                      className="text-red-600 hover:text-red-800 cursor-pointer"
+                    >
+                      <Trash2 size={18} />
+                    </button>
                   </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={9} className="p-3 text-center">No customer records found</td>
+                <td colSpan={9} className="p-3 text-center">
+                  No customer records found
+                </td>
               </tr>
             )}
           </tbody>
         </table>
         {currentCustomers.length > 0 && (
           <div className="mt-4 p-5 flex justify-start gap-2">
-            <button onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))} disabled={currentPage === 1} className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer">Prev</button>
-            {visiblePages.map((page, idx) => page === "..." ? (<span key={`ellipsis-${idx}`} className="px-3 py-1 text-gray-500 select-none cursor-pointer">...</span>) : (<button key={page} onClick={() => setCurrentPage(page)} className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${currentPage === page ? "bg-indigo-600 text-white" : "bg-gray-200 hover:bg-gray-300"}`}>{page}</button>))}
-            <button onClick={() => { setCurrentPage((prev) => Math.min(prev + 1, totalPages)); window.scrollTo({ top: 0, behavior: "smooth" }); }} disabled={currentPage === totalPages} className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer">Next</button>
+            <button
+              onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+            >
+              Prev
+            </button>
+            {visiblePages.map((page, idx) =>
+              page === "..." ? (
+                <span
+                  key={`ellipsis-${idx}`}
+                  className="px-3 py-1 text-gray-500 select-none cursor-pointer"
+                >
+                  ...
+                </span>
+              ) : (
+                <button
+                  key={`page-${page}`}
+                  onClick={() => setCurrentPage(page)}
+                  className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
+                    currentPage === page
+                      ? "bg-indigo-600 text-white"
+                      : "bg-gray-200 hover:bg-gray-300"
+                  }`}
+                >
+                  {page}
+                </button>
+              )
+            )}
+            <button
+              onClick={() => {
+                setCurrentPage((prev) => Math.min(prev + 1, totalPages));
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }}
+              disabled={currentPage === totalPages}
+              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+            >
+              Next
+            </button>
           </div>
         )}
       </div>
 
-      {showImportModal && ReactDOM.createPortal(
-        <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsOpen(false)} />
-          <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
-            <button onClick={() => setShowImportModal(false)} className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer" disabled={isUploading}><X size={20} /></button>
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">Import Customer</h2>
-            {isSampleFile && <SampleExcelDownloadCustomer />}
-            <div className="mb-6">
-              <label className="block text-gray-700 mb-2">File</label>
-              <input type="file" accept=".csv, .xlsx" onChange={handleFileUpload} className="block w-full border rounded-lg px-3 py-2 cursor-pointer" />
+      {showImportModal &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setShowImportModal(false)}
+            />
+            <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
+              <button
+                onClick={() => setShowImportModal(false)}
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                disabled={isUploading}
+              >
+                <X size={20} />
+              </button>
+              <h2 className="text-lg font-semibold text-gray-800 mb-4">
+                Import Customer
+              </h2>
+              {isSampleFile && <SampleExcelDownloadCustomer />}
+              <div className="mb-6">
+                <label className="block text-gray-700 mb-2">File</label>
+                <input
+                  type="file"
+                  accept=".csv, .xlsx"
+                  onChange={handleFileUpload}
+                  className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
+                />
+              </div>
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setShowImportModal(false)}
+                  disabled={isUploading}
+                  className={`px-5 py-2 rounded-lg cursor-pointer ${
+                    isUploading
+                      ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                      : "bg-gray-300 hover:bg-gray-400 text-gray-700"
+                  }`}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleImport}
+                  disabled={isUploading}
+                  className={`px-5 py-2 rounded-lg cursor-pointer ${
+                    isUploading
+                      ? "bg-blue-400 text-white cursor-not-allowed"
+                      : "bg-blue-600 hover:bg-blue-700 text-white"
+                  }`}
+                >
+                  {isUploading ? "Uploading…" : "Upload"}
+                </button>
+              </div>
             </div>
-            <div className="flex justify-end gap-3">
-              <button onClick={() => setShowImportModal(false)} disabled={isUploading} className={`px-5 py-2 rounded-lg cursor-pointer ${isUploading ? "bg-gray-300 text-gray-500 cursor-not-allowed" : "bg-gray-300 hover:bg-gray-400 text-gray-700"}`}>Cancel</button>
-              <button onClick={handleImport} disabled={isUploading} className={`px-5 py-2 rounded-lg cursor-pointer ${isUploading ? "bg-blue-400 text-white cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700 text-white"}`}>{isUploading ? "Uploading…" : "Upload"}</button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+          </div>,
+          document.body
+        )}
 
-      {/* Edit Customer Modal */}
-      {isEditModalOpen && ReactDOM.createPortal(
-        <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsOpen(false)} />
-          <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
-            <button onClick={() => setIsEditModalOpen(false)} className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"><X size={20} /></button>
-            <h2 className="text-xl font-semibold text-gray-800 mb-4">Edit Customer</h2>
-            <form onSubmit={async (e) => {
-              e.preventDefault();
-              try {
-                const res = await axios.put(`${backendUrl}/api/customers/${form._id}`, form);
-                if (res.status === 200) {
-                  showToast("success", "Customer updated successfully");
-                  setIsEditModalOpen(false);
-                  const updated = await fetch(`${backendUrl}/api/customers`);
-                  setCustomers(await updated.json());
-                }
-              } catch (err) {
-                console.error("Update error:", err);
-                showToast("error", "Failed to update customer.");
-              }
-            }} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div><label className="block text-sm font-medium text-gray-700">Customer Code</label><input type="text" value={form.customerCode} onChange={(e) => setForm({ ...form, customerCode: e.target.value })} className="w-full border px-3 py-2 rounded-lg bg-gray-100 text-gray-500 cursor-not-allowed" disabled /></div>
-              <div><label className="block text-sm font-medium">Name</label><input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full border px-3 py-2 rounded-lg capitalize" /></div>
-              <div><label className="block text-sm font-medium">Customer Number</label><input type="text" value={form.customerNumber} onChange={(e) => setForm({ ...form, customerNumber: e.target.value })} className="w-full border px-3 py-2 rounded-lg capitalize" /></div>
-              <div><label className="block text-sm font-medium">Customer Remark</label><input type="text" value={form.remark} onChange={(e) => setForm({ ...form, remark: e.target.value })} className="w-full border px-3 py-2 rounded-lg capitalize" /></div>
-              <div><label className="block text-sm font-medium">Type of Business</label><input type="text" value={form.typeOfBusiness} onChange={(e) => setForm({ ...form, typeOfBusiness: e.target.value })} className="w-full border px-3 py-2 rounded-lg capitalize" /></div>
-              <div><label className="block text-sm font-medium">Medical Rep Name</label><input type="text" value={form.medicalRepName} onChange={(e) => setForm({ ...form, medicalRepName: e.target.value })} className="w-full border px-3 py-2 rounded-lg capitalize" /></div>
-              <div><label className="block text-sm font-medium">Address</label><input type="text" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} className="w-full border px-3 py-2 rounded-lg capitalize" /></div>
-              <div><label className="block text-sm font-medium">Zone</label><input type="text" value={form.zone} onChange={(e) => setForm({ ...form, zone: e.target.value })} className="w-full border px-3 py-2 rounded-lg capitalize" /></div>
-              <div><label className="block text-sm font-medium">Province</label><input type="text" value={form.province} onChange={(e) => setForm({ ...form, province: e.target.value })} className="w-full border px-3 py-2 rounded-lg capitalize" /></div>
-              <div><label className="block text-sm font-medium">Date</label><DatePicker selected={form.date ? new Date(form.date) : null} onChange={(date) => date ? setForm({ ...form, date: date.toISOString() }) : null} dateFormat="yyyy-MM-dd" placeholderText="Select a date" className="w-full border px-3 py-2 rounded-lg" /></div>
-            </form>
-            <div className="mt-6 flex justify-end gap-3">
-              <button onClick={() => setIsEditModalOpen(false)} className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer">Cancel</button>
-              <button onClick={handleUpdateCustomer} className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer">Update</button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+      {/* Edit Customer Modal - FIXED */}
+      {isEditModalOpen &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            {/* Background overlay */}
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setIsOpen(false)}
+            />
 
-      {isViewModalOpen && ReactDOM.createPortal(
-        <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsOpen(false)} />
-          <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
-            <button onClick={() => setIsViewModalOpen(false)} className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"><X size={20} /></button>
-            <h2 className="text-xl font-semibold text-gray-800 mb-4">View Customer</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div><label className="block text-sm font-medium text-gray-600">Customer Code</label><p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">{form.customerCode}</p></div>
-              <div><label className="block text-sm font-medium text-gray-600">Name</label><p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">{form.name}</p></div>
-              <div><label className="block text-sm font-medium text-gray-600">Customer Number</label><p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">{form.customerNumber}</p></div>
-              <div><label className="block text-sm font-medium text-gray-600">Customer Remark</label><p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">{form.remark?.trim() ? form.remark : "No Remarks"}</p></div>
-              <div><label className="block text-sm font-medium text-gray-600">Type of Business</label><p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">{form.typeOfBusiness}</p></div>
-              <div><label className="block text-sm font-medium text-gray-600">Medical Rep Name</label><p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">{form.medicalRepName}</p></div>
-              <div><label className="block text-sm font-medium text-gray-600">Address</label><p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">{form.address}</p></div>
-              <div><label className="block text-sm font-medium text-gray-600">Zone</label><p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">{form.zone}</p></div>
-              <div><label className="block text-sm font-medium text-gray-600">Province</label><p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">{form.province}</p></div>
-              <div><label className="block text-sm font-medium text-gray-600">Date</label><p className="border px-3 py-2 rounded-lg bg-gray-100">{formatDateToReadable(form.date)}</p></div>
+            {/* Modal content */}
+            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+              {/* Close Button */}
+              <button
+                onClick={() => setIsEditModalOpen(false)}
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+
+              <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                Edit Customer
+              </h2>
+
+              {/* Edit Form */}
+              <form
+                onSubmit={handleUpdateCustomer}
+                className="grid grid-cols-1 md:grid-cols-2 gap-4"
+              >
+                {/* Customer Code (Read-only) */}
+                <InputField
+                  label="Customer Code"
+                  name="customerCode"
+                  value={form.customerCode}
+                  disabled={true}
+                  className="bg-gray-100 text-gray-500 cursor-not-allowed"
+                />
+
+                {/* Name */}
+                <InputField
+                  label="Name"
+                  name="name"
+                  value={form.name}
+                  onChange={handleInputChange}
+                  className="capitalize"
+                />
+
+                {/* Customer Number (numeric only) */}
+                <InputField
+                  label="Customer Number"
+                  name="customerNumber"
+                  type="text"
+                  value={form.customerNumber}
+                  onChange={(e) => {
+                    const value = e.target.value.replace(/[^0-9]/g, ""); // only digits
+                    handleInputChange("customerNumber", value);
+                  }}
+                  placeholder="Enter numbers only"
+                  className="capitalize"
+                />
+
+                {/* Type of Business */}
+                <SearchableDropdown
+                  label="Type of Business"
+                  value={form.typeOfBusiness}
+                  onChange={(value) =>
+                    handleInputChange("typeOfBusiness", value)
+                  }
+                  options={businessTypeOptions}
+                  placeholder="Select Business Type"
+                  required
+                  loading={businessTypesLoading}
+                />
+
+                {/* Medical Representative - FIXED */}
+                <SearchableDropdown
+                  label="Medical Representative"
+                  value={form.medicalRepId} // Use ID as value
+                  onChange={handleMRChange} // Use the fixed handler
+                  options={mrOptions}
+                  placeholder="Select MR"
+                  required
+                  loading={mrListLoading}
+                />
+
+                {/* Address */}
+                <InputField
+                  label="Address"
+                  name="address"
+                  value={form.address}
+                  onChange={handleInputChange}
+                  className="capitalize"
+                />
+
+                {/* Zone */}
+                <SearchableDropdown
+                  label="Zone"
+                  value={form.zone}
+                  onChange={(value) => handleInputChange("zone", value)}
+                  options={zoneOptions}
+                  placeholder="Select Zone"
+                  required
+                  loading={zonesLoading}
+                />
+
+                {/* Province */}
+                <SearchableDropdown
+                  label="Province"
+                  value={form.province}
+                  onChange={(value) => handleInputChange("province", value)}
+                  options={provinceOptions}
+                  placeholder="Select Province"
+                  required
+                  loading={provincesLoading}
+                />
+
+                {/* Date */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Date
+                  </label>
+                  <DatePicker
+                    selected={form.date ? new Date(form.date) : null}
+                    onChange={(date) => handleInputChange("date", date)}
+                    dateFormat="yyyy-MM-dd"
+                    placeholderText="Select a date"
+                    className="w-full border px-3 py-2 rounded-lg"
+                  />
+                </div>
+
+                {/* Remarks */}
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Customer Remark
+                  </label>
+                  <textarea
+                    name="remark"
+                    value={form.remark}
+                    onChange={handleInputChange}
+                    placeholder="Enter remarks"
+                    rows={3}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent capitalize resize-vertical"
+                  />
+                </div>
+              </form>
+
+              {/* Action Buttons */}
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  onClick={() => setIsEditModalOpen(false)}
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleUpdateCustomer}
+                  className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+                >
+                  Update
+                </button>
+              </div>
             </div>
-            <div className="mt-6 flex justify-end">
-              <button onClick={() => setIsViewModalOpen(false)} className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer">Close</button>
+          </div>,
+          document.body
+        )}
+
+      {isViewModalOpen &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setIsViewModalOpen(false)}
+            />
+            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+              <button
+                onClick={() => setIsViewModalOpen(false)}
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+              <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                View Customer
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Customer Code
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {form.customerCode}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Name
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {form.name}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Customer Number
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {form.customerNumber}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Type of Business
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {form.typeOfBusiness}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Medical Rep Name
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {form.medicalRepName}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Address
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {form.address}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Zone
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {form.zone}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Province
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    {form.province}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Date
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                    {formatDateToReadable(form.date)}
+                  </p>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-600">
+                    Customer Remark
+                  </label>
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize min-h-[80px]">
+                    {form.remark?.trim() ? form.remark : "No Remarks"}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-6 flex justify-end">
+                <button
+                  onClick={() => setIsViewModalOpen(false)}
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
             </div>
-          </div>
-        </div>,
-        document.body
-      )}
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

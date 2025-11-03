@@ -28,34 +28,14 @@ const stockTransferSchema = new mongoose.Schema(
           required: true,
           min: 0,
         },
-        openPieces: {
-          type: Number,
-          required: true,
-          min: 0,
-        },
-        qtyPerCarton: {
-          type: Number,
-          required: true,
-          min: 0,
-        },
-        totalPieces: {
-          type: Number,
-          required: true,
-          min: 0,
-        },
         expenses: {
           type: Number,
           required: true,
           min: 0,
-        }
+        },
       },
     ],
     remarks: {
-      type: String,
-      trim: true,
-      default: "",
-    },
-    notes: {
       type: String,
       trim: true,
       default: "",
@@ -67,7 +47,7 @@ const stockTransferSchema = new mongoose.Schema(
     transferType: {
       type: String,
       required: true,
-      enum: ["send", "receive"], // Updated enum values
+      enum: ["send", "receive"],
       default: "send",
     },
     shipping: {
@@ -88,23 +68,34 @@ const stockTransferSchema = new mongoose.Schema(
       min: 0,
       default: 0,
     },
+    // New fields for destination and source
+    destination: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    source: {
+      type: String,
+      trim: true,
+      default: "",
+    },
   },
   {
     timestamps: true,
   }
 );
 
-// Generate invoice number method (optional - you can keep your frontend generation)
+// Generate invoice number method
 stockTransferSchema.statics.generateInvoiceNo = async function () {
   const lastTransfer = await this.findOne({}, {}, { sort: { createdAt: -1 } });
-  
+
   let lastNumber = 0;
   if (lastTransfer && lastTransfer.invoiceNo) {
     // Extract number from format "ST-0001"
     const match = lastTransfer.invoiceNo.match(/\d+/);
     lastNumber = match ? parseInt(match[0]) : 0;
   }
-  
+
   const nextNumber = lastNumber + 1;
   return `ST-${String(nextNumber).padStart(4, "0")}`;
 };
@@ -113,6 +104,8 @@ stockTransferSchema.index({ invoiceNo: 1 });
 stockTransferSchema.index({ date: -1 });
 stockTransferSchema.index({ status: 1 });
 stockTransferSchema.index({ transferType: 1 });
+stockTransferSchema.index({ destination: 1 });
+stockTransferSchema.index({ source: 1 });
 
 const StockTransfer = mongoose.model("StockTransfer", stockTransferSchema);
 

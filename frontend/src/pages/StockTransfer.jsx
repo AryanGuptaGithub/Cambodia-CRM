@@ -6,7 +6,7 @@ import React, {
   useRef,
 } from "react";
 import ReactDOM from "react-dom";
-import { Plus, Trash2, Search, Eye, Edit, X } from "lucide-react";
+import { Plus, Trash2, Search, Eye, Edit, X, Package } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { getVisiblePages } from "../utils/useVisiblePages.jsx";
 import { formatDateToReadable } from "../utils/dateUtil.js";
@@ -28,11 +28,13 @@ const StockTransfer = () => {
   const [stockTransferData, setStockTransferData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [isProductModalOpen, setIsProductModalOpen] = useState(false);
 
   // Modal states
   const [isOpen, setIsOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [selectedProducts, setSelectedProducts] = useState([]);
   const inputRef = useRef(null);
 
   // Form state
@@ -113,6 +115,11 @@ const StockTransfer = () => {
       ...prev,
       [name]: value,
     }));
+  };
+
+  const handleViewProducts = (stockTransfer) => {
+    setSelectedProducts(stockTransfer.items || []);
+    setIsProductModalOpen(true);
   };
 
   // Enhanced numeric input handler
@@ -511,18 +518,30 @@ const StockTransfer = () => {
                   <span>Transfer No</span>
                 </div>
               </th>
+              {/* Add Source/Destination column based on activeTab */}
+              <th className="p-3 min-w-[120px] text-sm font-medium">
+                {activeTab === "send" ? "Destination" : "Source"}
+              </th>
               <th className="p-3 min-w-[120px] text-sm font-medium">Date</th>
-              <th className="p-3 min-w-[120px] text-sm font-medium">Grand Total ($)</th>
-              <th className="p-3 min-w-[120px] text-sm font-medium">Total Expenses ($)</th>
-              <th className="p-3 min-w-[120px] text-sm font-medium">Shipping ($)</th>
-              <th className="p-3 min-w-[120px] text-sm font-medium"># Products</th>
+              <th className="p-3 min-w-[120px] text-sm font-medium">
+                Grand Total ($)
+              </th>
+              <th className="p-3 min-w-[120px] text-sm font-medium">
+                Total Expenses ($)
+              </th>
+              <th className="p-3 min-w-[120px] text-sm font-medium">
+                Shipping ($)
+              </th>
+              <th className="p-3 min-w-[120px] text-sm font-medium">
+                # Products
+              </th>
               <th className="p-3 min-w-[150px] text-sm font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
             {currentStockTransfers.length === 0 ? (
               <tr>
-                <td colSpan={8} className="p-4 text-center text-gray-500">
+                <td colSpan={9} className="p-4 text-center text-gray-500">
                   {searchTerm
                     ? "No matching records found"
                     : "No data available"}
@@ -554,6 +573,12 @@ const StockTransfer = () => {
                         <span className="capitalize">{item.invoiceNo}</span>
                       </div>
                     </td>
+                    {/* Add Source/Destination data */}
+                    <td className="p-3 min-w-[120px]">
+                      {activeTab === "send"
+                        ? item.destination || "Main Warehouse"
+                        : item.source || "Main Warehouse"}
+                    </td>
                     <td className="p-3 min-w-[120px]">
                       {formatDateToReadable(item.date)}
                     </td>
@@ -564,7 +589,18 @@ const StockTransfer = () => {
                       {item.totalExpenses ?? 0}
                     </td>
                     <td className="p-3 min-w-[120px]">{item.shipping ?? 0}</td>
-                    <td className="p-3 min-w-[120px]">{productCount}</td>
+                    <td className="p-3 min-w-[120px]">
+                      <div className="flex items-center justify-center gap-3">
+                        {productCount}{" "}
+                        <button
+                          className="text-purple-600 hover:text-purple-800 cursor-pointer"
+                          onClick={() => handleViewProducts(item)}
+                          title="View Products"
+                        >
+                          <Package size={18} />
+                        </button>
+                      </div>
+                    </td>
                     <td className="p-3 min-w-[150px]">
                       <div className="flex items-center justify-center gap-3">
                         <button
@@ -762,30 +798,7 @@ const StockTransfer = () => {
                                 {item.boxQuantity || 0}
                               </p>
                             </div>
-                            <div>
-                              <label className="block text-sm font-medium text-gray-600">
-                                Open Pieces
-                              </label>
-                              <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                                {item.openPieces || 0}
-                              </p>
-                            </div>
-                            <div>
-                              <label className="block text-sm font-medium text-gray-600">
-                                Quantity Per Carton
-                              </label>
-                              <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                                {item.qtyPerCarton || 0}
-                              </p>
-                            </div>
-                            <div>
-                              <label className="block text-sm font-medium text-gray-600">
-                                Total Pieces
-                              </label>
-                              <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                                {item.totalPieces || 0}
-                              </p>
-                            </div>
+
                             <div>
                               <label className="block text-sm font-medium text-gray-600">
                                 Expenses
@@ -1040,61 +1053,6 @@ const StockTransfer = () => {
                               />
                             </div>
 
-                            {/* Open Pieces */}
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700">
-                                Open Pieces
-                              </label>
-                              <input
-                                type="text"
-                                value={item.openPieces || 0}
-                                onChange={(e) =>
-                                  handleItemChange(
-                                    index,
-                                    "openPieces",
-                                    parseInt(e.target.value) || 0
-                                  )
-                                }
-                                className="w-full border px-3 py-2 rounded-lg"
-                              />
-                            </div>
-
-                            {/* Quantity Per Carton */}
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700">
-                                Quantity Per Carton
-                              </label>
-                              <input
-                                type="text"
-                                value={item.qtyPerCarton || 0}
-                                onChange={(e) =>
-                                  handleItemChange(
-                                    index,
-                                    "qtyPerCarton",
-                                    parseInt(e.target.value) || 0
-                                  )
-                                }
-                                className="w-full border px-3 py-2 rounded-lg bg-gray-100"
-                                readOnly
-                                disabled
-                              />
-                            </div>
-
-                            {/* Total Pieces */}
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700">
-                                Total Pieces
-                              </label>
-                              <input
-                                type="text"
-                                value={item.totalPieces || 0}
-                                className="w-full border px-3 py-2 rounded-lg bg-gray-100"
-                                readOnly
-                                disabled
-                              />
-                            </div>
-
-                            {/* Expenses */}
                             <div>
                               <label className="block text-sm font-medium text-gray-700">
                                 Expenses ($)
@@ -1163,6 +1121,95 @@ const StockTransfer = () => {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>,
+          document.body
+        )}
+      {isProductModalOpen &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 flex items-center justify-center z-50 p-4">
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setIsOpen(false)}
+            />
+
+            <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-2xl shadow-lg relative flex flex-col border border-gray-200">
+              <div className="flex items-center justify-between p-6 border-b">
+                <h2 className="text-xl font-semibold text-gray-800">
+                  Product Details
+                </h2>
+                <button
+                  onClick={() => setIsProductModalOpen(false)}
+                  className="text-gray-500 hover:text-gray-700 cursor-pointer"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 overflow-auto p-6">
+                <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
+                  <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
+                    <thead className="bg-gray-100 text-gray-700 border-b">
+                      <tr>
+                        <th className="p-3 min-w-[200px] text-sm font-medium">
+                          Product Name
+                        </th>
+                        <th className="p-3 min-w-[120px] text-sm font-medium">
+                          Box Quantity
+                        </th>
+                        <th className="p-3 min-w-[120px] text-sm font-medium">
+                          Expenses ($)
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedProducts.length > 0 ? (
+                        selectedProducts.map((product, index) => (
+                          <tr
+                            key={product._id || index}
+                            className={`hover:bg-gray-50 ${
+                              (index + 1) % ITEMS_PER_PAGE === 0 ||
+                              index + 1 === selectedProducts.length
+                                ? ""
+                                : "border-b"
+                            }`}
+                          >
+                            <td className="p-3 min-w-[200px] capitalize">
+                              {product.productName || "-"}
+                            </td>
+                            <td className="p-3 min-w-[120px]">
+                              {product.boxQuantity || 0}
+                            </td>
+                            <td className="p-3 min-w-[120px]">
+                              {product.expenses || 0}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td
+                            colSpan={3}
+                            className="p-4 text-center text-gray-500"
+                          >
+                            No products found
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="flex justify-end p-6 border-t">
+                <button
+                  onClick={() => setIsProductModalOpen(false)}
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-6 py-2 rounded-lg cursor-pointer transition-colors"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>,
           document.body

@@ -1,135 +1,17 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from "react";
 import { useNavigate } from "react-router-dom";
 import { showToast } from "../../utils/toast";
 import axios from "axios";
+import SearchableDropdown from "../../components/common/SearchableDropdown";
+import InputField from "../../components/common/InputField";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
-
-// 🧩 Reusable Searchable Dropdown (Consistent implementation)
-const SearchableDropdown = React.memo(
-  ({
-    label,
-    value,
-    onChange,
-    options,
-    placeholder = "Select",
-    required = false,
-    loading = false,
-    error = "",
-    disabled = false,
-  }) => {
-    const [isOpen, setIsOpen] = useState(false);
-    const [searchTerm, setSearchTerm] = useState("");
-    const dropdownRef = React.useRef(null);
-
-    // Close dropdown when clicking outside
-    useEffect(() => {
-      const handleClickOutside = (event) => {
-        if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-          setIsOpen(false);
-          setSearchTerm("");
-        }
-      };
-      document.addEventListener("mousedown", handleClickOutside);
-      return () => document.removeEventListener("mousedown", handleClickOutside);
-    }, []);
-
-    // Filter options
-    const filteredOptions = useMemo(() => {
-      if (!searchTerm) return options;
-      const filtered = options.filter((option) =>
-        option.label.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-      return filtered.length > 0
-        ? filtered
-        : [{ value: "", label: "No results found", disabled: true }];
-    }, [options, searchTerm]);
-
-    const selectedOption = options.find((opt) => opt.value === value);
-
-    const handleSelect = (optionValue) => {
-      onChange(optionValue);
-      setIsOpen(false);
-      setSearchTerm("");
-    };
-
-    return (
-      <div className="flex flex-col">
-        {label && (
-          <label className="text-sm font-medium text-gray-700 mb-1">
-            {label}
-            {required && <span className="text-red-500 ml-1">*</span>}
-          </label>
-        )}
-
-        <div className="relative w-full" ref={dropdownRef}>
-          <button
-            type="button"
-            disabled={disabled || loading}
-            onClick={() => !disabled && !loading && setIsOpen((prev) => !prev)}
-            className={`w-full border rounded-md px-3 py-2 text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-              error ? "border-red-500" : "border-gray-300"
-            } ${
-              disabled || loading
-                ? "bg-gray-100 cursor-not-allowed opacity-60"
-                : "bg-white cursor-pointer hover:border-gray-400"
-            } ${!value ? "text-gray-500" : "text-gray-900"}`}
-          >
-            {loading
-              ? "Loading..."
-              : selectedOption
-              ? selectedOption.label
-              : placeholder}
-          </button>
-
-          {isOpen && !loading && !disabled && (
-            <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-hidden">
-              <div className="p-2 border-b border-gray-200">
-                <input
-                  type="text"
-                  placeholder="Search..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  autoFocus
-                  onKeyDown={(e) => {
-                    if (e.key === "Escape") {
-                      setIsOpen(false);
-                      setSearchTerm("");
-                    }
-                  }}
-                />
-              </div>
-              <div className="max-h-48 overflow-y-auto">
-                {filteredOptions.map((option) => (
-                  <button
-                    key={option.value || `option-${option.label}`}
-                    type="button"
-                    onClick={() => !option.disabled && handleSelect(option.value)}
-                    disabled={option.disabled}
-                    className={`w-full text-left px-3 py-2 transition-colors duration-150 ${
-                      option.disabled
-                        ? "text-gray-400 bg-gray-50 cursor-not-allowed"
-                        : "hover:bg-blue-50 hover:text-blue-900 cursor-pointer"
-                    } ${
-                      value === option.value
-                        ? "bg-blue-100 text-blue-900 font-medium"
-                        : ""
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {error && <p className="text-red-500 text-xs mt-1">{error}</p>}
-      </div>
-    );
-  }
-);
 
 const AddProduct = () => {
   const navigate = useNavigate();
@@ -151,17 +33,22 @@ const AddProduct = () => {
   const [errors, setErrors] = useState({});
   const [supplierOptions, setSupplierOptions] = useState([]);
   const [loadingSuppliers, setLoadingSuppliers] = useState(false);
+  const [isSupplierListEmpty, setIsSupplierListEmpty] = useState(false);
+  const isMrListEmptyRef = useRef(false);
 
   // 🔹 Product types
-  const typeOptions = useMemo(() => [
-    { value: "Tablet", label: "Tablet" },
-    { value: "Capsule", label: "Capsule" },
-    { value: "Syrup", label: "Syrup" },
-    { value: "Injection", label: "Injection" },
-    { value: "Cream", label: "Cream" },
-    { value: "Ointment", label: "Ointment" },
-    { value: "Drops", label: "Drops" },
-  ], []);
+  const typeOptions = useMemo(
+    () => [
+      { value: "Tablet", label: "Tablet" },
+      { value: "Capsule", label: "Capsule" },
+      { value: "Syrup", label: "Syrup" },
+      { value: "Injection", label: "Injection" },
+      { value: "Cream", label: "Cream" },
+      { value: "Ointment", label: "Ointment" },
+      { value: "Drops", label: "Drops" },
+    ],
+    []
+  );
 
   // 🔹 Fetch supplier list for dropdown
   const fetchSuppliers = useCallback(async () => {
@@ -169,18 +56,38 @@ const AddProduct = () => {
       setLoadingSuppliers(true);
       const res = await axios.get(`${backendUrl}/api/suppliers`);
       const suppliers = res.data?.data || res.data;
+
       if (Array.isArray(suppliers)) {
         setSupplierOptions(
           suppliers.map((s) => ({ value: s.name, label: s.name }))
         );
+
+        // Only update state, don't show toast here
+        if (suppliers.length === 0) {
+          setIsSupplierListEmpty(true);
+        } else {
+          setIsSupplierListEmpty(false);
+        }
+      } else {
+        setIsSupplierListEmpty(true);
       }
     } catch (error) {
       console.error(error);
-      showToast("error", "Failed to load suppliers");
+      setIsSupplierListEmpty(true);
     } finally {
       setLoadingSuppliers(false);
     }
   }, []);
+
+  // Add this useEffect to handle the toast
+  useEffect(() => {
+    if (isSupplierListEmpty && !loadingSuppliers) {
+      showToast(
+        "error",
+        "No suppliers found. Please add at least one supplier first."
+      );
+    }
+  }, [isSupplierListEmpty, loadingSuppliers]);
 
   useEffect(() => {
     fetchSuppliers();
@@ -189,17 +96,23 @@ const AddProduct = () => {
   // 🔹 Validation
   const validate = () => {
     const newErrors = {};
-    if (!form.productName.trim()) newErrors.productName = "Product name is required";
+    if (!form.productName.trim())
+      newErrors.productName = "Product name is required";
     if (!form.type) newErrors.type = "Type is required";
     if (!form.packing.trim()) newErrors.packing = "Packing is required";
-    if (!form.supplierName) newErrors.supplierName = "Supplier name is required";
+    if (!form.supplierName)
+      newErrors.supplierName = "Supplier name is required";
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   // 🔹 Handle text input (allow only numbers where needed)
-  const handleChange = (e) => {
-    const { name, value } = e.target;
+  const handleChange = (name, value) => {
+    // Prevent changes if supplier list is empty
+    if (isSupplierListEmpty) {
+      showToast("error", "Please add at least one supplier first.");
+      return;
+    }
 
     const numericFields = [
       "sellingPrice",
@@ -219,9 +132,24 @@ const AddProduct = () => {
     setErrors((prev) => ({ ...prev, [name]: "" }));
   };
 
+  // 🔹 Handle dropdown changes
+  const handleDropdownChange = (name, value) => {
+    if (!isSupplierListEmpty) {
+      setForm((prev) => ({ ...prev, [name]: value }));
+      setErrors((prev) => ({ ...prev, [name]: "" }));
+    }
+  };
+
   // 🔹 Submit form
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    // Prevent submission if supplier list is empty
+    if (isSupplierListEmpty) {
+      showToast("error", "Cannot add product. No suppliers available.");
+      return;
+    }
+
     if (!validate()) return;
 
     try {
@@ -239,7 +167,8 @@ const AddProduct = () => {
       });
 
       const data = await response.json();
-      if (!response.ok) throw new Error(data.message || "Failed to add product");
+      if (!response.ok)
+        throw new Error(data.message || "Failed to add product");
 
       showToast("success", data.message || "Product added successfully");
       navigate("/productmanagerlayout/product");
@@ -248,74 +177,217 @@ const AddProduct = () => {
     }
   };
 
-  // 🔹 Simple input field renderer
-  const renderInput = (label, name, type = "text", placeholder = "", required = false) => (
-    <div className="flex flex-col">
-      <label className="text-sm font-medium text-gray-700 mb-1">
-        {label} {required && <span className="text-red-500 ml-1">*</span>}
-      </label>
-      <input
-        type={type}
-        name={name}
-        value={form[name]}
-        onChange={handleChange}
-        placeholder={placeholder}
-        className={`w-full border rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-          errors[name] ? "border-red-500" : "border-gray-300"
-        }`}
-        autoComplete="off"
-      />
-      {errors[name] && <p className="text-red-500 text-xs mt-1">{errors[name]}</p>}
-    </div>
-  );
+  // Check if form is valid for submission - also check if supplier list is not empty
+  const isFormValid = useMemo(() => {
+    return (
+      !isSupplierListEmpty &&
+      form.productName.trim() &&
+      form.type &&
+      form.packing.trim() &&
+      form.supplierName
+    );
+  }, [form, isSupplierListEmpty]);
 
   return (
     <div className="max-w-3xl mx-auto p-8 bg-white rounded-2xl shadow">
       <h2 className="text-2xl font-bold mb-6 text-gray-800">Add New Product</h2>
 
+      {/* Warning message if supplier list is empty */}
+      {isSupplierListEmpty && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <div className="flex items-center">
+            <div className="flex-shrink-0">
+              <svg
+                className="h-5 w-5 text-red-400"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </div>
+            <div className="ml-3">
+              <h3 className="text-sm font-medium text-red-800">
+                No Suppliers Available
+              </h3>
+              <div className="mt-2 text-sm text-red-700">
+                <p>
+                  You need to add at least one supplier before creating
+                  products. Please add suppliers in the supplier management
+                  section first.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <form onSubmit={handleSubmit}>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {renderInput("Product Name", "productName", "text", "", true)}
+          {/* Product Name */}
+          <InputField
+            label="Product Name"
+            name="productName"
+            value={form.productName}
+            onChange={handleChange}
+            placeholder=""
+            required={true}
+            error={errors.productName}
+            disabled={isSupplierListEmpty}
+          />
 
-          {/* 🔹 Type Dropdown */}
+          {/* Type Dropdown */}
           <SearchableDropdown
             label="Type"
             value={form.type}
-            onChange={(val) => setForm((prev) => ({ ...prev, type: val }))}
+            onChange={(value) => handleDropdownChange("type", value)}
             options={typeOptions}
-            placeholder="Select Type"
-            required
+            placeholder={
+              isSupplierListEmpty ? "No Suppliers Available" : "Select Type"
+            }
+            required={true}
             error={errors.type}
+            disabled={isSupplierListEmpty}
           />
 
-          {renderInput("Packing", "packing", "text", "", true)}
-          {renderInput("Quantity per Box/Strip", "qtyPerBoxStrip", "text", "Enter number")}
+          {/* Packing */}
+          <InputField
+            label="Packing"
+            name="packing"
+            value={form.packing}
+            onChange={handleChange}
+            placeholder=""
+            required={true}
+            error={errors.packing}
+            disabled={isSupplierListEmpty}
+          />
 
-          {/* 🔹 Supplier Dropdown */}
+          {/* Quantity per Box/Strip */}
+          <InputField
+            label="Quantity per Box/Strip"
+            name="qtyPerBoxStrip"
+            value={form.qtyPerBoxStrip}
+            onChange={handleChange}
+            placeholder="Enter number"
+            error={errors.qtyPerBoxStrip}
+            disabled={isSupplierListEmpty}
+          />
+
+          {/* Supplier Dropdown */}
           <SearchableDropdown
             label="Supplier Name"
             value={form.supplierName}
-            onChange={(val) => setForm((prev) => ({ ...prev, supplierName: val }))}
-            options={supplierOptions}
+            onChange={(value) => handleDropdownChange("supplierName", value)}
+            options={
+              isSupplierListEmpty
+                ? [
+                    {
+                      value: "",
+                      label: "No Suppliers Available",
+                      disabled: true,
+                    },
+                  ]
+                : supplierOptions
+            }
             loading={loadingSuppliers}
-            placeholder="Select Supplier"
-            required
+            placeholder={
+              isSupplierListEmpty ? "No Suppliers Available" : "Select Supplier"
+            }
+            required={true}
             error={errors.supplierName}
+            disabled={isSupplierListEmpty}
           />
 
-          {renderInput("Drug License", "drugLicense", "text")}
-          {renderInput("License Validity Date", "licenseValidityDate", "date")}
-          {renderInput("Selling Price (USD)", "sellingPrice", "text", "Enter number")}
-          {renderInput("LC (USD)", "lc", "text", "Enter number")}
-          {renderInput("FOB (USD)", "fob", "text", "Enter number")}
-          {renderInput("Tax Selling Price (USD)", "taxSellingPrice", "text", "Enter number")}
-          {renderInput("Remarks", "remarks", "text")}
+          {/* Drug License */}
+          <InputField
+            label="Drug License"
+            name="drugLicense"
+            value={form.drugLicense}
+            onChange={handleChange}
+            placeholder=""
+            error={errors.drugLicense}
+            disabled={isSupplierListEmpty}
+          />
+
+          {/* License Validity Date */}
+          <InputField
+            label="License Validity Date"
+            name="licenseValidityDate"
+            value={form.licenseValidityDate}
+            onChange={handleChange}
+            type="date"
+            error={errors.licenseValidityDate}
+            disabled={isSupplierListEmpty}
+          />
+
+          {/* Selling Price */}
+          <InputField
+            label="Selling Price (USD)"
+            name="sellingPrice"
+            value={form.sellingPrice}
+            onChange={handleChange}
+            placeholder="Enter number"
+            error={errors.sellingPrice}
+            disabled={isSupplierListEmpty}
+          />
+
+          {/* LC */}
+          <InputField
+            label="LC (USD)"
+            name="lc"
+            value={form.lc}
+            onChange={handleChange}
+            placeholder="Enter number"
+            error={errors.lc}
+            disabled={isSupplierListEmpty}
+          />
+
+          {/* FOB */}
+          <InputField
+            label="FOB (USD)"
+            name="fob"
+            value={form.fob}
+            onChange={handleChange}
+            placeholder="Enter number"
+            error={errors.fob}
+            disabled={isSupplierListEmpty}
+          />
+
+          {/* Tax Selling Price */}
+          <InputField
+            label="Tax Selling Price (USD)"
+            name="taxSellingPrice"
+            value={form.taxSellingPrice}
+            onChange={handleChange}
+            placeholder="Enter number"
+            error={errors.taxSellingPrice}
+            disabled={isSupplierListEmpty}
+          />
+
+          {/* Remarks */}
+          <InputField
+            label="Remarks"
+            name="remarks"
+            value={form.remarks}
+            onChange={handleChange}
+            placeholder=""
+            error={errors.remarks}
+            disabled={isSupplierListEmpty}
+          />
         </div>
 
         <div className="flex justify-end mt-8 gap-4">
           <button
             type="submit"
-            className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg shadow transition duration-200 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
+            disabled={!isFormValid || isSupplierListEmpty}
+            className={`px-6 py-2 rounded-lg shadow transition duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+              !isFormValid || isSupplierListEmpty
+                ? "bg-gray-400 text-gray-200 cursor-not-allowed focus:ring-gray-300"
+                : "bg-green-600 hover:bg-green-700 text-white cursor-pointer focus:ring-green-500"
+            }`}
           >
             Submit
           </button>
