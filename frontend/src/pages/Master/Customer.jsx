@@ -16,6 +16,7 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import ReactDOM from "react-dom";
 import { getVisiblePages } from "../../utils/useVisiblePages";
+import SampleExcelDownloadCustomer from "../../excels/SampleExcelDownloadCustomer";
 
 // Import reusable components
 import SearchableDropdown from "../../components/common/SearchableDropdown";
@@ -800,66 +801,25 @@ const Customer = () => {
         </div>
 
         {/* Import Modal */}
-        {showImportModal &&
-          ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-              <div
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setShowImportModal(false)}
-              />
-              <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
-                <button
-                  onClick={() => setShowImportModal(false)}
-                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-                  disabled={isUploading}
-                >
-                  <X size={20} />
-                </button>
-                <h2 className="text-lg font-semibold mb-4">Import Customers</h2>
-
-                {mrList.length === 0 && (
-                  <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded-lg">
-                    <p className="text-red-700 text-sm">
-                      <strong>Warning:</strong> No Medical Representatives
-                      found.
-                    </p>
-                  </div>
-                )}
-
-                <input
-                  type="file"
-                  accept=".csv, .xlsx"
-                  onChange={handleFileUpload}
-                  className="block w-full border rounded-lg px-3 py-2 mb-6"
-                />
-                <div className="flex justify-end gap-3">
-                  <button
-                    onClick={() => setShowImportModal(false)}
-                    disabled={isUploading}
-                    className={`px-5 py-2 rounded-lg cursor-pointer ${
-                      isUploading
-                        ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                        : "bg-gray-300 hover:bg-gray-400 text-gray-700"
-                    }`}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleCustomerImport}
-                    disabled={isUploading || mrList.length === 0}
-                    className={`px-5 py-2 rounded-lg cursor-pointer ${
-                      isUploading || mrList.length === 0
-                        ? "bg-blue-400 text-white cursor-not-allowed"
-                        : "bg-blue-600 hover:bg-blue-700 text-white"
-                    }`}
-                  >
-                    {isUploading ? "Uploading…" : "Upload"}
-                  </button>
-                </div>
-              </div>
-            </div>,
-            document.body
-          )}
+       {showImportModal && ReactDOM.createPortal(
+        <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsOpen(false)} />
+          <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
+            <button onClick={() => setShowImportModal(false)} className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer" disabled={isUploading}><X size={20} /></button>
+            <h2 className="text-lg font-semibold text-gray-800 mb-4">Import Customer</h2>
+            {isSampleFile && <SampleExcelDownloadCustomer />}
+            <div className="mb-6">
+              <label className="block text-gray-700 mb-2">File</label>
+              <input type="file" accept=".csv, .xlsx" onChange={handleFileUpload} className="block w-full border rounded-lg px-3 py-2 cursor-pointer" />
+            </div>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setShowImportModal(false)} disabled={isUploading} className={`px-5 py-2 rounded-lg cursor-pointer ${isUploading ? "bg-gray-300 text-gray-500 cursor-not-allowed" : "bg-gray-300 hover:bg-gray-400 text-gray-700"}`}>Cancel</button>
+              <button onClick={handleCustomerImport} disabled={isUploading} className={`px-5 py-2 rounded-lg cursor-pointer ${isUploading ? "bg-blue-400 text-white cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700 text-white"}`}>{isUploading ? "Uploading…" : "Upload"}</button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
 
         {/* View Modal */}
         {isViewModalOpen &&
@@ -1236,6 +1196,7 @@ const Customer = () => {
             </div>,
             document.body
           )}
+    
       </div>
     </div>
   );

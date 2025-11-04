@@ -27,6 +27,8 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { confirmDialog } from "../../utils/confirmationDialog";
 import { useNavigate } from "react-router-dom";
+import { fetchProducts as fetchProductsAPI, fetchSuppliers as fetchSuppliersAPI } from "../../pages/ProductManager/common/fetchDropdown";
+import SearchableDropdown from "../../components/common/SearchableDropdown";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
@@ -89,6 +91,12 @@ function Purchase() {
   const [activeTab, setActiveTab] = useState("add");
   const [allSelected, setAllSelected] = useState(false);
   const inputRef = useRef(null);
+
+  // New states for dropdowns
+  const [productOptions, setProductOptions] = useState([]);
+  const [supplierOptions, setSupplierOptions] = useState([]);
+  const [loadingProducts, setLoadingProducts] = useState(false);
+  const [loadingSuppliers, setLoadingSuppliers] = useState(false);
 
   const purchasesPerPage = 10;
 
@@ -186,6 +194,48 @@ function Purchase() {
   );
 
   const requiredColumns = ["invoiceNumber", "productName", "actions"];
+
+  // Fetch products and suppliers for dropdowns
+  useEffect(() => {
+    if (isEditModalOpen) {
+      fetchProducts();
+      fetchSuppliers();
+    }
+  }, [isEditModalOpen]);
+
+  const fetchProducts = async () => {
+    setLoadingProducts(true);
+    try {
+      const result = await fetchProductsAPI();
+      if (result.success) {
+        setProductOptions(result.data);
+      } else {
+        showToast("error", result.error || "Failed to load products");
+      }
+    } catch (error) {
+      console.error("Error fetching products:", error);
+      showToast("error", "Failed to load products");
+    } finally {
+      setLoadingProducts(false);
+    }
+  };
+
+  const fetchSuppliers = async () => {
+    setLoadingSuppliers(true);
+    try {
+      const result = await fetchSuppliersAPI();
+      if (result.success) {
+        setSupplierOptions(result.data);
+      } else {
+        showToast("error", result.error || "Failed to load suppliers");
+      }
+    } catch (error) {
+      console.error("Error fetching suppliers:", error);
+      showToast("error", "Failed to load suppliers");
+    } finally {
+      setLoadingSuppliers(false);
+    }
+  };
 
   // Get available columns for Add tab (columns not currently in table)
   const availableColumns = useMemo(() => {
@@ -509,7 +559,7 @@ function Purchase() {
               entry.productName !== "" ||
               entry.deliveryNumber !== ""
           ); // Filter out completely empty rows
-
+        console.log('values of mapped',mappedData);
         setParsedData(mappedData);
       } catch (error) {
         console.error("Error reading Excel file:", error);
@@ -786,6 +836,21 @@ function Purchase() {
 
     // If it's a string (like during input), return as is
     return value;
+  };
+
+  // Handle dropdown changes
+  const handleProductChange = (value) => {
+    setForm(prev => ({
+      ...prev,
+      productName: value
+    }));
+  };
+
+  const handleSupplierChange = (value) => {
+    setForm(prev => ({
+      ...prev,
+      supplierName: value
+    }));
   };
 
   return (
@@ -1340,15 +1405,6 @@ function Purchase() {
 
                   <div>
                     <label className="block font-medium text-gray-600">
-                      Quantity Per Carton
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                      {form.qtyPerCarton || 0}
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block font-medium text-gray-600">
                       FOB (USD)
                     </label>
                     <p className="border px-3 py-2 rounded-lg bg-gray-100">
@@ -1407,7 +1463,7 @@ function Purchase() {
             document.body
           )}
 
-        {/* EDIT MODAL - FIXED VERSION */}
+        {/* EDIT MODAL - FIXED VERSION with SearchableDropdown */}
         {isEditModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -1520,31 +1576,35 @@ function Purchase() {
                     />
                   </div>
 
-                  {/* Product Name - Text field */}
+                  {/* Product Name - SearchableDropdown */}
                   <div>
                     <label className="block text-sm font-medium">
                       Product Name
                     </label>
-                    <input
-                      type="text"
-                      name="productName"
-                      value={form.productName || ""}
-                      onChange={enhancedHandleChange}
-                      className="w-full border px-3 py-2 rounded-lg"
+                    <SearchableDropdown
+                      value={form.productName}
+                      onChange={handleProductChange}
+                      options={productOptions}
+                      placeholder="Select Product"
+                      required={false}
+                      loading={loadingProducts}
+                      label=""
                     />
                   </div>
 
-                  {/* Supplier Name - Text field */}
+                  {/* Supplier Name - SearchableDropdown */}
                   <div>
                     <label className="block text-sm font-medium">
                       Supplier Name
                     </label>
-                    <input
-                      type="text"
-                      name="supplierName"
-                      value={form.supplierName || ""}
-                      onChange={enhancedHandleChange}
-                      className="w-full border px-3 py-2 rounded-lg"
+                    <SearchableDropdown
+                      value={form.supplierName}
+                      onChange={handleSupplierChange}
+                      options={supplierOptions}
+                      placeholder="Select Supplier"
+                      required={false}
+                      loading={loadingSuppliers}
+                      label=""
                     />
                   </div>
 
@@ -1564,23 +1624,6 @@ function Purchase() {
                     />
                   </div>
 
-                  {/* Quantity Per Carton - Numeric field (integer) */}
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Quantity Per Carton
-                    </label>
-                    <input
-                      type="text"
-                      name="qtyPerCarton"
-                      value={getDisplayValue("qtyPerCarton", form.qtyPerCarton)}
-                      onChange={(e) =>
-                        handleNumericInputChange(e, enhancedHandleChange)
-                      }
-                      className="w-full border px-3 py-2 rounded-lg"
-                    />
-                  </div>
-
-                  {/* FOB - Numeric field (4 decimal places) */}
                   <div>
                     <label className="block text-sm font-medium">
                       FOB (USD)

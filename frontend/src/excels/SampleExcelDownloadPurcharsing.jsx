@@ -1,21 +1,27 @@
 import React, { useState, useEffect, useCallback } from "react";
 import ExcelJS from "exceljs";
 import { useInitialSaleData } from "../pages/Sale/IntialLoading";
-import axios from "axios";
 import { showToast } from "../utils/toast";
-
-const backendUrl = import.meta.env.VITE_BACKEND_URL;
+import {
+  fetchProducts as fetchProductsAPI,
+  fetchSuppliers as fetchSuppliersAPI,
+} from "../pages/ProductManager/common/fetchDropdown";
 
 const PurchaseInventoryExcelDownload = ({ data = [] }) => {
   const { productNames = [], loading: productLoading } = useInitialSaleData();
   const [suppliers, setSuppliers] = useState([]);
   const [supplierLoading, setSupplierLoading] = useState(false);
+  const [products, setProducts] = useState([]);
 
   const fetchSuppliers = useCallback(async () => {
+    setSupplierLoading(true);
     try {
-      setSupplierLoading(true);
-      const response = await axios.get(`${backendUrl}/api/suppliers`);
-      setSuppliers(response.data);
+      const result = await fetchSuppliersAPI();
+      if (result.success) {
+        setSuppliers(result.data);
+      } else {
+        showToast("error", result.error || "Failed to fetch suppliers");
+      }
     } catch (err) {
       console.error("Error fetching suppliers:", err);
       showToast("error", "Failed to fetch suppliers");
@@ -24,24 +30,45 @@ const PurchaseInventoryExcelDownload = ({ data = [] }) => {
     }
   }, []);
 
-  useEffect(() => {
-    fetchSuppliers();
-  }, [fetchSuppliers]);
+  /* -------------------------------------------------------------------------- */
+  /*                              🔹 Fetch Products                             */
+  /* -------------------------------------------------------------------------- */
+  const fetchProducts = useCallback(async () => {
+    try {
+      const result = await fetchProductsAPI();
+      if (result.success) {
+        setProducts(result.data);
+      } else {
+        showToast("error", result.error || "Failed to fetch products");
+      }
+    } catch (err) {
+      console.error("Error fetching products:", err);
+      showToast("error", "Failed to fetch products");
+    }
+  }, []);
 
+  useEffect(() => {
+    fetchProducts();
+    fetchSuppliers();
+  }, [fetchProducts, fetchSuppliers]);
+
+  /* -------------------------------------------------------------------------- */
+  /*                          🔹 Excel Generation Logic                         */
+  /* -------------------------------------------------------------------------- */
   const generateExcel = async () => {
     try {
       const workbook = new ExcelJS.Workbook();
       const worksheet = workbook.addWorksheet("Purchase Inventory");
 
       // === Title Row ===
-      worksheet.mergeCells("A1:N1"); // Expanded to N for 14 columns
+      worksheet.mergeCells("A1:L1");
       const titleCell = worksheet.getCell("A1");
       titleCell.value = "HEALTHCARE SOUTH EAST ASIA";
       titleCell.font = { size: 16, bold: true };
       titleCell.alignment = { horizontal: "center", vertical: "middle" };
 
       // === Subtitle Row ===
-      worksheet.mergeCells("A2:N2"); // Expanded to N for 14 columns
+      worksheet.mergeCells("A2:L2");
       const subtitleCell = worksheet.getCell("A2");
       subtitleCell.value = "Purchase Inventory Summary";
       subtitleCell.font = { size: 14, bold: true };
@@ -49,25 +76,23 @@ const PurchaseInventoryExcelDownload = ({ data = [] }) => {
 
       worksheet.addRow([]);
 
-      // === Header Row ===
+      // === Header Row (Removed NO & Qty per Carton) ===
       const headerRow = worksheet.addRow([
-        "NO",
         "Invoice Number",
         "Invoice Date",
         "Delivery No.",
         "Received Date",
         "Product Name",
-        "Supplier Name", // New column added
+        "Supplier Name",
         "Expiry Date",
-        "Qty Box",
-        "Qty per Carton",
-        "FOB",
-        "CIF",
-        "LC Number",
+        "Quantity per Box/Strip", // ✅ Updated name
+        "FOB (USD)",
+        "CIF (USD)",
+        "LC (USD)",
         "Remarks",
       ]);
 
-      // Header styling
+      // === Header Styling ===
       headerRow.eachCell((cell) => {
         cell.font = { bold: true };
         cell.alignment = { vertical: "middle", horizontal: "center" };
@@ -79,173 +104,130 @@ const PurchaseInventoryExcelDownload = ({ data = [] }) => {
         };
       });
 
-      // Column widths
+      // === Column Widths ===
       worksheet.columns = [
-        { width: 5 }, // NO
         { width: 25 }, // Invoice Number
-        { width: 25 }, // Invoice Date
-        { width: 25 }, // Delivery Note No.
-        { width: 25 }, // Received Date
-        { width: 25 }, // Product Name
-        { width: 25 }, // Supplier Name (new column)
-        { width: 25 }, // Expiry Date
-        { width: 15 }, // Qty Box
-        { width: 15 }, // Qty per Carton
+        { width: 20 }, // Invoice Date
+        { width: 20 }, // Delivery No
+        { width: 20 }, // Received Date
+        { width: 30 }, // Product Name
+        { width: 25 }, // Supplier Name
+        { width: 20 }, // Expiry Date
+        { width: 25 }, // Quantity per Box/Strip
         { width: 15 }, // FOB
         { width: 15 }, // CIF
-        { width: 15 }, // LC Number
-        { width: 35 }, // Remarks
+        { width: 20 }, // LC Number
+        { width: 30 }, // Remarks
       ];
 
-      // Format date columns (adjusted for new column positions)
-      ["C", "E", "H"].forEach((col) => {
+      // === Date Columns ===
+      ["B", "D", "G"].forEach((col) => {
         worksheet.getColumn(col).numFmt = "dd/mm/yyyy";
       });
 
-      // Format numeric columns (adjusted for new column positions)
-      ["I", "J", "K", "L"].forEach((col) => {
+      // === Numeric Columns ===
+      ["H", "I", "J"].forEach((col) => {
         worksheet.getColumn(col).numFmt = "#,##0.00";
       });
 
       const startRow = 4;
       const endRow = 1000;
 
-      // Process product names for dropdown
+      /* -------------------------------------------------------------------------- */
+      /*                     🔹 Prepare Dropdown Data (Products & Suppliers)         */
+      /* -------------------------------------------------------------------------- */
       const uniqueProductNames = [
         ...new Set(
-          productNames
-            .map((p) => {
-              if (typeof p === "string") return p;
-              if (p && typeof p === "object") {
-                return p.name || p.productName || p.label || p.value || "";
-              }
-              return "";
-            })
-            .filter((name) => name && name.trim() !== "")
+          [
+            ...productNames.map(
+              (p) =>
+                (typeof p === "object"
+                  ? p.name || p.productName || p.label || p.value
+                  : p) || ""
+            ),
+            ...products.map((p) => p.label || p.productName || ""),
+          ].filter((name) => name && name.trim() !== "")
         ),
       ];
+
       const uniqueSupplierNames = [
         ...new Set(
           suppliers
-            .map((s) => {
-              if (typeof s === "string") return s;
-              if (s && typeof s === "object") {
-                return s.name || s.supplierName || s.label || s.value || "";
-              }
-              return "";
-            })
+            .map((s) =>
+              typeof s === "object"
+                ? s.name || s.supplierName || s.label || s.value
+                : s
+            )
             .filter((name) => name && name.trim() !== "")
         ),
       ];
 
+      /* -------------------------------------------------------------------------- */
+      /*                     🔹 Add Hidden Dropdown Sheet                           */
+      /* -------------------------------------------------------------------------- */
       if (uniqueProductNames.length > 0 || uniqueSupplierNames.length > 0) {
         const dropdownSheet = workbook.addWorksheet("DropdownData");
         dropdownSheet.state = "veryHidden";
 
-        if (uniqueProductNames.length > 0) {
-          uniqueProductNames.forEach((product, index) => {
-            dropdownSheet.getCell(`A${index + 1}`).value = product;
-          });
-        }
+        uniqueProductNames.forEach((product, index) => {
+          dropdownSheet.getCell(`A${index + 1}`).value = product;
+        });
 
-        // Write supplier names to dropdown sheet starting from column B
-        if (uniqueSupplierNames.length > 0) {
-          uniqueSupplierNames.forEach((supplier, index) => {
-            dropdownSheet.getCell(`B${index + 1}`).value = supplier;
-          });
-        }
+        uniqueSupplierNames.forEach((supplier, index) => {
+          dropdownSheet.getCell(`B${index + 1}`).value = supplier;
+        });
 
-        // Set up dropdown for Product Name column (Column F)
+        // === Product Name Dropdown (Column E) ===
         if (uniqueProductNames.length > 0) {
           for (let rowNum = startRow; rowNum <= endRow; rowNum++) {
-            try {
-              const cell = worksheet.getCell(`F${rowNum}`);
-              cell.dataValidation = {
-                type: "list",
-                allowBlank: true,
-                formulae: [
-                  `=DropdownData!$A$1:$A$${uniqueProductNames.length}`,
-                ],
-                showErrorMessage: true,
-                errorTitle: "Invalid Input",
-                error: "Please select a product from the list",
-                promptTitle: "Select Product",
-                prompt: "Choose a product from the dropdown list",
-                showDropDown: true,
-                showInputMessage: true,
-              };
-            } catch (error) {
-              console.warn(
-                `Failed to set dropdown for Product Name at row ${rowNum}:`,
-                error
-              );
-            }
+            const cell = worksheet.getCell(`E${rowNum}`);
+            cell.dataValidation = {
+              type: "list",
+              allowBlank: true,
+              formulae: [`=DropdownData!$A$1:$A$${uniqueProductNames.length}`],
+              showErrorMessage: true,
+              errorTitle: "Invalid Input",
+              error: "Please select a valid product",
+              promptTitle: "Select Product",
+              prompt: "Choose a product from the dropdown list",
+              showInputMessage: true,
+            };
           }
         }
 
-        // Set up dropdown for Supplier Name column (Column G)
+        // === Supplier Name Dropdown (Column F) ===
         if (uniqueSupplierNames.length > 0) {
           for (let rowNum = startRow; rowNum <= endRow; rowNum++) {
-            try {
-              const cell = worksheet.getCell(`G${rowNum}`);
-              cell.dataValidation = {
-                type: "list",
-                allowBlank: true,
-                formulae: [
-                  `=DropdownData!$B$1:$B$${uniqueSupplierNames.length}`,
-                ],
-                showErrorMessage: true,
-                errorTitle: "Invalid Input",
-                error: "Please select a supplier from the list",
-                promptTitle: "Select Supplier",
-                prompt: "Choose a supplier from the dropdown list",
-                showDropDown: true,
-                showInputMessage: true,
-              };
-            } catch (error) {
-              console.warn(
-                `Failed to set dropdown for Supplier Name at row ${rowNum}:`,
-                error
-              );
-            }
+            const cell = worksheet.getCell(`F${rowNum}`);
+            cell.dataValidation = {
+              type: "list",
+              allowBlank: true,
+              formulae: [`=DropdownData!$B$1:$B$${uniqueSupplierNames.length}`],
+              showErrorMessage: true,
+              errorTitle: "Invalid Input",
+              error: "Please select a valid supplier",
+              promptTitle: "Select Supplier",
+              prompt: "Choose a supplier from the dropdown list",
+              showInputMessage: true,
+            };
           }
         }
       }
 
+      // === Borders for Data Area ===
       for (let i = 4; i <= worksheet.rowCount; i++) {
         const row = worksheet.getRow(i);
-        if (row) {
-          row.eachCell((cell) => {
-            cell.border = {
-              top: { style: "thin" },
-              left: { style: "thin" },
-              bottom: { style: "thin" },
-              right: { style: "thin" },
-            };
-          });
-        }
-      }
-
-      // Format numeric cells in data rows (adjusted for new column positions)
-      for (let i = startRow; i <= endRow; i++) {
-        ["I", "J", "K", "L"].forEach((col) => {
-          const cell = worksheet.getCell(`${col}${i}`);
-          if (
-            cell.value !== null &&
-            cell.value !== undefined &&
-            cell.value !== ""
-          ) {
-            cell.numFmt = "#,##0.00";
-          }
+        row.eachCell((cell) => {
+          cell.border = {
+            top: { style: "thin" },
+            left: { style: "thin" },
+            bottom: { style: "thin" },
+            right: { style: "thin" },
+          };
         });
       }
 
-      // Set row heights for better visibility
-      worksheet.getRow(1).height = 25;
-      worksheet.getRow(2).height = 20;
-      worksheet.getRow(4).height = 20; // Header row
-
-      // === Export to Excel ===
+      // === Export File ===
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -257,14 +239,13 @@ const PurchaseInventoryExcelDownload = ({ data = [] }) => {
       document.body.appendChild(a);
       a.click();
 
-      // Cleanup
       setTimeout(() => {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
       }, 100);
     } catch (error) {
-      console.error("Error generating Excel file:", error);
-      alert("Error generating Excel file. Please try again.");
+      console.error("Error generating Excel:", error);
+      showToast("error", "Error generating Excel file. Please try again.");
     }
   };
 

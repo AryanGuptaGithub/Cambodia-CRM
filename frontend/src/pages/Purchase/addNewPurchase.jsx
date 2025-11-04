@@ -9,9 +9,11 @@ import { useNavigate } from "react-router-dom";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { showToast } from "../../utils/toast";
-import CustomDropdown from "../Utility/customDropdown.jsx";
-import axios from "axios";
+import SearchableDropdown from "../../components/common/SearchableDropdown";
 import { Eye, EyeOff } from "lucide-react";
+
+// Import reusable API functions
+import { fetchProducts as fetchProductsAPI, fetchSuppliers as fetchSuppliersAPI } from "../../pages/ProductManager/common/fetchDropdown";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -30,18 +32,18 @@ const INITIAL_FORM_STATE = {
     {
       productId: "",
       productName: "",
-      qtyBox: 0,
+      qtyBox: "",
       lcNumber: "",
-      cif: 0,
-      fob: 0,
-      amount: 0,
+      cif: "",
+      fob: "",
+      amount: "",
       expiredDate: "",
     },
   ],
 };
 
-// Define numeric fields for proper handling - DELIVERY NUMBER REMOVED (now alphanumeric)
-const NUMERIC_FIELDS = []; // No common numeric fields left
+// Define numeric fields for proper handling
+const NUMERIC_FIELDS = [];
 const PRODUCT_NUMERIC_FIELDS = ["qtyBox", "lcNumber", "cif", "fob", "amount"];
 
 // Custom hook for form state management
@@ -50,7 +52,11 @@ const usePurchaseForm = () => {
   const [errors, setErrors] = useState({});
   const [products, setProducts] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
-  const [expandedProductIndex, setExpandedProductIndex] = useState(0); // Track which product is expanded
+  const [expandedProductIndex, setExpandedProductIndex] = useState(0);
+  const [loading, setLoading] = useState({
+    products: false,
+    suppliers: false
+  });
 
   const parseNumber = useCallback((val) => {
     if (typeof val === "number") return val;
@@ -61,14 +67,14 @@ const usePurchaseForm = () => {
     return 0;
   }, []);
 
-  // Calculate amount for each product when lcNumber or qtyBox changes (qtyPerCarton removed)
+  // Calculate amount for each product when lcNumber or qtyBox changes
   useEffect(() => {
     setForm((prev) => ({
       ...prev,
       products: prev.products.map((product) => {
         const lcValue = parseNumber(product.lcNumber);
         const qtyBoxValue = parseNumber(product.qtyBox);
-        const amount = lcValue * qtyBoxValue; // Removed qtyPerCarton multiplication
+        const amount = lcValue * qtyBoxValue;
         const roundedAmount = Math.round(amount * 100) / 100;
 
         return {
@@ -78,7 +84,7 @@ const usePurchaseForm = () => {
       }),
     }));
   }, [
-    form.products.map((p) => p.lcNumber + p.qtyBox).join(","), // Removed qtyPerCarton
+    form.products.map((p) => p.lcNumber + p.qtyBox).join(","),
     parseNumber,
   ]);
 
@@ -180,11 +186,11 @@ const usePurchaseForm = () => {
     [updateProductField]
   );
 
-  // Handle product selection from dropdown - UPDATED to populate lcNumber and fob
+  // Handle product selection from dropdown - UPDATED to use transformed product data
   const handleProductSelection = useCallback(
     (productIndex, productId) => {
       const selectedProduct = products.find(
-        (product) => product._id === productId
+        (product) => product.value === productId
       );
       if (selectedProduct) {
         setForm((prev) => ({
@@ -193,11 +199,11 @@ const usePurchaseForm = () => {
             index === productIndex
               ? {
                   ...product,
-                  productId: selectedProduct._id,
-                  productName: selectedProduct.productName,
-                  lcNumber: selectedProduct.lc || 0, // Populate from product.lc
-                  fob: selectedProduct.fob || 0, // Populate from product.fob
-                  cif: selectedProduct.cif || 0, // Populate from product.cif if available
+                  productId: selectedProduct.value,
+                  productName: selectedProduct.label,
+                  lcNumber: selectedProduct.lc || 0,
+                  fob: selectedProduct.fob || 0,
+                  cif: selectedProduct.cif || 0,
                 }
               : product
           ),
@@ -207,17 +213,17 @@ const usePurchaseForm = () => {
     [products]
   );
 
-  // Handle supplier selection from dropdown
+  // Handle supplier selection from dropdown - UPDATED to use transformed supplier data
   const handleSupplierChange = useCallback(
     (supplierId) => {
       const selectedSupplier = suppliers.find(
-        (supplier) => supplier._id === supplierId
+        (supplier) => supplier.value === supplierId
       );
       if (selectedSupplier) {
         setForm((prev) => ({
           ...prev,
-          supplierId: selectedSupplier._id,
-          supplierName: selectedSupplier.supplierName || selectedSupplier.name,
+          supplierId: selectedSupplier.value,
+          supplierName: selectedSupplier.label,
         }));
       }
     },
@@ -339,7 +345,7 @@ const usePurchaseForm = () => {
       if (fobNum < 0) newErrors[`fob_${index}`] = "FOB cannot be negative";
       if (cifNum < 0) newErrors[`cif_${index}`] = "CIF cannot be negative";
       if (!lcNumberStr.trim())
-        newErrors[`lcNumber_${index}`] = "LC number is required";
+        newErrors[`lcNumber_${index}`] = "LC is required";
       if (!product.expiredDate)
         newErrors[`expiredDate_${index}`] = "Expired date is required";
     });
@@ -348,25 +354,45 @@ const usePurchaseForm = () => {
     return Object.keys(newErrors).length === 0;
   }, [form, parseNumber]);
 
-  // Fetch products
+  // Fetch products - UPDATED to use reusable API function
   const fetchProducts = useCallback(async () => {
     try {
-      const response = await axios.get(`${backendUrl}/api/products`);
-      setProducts(response.data);
+      setLoading(prev => ({ ...prev, products: true }));
+      const result = await fetchProductsAPI();
+      
+      if (result.success) {
+        setProducts(result.data);
+      } else {
+        showToast("error", result.error || "Failed to fetch products");
+        setProducts([]);
+      }
     } catch (err) {
       console.error("Error fetching products:", err);
       showToast("error", "Failed to fetch products");
+      setProducts([]);
+    } finally {
+      setLoading(prev => ({ ...prev, products: false }));
     }
   }, []);
 
-  // Fetch suppliers
+  // Fetch suppliers - UPDATED to use reusable API function
   const fetchSuppliers = useCallback(async () => {
     try {
-      const response = await axios.get(`${backendUrl}/api/suppliers`);
-      setSuppliers(response.data);
+      setLoading(prev => ({ ...prev, suppliers: true }));
+      const result = await fetchSuppliersAPI();
+      
+      if (result.success) {
+        setSuppliers(result.data);
+      } else {
+        showToast("error", result.error || "Failed to fetch suppliers");
+        setSuppliers([]);
+      }
     } catch (err) {
       console.error("Error fetching suppliers:", err);
       showToast("error", "Failed to fetch suppliers");
+      setSuppliers([]);
+    } finally {
+      setLoading(prev => ({ ...prev, suppliers: false }));
     }
   }, []);
 
@@ -375,6 +401,7 @@ const usePurchaseForm = () => {
     errors,
     products,
     suppliers,
+    loading,
     handleChange,
     handleProductChange,
     validate,
@@ -446,7 +473,7 @@ const DatePickerField = React.memo(
     readOnly = false,
     placeholder = "Select a date",
     className = "",
-    maxDate = null, // Added maxDate prop to disable future dates
+    maxDate = null,
   }) => {
     const today = new Date();
 
@@ -462,7 +489,7 @@ const DatePickerField = React.memo(
           dateFormat="yyyy-MM-dd"
           placeholderText={placeholder}
           readOnly={readOnly}
-          maxDate={maxDate || today} // Disable future dates
+          maxDate={maxDate || today}
           className={`w-full border px-3 py-2 rounded-lg ${
             error ? "border-red-500" : "border-gray-300"
           } ${readOnly ? "bg-gray-100" : ""} ${className}`}
@@ -564,6 +591,7 @@ const AddNewPurchase = () => {
     errors,
     products,
     suppliers,
+    loading,
     handleChange,
     handleProductChange,
     validate,
@@ -580,25 +608,19 @@ const AddNewPurchase = () => {
     fetchSuppliers,
   } = usePurchaseForm();
 
-  // Memoized product options for dropdown
+  // Memoized product options for dropdown - SIMPLIFIED (data already in correct format)
   const productOptions = useMemo(() => {
     return [
       { value: "", label: "Select Product" },
-      ...products.map((product) => ({
-        value: product._id,
-        label: product.productName,
-      })),
+      ...products,
     ];
   }, [products]);
 
-  // Memoized supplier options for dropdown
+  // Memoized supplier options for dropdown - SIMPLIFIED (data already in correct format)
   const supplierOptions = useMemo(() => {
     return [
       { value: "", label: "Select Supplier" },
-      ...suppliers.map((supplier) => ({
-        value: supplier._id,
-        label: supplier.supplierName || supplier.name,
-      })),
+      ...suppliers,
     ];
   }, [suppliers]);
 
@@ -741,7 +763,6 @@ const AddNewPurchase = () => {
           </h3>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* Invoice Number - alphanumeric */}
             <InputField
               label="Invoice Number"
               name="invoiceNumber"
@@ -752,37 +773,27 @@ const AddNewPurchase = () => {
               required
             />
 
-            {/* Delivery Number - CHANGED to alphanumeric */}
             <InputField
               label="Delivery Number"
               name="deliveryNumber"
               value={form.deliveryNumber}
-              onChange={handleChange} // Use regular handleChange instead of numeric handler
+              onChange={handleChange}
               error={errors.deliveryNumber}
               placeholder="DEL-001-A"
               required
             />
 
-            {/* Supplier Dropdown */}
-            <div className="flex flex-col">
-              <label className="text-sm font-medium text-gray-700 mb-1">
-                Supplier <span className="text-red-500">*</span>
-              </label>
-              <CustomDropdown
-                value={form.supplierId}
-                onChange={handleSupplierChange}
-                placeholder="Select Supplier"
-                options={supplierOptions}
-                required
-              />
-              {errors.supplierId && (
-                <p className="text-red-500 text-xs mt-0.5">
-                  {errors.supplierId}
-                </p>
-              )}
-            </div>
+            <SearchableDropdown
+              label="Supplier"
+              value={form.supplierId}
+              onChange={handleSupplierChange}
+              options={supplierOptions}
+              placeholder="Select Supplier"
+              required={true}
+              error={errors.supplierId}
+              loading={loading.suppliers}
+            />
 
-            {/* Invoice Date - future dates disabled */}
             <DatePickerField
               label="Invoice Date"
               name="invoiceDate"
@@ -790,10 +801,9 @@ const AddNewPurchase = () => {
               onChange={handleDateChange}
               error={errors.invoiceDate}
               required
-              maxDate={new Date()} // Disable future dates
+              maxDate={new Date()}
             />
 
-            {/* Received Date - future dates disabled */}
             <DatePickerField
               label="Received Date"
               name="receivedDate"
@@ -801,7 +811,7 @@ const AddNewPurchase = () => {
               onChange={handleDateChange}
               error={errors.receivedDate}
               required
-              maxDate={new Date()} // Disable future dates
+              maxDate={new Date()}
             />
           </div>
         </div>
@@ -879,26 +889,18 @@ const AddNewPurchase = () => {
               {isProductExpanded(productIndex) && (
                 <div className="p-6 border-t">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {/* Product Dropdown */}
-                    <div className="flex flex-col">
-                      <label className="text-sm font-medium text-gray-700 mb-1">
-                        Product <span className="text-red-500">*</span>
-                      </label>
-                      <CustomDropdown
-                        value={product.productId}
-                        onChange={(productId) =>
-                          handleProductSelection(productIndex, productId)
-                        }
-                        placeholder="Select Product"
-                        options={productOptions}
-                        required
-                      />
-                      {errors[`productId_${productIndex}`] && (
-                        <p className="text-red-500 text-xs mt-0.5">
-                          {errors[`productId_${productIndex}`]}
-                        </p>
-                      )}
-                    </div>
+                    <SearchableDropdown
+                      label="Product"
+                      value={product.productId}
+                      onChange={(productId) =>
+                        handleProductSelection(productIndex, productId)
+                      }
+                      options={productOptions}
+                      placeholder="Select Product"
+                      required={true}
+                      error={errors[`productId_${productIndex}`]}
+                      loading={loading.products}
+                    />
 
                     <NumericInputField
                       label="Box Quantity"
@@ -913,10 +915,8 @@ const AddNewPurchase = () => {
                       allowDecimal={false}
                     />
 
-                    {/* REMOVED: Quantity Per Carton field */}
-
                     <NumericInputField
-                      label="LC Number"
+                      label="LC (USD)"
                       name="lcNumber"
                       value={product.lcNumber}
                       onChange={(e) =>
@@ -962,6 +962,7 @@ const AddNewPurchase = () => {
                       error={errors[`expiredDate_${productIndex}`]}
                       required
                     />
+
                     <div className="flex flex-col">
                       <label className="text-sm font-medium text-gray-700 mb-1">
                         Amount (USD)

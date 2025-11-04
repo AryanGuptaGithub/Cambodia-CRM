@@ -863,7 +863,7 @@ const Product = () => {
                     <label className="block text-sm font-medium text-gray-600">
                       Type
                     </label>
-                    <div className="border rounded-lg">
+                    <div className="rounded-lg">
                       <SearchableDropdown
                         options={productTypes}
                         value={
@@ -917,7 +917,7 @@ const Product = () => {
                     <label className="block text-sm font-medium text-gray-600">
                       Supplier Name
                     </label>
-                    <div className="border rounded-lg">
+                    <div className="rounded-lg">
                       <SearchableDropdown
                         options={suppliers}
                         value={
@@ -954,7 +954,7 @@ const Product = () => {
                     <label className="block text-sm font-medium text-gray-600">
                       License Validity Date
                     </label>
-                    <div className="border rounded-lg">
+                    <div className="rounded-lg border border-gray-300">
                       <DatePicker
                         selected={
                           form.licenseValidityDate
@@ -981,7 +981,7 @@ const Product = () => {
                     <label className="block text-sm font-medium text-gray-600">
                       Remarks
                     </label>
-                    <div className="border rounded-lg bg-white">
+                    <div className="border border-gray-300 rounded-lg bg-white">
                       <textarea
                         value={form.remarks}
                         onChange={(e) =>
