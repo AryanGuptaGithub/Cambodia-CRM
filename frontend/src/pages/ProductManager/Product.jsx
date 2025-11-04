@@ -18,6 +18,9 @@ import { getVisiblePages } from "../../utils/useVisiblePages";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { confirmDialog } from "../../utils/confirmationDialog";
+import { fetchProductTypes, fetchSuppliers } from "./common/fetchDropdown";
+import SearchableDropdown from "../../components/common/SearchableDropdown";
+import InputField from "../../components/common/InputField";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
@@ -37,6 +40,8 @@ const Product = () => {
   const [types, setTypes] = useState([]);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [productTypes, setProductTypes] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
   const inputRef = useRef(null);
 
   const productsPerPage = 9;
@@ -45,13 +50,36 @@ const Product = () => {
     productName: "",
     type: "",
     packing: "",
-    qtyPerBox: "",
-    qtyPerCarton: "",
+    qtyPerBoxStrip: "",
     supplierName: "",
     drugLicense: "",
     licenseValidityDate: "",
     remarks: "",
   });
+
+  // Fetch dropdown data
+  useEffect(() => {
+    const fetchDropdownData = async () => {
+      try {
+        const [typesResult, suppliersResult] = await Promise.all([
+          fetchProductTypes(),
+          fetchSuppliers(),
+        ]);
+
+        if (typesResult.success) {
+          setProductTypes(typesResult.data);
+        }
+
+        if (suppliersResult.success) {
+          setSuppliers(suppliersResult.data);
+        }
+      } catch (error) {
+        console.error("Error fetching dropdown data:", error);
+      }
+    };
+
+    fetchDropdownData();
+  }, []);
 
   // Filter products by tab and search term
   const filteredProducts = useMemo(() => {
@@ -209,16 +237,15 @@ const Product = () => {
         return;
       }
 
+      // Updated required headers without "no" and "qty per carton"
       const requiredHeaders = [
-        "no",
         "product name",
         "type",
         "packing",
         "selling price (usd)",
-        "lc",
+        "lc (usd)",
         "tax selling price (usd)",
-        "qty per box",
-        "qty per carton",
+        "quantity per box/strip",
         "supplier name",
         "drug registration license #",
         "drug registration license validity date",
@@ -281,10 +308,9 @@ const Product = () => {
             type: item["type"],
             packing: item["packing"],
             sellingPrice: item["selling price (usd)"],
-            lc: item["lc"],
+            lc: item["lc (usd)"],
             taxSellingPrice: item["tax selling price (usd)"],
-            qtyPerBox: item["qty per box"],
-            qtyPerCarton: item["qty per carton"],
+            qtyPerBoxStrip: item["quantity per box/strip"],
             supplierName: item["supplier name"],
             drugLicense: item["drug registration license #"],
             licenseValidityDate:
@@ -365,6 +391,7 @@ const Product = () => {
       }
     }
   };
+  console.log("products", products);
 
   const handleProductUpdate = async (e) => {
     e.preventDefault();
@@ -395,6 +422,24 @@ const Product = () => {
     }
   };
 
+  // Handle numeric input for quantity
+  const handleNumericInput = (e, field) => {
+    const value = e.target.value;
+    // Only allow numbers and empty string
+    if (value === "" || /^\d+$/.test(value)) {
+      setForm({ ...form, [field]: value });
+    }
+  };
+
+  // Handle dropdown selection
+  const handleDropdownChange = (field, selectedOption) => {
+    setForm({
+      ...form,
+      [field]: selectedOption ? selectedOption.value : "",
+    });
+  };
+
+  console.log("valueso f ", products);
   return (
     <div className="p-6">
       <div className="container">
@@ -496,7 +541,9 @@ const Product = () => {
                 </th>
                 <th className="p-3 text-sm font-medium">Product Type</th>
                 <th className="p-3  text-sm font-medium">Packing</th>
-                <th className="p-3  text-sm font-medium">Quantity Per Box</th>
+                <th className="p-3  text-sm font-medium">
+                  Quantity per Box/Strip
+                </th>
                 <th className="p-3  text-sm font-medium">Supplier</th>
                 <th className="p-3  text-sm font-medium">Drug License</th>
                 <th className="p-3  text-sm font-medium">License Validity</th>
@@ -506,7 +553,7 @@ const Product = () => {
             <tbody>
               {currentProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="p-4 text-center text-gray-500">
+                  <td colSpan={8} className="p-4 text-center text-gray-500">
                     No products found.
                   </td>
                 </tr>
@@ -715,19 +762,10 @@ const Product = () => {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-600">
-                      Qty per Box
+                      Quantity per Box/Strip
                     </label>
                     <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                      {form.qtyPerBox || "--"}
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600">
-                      Qty per Carton
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                      {form.qtyPerCarton || "--"}
+                      {form.qtyPerBoxStrip || "--"}
                     </p>
                   </div>
 
@@ -792,7 +830,7 @@ const Product = () => {
               />
 
               {/* Modal Box */}
-              <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative max-h-screen overflow-y-auto">
+              <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
                 {/* Close Button */}
                 <button
                   onClick={() => setIsEditModalOpen(false)}
@@ -801,128 +839,160 @@ const Product = () => {
                   <X size={20} />
                 </button>
 
-                <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                  Edit Product
-                </h2>
+                <h2 className="text-xl font-semibold mb-4">Edit Product</h2>
 
-                {/* Form */}
-                <form className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Fields */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Product Name */}
                   <div>
-                    <label className="block text-sm font-medium">
+                    <label className="block text-sm font-medium text-gray-600">
                       Product Name
                     </label>
-                    <input
-                      type="text"
-                      value={capitalizeFirstLetter(form.productName)}
-                      onChange={(e) =>
-                        setForm({ ...form, productName: e.target.value })
-                      }
-                      className="w-full border px-3 py-2 rounded-lg"
-                    />
+                    <div>
+                      <InputField
+                        type="text"
+                        value={form.productName}
+                        onChange={(e) =>
+                          setForm({ ...form, productName: e.target.value })
+                        }
+                      />
+                    </div>
                   </div>
 
+                  {/* Type Dropdown */}
                   <div>
-                    <label className="block text-sm font-medium">Type</label>
-                    <input
-                      type="text"
-                      value={form.type}
-                      onChange={(e) =>
-                        setForm({ ...form, type: e.target.value })
-                      }
-                      className="w-full border px-3 py-2 rounded-lg"
-                    />
+                    <label className="block text-sm font-medium text-gray-600">
+                      Type
+                    </label>
+                    <div className="border rounded-lg">
+                      <SearchableDropdown
+                        options={productTypes}
+                        value={
+                          productTypes.find(
+                            (option) => option.value === form.type
+                          ) || null
+                        }
+                        onChange={(selectedOption) =>
+                          handleDropdownChange("type", selectedOption)
+                        }
+                        placeholder="Select Type"
+                      />
+                    </div>
                   </div>
 
+                  {/* Packing */}
                   <div>
-                    <label className="block text-sm font-medium">Packing</label>
-                    <input
-                      type="text"
-                      value={form.packing}
-                      onChange={(e) =>
-                        setForm({ ...form, packing: e.target.value })
-                      }
-                      className="w-full border px-3 py-2 rounded-lg"
-                    />
+                    <label className="block text-sm font-medium text-gray-600">
+                      Packing
+                    </label>
+                    <div>
+                      <InputField
+                        type="text"
+                        value={form.packing}
+                        onChange={(e) =>
+                          setForm({ ...form, packing: e.target.value })
+                        }
+                      />
+                    </div>
                   </div>
 
+                  {/* Quantity per Box/Strip (Numeric only) */}
                   <div>
-                    <label className="block text-sm font-medium">
+                    <label className="block text-sm font-medium text-gray-600">
                       Quantity per Box/Strip
                     </label>
-                    <input
-                      type="number"
-                      value={form.qtyPerBox}
-                      onChange={(e) =>
-                        setForm({ ...form, qtyPerBox: e.target.value })
-                      }
-                      className="w-full border px-3 py-2 rounded-lg"
-                    />
+                    <div>
+                      <InputField
+                        type="text"
+                        value={form.qtyPerBoxStrip}
+                        onChange={(e) =>
+                          handleNumericInput(e, "qtyPerBoxStrip")
+                        }
+                        placeholder="Enter numbers only"
+                      />
+                    </div>
                   </div>
 
+                  {/* Supplier Name Dropdown */}
                   <div>
-                    <label className="block text-sm font-medium">
+                    <label className="block text-sm font-medium text-gray-600">
                       Supplier Name
                     </label>
-                    <input
-                      type="text"
-                      value={capitalizeFirstLetter(form.supplierName)}
-                      onChange={(e) =>
-                        setForm({ ...form, supplierName: e.target.value })
-                      }
-                      className="w-full border px-3 py-2 rounded-lg"
-                    />
+                    <div className="border rounded-lg">
+                      <SearchableDropdown
+                        options={suppliers}
+                        value={
+                          suppliers.find(
+                            (option) => option.value === form.supplierName
+                          ) || null
+                        }
+                        onChange={(selectedOption) =>
+                          handleDropdownChange("supplierName", selectedOption)
+                        }
+                        placeholder="Select Supplier"
+                      />
+                    </div>
                   </div>
 
+                  {/* Drug License */}
                   <div>
-                    <label className="block text-sm font-medium">
+                    <label className="block text-sm font-medium text-gray-600">
                       Drug License
                     </label>
-                    <input
-                      type="text"
-                      value={form.drugLicense}
-                      onChange={(e) =>
-                        setForm({ ...form, drugLicense: e.target.value })
-                      }
-                      className="w-full border px-3 py-2 rounded-lg"
-                    />
+                    <div>
+                      <InputField
+                        type="text"
+                        value={form.drugLicense}
+                        onChange={(e) =>
+                          setForm({ ...form, drugLicense: e.target.value })
+                        }
+                      />
+                    </div>
                   </div>
 
+                  {/* License Validity Date */}
                   <div>
-                    <label className="block text-sm font-medium">
+                    <label className="block text-sm font-medium text-gray-600">
                       License Validity Date
                     </label>
-                    <DatePicker
-                      selected={
-                        form.licenseValidityDate
-                          ? new Date(form.licenseValidityDate)
-                          : null
-                      }
-                      onChange={(date) =>
-                        date
-                          ? setForm({
-                              ...form,
-                              licenseValidityDate: date.toISOString(),
-                            })
-                          : null
-                      }
-                      dateFormat="yyyy-MM-dd"
-                      placeholderText="Select date"
-                      className="w-full border px-3 py-2 rounded-lg"
-                    />
+                    <div className="border rounded-lg">
+                      <DatePicker
+                        selected={
+                          form.licenseValidityDate
+                            ? new Date(form.licenseValidityDate)
+                            : null
+                        }
+                        onChange={(date) =>
+                          date
+                            ? setForm({
+                                ...form,
+                                licenseValidityDate: date.toISOString(),
+                              })
+                            : null
+                        }
+                        dateFormat="yyyy-MM-dd"
+                        placeholderText="Select date"
+                        className="w-full px-3 py-2 border-none rounded-lg focus:ring-0"
+                      />
+                    </div>
                   </div>
 
+                  {/* Remarks */}
                   <div className="md:col-span-2">
-                    <label className="block text-sm font-medium">Remarks</label>
-                    <textarea
-                      value={form.remarks}
-                      onChange={(e) =>
-                        setForm({ ...form, remarks: e.target.value })
-                      }
-                      className="w-full border px-3 py-2 rounded-lg"
-                    />
+                    <label className="block text-sm font-medium text-gray-600">
+                      Remarks
+                    </label>
+                    <div className="border rounded-lg bg-white">
+                      <textarea
+                        value={form.remarks}
+                        onChange={(e) =>
+                          setForm({ ...form, remarks: e.target.value })
+                        }
+                        className="w-full px-3 py-2 border-none rounded-lg focus:ring-0 resize-none"
+                        rows={3}
+                      />
+                    </div>
                   </div>
-                </form>
+                </div>
 
                 {/* Buttons */}
                 <div className="mt-6 flex justify-end gap-3">

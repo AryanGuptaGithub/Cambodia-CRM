@@ -506,7 +506,7 @@ const AddCustomer = () => {
               value={form.customerCode}
               onChange={handleChange}
               disabled={true}
-              className="bg-gray-100 text-gray-700"
+              className="bg-gray-100 text-gray-700 border rounded px-3 py-2 border-gray-300"
             />
 
             <InputField

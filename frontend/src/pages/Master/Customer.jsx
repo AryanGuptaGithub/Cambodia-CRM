@@ -1,61 +1,43 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Eye, Edit, Trash2, UserPlus, Upload, X, Search } from "lucide-react";
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from "react";
+import { UserPlus, Upload, Trash2, Eye, X, Edit, Search } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import axios from "axios";
-import SampleExcelDownloadCustomer from "../../excels/SampleExcelDownloadCustomer";
 import { showToast } from "../../utils/toast";
 import { confirmDialog } from "../../utils/confirmationDialog";
 import { formatDateToReadable } from "../../utils/dateUtil";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import ReactDOM from "react-dom";
+import { getVisiblePages } from "../../utils/useVisiblePages";
 
-// Import the reusable components and functions
+// Import reusable components
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import InputField from "../../components/common/InputField";
+
+// Import API functions
 import {
   fetchProvinces as fetchProvincesAPI,
   fetchMRList as fetchMRListAPI,
   fetchZones as fetchZonesAPI,
   fetchBusinessTypes as fetchBusinessTypesAPI,
-  validateCustomerForm,
-  initialFormState,
-  getTodayDate,
-} from "../../utils/customerUtil"; // Adjust the path as needed
+} from "../../utils/customerUtil";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
-const customersPerPage = 7;
+const customersPerPage = 9;
 
-const Customer = () => {
-  const navigate = useNavigate();
-
-  const [customers, setCustomers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  const [selected, setSelected] = useState([]);
-  const [showImportModal, setShowImportModal] = useState(false);
-  const [parsedData, setParsedData] = useState([]);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
-  const [isUploading, setIsUploading] = useState(false);
-  const [nextCustomerCode, setNextCustomerCode] = useState(null);
-  const inputRef = useRef(null);
-  const [isOpen, setIsOpen] = useState(false);
-
-  // State for dropdown data
-  const [provinces, setProvinces] = useState([]);
-  const [mrList, setMrList] = useState([]);
-  const [zones, setZones] = useState([]);
-  const [provincesLoading, setProvincesLoading] = useState(false);
-  const [mrListLoading, setMrListLoading] = useState(false);
-  const [zonesLoading, setZonesLoading] = useState(false);
-
+// Custom hook for customer form management
+const useCustomerForm = (initialCustomerCode = "") => {
   const [form, setForm] = useState({
-    customerCode: "",
+    customerCode: initialCustomerCode || "",
     date: "",
     medicalRepName: "",
     medicalRepId: "",
@@ -69,111 +51,143 @@ const Customer = () => {
     _id: null,
   });
 
+  const [errors, setErrors] = useState({});
+
+  const handleChange = useCallback(
+    (name, value) => {
+      setForm((prev) => ({ ...prev, [name]: value }));
+      // Clear error when field is changed
+      if (errors[name]) {
+        setErrors((prev) => ({ ...prev, [name]: "" }));
+      }
+    },
+    [errors]
+  );
+
+  const handleDropdownChange = useCallback(
+    (field, selectedOption) => {
+      const value = selectedOption ? selectedOption.value : "";
+      handleChange(field, value);
+    },
+    [handleChange]
+  );
+
+  const handleNumericInput = useCallback(
+    (e, field) => {
+      const value = e.target.value;
+      if (value === "" || /^\d+$/.test(value)) {
+        handleChange(field, value);
+      }
+    },
+    [handleChange]
+  );
+
+  const validateForm = useCallback(() => {
+    const newErrors = {};
+
+    if (!form.name?.trim()) newErrors.name = "Customer name is required";
+    if (!form.typeOfBusiness)
+      newErrors.typeOfBusiness = "Business type is required";
+    if (!form.medicalRepId)
+      newErrors.medicalRepId = "Medical representative is required";
+    if (!form.zone) newErrors.zone = "Zone is required";
+    if (!form.province) newErrors.province = "Province is required";
+    if (!form.date) newErrors.date = "Date is required";
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  }, [form]);
+
+  const resetForm = useCallback(() => {
+    setForm({
+      customerCode: initialCustomerCode || "",
+      date: "",
+      medicalRepName: "",
+      medicalRepId: "",
+      name: "",
+      typeOfBusiness: "",
+      customerNumber: "",
+      address: "",
+      zone: "",
+      province: "",
+      remark: "",
+      _id: null,
+    });
+    setErrors({});
+  }, [initialCustomerCode]);
+
+  return {
+    form,
+    errors,
+    handleChange,
+    handleDropdownChange,
+    handleNumericInput,
+    validateForm,
+    resetForm,
+    setForm,
+  };
+};
+const Customer = () => {
+  const navigate = useNavigate();
+
+  const [customers, setCustomers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [parsedData, setParsedData] = useState([]);
+  const [nextCustomerCode, setNextCustomerCode] = useState(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const inputRef = useRef(null);
+
+  // State for dropdown data
+  const [provinces, setProvinces] = useState([]);
+  const [mrList, setMrList] = useState([]);
+  const [zones, setZones] = useState([]);
+  const [businessTypes, setBusinessTypes] = useState([]);
+
+  // Modal states
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  // State for business types
-  const [businessTypes, setBusinessTypes] = useState([]);
-  const [businessTypesLoading, setBusinessTypesLoading] = useState(false);
 
-  // Check if MR list is empty
-  const isMRListEmpty = mrList.length === 0;
+  // Use custom hook for form management
+  const {
+    form,
+    errors,
+    handleChange,
+    handleDropdownChange,
+    handleNumericInput,
+    validateForm,
+    resetForm,
+    setForm,
+  } = useCustomerForm();
 
-  // Fetch business types from backend
-  const fetchBusinessTypes = async () => {
-    try {
-      setBusinessTypesLoading(true);
-      const result = await fetchBusinessTypesAPI();
-      if (result.success) {
-        setBusinessTypes(Array.isArray(result.data) ? result.data : []);
-      } else {
-        showToast("error", result.error || "Failed to load business types");
-        setBusinessTypes([]);
-      }
-    } catch (error) {
-      console.error("Error fetching business types:", error);
-      showToast("error", "Failed to load business types");
-      setBusinessTypes([]);
-    } finally {
-      setBusinessTypesLoading(false);
-    }
-  };
-
-  // Call it in useEffect
+  // Fetch initial data
   useEffect(() => {
     fetchCustomers();
-    fetchProvinces();
-    fetchMRList();
-    fetchZones();
-    fetchBusinessTypes();
+    fetchDropdownData();
   }, []);
 
-  // Business type options
-  const businessTypeOptions = useMemo(() => {
-    const options = [{ value: "", label: "Select Business Type" }];
-
-    if (Array.isArray(businessTypes)) {
-      businessTypes.forEach((type) => {
-        const name =
-          typeof type === "string"
-            ? type
-            : type.name || type.label || "Unknown";
-        options.push({
-          value: name,
-          label: name,
-        });
-      });
-    }
-
-    return options;
-  }, [businessTypes]);
-
-  // Fetch dropdown data using reusable functions
-  const fetchProvinces = async () => {
+  const fetchDropdownData = async () => {
     try {
-      setProvincesLoading(true);
-      const result = await fetchProvincesAPI();
-      if (result.success) {
-        setProvinces(result.data || []);
-      }
-    } catch (error) {
-      console.error("Error fetching provinces:", error);
-    } finally {
-      setProvincesLoading(false);
-    }
-  };
+      const [provincesResult, mrResult, zonesResult, businessTypesResult] =
+        await Promise.all([
+          fetchProvincesAPI(),
+          fetchMRListAPI(),
+          fetchZonesAPI(),
+          fetchBusinessTypesAPI(),
+        ]);
 
-  const fetchMRList = async () => {
-    try {
-      setMrListLoading(true);
-      const result = await fetchMRListAPI();
-      if (result.success) {
-        const mrData = Array.isArray(result.data) ? result.data : [];
-        setMrList(mrData);
-
-        // REMOVED: Don't show toast here to avoid duplicates
-      } else {
-        setMrList([]);
-      }
+      if (provincesResult.success) setProvinces(provincesResult.data || []);
+      if (mrResult.success) setMrList(mrResult.data || []);
+      if (zonesResult.success) setZones(zonesResult.data || []);
+      if (businessTypesResult.success)
+        setBusinessTypes(businessTypesResult.data || []);
     } catch (error) {
-      console.error("Error fetching MR list:", error);
-      setMrList([]);
-    } finally {
-      setMrListLoading(false);
-    }
-  };
-
-  const fetchZones = async () => {
-    try {
-      setZonesLoading(true);
-      const result = await fetchZonesAPI();
-      if (result.success) {
-        setZones(Array.isArray(result.data) ? result.data : []);
-      }
-    } catch (error) {
-      console.error("Error fetching zones:", error);
-      setZones([]);
-    } finally {
-      setZonesLoading(false);
+      console.error("Error fetching dropdown data:", error);
+      showToast("error", "Failed to load dropdown data");
     }
   };
 
@@ -183,32 +197,48 @@ const Customer = () => {
       if (!response.ok) throw new Error("Failed to fetch customers");
       const data = await response.json();
       setCustomers(data.customers || []);
-      if (data.nextCustomerCode) {
-        setNextCustomerCode(data.nextCustomerCode);
-      }
+      setNextCustomerCode(data.nextCustomerCode || null);
     } catch (err) {
-      setError(err.message || "Something went wrong");
+      showToast("error", err.message || "Something went wrong");
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm]);
+  // Filter customers by search term
+  const filteredCustomers = useMemo(() => {
+    const lowerSearch = searchTerm.toLowerCase();
 
-  const filteredCustomers = customers.filter(
-    (r) =>
-      r.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.typeOfBusiness?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.medicalRepName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.address?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.zone?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.province?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.date?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+    return customers.filter((customer) => {
+      const nameMatch = customer.name?.toLowerCase().includes(lowerSearch);
+      const businessMatch = customer.typeOfBusiness
+        ?.toLowerCase()
+        .includes(lowerSearch);
+      const mrMatch = customer.medicalRepName
+        ?.toLowerCase()
+        .includes(lowerSearch);
+      const addressMatch = customer.address
+        ?.toLowerCase()
+        .includes(lowerSearch);
+      const zoneMatch = customer.zone?.toLowerCase().includes(lowerSearch);
+      const provinceMatch = customer.province
+        ?.toLowerCase()
+        .includes(lowerSearch);
+      const dateMatch = customer.date?.toLowerCase().includes(lowerSearch);
 
-  // Pagination calculations
+      return (
+        nameMatch ||
+        businessMatch ||
+        mrMatch ||
+        addressMatch ||
+        zoneMatch ||
+        provinceMatch ||
+        dateMatch
+      );
+    });
+  }, [customers, searchTerm]);
+
+  // Pagination logic
   const totalPages = Math.ceil(filteredCustomers.length / customersPerPage);
   const visiblePages = getVisiblePages(currentPage, totalPages);
   const currentCustomers = filteredCustomers.slice(
@@ -216,92 +246,36 @@ const Customer = () => {
     currentPage * customersPerPage
   );
 
-  function getVisiblePages(currentPage, totalPages) {
-    if (totalPages <= 5) {
-      return Array.from({ length: totalPages }, (_, i) => i + 1);
-    }
+  // Selection handlers
+  const toggleSelect = useCallback((customer) => {
+    setSelected((prev) =>
+      prev.some((c) => c.id === customer._id)
+        ? prev.filter((c) => c.id !== customer._id)
+        : [...prev, { id: customer._id, name: customer.name }]
+    );
+  }, []);
 
-    if (currentPage <= 3) {
-      return [1, 2, 3, "...", totalPages];
-    }
+  const toggleSelectAll = useCallback(
+    (checked) => {
+      setSelected(
+        checked
+          ? currentCustomers.map((customer) => ({
+              id: customer._id,
+              name: customer.name,
+            }))
+          : []
+      );
+    },
+    [currentCustomers]
+  );
 
-    if (currentPage >= totalPages - 2) {
-      return [1, "...", totalPages - 2, totalPages - 1, totalPages];
-    }
-
-    return [1, "...", currentPage, "...", totalPages];
-  }
-
-  // Memoized dropdown options
-  const provinceOptions = useMemo(() => {
-    return [
-      { value: "", label: "Select Province" },
-      ...provinces.map((province) => ({
-        value: province.name || province,
-        label: province.name || province,
-      })),
-    ];
-  }, [provinces]);
-
-  const mrOptions = useMemo(() => {
-    return [
-      { value: "", label: "Select MR" },
-      ...mrList.map((mr) => {
-        // Handle different possible formats of MR data
-        const mrId = mr._id || mr.id || "";
-        const mrName =
-          mr.medicalRepName || mr.name || mr.staffName || "Unknown";
-
-        return {
-          value: mrId,
-          label: mrName,
-        };
-      }),
-    ];
-  }, [mrList]);
-
-  const zoneOptions = useMemo(() => {
-    return [
-      { value: "", label: "Select Zone" },
-      ...zones.map((zone, index) => ({
-        value: typeof zone === "string" ? zone : zone.name || `Zone ${index}`,
-        label: typeof zone === "string" ? zone : zone.name || `Zone ${index}`,
-      })),
-    ];
-  }, [zones]);
-
-  // Select/unselect a customer by id
-  const toggleSelect = (customer) => {
-    setSelected((prev) => {
-      const exists = prev.some((c) => c.id === customer._id);
-
-      if (exists) {
-        return prev.filter((c) => c.id !== customer._id);
-      } else {
-        return [...prev, { id: customer._id, name: customer.name }];
-      }
-    });
-  };
-
-  const toggleSelectAll = (checked) => {
-    if (checked) {
-      const allSelected = currentCustomers.map((s) => ({
-        id: s._id,
-        name: s.name,
-      }));
-      setSelected(allSelected);
-    } else {
-      setSelected([]);
-    }
-  };
-
+  // Delete handlers
   const handleDeleteSelected = async () => {
     const confirm = await confirmDialog({
-      text: `Are you sure you want to delete <b>${selected.length}</b> customers`,
+      text: `Are you sure you want to delete <b>${selected.length}</b> customer(s)?`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
-      selected,
     });
 
     if (confirm.isConfirmed) {
@@ -312,69 +286,24 @@ const Customer = () => {
 
         if (res.status === 200) {
           showToast("success", "Selected customers deleted successfully");
-          const updated = await fetch(`${backendUrl}/api/customers`);
-          const data = await updated.json();
-          setCustomers(data.customers || []);
-          setNextCustomerCode(data.nextCustomerCode);
+          fetchCustomers();
           setSelected([]);
         }
       } catch (error) {
         showToast("error", "Failed to delete selected customers.");
       }
-    } else {
-      setSelected([]);
     }
-  };
-
-  // Open edit modal with selected customer data - FIXED
-  const editCustomer = async (customer) => {
-    // Find the actual MR ID from the MR list based on the medicalRepName
-    let actualMrId = customer.medicalRepId || "";
-
-    // If medicalRepId is not available, try to find it by medicalRepName
-    if (!actualMrId && customer.medicalRepName && mrList.length > 0) {
-      const foundMr = mrList.find(
-        (mr) =>
-          (mr.medicalRepName || mr.name || "").toLowerCase() ===
-          customer.medicalRepName.toLowerCase()
-      );
-      actualMrId = foundMr?._id || foundMr?.id || "";
-    }
-
-    setForm({
-      customerCode: customer.customerCode || "",
-      date: customer.date || "",
-      medicalRepName: customer.medicalRepName || "",
-      medicalRepId: actualMrId, // Use the found ID
-      name: customer.name || "",
-      typeOfBusiness: customer.typeOfBusiness || "",
-      customerNumber: customer.customerNumber || "",
-      address: customer.address || "",
-      zone: customer.zone || "",
-      province: customer.province || "",
-      remark: customer.remark || "",
-      _id: customer._id || null,
-    });
-    setIsEditModalOpen(true);
-  };
-
-  // Open view modal with selected customer data
-  const handleView = (customer) => {
-    setForm({ ...customer });
-    setIsViewModalOpen(true);
   };
 
   const deleteCustomer = async (customer) => {
-    if (!customer._id) return;
-    const confirmDelete = await confirmDialog({
-      title: "Delete",
+    const confirm = await confirmDialog({
       text: `Are you sure you want to delete <b>${customer.name}</b>?`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
     });
 
-    if (confirmDelete.isConfirmed) {
+    if (confirm.isConfirmed) {
       try {
         const res = await axios.delete(
           `${backendUrl}/api/customers/${customer._id}`
@@ -383,13 +312,9 @@ const Customer = () => {
         if (res.status === 200) {
           showToast(
             "success",
-            `Customer <b>${customer.name}</b> deleted successfully`
+            `Customer ${customer.name} deleted successfully`
           );
-          const updated = await axios.get(`${backendUrl}/api/customers`);
-          const customers = updated.data.customers || [];
-          setCustomers(customers);
-          setNextCustomerCode(updated.data.nextCustomerCode);
-          setSelected([]);
+          fetchCustomers();
         }
       } catch (error) {
         showToast("error", "Failed to delete customer.");
@@ -397,227 +322,53 @@ const Customer = () => {
     }
   };
 
-  // Handle Import CSV button click with MR list validation
-  const handleImportClick = () => {
-    if (isMRListEmpty) {
-      // Show the message ONLY HERE - not in fetchMRList
-      showToast(
-        "error",
-        "No Medical Representatives found. Please add at least one MR first."
-      );
-      return;
-    }
-    setShowImportModal(true);
-  };
+  // View and Edit handlers
+  const handleView = useCallback(
+    (customer) => {
+      setForm(customer);
+      setIsViewModalOpen(true);
+    },
+    [setForm]
+  );
 
-  // File upload and parsing logic for import - REMOVED CUSTOMER CODE REQUIREMENT
-  const handleFileUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleEdit = useCallback(
+    (customer) => {
+      // Find the actual MR ID from the MR list
+      let actualMrId = customer.medicalRepId || "";
+      if (!actualMrId && customer.medicalRepName && mrList.length > 0) {
+        const foundMr = mrList.find(
+          (mr) =>
+            (mr.medicalRepName || mr.name || "").toLowerCase() ===
+            customer.medicalRepName.toLowerCase()
+        );
+        actualMrId = foundMr?._id || foundMr?.id || "";
+      }
 
-    const reader = new FileReader();
-
-    reader.onload = (evt) => {
-      const data = new Uint8Array(evt.target.result);
-      const workbook = XLSX.read(data, { type: "array" });
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
-
-      const rows = XLSX.utils.sheet_to_json(worksheet, {
-        header: 1,
-        defval: "",
+      setForm({
+        customerCode: customer.customerCode || "",
+        date: customer.date || "",
+        medicalRepName: customer.medicalRepName || "",
+        medicalRepId: actualMrId,
+        name: customer.name || "",
+        typeOfBusiness: customer.typeOfBusiness || "",
+        customerNumber: customer.customerNumber || "",
+        address: customer.address || "",
+        zone: customer.zone || "",
+        province: customer.province || "",
+        remark: customer.remark || "",
+        _id: customer._id || null,
       });
+      setIsEditModalOpen(true);
+    },
+    [mrList, setForm]
+  );
 
-      if (rows.length === 0) {
-        showToast("warning", "Excel file is empty");
-        return;
-      }
-
-      // REMOVED "customer code" from required headers
-      const requiredHeaders = [
-        "date",
-        "medical representative name",
-        "customer name in english",
-        "types of business",
-        "customer number",
-        "customer address",
-        "zone",
-        "province",
-        "remark",
-      ];
-
-      let headerRowIndex = -1;
-      let matchedHeaders = [];
-
-      for (let i = 0; i < Math.min(rows.length, 10); i++) {
-        const row = rows[i].map((cell) =>
-          cell?.toString().trim().toLowerCase()
-        );
-        const matched = requiredHeaders.filter((header) =>
-          row.includes(header)
-        );
-        if (matched.length >= 5) {
-          headerRowIndex = i;
-          matchedHeaders = matched;
-          break;
-        }
-      }
-
-      if (
-        headerRowIndex === -1 ||
-        matchedHeaders.length < requiredHeaders.length
-      ) {
-        const missingHeaders = requiredHeaders.filter(
-          (header) => !matchedHeaders.includes(header)
-        );
-        const errorMsg = `❌ Required headers not found in Excel file:\n\n${missingHeaders.join(
-          ", "
-        )}`;
-        showToast("error", errorMsg);
-        return;
-      }
-
-      const rawHeaders = rows[headerRowIndex];
-      const headersMap = {};
-      rawHeaders.forEach((header, index) => {
-        if (!header) return;
-        const cleaned = header.toString().trim().toLowerCase();
-        headersMap[index] = cleaned;
-      });
-
-      const dataRows = rows.slice(headerRowIndex + 1);
-      if (dataRows.length == 0) {
-        showToast("warning", "Excel file is empty");
-        return;
-      }
-
-      const mappedData = dataRows
-        .map((row, rowIndex) => {
-          const item = {};
-          Object.entries(headersMap).forEach(([index, key]) => {
-            item[key] = row[index] || "";
-          });
-
-          return {
-            // REMOVED customerCode from mapping
-            date: parseExcelDate(item["date"]),
-            medicalRepName: item["medical representative name"],
-            name: item["customer name in english"],
-            typeOfBusiness: item["types of business"],
-            customerNumber: item["customer number"],
-            address: item["customer address"],
-            zone: item["zone"],
-            province: item["province"],
-            remark: item["remark"],
-          };
-        })
-        .filter((entry, index) => {
-          // Filter based on name instead of customerCode
-          const keep = !!entry.name && !!entry.medicalRepName;
-          return keep;
-        });
-      setParsedData(mappedData);
-    };
-
-    reader.readAsArrayBuffer(file);
-  };
-
-  const parseExcelDate = (value) => {
-    if (value == null || value === "") return null;
-
-    // Detect numeric Excel serial (pure numbers, not string like "10/28/2025")
-    if (typeof value === "number") {
-      // Excel stores days since 1900-01-00 → convert properly
-      const jsDate = new Date(Math.round((value - 25569) * 86400 * 1000));
-      return isNaN(jsDate.getTime()) ? null : jsDate.toISOString();
-    }
-
-    // For strings such as "10/28/2025" or "28/10/2025"
-    if (typeof value === "string") {
-      const trimmed = value.trim();
-
-      // Try to match MM/DD/YYYY or DD/MM/YYYY explicitly
-      const mdy = trimmed.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
-      if (mdy) {
-        const [_, m1, d1, y1] = mdy;
-        // Decide if the first part looks like month or day
-        // If the first part > 12, it must be DD/MM/YYYY
-        let month, day, year;
-        if (parseInt(m1, 10) > 12) {
-          day = parseInt(m1, 10);
-          month = parseInt(d1, 10);
-        } else {
-          month = parseInt(m1, 10);
-          day = parseInt(d1, 10);
-        }
-        year = parseInt(y1, 10);
-
-        const jsDate = new Date(year, month - 1, day);
-        return isNaN(jsDate.getTime()) ? null : jsDate.toISOString();
-      }
-
-      // Fallback: native JS parsing for other formats
-      const parsed = new Date(trimmed);
-      return isNaN(parsed.getTime()) ? null : parsed.toISOString();
-    }
-
-    return null;
-  };
-
-  // Import parsed customers to backend
-  const handleImport = async () => {
-    if (parsedData.length === 0) {
-      showToast("warning", "Please upload a valid file first");
-      return;
-    }
-
-    // Additional validation before import
-    if (isMRListEmpty) {
-      showToast(
-        "error",
-        "Cannot import customers: No Medical Representatives found. Please add at least one MR first."
-      );
-      return;
-    }
-
-    setIsUploading(true);
-    console.log("valueso f par", parsedData);
-    try {
-      const res = await axios.post(
-        `${backendUrl}/api/customers/import`,
-        parsedData
-      );
-
-      if (res.status === 200) {
-        showToast(
-          "success",
-          res.data.message || "Customers imported successfully!"
-        );
-        setShowImportModal(false);
-        const response = await fetch(`${backendUrl}/api/customers`);
-        const data = await response.json();
-        setCustomers(data.customers || []);
-        setNextCustomerCode(data.nextCustomerCode);
-      }
-    } catch (err) {
-      console.error("Import error:", err);
-      if (err.response) {
-        const { message } = err.response.data;
-        const cleanMessage = message.replace(/<[^>]+>/g, "");
-
-        showToast("error", cleanMessage || "Failed to import customers.");
-      } else {
-        showToast("error", "Network error. Please try again.");
-      }
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
-  const handlerEnabledCustomer = async (id) => {
+  // Status handler
+  const handleStatusToggle = async (id) => {
     try {
       const customer = customers.find((c) => c._id === id);
       if (!customer) return;
+
       const updatedCustomer = { ...customer, enabled: !customer.enabled };
       const response = await fetch(`${backendUrl}/api/customers/${id}`, {
         method: "PUT",
@@ -633,74 +384,44 @@ const Customer = () => {
       setCustomers((prev) =>
         prev.map((c) => (c._id === id ? { ...c, enabled: data.enabled } : c))
       );
+      showToast(
+        "success",
+        `Customer ${
+          updatedCustomer.enabled ? "enabled" : "disabled"
+        } successfully`
+      );
     } catch (err) {
       console.error("Error updating customer:", err);
+      showToast("error", "Failed to update customer status");
     }
   };
 
-  const handleIconClick = () => {
-    if (inputRef.current) {
-      inputRef.current.focus();
-      inputRef.current.classList.add("highlight");
-      setTimeout(() => {
-        inputRef.current.classList.remove("highlight");
-      }, 1000);
-    }
-  };
+  // MR change handler
+  const handleMRChange = useCallback(
+    (selectedOption) => {
+      const mrId = selectedOption ? selectedOption.value : "";
+      const selectedMR = mrList.find((mr) => (mr._id || mr.id) === mrId);
 
-  // ✅ Safe, unified handler for all inputs
-  const handleInputChange = (nameOrEvent, maybeValue) => {
-    if (nameOrEvent?.target) {
-      const { name, value } = nameOrEvent.target;
-      setForm((prev) => ({ ...prev, [name]: value }));
-    } else {
-      const name = nameOrEvent;
-      const value = maybeValue;
-      setForm((prev) => ({ ...prev, [name]: value }));
-    }
-  };
-
-  // ✅ Handle Medical Representative selection - FIXED
-  const handleMRChange = (mrId) => {
-    const selectedMR = mrList.find((mr) => (mr._id || mr.id) === mrId);
-    if (selectedMR) {
       setForm((prev) => ({
         ...prev,
         medicalRepId: mrId,
-        medicalRepName:
-          selectedMR.medicalRepName ||
-          selectedMR.name ||
-          selectedMR.staffName ||
-          "",
+        medicalRepName: selectedMR
+          ? selectedMR.medicalRepName ||
+            selectedMR.name ||
+            selectedMR.staffName ||
+            ""
+          : "",
       }));
-    } else {
-      setForm((prev) => ({
-        ...prev,
-        medicalRepId: "",
-        medicalRepName: "",
-      }));
-    }
-  };
+    },
+    [mrList, setForm]
+  );
 
-  // ✅ Validate and update customer
-  const handleUpdateCustomer = async (e) => {
+  // Update customer
+  const handleCustomerUpdate = async (e) => {
     e.preventDefault();
 
-    // Validation for required fields
-    if (!form.zone) {
-      showToast("error", "Zone is required.");
-      return;
-    }
-    if (!form.province) {
-      showToast("error", "Province is required.");
-      return;
-    }
-    if (!form.typeOfBusiness) {
-      showToast("error", "Type of Business is required.");
-      return;
-    }
-    if (!form.medicalRepId) {
-      showToast("error", "Medical Representative is required.");
+    if (!validateForm()) {
+      showToast("error", "Please fill all required fields");
       return;
     }
 
@@ -725,16 +446,10 @@ const Customer = () => {
       );
 
       if (res.status === 200) {
-        showToast(
-          "success",
-          `Customer <b>${form.name}</b> updated successfully`
-        );
+        showToast("success", `Customer ${form.name} updated successfully`);
         setIsEditModalOpen(false);
-
-        const updated = await fetch(`${backendUrl}/api/customers`);
-        const data = await updated.json();
-        setCustomers(data.customers || []);
-        setNextCustomerCode(data.nextCustomerCode);
+        resetForm();
+        fetchCustomers();
       }
     } catch (err) {
       console.error("Update error:", err);
@@ -742,194 +457,326 @@ const Customer = () => {
     }
   };
 
+  // Import functionality
+  const handleImportClick = () => {
+    if (mrList.length === 0) {
+      showToast(
+        "error",
+        "No Medical Representatives found. Please add at least one MR first."
+      );
+      return;
+    }
+    setShowImportModal(true);
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const data = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(data, { type: "array" });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+        if (jsonData.length === 0) {
+          showToast("warning", "Excel file is empty");
+          return;
+        }
+
+        setParsedData(jsonData);
+        showToast("success", "File parsed successfully");
+      } catch (error) {
+        console.error("Error parsing file:", error);
+        showToast("error", "Failed to parse file");
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleCustomerImport = async () => {
+    if (parsedData.length === 0) {
+      showToast("warning", "Please upload a valid file first");
+      return;
+    }
+
+    if (mrList.length === 0) {
+      showToast(
+        "error",
+        "Cannot import customers: No Medical Representatives found."
+      );
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const res = await axios.post(
+        `${backendUrl}/api/customers/import`,
+        parsedData
+      );
+
+      if (res.status === 200) {
+        showToast(
+          "success",
+          res.data.message || "Customers imported successfully!"
+        );
+        setShowImportModal(false);
+        setParsedData([]);
+        fetchCustomers();
+      }
+    } catch (err) {
+      console.error("Import error:", err);
+      showToast("error", "Failed to import customers.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // Search input focus handler
+  const handleIconClick = () => {
+    if (inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.classList.add("highlight");
+      setTimeout(() => {
+        inputRef.current.classList.remove("highlight");
+      }, 1000);
+    }
+  };
+
+  // Memoized dropdown options
+  const provinceOptions = useMemo(() => {
+    return provinces.map((province) => ({
+      value: province.name || province,
+      label: province.name || province,
+    }));
+  }, [provinces]);
+
+  const mrOptions = useMemo(() => {
+    return mrList.map((mr) => {
+      const mrId = mr._id || mr.id || "";
+      const mrName = mr.medicalRepName || mr.name || mr.staffName || "Unknown";
+      return {
+        value: mrId,
+        label: mrName,
+      };
+    });
+  }, [mrList]);
+
+  const zoneOptions = useMemo(() => {
+    return zones.map((zone, index) => ({
+      value: typeof zone === "string" ? zone : zone.name || `Zone ${index}`,
+      label: typeof zone === "string" ? zone : zone.name || `Zone ${index}`,
+    }));
+  }, [zones]);
+
+  const businessTypeOptions = useMemo(() => {
+    return businessTypes.map((type) => {
+      const name =
+        typeof type === "string" ? type : type.name || type.label || "Unknown";
+      return {
+        value: name,
+        label: name,
+      };
+    });
+  }, [businessTypes]);
+
+  // Helper function
+  const capitalizeFirstLetter = (str) => {
+    if (!str) return "";
+    return str.toString().charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+  };
+
   if (loading) return <p>Loading...</p>;
-  if (error) return <p className="text-red-500">{error}</p>;
 
   return (
     <div className="p-6">
-      <div className="flex justify-between items-center mb-4">
-        <div className="flex gap-3">
-          <button
-            onClick={() =>
-              navigate("/masterlayout/customer/new", {
-                state: { customerCode: nextCustomerCode },
-              })
-            }
-            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-          >
-            <UserPlus size={18} /> Add New Customer
-          </button>
-
-          <button
-            onClick={handleImportClick}
-            disabled={isMRListEmpty}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl shadow-md cursor-pointer ${
-              isMRListEmpty
-                ? "bg-gray-400 text-gray-200 cursor-not-allowed"
-                : "bg-green-600 hover:bg-green-700 text-white"
-            }`}
-          >
-            <Upload size={18} /> Import CSV
-          </button>
-          {selected.length > 0 && (
+      <div className="container">
+        {/* Header Section */}
+        <div className="flex justify-between items-center mb-4">
+          <div className="flex gap-3">
             <button
-              className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-              onClick={() => handleDeleteSelected()}
+              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+              onClick={() =>
+                navigate("/masterlayout/customer/new", {
+                  state: { customerCode: nextCustomerCode },
+                })
+              }
             >
-              <Trash2 size={18} /> Delete
+              <UserPlus size={18} /> Add New Customer
             </button>
-          )}
-        </div>
-        <div className="flex justify-between items-center mb-4 gap-8">
-          <p className="text-lg font-semibold text-gray-700">
-            Total Count:{" "}
-            <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-              {filteredCustomers.length}
-            </span>
-          </p>
-          <div className="relative w-full md:w-72">
-            <Search
-              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-              size={16}
-              onClick={handleIconClick}
-            />
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder="Search..."
-              value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-            />
+
+            <button
+              onClick={handleImportClick}
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+            >
+              <Upload size={18} /> Import Customer
+            </button>
+
+            {selected.length > 0 && (
+              <button
+                className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+                onClick={handleDeleteSelected}
+              >
+                <Trash2 size={18} /> Delete
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-8">
+            <p className="text-lg font-semibold text-gray-700">
+              Total Count:{" "}
+              <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+                {filteredCustomers.length}
+              </span>
+            </p>
+
+            <div className="relative w-full md:w-72">
+              <Search
+                className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                size={16}
+                onClick={handleIconClick}
+              />
+              <input
+                ref={inputRef}
+                type="text"
+                placeholder="Search..."
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+              />
+            </div>
           </div>
         </div>
-      </div>
 
-      <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-        <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
-          <thead className="bg-gray-100 text-gray-700 border-b">
-            <tr>
-              <th className="p-3 text-sm font-medium">
-                <div className="flex items-center gap-4">
-                  {currentCustomers.length > 0 && (
-                    <input
-                      type="checkbox"
-                      checked={
-                        selected.length === currentCustomers.length &&
-                        currentCustomers.length > 0
-                      }
-                      onChange={(e) => toggleSelectAll(e.target.checked)}
-                    />
-                  )}
-                  <span>Name</span>
-                </div>
-              </th>
-              <th className="p-3 text-sm font-medium">Business</th>
-              <th className="p-3 text-sm font-medium">MR Name</th>
-              <th className="p-3 text-sm font-medium">Address</th>
-              <th className="p-3 text-sm font-medium">Zone</th>
-              <th className="p-3 text-sm font-medium">Province</th>
-              <th className="p-3 text-sm font-medium">Joining Date</th>
-              <th className="p-3 text-sm font-medium">Status</th>
-              <th className="p-3 text-sm font-medium">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {currentCustomers.length > 0 ? (
-              currentCustomers.map((customer, index) => (
-                <tr
-                  key={customer._id || index}
-                  className={`hover:bg-gray-50 ${
-                    (index + 1) % customersPerPage === 0 ||
-                    index + 1 === currentCustomers.length
-                      ? ""
-                      : "border-b"
-                  }`}
-                >
-                  <td className="p-3">
-                    <div className="flex items-center gap-4">
+        {/* Customers Table */}
+        <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
+          <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
+            <thead className="bg-gray-100 text-gray-700 border-b">
+              <tr>
+                <th className="p-3">
+                  <div className="flex items-center gap-4">
+                    {currentCustomers.length > 0 && (
                       <input
                         type="checkbox"
-                        checked={selected.some((s) => s.id === customer._id)}
-                        onChange={() => toggleSelect(customer)}
+                        checked={
+                          selected.length === currentCustomers.length &&
+                          currentCustomers.length > 0
+                        }
+                        onChange={(e) => toggleSelectAll(e.target.checked)}
                       />
-                      <span className="capitalize">{customer.name}</span>
-                    </div>
-                  </td>
-                  <td className="p-3">{customer.typeOfBusiness}</td>
-                  <td className="p-3 capitalize">{customer.medicalRepName}</td>
-                  <td className="p-3 capitalize">{customer.address}</td>
-                  <td className="p-3 capitalize">{customer.zone}</td>
-                  <td className="p-3 capitalize">{customer.province}</td>
-                  <td className="p-3">{formatDateToReadable(customer.date)}</td>
-                  <td>
-                    <button
-                      onClick={() => handlerEnabledCustomer(customer._id)}
-                      className={`px-3 py-1 rounded-full text-sm cursor-pointer ${
-                        customer.enabled
-                          ? "bg-green-100 text-green-600"
-                          : "bg-gray-200 text-gray-600"
-                      }`}
-                    >
-                      {customer.enabled ? "Enabled" : "Disabled"}
-                    </button>
-                  </td>
-                  <td className="p-3 flex items-center justify-center gap-3">
-                    <button
-                      onClick={() => handleView(customer)}
-                      className="text-blue-600 hover:text-blue-800 cursor-pointer"
-                    >
-                      <Eye size={18} />
-                    </button>
-                    <button
-                      onClick={() => editCustomer(customer)}
-                      className="text-green-600 hover:text-green-800 cursor-pointer"
-                    >
-                      <Edit size={18} />
-                    </button>
-                    <button
-                      onClick={() => deleteCustomer(customer)}
-                      className="text-red-600 hover:text-red-800 cursor-pointer"
-                    >
-                      <Trash2 size={18} />
-                    </button>
+                    )}
+                    <span className="text-sm font-medium">Name</span>
+                  </div>
+                </th>
+                <th className="p-3 text-sm font-medium">Business Type</th>
+                <th className="p-3 text-sm font-medium">MR Name</th>
+                <th className="p-3 text-sm font-medium">Address</th>
+                <th className="p-3 text-sm font-medium">Zone</th>
+                <th className="p-3 text-sm font-medium">Province</th>
+                <th className="p-3 text-sm font-medium">Joining Date</th>
+                <th className="p-3 text-sm font-medium">Status</th>
+                <th className="p-3 text-sm font-medium">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {currentCustomers.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="p-4 text-center text-gray-500">
+                    No customers found.
                   </td>
                 </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={9} className="p-3 text-center">
-                  No customer records found
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-        {currentCustomers.length > 0 && (
-          <div className="mt-4 p-5 flex justify-start gap-2">
-            <button
-              onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-              disabled={currentPage === 1}
-              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-            >
-              Prev
-            </button>
-            {visiblePages.map((page, idx) =>
-              page === "..." ? (
-                <span
-                  key={`ellipsis-${idx}`}
-                  className="px-3 py-1 text-gray-500 select-none cursor-pointer"
-                >
-                  ...
-                </span>
               ) : (
+                currentCustomers.map((customer, index) => (
+                  <tr
+                    key={customer._id}
+                    className={`hover:bg-gray-50 ${
+                      index < currentCustomers.length - 1 ? "border-b" : ""
+                    }`}
+                  >
+                    <td className="p-3">
+                      <div className="flex items-center gap-4">
+                        <input
+                          type="checkbox"
+                          checked={selected.some((s) => s.id === customer._id)}
+                          onChange={() => toggleSelect(customer)}
+                        />
+                        <span className="capitalize">{customer.name}</span>
+                      </div>
+                    </td>
+                    <td className="p-3 capitalize">
+                      {customer.typeOfBusiness}
+                    </td>
+                    <td className="p-3 capitalize">
+                      {customer.medicalRepName}
+                    </td>
+                    <td className="p-3 capitalize">{customer.address}</td>
+                    <td className="p-3 capitalize">{customer.zone}</td>
+                    <td className="p-3 capitalize">{customer.province}</td>
+                    <td className="p-3">
+                      {formatDateToReadable(customer.date) || "--"}
+                    </td>
+                    <td className="p-3">
+                      <button
+                        onClick={() => handleStatusToggle(customer._id)}
+                        className={`px-3 py-1 rounded-full text-sm cursor-pointer ${
+                          customer.enabled
+                            ? "bg-green-100 text-green-600"
+                            : "bg-gray-200 text-gray-600"
+                        }`}
+                      >
+                        {customer.enabled ? "Enabled" : "Disabled"}
+                      </button>
+                    </td>
+                    <td className="p-3 flex items-center justify-center gap-3">
+                      <button
+                        className="text-blue-600 hover:text-blue-800 cursor-pointer"
+                        onClick={() => handleView(customer)}
+                        title="View"
+                      >
+                        <Eye size={18} />
+                      </button>
+                      <button
+                        className="text-green-600 hover:text-green-800 cursor-pointer"
+                        onClick={() => handleEdit(customer)}
+                        title="Edit"
+                      >
+                        <Edit size={18} />
+                      </button>
+                      <button
+                        className="text-red-600 hover:text-red-800 cursor-pointer"
+                        onClick={() => deleteCustomer(customer)}
+                        title="Delete"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+
+          {/* Pagination */}
+          {currentCustomers.length > 0 && (
+            <div className="mt-4 p-5 flex justify-start gap-2">
+              <button
+                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+              >
+                Prev
+              </button>
+
+              {visiblePages.map((page) => (
                 <button
-                  key={`page-${page}`}
+                  key={page}
                   onClick={() => setCurrentPage(page)}
-                  className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
+                  className={`px-3 py-1 rounded cursor-pointer ${
                     currentPage === page
                       ? "bg-indigo-600 text-white"
                       : "bg-gray-200 hover:bg-gray-300"
@@ -937,375 +784,459 @@ const Customer = () => {
                 >
                   {page}
                 </button>
-              )
-            )}
-            <button
-              onClick={() => {
-                setCurrentPage((prev) => Math.min(prev + 1, totalPages));
-                window.scrollTo({ top: 0, behavior: "smooth" });
-              }}
-              disabled={currentPage === totalPages}
-              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-            >
-              Next
-            </button>
-          </div>
-        )}
-      </div>
+              ))}
 
-      {showImportModal &&
-        ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            <div
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsOpen(false)}
-            />
-            <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
               <button
-                onClick={() => setShowImportModal(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-                disabled={isUploading}
+                onClick={() =>
+                  setCurrentPage((prev) => Math.min(prev + 1, totalPages))
+                }
+                disabled={currentPage === totalPages}
+                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
               >
-                <X size={20} />
+                Next
               </button>
-              <h2 className="text-lg font-semibold text-gray-800 mb-4">
-                Import Customer
-              </h2>
+            </div>
+          )}
+        </div>
 
-              {/* Show Sample Excel Download only if MR list is not empty */}
-              {isSampleFile && !isMRListEmpty && (
-                <SampleExcelDownloadCustomer />
-              )}
+        {/* Import Modal */}
+        {showImportModal &&
+          ReactDOM.createPortal(
+            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+              <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                onClick={() => setShowImportModal(false)}
+              />
+              <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
+                <button
+                  onClick={() => setShowImportModal(false)}
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                  disabled={isUploading}
+                >
+                  <X size={20} />
+                </button>
+                <h2 className="text-lg font-semibold mb-4">Import Customers</h2>
 
-              {/* Show warning message if MR list is empty - ONLY IN MODAL */}
-              {isMRListEmpty && (
-                <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded-lg">
-                  <p className="text-red-700 text-sm">
-                    <strong>Warning:</strong> No Medical Representatives found.
-                    Please add at least one MR first.
-                  </p>
-                </div>
-              )}
+                {mrList.length === 0 && (
+                  <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded-lg">
+                    <p className="text-red-700 text-sm">
+                      <strong>Warning:</strong> No Medical Representatives
+                      found.
+                    </p>
+                  </div>
+                )}
 
-              <div className="mb-6">
-                <label className="block text-gray-700 mb-2">File</label>
                 <input
                   type="file"
                   accept=".csv, .xlsx"
                   onChange={handleFileUpload}
-                  disabled={isMRListEmpty}
-                  className={`block w-full border rounded-lg px-3 py-2 ${
-                    isMRListEmpty
-                      ? "bg-gray-100 cursor-not-allowed"
-                      : "cursor-pointer"
-                  }`}
+                  className="block w-full border rounded-lg px-3 py-2 mb-6"
                 />
-              </div>
-              <div className="flex justify-end gap-3">
-                <button
-                  onClick={() => setShowImportModal(false)}
-                  disabled={isUploading}
-                  className={`px-5 py-2 rounded-lg cursor-pointer ${
-                    isUploading
-                      ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                      : "bg-gray-300 hover:bg-gray-400 text-gray-700"
-                  }`}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleImport}
-                  disabled={isUploading || isMRListEmpty}
-                  className={`px-5 py-2 rounded-lg cursor-pointer ${
-                    isUploading || isMRListEmpty
-                      ? "bg-blue-400 text-white cursor-not-allowed"
-                      : "bg-blue-600 hover:bg-blue-700 text-white"
-                  }`}
-                >
-                  {isUploading ? "Uploading…" : "Upload"}
-                </button>
-              </div>
-            </div>
-          </div>,
-          document.body
-        )}
-
-      {isEditModalOpen &&
-        ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            {/* Background overlay */}
-            <div
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsOpen(false)}
-            />
-
-            {/* Modal content */}
-            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
-              {/* Close Button */}
-              <button
-                onClick={() => setIsEditModalOpen(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-              >
-                <X size={20} />
-              </button>
-
-              <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                Edit Customer
-              </h2>
-
-              {/* Edit Form */}
-              <form
-                onSubmit={handleUpdateCustomer}
-                className="grid grid-cols-1 md:grid-cols-2 gap-4"
-              >
-                {/* Customer Code (Read-only) */}
-                <InputField
-                  label="Customer Code"
-                  name="customerCode"
-                  value={form.customerCode}
-                  disabled={true}
-                  className="bg-gray-100 text-gray-500 cursor-not-allowed"
-                />
-
-                {/* Name */}
-                <InputField
-                  label="Name"
-                  name="name"
-                  value={form.name}
-                  onChange={handleInputChange}
-                  className="capitalize"
-                />
-
-                {/* Customer Number (numeric only) */}
-                <InputField
-                  label="Customer Number"
-                  name="customerNumber"
-                  type="text"
-                  value={form.customerNumber}
-                  onChange={(e) => {
-                    const value = e.target.value.replace(/[^0-9]/g, ""); // only digits
-                    handleInputChange("customerNumber", value);
-                  }}
-                  placeholder="Enter numbers only"
-                  className="capitalize"
-                />
-
-                {/* Type of Business */}
-                <SearchableDropdown
-                  label="Type of Business"
-                  value={form.typeOfBusiness}
-                  onChange={(value) =>
-                    handleInputChange("typeOfBusiness", value)
-                  }
-                  options={businessTypeOptions}
-                  placeholder="Select Business Type"
-                  required
-                  loading={businessTypesLoading}
-                />
-
-                {/* Medical Representative - FIXED */}
-                <SearchableDropdown
-                  label="Medical Representative"
-                  value={form.medicalRepId} // Use ID as value
-                  onChange={handleMRChange} // Use the fixed handler
-                  options={mrOptions}
-                  placeholder="Select MR"
-                  required
-                  loading={mrListLoading}
-                />
-
-                {/* Address */}
-                <InputField
-                  label="Address"
-                  name="address"
-                  value={form.address}
-                  onChange={handleInputChange}
-                  className="capitalize"
-                />
-
-                {/* Zone */}
-                <SearchableDropdown
-                  label="Zone"
-                  value={form.zone}
-                  onChange={(value) => handleInputChange("zone", value)}
-                  options={zoneOptions}
-                  placeholder="Select Zone"
-                  required
-                  loading={zonesLoading}
-                />
-
-                {/* Province */}
-                <SearchableDropdown
-                  label="Province"
-                  value={form.province}
-                  onChange={(value) => handleInputChange("province", value)}
-                  options={provinceOptions}
-                  placeholder="Select Province"
-                  required
-                  loading={provincesLoading}
-                />
-
-                {/* Date */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Date
-                  </label>
-                  <DatePicker
-                    selected={form.date ? new Date(form.date) : null}
-                    onChange={(date) => handleInputChange("date", date)}
-                    dateFormat="yyyy-MM-dd"
-                    placeholderText="Select a date"
-                    className="w-full border px-3 py-2 rounded-lg"
-                  />
-                </div>
-
-                {/* Remarks */}
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Customer Remark
-                  </label>
-                  <textarea
-                    name="remark"
-                    value={form.remark}
-                    onChange={handleInputChange}
-                    placeholder="Enter remarks"
-                    rows={3}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent capitalize resize-vertical"
-                  />
-                </div>
-              </form>
-
-              {/* Action Buttons */}
-              <div className="mt-6 flex justify-end gap-3">
-                <button
-                  onClick={() => setIsEditModalOpen(false)}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleUpdateCustomer}
-                  className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
-                >
-                  Update
-                </button>
-              </div>
-            </div>
-          </div>,
-          document.body
-        )}
-
-      {isViewModalOpen &&
-        ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            <div
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsOpen(false)}
-            />
-            <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
-              <button
-                onClick={() => setIsViewModalOpen(false)}
-                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-              >
-                <X size={20} />
-              </button>
-              <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                View Customer
-              </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Customer Code
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.customerCode}
-                  </p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Name
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.name}
-                  </p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Customer Number
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.customerNumber}
-                  </p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Type of Business
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.typeOfBusiness}
-                  </p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Medical Rep Name
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.medicalRepName}
-                  </p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Address
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.address}
-                  </p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Zone
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.zone}
-                  </p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Province
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.province}
-                  </p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Date
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {formatDateToReadable(form.date)}
-                  </p>
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-600">
-                    Customer Remark
-                  </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize min-h-[80px]">
-                    {form.remark?.trim() ? form.remark : "No Remarks"}
-                  </p>
+                <div className="flex justify-end gap-3">
+                  <button
+                    onClick={() => setShowImportModal(false)}
+                    disabled={isUploading}
+                    className={`px-5 py-2 rounded-lg cursor-pointer ${
+                      isUploading
+                        ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                        : "bg-gray-300 hover:bg-gray-400 text-gray-700"
+                    }`}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleCustomerImport}
+                    disabled={isUploading || mrList.length === 0}
+                    className={`px-5 py-2 rounded-lg cursor-pointer ${
+                      isUploading || mrList.length === 0
+                        ? "bg-blue-400 text-white cursor-not-allowed"
+                        : "bg-blue-600 hover:bg-blue-700 text-white"
+                    }`}
+                  >
+                    {isUploading ? "Uploading…" : "Upload"}
+                  </button>
                 </div>
               </div>
-              <div className="mt-6 flex justify-end">
+            </div>,
+            document.body
+          )}
+
+        {/* View Modal */}
+        {isViewModalOpen &&
+          ReactDOM.createPortal(
+            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+              <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                onClick={() => setIsOpen(false)}
+              />
+              <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
                 <button
                   onClick={() => setIsViewModalOpen(false)}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
                 >
-                  Close
+                  <X size={20} />
                 </button>
+
+                <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                  View Customer
+                </h2>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Customer Code
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                      {form.customerCode}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Name
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                      {form.name}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Customer Number
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                      {form.customerNumber || "--"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Type of Business
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                      {form.typeOfBusiness}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Medical Rep Name
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                      {form.medicalRepName || "--"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Address
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                      {form.address || "--"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Zone
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                      {form.zone || "--"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Province
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                      {form.province || "--"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Joining Date
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                      {form.date ? formatDateToReadable(form.date) : "N/A"}
+                    </p>
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-600">
+                      Remarks
+                    </label>
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100 min-h-[80px]">
+                      {form.remark || "—"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-6 flex justify-end">
+                  <button
+                    onClick={() => setIsViewModalOpen(false)}
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
-            </div>
-          </div>,
-          document.body
-        )}
+            </div>,
+            document.body
+          )}
+
+        {/* Edit Modal - Structured like Product Edit Modal */}
+        {isEditModalOpen &&
+          ReactDOM.createPortal(
+            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+              <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                onClick={() => {
+                  setIsOpen(false);
+                }}
+              />
+              <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+                <button
+                  onClick={() => {
+                    setIsEditModalOpen(false);
+                    resetForm();
+                  }}
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                >
+                  <X size={20} />
+                </button>
+
+                <h2 className="text-xl font-semibold mb-4">Edit Customer</h2>
+
+                <form onSubmit={handleCustomerUpdate}>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Customer Code */}
+                    <div>
+                      <InputField
+                        label="Customer Code"
+                        name="customerCode"
+                        value={form.customerCode}
+                        disabled={true}
+                        className="bg-gray-100 text-gray-700 border rounded px-3 py-2 border-gray-300"
+                      />
+                    </div>
+
+                    {/* Name */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Name
+                      </label>
+                      <InputField
+                        type="text"
+                        value={form.name}
+                        onChange={(e) => handleChange("name", e.target.value)}
+                        error={errors.name}
+                        className="capitalize px-2 py-2 border-gray-300 border rounded-lg"
+                      />
+                    </div>
+
+                    {/* Customer Number */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Customer Number
+                      </label>
+                      <InputField
+                        type="text"
+                        value={form.customerNumber}
+                        onChange={(e) =>
+                          handleNumericInput(e, "customerNumber")
+                        }
+                        placeholder="Enter numbers only"
+                      />
+                    </div>
+
+                    {/* Type of Business */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Type of Business
+                      </label>
+                      <div className="rounded-lg">
+                        <SearchableDropdown
+                          options={businessTypeOptions}
+                          value={
+                            businessTypeOptions.find(
+                              (option) => option.value === form.typeOfBusiness
+                            ) || null
+                          }
+                          onChange={(selectedOption) =>
+                            handleDropdownChange(
+                              "typeOfBusiness",
+                              selectedOption
+                            )
+                          }
+                          placeholder="Select Business Type"
+                        />
+                      </div>
+                      {errors.typeOfBusiness && (
+                        <p className="text-red-500 text-sm mt-1">
+                          {errors.typeOfBusiness}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Medical Representative */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Medical Representative
+                      </label>
+                      <div className="rounded-lg">
+                        <SearchableDropdown
+                          options={mrOptions}
+                          value={
+                            mrOptions.find(
+                              (option) => option.value === form.medicalRepId
+                            ) || null
+                          }
+                          onChange={handleMRChange}
+                          placeholder="Select MR"
+                        />
+                      </div>
+                      {errors.medicalRepId && (
+                        <p className="text-red-500 text-sm mt-1">
+                          {errors.medicalRepId}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Address */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Address
+                      </label>
+                      <InputField
+                        type="text"
+                        value={form.address}
+                        onChange={(e) =>
+                          handleChange("address", e.target.value)
+                        }
+                        className="capitalize px-2 py-2 border-gray-300 border rounded-lg"
+                      />
+                    </div>
+
+                    {/* Zone */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Zone
+                      </label>
+                      <div className="rounded-lg">
+                        <SearchableDropdown
+                          options={zoneOptions}
+                          value={
+                            zoneOptions.find(
+                              (option) => option.value === form.zone
+                            ) || null
+                          }
+                          onChange={(selectedOption) =>
+                            handleDropdownChange("zone", selectedOption)
+                          }
+                          placeholder="Select Zone"
+                        />
+                      </div>
+                      {errors.zone && (
+                        <p className="text-red-500 text-sm mt-1">
+                          {errors.zone}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Province */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Province
+                      </label>
+                      <div className="rounded-lg">
+                        <SearchableDropdown
+                          options={provinceOptions}
+                          value={
+                            provinceOptions.find(
+                              (option) => option.value === form.province
+                            ) || null
+                          }
+                          onChange={(selectedOption) =>
+                            handleDropdownChange("province", selectedOption)
+                          }
+                          placeholder="Select Province"
+                        />
+                      </div>
+                      {errors.province && (
+                        <p className="text-red-500 text-sm mt-1">
+                          {errors.province}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Date */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Joining Date
+                      </label>
+                      <div className="rounded-lg border-gray-300 border">
+                        <DatePicker
+                          selected={form.date ? new Date(form.date) : null}
+                          onChange={(date) =>
+                            handleChange("date", date ? date.toISOString() : "")
+                          }
+                          dateFormat="yyyy-MM-dd"
+                          placeholderText="Select date"
+                          className="w-full px-3 py-2 border-none rounded-lg focus:ring-0"
+                        />
+                      </div>
+                      {errors.date && (
+                        <p className="text-red-500 text-sm mt-1">
+                          {errors.date}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Remarks */}
+                    <div className="md:col-span-2">
+                      <label className="block text-sm font-medium text-gray-600">
+                        Remarks
+                      </label>
+                      <div className="rounded-lg border-gray-300 border">
+                        <textarea
+                          value={form.remark}
+                          onChange={(e) =>
+                            handleChange("remark", e.target.value)
+                          }
+                          className="w-full rounded-lg border-gray-300 p-3"
+                          rows={3}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="mt-6 flex justify-end gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsEditModalOpen(false);
+                        resetForm();
+                      }}
+                      className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+                    >
+                      Update
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>,
+            document.body
+          )}
+      </div>
     </div>
   );
 };

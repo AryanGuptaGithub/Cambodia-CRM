@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 
 const SearchableDropdown = React.memo(
   ({
@@ -18,18 +18,13 @@ const SearchableDropdown = React.memo(
 
     useEffect(() => {
       const handleClickOutside = (event) => {
-        if (
-          dropdownRef.current &&
-          !dropdownRef.current.contains(event.target)
-        ) {
+        if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
           setIsOpen(false);
           setSearchTerm("");
         }
       };
-
       document.addEventListener("mousedown", handleClickOutside);
-      return () =>
-        document.removeEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
     const filteredOptions = useMemo(() => {
@@ -51,7 +46,7 @@ const SearchableDropdown = React.memo(
     };
 
     return (
-      <div className="flex flex-col">
+      <div className="flex flex-col w-full">
         {label && (
           <label className="text-sm font-medium text-gray-700 mb-1">
             {label}
@@ -64,33 +59,30 @@ const SearchableDropdown = React.memo(
             type="button"
             disabled={disabled || loading}
             onClick={() => !disabled && !loading && setIsOpen(!isOpen)}
-            className={`w-full border rounded-md px-3 py-2 text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-              error ? "border-red-500" : "border-gray-300"
-            } ${
-              disabled || loading
+            className={`w-full border rounded-md px-3 py-2 text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500
+              ${error ? "border-red-500" : "border-gray-300"}
+              ${disabled || loading
                 ? "bg-gray-100 cursor-not-allowed opacity-60"
-                : "bg-white cursor-pointer hover:border-gray-400"
-            } ${!value ? "text-gray-500" : "text-gray-900"}`}
+                : "bg-white cursor-pointer hover:border-gray-400"}
+              ${!value ? "text-gray-500" : "text-gray-900"}`}
           >
             {loading ? (
               <span className="text-gray-500">Loading...</span>
             ) : (
-              <span className="truncate">
-                {selectedOption ? selectedOption.label : placeholder}
-              </span>
+              <span className="truncate">{selectedOption ? selectedOption.label : placeholder}</span>
             )}
           </button>
 
           {isOpen && !disabled && !loading && (
             <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-hidden">
               {/* Search Input */}
-              <div className="p-2 border-b border-gray-200">
+              <div className="p-2 border-b border-gray-300">
                 <input
                   type="text"
                   placeholder="Search..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   autoFocus
                   onKeyDown={(e) => {
                     if (e.key === "Escape") {
@@ -107,18 +99,12 @@ const SearchableDropdown = React.memo(
                   <button
                     key={option.value}
                     type="button"
-                    onClick={() =>
-                      !option.disabled && handleSelect(option.value)
-                    }
-                    className={`w-full px-3 py-2 text-left transition-colors duration-150 ${
-                      option.disabled
+                    onClick={() => !option.disabled && handleSelect(option.value)}
+                    className={`w-full px-3 py-2 text-left transition-colors duration-150
+                      ${option.disabled
                         ? "text-gray-400 cursor-not-allowed bg-gray-50"
-                        : "hover:bg-blue-50 hover:text-blue-900 text-gray-900 cursor-pointer"
-                    } ${
-                      value === option.value
-                        ? "bg-blue-100 text-blue-900 font-medium"
-                        : ""
-                    }`}
+                        : "hover:bg-blue-50 hover:text-blue-900 text-gray-900 cursor-pointer"}
+                      ${value === option.value ? "bg-blue-100 text-blue-900 font-medium" : ""}`}
                     disabled={option.disabled}
                   >
                     {option.label}

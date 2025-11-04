@@ -1,17 +1,13 @@
 import React, {
   useState,
   useEffect,
-  useMemo,
   useCallback,
-  useRef,
 } from "react";
 import { useNavigate } from "react-router-dom";
 import { showToast } from "../../utils/toast";
-import axios from "axios";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import InputField from "../../components/common/InputField";
-
-const backendUrl = import.meta.env.VITE_BACKEND_URL;
+import { fetchProductTypes, fetchSuppliers } from "./common/fetchDropdown";
 
 const AddProduct = () => {
   const navigate = useNavigate();
@@ -31,55 +27,63 @@ const AddProduct = () => {
   });
 
   const [errors, setErrors] = useState({});
+  const [typeOptions, setTypeOptions] = useState([]);
   const [supplierOptions, setSupplierOptions] = useState([]);
+  const [loadingTypes, setLoadingTypes] = useState(false);
   const [loadingSuppliers, setLoadingSuppliers] = useState(false);
   const [isSupplierListEmpty, setIsSupplierListEmpty] = useState(false);
-  const isMrListEmptyRef = useRef(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // 🔹 Product types
-  const typeOptions = useMemo(
-    () => [
-      { value: "Tablet", label: "Tablet" },
-      { value: "Capsule", label: "Capsule" },
-      { value: "Syrup", label: "Syrup" },
-      { value: "Injection", label: "Injection" },
-      { value: "Cream", label: "Cream" },
-      { value: "Ointment", label: "Ointment" },
-      { value: "Drops", label: "Drops" },
-    ],
-    []
-  );
-
-  // 🔹 Fetch supplier list for dropdown
-  const fetchSuppliers = useCallback(async () => {
+  // 🔹 Load product types from backend using common function
+  const loadProductTypes = useCallback(async () => {
+    setLoadingTypes(true);
     try {
-      setLoadingSuppliers(true);
-      const res = await axios.get(`${backendUrl}/api/suppliers`);
-      const suppliers = res.data?.data || res.data;
-
-      if (Array.isArray(suppliers)) {
-        setSupplierOptions(
-          suppliers.map((s) => ({ value: s.name, label: s.name }))
-        );
-
-        // Only update state, don't show toast here
-        if (suppliers.length === 0) {
-          setIsSupplierListEmpty(true);
-        } else {
-          setIsSupplierListEmpty(false);
-        }
+      const result = await fetchProductTypes();
+      if (result.success) {
+        setTypeOptions(result.data);
       } else {
-        setIsSupplierListEmpty(true);
+        setTypeOptions([]);
+        console.error("Failed to load product types:", result.error);
+        showToast("error", "Failed to load product types");
       }
     } catch (error) {
-      console.error(error);
+      console.error("Error loading product types:", error);
+      setTypeOptions([]);
+      showToast("error", "Error loading product types");
+    } finally {
+      setLoadingTypes(false);
+    }
+  }, []);
+
+  // 🔹 Load suppliers from backend using common function
+  const loadSuppliers = useCallback(async () => {
+    setLoadingSuppliers(true);
+    try {
+      const result = await fetchSuppliers();
+      if (result.success) {
+        setSupplierOptions(result.data);
+        setIsSupplierListEmpty(result.data.length === 0);
+      } else {
+        setSupplierOptions([]);
+        setIsSupplierListEmpty(true);
+        console.error("Failed to load suppliers:", result.error);
+      }
+    } catch (error) {
+      console.error("Error loading suppliers:", error);
+      setSupplierOptions([]);
       setIsSupplierListEmpty(true);
     } finally {
       setLoadingSuppliers(false);
     }
   }, []);
 
-  // Add this useEffect to handle the toast
+  // On component mount, load both dropdown lists
+  useEffect(() => {
+    loadProductTypes();
+    loadSuppliers();
+  }, [loadProductTypes, loadSuppliers]);
+
+  // Add this useEffect to handle the toast for empty suppliers
   useEffect(() => {
     if (isSupplierListEmpty && !loadingSuppliers) {
       showToast(
@@ -88,10 +92,6 @@ const AddProduct = () => {
       );
     }
   }, [isSupplierListEmpty, loadingSuppliers]);
-
-  useEffect(() => {
-    fetchSuppliers();
-  }, [fetchSuppliers]);
 
   // 🔹 Validation
   const validate = () => {
@@ -106,7 +106,7 @@ const AddProduct = () => {
     return Object.keys(newErrors).length === 0;
   };
 
-  // 🔹 Handle text input (allow only numbers where needed)
+  // 🔹 Handle text input changes - SIMPLIFIED VERSION
   const handleChange = (name, value) => {
     // Prevent changes if supplier list is empty
     if (isSupplierListEmpty) {
@@ -123,13 +123,21 @@ const AddProduct = () => {
     ];
 
     if (numericFields.includes(name)) {
-      const numericValue = value.replace(/[^0-9.]/g, "");
-      setForm((prev) => ({ ...prev, [name]: numericValue }));
+      // For numeric fields, allow only numbers and single decimal point
+      if (value === '') {
+        setForm(prev => ({ ...prev, [name]: '' }));
+      } else if (/^\d*\.?\d*$/.test(value)) {
+        setForm(prev => ({ ...prev, [name]: value }));
+      }
     } else {
-      setForm((prev) => ({ ...prev, [name]: value }));
+      // For text fields, allow any input
+      setForm(prev => ({ ...prev, [name]: value }));
     }
 
-    setErrors((prev) => ({ ...prev, [name]: "" }));
+    // Clear error for this field
+    if (errors[name]) {
+      setErrors(prev => ({ ...prev, [name]: '' }));
+    }
   };
 
   // 🔹 Handle dropdown changes
@@ -152,17 +160,19 @@ const AddProduct = () => {
 
     if (!validate()) return;
 
+    setIsSubmitting(true);
     try {
+      const backendUrl = import.meta.env.VITE_BACKEND_URL;
       const response = await fetch(`${backendUrl}/api/product/add`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...form,
-          sellingPrice: Number(form.sellingPrice) || 0,
-          lc: Number(form.lc) || 0,
-          fob: Number(form.fob) || 0,
-          taxSellingPrice: Number(form.taxSellingPrice) || 0,
-          qtyPerBoxStrip: Number(form.qtyPerBoxStrip) || 0,
+          sellingPrice: form.sellingPrice ? Number(form.sellingPrice) : 0,
+          lc: form.lc ? Number(form.lc) : 0,
+          fob: form.fob ? Number(form.fob) : 0,
+          taxSellingPrice: form.taxSellingPrice ? Number(form.taxSellingPrice) : 0,
+          qtyPerBoxStrip: form.qtyPerBoxStrip ? Number(form.qtyPerBoxStrip) : 0,
         }),
       });
 
@@ -171,22 +181,38 @@ const AddProduct = () => {
         throw new Error(data.message || "Failed to add product");
 
       showToast("success", data.message || "Product added successfully");
+      
+      // Reset form after successful submission
+      setForm({
+        productName: "",
+        type: "",
+        packing: "",
+        qtyPerBoxStrip: "",
+        supplierName: "",
+        drugLicense: "",
+        licenseValidityDate: "",
+        remarks: "",
+        sellingPrice: "",
+        lc: "",
+        fob: "",
+        taxSellingPrice: "",
+      });
+      
       navigate("/productmanagerlayout/product");
     } catch (error) {
       showToast("error", error.message || "Network error");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  // Check if form is valid for submission - also check if supplier list is not empty
-  const isFormValid = useMemo(() => {
-    return (
-      !isSupplierListEmpty &&
-      form.productName.trim() &&
-      form.type &&
-      form.packing.trim() &&
-      form.supplierName
-    );
-  }, [form, isSupplierListEmpty]);
+  // Check if form is valid for submission
+  const isFormValid = 
+    !isSupplierListEmpty &&
+    form.productName.trim() &&
+    form.type &&
+    form.packing.trim() &&
+    form.supplierName;
 
   return (
     <div className="max-w-3xl mx-auto p-8 bg-white rounded-2xl shadow">
@@ -233,7 +259,7 @@ const AddProduct = () => {
             name="productName"
             value={form.productName}
             onChange={handleChange}
-            placeholder=""
+            placeholder="Enter product name"
             required={true}
             error={errors.productName}
             disabled={isSupplierListEmpty}
@@ -245,12 +271,14 @@ const AddProduct = () => {
             value={form.type}
             onChange={(value) => handleDropdownChange("type", value)}
             options={typeOptions}
+            loading={loadingTypes}
             placeholder={
+              loadingTypes ? "Loading types..." : 
               isSupplierListEmpty ? "No Suppliers Available" : "Select Type"
             }
             required={true}
             error={errors.type}
-            disabled={isSupplierListEmpty}
+            disabled={isSupplierListEmpty || loadingTypes}
           />
 
           {/* Packing */}
@@ -259,7 +287,7 @@ const AddProduct = () => {
             name="packing"
             value={form.packing}
             onChange={handleChange}
-            placeholder=""
+            placeholder="e.g., 10 tablets, 100ml"
             required={true}
             error={errors.packing}
             disabled={isSupplierListEmpty}
@@ -294,11 +322,12 @@ const AddProduct = () => {
             }
             loading={loadingSuppliers}
             placeholder={
+              loadingSuppliers ? "Loading suppliers..." : 
               isSupplierListEmpty ? "No Suppliers Available" : "Select Supplier"
             }
             required={true}
             error={errors.supplierName}
-            disabled={isSupplierListEmpty}
+            disabled={isSupplierListEmpty || loadingSuppliers}
           />
 
           {/* Drug License */}
@@ -307,7 +336,7 @@ const AddProduct = () => {
             name="drugLicense"
             value={form.drugLicense}
             onChange={handleChange}
-            placeholder=""
+            placeholder="Enter drug license number"
             error={errors.drugLicense}
             disabled={isSupplierListEmpty}
           />
@@ -367,29 +396,33 @@ const AddProduct = () => {
             disabled={isSupplierListEmpty}
           />
 
-          {/* Remarks */}
-          <InputField
-            label="Remarks"
-            name="remarks"
-            value={form.remarks}
-            onChange={handleChange}
-            placeholder=""
-            error={errors.remarks}
-            disabled={isSupplierListEmpty}
-          />
+          {/* Remarks - Fixed multiline issue */}
+          <div className="md:col-span-3">
+            <InputField
+              label="Remarks"
+              name="remarks"
+              value={form.remarks}
+              onChange={handleChange}
+              placeholder="Enter any additional remarks..."
+              error={errors.remarks}
+              disabled={isSupplierListEmpty}
+              isTextArea={true}  // Changed from multiline to isTextArea
+              rows={3}
+            />
+          </div>
         </div>
 
         <div className="flex justify-end mt-8 gap-4">
           <button
             type="submit"
-            disabled={!isFormValid || isSupplierListEmpty}
+            disabled={!isFormValid || isSubmitting}
             className={`px-6 py-2 rounded-lg shadow transition duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
-              !isFormValid || isSupplierListEmpty
+              !isFormValid || isSubmitting
                 ? "bg-gray-400 text-gray-200 cursor-not-allowed focus:ring-gray-300"
                 : "bg-green-600 hover:bg-green-700 text-white cursor-pointer focus:ring-green-500"
             }`}
           >
-            Submit
+            {isSubmitting ? "Adding Product..." : "Add Product"}
           </button>
           <button
             type="button"
