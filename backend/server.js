@@ -48,6 +48,7 @@ import Attendance from "./routers/hrm/Attendance.js";
 import Payroll from './routers/hrm/payroll.js';
 import zone from "./routers/master/zone.js";
 import businessTypes from "./routers/master/businessType.js";
+import productType from "./routers/projectManager/productType.js";
 
 dotenv.config();
 
@@ -123,6 +124,7 @@ app.use("/api", Attendance);
 app.use("/api", Payroll);
 app.use("/api", zone);
 app.use("/api", businessTypes);
+app.use("/api", productType);
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);

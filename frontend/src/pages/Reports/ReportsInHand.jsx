@@ -73,8 +73,6 @@ const ReportsInHand = () => {
 
   // Export to Excel (placeholder - you can implement this)
   const handleExport = () => {
-    // Implement export functionality here
-    console.log("Exporting data:", products);
     alert("Export functionality to be implemented");
   };
 
@@ -276,8 +274,6 @@ const ReportsInHand = () => {
         fileData,
         `Stock_Report_${new Date().toISOString().slice(0, 10)}.xlsx`
       );
-
-      console.log("✅ Excel exported successfully with centered headers!");
     } catch (error) {
       console.error("❌ Error exporting Excel:", error);
     }

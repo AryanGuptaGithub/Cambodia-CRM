@@ -88,7 +88,7 @@ const SampleExcelDownloadPriceListSimple = () => {
       onClick={generateExcel}
       className="text-blue-600 hover:underline text-sm mb-4 block cursor-pointer"
     >
-      Download Price List Sample Excel
+      Download Product List Sample Excel
     </button>
   );
 };

@@ -26,16 +26,20 @@ const AddSupplier = () => {
 
   const [errors, setErrors] = useState({});
 
+  // ✅ Handle form input and prevent future registration dates (allow today)
   const handleChange = (e) => {
     const { name, value } = e.target;
 
-    // Validation for registration date (❌ future date not allowed)
     if (name === "siteRegistrationDate" && value) {
       const selectedDate = new Date(value);
       const today = new Date();
+
+      // normalize both to midnight
+      selectedDate.setHours(0, 0, 0, 0);
       today.setHours(0, 0, 0, 0);
 
-      if (selectedDate > today) {
+      // allow today but not future
+      if (selectedDate.getTime() > today.getTime()) {
         setErrors((prev) => ({
           ...prev,
           [name]: "Future dates are not allowed for registration date",
@@ -44,12 +48,12 @@ const AddSupplier = () => {
       }
     }
 
-    // ✅ Expiry date can be future, so no check here
-
+    // update form
     setForm((prev) => ({ ...prev, [name]: value }));
     setErrors((prev) => ({ ...prev, [name]: "" }));
   };
 
+  // ✅ Validate all fields before submission
   const validate = () => {
     const newErrors = {};
     const today = new Date();
@@ -58,18 +62,20 @@ const AddSupplier = () => {
     if (!form.name) newErrors.name = "Name is required";
     if (!form.address) newErrors.address = "Address is required";
 
-    // Site Registration Date validation
+    // Site Registration Date validation (allow today)
     if (!form.siteRegistrationDate) {
       newErrors.siteRegistrationDate = "Registration date is required";
     } else {
       const registrationDate = new Date(form.siteRegistrationDate);
-      if (registrationDate > today) {
+      registrationDate.setHours(0, 0, 0, 0);
+
+      if (registrationDate.getTime() > today.getTime()) {
         newErrors.siteRegistrationDate =
           "Future dates are not allowed for registration date";
       }
     }
 
-    // ✅ Site Registration Expiry Date validation (future date allowed)
+    // Site Registration Expiry Date validation (can be future)
     if (!form.siteRegistrationExpiryDate) {
       newErrors.siteRegistrationExpiryDate = "Expiry date is required";
     } else if (
@@ -85,6 +91,7 @@ const AddSupplier = () => {
     return Object.keys(newErrors).length === 0;
   };
 
+  // ✅ Submit form data
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validate()) return;
@@ -95,9 +102,10 @@ const AddSupplier = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
-      const data = await res.json();
 
+      const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Failed to add supplier");
+
       showToast("success", data.message || "Supplier added successfully");
       navigate("/masterlayout/supplier");
     } catch (err) {
@@ -105,14 +113,14 @@ const AddSupplier = () => {
     }
   };
 
+  // ✅ Reusable input field component
   const renderInput = (
     label,
     name,
     type = "text",
     placeholder = "",
     required = false,
-    disabled = false,
-    max = ""
+    disabled = false
   ) => (
     <div>
       <label className="text-sm font-medium text-gray-700">{label}</label>
@@ -127,7 +135,7 @@ const AddSupplier = () => {
         }`}
         disabled={disabled}
         autoComplete="off"
-        max={name === "siteRegistrationDate" ? getTodayDate() : undefined} // ✅ Only restrict registration date
+        max={name === "siteRegistrationDate" ? getTodayDate() : undefined}
       />
       {errors[name] && (
         <p className="text-red-500 text-sm mt-1">{errors[name]}</p>
@@ -145,7 +153,7 @@ const AddSupplier = () => {
             {renderInput("Name", "name", "text", "Enter name", true)}
             {renderInput("Address", "address", "text", "Enter address", true)}
 
-            {/* Registration date - cannot be future */}
+            {/* Site Registration Date - allow today, not future */}
             {renderInput(
               "Site Registration Date",
               "siteRegistrationDate",
@@ -154,7 +162,7 @@ const AddSupplier = () => {
               true
             )}
 
-            {/* Expiry date - ✅ can be in the future */}
+            {/* Site Registration Expiry Date - future allowed */}
             {renderInput(
               "Site Registration Expiry Date",
               "siteRegistrationExpiryDate",
@@ -164,6 +172,7 @@ const AddSupplier = () => {
             )}
           </div>
 
+          {/* Status Dropdown */}
           <div>
             <label className="text-sm font-medium text-gray-700">Status</label>
             <select
@@ -180,6 +189,7 @@ const AddSupplier = () => {
             )}
           </div>
 
+          {/* Buttons */}
           <div className="md:col-span-2 flex justify-end gap-4 mt-8">
             <button
               type="submit"

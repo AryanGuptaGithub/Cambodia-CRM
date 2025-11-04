@@ -1,36 +1,80 @@
 import React, { useState, useEffect } from "react";
 import ExcelJS from "exceljs";
-import axios from "axios";
+import {
+  fetchProvinces,
+  fetchZones,
+  fetchBusinessTypes,
+  fetchMRList,
+  EXCEL_CONFIG,
+} from "../utils/customerUtil";
 
 const SampleExcelDownloadCustomer = () => {
-  const [provinces, setProvinces] = useState([]);
-  const [provincesLoading, setProvincesLoading] = useState(false);
+  const [dropdownData, setDropdownData] = useState({
+    provinces: [],
+    zones: [],
+    businessTypes: [],
+    mrList: [],
+  });
+  const [loading, setLoading] = useState(false);
 
-  const backendUrl = import.meta.env.VITE_BACKEND_URL;
-
-  const fetchProvinces = async () => {
+  const fetchAllDropdownData = async () => {
     try {
-      setProvincesLoading(true);
-      const response = await axios.get(`${backendUrl}/api/customers/provinces`);
+      setLoading(true);
 
-      if (response.data.success) {
-        setProvinces(response.data.data || []);
+      const [provincesResult, zonesResult, businessTypesResult, mrListResult] =
+        await Promise.all([
+          fetchProvinces(),
+          fetchZones(),
+          fetchBusinessTypes(),
+          fetchMRList(),
+        ]);
+
+      const newDropdownData = {
+        provinces: [],
+        zones: [],
+        businessTypes: [],
+        mrList: [],
+      };
+
+      if (provincesResult.success) {
+        newDropdownData.provinces = provincesResult.data || [];
       } else {
-        throw new Error(response.data.message || "Failed to fetch provinces");
+        console.warn("Failed to fetch provinces:", provincesResult.error);
       }
+
+      if (zonesResult.success) {
+        newDropdownData.zones = zonesResult.data || [];
+      }
+
+      if (businessTypesResult.success) {
+        newDropdownData.businessTypes = businessTypesResult.data || [];
+      } else {
+        console.warn(
+          "Failed to fetch business types:",
+          businessTypesResult.error
+        );
+      }
+
+      if (mrListResult.success) {
+        newDropdownData.mrList = mrListResult.data || [];
+      } else {
+        console.warn("Failed to fetch MR list:", mrListResult.error);
+      }
+
+      setDropdownData(newDropdownData);
     } catch (error) {
-      console.error("Error fetching provinces:", error);
+      console.error("Error fetching dropdown data:", error);
     } finally {
-      setProvincesLoading(false);
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchProvinces();
+    fetchAllDropdownData();
   }, []);
 
   const generateExcel = async () => {
-    if (provincesLoading) {
+    if (loading) {
       return;
     }
 
@@ -38,68 +82,45 @@ const SampleExcelDownloadCustomer = () => {
     const worksheet = workbook.addWorksheet("Customer List");
 
     // ===== Title Row (Row 1) =====
-    worksheet.mergeCells("A1:J1");
+    worksheet.mergeCells("A1:I1"); // Changed from J1 to I1 (9 columns now)
     const titleCell = worksheet.getCell("A1");
-    titleCell.value = "HEALTHCARE SOUTH EAST ASIA";
+    titleCell.value = EXCEL_CONFIG.title;
     titleCell.font = { bold: true, size: 16 };
     titleCell.alignment = { vertical: "middle", horizontal: "center" };
     worksheet.getRow(1).height = 25;
 
     // ===== Subtitle Row (Row 2) =====
-    worksheet.mergeCells("A2:J2");
+    worksheet.mergeCells("A2:I2"); // Changed from J2 to I2 (9 columns now)
     const subtitleCell = worksheet.getCell("A2");
-    subtitleCell.value = "Customer List";
+    subtitleCell.value = EXCEL_CONFIG.subtitle;
     subtitleCell.font = { bold: true, size: 14 };
     subtitleCell.alignment = { vertical: "middle", horizontal: "center" };
     worksheet.getRow(2).height = 20;
 
     // ===== Define Column Structure =====
-    worksheet.columns = [
-      { key: "customerCode", width: 18 },
-      { key: "date", width: 15 },
-      { key: "medicalRep", width: 28 },
-      { key: "customerName", width: 30 },
-      { key: "businessType", width: 22 },
-      { key: "customerNumber", width: 20 },
-      { key: "customerAddress", width: 55 },
-      { key: "zone", width: 18 },
-      { key: "province", width: 20 },
-      { key: "remark", width: 25 },
-    ];
+    worksheet.columns = EXCEL_CONFIG.columns.map((col) => ({
+      key: col.key,
+      width: col.width,
+    }));
 
-    worksheet.getRow(3).values = [
-      "Customer Code",
-      "Date",
-      "Medical Representative Name",
-      "Customer Name in English",
-      "Types of Business",
-      "Customer Number",
-      "Customer Address",
-      "Zone",
-      "Province",
-      "Remark",
-    ];
+    // ===== Header Row (Row 3) =====
+    worksheet.getRow(3).values = EXCEL_CONFIG.columns.map((col) => col.header);
     worksheet.getRow(3).font = { bold: true };
     worksheet.getRow(3).alignment = {
       vertical: "middle",
       horizontal: "center",
     };
     worksheet.getRow(3).height = 20;
-    worksheet.getColumn(2).numFmt = "d-mmm-yy"; // Date column (B)
+    worksheet.getColumn(1).numFmt = "d-mmm-yy"; // Date column (A) - changed from column 2 to 1
 
     // ===== Create a hidden dropdown sheet =====
-    const dropdownSheet = workbook.addWorksheet("DropdownValues");
+    const dropdownSheet = workbook.addWorksheet(EXCEL_CONFIG.dropdownSheetName);
     dropdownSheet.state = "veryHidden";
 
     // ===== Prepare dropdown values =====
+    const { provinces, zones, businessTypes, mrList } = dropdownData;
 
-    // Business Types
-    const businessTypes = ["Retail", "Clinic", "Hospital", "Pharmacy"];
-
-    // Zones
-    const zones = ["Olympic", "Borverl", "Other"];
-
-    // Provinces (from API)
+    // Extract names for dropdowns
     const provinceNames = provinces
       .map((province) =>
         typeof province === "string"
@@ -108,15 +129,41 @@ const SampleExcelDownloadCustomer = () => {
       )
       .filter(Boolean);
 
+    const zoneNames = zones
+      .map((zone) =>
+        typeof zone === "string" ? zone : zone.name || zone.zoneName || ""
+      )
+      .filter(Boolean);
+
+    const businessTypeNames = businessTypes
+      .map((type) =>
+        typeof type === "string" ? type : type.name || type.typeName || ""
+      )
+      .filter(Boolean);
+
+    const mrNames = mrList
+      .map((mr) => {
+        if (typeof mr === "string") return mr;
+
+        // Handle different possible field names for MR name
+        const name =
+          mr.name ||
+          mr.staffName ||
+          mr.medicalRepName ||
+          `${mr.firstName || ""} ${mr.lastName || ""}`.trim();
+        return name;
+      })
+      .filter(Boolean);
+
     // ===== Write dropdown values to hidden sheet =====
 
     // Business Types (Column A)
-    businessTypes.forEach((type, index) => {
+    businessTypeNames.forEach((type, index) => {
       dropdownSheet.getCell(`A${index + 1}`).value = type;
     });
 
     // Zones (Column B)
-    zones.forEach((zone, index) => {
+    zoneNames.forEach((zone, index) => {
       dropdownSheet.getCell(`B${index + 1}`).value = zone;
     });
 
@@ -125,94 +172,39 @@ const SampleExcelDownloadCustomer = () => {
       dropdownSheet.getCell(`C${index + 1}`).value = province;
     });
 
-    // ===== Define dropdown ranges =====
-    const startRow = 4;
-    const endRow = 1000;
+    // Medical Representatives (Column D)
+    mrNames.forEach((mr, index) => {
+      dropdownSheet.getCell(`D${index + 1}`).value = mr;
+    });
 
-    // ===== Set up dropdown for "Types of Business" (Column E) =====
-    if (businessTypes.length > 0) {
-      try {
-        worksheet.getColumn(5).eachCell((cell, rowNumber) => {
-          if (rowNumber >= startRow) {
-            cell.dataValidation = {
-              type: "list",
-              allowBlank: true,
-              formulae: [`=DropdownValues!$A$1:$A$${businessTypes.length}`],
-              showErrorMessage: true,
-              errorStyle: "warning",
-              errorTitle: "Invalid input",
-              error: "Please select a business type from the list.",
-              showDropDown: true,
-            };
-          }
-        });
-      } catch (error) {
-        console.warn(
-          "Failed to set column-wide data validation for Business Types:",
-          error
-        );
-      }
-    }
+    // ===== Set up dropdowns for all rows =====
+    const { dataStartRow, dataEndRow } = EXCEL_CONFIG;
 
-    // ===== Set up dropdown for "Zone" (Column H) =====
-    if (zones.length > 0) {
+    for (let i = dataStartRow; i <= dataEndRow; i++) {
       try {
-        worksheet.getColumn(8).eachCell((cell, rowNumber) => {
-          if (rowNumber >= startRow) {
-            cell.dataValidation = {
-              type: "list",
-              allowBlank: true,
-              formulae: [`=DropdownValues!$B$1:$B$${zones.length}`],
-              showErrorMessage: true,
-              errorStyle: "warning",
-              errorTitle: "Invalid input",
-              error: "Please select a zone from the list.",
-              showDropDown: true,
-            };
-          }
-        });
-      } catch (error) {
-        console.warn(
-          "Failed to set column-wide data validation for Zone:",
-          error
-        );
-      }
-    }
-
-    // ===== Set up dropdown for "Province" (Column I) =====
-    if (provinceNames.length > 0) {
-      try {
-        worksheet.getColumn(9).eachCell((cell, rowNumber) => {
-          if (rowNumber >= startRow) {
-            cell.dataValidation = {
-              type: "list",
-              allowBlank: true,
-              formulae: [`=DropdownValues!$C$1:$C$${provinceNames.length}`],
-              showErrorMessage: true,
-              errorStyle: "warning",
-              errorTitle: "Invalid input",
-              error: "Please select a province from the list.",
-              showDropDown: true,
-            };
-          }
-        });
-      } catch (error) {
-        console.warn(
-          "Failed to set column-wide data validation for Province:",
-          error
-        );
-      }
-    }
-
-    // ===== Alternative method: Set dropdown for each cell individually =====
-    for (let i = startRow; i <= endRow; i++) {
-      try {
-        // Business Type dropdown (Column E)
-        if (businessTypes.length > 0) {
-          worksheet.getCell(`E${i}`).dataValidation = {
+        // Medical Representative dropdown (Column B) - changed from C to B
+        if (mrNames.length > 0) {
+          worksheet.getCell(`B${i}`).dataValidation = {
             type: "list",
             allowBlank: true,
-            formulae: [`=DropdownValues!$A$1:$A$${businessTypes.length}`],
+            formulae: [
+              `=${EXCEL_CONFIG.dropdownSheetName}!$D$1:$D$${mrNames.length}`,
+            ],
+            showErrorMessage: true,
+            errorTitle: "Invalid Input",
+            error: "Please select a medical representative from the list",
+            showDropDown: true,
+          };
+        }
+
+        // Business Type dropdown (Column D) - changed from E to D
+        if (businessTypeNames.length > 0) {
+          worksheet.getCell(`D${i}`).dataValidation = {
+            type: "list",
+            allowBlank: true,
+            formulae: [
+              `=${EXCEL_CONFIG.dropdownSheetName}!$A$1:$A$${businessTypeNames.length}`,
+            ],
             showErrorMessage: true,
             errorTitle: "Invalid Input",
             error: "Please select a business type from the list",
@@ -220,12 +212,14 @@ const SampleExcelDownloadCustomer = () => {
           };
         }
 
-        // Zone dropdown (Column H)
-        if (zones.length > 0) {
-          worksheet.getCell(`H${i}`).dataValidation = {
+        // Zone dropdown (Column G) - changed from H to G
+        if (zoneNames.length > 0) {
+          worksheet.getCell(`G${i}`).dataValidation = {
             type: "list",
             allowBlank: true,
-            formulae: [`=DropdownValues!$B$1:$B$${zones.length}`],
+            formulae: [
+              `=${EXCEL_CONFIG.dropdownSheetName}!$B$1:$B$${zoneNames.length}`,
+            ],
             showErrorMessage: true,
             errorTitle: "Invalid Input",
             error: "Please select a zone from the list",
@@ -233,12 +227,14 @@ const SampleExcelDownloadCustomer = () => {
           };
         }
 
-        // Province dropdown (Column I)
+        // Province dropdown (Column H) - changed from I to H
         if (provinceNames.length > 0) {
-          worksheet.getCell(`I${i}`).dataValidation = {
+          worksheet.getCell(`H${i}`).dataValidation = {
             type: "list",
             allowBlank: true,
-            formulae: [`=DropdownValues!$C$1:$C$${provinceNames.length}`],
+            formulae: [
+              `=${EXCEL_CONFIG.dropdownSheetName}!$C$1:$C$${provinceNames.length}`,
+            ],
             showErrorMessage: true,
             errorTitle: "Invalid Input",
             error: "Please select a province from the list",
@@ -265,34 +261,38 @@ const SampleExcelDownloadCustomer = () => {
     });
 
     // ===== Export File =====
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    });
+    try {
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
 
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "customer_list_sample.xlsx";
-    link.style.display = "none";
-    document.body.appendChild(link);
-    link.click();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = EXCEL_CONFIG.fileName;
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
 
-    setTimeout(() => {
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    }, 100);
+      setTimeout(() => {
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }, 100);
+    } catch (error) {
+      console.error("Error generating Excel file:", error);
+    }
   };
 
   return (
     <button
       onClick={generateExcel}
-      disabled={provincesLoading}
+      disabled={loading}
       className="text-blue-600 hover:underline text-sm mb-4 block cursor-pointer
        disabled:opacity-50 disabled:cursor-not-allowed"
     >
-      {provincesLoading
-        ? "Loading provinces..."
+      {loading
+        ? "Loading dropdown data..."
         : "Click here to download Customer List Sample Excel"}
     </button>
   );

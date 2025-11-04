@@ -41,7 +41,6 @@ const Leaves = () => {
     try {
       setLoading(true);
       const response = await axios.get(`${backendUrl}/api/staffs`);
-      console.log('values of response', response);
       setMrList(response.data || []);
 
       // Mock leave data - replace with actual leave API calls

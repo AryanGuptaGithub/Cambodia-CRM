@@ -8,25 +8,19 @@ import React, {
 } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { showToast } from "../../utils/toast";
-import axios from "axios";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import InputField from "../../components/common/InputField";
+import {
+  initialFormState,
+  getTodayDate,
+  validateCustomerForm,
+  fetchProvinces,
+  fetchMRList,
+  fetchZones,
+  fetchBusinessTypes,
+} from "../../utils/customerUtil";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
-
-const initialFormState = {
-  customerCode: "",
-  date: "",
-  medicalRepName: "",
-  medicalRepId: "",
-  name: "",
-  typeOfBusiness: "",
-  customerNumber: "",
-  address: "",
-  zone: "",
-  province: "",
-  remark: "",
-};
 
 const useCustomerForm = (initialCustomerCode = "") => {
   const [form, setForm] = useState({
@@ -47,7 +41,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
   const navigate = useNavigate();
   const isMrListEmptyRef = useRef(false);
 
-  // Get today's date in YYYY-MM-DD format for max date
+  // Get today's date in YYYY-MM-DD format for max date and comparison
   const getTodayDate = () => {
     const today = new Date();
     const year = today.getFullYear();
@@ -56,18 +50,15 @@ const useCustomerForm = (initialCustomerCode = "") => {
     return `${year}-${month}-${day}`;
   };
 
+  // Fixed validation function that allows today's date
   const validate = useCallback(() => {
     const newErrors = {};
+    const today = getTodayDate();
 
-    if (!form.date) newErrors.date = "Date is required";
-    else {
-      const selectedDate = new Date(form.date);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      if (selectedDate > today) {
-        newErrors.date = "Future dates are not allowed";
-      }
+    if (!form.date) {
+      newErrors.date = "Date is required";
+    } else if (form.date > today) {
+      newErrors.date = "Future dates are not allowed";
     }
 
     if (!form.medicalRepId)
@@ -75,7 +66,6 @@ const useCustomerForm = (initialCustomerCode = "") => {
     if (!form.name.trim()) newErrors.name = "Customer Name is required";
     if (!form.typeOfBusiness.trim())
       newErrors.typeOfBusiness = "Type of Business is required";
-    // Removed address validation to make it optional
     if (!form.zone) newErrors.zone = "Zone is required";
     if (!form.province) newErrors.province = "Province is required";
 
@@ -88,26 +78,28 @@ const useCustomerForm = (initialCustomerCode = "") => {
     return Object.keys(newErrors).length === 0;
   }, [form]);
 
+  // Fixed handleChange function that allows today's date
   const handleChange = useCallback((e) => {
     const { name, value } = e.target;
 
     if (name === "date" && value) {
-      const selectedDate = new Date(value);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      if (selectedDate > today) {
+      const today = getTodayDate();
+      
+      // Allow today's date, only block future dates
+      if (value > today) {
         setErrors((prev) => ({
           ...prev,
           date: "Future dates are not allowed",
         }));
         return;
+      } else {
+        // Clear date error if it's valid (today or past)
+        setErrors((prev) => ({ ...prev, date: "" }));
       }
     }
 
     // Handle Customer Number - only allow numbers
     if (name === "customerNumber") {
-      // Allow only numbers, remove any non-digit characters
       const numericValue = value.replace(/[^\d]/g, "");
       setForm((prevForm) => ({
         ...prevForm,
@@ -120,7 +112,10 @@ const useCustomerForm = (initialCustomerCode = "") => {
       }));
     }
 
-    setErrors((prev) => ({ ...prev, [name]: "" }));
+    // Clear error for the field being changed (except date which is handled above)
+    if (name !== "date") {
+      setErrors((prev) => ({ ...prev, [name]: "" }));
+    }
   }, []);
 
   // Handle business type change
@@ -163,46 +158,50 @@ const useCustomerForm = (initialCustomerCode = "") => {
     setErrors((prev) => ({ ...prev, zone: "" }));
   }, []);
 
-  const fetchProvinces = useCallback(async () => {
+  const loadProvinces = useCallback(async () => {
     try {
       setProvincesLoading(true);
-      const response = await axios.get(`${backendUrl}/api/customers/provinces`);
-
-      if (response.data.success) {
-        setProvinces(response.data.data || []);
+      const result = await fetchProvinces();
+      if (result.success) {
+        setProvinces(result.data);
       } else {
-        throw new Error(response.data.message || "Failed to fetch provinces");
+        showToast("error", result.error);
       }
     } catch (error) {
-      console.error("Error fetching provinces:", error);
+      console.error("Error in loadProvinces:", error);
       showToast("error", "Failed to load provinces");
     } finally {
       setProvincesLoading(false);
     }
   }, []);
 
-  const fetchMRList = useCallback(async () => {
+  const loadMRList = useCallback(async () => {
     try {
       setMrListLoading(true);
-      const response = await axios.get(`${backendUrl}/api/staffs`);
-      const mrData = response.data || [];
-      setMrList(mrData);
+      const result = await fetchMRList();
+      if (result.success) {
+        setMrList(result.data);
 
-      if (mrData.length === 0) {
-        if (!isMrListEmptyRef.current) {
-          setIsMrListEmpty(true);
-          isMrListEmptyRef.current = true;
-          showToast(
-            "error",
-            "No Medical Representatives found. Please add at least one MR first."
-          );
+        if (result.data.length === 0) {
+          if (!isMrListEmptyRef.current) {
+            setIsMrListEmpty(true);
+            isMrListEmptyRef.current = true;
+            showToast(
+              "error",
+              "No Medical Representatives found. Please add at least one MR first."
+            );
+          }
+        } else {
+          setIsMrListEmpty(false);
+          isMrListEmptyRef.current = false;
         }
       } else {
-        setIsMrListEmpty(false);
-        isMrListEmptyRef.current = false;
+        showToast("error", result.error);
+        setIsMrListEmpty(true);
+        isMrListEmptyRef.current = true;
       }
     } catch (error) {
-      console.error("Error fetching MR list:", error);
+      console.error("Error in loadMRList:", error);
       showToast("error", "Failed to load Medical Representatives");
       setIsMrListEmpty(true);
       isMrListEmptyRef.current = true;
@@ -211,55 +210,35 @@ const useCustomerForm = (initialCustomerCode = "") => {
     }
   }, []);
 
-  const fetchZones = useCallback(async () => {
+  const loadZones = useCallback(async () => {
     try {
       setZonesLoading(true);
-      const response = await axios.get(`${backendUrl}/api/zones`);
-      console.log("Zones API response:", response);
-
-      const zonesData = response.data || [];
-      setZones(zonesData);
+      const result = await fetchZones();
+      if (result.success) {
+        setZones(result.data);
+      } else {
+        showToast("error", result.error);
+      }
     } catch (error) {
-      console.error("Error fetching zones:", error);
+      console.error("Error in loadZones:", error);
       showToast("error", "Failed to load zones");
     } finally {
       setZonesLoading(false);
     }
   }, []);
 
-  const fetchBusinessTypes = useCallback(async () => {
+  const loadBusinessTypes = useCallback(async () => {
     try {
       setBusinessTypesLoading(true);
-      const response = await axios.get(`${backendUrl}/api/business-types`);
-      console.log("Business Types API response:", response);
-
-      // Handle different response structures
-      let businessTypesData = [];
-
-      if (response.data && Array.isArray(response.data)) {
-        // If response.data is directly an array
-        businessTypesData = response.data;
-      } else if (
-        response.data &&
-        response.data.data &&
-        Array.isArray(response.data.data)
-      ) {
-        // If response.data has a data property that is an array
-        businessTypesData = response.data.data;
-      } else if (
-        response.data &&
-        response.data.success &&
-        Array.isArray(response.data.data)
-      ) {
-        // If response follows the success/data pattern
-        businessTypesData = response.data.data;
+      const result = await fetchBusinessTypes();
+      if (result.success) {
+        setBusinessTypes(result.data);
+      } else {
+        showToast("error", result.error);
       }
-
-      setBusinessTypes(businessTypesData);
     } catch (error) {
-      console.error("Error fetching business types:", error);
+      console.error("Error in loadBusinessTypes:", error);
       showToast("error", "Failed to load business types");
-    
     } finally {
       setBusinessTypesLoading(false);
     }
@@ -329,10 +308,10 @@ const useCustomerForm = (initialCustomerCode = "") => {
     handleZoneChange,
     handleSubmit,
     validate,
-    fetchProvinces,
-    fetchMRList,
-    fetchZones,
-    fetchBusinessTypes,
+    loadProvinces,
+    loadMRList,
+    loadZones,
+    loadBusinessTypes,
     setForm,
     updateFormField,
     getTodayDate,
@@ -363,10 +342,10 @@ const AddCustomer = () => {
     handleMRChange,
     handleZoneChange,
     handleSubmit,
-    fetchProvinces,
-    fetchMRList,
-    fetchZones,
-    fetchBusinessTypes,
+    loadProvinces,
+    loadMRList,
+    loadZones,
+    loadBusinessTypes,
     updateFormField,
     getTodayDate,
   } = useCustomerForm(customerCode);
@@ -420,14 +399,12 @@ const AddCustomer = () => {
       { value: "", label: "Select Business Type" },
       ...businessTypes
         .map((type) => {
-          // Handle both string and object formats
           if (typeof type === "string") {
             return {
               value: type,
               label: type,
             };
           } else if (type && typeof type === "object") {
-            // If business types are objects with name property
             return {
               value: type.name || type.value || type._id,
               label: type.name || type.label || type.value,
@@ -444,18 +421,24 @@ const AddCustomer = () => {
     if (customerCode) {
       updateFormField("customerCode", customerCode);
     }
-    fetchProvinces();
-    fetchMRList();
-    fetchZones();
-    fetchBusinessTypes();
+    loadProvinces();
+    loadMRList();
+    loadZones();
+    loadBusinessTypes();
   }, [
     customerCode,
-    fetchProvinces,
-    fetchMRList,
-    fetchZones,
-    fetchBusinessTypes,
+    loadProvinces,
+    loadMRList,
+    loadZones,
+    loadBusinessTypes,
     updateFormField,
   ]);
+
+  // Set today's date as default when component mounts
+  useEffect(() => {
+    const today = getTodayDate();
+    updateFormField("date", today);
+  }, [updateFormField]);
 
   // Check if form is valid for submission
   const isFormValid = useMemo(() => {
@@ -467,9 +450,10 @@ const AddCustomer = () => {
       form.typeOfBusiness.trim() &&
       form.zone &&
       form.province &&
-      !errors.customerNumber // Ensure customer number is valid if provided
+      !errors.customerNumber &&
+      !errors.date // Ensure no date errors
     );
-  }, [form, isMrListEmpty, errors.customerNumber]);
+  }, [form, isMrListEmpty, errors.customerNumber, errors.date]);
 
   // Check if any field should be disabled
   const isFormDisabled = isMrListEmpty;
@@ -477,7 +461,6 @@ const AddCustomer = () => {
   return (
     <div className="max-w-3xl mx-auto p-8 bg-white rounded-3xl shadow-lg">
       <h2 className="text-xl font-semibold text-gray-800 mb-4">
-        {" "}
         Add New Customer
       </h2>
 
@@ -534,7 +517,7 @@ const AddCustomer = () => {
               onChange={handleChange}
               error={errors.date}
               required
-              max={getTodayDate()}
+              max={getTodayDate()} // Set max to today to prevent future date selection in UI
               disabled={isFormDisabled}
             />
             <SearchableDropdown
@@ -581,9 +564,9 @@ const AddCustomer = () => {
               placeholder="Enter numbers only"
               error={errors.customerNumber}
               disabled={isFormDisabled}
-              type="tel" // Use tel type for better mobile keyboard
-              inputMode="numeric" // Show numeric keyboard on mobile
-              pattern="[0-9]*" // HTML5 pattern for numbers only
+              type="tel"
+              inputMode="numeric"
+              pattern="[0-9]*"
             />
           </div>
 

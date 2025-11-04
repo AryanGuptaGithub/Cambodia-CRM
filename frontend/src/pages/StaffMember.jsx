@@ -731,11 +731,11 @@ const StaffMember = () => {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-600">
-                      Created At
+                      Joining Date
                     </label>
                     <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                      {form.createdAt
-                        ? formatDateToReadable(form.createdAt)
+                      {form.date
+                        ? formatDateToReadable(form.date)
                         : "--"}
                     </p>
                   </div>
@@ -872,15 +872,15 @@ const StaffMember = () => {
                   {/* Created At */}
                   <div>
                     <label className="block text-sm font-medium text-gray-600">
-                      Created At
+                     Joining Date
                     </label>
                     <DatePicker
                       selected={
-                        form.createdAt ? new Date(form.createdAt) : null
+                        form.date ? new Date(form.date) : null
                       }
                       onChange={(date) =>
                         date
-                          ? setForm({ ...form, createdAt: date.toISOString() })
+                          ? setForm({ ...form, date: date.toISOString() })
                           : null
                       }
                       dateFormat="yyyy-MM-dd"

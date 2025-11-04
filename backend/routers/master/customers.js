@@ -28,8 +28,78 @@ const handleDuplicateError = (res, err) => {
     ok: false,
   });
 };
+// ✅ POST import multiple customers from Excel
+router.post("/customers/import", async (req, res) => {
+  try {
+    const customers = req.body; // Array of customer objects from frontend
+    if (!Array.isArray(customers) || customers.length === 0) {
+      return res.status(400).json({
+        message: "No customers found in the uploaded file.",
+        ok: false,
+      });
+    }
 
-// ✅ GET all customers
+    // ✅ Find last customerCode in DB to continue incrementing
+    const lastCustomer = await Customer.findOne({})
+      .sort({ createdAt: -1 })
+      .select("customerCode");
+
+    let nextCode = 1;
+    if (lastCustomer && lastCustomer.customerCode) {
+      const parsed = parseInt(lastCustomer.customerCode, 10);
+      if (!isNaN(parsed)) nextCode = parsed + 1;
+    }
+
+    const newCustomers = customers.map((item, index) => ({
+      customerCode: (nextCode + index).toString().padStart(4, "0"),
+      date: item.date ? new Date(item.date) : new Date(),
+      medicalRepName: item.medicalRepName || "",
+      name: item.name || "",
+      typeOfBusiness: item.typeOfBusiness || "",
+      customerNumber: item.customerNumber || "",
+      address: item.address || "",
+      zone: item.zone || "",
+      province: item.province || "",
+      remark: item.remark || "",
+      isNew: true,
+      enabled: true,
+    }));
+
+    // ✅ Bulk insert with duplicate filtering
+    const existingNames = await Customer.find({
+      name: { $in: newCustomers.map((c) => c.name) },
+    }).select("name");
+
+    const existingNameSet = new Set(existingNames.map((c) => c.name));
+    const uniqueCustomers = newCustomers.filter(
+      (c) => !existingNameSet.has(c.name)
+    );
+
+    if (uniqueCustomers.length === 0) {
+      return res.status(400).json({
+        message: "No new customers to import (all already exist).",
+        ok: false,
+      });
+    }
+
+    const inserted = await Customer.insertMany(uniqueCustomers);
+
+    res.status(200).json({
+      message: `${inserted.length} customer(s) imported successfully.`,
+      importedCount: inserted.length,
+      skippedCount: newCustomers.length - inserted.length,
+      ok: true,
+    });
+  } catch (err) {
+    console.error("❌ Import Error:", err);
+    res.status(500).json({
+      message: "Failed to import customers.",
+      error: err.message,
+      ok: false,
+    });
+  }
+});
+
 router.get("/customers", async (req, res) => {
   try {
     const customers = await Customer.find();
@@ -120,12 +190,18 @@ router.get("/customers/:id", async (req, res) => {
 });
 
 // ✅ POST create new customer
+// ✅ POST create new customer
 router.post("/customers", async (req, res) => {
   try {
-    const newCustomer = new Customer(req.body);
+    // Remove any user-sent customerCode (security)
+    const { ...cleanData } = req.body;
+
+    const newCustomer = new Customer(cleanData);
     const savedCustomer = await newCustomer.save();
+
     res.status(201).json({
-      message: `Customer <b>${savedCustomer.name}</b> created successfully`,
+      message: `Customer <b>${savedCustomer.name}</b> created successfully with code <b>${savedCustomer.customerCode}</b>`,
+      customer: savedCustomer,
       ok: true,
     });
   } catch (err) {

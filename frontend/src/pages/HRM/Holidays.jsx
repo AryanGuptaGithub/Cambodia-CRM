@@ -794,7 +794,6 @@ const Holidays = () => {
       return;
     }
     setIsUploading(true);
-    console.log("values of pares", parsedData);
     try {
       const res = await axios.post(
         `${backendUrl}/api/holidays/import`,

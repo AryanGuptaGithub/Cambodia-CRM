@@ -44,6 +44,68 @@ const Supplier = () => {
     enabled: "",
   });
 
+  // Enhanced date parsing function
+  const parseExcelDate = (value) => {
+    if (!value && value !== 0) return null;
+    
+    console.log("Raw date value:", value, "Type:", typeof value);
+    
+    // If it's an Excel serial number
+    if (typeof value === "number") {
+      try {
+        // Excel date (number of days since 1900-01-01)
+        // Adjust for Excel's leap year bug (treats 1900 as leap year)
+        const days = value > 60 ? value - 1 : value;
+        const excelEpoch = new Date(1900, 0, 1);
+        const jsDate = new Date(excelEpoch.getTime() + days * 86400 * 1000);
+        
+        // Validate the date
+        if (isNaN(jsDate.getTime())) {
+          console.warn("Invalid date from Excel serial:", value);
+          return null;
+        }
+        
+        console.log("Converted Excel serial to date:", jsDate);
+        return jsDate; // Return Date object instead of string
+      } catch (error) {
+        console.error("Error converting Excel date:", error);
+        return null;
+      }
+    }
+    
+    // If it's a string, try to parse it with multiple formats
+    if (typeof value === "string") {
+      const trimmedValue = value.trim();
+      if (!trimmedValue) return null;
+
+      // Try different date formats
+      const dateFormats = [
+        new Date(trimmedValue), // Standard format
+        new Date(trimmedValue.replace(/(\d+)\/(\d+)\/(\d+)/, '$2/$1/$3')), // DD/MM/YYYY to MM/DD/YYYY
+        new Date(trimmedValue.replace(/(\d+)-(\d+)-(\d+)/, '$2/$1/$3')), // DD-MM-YYYY to MM-DD-YYYY
+        new Date(trimmedValue.replace(/(\d+)\.(\d+)\.(\d+)/, '$2/$1/$3')), // DD.MM.YYYY to MM/DD/YYYY
+      ];
+
+      for (const date of dateFormats) {
+        if (!isNaN(date.getTime())) {
+          console.log("Parsed string date:", date);
+          return date; // Return Date object
+        }
+      }
+
+      console.warn("Could not parse date string:", trimmedValue);
+      return null;
+    }
+
+    // If it's already a Date object, validate it
+    if (value instanceof Date) {
+      return !isNaN(value.getTime()) ? value : null;
+    }
+
+    console.warn("Unhandled date format:", value, typeof value);
+    return null;
+  };
+
   // Fetch suppliers
   useEffect(() => {
     const fetchSuppliers = async () => {
@@ -129,6 +191,7 @@ const Supplier = () => {
     setForm(supplier);
     setIsEditModalOpen(true);
   };
+
   // Delete selected
   const handleDeleteSelected = async () => {
     const confirm = await confirmDialog({
@@ -187,7 +250,6 @@ const Supplier = () => {
   };
 
   const EXPECTED_HEADERS = [
-    "sr no",
     "product name",
     "address",
     "site registration date",
@@ -239,9 +301,34 @@ const Supplier = () => {
         headers.forEach((header, idx) => {
           obj[normalizeHeader(header)] = row[idx];
         });
-        return obj;
+
+        // Parse dates and ensure they're valid
+        const siteRegistrationDate = parseExcelDate(obj["site registration date"]);
+        const siteRegistrationExpiryDate = parseExcelDate(obj["site registration expiry date"]);
+
+        return {
+          name: obj["product name"]?.toString().trim() || "",
+          address: obj["address"]?.toString().trim() || "",
+          siteRegistrationDate: siteRegistrationDate && !isNaN(siteRegistrationDate.getTime()) 
+            ? siteRegistrationDate.toISOString() 
+            : null,
+          siteRegistrationExpiryDate: siteRegistrationExpiryDate && !isNaN(siteRegistrationExpiryDate.getTime()) 
+            ? siteRegistrationExpiryDate.toISOString() 
+            : null,
+        };
+      }).filter(item => {
+        // Filter out items with invalid required dates
+        const hasValidDates = item.siteRegistrationDate !== null && item.siteRegistrationExpiryDate !== null;
+        const hasRequiredFields = item.name && item.address;
+        
+        if (!hasValidDates) {
+          console.warn("Skipping item with invalid dates:", item);
+        }
+        
+        return hasRequiredFields && hasValidDates;
       });
 
+      console.log("Final parsed data:", parsedData);
       setParsedData(parsedData);
     };
 
@@ -253,6 +340,15 @@ const Supplier = () => {
       showToast("warning", "Excel File is Empty");
       return;
     }
+    
+    // Additional validation before import
+    const invalidDates = parsedData.filter(item => !item.siteRegistrationDate || !item.siteRegistrationExpiryDate);
+    if (invalidDates.length > 0) {
+      showToast("warning", `Found ${invalidDates.length} records with invalid dates. Please check your Excel file.`);
+      console.log("Records with invalid dates:", invalidDates);
+      return;
+    }
+
     setIsUploading(true);
     try {
       const res = await axios.post(
@@ -268,6 +364,7 @@ const Supplier = () => {
         setShowImportModal(false);
         const updated = await fetch(`${backendUrl}/api/suppliers`);
         setSupplier(await updated.json());
+        setParsedData([]); // Clear parsed data after successful import
       }
     } catch (err) {
       console.error("Import error:", err);
@@ -316,6 +413,7 @@ const Supplier = () => {
       }, 1000);
     }
   };
+
   if (loading) return <p>Loading...</p>;
   if (error) return <p className="text-red-500">{error}</p>;
 
@@ -544,7 +642,7 @@ const Supplier = () => {
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsOpen(false)}
+              onClick={() => setShowImportModal(false)}
             />
             <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
               {/* Close */}
@@ -585,7 +683,7 @@ const Supplier = () => {
                 <button
                   onClick={handleImport}
                   className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg cursor-pointer"
-                  disabled={isUploading}
+                  disabled={isUploading || parsedData.length === 0}
                 >
                   {isUploading ? "Uploading…" : "Upload"}
                 </button>
@@ -599,7 +697,7 @@ const Supplier = () => {
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsOpen(false)}
+              onClick={() => setIsViewModalOpen(false)}
             />
             <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
               {/* Close Button */}
@@ -651,9 +749,9 @@ const Supplier = () => {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-600"></label>
+                  <label className="block text-sm font-medium text-gray-600">Status</label>
                   <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.enabled == true ? "enabled" : "disabled"}
+                    {form.enabled == true ? "Enabled" : "Disabled"}
                   </p>
                 </div>
               </div>
@@ -675,7 +773,7 @@ const Supplier = () => {
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsOpen(false)}
+              onClick={() => setIsEditModalOpen(false)}
             />
             <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative max-h-screen">
               {/* Close Button */}
@@ -705,7 +803,7 @@ const Supplier = () => {
                       const updated = await fetch(
                         `${backendUrl}/api/suppliers`
                       );
-                      setSupplier(await updated.json()); // Replace with setCustomers if needed
+                      setSupplier(await updated.json());
                     }
                   } catch (err) {
                     console.error("Update error:", err);
@@ -729,7 +827,7 @@ const Supplier = () => {
                 <div>
                   <label className="block text-sm font-medium">Address</label>
                   <input
-                    type="email"
+                    type="text"
                     value={form.address}
                     onChange={(e) =>
                       setForm({ ...form, address: e.target.value })
@@ -756,7 +854,7 @@ const Supplier = () => {
                         : null
                     }
                     dateFormat="yyyy-MM-dd"
-                    placeholderText="Select expiry date"
+                    placeholderText="Select registration date"
                     className="w-full border px-3 py-2 rounded-lg"
                   />
                 </div>
@@ -787,8 +885,8 @@ const Supplier = () => {
                 <div>
                   <label className="block text-sm font-medium">Status</label>
                   <select
-                    value={form.type}
-                    onChange={(e) => setForm({ ...form, type: e.target.value })}
+                    value={form.enabled}
+                    onChange={(e) => setForm({ ...form, enabled: e.target.value === "true" })}
                     className="w-full border px-3 py-2 rounded-lg capitalize"
                   >
                     <option value="true">Enabled</option>

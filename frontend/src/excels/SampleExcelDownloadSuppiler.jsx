@@ -1,25 +1,30 @@
 import React from "react";
 import ExcelJS from "exceljs";
 
-const SampleExcelDownloadSuppiler = () => {
+const SampleExcelDownloadSupplier = () => {
   const generateExcel = async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Supplier List");
 
-    // Merge and center the main title across A1:E1
-    worksheet.mergeCells("A1:E1");
+    // ===== Title Row (Row 1): HEALTHCARE SOUTH EAST ASIA =====
+    worksheet.mergeCells("A1:D1"); // 4 columns now (A–D)
     const titleCell = worksheet.getCell("A1");
-    titleCell.value = "HSCL Manufacturers /Supplier List";
-    titleCell.font = { bold: true, size: 14 };
+    titleCell.value = "HEALTHCARE SOUTH EAST ASIA";
+    titleCell.font = { bold: true, size: 16 };
     titleCell.alignment = { horizontal: "center", vertical: "middle" };
-    worksheet.getRow(1).height = 20;
+    worksheet.getRow(1).height = 25;
 
-    // Remove subtitle row (A2:E2)
+    // ===== Subtitle Row (Row 2): HSCL Manufacturers / Supplier List =====
+    worksheet.mergeCells("A2:D2");
+    const subtitleCell = worksheet.getCell("A2");
+    subtitleCell.value = "HSCL Manufacturers / Supplier List";
+    subtitleCell.font = { bold: true, size: 14 };
+    subtitleCell.alignment = { horizontal: "center", vertical: "middle" };
+    worksheet.getRow(2).height = 20;
 
-    // Header row (now in row 2 instead of 3)
-    const headerRow = worksheet.getRow(2);
+    // ===== Header Row (Row 3) =====
+    const headerRow = worksheet.getRow(3);
     headerRow.values = [
-      "Sr No",
       "Product Name",
       "Address",
       "Site Registration Date",
@@ -27,14 +32,13 @@ const SampleExcelDownloadSuppiler = () => {
     ];
 
     worksheet.columns = [
-      { key: "srNo", width: 8 },
       { key: "productName", width: 30 },
       { key: "address", width: 40 },
       { key: "regDate", width: 25 },
       { key: "expiryDate", width: 25 },
     ];
 
-    // Style header
+    // Style header row
     headerRow.font = { bold: true };
     headerRow.alignment = { horizontal: "center", vertical: "middle" };
     headerRow.height = 20;
@@ -52,10 +56,10 @@ const SampleExcelDownloadSuppiler = () => {
       };
     });
 
-    // Optional: Add spacing row after header
-    worksheet.getRow(3).height = 18;
+    // Optional spacing row after header (Row 4)
+    worksheet.getRow(4).height = 18;
 
-    // Generate and trigger download
+    // ===== Generate and trigger download =====
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], {
       type:
@@ -69,16 +73,17 @@ const SampleExcelDownloadSuppiler = () => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   return (
     <button
       onClick={generateExcel}
-      className="text-blue-600 hover:text text-sm mb-4 block cursor-pointer"
+      className="text-blue-600 hover:underline text-sm mb-4 block cursor-pointer"
     >
       Click here to download Supplier Excel sample
     </button>
   );
 };
 
-export default SampleExcelDownloadSuppiler;
+export default SampleExcelDownloadSupplier;

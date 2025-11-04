@@ -409,11 +409,7 @@ const Sales = () => {
       if (!res.ok) throw new Error("Failed to fetch sale summaries");
 
       const data = await res.json();
-      console.log("API response data:", data);
-
-      // Extract the sales array from the response
       const salesData = data.summaries || data;
-      console.log("Sales data to set:", salesData);
 
       const uniqueTypes = Array.from(
         new Set(salesData.map((item) => item.paymentStatus?.toLowerCase()))

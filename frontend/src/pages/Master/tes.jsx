@@ -410,7 +410,7 @@ const Customer = () => {
     setShowImportModal(true);
   };
 
-  // File upload and parsing logic for import - REMOVED CUSTOMER CODE REQUIREMENT
+  // File upload and parsing logic for import
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -433,8 +433,8 @@ const Customer = () => {
         return;
       }
 
-      // REMOVED "customer code" from required headers
       const requiredHeaders = [
+        "customer code",
         "date",
         "medical representative name",
         "customer name in english",
@@ -499,7 +499,7 @@ const Customer = () => {
           });
 
           return {
-            // REMOVED customerCode from mapping
+            customerCode: item["customer code"],
             date: parseExcelDate(item["date"]),
             medicalRepName: item["medical representative name"],
             name: item["customer name in english"],
@@ -512,8 +512,7 @@ const Customer = () => {
           };
         })
         .filter((entry, index) => {
-          // Filter based on name instead of customerCode
-          const keep = !!entry.name && !!entry.medicalRepName;
+          const keep = !!entry.customerCode;
           return keep;
         });
       setParsedData(mappedData);
@@ -523,45 +522,15 @@ const Customer = () => {
   };
 
   const parseExcelDate = (value) => {
-    if (value == null || value === "") return null;
+    if (!value) return null;
 
-    // Detect numeric Excel serial (pure numbers, not string like "10/28/2025")
     if (typeof value === "number") {
-      // Excel stores days since 1900-01-00 → convert properly
       const jsDate = new Date(Math.round((value - 25569) * 86400 * 1000));
-      return isNaN(jsDate.getTime()) ? null : jsDate.toISOString();
+      return jsDate.toISOString();
     }
 
-    // For strings such as "10/28/2025" or "28/10/2025"
-    if (typeof value === "string") {
-      const trimmed = value.trim();
-
-      // Try to match MM/DD/YYYY or DD/MM/YYYY explicitly
-      const mdy = trimmed.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
-      if (mdy) {
-        const [_, m1, d1, y1] = mdy;
-        // Decide if the first part looks like month or day
-        // If the first part > 12, it must be DD/MM/YYYY
-        let month, day, year;
-        if (parseInt(m1, 10) > 12) {
-          day = parseInt(m1, 10);
-          month = parseInt(d1, 10);
-        } else {
-          month = parseInt(m1, 10);
-          day = parseInt(d1, 10);
-        }
-        year = parseInt(y1, 10);
-
-        const jsDate = new Date(year, month - 1, day);
-        return isNaN(jsDate.getTime()) ? null : jsDate.toISOString();
-      }
-
-      // Fallback: native JS parsing for other formats
-      const parsed = new Date(trimmed);
-      return isNaN(parsed.getTime()) ? null : parsed.toISOString();
-    }
-
-    return null;
+    const parsed = new Date(value);
+    return isNaN(parsed.getTime()) ? null : parsed.toISOString();
   };
 
   // Import parsed customers to backend
@@ -581,7 +550,7 @@ const Customer = () => {
     }
 
     setIsUploading(true);
-    console.log("valueso f par", parsedData);
+
     try {
       const res = await axios.post(
         `${backendUrl}/api/customers/import`,
@@ -828,7 +797,7 @@ const Customer = () => {
                 </div>
               </th>
               <th className="p-3 text-sm font-medium">Business</th>
-              <th className="p-3 text-sm font-medium">MR Name</th>
+              <th className="p-3 text-sm font-medium">medicalRepName</th>
               <th className="p-3 text-sm font-medium">Address</th>
               <th className="p-3 text-sm font-medium">Zone</th>
               <th className="p-3 text-sm font-medium">Province</th>
@@ -958,7 +927,7 @@ const Customer = () => {
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsOpen(false)}
+              onClick={() => setShowImportModal(false)}
             />
             <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
               <button
@@ -1036,7 +1005,7 @@ const Customer = () => {
             {/* Background overlay */}
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsOpen(false)}
+              onClick={() => setIsEditModalOpen(false)}
             />
 
             {/* Modal content */}
@@ -1200,7 +1169,7 @@ const Customer = () => {
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsOpen(false)}
+              onClick={() => setIsViewModalOpen(false)}
             />
             <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
               <button

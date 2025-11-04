@@ -1,17 +1,17 @@
-// routers/master/supplier.js
+// routes/master/supplier.js
 import express from "express";
-import Supplier from "../../models/master/supplier.js";
 import mongoose from "mongoose";
+import Supplier from "../../models/master/supplier.js";
 
 const router = express.Router();
 
-// ✅ Utility: Handle standard errors
+/* ----------------------------- Utility Functions ---------------------------- */
+
 const handleServerError = (res, err, message = "Server error", code = 500) => {
   console.error("❌ [ERROR]:", err);
   res.status(code).json({ message, error: err.message || err });
 };
 
-// ✅ Utility: Handle duplicate key error
 const handleDuplicateError = (res, err, entity = "supplier") => {
   const field = Object.keys(err.keyPattern || {})[0] || "field";
   const value = err.keyValue?.[field] || "unknown";
@@ -22,12 +22,7 @@ const handleDuplicateError = (res, err, entity = "supplier") => {
   });
 };
 
-// ✅ Utility: Validate required fields
-const validateRequiredFields = (obj, required = []) => {
-  return required.every((key) => obj[key] !== undefined && obj[key] !== "");
-};
-
-// ✅ Route: Get all suppliers
+/* ------------------------------- GET All ------------------------------- */
 router.get("/suppliers", async (_, res) => {
   try {
     const suppliers = await Supplier.find();
@@ -37,90 +32,98 @@ router.get("/suppliers", async (_, res) => {
   }
 });
 
-// ✅ Route: Get supplier by ID
+/* ------------------------------- GET by ID ------------------------------ */
 router.get("/suppliers/:id", async (req, res) => {
   try {
     const supplier = await Supplier.findById(req.params.id);
-    if (!supplier) return res.status(404).json({ message: "Supplier not found" });
+    if (!supplier) {
+      return res.status(404).json({ message: "Supplier not found" });
+    }
     res.json(supplier);
   } catch (err) {
     handleServerError(res, err);
   }
 });
 
-// ✅ Route: Create supplier
+/* ----------------------------- CREATE Supplier ----------------------------- */
 router.post("/suppliers", async (req, res) => {
   try {
-    const { name, address, siteRegistrationDate, siteRegistrationExpiryDate, enabled } = req.body;
-    const enabledValue = enabled === "enabled" ? true: false; 
-
-    // Validate required fields
-    if (!name || !address || !siteRegistrationDate || !siteRegistrationExpiryDate || !enabled) {
-      return res.status(400).json({ message: "All fields are required." });
-    }
-
-    // Prepare the payload
-    const payload = {
+    const {
       name,
       address,
       siteRegistrationDate,
       siteRegistrationExpiryDate,
-      enabledValue,
+      enabled,
+    } = req.body;
+
+    // ✅ Validation
+    if (
+      !name ||
+      !address ||
+      !siteRegistrationDate ||
+      !siteRegistrationExpiryDate
+    ) {
+      return res
+        .status(400)
+        .json({ message: "All required fields must be provided." });
+    }
+
+    const payload = {
+      name: name.trim(),
+      address: address.trim(),
+      siteRegistrationDate: new Date(siteRegistrationDate),
+      siteRegistrationExpiryDate: new Date(siteRegistrationExpiryDate),
+      enabled: enabled === true || enabled === "enabled",
     };
 
     const newSupplier = new Supplier(payload);
     const savedSupplier = await newSupplier.save();
 
     res.status(201).json({
-      message: `Supplier ${savedSupplier.name} created successfully`,
+      message: `Supplier <b>${savedSupplier.name}</b> created successfully.`,
+      supplier: savedSupplier,
       ok: true,
     });
   } catch (err) {
-
-    if (err.code === 11000) {
-      return res.status(409).json({
-        message: "Duplicate key error",
-        error: err.message,
-        ok: false,
-      });
-    }
-    if (err.name === "ValidationError") {
-      const errors = Object.values(err.errors).map((e) => ({
-        path: e.path,
-        message: e.message,
-      }));
-      return res.status(400).json({ errors });
-    }
-
-    console.error(err);
-    res.status(500).json({ message: "Internal Server Error", ok: false });
+    if (err.code === 11000) return handleDuplicateError(res, err);
+    handleServerError(res, err);
   }
 });
 
-// ✅ Route: Update supplier
+/* ----------------------------- UPDATE Supplier ----------------------------- */
 router.put("/suppliers/:id", async (req, res) => {
   try {
-    const updatedSupplier = await Supplier.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-      runValidators: true,
+    const updatedSupplier = await Supplier.findByIdAndUpdate(
+      req.params.id,
+      req.body,
+      {
+        new: true,
+        runValidators: true,
+      }
+    );
+
+    if (!updatedSupplier)
+      return res.status(404).json({ message: "Supplier not found" });
+
+    res.json({
+      message: `Supplier <b>${updatedSupplier.name}</b> updated successfully.`,
+      supplier: updatedSupplier,
+      ok: true,
     });
-
-    if (!updatedSupplier) return res.status(404).json({ message: "Supplier not found" });
-
-    res.json(updatedSupplier);
   } catch (err) {
     res.status(400).json({ message: "Invalid data", error: err.message });
   }
 });
 
-// ✅ Route: Delete one supplier
+/* ----------------------------- DELETE Supplier ----------------------------- */
 router.delete("/suppliers/:id", async (req, res) => {
   try {
     const deleted = await Supplier.findByIdAndDelete(req.params.id);
-    if (!deleted) return res.status(404).json({ message: "Supplier not found" });
+    if (!deleted)
+      return res.status(404).json({ message: "Supplier not found" });
 
     res.json({
-      message: `Supplier <b>${deleted.name}</b> deleted successfully`,
+      message: `Supplier <b>${deleted.name}</b> deleted successfully.`,
       ok: true,
     });
   } catch (err) {
@@ -128,84 +131,113 @@ router.delete("/suppliers/:id", async (req, res) => {
   }
 });
 
+/* ----------------------- DELETE Multiple Suppliers ----------------------- */
 router.delete("/suppliers", async (req, res) => {
   try {
-    const idObjects = req.body.ids;
-    if (!Array.isArray(idObjects) || idObjects.length === 0) {
-      return res.status(400).json({ message: "No supplier IDs provided", ok: false });
+    const ids = req.body.ids?.map((item) => item.id) || [];
+
+    if (ids.length === 0) {
+      return res
+        .status(400)
+        .json({ message: "No supplier IDs provided.", ok: false });
     }
 
-    const stringIds = idObjects.map(obj => obj.id);
-    const validIds = stringIds.filter(id => mongoose.Types.ObjectId.isValid(id));
+    const validIds = ids.filter((id) => mongoose.Types.ObjectId.isValid(id));
+    if (validIds.length !== ids.length) {
+      return res
+        .status(400)
+        .json({ message: "Invalid supplier ID(s) provided.", ok: false });
+    }
 
-    if (validIds.length !== stringIds.length) {
+    const result = await Supplier.deleteMany({ _id: { $in: validIds } });
+
+    res.json({
+      message: `${result.deletedCount} supplier(s) deleted successfully.`,
+      ok: true,
+    });
+  } catch (err) {
+    handleServerError(res, err);
+  }
+});
+
+/* ----------------------------- EXCEL Import ----------------------------- */
+
+// ✅ Convert Excel serial date to JS Date safely
+const excelDateToJSDate = (value) => {
+  if (!value) return null;
+
+  if (typeof value === "number") {
+    const epoch = new Date(1899, 11, 30);
+    return new Date(epoch.getTime() + value * 86400000);
+  }
+
+  const parsed = new Date(value);
+  return isNaN(parsed.getTime()) ? null : parsed;
+};
+
+// ✅ Import suppliers from Excel
+router.post("/suppliers/import", async (req, res) => {
+  try {
+    const suppliers = req.body;
+    console.log("values of supplier", suppliers);
+    if (!Array.isArray(suppliers) || suppliers.length === 0) {
       return res.status(400).json({
-        message: "One or more supplier IDs are invalid",
+        message: "Invalid or empty data. Expected an array of suppliers.",
         ok: false,
       });
     }
 
-    const result = await Supplier.deleteMany({ _id: { $in: validIds } });
-    res.json({
-      message: `${result.deletedCount} supplier(s) deleted successfully`,
-      ok: true,
-    });
-  } catch (err) {
-    handleServerError(res, err); 
-  }
-});
-
-const excelDateToJSDate = (excelSerial) => {
-  const epoch = new Date(1899, 11, 30); // Excel epoch
-  return new Date(epoch.getTime() + excelSerial * 86400000);
-};
-
-router.post("/suppliers/import", async (req, res) => {
-  try {
-    const suppliers = req.body;
-
-    if (!Array.isArray(suppliers)) {
-      return res.status(400).json({
-        message: "Invalid data format. Expected an array of suppliers.",
-      });
-    }
+    // You can skip normalizeKeys if your keys are already in correct format,
+    // or normalize only lowercase for safety but keep camelCase keys intact:
+    const normalizeKeys = (obj) => {
+      const newObj = {};
+      for (const key in obj) {
+        if (Object.hasOwn(obj, key)) {
+          // Keep camelCase keys as-is (no spaces), lowercase simple keys:
+          // If you want, just keep keys as they are to avoid mismatch:
+          newObj[key] = obj[key];
+        }
+      }
+      return newObj;
+    };
 
     const requiredFields = [
-      "sr no",
-      "product name",
+      "name",
       "address",
-      "site registration date",
-      "site registration expiry date",
+      "siteRegistrationDate",
+      "siteRegistrationExpiryDate",
     ];
 
     const results = [];
 
-    for (const supplier of suppliers) {
-      for (const field of requiredFields) {
-        if (
-          !supplier.hasOwnProperty(field) ||
-          supplier[field] === undefined ||
-          supplier[field] === null ||
-          supplier[field] === ""
-        ) {
-          results.push({
-            supplier: supplier["product name"],
-            status: "failed",
-            message: `Missing required field '${field}'.`,
-          });
-          continue;
-        }
+    for (let supplier of suppliers) {
+      supplier = normalizeKeys(supplier);
+
+      // Check missing fields for this data shape
+      const missing = requiredFields.filter(
+        (f) => !supplier[f] || supplier[f].toString().trim() === ""
+      );
+      if (missing.length > 0) {
+        results.push({
+          supplier: supplier["name"] || "Unnamed",
+          status: "failed",
+          message: `Missing required field(s): ${missing.join(", ")}.`,
+        });
+        continue;
       }
 
+      // For ISO date strings just do new Date() conversion
       const mappedSupplier = {
-        srNo: supplier["sr no"],
-        name: supplier["product name"],
-        address: supplier["address"],
-        siteRegistrationDate: excelDateToJSDate(supplier["site registration date"]),
-        siteRegistrationExpiryDate: excelDateToJSDate(supplier["site registration expiry date"]),
+        name: supplier["name"].trim(),
+        address: supplier["address"].trim(),
+        siteRegistrationDate: new Date(supplier["siteRegistrationDate"]),
+        siteRegistrationExpiryDate: new Date(
+          supplier["siteRegistrationExpiryDate"]
+        ),
+        enabled: true,
       };
 
-      // Check for duplicates
+      // Check if supplier already exists
       const exists = await Supplier.findOne({
         name: mappedSupplier.name,
         address: mappedSupplier.address,
@@ -228,14 +260,18 @@ router.post("/suppliers/import", async (req, res) => {
     }
 
     return res.status(200).json({
-      message: `Supplier <b> ${suppliers.length}</b> imported successfully.`,
+      message: `✅ ${
+        results.filter((r) => r.status === "created").length
+      } supplier(s) imported successfully.`,
       results,
+      ok: true,
     });
   } catch (err) {
-    console.error("Import error:", err);
+    console.error("❌ Import error:", err);
     return res.status(500).json({
       message: "Server error while importing suppliers.",
       error: err.message,
+      ok: false,
     });
   }
 });

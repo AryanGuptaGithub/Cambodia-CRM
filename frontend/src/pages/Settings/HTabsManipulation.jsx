@@ -83,7 +83,6 @@ const CustomDropdown = ({
                     : "text-gray-900"
                 } `}
               >
-                {console.log(options)}
                 {option.label}
                 {option.disabled && (
                   <span className="text-xs text-gray-500 ml-2">(Taken)</span>
@@ -587,103 +586,76 @@ const EditSequenceModal = ({
     return options;
   };
 
-const handleSequenceChange = (tabId, newSequence) => {
-  console.log("🔹 handleSequenceChange called");
-  console.log("➡️ tabId:", tabId, "➡️ newSequence:", newSequence);
+  const handleSequenceChange = (tabId, newSequence) => {
+    const seq = parseInt(newSequence, 10);
+    const oldSequence = localSequences[tabId];
+    // Check if this sequence is already assigned to another tab
+    const isSequenceTaken = manualAssignments.some(
+      (a) => a.tabId !== tabId && a.assignedSequence === seq
+    );
 
-  const seq = parseInt(newSequence, 10);
-  console.log("✅ Parsed sequence (seq):", seq);
+    if (isSequenceTaken) {
+      setLocalSequences((prev) => {
+        const updated = { ...prev, [tabId]: null };
+        return updated;
+      });
 
-  // Get the old sequence for this tab
-  const oldSequence = localSequences[tabId];
-  console.log("🕓 Old sequence for tabId", tabId, ":", oldSequence);
+      setManualAssignments((prev) => {
+        const updated = prev.map((a) =>
+          a.tabId === tabId ? { ...a, assignedSequence: null } : a
+        );
+        return updated;
+      });
 
-  // Check if this sequence is already assigned to another tab
-  const isSequenceTaken = manualAssignments.some(
-    (a) => a.tabId !== tabId && a.assignedSequence === seq
-  );
-  console.log("❓ Is sequence already taken by another tab:", isSequenceTaken);
+      // Remove from assigned sequences if it was there
+      setAssignedSequences((prev) => {
+        const newSet = new Set(prev);
 
-  if (isSequenceTaken) {
-    console.log("⚠️ Sequence", seq, "is already taken. Resetting tab:", tabId);
+        if (oldSequence) {
+          newSet.delete(oldSequence);
+        }
 
-    setLocalSequences((prev) => {
-      const updated = { ...prev, [tabId]: null };
-      console.log("🧩 Updated localSequences (after reset):", updated);
-      return updated;
-    });
+        return newSet;
+      });
+    } else {
+      // Update local sequences
+      setLocalSequences((prev) => {
+        const updated = { ...prev, [tabId]: seq };
+        return updated;
+      });
 
-    setManualAssignments((prev) => {
-      const updated = prev.map((a) =>
-        a.tabId === tabId ? { ...a, assignedSequence: null } : a
-      );
-      console.log("🧩 Updated manualAssignments (after reset):", updated);
-      return updated;
-    });
+      // Update manual assignments
+      setManualAssignments((prev) => {
+        const updated = prev.map((a) =>
+          a.tabId === tabId ? { ...a, assignedSequence: seq } : a
+        );
 
-    // Remove from assigned sequences if it was there
-    setAssignedSequences((prev) => {
-      const newSet = new Set(prev);
-      console.log("🗂️ Old assignedSequences set before delete:", Array.from(newSet));
-      if (oldSequence) {
-        newSet.delete(oldSequence);
-        console.log("❌ Deleted oldSequence:", oldSequence);
-      }
-      console.log("✅ New assignedSequences set:", Array.from(newSet));
-      return newSet;
-    });
-  } else {
-    console.log("✅ Sequence", seq, "is available. Updating tab:", tabId);
+        return updated;
+      });
 
-    // Update local sequences
-    setLocalSequences((prev) => {
-      const updated = { ...prev, [tabId]: seq };
-      console.log("🧩 Updated localSequences:", updated);
-      return updated;
-    });
+      // Update assigned sequences set - only track user-assigned sequences
+      setAssignedSequences((prev) => {
+        const newSet = new Set(prev);
 
-    // Update manual assignments
-    setManualAssignments((prev) => {
-      const updated = prev.map((a) =>
-        a.tabId === tabId ? { ...a, assignedSequence: seq } : a
-      );
-      console.log("🧩 Updated manualAssignments:", updated);
-      return updated;
-    });
+        if (oldSequence && oldSequence !== seq) {
+          newSet.delete(oldSequence);
+        }
 
-    // Update assigned sequences set - only track user-assigned sequences
-    setAssignedSequences((prev) => {
-      const newSet = new Set(prev);
-      console.log("🗂️ AssignedSequences before update:", Array.from(newSet));
+        // Add the new sequence (only if it's different from the original)
+        const originalAssignment = manualAssignments.find(
+          (a) => a.tabId === tabId
+        )?.currentSequence;
 
-      // Remove the old sequence if it exists and was user-assigned
-      if (oldSequence && oldSequence !== seq) {
-        newSet.delete(oldSequence);
-        console.log("❌ Removed oldSequence:", oldSequence);
-      }
+        if (seq && seq !== originalAssignment) {
+          newSet.add(seq);
+        }
 
-      // Add the new sequence (only if it's different from the original)
-      const originalAssignment = manualAssignments.find(
-        (a) => a.tabId === tabId
-      )?.currentSequence;
-      console.log("📋 Original assignment for tab", tabId, ":", originalAssignment);
+        return newSet;
+      });
+    }
 
-      if (seq && seq !== originalAssignment) {
-        newSet.add(seq);
-        console.log("➕ Added new sequence:", seq);
-      }
-
-      console.log("✅ New assignedSequences set:", Array.from(newSet));
-      return newSet;
-    });
-  }
-
-  console.log("💾 Marking that user made manual changes");
-  setHasUserMadeChanges(true);
-
-  console.log("✅ handleSequenceChange finished for tab:", tabId);
-};
-
+    setHasUserMadeChanges(true);
+  };
 
   const handleSwapSelectionChange = (field, tabId) => {
     setSwapSelections((prev) => ({
@@ -933,10 +905,13 @@ const handleSequenceChange = (tabId, newSequence) => {
                               : "bg-green-100 text-green-800"
                           }`}
                         >
-                          {assignment.assignedSequence === null ? "Not set" : assignment.assignedSequence}
-                          {isUserModified && assignment.assignedSequence !== null && (
-                            <span className="ml-1">✓</span>
-                          )}
+                          {assignment.assignedSequence === null
+                            ? "Not set"
+                            : assignment.assignedSequence}
+                          {isUserModified &&
+                            assignment.assignedSequence !== null && (
+                              <span className="ml-1">✓</span>
+                            )}
                           {assignment.assignedSequence === null && (
                             <span className="ml-1">⚠️</span>
                           )}
