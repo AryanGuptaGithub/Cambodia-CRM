@@ -1,38 +1,25 @@
-// models/PurchaseInventory.js
 import mongoose from "mongoose";
 
 const purchaseInventorySchema = new mongoose.Schema(
   {
-    invoiceNumber: { type: String },
+    invoiceNumber: { type: String, trim: true },
     invoiceDate: { type: Date },
-    deliveryNumber: { type: String },
+    deliveryNumber: { type: String, trim: true },
     receivedDate: { type: Date },
-    expiredDate: { type: Date },
-    productName: { type: String },
-    supplierName: { type: String }, // Added supplierName field
-    qtyBox: { type: Number, default: 0 },
-    qtyPerCarton: { type: Number, default: 0 },
+    expiryDate: { type: Date },
+    productName: { type: String, trim: true },
+    supplierName: { type: String, trim: true },
+    quantityPerBoxStrip: { type: Number, default: 0 },
     fob: { type: Number, default: 0 },
     cif: { type: Number, default: 0 },
-    lcNumber: { type: String },
-    remarks: { type: String },
-    amount: { type: Number, default: 0 },
+    lc: { type: Number, default: 0 },  // keep this if needed for info
+    lcNumber: { type: String, trim: true },
+    remarks: { type: String, trim: true },
+    amount: { type: Number, default: 0 },  // amount comes from frontend
   },
   {
     timestamps: true,
   }
 );
-
-// Pre-save middleware to calculate amount = lcNumber * qtyBox * qtyPerCarton
-purchaseInventorySchema.pre("save", function (next) {
-  // Convert lcNumber to number and calculate amount
-  const lcValue = parseFloat(this.lcNumber) || 0;
-  const qtyBoxValue = parseFloat(this.qtyBox) || 0;
-  const qtyPerCarton = parseFloat(this.qtyPerCarton) || 0;
-  
-  this.amount = lcValue * qtyBoxValue * qtyPerCarton;
-  
-  next();
-});
 
 export default mongoose.model("PurchaseInventory", purchaseInventorySchema);

@@ -682,14 +682,14 @@ const AddNewPurchase = () => {
           productId: product.productId,
           productName: product.productName,
           qtyBox: parseFloat(product.qtyBox) || 0,
-          lcNumber: product.lcNumber,
+          lc: product.lcNumber,
           cif: parseFloat(product.cif) || 0,
           fob: parseFloat(product.fob) || 0,
           amount: parseFloat(product.amount) || 0,
           expiredDate: product.expiredDate,
         })),
       };
-
+console.log('values of submissionData', submissionData);
       const response = await fetch(`${backendUrl}/api/purchase`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

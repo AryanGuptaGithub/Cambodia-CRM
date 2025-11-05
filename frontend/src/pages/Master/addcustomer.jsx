@@ -84,7 +84,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
 
     if (name === "date" && value) {
       const today = getTodayDate();
-      
+
       // Allow today's date, only block future dates
       if (value > today) {
         setErrors((prev) => ({
@@ -112,7 +112,6 @@ const useCustomerForm = (initialCustomerCode = "") => {
       }));
     }
 
-    // Clear error for the field being changed (except date which is handled above)
     if (name !== "date") {
       setErrors((prev) => ({ ...prev, [name]: "" }));
     }
@@ -353,7 +352,6 @@ const AddCustomer = () => {
   // Memoized province options for dropdown
   const provinceOptions = useMemo(() => {
     return [
-      { value: "", label: "Select Province" },
       ...provinces.map((province) => ({
         value: province.name,
         label: province.name,
@@ -374,7 +372,6 @@ const AddCustomer = () => {
     }
 
     return [
-      { value: "", label: "Select MR" },
       ...mrList.map((mr) => ({
         value: mr._id,
         label: `${mr.medicalRepName}`,
@@ -385,7 +382,6 @@ const AddCustomer = () => {
   // Memoized zone options for dropdown
   const zoneOptions = useMemo(() => {
     return [
-      { value: "", label: "Select Zone" },
       ...zones.map((zone) => ({
         value: zone.name,
         label: zone.name,
@@ -396,7 +392,6 @@ const AddCustomer = () => {
   // Memoized business type options for dropdown
   const businessTypeOptions = useMemo(() => {
     return [
-      { value: "", label: "Select Business Type" },
       ...businessTypes
         .map((type) => {
           if (typeof type === "string") {

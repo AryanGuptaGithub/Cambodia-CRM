@@ -27,7 +27,10 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { confirmDialog } from "../../utils/confirmationDialog";
 import { useNavigate } from "react-router-dom";
-import { fetchProducts as fetchProductsAPI, fetchSuppliers as fetchSuppliersAPI } from "../../pages/ProductManager/common/fetchDropdown";
+import {
+  fetchProducts as fetchProductsAPI,
+  fetchSuppliers as fetchSuppliersAPI,
+} from "../../pages/ProductManager/common/fetchDropdown";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
@@ -39,11 +42,10 @@ const initialFormState = {
   invoiceDate: "",
   deliveryNumber: "",
   receivedDate: "",
-  expiredDate: "",
+  expiryDate: "",
   productName: "",
   supplierName: "",
-  qtyBox: 0,
-  qtyPerCarton: 0,
+  quantityPerBoxStrip: 0,
   fob: 0,
   cif: 0,
   lcNumber: "",
@@ -56,11 +58,10 @@ const requiredHeaders = [
   "invoice date",
   "delivery #",
   "received date",
-  "expired date",
+  "expiry date",
   "product name",
   "supplier name",
   "qty box",
-  "qty per carton",
   "fob",
   "cif",
   "lc number",
@@ -68,7 +69,8 @@ const requiredHeaders = [
 ];
 
 // Define which fields should be treated as numbers
-const numericFields = ["qtyBox", "qtyPerCarton", "fob", "cif", "amount"];
+const numericFields = ["quantityPerBoxStrip", "fob", "cif", "amount"];
+const integerFields = ["quantityPerBoxStrip"];
 
 function Purchase() {
   const navigate = useNavigate();
@@ -106,7 +108,7 @@ function Purchase() {
     "deliveryNumber",
     "productName",
     "supplierName",
-    "qtyBox",
+    "quantityPerBoxStrip",
     "lcNumber",
     "amount",
     "actions",
@@ -135,9 +137,9 @@ function Purchase() {
         dbName: "receivedDate",
       },
       {
-        id: "expiredDate",
-        name: "Expired Date",
-        dbName: "expiredDate",
+        id: "expiryDate",
+        name: "Expiry Date",
+        dbName: "expiryDate",
       },
       {
         id: "productName",
@@ -150,18 +152,13 @@ function Purchase() {
         dbName: "supplierName",
       },
       {
-        id: "qtyBox",
+        id: "quantityPerBoxStrip",
         name: "Box Qty",
-        dbName: "qtyBox",
-      },
-      {
-        id: "qtyPerCarton",
-        name: "Qty per Carton",
-        dbName: "qtyPerCarton",
+        dbName: "quantityPerBoxStrip",
       },
       {
         id: "lcNumber",
-        name: "LC",
+        name: "LC (USD)",
         dbName: "lcNumber",
       },
       {
@@ -194,48 +191,6 @@ function Purchase() {
   );
 
   const requiredColumns = ["invoiceNumber", "productName", "actions"];
-
-  // Fetch products and suppliers for dropdowns
-  useEffect(() => {
-    if (isEditModalOpen) {
-      fetchProducts();
-      fetchSuppliers();
-    }
-  }, [isEditModalOpen]);
-
-  const fetchProducts = async () => {
-    setLoadingProducts(true);
-    try {
-      const result = await fetchProductsAPI();
-      if (result.success) {
-        setProductOptions(result.data);
-      } else {
-        showToast("error", result.error || "Failed to load products");
-      }
-    } catch (error) {
-      console.error("Error fetching products:", error);
-      showToast("error", "Failed to load products");
-    } finally {
-      setLoadingProducts(false);
-    }
-  };
-
-  const fetchSuppliers = async () => {
-    setLoadingSuppliers(true);
-    try {
-      const result = await fetchSuppliersAPI();
-      if (result.success) {
-        setSupplierOptions(result.data);
-      } else {
-        showToast("error", result.error || "Failed to load suppliers");
-      }
-    } catch (error) {
-      console.error("Error fetching suppliers:", error);
-      showToast("error", "Failed to load suppliers");
-    } finally {
-      setLoadingSuppliers(false);
-    }
-  };
 
   // Get available columns for Add tab (columns not currently in table)
   const availableColumns = useMemo(() => {
@@ -310,8 +265,7 @@ function Purchase() {
       "receivedDate",
       "productName",
       "supplierName",
-      "qtyBox",
-      "qtyPerCarton",
+      "quantityPerBoxStrip",
       "lcNumber",
       "fob",
       "amount",
@@ -325,29 +279,86 @@ function Purchase() {
     setIsModalOpen(false);
   };
 
+  // Fetch products and suppliers for dropdowns
+  useEffect(() => {
+    if (isEditModalOpen) {
+      fetchProducts();
+      fetchSuppliers();
+    }
+  }, [isEditModalOpen]);
+
+  const fetchProducts = async () => {
+    setLoadingProducts(true);
+    try {
+      const result = await fetchProductsAPI();
+      if (result.success) {
+        setProductOptions(result.data);
+      } else {
+        showToast("error", result.error || "Failed to load products");
+      }
+    } catch (error) {
+      console.error("Error fetching products:", error);
+      showToast("error", "Failed to load products");
+    } finally {
+      setLoadingProducts(false);
+    }
+  };
+
+  const fetchSuppliers = async () => {
+    setLoadingSuppliers(true);
+    try {
+      const result = await fetchSuppliersAPI();
+      if (result.success) {
+        setSupplierOptions(result.data);
+      } else {
+        showToast("error", result.error || "Failed to load suppliers");
+      }
+    } catch (error) {
+      console.error("Error fetching suppliers:", error);
+      showToast("error", "Failed to load suppliers");
+    } finally {
+      setLoadingSuppliers(false);
+    }
+  };
+
   // Get field value from purchase object
   const getFieldValue = (purchase, dbName) => {
-    if (["receivedDate", "expiredDate", "invoiceDate"].includes(dbName)) {
+    if (!purchase || typeof purchase !== "object") return "--";
+
+    // ✅ Date fields
+    if (["receivedDate", "expiryDate", "invoiceDate"].includes(dbName)) {
       return formatDateToReadable(purchase[dbName]) || "--";
     }
 
+    // ✅ Amount: ensure number & round properly
     if (dbName === "amount") {
-      return Math.ceil(purchase.amount || 0);
+      const amount = Number(purchase.amount) || 0;
+      return formatNumber(amount);
     }
 
-    if (dbName === "qtyBox" || dbName === "qtyPerCarton") {
-      return Math.ceil(purchase[dbName] || 0);
+    // ✅ Quantity fields - use consistent field names
+    if (dbName === "quantityPerBoxStrip") {
+      const qty = Number(purchase.quantityPerBoxStrip) || 0;
+      return qty;
     }
 
+    // ✅ LC Number — numeric but stored as string sometimes
     if (dbName === "lcNumber") {
-      return formatNumber(Number(purchase[dbName])) || "--";
+      const lc = parseFloat(purchase.lcNumber) || 0;
+      return formatNumber(lc);
     }
 
+    // ✅ FOB / CIF
     if (dbName === "fob" || dbName === "cif") {
-      return formatNumber(purchase[dbName]) || "--";
+      const val = parseFloat(purchase[dbName]) || 0;
+      return formatNumber(val);
     }
 
-    return purchase[dbName] ?? "--";
+    // ✅ Default fallback
+    const value = purchase[dbName];
+    if (value === null || value === undefined || value === "") return "--";
+
+    return value;
   };
 
   // Update allSelected state when individual selections change
@@ -437,17 +448,58 @@ function Purchase() {
 
   const parseDate = (val) => {
     if (!val) return null;
-    if (val instanceof Date) return val;
-    if (typeof val === "string") {
-      if (val.toUpperCase() === "N/A" || val.trim() === "") return null;
-      const parsed = new Date(val);
-      if (!isNaN(parsed)) return parsed;
+
+    // If it's already a Date
+    if (val instanceof Date && !isNaN(val)) return val;
+
+    // Handle Excel serial numbers (e.g. 45567)
+    if (typeof val === "number") {
+      const excelEpoch = new Date(Math.round((val - 25569) * 86400 * 1000));
+      if (!isNaN(excelEpoch)) return excelEpoch;
+      return null;
     }
 
-    if (typeof val === "number") {
-      const date = new Date(Math.round((val - 25569) * 86400 * 1000));
-      if (!isNaN(date)) return date;
+    // Handle strings
+    if (typeof val === "string") {
+      const trimmed = val.trim();
+      if (!trimmed || trimmed.toUpperCase() === "N/A") return null;
+
+      // Try built-in Date parsing
+      let parsed = new Date(trimmed);
+      if (!isNaN(parsed)) return parsed;
+
+      // Try known formats manually (like DD/MM/YYYY, DD-MM-YYYY, etc.)
+      const patterns = [
+        /^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/, // 05/11/2025 or 5-11-25
+        /^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/, // 2025-11-05
+        /^(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{2,4})$/, // 05 Nov 2025
+      ];
+
+      for (const p of patterns) {
+        const m = trimmed.match(p);
+        if (m) {
+          let day, month, year;
+          if (p === patterns[0]) {
+            [, day, month, year] = m;
+          } else if (p === patterns[1]) {
+            [, year, month, day] = m;
+          } else {
+            [, day, month, year] = m;
+            const monthIndex = new Date(`${month} 1, 2000`).getMonth(); // convert "Nov" → 10
+            if (!isNaN(monthIndex)) month = monthIndex + 1;
+          }
+
+          day = parseInt(day);
+          month = parseInt(month) - 1; // JS months are 0-based
+          year = parseInt(year);
+          if (year < 100) year += 2000; // handle 2-digit years
+
+          const d = new Date(year, month, day);
+          if (!isNaN(d)) return d;
+        }
+      }
     }
+
     return null;
   };
 
@@ -472,28 +524,28 @@ function Purchase() {
           return;
         }
 
-        // Updated required headers for your new format
         const requiredHeaders = [
-          "no",
           "invoice number",
+          "invoice date",
           "delivery no.",
           "received date",
           "product name",
           "supplier name",
           "expiry date",
-          "lc number",
-          "amount",
+          "quantity per box/strip",
+          "fob (usd)",
+          "cif (usd)",
+          "lc (usd)",
+          "remarks",
         ];
 
-        // Step 1: Find the header row index
+        // Step 1: Find header row
         let headerRowIndex = -1;
         for (let i = 0; i < Math.min(rows.length, 10); i++) {
           const row = rows[i].map((cell) =>
             (cell || "").toString().trim().toLowerCase()
           );
-
           const matched = requiredHeaders.filter((hdr) => row.includes(hdr));
-          // Require at least 8 matching headers to be flexible
           if (matched.length >= 8) {
             headerRowIndex = i;
             break;
@@ -501,14 +553,7 @@ function Purchase() {
         }
 
         if (headerRowIndex === -1) {
-          const sampleRow = rows.find((_, i) => i < 10) || [];
-          const lowerSampleRow = sampleRow.map((cell) =>
-            (cell || "").toString().trim().toLowerCase()
-          );
-          const missing = requiredHeaders.filter(
-            (hdr) => !lowerSampleRow.includes(hdr)
-          );
-
+          showToast("error", "Header row not found or missing columns");
           return;
         }
 
@@ -525,7 +570,7 @@ function Purchase() {
         // Step 3: Map rows to structured data
         const dataRows = rows.slice(headerRowIndex + 1);
         const mappedData = dataRows
-          .map((row, index) => {
+          .map((row) => {
             const item = {};
             Object.entries(headersMap).forEach(([colIndex, key]) => {
               let cellVal = row[colIndex] || "";
@@ -542,14 +587,13 @@ function Purchase() {
               invoiceDate: parseDate(item["invoice date"]),
               deliveryNumber: item["delivery no."] || "",
               receivedDate: parseDate(item["received date"]),
-              expiredDate: parseDate(item["expiry date"]),
               productName: item["product name"] || "",
               supplierName: item["supplier name"] || "",
-              qtyBox: parseNumber(item["qty box"]),
-              qtyPerCarton: parseNumber(item["qty per carton"]),
-              fob: parseNumber(item["fob"]),
-              cif: parseNumber(item["cif"]),
-              lcNumber: item["lc number"] || "",
+              expiryDate: parseDate(item["expiry date"]),
+              quantityPerBoxStrip: parseNumber(item["quantity per box/strip"]),
+              fob: parseNumber(item["fob (usd)"]),
+              cif: parseNumber(item["cif (usd)"]),
+              lc: parseNumber(item["lc (usd)"]),
               remarks: item["remarks"] || "",
             };
           })
@@ -558,8 +602,7 @@ function Purchase() {
               entry.invoiceNumber !== "" ||
               entry.productName !== "" ||
               entry.deliveryNumber !== ""
-          ); // Filter out completely empty rows
-        console.log('values of mapped',mappedData);
+          );
         setParsedData(mappedData);
       } catch (error) {
         console.error("Error reading Excel file:", error);
@@ -599,14 +642,22 @@ function Purchase() {
     }
   };
 
+  // CORRECTED: Enhanced editPurchase function
   const editPurchase = (purchase) => {
     setForm({
-      ...purchase,
-      // Ensure numeric values are properly formatted
-      qtyBox: purchase.qtyBox || 0,
-      qtyPerCarton: purchase.qtyPerCarton || 0,
+      _id: purchase._id || "",
+      invoiceNumber: purchase.invoiceNumber || "",
+      invoiceDate: purchase.invoiceDate || "",
+      deliveryNumber: purchase.deliveryNumber || "",
+      receivedDate: purchase.receivedDate || "",
+      expiryDate: purchase.expiryDate || "",
+      productName: purchase.productName || "",
+      supplierName: purchase.supplierName || "",
+      quantityPerBoxStrip: purchase.quantityPerBoxStrip || 0,
       fob: purchase.fob || 0,
       cif: purchase.cif || 0,
+      lcNumber: purchase.lcNumber || "",
+      remarks: purchase.remarks || "",
       amount: purchase.amount || 0,
     });
     setIsOpen(true);
@@ -637,7 +688,7 @@ function Purchase() {
         if (res.status === 200) {
           showToast(
             "success",
-            `Purcharse <b>${purchase.productName}-${purchase?.invoiceNumber}</b> deleted successfully`
+            `Purchase <b>${purchase.productName}-${purchase?.invoiceNumber}</b> deleted successfully`
           );
           fetchPurchaseDetails();
         }
@@ -726,23 +777,49 @@ function Purchase() {
     }
   };
 
+  // CORRECTED: Enhanced handlePurchaseUpdate function
   const handlePurchaseUpdate = async (e) => {
     e.preventDefault();
+    console.log("Updating purchase with data:", form);
 
     try {
+      // ✅ Prepare data with correct field names matching backend
+      const updateData = {
+        invoiceNumber: form.invoiceNumber,
+        invoiceDate: form.invoiceDate,
+        deliveryNumber: form.deliveryNumber,
+        receivedDate: form.receivedDate,
+        expiryDate: form.expiryDate,
+        productName: form.productName,
+        supplierName: form.supplierName,
+        quantityPerBoxStrip: Number(form.quantityPerBoxStrip) || 0,
+        fob: Number(form.fob) || 0,
+        cif: Number(form.cif) || 0,
+        lcNumber: form.lcNumber,
+        remarks: form.remarks,
+        amount: Number(form.amount) || 0,
+      };
+
+      console.log("Sending update data:", updateData);
+
       const res = await axios.put(
         `${backendUrl}/api/purchase/${form._id}`,
-        form
+        updateData
       );
 
       if (res.status === 200) {
         showToast("success", "Purchase updated successfully");
         setIsEditModalOpen(false);
+        setForm(initialFormState);
         fetchPurchaseDetails();
       }
     } catch (err) {
       console.error("Update error:", err);
-      showToast("error", "Failed to update product.");
+      showToast(
+        "error",
+        "Failed to update purchase: " +
+          (err.response?.data?.message || err.message)
+      );
     }
   };
 
@@ -759,38 +836,56 @@ function Purchase() {
     [currentPurchases]
   );
 
-  // Calculate amount when lcNumber or qtyBox changes - FIXED VERSION
+  // CORRECTED: Enhanced amount calculation effect
   useEffect(() => {
     if (isEditModalOpen) {
       const lcValue = parseFloat(form.lcNumber) || 0;
-      const qtyBoxValue = parseFloat(form.qtyBox) || 0;
-      const amount = lcValue * qtyBoxValue;
+      const quantityPerBoxStripValue =
+        parseFloat(form.quantityPerBoxStrip) || 0;
+
+      // ✅ CORRECT CALCULATION: LC × Box Qty
+      const calculatedAmount = lcValue * quantityPerBoxStripValue;
 
       // Round to 2 decimal places
-      const roundedAmount = Math.round(amount * 100) / 100;
+      const roundedAmount = Math.round(calculatedAmount * 100) / 100;
 
-      setForm((prev) => ({
-        ...prev,
-        amount: roundedAmount,
-      }));
+      // Only update if the calculated value is different from current
+      if (Math.abs(roundedAmount - (parseFloat(form.amount) || 0)) > 0.01) {
+        setForm((prev) => ({
+          ...prev,
+          amount: roundedAmount,
+        }));
+      }
     }
-  }, [form.lcNumber, form.qtyBox, isEditModalOpen]);
+  }, [form.lcNumber, form.quantityPerBoxStrip, isEditModalOpen]);
 
-  // Numeric input handler - IMPROVED VERSION
+  // CORRECTED: Numeric input handler for integer and decimal fields
   const handleNumericInputChange = (e, updateFunc) => {
     const { name, value } = e.target;
 
-    // For numeric fields, allow only numbers and decimal point
     if (numericFields.includes(name)) {
-      // Allow empty, numbers, and decimal point with proper format
-      if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
-        const validatedEvent = {
-          target: {
-            name: name,
-            value: value,
-          },
-        };
-        updateFunc(validatedEvent);
+      // For integer fields, allow only whole numbers
+      if (integerFields.includes(name)) {
+        if (value === "" || /^\d*$/.test(value)) {
+          const validatedEvent = {
+            target: {
+              name: name,
+              value: value === "" ? "" : parseInt(value) || 0,
+            },
+          };
+          updateFunc(validatedEvent);
+        }
+      } else {
+        // For decimal fields, allow numbers and decimal point
+        if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+          const validatedEvent = {
+            target: {
+              name: name,
+              value: value,
+            },
+          };
+          updateFunc(validatedEvent);
+        }
       }
     } else {
       // For non-numeric fields, pass through directly
@@ -798,36 +893,56 @@ function Purchase() {
     }
   };
 
-  // Enhanced handle change with proper number conversion - FIXED VERSION
+  // CORRECTED: Enhanced handle change with proper number conversion
   const enhancedHandleChange = useCallback((e) => {
     const { name, value } = e.target;
+    console.log(`Field ${name} changed to:`, value);
 
     setForm((prev) => {
       let processedValue = value;
 
-      // Convert numeric fields to numbers when they're complete
+      // Convert numeric fields to proper types
       if (numericFields.includes(name)) {
         if (value === "" || value === "-") {
-          processedValue = value; // Keep as string for intermediate input
-        } else if (!value.endsWith(".")) {
-          const numValue = parseFloat(value);
-          processedValue = isNaN(numValue) ? 0 : numValue;
+          processedValue = value;
+        } else if (integerFields.includes(name)) {
+          // For integer fields, convert to whole number
+          const intValue = parseInt(value);
+          processedValue = isNaN(intValue) ? 0 : intValue;
+        } else {
+          // For decimal fields, convert to float with 2 decimal places
+          if (!value.endsWith(".")) {
+            const numValue = parseFloat(value);
+            processedValue = isNaN(numValue)
+              ? 0
+              : Math.round(numValue * 100) / 100;
+          }
         }
-        // If value ends with ".", keep it as string to allow decimal input
       }
 
-      return {
+      const updatedForm = {
         ...prev,
         [name]: processedValue,
       };
+
+      console.log("Updated form:", updatedForm);
+      return updatedForm;
     });
   }, []);
 
-  // Format numeric values for display in edit modal
+  // CORRECTED: Format numeric values for display in edit modal
   const getDisplayValue = (fieldName, value) => {
     if (!numericFields.includes(fieldName)) return value || "";
 
     if (value === null || value === undefined) return "";
+
+    // For integer fields, don't show decimal places
+    if (integerFields.includes(fieldName)) {
+      if (typeof value === "number") {
+        return value.toString();
+      }
+      return value || "";
+    }
 
     // If it's a number and we're not in the middle of typing a decimal
     if (typeof value === "number") {
@@ -840,19 +955,20 @@ function Purchase() {
 
   // Handle dropdown changes
   const handleProductChange = (value) => {
-    setForm(prev => ({
+    setForm((prev) => ({
       ...prev,
-      productName: value
+      productName: value,
     }));
   };
 
   const handleSupplierChange = (value) => {
-    setForm(prev => ({
+    setForm((prev) => ({
       ...prev,
-      supplierName: value
+      supplierName: value,
     }));
   };
 
+  console.log("pro", purchases);
   return (
     <div className="p-6">
       <div className="container">
@@ -1254,7 +1370,7 @@ function Purchase() {
               {/* Background Overlay */}
               <div
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setIsOpen(false)}
+                onClick={() => setShowImportModal(false)}
               />
               <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
                 {/* Close */}
@@ -1315,7 +1431,7 @@ function Purchase() {
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
               <div
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setIsOpen(false)}
+                onClick={() => setIsViewModalOpen(false)}
               />
 
               <div className="bg-white w-full max-w-3xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
@@ -1369,10 +1485,10 @@ function Purchase() {
 
                   <div>
                     <label className="block font-medium text-gray-600">
-                      Expired Date
+                      Expiry Date
                     </label>
                     <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                      {formatDateToReadable(form.expiredDate) || "--"}
+                      {formatDateToReadable(form.expiryDate) || "--"}
                     </p>
                   </div>
 
@@ -1399,7 +1515,7 @@ function Purchase() {
                       Box Quantity
                     </label>
                     <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                      {form.qtyBox || 0}
+                      {form.quantityPerBoxStrip || 0}
                     </p>
                   </div>
 
@@ -1463,18 +1579,24 @@ function Purchase() {
             document.body
           )}
 
-        {/* EDIT MODAL - FIXED VERSION with SearchableDropdown */}
+        {/* EDIT MODAL - CORRECTED */}
         {isEditModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
               <div
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setIsOpen(false)}
+                onClick={() => {
+                  setIsEditModalOpen(false);
+                  setForm(initialFormState);
+                }}
               />
 
               <div className="bg-white w-full max-w-3xl p-6 rounded-xl shadow-lg relative max-h-screen overflow-y-auto">
                 <button
-                  onClick={() => setIsEditModalOpen(false)}
+                  onClick={() => {
+                    setIsEditModalOpen(false);
+                    setForm(initialFormState);
+                  }}
                   className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
                 >
                   <X size={20} />
@@ -1486,11 +1608,11 @@ function Purchase() {
 
                 <form
                   className="grid grid-cols-1 md:grid-cols-3 gap-4"
-                  onSubmit={(e) => e.preventDefault()}
+                  onSubmit={handlePurchaseUpdate}
                 >
-                  {/* Invoice Number - Text field */}
+                  {/* Invoice Number */}
                   <div>
-                    <label className="block text-sm font-medium">
+                    <label className="block font-medium text-gray-600">
                       Invoice Number
                     </label>
                     <input
@@ -1498,13 +1620,13 @@ function Purchase() {
                       name="invoiceNumber"
                       value={form.invoiceNumber || ""}
                       onChange={enhancedHandleChange}
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
                     />
                   </div>
 
-                  {/* Delivery Number - Text field */}
+                  {/* Delivery Number */}
                   <div>
-                    <label className="block text-sm font-medium">
+                    <label className="block font-medium text-gray-600">
                       Delivery Number
                     </label>
                     <input
@@ -1512,12 +1634,13 @@ function Purchase() {
                       name="deliveryNumber"
                       value={form.deliveryNumber || ""}
                       onChange={enhancedHandleChange}
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
                     />
                   </div>
 
+                  {/* Invoice Date */}
                   <div>
-                    <label className="block text-sm font-medium">
+                    <label className="block font-medium text-gray-600">
                       Invoice Date
                     </label>
                     <DatePicker
@@ -1532,12 +1655,13 @@ function Purchase() {
                       }
                       dateFormat="yyyy-MM-dd"
                       placeholderText="Select date"
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
                     />
                   </div>
 
+                  {/* Received Date */}
                   <div>
-                    <label className="block text-sm font-medium">
+                    <label className="block font-medium text-gray-600">
                       Received Date
                     </label>
                     <DatePicker
@@ -1552,33 +1676,34 @@ function Purchase() {
                       }
                       dateFormat="yyyy-MM-dd"
                       placeholderText="Select date"
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
                     />
                   </div>
 
+                  {/* Expiry Date */}
                   <div>
-                    <label className="block text-sm font-medium">
-                      Expired Date
+                    <label className="block font-medium text-gray-600">
+                      Expiry Date
                     </label>
                     <DatePicker
                       selected={
-                        form.expiredDate ? new Date(form.expiredDate) : null
+                        form.expiryDate ? new Date(form.expiryDate) : null
                       }
                       onChange={(date) =>
                         setForm({
                           ...form,
-                          expiredDate: date ? date.toISOString() : "",
+                          expiryDate: date ? date.toISOString() : "",
                         })
                       }
                       dateFormat="yyyy-MM-dd"
                       placeholderText="Select date"
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
                     />
                   </div>
 
                   {/* Product Name - SearchableDropdown */}
                   <div>
-                    <label className="block text-sm font-medium">
+                    <label className="block font-medium text-gray-600">
                       Product Name
                     </label>
                     <SearchableDropdown
@@ -1594,7 +1719,7 @@ function Purchase() {
 
                   {/* Supplier Name - SearchableDropdown */}
                   <div>
-                    <label className="block text-sm font-medium">
+                    <label className="block font-medium text-gray-600">
                       Supplier Name
                     </label>
                     <SearchableDropdown
@@ -1608,24 +1733,28 @@ function Purchase() {
                     />
                   </div>
 
-                  {/* Box Quantity - Numeric field (integer) */}
+                  {/* Box Quantity */}
                   <div>
-                    <label className="block text-sm font-medium">
+                    <label className="block font-medium text-gray-600">
                       Box Quantity
                     </label>
                     <input
                       type="text"
-                      name="qtyBox"
-                      value={getDisplayValue("qtyBox", form.qtyBox)}
+                      name="quantityPerBoxStrip"
+                      value={getDisplayValue(
+                        "quantityPerBoxStrip",
+                        form.quantityPerBoxStrip
+                      )}
                       onChange={(e) =>
                         handleNumericInputChange(e, enhancedHandleChange)
                       }
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
                     />
                   </div>
 
+                  {/* FOB */}
                   <div>
-                    <label className="block text-sm font-medium">
+                    <label className="block font-medium text-gray-600">
                       FOB (USD)
                     </label>
                     <input
@@ -1635,13 +1764,13 @@ function Purchase() {
                       onChange={(e) =>
                         handleNumericInputChange(e, enhancedHandleChange)
                       }
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
                     />
                   </div>
 
-                  {/* CIF - Numeric field (4 decimal places) */}
+                  {/* CIF */}
                   <div>
-                    <label className="block text-sm font-medium">
+                    <label className="block font-medium text-gray-600">
                       CIF (USD)
                     </label>
                     <input
@@ -1651,53 +1780,49 @@ function Purchase() {
                       onChange={(e) =>
                         handleNumericInputChange(e, enhancedHandleChange)
                       }
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
                     />
                   </div>
 
-                  {/* LC Number - Text field */}
+                  {/* LC Number */}
                   <div>
-                    <label className="block text-sm font-medium">
-                      LC Number
+                    <label className="block font-medium text-gray-600">
+                      LC (USD)
                     </label>
                     <input
                       type="text"
                       name="lcNumber"
                       value={form.lcNumber || ""}
                       onChange={enhancedHandleChange}
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
                     />
                   </div>
 
-                  {/* Amount - Numeric field (2 decimal places, readonly) - FIXED */}
+                  {/* Amount - Read-only calculated field */}
                   <div>
-                    <label className="block text-sm font-medium">
+                    <label className="block font-medium text-gray-600">
                       Amount (USD)
                     </label>
                     <input
                       type="text"
                       name="amount"
-                      value={
-                        form.amount
-                          ? parseFloat(form.amount).toFixed(2)
-                          : "0.00"
-                      }
-                      className="w-full border px-3 py-2 rounded-lg bg-gray-100"
+                      value={formatNumber(form.amount)}
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300 bg-gray-100 cursor-not-allowed"
                       readOnly
+                      disabled
                     />
-                    <p className="text-xs text-gray-500 mt-1">
-                      Calculated: LC Number × Box Quantity
-                    </p>
                   </div>
 
                   {/* Remarks - Full width */}
                   <div className="md:col-span-3">
-                    <label className="block text-sm font-medium">Remarks</label>
+                    <label className="block font-medium text-gray-600">
+                      Remarks
+                    </label>
                     <textarea
                       name="remarks"
                       value={form.remarks || ""}
                       onChange={enhancedHandleChange}
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
                       rows={3}
                     />
                   </div>
@@ -1705,7 +1830,10 @@ function Purchase() {
 
                 <div className="mt-6 flex justify-end gap-3">
                   <button
-                    onClick={() => setIsEditModalOpen(false)}
+                    onClick={() => {
+                      setIsEditModalOpen(false);
+                      setForm(initialFormState);
+                    }}
                     className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
                   >
                     Cancel

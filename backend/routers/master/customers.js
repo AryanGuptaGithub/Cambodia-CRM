@@ -31,7 +31,8 @@ const handleDuplicateError = (res, err) => {
 // ✅ POST import multiple customers from Excel
 router.post("/customers/import", async (req, res) => {
   try {
-    const customers = req.body; // Array of customer objects from frontend
+    const customers = req.body;
+
     if (!Array.isArray(customers) || customers.length === 0) {
       return res.status(400).json({
         message: "No customers found in the uploaded file.",
@@ -57,7 +58,7 @@ router.post("/customers/import", async (req, res) => {
       name: item.name || "",
       typeOfBusiness: item.typeOfBusiness || "",
       customerNumber: item.customerNumber || "",
-      address: item.address || "",
+      address: item.customerAddress || "",
       zone: item.zone || "",
       province: item.province || "",
       remark: item.remark || "",
@@ -247,12 +248,13 @@ router.delete("/customers/:id", async (req, res) => {
 // ✅ DELETE multiple customers
 router.delete("/customers", async (req, res) => {
   try {
-    const ids = req.body.ids.map((item) => item.id);
+    const ids = req.body.ids; // <- directly use the array of strings
     if (!Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ message: "No customer IDs provided" });
     }
 
     const result = await Customer.deleteMany({ _id: { $in: ids } });
+    console.log("result:", result);
 
     res.json({
       message: `${result.deletedCount} customer(s) deleted successfully`,

@@ -35,7 +35,7 @@ const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
 const customersPerPage = 9;
 
-// Custom hook for customer form management
+/* ────────────────────── Custom hook for form ────────────────────── */
 const useCustomerForm = (initialCustomerCode = "") => {
   const [form, setForm] = useState({
     customerCode: initialCustomerCode || "",
@@ -57,10 +57,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
   const handleChange = useCallback(
     (name, value) => {
       setForm((prev) => ({ ...prev, [name]: value }));
-      // Clear error when field is changed
-      if (errors[name]) {
-        setErrors((prev) => ({ ...prev, [name]: "" }));
-      }
+      if (errors[name]) setErrors((prev) => ({ ...prev, [name]: "" }));
     },
     [errors]
   );
@@ -128,6 +125,8 @@ const useCustomerForm = (initialCustomerCode = "") => {
     setForm,
   };
 };
+
+/* ────────────────────── Main Component ────────────────────── */
 const Customer = () => {
   const navigate = useNavigate();
 
@@ -140,20 +139,19 @@ const Customer = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [parsedData, setParsedData] = useState([]);
   const [nextCustomerCode, setNextCustomerCode] = useState(null);
-  const [isOpen, setIsOpen] = useState(false);
   const inputRef = useRef(null);
 
-  // State for dropdown data
+  // Dropdown data
   const [provinces, setProvinces] = useState([]);
   const [mrList, setMrList] = useState([]);
   const [zones, setZones] = useState([]);
   const [businessTypes, setBusinessTypes] = useState([]);
+  const [isDropdownsLoading, setIsDropdownsLoading] = useState(true);
 
   // Modal states
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
 
-  // Use custom hook for form management
   const {
     form,
     errors,
@@ -165,7 +163,7 @@ const Customer = () => {
     setForm,
   } = useCustomerForm();
 
-  // Fetch initial data
+  /* ──────── Data fetching ──────── */
   useEffect(() => {
     fetchCustomers();
     fetchDropdownData();
@@ -173,6 +171,7 @@ const Customer = () => {
 
   const fetchDropdownData = async () => {
     try {
+      setIsDropdownsLoading(true);
       const [provincesResult, mrResult, zonesResult, businessTypesResult] =
         await Promise.all([
           fetchProvincesAPI(),
@@ -189,6 +188,8 @@ const Customer = () => {
     } catch (error) {
       console.error("Error fetching dropdown data:", error);
       showToast("error", "Failed to load dropdown data");
+    } finally {
+      setIsDropdownsLoading(false);
     }
   };
 
@@ -206,40 +207,22 @@ const Customer = () => {
     }
   };
 
-  // Filter customers by search term
+  /* ──────── Filtering & Pagination ──────── */
   const filteredCustomers = useMemo(() => {
     const lowerSearch = searchTerm.toLowerCase();
-
-    return customers.filter((customer) => {
-      const nameMatch = customer.name?.toLowerCase().includes(lowerSearch);
-      const businessMatch = customer.typeOfBusiness
-        ?.toLowerCase()
-        .includes(lowerSearch);
-      const mrMatch = customer.medicalRepName
-        ?.toLowerCase()
-        .includes(lowerSearch);
-      const addressMatch = customer.address
-        ?.toLowerCase()
-        .includes(lowerSearch);
-      const zoneMatch = customer.zone?.toLowerCase().includes(lowerSearch);
-      const provinceMatch = customer.province
-        ?.toLowerCase()
-        .includes(lowerSearch);
-      const dateMatch = customer.date?.toLowerCase().includes(lowerSearch);
-
+    return customers.filter((c) => {
       return (
-        nameMatch ||
-        businessMatch ||
-        mrMatch ||
-        addressMatch ||
-        zoneMatch ||
-        provinceMatch ||
-        dateMatch
+        c.name?.toLowerCase().includes(lowerSearch) ||
+        c.typeOfBusiness?.toLowerCase().includes(lowerSearch) ||
+        c.medicalRepName?.toLowerCase().includes(lowerSearch) ||
+        c.address?.toLowerCase().includes(lowerSearch) ||
+        c.zone?.toLowerCase().includes(lowerSearch) ||
+        c.province?.toLowerCase().includes(lowerSearch) ||
+        c.date?.toLowerCase().includes(lowerSearch)
       );
     });
   }, [customers, searchTerm]);
 
-  // Pagination logic
   const totalPages = Math.ceil(filteredCustomers.length / customersPerPage);
   const visiblePages = getVisiblePages(currentPage, totalPages);
   const currentCustomers = filteredCustomers.slice(
@@ -247,7 +230,7 @@ const Customer = () => {
     currentPage * customersPerPage
   );
 
-  // Selection handlers
+  /* ──────── Selection ──────── */
   const toggleSelect = useCallback((customer) => {
     setSelected((prev) =>
       prev.some((c) => c.id === customer._id)
@@ -260,17 +243,14 @@ const Customer = () => {
     (checked) => {
       setSelected(
         checked
-          ? currentCustomers.map((customer) => ({
-              id: customer._id,
-              name: customer.name,
-            }))
+          ? currentCustomers.map((c) => ({ id: c._id, name: c.name }))
           : []
       );
     },
     [currentCustomers]
   );
 
-  // Delete handlers
+  /* ──────── Delete ──────── */
   const handleDeleteSelected = async () => {
     const confirm = await confirmDialog({
       text: `Are you sure you want to delete <b>${selected.length}</b> customer(s)?`,
@@ -278,13 +258,12 @@ const Customer = () => {
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
     });
-
+console.log('values of selected', selected);
     if (confirm.isConfirmed) {
       try {
         const res = await axios.delete(`${backendUrl}/api/customers`, {
-          data: { ids: selected },
+          data: { ids: selected.map((s) => s.id) },
         });
-
         if (res.status === 200) {
           showToast("success", "Selected customers deleted successfully");
           fetchCustomers();
@@ -309,12 +288,8 @@ const Customer = () => {
         const res = await axios.delete(
           `${backendUrl}/api/customers/${customer._id}`
         );
-
         if (res.status === 200) {
-          showToast(
-            "success",
-            `Customer ${customer.name} deleted successfully`
-          );
+          showToast("success", `${customer.name} deleted successfully`);
           fetchCustomers();
         }
       } catch (error) {
@@ -323,7 +298,7 @@ const Customer = () => {
     }
   };
 
-  // View and Edit handlers
+  /* ──────── View / Edit ──────── */
   const handleView = useCallback(
     (customer) => {
       setForm(customer);
@@ -334,15 +309,14 @@ const Customer = () => {
 
   const handleEdit = useCallback(
     (customer) => {
-      // Find the actual MR ID from the MR list
       let actualMrId = customer.medicalRepId || "";
-      if (!actualMrId && customer.medicalRepName && mrList.length > 0) {
-        const foundMr = mrList.find(
+      if (!actualMrId && customer.medicalRepName && mrList.length) {
+        const found = mrList.find(
           (mr) =>
             (mr.medicalRepName || mr.name || "").toLowerCase() ===
             customer.medicalRepName.toLowerCase()
         );
-        actualMrId = foundMr?._id || foundMr?.id || "";
+        actualMrId = found?._id || found?.id || "";
       }
 
       setForm({
@@ -364,70 +338,58 @@ const Customer = () => {
     [mrList, setForm]
   );
 
-  // Status handler
+  /* ──────── Status toggle ──────── */
   const handleStatusToggle = async (id) => {
     try {
       const customer = customers.find((c) => c._id === id);
-      if (!customer) return;
-
-      const updatedCustomer = { ...customer, enabled: !customer.enabled };
-      const response = await fetch(`${backendUrl}/api/customers/${id}`, {
+      const updated = { ...customer, enabled: !customer.enabled };
+      const res = await fetch(`${backendUrl}/api/customers/${id}`, {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ enabled: updatedCustomer.enabled }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: updated.enabled }),
       });
-
-      if (!response.ok) throw new Error("Failed to update customer");
-
-      const data = await response.json();
+      if (!res.ok) throw new Error("Failed to update");
+      const data = await res.json();
       setCustomers((prev) =>
         prev.map((c) => (c._id === id ? { ...c, enabled: data.enabled } : c))
       );
       showToast(
         "success",
-        `Customer ${
-          updatedCustomer.enabled ? "enabled" : "disabled"
-        } successfully`
+        `Customer ${updated.enabled ? "enabled" : "disabled"} successfully`
       );
     } catch (err) {
-      console.error("Error updating customer:", err);
-      showToast("error", "Failed to update customer status");
+      showToast("error", "Failed to update status");
     }
   };
 
-  // MR change handler
+  /* ──────── MR change (keeps name in sync) ──────── */
   const handleMRChange = useCallback(
     (selectedOption) => {
       const mrId = selectedOption ? selectedOption.value : "";
       const selectedMR = mrList.find((mr) => (mr._id || mr.id) === mrId);
-
       setForm((prev) => ({
         ...prev,
         medicalRepId: mrId,
-        medicalRepName: selectedMR
-          ? selectedMR.medicalRepName ||
-            selectedMR.name ||
-            selectedMR.staffName ||
-            ""
-          : "",
+        medicalRepName:
+          selectedMR?.medicalRepName ||
+          selectedMR?.name ||
+          selectedMR?.staffName ||
+          "",
       }));
     },
     [mrList, setForm]
   );
 
-  // Update customer
+  /* ──────── Update ──────── */
   const handleCustomerUpdate = async (e) => {
     e.preventDefault();
-
     if (!validateForm()) {
       showToast("error", "Please fill all required fields");
       return;
     }
 
     try {
-      const updatePayload = {
+      const payload = {
         customerCode: form.customerCode,
         date: form.date,
         medicalRepName: form.medicalRepName,
@@ -443,24 +405,23 @@ const Customer = () => {
 
       const res = await axios.put(
         `${backendUrl}/api/customers/${form._id}`,
-        updatePayload
+        payload
       );
 
       if (res.status === 200) {
-        showToast("success", `Customer ${form.name} updated successfully`);
+        showToast("success", `${form.name} updated successfully`);
         setIsEditModalOpen(false);
         resetForm();
         fetchCustomers();
       }
     } catch (err) {
-      console.error("Update error:", err);
       showToast("error", "Failed to update customer.");
     }
   };
 
-  // Import functionality
+  /* ──────── Import ──────── */
   const handleImportClick = () => {
-    if (mrList.length === 0) {
+    if (!mrList.length) {
       showToast(
         "error",
         "No Medical Representatives found. Please add at least one MR first."
@@ -479,19 +440,106 @@ const Customer = () => {
       try {
         const data = new Uint8Array(evt.target.result);
         const workbook = XLSX.read(data, { type: "array" });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
 
-        if (jsonData.length === 0) {
+        if (!rows.length) {
           showToast("warning", "Excel file is empty");
           return;
         }
 
-        setParsedData(jsonData);
-        showToast("success", "File parsed successfully");
-      } catch (error) {
-        console.error("Error parsing file:", error);
+        // Header detection
+        const expectedHeaders = [
+          "date",
+          "medical representative name",
+          "customer name in english",
+          "types of business",
+          "customer number",
+          "customer address",
+          "zone",
+          "province",
+          "remark",
+        ];
+        let headerIdx = -1;
+        for (let i = 0; i < rows.length; i++) {
+          const row = rows[i].map((c) => c.toString().trim().toLowerCase());
+          if (expectedHeaders.filter((h) => row.includes(h)).length >= 5) {
+            headerIdx = i;
+            break;
+          }
+        }
+        if (headerIdx === -1) {
+          showToast("error", "Header row not found");
+          return;
+        }
+
+        const headers = rows[headerIdx].map((h) => h.toString().trim());
+        const dataRows = rows.slice(headerIdx + 1);
+
+        // Date parser
+        const parseDate = (val) => {
+          if (!val) return null;
+          if (val instanceof Date && !isNaN(val)) return val;
+          if (typeof val === "number") {
+            const d = new Date(Math.round((val - 25569) * 86400 * 1000));
+            if (!isNaN(d)) return d;
+          }
+          if (typeof val === "string") {
+            const cleaned = val.trim();
+            if (!cleaned || cleaned.toUpperCase() === "N/A") return null;
+            const parsed = new Date(cleaned);
+            if (!isNaN(parsed)) return parsed;
+
+            const patterns = [
+              /^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/,
+              /^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/,
+              /^(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{2,4})$/,
+            ];
+            for (const p of patterns) {
+              const m = cleaned.match(p);
+              if (m) {
+                let day, month, year;
+                if (p === patterns[0]) [, day, month, year] = m;
+                else if (p === patterns[1]) [, year, month, day] = m;
+                else {
+                  [, day, month, year] = m;
+                  month = new Date(`${month} 1, 2000`).getMonth() + 1;
+                }
+                day = parseInt(day);
+                month = parseInt(month) - 1;
+                year = parseInt(year);
+                if (year < 100) year += 2000;
+                const d = new Date(year, month, day);
+                if (!isNaN(d)) return d;
+              }
+            }
+          }
+          return null;
+        };
+
+        const json = dataRows
+          .map((row) => {
+            const obj = {};
+            headers.forEach((h, i) => (obj[h] = row[i] ?? ""));
+            return obj;
+          })
+          .filter((o) => Object.values(o).some((v) => v !== ""));
+
+        const final = json.map((i) => ({
+          date: parseDate(i["Date"]),
+          medicalRepName: i["Medical Representative Name"] || "",
+          name: i["Customer Name in English"] || "",
+          typeOfBusiness: i["Types of Business"] || "",
+          customerNumber: i["Customer Number"] || "",
+          customerAddress: i["Customer Address"] || "",
+          zone: i["Zone"] || "",
+          province: i["Province"] || "",
+          remark: i["Remark"] || "",
+        }));
+
+        setParsedData(final);
+      } catch (err) {
+        console.error(err);
         showToast("error", "Failed to parse file");
       }
     };
@@ -499,107 +547,87 @@ const Customer = () => {
   };
 
   const handleCustomerImport = async () => {
-    if (parsedData.length === 0) {
-      showToast("warning", "Please upload a valid file first");
+    if (!parsedData.length) {
+      showToast("warning", "Upload a valid file first");
       return;
     }
-
-    if (mrList.length === 0) {
-      showToast(
-        "error",
-        "Cannot import customers: No Medical Representatives found."
-      );
+    if (!mrList.length) {
+      showToast("error", "No MRs found – cannot import");
       return;
     }
-
     setIsUploading(true);
     try {
       const res = await axios.post(
         `${backendUrl}/api/customers/import`,
         parsedData
       );
-
       if (res.status === 200) {
-        showToast(
-          "success",
-          res.data.message || "Customers imported successfully!"
-        );
+        showToast("success", res.data.message || "Imported successfully");
         setShowImportModal(false);
         setParsedData([]);
         fetchCustomers();
       }
     } catch (err) {
-      console.error("Import error:", err);
-      showToast("error", "Failed to import customers.");
+      showToast("error", "Import failed");
     } finally {
       setIsUploading(false);
     }
   };
 
-  // Search input focus handler
   const handleIconClick = () => {
-    if (inputRef.current) {
-      inputRef.current.focus();
-      inputRef.current.classList.add("highlight");
-      setTimeout(() => {
-        inputRef.current.classList.remove("highlight");
-      }, 1000);
-    }
+    inputRef.current?.focus();
+    inputRef.current?.classList.add("highlight");
+    setTimeout(() => inputRef.current?.classList.remove("highlight"), 1000);
   };
 
-  // Memoized dropdown options
-  const provinceOptions = useMemo(() => {
-    return provinces.map((province) => ({
-      value: province.name || province,
-      label: province.name || province,
-    }));
-  }, [provinces]);
+  /* ──────── Dropdown options (memoized) ──────── */
+  const provinceOptions = useMemo(
+    () =>
+      provinces.map((p) => ({
+        value: p.name || p,
+        label: p.name || p,
+      })),
+    [provinces]
+  );
 
-  const mrOptions = useMemo(() => {
-    return mrList.map((mr) => {
-      const mrId = mr._id || mr.id || "";
-      const mrName = mr.medicalRepName || mr.name || mr.staffName || "Unknown";
-      return {
-        value: mrId,
-        label: mrName,
-      };
-    });
-  }, [mrList]);
+  const mrOptions = useMemo(
+    () =>
+      mrList.map((mr) => {
+        const id = mr._id || mr.id || "";
+        const name = mr.medicalRepName || mr.name || mr.staffName || "Unknown";
+        return { value: id, label: name };
+      }),
+    [mrList]
+  );
 
-  const zoneOptions = useMemo(() => {
-    return zones.map((zone, index) => ({
-      value: typeof zone === "string" ? zone : zone.name || `Zone ${index}`,
-      label: typeof zone === "string" ? zone : zone.name || `Zone ${index}`,
-    }));
-  }, [zones]);
+  const zoneOptions = useMemo(
+    () =>
+      zones.map((z, i) => {
+        const val = typeof z === "string" ? z : z.name || `Zone ${i + 1}`;
+        return { value: val, label: val };
+      }),
+    [zones]
+  );
 
-  const businessTypeOptions = useMemo(() => {
-    return businessTypes.map((type) => {
-      const name =
-        typeof type === "string" ? type : type.name || type.label || "Unknown";
-      return {
-        value: name,
-        label: name,
-      };
-    });
-  }, [businessTypes]);
+  const businessTypeOptions = useMemo(
+    () =>
+      businessTypes.map((t) => {
+        const name = typeof t === "string" ? t : t.name || t.label || "Unknown";
+        return { value: name, label: name };
+      }),
+    [businessTypes]
+  );
 
-  // Helper function
-  const capitalizeFirstLetter = (str) => {
-    if (!str) return "";
-    return str.toString().charAt(0).toUpperCase() + str.slice(1).toLowerCase();
-  };
-
-  if (loading) return <p>Loading...</p>;
+  if (loading) return <p className="p-6">Loading...</p>;
 
   return (
     <div className="p-6">
       <div className="container">
-        {/* Header Section */}
+        {/* ──────── Header ──────── */}
         <div className="flex justify-between items-center mb-4">
           <div className="flex gap-3">
             <button
-              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md"
               onClick={() =>
                 navigate("/masterlayout/customer/new", {
                   state: { customerCode: nextCustomerCode },
@@ -611,20 +639,21 @@ const Customer = () => {
 
             <button
               onClick={handleImportClick}
-              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md"
             >
               <Upload size={18} /> Import Customer
             </button>
 
             {selected.length > 0 && (
               <button
-                className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+                className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md"
                 onClick={handleDeleteSelected}
               >
                 <Trash2 size={18} /> Delete
               </button>
             )}
           </div>
+
           <div className="flex items-center gap-8">
             <p className="text-lg font-semibold text-gray-700">
               Total Count:{" "}
@@ -654,7 +683,7 @@ const Customer = () => {
           </div>
         </div>
 
-        {/* Customers Table */}
+        {/* ──────── Table ──────── */}
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
           <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
             <thead className="bg-gray-100 text-gray-700 border-b">
@@ -692,11 +721,11 @@ const Customer = () => {
                   </td>
                 </tr>
               ) : (
-                currentCustomers.map((customer, index) => (
+                currentCustomers.map((customer, idx) => (
                   <tr
                     key={customer._id}
                     className={`hover:bg-gray-50 ${
-                      index < currentCustomers.length - 1 ? "border-b" : ""
+                      idx < currentCustomers.length - 1 ? "border-b" : ""
                     }`}
                   >
                     <td className="p-3">
@@ -735,21 +764,21 @@ const Customer = () => {
                     </td>
                     <td className="p-3 flex items-center justify-center gap-3">
                       <button
-                        className="text-blue-600 hover:text-blue-800 cursor-pointer"
+                        className="text-blue-600 hover:text-blue-800"
                         onClick={() => handleView(customer)}
                         title="View"
                       >
                         <Eye size={18} />
                       </button>
                       <button
-                        className="text-green-600 hover:text-green-800 cursor-pointer"
+                        className="text-green-600 hover:text-green-800"
                         onClick={() => handleEdit(customer)}
                         title="Edit"
                       >
                         <Edit size={18} />
                       </button>
                       <button
-                        className="text-red-600 hover:text-red-800 cursor-pointer"
+                        className="text-red-600 hover:text-red-800"
                         onClick={() => deleteCustomer(customer)}
                         title="Delete"
                       >
@@ -766,33 +795,33 @@ const Customer = () => {
           {currentCustomers.length > 0 && (
             <div className="mt-4 p-5 flex justify-start gap-2">
               <button
-                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
                 disabled={currentPage === 1}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
               >
                 Prev
               </button>
 
-              {visiblePages.map((page) => (
+              {visiblePages.map((p) => (
                 <button
-                  key={page}
-                  onClick={() => setCurrentPage(page)}
-                  className={`px-3 py-1 rounded cursor-pointer ${
-                    currentPage === page
+                  key={p}
+                  onClick={() => setCurrentPage(p)}
+                  className={`px-3 py-1 rounded ${
+                    currentPage === p
                       ? "bg-indigo-600 text-white"
                       : "bg-gray-200 hover:bg-gray-300"
                   }`}
                 >
-                  {page}
+                  {p}
                 </button>
               ))}
 
               <button
                 onClick={() =>
-                  setCurrentPage((prev) => Math.min(prev + 1, totalPages))
+                  setCurrentPage((p) => Math.min(p + 1, totalPages))
                 }
                 disabled={currentPage === totalPages}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
               >
                 Next
               </button>
@@ -800,143 +829,166 @@ const Customer = () => {
           )}
         </div>
 
-        {/* Import Modal */}
-       {showImportModal && ReactDOM.createPortal(
-        <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsOpen(false)} />
-          <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
-            <button onClick={() => setShowImportModal(false)} className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer" disabled={isUploading}><X size={20} /></button>
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">Import Customer</h2>
-            {isSampleFile && <SampleExcelDownloadCustomer />}
-            <div className="mb-6">
-              <label className="block text-gray-700 mb-2">File</label>
-              <input type="file" accept=".csv, .xlsx" onChange={handleFileUpload} className="block w-full border rounded-lg px-3 py-2 cursor-pointer" />
-            </div>
-            <div className="flex justify-end gap-3">
-              <button onClick={() => setShowImportModal(false)} disabled={isUploading} className={`px-5 py-2 rounded-lg cursor-pointer ${isUploading ? "bg-gray-300 text-gray-500 cursor-not-allowed" : "bg-gray-300 hover:bg-gray-400 text-gray-700"}`}>Cancel</button>
-              <button onClick={handleCustomerImport} disabled={isUploading} className={`px-5 py-2 rounded-lg cursor-pointer ${isUploading ? "bg-blue-400 text-white cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700 text-white"}`}>{isUploading ? "Uploading…" : "Upload"}</button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
-
-        {/* View Modal */}
+        {/* ──────── Import Modal ──────── */}
+        {showImportModal &&
+          ReactDOM.createPortal(
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
+              <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
+                <button
+                  onClick={() => setShowImportModal(false)}
+                  disabled={isUploading}
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
+                >
+                  <X size={20} />
+                </button>
+                <h2 className="text-lg font-semibold mb-4">Import Customer</h2>
+                {isSampleFile && <SampleExcelDownloadCustomer />}
+                <div className="mb-6">
+                  <label className="block text-gray-700 mb-2">File</label>
+                  <input
+                    type="file"
+                    accept=".csv, .xlsx"
+                    onChange={handleFileUpload}
+                    className="block w-full border rounded-lg px-3 py-2"
+                  />
+                </div>
+                <div className="flex justify-end gap-3">
+                  <button
+                    onClick={() => setShowImportModal(false)}
+                    disabled={isUploading}
+                    className={`px-5 py-2 rounded-lg ${
+                      isUploading
+                        ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                        : "bg-gray-300 hover:bg-gray-400 text-gray-700"
+                    }`}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleCustomerImport}
+                    disabled={isUploading}
+                    className={`px-5 py-2 rounded-lg ${
+                      isUploading
+                        ? "bg-blue-400 text-white cursor-not-allowed"
+                        : "bg-blue-600 hover:bg-blue-700 text-white"
+                    }`}
+                  >
+                    {isUploading ? "Uploading…" : "Upload"}
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
         {isViewModalOpen &&
           ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-              <div
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setIsOpen(false)}
-              />
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
               <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+                {/* Close Button */}
                 <button
                   onClick={() => setIsViewModalOpen(false)}
-                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
                 >
                   <X size={20} />
                 </button>
 
-                <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                  View Customer
-                </h2>
+                <h2 className="text-xl font-semibold mb-4">View Customer</h2>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Customer Code */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-600">
-                      Customer Code
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    <p className="text-gray-700 font-medium">Customer Code</p>
+                    <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
                       {form.customerCode}
                     </p>
                   </div>
 
+                  {/* Name */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-600">
-                      Name
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    <p className="text-gray-700 font-medium">Name</p>
+                    <p className="capitalize bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
                       {form.name}
                     </p>
                   </div>
 
+                  {/* Customer Number */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-600">
-                      Customer Number
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                      {form.customerNumber || "--"}
+                    <p className="text-gray-700 font-medium">Customer Number</p>
+                    <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
+                      {form.customerNumber}
                     </p>
                   </div>
 
+                  {/* Type of Business */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-600">
+                    <p className="text-gray-700 font-medium">
                       Type of Business
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    </p>
+                    <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
                       {form.typeOfBusiness}
                     </p>
                   </div>
 
+                  {/* Medical Representative */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-600">
-                      Medical Rep Name
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                      {form.medicalRepName || "--"}
+                    <p className="text-gray-700 font-medium">
+                      Medical Representative
+                    </p>
+                    <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
+                      {form.medicalRepName}
                     </p>
                   </div>
 
+                  {/* Address */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-600">
-                      Address
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                      {form.address || "--"}
+                    <p className="text-gray-700 font-medium">Address</p>
+                    <p className="capitalize bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
+                      {form.address}
                     </p>
                   </div>
 
+                  {/* Zone */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-600">
-                      Zone
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                      {form.zone || "--"}
+                    <p className="text-gray-700 font-medium">Zone</p>
+                    <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
+                      {form.zone}
                     </p>
                   </div>
 
+                  {/* Province */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-600">
-                      Province
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                      {form.province || "--"}
+                    <p className="text-gray-700 font-medium">Province</p>
+                    <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
+                      {form.province}
                     </p>
                   </div>
 
+                  {/* Joining Date */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-600">
-                      Joining Date
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                      {form.date ? formatDateToReadable(form.date) : "N/A"}
+                    <p className="text-gray-700 font-medium">Joining Date</p>
+                    <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300 ">
+                      {form.date ? formatDateToReadable(form.date) : "-"}
                     </p>
                   </div>
 
+                  {/* Remarks */}
                   <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-600">
-                      Remarks
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100 min-h-[80px]">
-                      {form.remark || "—"}
-                    </p>
+                    <p className="text-gray-700 font-medium">Remarks</p>
+
+                    <textarea
+                      value={form.remark}
+                      className="w-full rounded-lg border border-gray-300 p-3"
+                      rows={3}
+                      disabled
+                    />
                   </div>
                 </div>
 
+                {/* Close Button */}
                 <div className="mt-6 flex justify-end">
                   <button
                     onClick={() => setIsViewModalOpen(false)}
-                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg"
                   >
                     Close
                   </button>
@@ -946,23 +998,16 @@ const Customer = () => {
             document.body
           )}
 
-        {/* Edit Modal - Structured like Product Edit Modal */}
         {isEditModalOpen &&
           ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-              <div
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => {
-                  setIsOpen(false);
-                }}
-              />
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
               <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
                 <button
                   onClick={() => {
                     setIsEditModalOpen(false);
                     resetForm();
                   }}
-                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
                 >
                   <X size={20} />
                 </button>
@@ -977,7 +1022,7 @@ const Customer = () => {
                         label="Customer Code"
                         name="customerCode"
                         value={form.customerCode}
-                        disabled={true}
+                        disabled
                         className="bg-gray-100 text-gray-700 border rounded px-3 py-2 border-gray-300"
                       />
                     </div>
@@ -985,15 +1030,21 @@ const Customer = () => {
                     {/* Name */}
                     <div>
                       <label className="block text-sm font-medium text-gray-600">
-                        Name
+                        Name <span className="text-red-500">*</span>
                       </label>
                       <InputField
                         type="text"
                         value={form.name}
                         onChange={(e) => handleChange("name", e.target.value)}
                         error={errors.name}
-                        className="capitalize px-2 py-2 border-gray-300 border rounded-lg"
+                        className="capitalize px-3 py-2 border-gray-300 border rounded-lg w-full"
+                        placeholder="Enter customer name"
                       />
+                      {errors.name && (
+                        <p className="text-red-500 text-sm mt-1">
+                          {errors.name}
+                        </p>
+                      )}
                     </div>
 
                     {/* Customer Number */}
@@ -1007,32 +1058,33 @@ const Customer = () => {
                         onChange={(e) =>
                           handleNumericInput(e, "customerNumber")
                         }
-                        placeholder="Enter numbers only"
+                        placeholder="Numbers only"
+                        className="px-3 py-2 border-gray-300 border rounded-lg w-full"
                       />
                     </div>
 
                     {/* Type of Business */}
                     <div>
                       <label className="block text-sm font-medium text-gray-600">
-                        Type of Business
+                        Type of Business <span className="text-red-500">*</span>
                       </label>
-                      <div className="rounded-lg">
+                      {isDropdownsLoading ? (
+                        <div className="px-3 py-2 bg-gray-100 rounded-lg text-gray-500">
+                          Loading...
+                        </div>
+                      ) : (
                         <SearchableDropdown
                           options={businessTypeOptions}
-                          value={
-                            businessTypeOptions.find(
-                              (option) => option.value === form.typeOfBusiness
-                            ) || null
-                          }
-                          onChange={(selectedOption) =>
-                            handleDropdownChange(
-                              "typeOfBusiness",
-                              selectedOption
-                            )
+                          value={businessTypeOptions.find(
+                            (o) => o.value === form.typeOfBusiness
+                          )}
+                          onChange={(opt) =>
+                            handleDropdownChange("typeOfBusiness", opt)
                           }
                           placeholder="Select Business Type"
+                          isSearchable
                         />
-                      </div>
+                      )}
                       {errors.typeOfBusiness && (
                         <p className="text-red-500 text-sm mt-1">
                           {errors.typeOfBusiness}
@@ -1043,20 +1095,24 @@ const Customer = () => {
                     {/* Medical Representative */}
                     <div>
                       <label className="block text-sm font-medium text-gray-600">
-                        Medical Representative
+                        Medical Representative{" "}
+                        <span className="text-red-500">*</span>
                       </label>
-                      <div className="rounded-lg">
+                      {isDropdownsLoading ? (
+                        <div className="px-3 py-2 bg-gray-100 rounded-lg text-gray-500">
+                          Loading...
+                        </div>
+                      ) : (
                         <SearchableDropdown
                           options={mrOptions}
-                          value={
-                            mrOptions.find(
-                              (option) => option.value === form.medicalRepId
-                            ) || null
-                          }
+                          value={mrOptions.find(
+                            (o) => o.value === form.medicalRepId
+                          )}
                           onChange={handleMRChange}
                           placeholder="Select MR"
+                          isSearchable
                         />
-                      </div>
+                      )}
                       {errors.medicalRepId && (
                         <p className="text-red-500 text-sm mt-1">
                           {errors.medicalRepId}
@@ -1075,29 +1131,29 @@ const Customer = () => {
                         onChange={(e) =>
                           handleChange("address", e.target.value)
                         }
-                        className="capitalize px-2 py-2 border-gray-300 border rounded-lg"
+                        className="capitalize px-3 py-2 border-gray-300 border rounded-lg w-full"
+                        placeholder="Enter address"
                       />
                     </div>
 
                     {/* Zone */}
                     <div>
                       <label className="block text-sm font-medium text-gray-600">
-                        Zone
+                        Zone <span className="text-red-500">*</span>
                       </label>
-                      <div className="rounded-lg">
+                      {isDropdownsLoading ? (
+                        <div className="px-3 py-2 bg-gray-100 rounded-lg text-gray-500">
+                          Loading...
+                        </div>
+                      ) : (
                         <SearchableDropdown
                           options={zoneOptions}
-                          value={
-                            zoneOptions.find(
-                              (option) => option.value === form.zone
-                            ) || null
-                          }
-                          onChange={(selectedOption) =>
-                            handleDropdownChange("zone", selectedOption)
-                          }
+                          value={zoneOptions.find((o) => o.value === form.zone)}
+                          onChange={(opt) => handleDropdownChange("zone", opt)}
                           placeholder="Select Zone"
+                          isSearchable
                         />
-                      </div>
+                      )}
                       {errors.zone && (
                         <p className="text-red-500 text-sm mt-1">
                           {errors.zone}
@@ -1108,22 +1164,25 @@ const Customer = () => {
                     {/* Province */}
                     <div>
                       <label className="block text-sm font-medium text-gray-600">
-                        Province
+                        Province <span className="text-red-500">*</span>
                       </label>
-                      <div className="rounded-lg">
+                      {isDropdownsLoading ? (
+                        <div className="px-3 py-2 bg-gray-100 rounded-lg text-gray-500">
+                          Loading...
+                        </div>
+                      ) : (
                         <SearchableDropdown
                           options={provinceOptions}
-                          value={
-                            provinceOptions.find(
-                              (option) => option.value === form.province
-                            ) || null
-                          }
-                          onChange={(selectedOption) =>
-                            handleDropdownChange("province", selectedOption)
+                          value={provinceOptions.find(
+                            (o) => o.value === form.province
+                          )}
+                          onChange={(opt) =>
+                            handleDropdownChange("province", opt)
                           }
                           placeholder="Select Province"
+                          isSearchable
                         />
-                      </div>
+                      )}
                       {errors.province && (
                         <p className="text-red-500 text-sm mt-1">
                           {errors.province}
@@ -1131,22 +1190,24 @@ const Customer = () => {
                       )}
                     </div>
 
-                    {/* Date */}
+                    {/* Joining Date */}
                     <div>
                       <label className="block text-sm font-medium text-gray-600">
-                        Joining Date
+                        Joining Date <span className="text-red-500">*</span>
                       </label>
-                      <div className="rounded-lg border-gray-300 border">
-                        <DatePicker
-                          selected={form.date ? new Date(form.date) : null}
-                          onChange={(date) =>
-                            handleChange("date", date ? date.toISOString() : "")
-                          }
-                          dateFormat="yyyy-MM-dd"
-                          placeholderText="Select date"
-                          className="w-full px-3 py-2 border-none rounded-lg focus:ring-0"
-                        />
-                      </div>
+                      <DatePicker
+                        selected={form.date ? new Date(form.date) : null}
+                        onChange={(date) =>
+                          handleChange(
+                            "date",
+                            date ? date.toISOString().split("T")[0] : ""
+                          )
+                        }
+                        dateFormat="yyyy-MM-dd"
+                        placeholderText="Select date"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                        isClearable
+                      />
                       {errors.date && (
                         <p className="text-red-500 text-sm mt-1">
                           {errors.date}
@@ -1159,20 +1220,16 @@ const Customer = () => {
                       <label className="block text-sm font-medium text-gray-600">
                         Remarks
                       </label>
-                      <div className="rounded-lg border-gray-300 border">
-                        <textarea
-                          value={form.remark}
-                          onChange={(e) =>
-                            handleChange("remark", e.target.value)
-                          }
-                          className="w-full rounded-lg border-gray-300 p-3"
-                          rows={3}
-                        />
-                      </div>
+                      <textarea
+                        value={form.remark}
+                        onChange={(e) => handleChange("remark", e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 p-3 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                        rows={3}
+                        placeholder="Enter any remarks"
+                      />
                     </div>
                   </div>
 
-                  {/* Action Buttons */}
                   <div className="mt-6 flex justify-end gap-3">
                     <button
                       type="button"
@@ -1180,15 +1237,15 @@ const Customer = () => {
                         setIsEditModalOpen(false);
                         resetForm();
                       }}
-                      className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                      className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg"
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
-                      className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+                      className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg"
                     >
-                      Update
+                      Update Customer
                     </button>
                   </div>
                 </form>
@@ -1196,7 +1253,6 @@ const Customer = () => {
             </div>,
             document.body
           )}
-    
       </div>
     </div>
   );
