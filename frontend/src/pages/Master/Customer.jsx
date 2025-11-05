@@ -63,8 +63,8 @@ const useCustomerForm = (initialCustomerCode = "") => {
   );
 
   const handleDropdownChange = useCallback(
-    (field, selectedOption) => {
-      const value = selectedOption ? selectedOption.value : "";
+    (field, option) => {
+      const value = option ? option.value : "";
       handleChange(field, value);
     },
     [handleChange]
@@ -152,11 +152,11 @@ const Customer = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
 
+  const [errors, setErrors] = useState({});
+
   const {
     form,
-    errors,
     handleChange,
-    handleDropdownChange,
     handleNumericInput,
     validateForm,
     resetForm,
@@ -258,7 +258,7 @@ const Customer = () => {
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
     });
-console.log('values of selected', selected);
+
     if (confirm.isConfirmed) {
       try {
         const res = await axios.delete(`${backendUrl}/api/customers`, {
@@ -362,10 +362,10 @@ console.log('values of selected', selected);
     }
   };
 
-  /* ──────── MR change (keeps name in sync) ──────── */
+  /* ──────── Dropdown Change Handlers ──────── */
   const handleMRChange = useCallback(
-    (selectedOption) => {
-      const mrId = selectedOption ? selectedOption.value : "";
+    (option) => {
+      const mrId = option ? option : "";
       const selectedMR = mrList.find((mr) => (mr._id || mr.id) === mrId);
       setForm((prev) => ({
         ...prev,
@@ -376,8 +376,38 @@ console.log('values of selected', selected);
           selectedMR?.staffName ||
           "",
       }));
+      if (errors.medicalRepId)
+        setErrors((prev) => ({ ...prev, medicalRepId: "" }));
     },
-    [mrList, setForm]
+    [mrList, errors]
+  );
+
+  const handleBusinessTypeChange = useCallback(
+    (option) => {
+      const value = option ? option : "";
+      setForm((prev) => ({ ...prev, typeOfBusiness: value }));
+      if (errors.typeOfBusiness)
+        setErrors((prev) => ({ ...prev, typeOfBusiness: "" }));
+    },
+    [errors]
+  );
+
+  const handleZoneChange = useCallback(
+    (option) => {
+      const value = option ? option : "";
+      setForm((prev) => ({ ...prev, zone: value }));
+      if (errors.zone) setErrors((prev) => ({ ...prev, zone: "" }));
+    },
+    [errors]
+  );
+
+  const handleProvinceChange = useCallback(
+    (option) => {
+      const value = option ? option : "";
+      setForm((prev) => ({ ...prev, province: value }));
+      if (errors.province) setErrors((prev) => ({ ...prev, province: "" }));
+    },
+    [errors]
   );
 
   /* ──────── Update ──────── */
@@ -419,7 +449,7 @@ console.log('values of selected', selected);
     }
   };
 
-  /* ──────── Import ──────── */
+  /* ──────── Import Logic ──────── */
   const handleImportClick = () => {
     if (!mrList.length) {
       showToast(
@@ -448,7 +478,6 @@ console.log('values of selected', selected);
           return;
         }
 
-        // Header detection
         const expectedHeaders = [
           "date",
           "medical representative name",
@@ -476,7 +505,6 @@ console.log('values of selected', selected);
         const headers = rows[headerIdx].map((h) => h.toString().trim());
         const dataRows = rows.slice(headerIdx + 1);
 
-        // Date parser
         const parseDate = (val) => {
           if (!val) return null;
           if (val instanceof Date && !isNaN(val)) return val;
@@ -489,30 +517,6 @@ console.log('values of selected', selected);
             if (!cleaned || cleaned.toUpperCase() === "N/A") return null;
             const parsed = new Date(cleaned);
             if (!isNaN(parsed)) return parsed;
-
-            const patterns = [
-              /^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/,
-              /^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/,
-              /^(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{2,4})$/,
-            ];
-            for (const p of patterns) {
-              const m = cleaned.match(p);
-              if (m) {
-                let day, month, year;
-                if (p === patterns[0]) [, day, month, year] = m;
-                else if (p === patterns[1]) [, year, month, day] = m;
-                else {
-                  [, day, month, year] = m;
-                  month = new Date(`${month} 1, 2000`).getMonth() + 1;
-                }
-                day = parseInt(day);
-                month = parseInt(month) - 1;
-                year = parseInt(year);
-                if (year < 100) year += 2000;
-                const d = new Date(year, month, day);
-                if (!isNaN(d)) return d;
-              }
-            }
           }
           return null;
         };
@@ -580,12 +584,12 @@ console.log('values of selected', selected);
     setTimeout(() => inputRef.current?.classList.remove("highlight"), 1000);
   };
 
-  /* ──────── Dropdown options (memoized) ──────── */
+  /* ──────── Dropdown Options (memoized) ──────── */
   const provinceOptions = useMemo(
     () =>
       provinces.map((p) => ({
-        value: p.name || p,
-        label: p.name || p,
+        value: p.name,
+        label: p.name,
       })),
     [provinces]
   );
@@ -619,11 +623,11 @@ console.log('values of selected', selected);
   );
 
   if (loading) return <p className="p-6">Loading...</p>;
-
+  console.log(businessTypeOptions.find((o) => o.value === form.typeOfBusiness)?.value);
   return (
     <div className="p-6">
       <div className="container">
-        {/* ──────── Header ──────── */}
+        {/* Header */}
         <div className="flex justify-between items-center mb-4">
           <div className="flex gap-3">
             <button
@@ -683,7 +687,7 @@ console.log('values of selected', selected);
           </div>
         </div>
 
-        {/* ──────── Table ──────── */}
+        {/* Table */}
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
           <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
             <thead className="bg-gray-100 text-gray-700 border-b">
@@ -801,7 +805,6 @@ console.log('values of selected', selected);
               >
                 Prev
               </button>
-
               {visiblePages.map((p) => (
                 <button
                   key={p}
@@ -815,7 +818,6 @@ console.log('values of selected', selected);
                   {p}
                 </button>
               ))}
-
               <button
                 onClick={() =>
                   setCurrentPage((p) => Math.min(p + 1, totalPages))
@@ -829,7 +831,7 @@ console.log('values of selected', selected);
           )}
         </div>
 
-        {/* ──────── Import Modal ──────── */}
+        {/* Import Modal */}
         {showImportModal &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
@@ -880,46 +882,38 @@ console.log('values of selected', selected);
             </div>,
             document.body
           )}
+
+        {/* View Modal */}
         {isViewModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
               <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
-                {/* Close Button */}
                 <button
                   onClick={() => setIsViewModalOpen(false)}
                   className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
                 >
                   <X size={20} />
                 </button>
-
                 <h2 className="text-xl font-semibold mb-4">View Customer</h2>
-
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Customer Code */}
                   <div>
                     <p className="text-gray-700 font-medium">Customer Code</p>
                     <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
                       {form.customerCode}
                     </p>
                   </div>
-
-                  {/* Name */}
                   <div>
                     <p className="text-gray-700 font-medium">Name</p>
                     <p className="capitalize bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
                       {form.name}
                     </p>
                   </div>
-
-                  {/* Customer Number */}
                   <div>
                     <p className="text-gray-700 font-medium">Customer Number</p>
                     <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
                       {form.customerNumber}
                     </p>
                   </div>
-
-                  {/* Type of Business */}
                   <div>
                     <p className="text-gray-700 font-medium">
                       Type of Business
@@ -928,8 +922,6 @@ console.log('values of selected', selected);
                       {form.typeOfBusiness}
                     </p>
                   </div>
-
-                  {/* Medical Representative */}
                   <div>
                     <p className="text-gray-700 font-medium">
                       Medical Representative
@@ -938,43 +930,32 @@ console.log('values of selected', selected);
                       {form.medicalRepName}
                     </p>
                   </div>
-
-                  {/* Address */}
                   <div>
                     <p className="text-gray-700 font-medium">Address</p>
                     <p className="capitalize bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
                       {form.address}
                     </p>
                   </div>
-
-                  {/* Zone */}
                   <div>
                     <p className="text-gray-700 font-medium">Zone</p>
                     <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
                       {form.zone}
                     </p>
                   </div>
-
-                  {/* Province */}
                   <div>
                     <p className="text-gray-700 font-medium">Province</p>
                     <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
                       {form.province}
                     </p>
                   </div>
-
-                  {/* Joining Date */}
                   <div>
                     <p className="text-gray-700 font-medium">Joining Date</p>
-                    <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300 ">
+                    <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
                       {form.date ? formatDateToReadable(form.date) : "-"}
                     </p>
                   </div>
-
-                  {/* Remarks */}
                   <div className="md:col-span-2">
                     <p className="text-gray-700 font-medium">Remarks</p>
-
                     <textarea
                       value={form.remark}
                       className="w-full rounded-lg border border-gray-300 p-3"
@@ -983,8 +964,6 @@ console.log('values of selected', selected);
                     />
                   </div>
                 </div>
-
-                {/* Close Button */}
                 <div className="mt-6 flex justify-end">
                   <button
                     onClick={() => setIsViewModalOpen(false)}
@@ -998,6 +977,7 @@ console.log('values of selected', selected);
             document.body
           )}
 
+        {/* Edit Modal */}
         {isEditModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
@@ -1066,30 +1046,20 @@ console.log('values of selected', selected);
                     {/* Type of Business */}
                     <div>
                       <label className="block text-sm font-medium text-gray-600">
-                        Type of Business <span className="text-red-500">*</span>
+                        Types of Business{" "}
+                        <span className="text-red-500">*</span>
                       </label>
-                      {isDropdownsLoading ? (
-                        <div className="px-3 py-2 bg-gray-100 rounded-lg text-gray-500">
-                          Loading...
-                        </div>
-                      ) : (
-                        <SearchableDropdown
-                          options={businessTypeOptions}
-                          value={businessTypeOptions.find(
-                            (o) => o.value === form.typeOfBusiness
-                          )}
-                          onChange={(opt) =>
-                            handleDropdownChange("typeOfBusiness", opt)
-                          }
-                          placeholder="Select Business Type"
-                          isSearchable
-                        />
-                      )}
-                      {errors.typeOfBusiness && (
-                        <p className="text-red-500 text-sm mt-1">
-                          {errors.typeOfBusiness}
-                        </p>
-                      )}
+                      <SearchableDropdown
+                        value={businessTypeOptions.find(
+                          (o) => o.value === form.typeOfBusiness
+                        )?.value}
+                        onChange={handleBusinessTypeChange}
+                        options={businessTypeOptions}
+                        placeholder="Select Business Type"
+                        required
+                        loading={isDropdownsLoading}
+                        error={errors.typeOfBusiness}
+                      />
                     </div>
 
                     {/* Medical Representative */}
@@ -1098,26 +1068,19 @@ console.log('values of selected', selected);
                         Medical Representative{" "}
                         <span className="text-red-500">*</span>
                       </label>
-                      {isDropdownsLoading ? (
-                        <div className="px-3 py-2 bg-gray-100 rounded-lg text-gray-500">
-                          Loading...
-                        </div>
-                      ) : (
-                        <SearchableDropdown
-                          options={mrOptions}
-                          value={mrOptions.find(
+                      <SearchableDropdown
+                        value={
+                          mrOptions.find(
                             (o) => o.value === form.medicalRepId
-                          )}
-                          onChange={handleMRChange}
-                          placeholder="Select MR"
-                          isSearchable
-                        />
-                      )}
-                      {errors.medicalRepId && (
-                        <p className="text-red-500 text-sm mt-1">
-                          {errors.medicalRepId}
-                        </p>
-                      )}
+                          )?.value
+                        }
+                        onChange={handleMRChange}
+                        options={mrOptions}
+                        placeholder="Select MR"
+                        required
+                        loading={isDropdownsLoading}
+                        error={errors.medicalRepId}
+                      />
                     </div>
 
                     {/* Address */}
@@ -1141,24 +1104,17 @@ console.log('values of selected', selected);
                       <label className="block text-sm font-medium text-gray-600">
                         Zone <span className="text-red-500">*</span>
                       </label>
-                      {isDropdownsLoading ? (
-                        <div className="px-3 py-2 bg-gray-100 rounded-lg text-gray-500">
-                          Loading...
-                        </div>
-                      ) : (
-                        <SearchableDropdown
-                          options={zoneOptions}
-                          value={zoneOptions.find((o) => o.value === form.zone)}
-                          onChange={(opt) => handleDropdownChange("zone", opt)}
-                          placeholder="Select Zone"
-                          isSearchable
-                        />
-                      )}
-                      {errors.zone && (
-                        <p className="text-red-500 text-sm mt-1">
-                          {errors.zone}
-                        </p>
-                      )}
+                      <SearchableDropdown
+                        value={
+                          zoneOptions.find((o) => o.value === form.zone)?.value
+                        }
+                        onChange={handleZoneChange}
+                        options={zoneOptions}
+                        placeholder="Select Zone"
+                        required
+                        loading={isDropdownsLoading}
+                        error={errors.zone}
+                      />
                     </div>
 
                     {/* Province */}
@@ -1166,28 +1122,19 @@ console.log('values of selected', selected);
                       <label className="block text-sm font-medium text-gray-600">
                         Province <span className="text-red-500">*</span>
                       </label>
-                      {isDropdownsLoading ? (
-                        <div className="px-3 py-2 bg-gray-100 rounded-lg text-gray-500">
-                          Loading...
-                        </div>
-                      ) : (
-                        <SearchableDropdown
-                          options={provinceOptions}
-                          value={provinceOptions.find(
-                            (o) => o.value === form.province
-                          )}
-                          onChange={(opt) =>
-                            handleDropdownChange("province", opt)
-                          }
-                          placeholder="Select Province"
-                          isSearchable
-                        />
-                      )}
-                      {errors.province && (
-                        <p className="text-red-500 text-sm mt-1">
-                          {errors.province}
-                        </p>
-                      )}
+                      <SearchableDropdown
+                        value={
+                          provinceOptions.find(
+                            (o) => o.label === form.province
+                          )?.value 
+                        }
+                        onChange={handleProvinceChange}
+                        options={provinceOptions}
+                        placeholder="Select Province"
+                        required
+                        loading={isDropdownsLoading}
+                        error={errors.province}
+                      />
                     </div>
 
                     {/* Joining Date */}

@@ -55,23 +55,39 @@ const SearchableDropdown = React.memo(
         )}
 
         <div className="relative w-full" ref={dropdownRef}>
-          <button
-            type="button"
-            disabled={disabled || loading}
-            onClick={() => !disabled && !loading && setIsOpen(!isOpen)}
+          {/* Main dropdown trigger - now looks like a select box */}
+          <div
             className={`w-full border rounded-md px-3 py-2 text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500
               ${error ? "border-red-500" : "border-gray-300"}
               ${disabled || loading
                 ? "bg-gray-100 cursor-not-allowed opacity-60"
                 : "bg-white cursor-pointer hover:border-gray-400"}
-              ${!value ? "text-gray-500" : "text-gray-900"}`}
+              ${!value ? "text-gray-500" : "text-gray-900"}
+              flex items-center justify-between`}
+            onClick={() => !disabled && !loading && setIsOpen(!isOpen)}
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if ((e.key === "Enter" || e.key === " ") && !disabled && !loading) {
+                setIsOpen(!isOpen);
+                e.preventDefault();
+              }
+            }}
           >
             {loading ? (
               <span className="text-gray-500">Loading...</span>
             ) : (
               <span className="truncate">{selectedOption ? selectedOption.label : placeholder}</span>
             )}
-          </button>
+            {/* Dropdown arrow */}
+            <svg 
+              className={`w-4 h-4 text-gray-500 transition-transform ${isOpen ? "rotate-180" : ""}`}
+              fill="none" 
+              stroke="currentColor" 
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
 
           {isOpen && !disabled && !loading && (
             <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-hidden">
@@ -96,19 +112,24 @@ const SearchableDropdown = React.memo(
               {/* Options List */}
               <div className="max-h-48 overflow-y-auto">
                 {filteredOptions.map((option) => (
-                  <button
+                  <div
                     key={option.value}
-                    type="button"
-                    onClick={() => !option.disabled && handleSelect(option.value)}
-                    className={`w-full px-3 py-2 text-left transition-colors duration-150
+                    className={`w-full px-3 py-2 text-left transition-colors duration-150 cursor-pointer
                       ${option.disabled
                         ? "text-gray-400 cursor-not-allowed bg-gray-50"
-                        : "hover:bg-blue-50 hover:text-blue-900 text-gray-900 cursor-pointer"}
+                        : "hover:bg-blue-50 hover:text-blue-900 text-gray-900"}
                       ${value === option.value ? "bg-blue-100 text-blue-900 font-medium" : ""}`}
-                    disabled={option.disabled}
+                    onClick={() => !option.disabled && handleSelect(option.value)}
+                    onKeyDown={(e) => {
+                      if ((e.key === "Enter" || e.key === " ") && !option.disabled) {
+                        handleSelect(option.value);
+                        e.preventDefault();
+                      }
+                    }}
+                    tabIndex={option.disabled ? -1 : 0}
                   >
                     {option.label}
-                  </button>
+                  </div>
                 ))}
               </div>
             </div>

@@ -4,31 +4,47 @@ import Province from "../../models/master/Province.js";
 
 const router = express.Router();
 
-// ✅ Utility: Common error handler
+/* ────────────────────── PARAM VALIDATION ────────────────────── */
+router.param("id", (req, res, next, id) => {
+  if (!/^[0-9a-fA-F]{24}$/.test(id)) {
+    return res.status(400).json({
+      message: "Invalid customer ID format",
+      ok: false,
+    });
+  }
+  next();
+});
+
+/* ────────────────────── UTILITIES ────────────────────── */
 const handleServerError = (res, err, message = "Server error", code = 500) => {
-  console.error("❌ [ERROR]:", err);
-  res.status(code).json({ message, error: err.message || err });
+  console.error("ERROR:", err);
+  res.status(code).json({ message, error: err.message || err, ok: false });
 };
 
-// ✅ Utility: Duplicate key error handler
 const handleDuplicateError = (res, err) => {
-  let duplicateField = "field";
-  let duplicateValue = "value";
+  let field = "field";
+  let value = "Unknown";
 
   try {
-    duplicateField = Object.keys(err.keyPattern || {})[0];
-    duplicateValue = err.keyValue?.[duplicateField] || "Unknown";
-  } catch (parseErr) {
-    console.error("❌ Error parsing duplicate key info:", parseErr);
+    field = Object.keys(err.keyPattern || {})[0];
+    value = err.keyValue?.[field] || "Unknown";
+  } catch (e) {
+    console.error("Parse duplicate error failed:", e);
   }
 
   return res.status(400).json({
-    message: `A customer with this ${duplicateField} <b style="color:#EF4444">${duplicateValue}</b> already exists.`,
-    field: duplicateField,
+    message: `A customer with this ${field} <b style="color:#EF4444">${value}</b> already exists.`,
+    field,
     ok: false,
   });
 };
-// ✅ POST import multiple customers from Excel
+
+/* ────────────────────── HELPER: Safe String ────────────────────── */
+const safeStr = (val) => (val == null ? "" : String(val).trim());
+
+/* ────────────────────── ROUTES ────────────────────── */
+
+// 1. POST: Import multiple customers
 router.post("/customers/import", async (req, res) => {
   try {
     const customers = req.body;
@@ -40,41 +56,71 @@ router.post("/customers/import", async (req, res) => {
       });
     }
 
-    // ✅ Find last customerCode in DB to continue incrementing
+    // Get last customer code
     const lastCustomer = await Customer.findOne({})
       .sort({ createdAt: -1 })
       .select("customerCode");
 
     let nextCode = 1;
-    if (lastCustomer && lastCustomer.customerCode) {
+    if (lastCustomer?.customerCode) {
       const parsed = parseInt(lastCustomer.customerCode, 10);
       if (!isNaN(parsed)) nextCode = parsed + 1;
     }
 
-    const newCustomers = customers.map((item, index) => ({
-      customerCode: (nextCode + index).toString().padStart(4, "0"),
+    // Convert all fields to safe strings
+    const newCustomers = customers.map((item, idx) => ({
+      customerCode: (nextCode + idx).toString().padStart(4, "0"),
       date: item.date ? new Date(item.date) : new Date(),
-      medicalRepName: item.medicalRepName || "",
-      name: item.name || "",
-      typeOfBusiness: item.typeOfBusiness || "",
-      customerNumber: item.customerNumber || "",
-      address: item.customerAddress || "",
-      zone: item.zone || "",
-      province: item.province || "",
-      remark: item.remark || "",
+      medicalRepName: safeStr(item.medicalRepName),
+      name: safeStr(item.name),
+      typeOfBusiness: safeStr(item.typeOfBusiness),
+      customerNumber: safeStr(item.customerNumber),
+      address: safeStr(item.customerAddress),
+      zone: safeStr(item.zone),
+      province: safeStr(item.province),
+      remark: safeStr(item.remark),
       isNew: true,
       enabled: true,
     }));
 
-    // ✅ Bulk insert with duplicate filtering
+    // Filter out empty names
+    const validCustomers = newCustomers.filter(c => c.name);
+
+    if (validCustomers.length === 0) {
+      return res.status(400).json({
+        message: "No valid customers to import (missing names).",
+        ok: false,
+      });
+    }
+
+    // Check duplicate customer numbers
+    const importedNumbers = validCustomers
+      .map(c => c.customerNumber)
+      .filter(n => n);
+
+    if (importedNumbers.length > 0) {
+      const existing = await Customer.find({
+        customerNumber: { $in: importedNumbers }
+      }).select("customerNumber name");
+
+      if (existing.length > 0) {
+        const dup = existing[0];
+        return res.status(400).json({
+          message: `Customer with mobile number <b style="color:#EF4444">${dup.customerNumber}</b> already exists.`,
+          duplicateNumber: dup.customerNumber,
+          existingCustomer: dup.name,
+          ok: false,
+        });
+      }
+    }
+
+    // Check duplicate names
     const existingNames = await Customer.find({
-      name: { $in: newCustomers.map((c) => c.name) },
+      name: { $in: validCustomers.map(c => c.name) }
     }).select("name");
 
-    const existingNameSet = new Set(existingNames.map((c) => c.name));
-    const uniqueCustomers = newCustomers.filter(
-      (c) => !existingNameSet.has(c.name)
-    );
+    const existingNameSet = new Set(existingNames.map(c => c.name));
+    const uniqueCustomers = validCustomers.filter(c => !existingNameSet.has(c.name));
 
     if (uniqueCustomers.length === 0) {
       return res.status(400).json({
@@ -88,27 +134,123 @@ router.post("/customers/import", async (req, res) => {
     res.status(200).json({
       message: `${inserted.length} customer(s) imported successfully.`,
       importedCount: inserted.length,
-      skippedCount: newCustomers.length - inserted.length,
+      skippedCount: validCustomers.length - inserted.length,
       ok: true,
     });
   } catch (err) {
-    console.error("❌ Import Error:", err);
-    res.status(500).json({
-      message: "Failed to import customers.",
-      error: err.message,
-      ok: false,
-    });
+    if (err.code === 11000) {
+      if (err.keyPattern?.customerNumber) {
+        return res.status(400).json({
+          message: `Customer with mobile number <b style="color:#EF4444">${err.keyValue.customerNumber}</b> already exists.`,
+          duplicateNumber: err.keyValue.customerNumber,
+          ok: false,
+        });
+      }
+      return handleDuplicateError(res, err);
+    }
+
+    handleServerError(res, err, "Failed to import customers");
   }
 });
 
+// 2. POST: Create new customer
+router.post("/customers", async (req, res) => {
+  try {
+    const { customerNumber, ...data } = req.body;
+
+    const cleanNumber = customerNumber ? safeStr(customerNumber) : "";
+
+    if (cleanNumber) {
+      const exists = await Customer.findOne({ customerNumber: cleanNumber });
+      if (exists) {
+        return res.status(400).json({
+          message: `Customer with mobile number <b style="color:#EF4444">${cleanNumber}</b> already exists.`,
+          duplicateNumber: cleanNumber,
+          existingCustomer: exists.name,
+          ok: false,
+        });
+      }
+    }
+
+    const customer = new Customer({ ...data, customerNumber: cleanNumber });
+    const saved = await customer.save();
+
+    res.status(201).json({
+      message: `Customer <b>${saved.name}</b> created with code <b>${saved.customerCode}</b>`,
+      customer: saved,
+      ok: true,
+    });
+  } catch (err) {
+    if (err.code === 11000) {
+      if (err.keyPattern?.customerNumber) {
+        return res.status(400).json({
+          message: `Customer with mobile number <b style="color:#EF4444">${err.keyValue.customerNumber}</b> already exists.`,
+          duplicateNumber: err.keyValue.customerNumber,
+          ok: false,
+        });
+      }
+      return handleDuplicateError(res, err);
+    }
+    res.status(400).json({ message: "Invalid data", error: err.message, ok: false });
+  }
+});
+
+// 3. PUT: Update customer
+router.put("/customers/:id", async (req, res) => {
+  try {
+    const { customerNumber, ...updateData } = req.body;
+    const cleanNumber = customerNumber ? safeStr(customerNumber) : "";
+
+    if (cleanNumber) {
+      const exists = await Customer.findOne({
+        customerNumber: cleanNumber,
+        _id: { $ne: req.params.id }
+      });
+      if (exists) {
+        return res.status(400).json({
+          message: `Customer with mobile number <b style="color:#EF4444">${cleanNumber}</b> already exists.`,
+          duplicateNumber: cleanNumber,
+          existingCustomer: exists.name,
+          ok: false,
+        });
+      }
+    }
+
+    const updated = await Customer.findByIdAndUpdate(
+      req.params.id,
+      { ...updateData, customerNumber: cleanNumber },
+      { new: true, runValidators: true }
+    );
+
+    if (!updated) {
+      return res.status(404).json({ message: "Customer not found", ok: false });
+    }
+
+    res.json({ customer: updated, ok: true });
+  } catch (err) {
+    if (err.code === 11000) {
+      if (err.keyPattern?.customerNumber) {
+        return res.status(400).json({
+          message: `Customer with mobile number <b style="color:#EF4444">${err.keyValue.customerNumber}</b> already exists.`,
+          duplicateNumber: err.keyValue.customerNumber,
+          ok: false,
+        });
+      }
+      return handleDuplicateError(res, err);
+    }
+    res.status(400).json({ message: "Invalid data", error: err.message, ok: false });
+  }
+});
+
+// 4. GET: All customers + next code
 router.get("/customers", async (req, res) => {
   try {
-    const customers = await Customer.find();
+    const customers = await Customer.find().sort({ createdAt: -1 });
 
     const agg = await Customer.aggregate([
       {
         $project: {
-          customerCodeNumeric: {
+          codeNum: {
             $convert: {
               input: { $trim: { input: "$customerCode" } },
               to: "int",
@@ -118,48 +260,34 @@ router.get("/customers", async (req, res) => {
           },
         },
       },
-      {
-        $sort: { customerCodeNumeric: -1 },
-      },
-      {
-        $limit: 1,
-      },
+      { $sort: { codeNum: -1 } },
+      { $limit: 1 },
     ]);
 
     let nextCode = 1;
-    if (agg.length > 0 && typeof agg[0].customerCodeNumeric === "number") {
-      nextCode = agg[0].customerCodeNumeric + 1;
-    }
+    if (agg[0]?.codeNum) nextCode = agg[0].codeNum + 1;
 
     res.json({
       customers,
-      nextCustomerCode: nextCode.toString(),
+      nextCustomerCode: nextCode.toString().padStart(4, "0"),
+      ok: true,
     });
   } catch (err) {
     handleServerError(res, err);
   }
 });
 
-// ✅ GET provinces - MOVE THIS BEFORE THE :id ROUTE
+// 5. GET: Provinces
 router.get("/customers/provinces", async (req, res) => {
   try {
     const provinces = await Province.find({ isActive: true }).sort({ name: 1 });
-
-    res.json({
-      success: true,
-      data: provinces,
-    });
-  } catch (error) {
-    console.error("Error fetching provinces:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch provinces",
-      error: error.message,
-    });
+    res.json({ success: true, data: provinces });
+  } catch (err) {
+    handleServerError(res, err, "Failed to fetch provinces");
   }
 });
 
-// ✅ GET customers by province
+// 6. GET: By province
 router.get("/customers/province/:province", async (req, res) => {
   try {
     const { province } = req.params;
@@ -172,92 +300,53 @@ router.get("/customers/province/:province", async (req, res) => {
       data: customers,
       count: customers.length,
     });
-  } catch (error) {
-    handleServerError(res, error, "Failed to fetch customers by province");
+  } catch (err) {
+    handleServerError(res, err, "Failed to fetch customers by province");
   }
 });
 
-// ✅ GET customer by ID
+// 7. GET: By ID
 router.get("/customers/:id", async (req, res) => {
   try {
     const customer = await Customer.findById(req.params.id);
     if (!customer) {
-      return res.status(404).json({ message: "Customer not found" });
+      return res.status(404).json({ message: "Customer not found", ok: false });
     }
-    res.json(customer);
+    res.json({ customer, ok: true });
   } catch (err) {
+    if (err.name === "CastError") {
+      return res.status(400).json({ message: "Invalid customer ID", ok: false });
+    }
     handleServerError(res, err);
   }
 });
 
-// ✅ POST create new customer
-// ✅ POST create new customer
-router.post("/customers", async (req, res) => {
-  try {
-    // Remove any user-sent customerCode (security)
-    const { ...cleanData } = req.body;
-
-    const newCustomer = new Customer(cleanData);
-    const savedCustomer = await newCustomer.save();
-
-    res.status(201).json({
-      message: `Customer <b>${savedCustomer.name}</b> created successfully with code <b>${savedCustomer.customerCode}</b>`,
-      customer: savedCustomer,
-      ok: true,
-    });
-  } catch (err) {
-    if (err.code === 11000) return handleDuplicateError(res, err);
-    res.status(400).json({
-      message: "Invalid data provided",
-      error: err.message,
-      ok: false,
-    });
-  }
-});
-
-// ✅ PUT update customer
-router.put("/customers/:id", async (req, res) => {
-  try {
-    const updatedCustomer = await Customer.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true, runValidators: true }
-    );
-    if (!updatedCustomer) {
-      return res.status(404).json({ message: "Customer not found" });
-    }
-    res.json(updatedCustomer);
-  } catch (err) {
-    res.status(400).json({ message: "Invalid data", error: err.message });
-  }
-});
-
-// ✅ DELETE single customer
+// 8. DELETE: Single
 router.delete("/customers/:id", async (req, res) => {
   try {
-    const deletedCustomer = await Customer.findByIdAndDelete(req.params.id);
-    if (!deletedCustomer) {
-      return res.status(404).json({ message: "Customer not found" });
+    const deleted = await Customer.findByIdAndDelete(req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ message: "Customer not found", ok: false });
     }
-    res.json({ message: "Customer deleted successfully" });
+    res.json({ message: "Customer deleted successfully", ok: true });
   } catch (err) {
     handleServerError(res, err);
   }
 });
 
-// ✅ DELETE multiple customers
+// 9. DELETE: Multiple
 router.delete("/customers", async (req, res) => {
   try {
-    const ids = req.body.ids; // <- directly use the array of strings
+    const { ids } = req.body;
     if (!Array.isArray(ids) || ids.length === 0) {
-      return res.status(400).json({ message: "No customer IDs provided" });
+      return res.status(400).json({ message: "No IDs provided", ok: false });
     }
 
     const result = await Customer.deleteMany({ _id: { $in: ids } });
-    console.log("result:", result);
-
     res.json({
-      message: `${result.deletedCount} customer(s) deleted successfully`,
+      message: `${result.deletedCount} customer(s) deleted`,
+      deletedCount: result.deletedCount,
+      ok: true,
     });
   } catch (err) {
     handleServerError(res, err);
