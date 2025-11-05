@@ -628,7 +628,9 @@ const Customer = () => {
       }),
     [businessTypes]
   );
-  console.log(mrOptions.find((o) => o.label === form.medicalRepName)?.label);
+  console.log('values of mr', mrOptions);
+  console.log('valu esof form', form);
+  console.log('vlaues of businessTypeOptions', businessTypeOptions);
 
   if (loading) return <p className="p-6">Loading...</p>;
 
@@ -1058,14 +1060,13 @@ const Customer = () => {
                         <span className="text-red-500">*</span>
                       </label>
                       <SearchableDropdown
-                        value={
-                          mrOptions.find(
-                            (o) => o.value === form.medicalRepId
-                          ) || null
+                        value ={
+                          businessTypeOptions.find((o) => o.value === form.typeOfBusiness)
+                            ?.label
                         }
                         onChange={handleMRChange}
-                        options={mrOptions}
-                        placeholder="Select MR"
+                        options={businessTypeOptions}
+                        placeholder="Select Business Type"
                         required
                         loading={isDropdownsLoading}
                         error={errors.medicalRepId}
