@@ -151,7 +151,6 @@ const Customer = () => {
   // Modal states
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-
   const [errors, setErrors] = useState({});
 
   const {
@@ -313,7 +312,7 @@ const Customer = () => {
       if (!actualMrId && customer.medicalRepName && mrList.length) {
         const found = mrList.find(
           (mr) =>
-            (mr.medicalRepName || mr.name || "").toLowerCase() ===
+            (mr.medicalRepName || mr.staffName || "").toLowerCase() ===
             customer.medicalRepName.toLowerCase()
         );
         actualMrId = found?._id || found?.id || "";
@@ -365,15 +364,15 @@ const Customer = () => {
   /* ──────── Dropdown Change Handlers ──────── */
   const handleMRChange = useCallback(
     (option) => {
-      const mrId = option ? option : "";
+      const mrId = option ? option.value : "";
       const selectedMR = mrList.find((mr) => (mr._id || mr.id) === mrId);
       setForm((prev) => ({
         ...prev,
         medicalRepId: mrId,
         medicalRepName:
           selectedMR?.medicalRepName ||
-          selectedMR?.name ||
           selectedMR?.staffName ||
+          selectedMR?.name ||
           "",
       }));
       if (errors.medicalRepId)
@@ -530,15 +529,22 @@ const Customer = () => {
           .filter((o) => Object.values(o).some((v) => v !== ""));
 
         const final = json.map((i) => ({
-          date: parseDate(i["Date"]),
-          medicalRepName: i["Medical Representative Name"] || "",
-          name: i["Customer Name in English"] || "",
-          typeOfBusiness: i["Types of Business"] || "",
-          customerNumber: i["Customer Number"] || "",
-          customerAddress: i["Customer Address"] || "",
-          zone: i["Zone"] || "",
-          province: i["Province"] || "",
-          remark: i["Remark"] || "",
+          date: parseDate(i["Date"] || i["date"]),
+          medicalRepName:
+            i["Medical Representative Name"] ||
+            i["medical representative name"] ||
+            "",
+          name:
+            i["Customer Name in English"] ||
+            i["customer name in english"] ||
+            "",
+          typeOfBusiness:
+            i["Types of Business"] || i["types of business"] || "",
+          customerNumber: i["Customer Number"] || i["customer number"] || "",
+          customerAddress: i["Customer Address"] || i["customer address"] || "",
+          zone: i["Zone"] || i["zone"] || "",
+          province: i["Province"] || i["province"] || "",
+          remark: i["Remark"] || i["remark"] || "",
         }));
 
         setParsedData(final);
@@ -572,7 +578,8 @@ const Customer = () => {
         fetchCustomers();
       }
     } catch (err) {
-      showToast("error", "Import failed");
+      const msg = err.response?.data?.message || "Import failed";
+      showToast("error", msg);
     } finally {
       setIsUploading(false);
     }
@@ -598,7 +605,7 @@ const Customer = () => {
     () =>
       mrList.map((mr) => {
         const id = mr._id || mr.id || "";
-        const name = mr.medicalRepName || mr.name || mr.staffName || "Unknown";
+        const name = mr.medicalRepName || mr.staffName || mr.name || "Unknown";
         return { value: id, label: name };
       }),
     [mrList]
@@ -621,9 +628,10 @@ const Customer = () => {
       }),
     [businessTypes]
   );
+  console.log(mrOptions.find((o) => o.label === form.medicalRepName)?.label);
 
   if (loading) return <p className="p-6">Loading...</p>;
-  console.log(businessTypeOptions.find((o) => o.value === form.typeOfBusiness)?.value);
+
   return (
     <div className="p-6">
       <div className="container">
@@ -1050,15 +1058,17 @@ const Customer = () => {
                         <span className="text-red-500">*</span>
                       </label>
                       <SearchableDropdown
-                        value={businessTypeOptions.find(
-                          (o) => o.value === form.typeOfBusiness
-                        )?.value}
-                        onChange={handleBusinessTypeChange}
-                        options={businessTypeOptions}
-                        placeholder="Select Business Type"
+                        value={
+                          mrOptions.find(
+                            (o) => o.value === form.medicalRepId
+                          ) || null
+                        }
+                        onChange={handleMRChange}
+                        options={mrOptions}
+                        placeholder="Select MR"
                         required
                         loading={isDropdownsLoading}
-                        error={errors.typeOfBusiness}
+                        error={errors.medicalRepId}
                       />
                     </div>
 
@@ -1070,9 +1080,8 @@ const Customer = () => {
                       </label>
                       <SearchableDropdown
                         value={
-                          mrOptions.find(
-                            (o) => o.value === form.medicalRepId
-                          )?.value
+                          mrOptions.find((o) => o.value === form.medicalRepName)
+                            ?.label
                         }
                         onChange={handleMRChange}
                         options={mrOptions}
@@ -1106,7 +1115,8 @@ const Customer = () => {
                       </label>
                       <SearchableDropdown
                         value={
-                          zoneOptions.find((o) => o.value === form.zone)?.value
+                          zoneOptions.find((o) => o.value === form.zone)
+                            ?.value || null
                         }
                         onChange={handleZoneChange}
                         options={zoneOptions}
@@ -1124,9 +1134,8 @@ const Customer = () => {
                       </label>
                       <SearchableDropdown
                         value={
-                          provinceOptions.find(
-                            (o) => o.label === form.province
-                          )?.value 
+                          provinceOptions.find((o) => o.value === form.province)
+                            ?.value || null
                         }
                         onChange={handleProvinceChange}
                         options={provinceOptions}
