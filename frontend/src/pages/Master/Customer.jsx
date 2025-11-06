@@ -364,16 +364,13 @@ const Customer = () => {
   /* ──────── Dropdown Change Handlers ──────── */
   const handleMRChange = useCallback(
     (option) => {
-      const mrId = option ? option.value : "";
-      const selectedMR = mrList.find((mr) => (mr._id || mr.id) === mrId);
+      const mrId = option ? option : "";
+      const selectedMR = mrList.find((mr) => (mr._id === mrId));
       setForm((prev) => ({
         ...prev,
         medicalRepId: mrId,
         medicalRepName:
-          selectedMR?.medicalRepName ||
-          selectedMR?.staffName ||
-          selectedMR?.name ||
-          "",
+          selectedMR?.medicalRepName,
       }));
       if (errors.medicalRepId)
         setErrors((prev) => ({ ...prev, medicalRepId: "" }));
@@ -604,8 +601,8 @@ const Customer = () => {
   const mrOptions = useMemo(
     () =>
       mrList.map((mr) => {
-        const id = mr._id || mr.id || "";
-        const name = mr.medicalRepName || mr.staffName || mr.name || "Unknown";
+        const id = mr._id;
+        const name = mr.medicalRepName;
         return { value: id, label: name };
       }),
     [mrList]
@@ -628,9 +625,6 @@ const Customer = () => {
       }),
     [businessTypes]
   );
-  console.log('values of mr', mrOptions);
-  console.log('valu esof form', form);
-  console.log('vlaues of businessTypeOptions', businessTypeOptions);
 
   if (loading) return <p className="p-6">Loading...</p>;
 
@@ -1060,16 +1054,13 @@ const Customer = () => {
                         <span className="text-red-500">*</span>
                       </label>
                       <SearchableDropdown
-                        value ={
-                          businessTypeOptions.find((o) => o.value === form.typeOfBusiness)
-                            ?.label
-                        }
-                        onChange={handleMRChange}
+                        value={form.typeOfBusiness}
+                        onChange={handleBusinessTypeChange}
                         options={businessTypeOptions}
                         placeholder="Select Business Type"
                         required
                         loading={isDropdownsLoading}
-                        error={errors.medicalRepId}
+                        error={errors.typeOfBusiness}
                       />
                     </div>
 
@@ -1080,10 +1071,7 @@ const Customer = () => {
                         <span className="text-red-500">*</span>
                       </label>
                       <SearchableDropdown
-                        value={
-                          mrOptions.find((o) => o.value === form.medicalRepName)
-                            ?.label
-                        }
+                        value={form.medicalRepId}
                         onChange={handleMRChange}
                         options={mrOptions}
                         placeholder="Select MR"
@@ -1115,10 +1103,7 @@ const Customer = () => {
                         Zone <span className="text-red-500">*</span>
                       </label>
                       <SearchableDropdown
-                        value={
-                          zoneOptions.find((o) => o.value === form.zone)
-                            ?.value || null
-                        }
+                        value={form.zone}
                         onChange={handleZoneChange}
                         options={zoneOptions}
                         placeholder="Select Zone"
@@ -1134,10 +1119,7 @@ const Customer = () => {
                         Province <span className="text-red-500">*</span>
                       </label>
                       <SearchableDropdown
-                        value={
-                          provinceOptions.find((o) => o.value === form.province)
-                            ?.value || null
-                        }
+                        value={form.province}
                         onChange={handleProvinceChange}
                         options={provinceOptions}
                         placeholder="Select Province"
