@@ -17,10 +17,9 @@ import "react-datepicker/dist/react-datepicker.css";
 import ReactDOM from "react-dom";
 import { getVisiblePages } from "../../utils/useVisiblePages";
 import SampleExcelDownloadCustomer from "../../excels/SampleExcelDownloadCustomer";
-
-// Import reusable components
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import InputField from "../../components/common/InputField";
+import { parseExcelDate } from "../../utils/excelUtility";
 
 // Import API functions
 import {
@@ -365,12 +364,11 @@ const Customer = () => {
   const handleMRChange = useCallback(
     (option) => {
       const mrId = option ? option : "";
-      const selectedMR = mrList.find((mr) => (mr._id === mrId));
+      const selectedMR = mrList.find((mr) => mr._id === mrId);
       setForm((prev) => ({
         ...prev,
         medicalRepId: mrId,
-        medicalRepName:
-          selectedMR?.medicalRepName,
+        medicalRepName: selectedMR?.medicalRepName,
       }));
       if (errors.medicalRepId)
         setErrors((prev) => ({ ...prev, medicalRepId: "" }));
@@ -501,22 +499,6 @@ const Customer = () => {
         const headers = rows[headerIdx].map((h) => h.toString().trim());
         const dataRows = rows.slice(headerIdx + 1);
 
-        const parseDate = (val) => {
-          if (!val) return null;
-          if (val instanceof Date && !isNaN(val)) return val;
-          if (typeof val === "number") {
-            const d = new Date(Math.round((val - 25569) * 86400 * 1000));
-            if (!isNaN(d)) return d;
-          }
-          if (typeof val === "string") {
-            const cleaned = val.trim();
-            if (!cleaned || cleaned.toUpperCase() === "N/A") return null;
-            const parsed = new Date(cleaned);
-            if (!isNaN(parsed)) return parsed;
-          }
-          return null;
-        };
-
         const json = dataRows
           .map((row) => {
             const obj = {};
@@ -525,24 +507,29 @@ const Customer = () => {
           })
           .filter((o) => Object.values(o).some((v) => v !== ""));
 
-        const final = json.map((i) => ({
-          date: parseDate(i["Date"] || i["date"]),
-          medicalRepName:
-            i["Medical Representative Name"] ||
-            i["medical representative name"] ||
-            "",
-          name:
-            i["Customer Name in English"] ||
-            i["customer name in english"] ||
-            "",
-          typeOfBusiness:
-            i["Types of Business"] || i["types of business"] || "",
-          customerNumber: i["Customer Number"] || i["customer number"] || "",
-          customerAddress: i["Customer Address"] || i["customer address"] || "",
-          zone: i["Zone"] || i["zone"] || "",
-          province: i["Province"] || i["province"] || "",
-          remark: i["Remark"] || i["remark"] || "",
-        }));
+        const final = json.map((i) => {
+          const parsedDate = parseExcelDate(i["Date"] || i["date"]);
+
+          return {
+            date: parsedDate ? parsedDate.toISOString().split("T")[0] : "",
+            medicalRepName:
+              i["Medical Representative Name"] ||
+              i["medical representative name"] ||
+              "",
+            name:
+              i["Customer Name in English"] ||
+              i["customer name in english"] ||
+              "",
+            typeOfBusiness:
+              i["Types of Business"] || i["types of business"] || "",
+            customerNumber: i["Customer Number"] || i["customer number"] || "",
+            customerAddress:
+              i["Customer Address"] || i["customer address"] || "",
+            zone: i["Zone"] || i["zone"] || "",
+            province: i["Province"] || i["province"] || "",
+            remark: i["Remark"] || i["remark"] || "",
+          };
+        });
 
         setParsedData(final);
       } catch (err) {
@@ -635,7 +622,7 @@ const Customer = () => {
         <div className="flex justify-between items-center mb-4">
           <div className="flex gap-3">
             <button
-              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md"
+              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
               onClick={() =>
                 navigate("/masterlayout/customer/new", {
                   state: { customerCode: nextCustomerCode },
@@ -647,14 +634,14 @@ const Customer = () => {
 
             <button
               onClick={handleImportClick}
-              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md"
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
             >
               <Upload size={18} /> Import Customer
             </button>
 
             {selected.length > 0 && (
               <button
-                className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md"
+                className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
                 onClick={handleDeleteSelected}
               >
                 <Trash2 size={18} /> Delete
@@ -772,21 +759,21 @@ const Customer = () => {
                     </td>
                     <td className="p-3 flex items-center justify-center gap-3">
                       <button
-                        className="text-blue-600 hover:text-blue-800"
+                        className="text-blue-600 hover:text-blue-800 cursor-pointer"
                         onClick={() => handleView(customer)}
                         title="View"
                       >
                         <Eye size={18} />
                       </button>
                       <button
-                        className="text-green-600 hover:text-green-800"
+                        className="text-green-600 hover:text-green-800 cursor-pointer"
                         onClick={() => handleEdit(customer)}
                         title="Edit"
                       >
                         <Edit size={18} />
                       </button>
                       <button
-                        className="text-red-600 hover:text-red-800"
+                        className="text-red-600 hover:text-red-800 cursor-pointer"
                         onClick={() => deleteCustomer(customer)}
                         title="Delete"
                       >
@@ -805,7 +792,7 @@ const Customer = () => {
               <button
                 onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
                 disabled={currentPage === 1}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
+                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
               >
                 Prev
               </button>
@@ -813,7 +800,7 @@ const Customer = () => {
                 <button
                   key={p}
                   onClick={() => setCurrentPage(p)}
-                  className={`px-3 py-1 rounded ${
+                  className={`px-3 py-1 rounded cursor-pointer ${
                     currentPage === p
                       ? "bg-indigo-600 text-white"
                       : "bg-gray-200 hover:bg-gray-300"
@@ -827,7 +814,7 @@ const Customer = () => {
                   setCurrentPage((p) => Math.min(p + 1, totalPages))
                 }
                 disabled={currentPage === totalPages}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50"
+                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
               >
                 Next
               </button>
@@ -843,7 +830,7 @@ const Customer = () => {
                 <button
                   onClick={() => setShowImportModal(false)}
                   disabled={isUploading}
-                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
                 >
                   <X size={20} />
                 </button>
@@ -862,7 +849,7 @@ const Customer = () => {
                   <button
                     onClick={() => setShowImportModal(false)}
                     disabled={isUploading}
-                    className={`px-5 py-2 rounded-lg ${
+                    className={`px-5 py-2 rounded-lg cursor-pointer ${
                       isUploading
                         ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                         : "bg-gray-300 hover:bg-gray-400 text-gray-700"
@@ -873,7 +860,7 @@ const Customer = () => {
                   <button
                     onClick={handleCustomerImport}
                     disabled={isUploading}
-                    className={`px-5 py-2 rounded-lg ${
+                    className={`px-5 py-2 rounded-lg cursor-pointer ${
                       isUploading
                         ? "bg-blue-400 text-white cursor-not-allowed"
                         : "bg-blue-600 hover:bg-blue-700 text-white"
@@ -894,7 +881,7 @@ const Customer = () => {
               <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
                 <button
                   onClick={() => setIsViewModalOpen(false)}
-                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
                 >
                   <X size={20} />
                 </button>
@@ -971,7 +958,7 @@ const Customer = () => {
                 <div className="mt-6 flex justify-end">
                   <button
                     onClick={() => setIsViewModalOpen(false)}
-                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg"
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
                   >
                     Close
                   </button>
@@ -991,7 +978,7 @@ const Customer = () => {
                     setIsEditModalOpen(false);
                     resetForm();
                   }}
-                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
                 >
                   <X size={20} />
                 </button>
@@ -1176,13 +1163,13 @@ const Customer = () => {
                         setIsEditModalOpen(false);
                         resetForm();
                       }}
-                      className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg"
+                      className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
-                      className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg"
+                      className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
                     >
                       Update Customer
                     </button>

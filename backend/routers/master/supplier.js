@@ -179,7 +179,7 @@ const excelDateToJSDate = (value) => {
 router.post("/suppliers/import", async (req, res) => {
   try {
     const suppliers = req.body;
-    console.log("values of supplier", suppliers);
+
     if (!Array.isArray(suppliers) || suppliers.length === 0) {
       return res.status(400).json({
         message: "Invalid or empty data. Expected an array of suppliers.",
@@ -260,7 +260,7 @@ router.post("/suppliers/import", async (req, res) => {
     }
 
     return res.status(200).json({
-      message: `✅ ${
+      message: `${
         results.filter((r) => r.status === "created").length
       } supplier(s) imported successfully.`,
       results,

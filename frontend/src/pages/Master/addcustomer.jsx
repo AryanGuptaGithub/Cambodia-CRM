@@ -41,15 +41,6 @@ const useCustomerForm = (initialCustomerCode = "") => {
   const navigate = useNavigate();
   const isMrListEmptyRef = useRef(false);
 
-  // Get today's date in YYYY-MM-DD format for max date and comparison
-  const getTodayDate = () => {
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, "0");
-    const day = String(today.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  };
-
   // Fixed validation function that allows today's date
   const validate = useCallback(() => {
     const newErrors = {};

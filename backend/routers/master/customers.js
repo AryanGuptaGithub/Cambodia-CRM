@@ -5,19 +5,6 @@ import MedicalRep from "../../models/staffMember/staff.js"
 
 const router = express.Router();
 
-/* ────────────────────── PARAM VALIDATION ────────────────────── */
-// router.param("id", (req, res, next, id) => {
-//   console.log('valuesof req', req.body);
-//   if (!/^[0-9a-fA-F]{24}$/.test(id)) {
-//     return res.status(400).json({
-//       message: "Invalid customer ID format",
-//       ok: false,
-//     });
-//   }
-//   next();
-// });
-
-/* ────────────────────── UTILITIES ────────────────────── */
 const handleServerError = (res, err, message = "Server error", code = 500) => {
   console.error("ERROR:", err);
   res.status(code).json({ message, error: err.message || err, ok: false });
@@ -41,12 +28,9 @@ const handleDuplicateError = (res, err) => {
   });
 };
 
-/* ────────────────────── HELPER: Safe String ────────────────────── */
+
 const safeStr = (val) => (val == null ? "" : String(val).trim());
 
-/* ────────────────────── ROUTES ────────────────────── */
-
-// 1. POST: Import multiple customers
 router.post("/customers/import", async (req, res) => {
   try {
     const customers = req.body;
