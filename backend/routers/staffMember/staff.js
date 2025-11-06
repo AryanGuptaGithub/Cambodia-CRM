@@ -142,6 +142,7 @@ router.delete("/staff/:id", async (req, res) => {
   }
 });
 
+// ✅ CORRECTED Import route with date field
 router.post("/staffs/import", async (req, res) => {
   try {
     const staffList = req.body;
@@ -151,7 +152,7 @@ router.post("/staffs/import", async (req, res) => {
       });
     }
 
-    const requiredFields = ["medicalRepName", "teamName"]; // Changed from ["mrName", "teamName"]
+    const requiredFields = ["medicalRepName", "teamName"];
 
     for (const staff of staffList) {
       for (const field of requiredFields) {
@@ -167,11 +168,14 @@ router.post("/staffs/import", async (req, res) => {
         }
       }
 
+      // CORRECTED: Include date field with proper handling
       const staffData = {
-        medicalRepName: staff.medicalRepName, // Direct mapping
-        teamName: staff.teamName, // Direct mapping
-        contactNo: staff.contactNo || "", // Add contactNo field
-        email: staff.email || "", // Add email field
+        medicalRepName: staff.medicalRepName,
+        teamName: staff.teamName,
+        contactNo: staff.contactNo || "",
+        email: staff.email || "",
+        date: staff.date || new Date().toISOString(), // Use provided date or current date as fallback
+        enabled: staff.enabled !== undefined ? staff.enabled : true, // Default to enabled if not provided
       };
 
       const existingStaff = await staffSchema.findOne({

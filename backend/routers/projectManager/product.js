@@ -66,17 +66,17 @@ const parseDate = (dateStr) => {
 
 router.post("/product/import", async (req, res) => {
   try {
-    const products = req.body;
+    const products = req.body;    
     for (const productData of products) {
       const {
         productName,
         type,
         packing,
-        sellingPrice,
-        lc,
-        taxSellingPrice,
-        qtyPerBox,
-        qtyPerCarton,
+        sellingPriceUSD,
+        lcUSD,
+        fobUSD, // NEW: Added FOB field
+        taxSellingPriceUSD,
+        qtyPerBoxStrip,
         supplierName,
         drugLicense,
         licenseValidityDate,
@@ -89,11 +89,11 @@ router.post("/product/import", async (req, res) => {
         productName,
         type,
         packing,
-        sellingPrice,
-        lc,
-        taxSellingPrice,
-        qtyPerBox,
-        qtyPerCarton,
+        sellingPrice: sellingPriceUSD, // map incoming key to your DB field
+        lc: lcUSD,
+        fob: fobUSD, // NEW: Map FOB field to database
+        taxSellingPrice: taxSellingPriceUSD,
+        qtyPerBoxStrip,
         supplierName,
         drugLicense,
         licenseValidityDate: parsedDate,

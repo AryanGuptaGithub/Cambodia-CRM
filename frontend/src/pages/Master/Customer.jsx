@@ -11,7 +11,7 @@ import * as XLSX from "xlsx";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
 import { confirmDialog } from "../../utils/confirmationDialog";
-import { formatDateToReadable } from "../../utils/dateUtil";
+import { formatDateToReadable, getTodayDate } from "../../utils/dateUtil";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import ReactDOM from "react-dom";
@@ -614,7 +614,7 @@ const Customer = () => {
   );
 
   if (loading) return <p className="p-6">Loading...</p>;
-
+  console.log("values of currentCustomers", currentCustomers);
   return (
     <div className="p-6">
       <div className="container">
@@ -730,18 +730,24 @@ const Customer = () => {
                           checked={selected.some((s) => s.id === customer._id)}
                           onChange={() => toggleSelect(customer)}
                         />
-                        <span className="capitalize">{customer.name}</span>
+                        <span className="capitalize">
+                          {customer.name || "--"}
+                        </span>
                       </div>
                     </td>
                     <td className="p-3 capitalize">
-                      {customer.typeOfBusiness}
+                      {customer.typeOfBusiness || "--"}
                     </td>
                     <td className="p-3 capitalize">
-                      {customer.medicalRepName}
+                      {customer.medicalRepName || "--"}
                     </td>
-                    <td className="p-3 capitalize">{customer.address}</td>
-                    <td className="p-3 capitalize">{customer.zone}</td>
-                    <td className="p-3 capitalize">{customer.province}</td>
+                    <td className="p-3 capitalize">
+                      {customer.address || "--"}
+                    </td>
+                    <td className="p-3 capitalize">{customer.zone || "--"}</td>
+                    <td className="p-3 capitalize">
+                      {customer.province || "--"}
+                    </td>
                     <td className="p-3">
                       {formatDateToReadable(customer.date) || "--"}
                     </td>
@@ -789,6 +795,7 @@ const Customer = () => {
           {/* Pagination */}
           {currentCustomers.length > 0 && (
             <div className="mt-4 p-5 flex justify-start gap-2">
+              {/* Prev button */}
               <button
                 onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
                 disabled={currentPage === 1}
@@ -796,19 +803,26 @@ const Customer = () => {
               >
                 Prev
               </button>
-              {visiblePages.map((p) => (
+
+              {/* Page buttons */}
+              {visiblePages.map((p, index) => (
                 <button
-                  key={p}
-                  onClick={() => setCurrentPage(p)}
-                  className={`px-3 py-1 rounded cursor-pointer ${
-                    currentPage === p
-                      ? "bg-indigo-600 text-white"
-                      : "bg-gray-200 hover:bg-gray-300"
+                  key={index}
+                  onClick={() => typeof p === "number" && setCurrentPage(p)}
+                  disabled={p === "..."}
+                  className={`px-3 py-1 rounded ${
+                    p === "..."
+                      ? "bg-gray-200 cursor-not-allowed"
+                      : currentPage === p
+                      ? "bg-indigo-600 text-white cursor-pointer"
+                      : "bg-gray-200 hover:bg-gray-300 cursor-pointer"
                   }`}
                 >
                   {p}
                 </button>
               ))}
+
+              {/* Next button */}
               <button
                 onClick={() =>
                   setCurrentPage((p) => Math.min(p + 1, totalPages))

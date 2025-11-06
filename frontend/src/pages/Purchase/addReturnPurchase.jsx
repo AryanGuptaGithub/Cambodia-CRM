@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { showToast } from "../../utils/toast";
-import CustomDropdown from "../Utility/customDropdown.jsx";
+import SearchableDropdown from "../../components/common/SearchableDropdown";
 import axios from "axios";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
@@ -52,6 +52,11 @@ const useReturnForm = () => {
   const [purchases, setPurchases] = useState([]);
   const [showInvoiceSuggestions, setShowInvoiceSuggestions] = useState(false);
   const [filteredPurchases, setFilteredPurchases] = useState([]);
+  const [loading, setLoading] = useState({
+    products: false,
+    suppliers: false,
+    purchases: false,
+  });
 
   const parseNumber = useCallback((val) => {
     if (typeof val === "number") return val;
@@ -166,12 +171,12 @@ const useReturnForm = () => {
           productName: purchase.productName || "",
           supplierId: purchase.supplierId || "",
           supplierName: purchase.supplierName || "",
-          purchaseQty: purchase.qtyBox || 0,
+          purchaseQty: purchase.quantityPerBoxStrip || 0,
           fob: purchase.fob || 0,
           cif: purchase.cif || 0,
           lcNumber: purchase.lcNumber || "",
           amount: purchase.amount || 0,
-          expiredDate: purchase.expiredDate || "",
+          expiredDate: purchase.expiryDate || "",
         }));
       }
 
@@ -195,44 +200,44 @@ const useReturnForm = () => {
       productName: purchase.productName || "",
       supplierId: purchase.supplierId || "",
       supplierName: purchase.supplierName || "",
-      purchaseQty: purchase.qtyBox || 0,
+      purchaseQty: purchase.quantityPerBoxStrip || 0,
       fob: purchase.fob || 0,
       cif: purchase.cif || 0,
       lcNumber: purchase.lcNumber || "",
       amount: purchase.amount || 0,
-      expiredDate: purchase.expiredDate || "",
+      expiredDate: purchase.expiryDate || "",
     }));
     setShowInvoiceSuggestions(false);
   };
 
-  // Handle product selection from dropdown
+  // Handle product selection from dropdown - CORRECTED
   const handleProductChange = useCallback(
     (productId) => {
       const selectedProduct = products.find(
-        (product) => product._id === productId
+        (product) => product.value === productId
       );
       if (selectedProduct) {
         setForm((prev) => ({
           ...prev,
-          productId: selectedProduct._id,
-          productName: selectedProduct.productName,
+          productId: selectedProduct.value,
+          productName: selectedProduct.label,
         }));
       }
     },
     [products]
   );
 
-  // Handle supplier selection from dropdown
+  // Handle supplier selection from dropdown - CORRECTED
   const handleSupplierChange = useCallback(
     (supplierId) => {
       const selectedSupplier = suppliers.find(
-        (supplier) => supplier._id === supplierId
+        (supplier) => supplier.value === supplierId
       );
       if (selectedSupplier) {
         setForm((prev) => ({
           ...prev,
-          supplierId: selectedSupplier._id,
-          supplierName: selectedSupplier.supplierName || selectedSupplier.name,
+          supplierId: selectedSupplier.value,
+          supplierName: selectedSupplier.label,
         }));
       }
     },
@@ -281,31 +286,52 @@ const useReturnForm = () => {
     return Object.keys(newErrors).length === 0;
   }, [form, parseNumber]);
 
-  // Fetch products
+  // Fetch products - CORRECTED to use SearchableDropdown format
   const fetchProducts = useCallback(async () => {
     try {
+      setLoading((prev) => ({ ...prev, products: true }));
       const response = await axios.get(`${backendUrl}/api/products`);
-      setProducts(response.data);
+
+      // Transform to SearchableDropdown format
+      const transformedProducts = response.data.map((product) => ({
+        value: product._id,
+        label: product.productName,
+      }));
+
+      setProducts(transformedProducts);
     } catch (err) {
       console.error("Error fetching products:", err);
       showToast("error", "Failed to fetch products");
+    } finally {
+      setLoading((prev) => ({ ...prev, products: false }));
     }
   }, []);
 
-  // Fetch suppliers
+  // Fetch suppliers - CORRECTED to use SearchableDropdown format
   const fetchSuppliers = useCallback(async () => {
     try {
+      setLoading((prev) => ({ ...prev, suppliers: true }));
       const response = await axios.get(`${backendUrl}/api/suppliers`);
-      setSuppliers(response.data);
+
+      // Transform to SearchableDropdown format
+      const transformedSuppliers = response.data.map((supplier) => ({
+        value: supplier._id,
+        label: supplier.supplierName || supplier.name,
+      }));
+
+      setSuppliers(transformedSuppliers);
     } catch (err) {
       console.error("Error fetching suppliers:", err);
       showToast("error", "Failed to fetch suppliers");
+    } finally {
+      setLoading((prev) => ({ ...prev, suppliers: false }));
     }
   }, []);
 
   // Fetch purchases for auto-fill
   const fetchPurchases = useCallback(async () => {
     try {
+      setLoading((prev) => ({ ...prev, purchases: true }));
       const response = await axios.get(`${backendUrl}/api/purchase`);
       const purchaseData = response.data.reports || response.data || [];
       setPurchases(purchaseData);
@@ -313,6 +339,8 @@ const useReturnForm = () => {
     } catch (err) {
       console.error("Error fetching purchases:", err);
       showToast("error", "Failed to fetch purchases");
+    } finally {
+      setLoading((prev) => ({ ...prev, purchases: false }));
     }
   }, []);
 
@@ -322,6 +350,7 @@ const useReturnForm = () => {
     products,
     suppliers,
     purchases,
+    loading,
     showInvoiceSuggestions,
     filteredPurchases,
     handleChange,
@@ -470,6 +499,7 @@ const AddReturnPurchase = () => {
     products,
     suppliers,
     purchases,
+    loading,
     showInvoiceSuggestions,
     filteredPurchases,
     handleChange,
@@ -502,24 +532,12 @@ const AddReturnPurchase = () => {
 
   // Memoized product options for dropdown
   const productOptions = useMemo(() => {
-    return [
-      { value: "", label: "Select Product" },
-      ...products.map((product) => ({
-        value: product._id,
-        label: product.productName,
-      })),
-    ];
+    return [{ value: "", label: "Select Product" }, ...products];
   }, [products]);
 
   // Memoized supplier options for dropdown
   const supplierOptions = useMemo(() => {
-    return [
-      { value: "", label: "Select Supplier" },
-      ...suppliers.map((supplier) => ({
-        value: supplier._id,
-        label: supplier.supplierName || supplier.name,
-      })),
-    ];
+    return [{ value: "", label: "Select Supplier" }, ...suppliers];
   }, [suppliers]);
 
   useEffect(() => {
@@ -624,13 +642,17 @@ const AddReturnPurchase = () => {
     );
   }, [form]);
 
-  // Calculate remaining quantity
-  const remainingQty = useMemo(() => {
+  // Calculate used quantity automatically
+  useEffect(() => {
     const purchaseQty = parseFloat(form.purchaseQty) || 0;
     const returnQty = parseFloat(form.returnQuantity) || 0;
-    const usedQty = parseFloat(form.usedQty) || 0;
-    return Math.max(0, purchaseQty - returnQty - usedQty);
-  }, [form.purchaseQty, form.returnQuantity, form.usedQty]);
+
+    const calculatedUsedQty = Math.max(0, purchaseQty - returnQty);
+
+    if (calculatedUsedQty !== parseFloat(form.usedQty)) {
+      updateFormField("usedQty", calculatedUsedQty.toString());
+    }
+  }, [form.purchaseQty, form.returnQuantity, form.usedQty, updateFormField]);
 
   // Calculate unit price
   const unitPrice = useMemo(() => {
@@ -743,40 +765,31 @@ const AddReturnPurchase = () => {
           />
         </div>
 
-        {/* Rest of your form remains the same... */}
         {/* Second Row - Product and Supplier */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
-          <div className="flex flex-col">
-            <label className="text-sm font-medium text-gray-700 mb-1">
-              Product <span className="text-red-500">*</span>
-            </label>
-            <CustomDropdown
-              value={form.productId}
-              onChange={handleProductChange}
-              placeholder="Select Product"
-              options={productOptions}
-              required
-            />
-            {errors.productId && (
-              <p className="text-red-500 text-xs mt-0.5">{errors.productId}</p>
-            )}
-          </div>
+          {/* Product Dropdown */}
+          <SearchableDropdown
+            label="Product"
+            value={form.productId}
+            onChange={handleProductChange}
+            options={productOptions}
+            placeholder="Select Product"
+            required={true}
+            error={errors.productId}
+            loading={loading.products}
+          />
 
-          <div className="flex flex-col">
-            <label className="text-sm font-medium text-gray-700 mb-1">
-              Supplier <span className="text-red-500">*</span>
-            </label>
-            <CustomDropdown
-              value={form.supplierId}
-              onChange={handleSupplierChange}
-              placeholder="Select Supplier"
-              options={supplierOptions}
-              required
-            />
-            {errors.supplierId && (
-              <p className="text-red-500 text-xs mt-0.5">{errors.supplierId}</p>
-            )}
-          </div>
+          {/* Supplier Dropdown */}
+          <SearchableDropdown
+            label="Supplier"
+            value={form.supplierId}
+            onChange={handleSupplierChange}
+            options={supplierOptions}
+            placeholder="Select Supplier"
+            required={true}
+            error={errors.supplierId}
+            loading={loading.suppliers}
+          />
 
           <InputField
             label="LC Number"
@@ -822,7 +835,7 @@ const AddReturnPurchase = () => {
         </div>
 
         {/* Fourth Row - Quantities */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mt-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
           <NumericInputField
             label="Purchase Quantity"
             name="purchaseQty"
@@ -834,15 +847,15 @@ const AddReturnPurchase = () => {
             readOnly
           />
 
-          {/* <NumericInputField
+          <NumericInputField
             label="Used Quantity"
             name="usedQty"
             value={form.usedQty}
             onChange={handleNumericInputChange}
             error={errors.usedQty}
             placeholder="0"
-            required
-          /> */}
+            readOnly
+          />
 
           <NumericInputField
             label="Return Quantity"
@@ -853,18 +866,6 @@ const AddReturnPurchase = () => {
             placeholder="0"
             required
           />
-
-          <div className="flex flex-col">
-            <label className="text-sm font-medium text-gray-700 mb-1">
-              Remaining Quantity
-            </label>
-            <input
-              type="text"
-              value={remainingQty.toFixed(2)}
-              className="w-full border px-3 py-2 rounded-lg bg-gray-100 border-gray-300"
-              readOnly
-            />
-          </div>
         </div>
 
         {/* Fifth Row - Amounts */}
@@ -966,7 +967,7 @@ const AddReturnPurchase = () => {
           </button>
           <button
             type="button"
-            onClick={() => navigate("/purchaselayout/purchase-return")}
+            onClick={() => navigate("/purchaselayout/purchasereturn")}
             className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-6 py-2 rounded-lg cursor-pointer transition-colors"
           >
             Cancel

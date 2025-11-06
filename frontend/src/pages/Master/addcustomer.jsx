@@ -10,9 +10,9 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { showToast } from "../../utils/toast";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import InputField from "../../components/common/InputField";
+import { getTodayDate } from "../../utils/dateUtil";
 import {
   initialFormState,
-  getTodayDate,
   validateCustomerForm,
   fetchProvinces,
   fetchMRList,

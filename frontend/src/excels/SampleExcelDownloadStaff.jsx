@@ -6,7 +6,7 @@ const SampleExcelDownloadStaff = () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("List");
 
-    // Merge and center "List" across A1:D1
+    // Merge and center "List" across A1:F1
     worksheet.mergeCells("A1:E1");
     const titleCell = worksheet.getCell("A1");
     titleCell.value = "MR List";
@@ -14,7 +14,7 @@ const SampleExcelDownloadStaff = () => {
     titleCell.alignment = { horizontal: "center", vertical: "middle" };
     worksheet.getRow(1).height = 20;
 
-    // Merge and center "Medical Representative" across A2:D2
+    // Merge and center "Medical Representative" across A2:F2
     worksheet.mergeCells("A2:E2");
     const mrTitleCell = worksheet.getCell("A2");
     mrTitleCell.value = "Medical Representative";
@@ -22,20 +22,22 @@ const SampleExcelDownloadStaff = () => {
     mrTitleCell.alignment = { horizontal: "center", vertical: "middle" };
     worksheet.getRow(2).height = 18;
 
-    // Header row (No, MR Name, Team Name, Contact No, Email)
+    // Header row (No, MR Name, Team Name, Contact No, Email, Instance of Joining Date)
     worksheet.getRow(3).values = [
-      "No",
       "MR Name",
       "Team Name",
       "Contact No",
       "Email",
+      "Joining Date"
     ];
+    
+    // Updated column definitions with the new column
     worksheet.columns = [
-      { key: "no", width: 5 },
       { key: "mrName", width: 25 },
       { key: "teamName", width: 15 },
       { key: "contactNo", width: 25 },
       { key: "email", width: 30 },
+      { key: "joiningDate", width: 20 }
     ];
 
     // Style header row
@@ -53,7 +55,7 @@ const SampleExcelDownloadStaff = () => {
       cell.fill = {
         type: "pattern",
         pattern: "solid",
-        fgColor: { argb: "FFD9D9D9" }, // light gray background
+        fgColor: { argb: "FFD9D9D9" },
       };
     });
 

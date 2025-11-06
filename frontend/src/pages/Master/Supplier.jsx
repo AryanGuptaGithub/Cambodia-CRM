@@ -254,11 +254,7 @@ const ImportModal = ({
 }) =>
   show &&
   ReactDOM.createPortal(
-    <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-      />
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
       <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
         <button
           onClick={onClose}
@@ -304,11 +300,7 @@ const ImportModal = ({
 const ViewModal = ({ show, onClose, form, formatDateToReadable }) =>
   show &&
   ReactDOM.createPortal(
-    <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-      />
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
       <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
         <button
           onClick={onClose}
@@ -384,12 +376,8 @@ const EditModal = ({
 }) =>
   show &&
   ReactDOM.createPortal(
-    <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-      />
-      <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative max-h-screen">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
+      <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative max-h-screen overflow-y-auto">
         <button
           onClick={onClose}
           className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
@@ -400,7 +388,10 @@ const EditModal = ({
           Edit Supplier
         </h2>
         <form
-          onSubmit={onSubmit}
+          onSubmit={(e) => {
+            e.preventDefault();
+            onSubmit(e);
+          }}
           className="grid grid-cols-1 md:grid-cols-2 gap-4"
         >
           <div>
@@ -410,6 +401,7 @@ const EditModal = ({
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               className="w-full border px-3 py-2 rounded-lg border-gray-300"
+              required
             />
           </div>
           <div>
@@ -419,6 +411,7 @@ const EditModal = ({
               value={form.address}
               onChange={(e) => setForm({ ...form, address: e.target.value })}
               className="w-full border px-3 py-2 rounded-lg border-gray-300"
+              required
             />
           </div>
           <div>
@@ -432,16 +425,15 @@ const EditModal = ({
                   : null
               }
               onChange={(date) =>
-                date
-                  ? setForm({
-                      ...form,
-                      siteRegistrationDate: date.toISOString(),
-                    })
-                  : null
+                setForm({
+                  ...form,
+                  siteRegistrationDate: date ? date.toISOString() : "",
+                })
               }
               dateFormat="yyyy-MM-dd"
               placeholderText="Select registration date"
               className="w-full border px-3 py-2 rounded-lg border-gray-300"
+              required
             />
           </div>
           <div>
@@ -455,16 +447,15 @@ const EditModal = ({
                   : null
               }
               onChange={(date) =>
-                date
-                  ? setForm({
-                      ...form,
-                      siteRegistrationExpiryDate: date.toISOString(),
-                    })
-                  : null
+                setForm({
+                  ...form,
+                  siteRegistrationExpiryDate: date ? date.toISOString() : "",
+                })
               }
               dateFormat="yyyy-MM-dd"
               placeholderText="Select expiry date"
               className="w-full border px-3 py-2 rounded-lg border-gray-300"
+              required
             />
           </div>
           <div>
@@ -480,21 +471,22 @@ const EditModal = ({
               <option value="false">Disabled</option>
             </select>
           </div>
+          <div className="md:col-span-2 mt-4 flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+            >
+              Update
+            </button>
+          </div>
         </form>
-        <div className="mt-6 flex justify-end gap-3">
-          <button
-            onClick={onClose}
-            className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onSubmit}
-            className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
-          >
-            Update
-          </button>
-        </div>
       </div>
     </div>,
     document.body
@@ -512,7 +504,7 @@ const Supplier = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [activeTab, setActiveTab] = useState("All");
   const [search, setSearch] = useState("");
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(false); // Controls modal visibility: "import", "view", "edit", or null
   const [parsedData, setParsedData] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
   const [form, setForm] = useState({
@@ -610,9 +602,13 @@ const Supplier = () => {
 
     if (confirm.isConfirmed) {
       try {
+        const idsToDelete = selected.map((s) => s.id);
+        console.log("Deleting supplier IDs:", idsToDelete); // Debug log
+
         const res = await axios.delete(`${backendUrl}/api/suppliers`, {
-          data: { ids: selected },
+          data: { ids: idsToDelete },
         });
+
         if (res.status === 200) {
           showToast("success", "Suppliers deleted successfully");
           const refreshed = await fetch(`${backendUrl}/api/suppliers`);
@@ -621,6 +617,7 @@ const Supplier = () => {
           setSelected([]);
         }
       } catch (err) {
+        console.error("Delete error:", err.response?.data || err.message); // Debug log
         showToast("error", "Failed to delete suppliers.");
       }
     } else {
@@ -883,7 +880,7 @@ const Supplier = () => {
       )}
       <ImportModal
         show={isOpen === "import"}
-        onClose={() => setIsOpen(false)}
+        onClose={() => setIsOpen(null)}
         isUploading={isUploading}
         onFileUpload={handleFileUpload}
         onImport={handleImport}
@@ -892,13 +889,13 @@ const Supplier = () => {
       />
       <ViewModal
         show={isOpen === "view"}
-        onClose={() => setIsOpen(false)}
+        onClose={() => setIsOpen(null)}
         form={form}
         formatDateToReadable={formatDateToReadable}
       />
       <EditModal
         show={isOpen === "edit"}
-        onClose={() => setIsOpen(false)}
+        onClose={() => setIsOpen(null)}
         form={form}
         setForm={setForm}
         onSubmit={handleEditSubmit}

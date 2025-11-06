@@ -5,8 +5,6 @@ import Supplier from "../../models/master/supplier.js";
 
 const router = express.Router();
 
-/* ----------------------------- Utility Functions ---------------------------- */
-
 const handleServerError = (res, err, message = "Server error", code = 500) => {
   console.error("❌ [ERROR]:", err);
   res.status(code).json({ message, error: err.message || err });
@@ -134,7 +132,18 @@ router.delete("/suppliers/:id", async (req, res) => {
 /* ----------------------- DELETE Multiple Suppliers ----------------------- */
 router.delete("/suppliers", async (req, res) => {
   try {
-    const ids = req.body.ids?.map((item) => item.id) || [];
+    let ids = [];
+    
+    // Handle both array of strings and array of objects with id property
+    if (Array.isArray(req.body.ids)) {
+      if (req.body.ids.length > 0 && typeof req.body.ids[0] === 'object') {
+        // Array of objects with id property
+        ids = req.body.ids.map((item) => item.id).filter(Boolean);
+      } else {
+        // Array of strings
+        ids = req.body.ids;
+      }
+    }
 
     if (ids.length === 0) {
       return res

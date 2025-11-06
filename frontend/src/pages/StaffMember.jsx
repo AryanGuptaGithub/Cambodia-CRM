@@ -10,6 +10,7 @@ import { formatDateToReadable } from "../utils/dateUtil";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import ReactDOM from "react-dom";
+import { parseExcelDate } from "../utils/excelUtility";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
@@ -256,7 +257,7 @@ const StaffMember = () => {
     });
   };
 
-  // ✅ CORRECTED File upload handler
+  // ✅ CORRECTED File upload handler with Joining Date support
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -283,13 +284,14 @@ const StaffMember = () => {
             cell.toString().trim().toLowerCase()
           );
 
-          // Match the exact column names from your Excel file
+          // Match the exact column names from your Excel file including Joining Date
           if (
-            normalizedRow.includes("no") &&
             normalizedRow.includes("mr name") &&
-            normalizedRow.includes("team name") && // Fixed: was "team", now "team name"
+            normalizedRow.includes("team name") &&
             normalizedRow.includes("contact no") &&
-            normalizedRow.includes("email")
+            normalizedRow.includes("email") &&
+            (normalizedRow.includes("joining date") ||
+              normalizedRow.includes("instance of joining date"))
           ) {
             headerRowIndex = i;
             headersMap = normalizedRow.reduce((acc, header, index) => {
@@ -304,7 +306,7 @@ const StaffMember = () => {
           console.error("Header row not found.");
           showToast(
             "error",
-            "Required headers not found in Excel file. Please ensure columns: No, MR Name, Team Name, Contact No, Email"
+            "Required headers not found in Excel file. Please ensure columns: No, MR Name, Team Name, Contact No, Email, Joining Date"
           );
           return;
         }
@@ -317,12 +319,20 @@ const StaffMember = () => {
               item[key] = row[index] || "";
             });
 
+            // Parse joining date using the utility function
+            const joiningDateKey =
+              item["joining date"] !== undefined
+                ? "joining date"
+                : "instance of joining date";
+            const rawDate = item[joiningDateKey];
+            const parsedDate = parseExcelDate(rawDate);
+
             return {
-              no: item["no"],
-              medicalRepName: item["mr name"], // Fixed: was mrName, now medicalRepName
-              teamName: item["team name"], // Fixed: was team, now teamName
+              medicalRepName: item["mr name"],
+              teamName: item["team name"],
               contactNo: item["contact no"],
               email: item["email"],
+              date: parsedDate ? parsedDate : null, // Convert to ISO string for backend
             };
           })
           .filter(
@@ -333,6 +343,7 @@ const StaffMember = () => {
               entry.email
           );
 
+        console.log("Parsed data with dates:", mappedData);
         setParsedData(mappedData);
       } catch (error) {
         console.error("Error parsing file:", error);
@@ -734,9 +745,7 @@ const StaffMember = () => {
                       Joining Date
                     </label>
                     <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                      {form.date
-                        ? formatDateToReadable(form.date)
-                        : "--"}
+                      {form.date ? formatDateToReadable(form.date) : "--"}
                     </p>
                   </div>
 
@@ -872,12 +881,10 @@ const StaffMember = () => {
                   {/* Created At */}
                   <div>
                     <label className="block text-sm font-medium text-gray-600">
-                     Joining Date
+                      Joining Date
                     </label>
                     <DatePicker
-                      selected={
-                        form.date ? new Date(form.date) : null
-                      }
+                      selected={form.date ? new Date(form.date) : null}
                       onChange={(date) =>
                         date
                           ? setForm({ ...form, date: date.toISOString() })

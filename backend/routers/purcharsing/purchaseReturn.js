@@ -1,9 +1,94 @@
 import express from "express";
-import PurchaseReturn from "../../models/purcharsing/purchaseReturns.js";
 import mongoose from "mongoose";
+import PurchaseReturn from "../../models/purcharsing/purchaseReturns.js";
+import ReportInHand from "../../models/reports/reportsInHand.js";
+import product from "../../models/projectManger/product.js";
+
 const router = express.Router();
 
-// GET all purchase returns
+/** ✅ Utility: calculate stock status based on boxes count */
+const calculateStockStatus = (boxes) => {
+  if (boxes <= 0) return "Out of Stock";
+  if (boxes < 10) return "Critical";
+  if (boxes < 25) return "Low Stock";
+  return "In Stock";
+};
+
+/** ✅ Core helper: updates ReportInHand when purchase returns are created/updated/deleted */
+const updateReportInHandForReturn = async (purchaseReturnData, operation = "subtract") => {
+  try {
+    const {
+      productName,
+      returnQuantity = 0,
+      supplierName,
+      lcNumber,
+      fob = 0,
+      cif = 0,
+      amount = 0,
+      returnAmount = 0,
+    } = purchaseReturnData;
+
+
+    const validSupplierName = supplierName?.trim() || "Unknown Supplier";
+
+    // Get product info for conversion
+    const productDoc = await product.findOne({ productName });
+    const piecesPerBox =
+      Number(productDoc?.qtyPerBoxStrip) ||
+      Number(productDoc?.packing) ||
+      1; // fallback if missing
+
+    const boxesToUpdate = returnQuantity;
+    
+
+    const existing = await ReportInHand.findOne({ productName });
+
+    if (existing) {
+      let finalBoxes =
+        operation === "subtract"
+          ? existing.quantity.boxes - boxesToUpdate
+          : existing.quantity.boxes + boxesToUpdate;
+
+      if (finalBoxes < 0) finalBoxes = 0;
+      const newStatus = calculateStockStatus(finalBoxes);
+
+
+
+      await ReportInHand.findByIdAndUpdate(existing._id, {
+        $set: {
+          "quantity.boxes": finalBoxes,
+          status: newStatus,
+          supplierName: validSupplierName,
+          updatedAt: new Date(),
+        },
+      });
+
+      
+    } else if (operation === "add") {
+      // Recreate if deleted record needs stock re-added
+      const status = calculateStockStatus(boxesToUpdate);
+      await ReportInHand.create({
+        productName,
+        supplierName: validSupplierName,
+        quantity: { boxes: boxesToUpdate, pieces: 0 },
+        status,
+        lc: lcNumber || "",
+        fob,
+        cif,
+      });
+      
+    }
+  } catch (error) {
+    console.error("❌ Error in updateReportInHandForReturn:", error);
+    throw error;
+  }
+};
+
+/* ==========================================================
+   🔹 ROUTES BELOW
+   ========================================================== */
+
+/** ✅ GET all purchase returns */
 router.get("/purchase-return", async (req, res) => {
   try {
     const {
@@ -17,10 +102,8 @@ router.get("/purchase-return", async (req, res) => {
       endDate = "",
     } = req.query;
 
-    // Build filter object
     const filter = {};
 
-    // Search filter
     if (search) {
       filter.$or = [
         { invoiceNumber: { $regex: search, $options: "i" } },
@@ -30,27 +113,20 @@ router.get("/purchase-return", async (req, res) => {
       ];
     }
 
-    // Status filter
-    if (status) {
-      filter.status = status;
-    }
+    if (status) filter.status = status;
 
-    // Date range filter
     if (startDate || endDate) {
       filter.recordingDate = {};
       if (startDate) filter.recordingDate.$gte = new Date(startDate);
       if (endDate) filter.recordingDate.$lte = new Date(endDate);
     }
 
-    // Calculate pagination
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
 
-    // Get total count for pagination
     const total = await PurchaseReturn.countDocuments(filter);
 
-    // Get purchase returns with pagination and sorting
     const purchaseReturns = await PurchaseReturn.find(filter)
       .sort({ [sortBy]: sortOrder === "desc" ? -1 : 1 })
       .skip(skip)
@@ -76,61 +152,24 @@ router.get("/purchase-return", async (req, res) => {
   }
 });
 
-// GET purchase return by ID
-router.get("/purchase-return/:id", async (req, res) => {
-  try {
-    const purchaseReturn = await PurchaseReturn.findById(req.params.id);
-
-    if (!purchaseReturn) {
-      return res.status(404).json({
-        success: false,
-        message: "Purchase return not found",
-      });
-    }
-
-    res.json({
-      success: true,
-      data: purchaseReturn,
-    });
-  } catch (error) {
-    console.error("Error fetching purchase return:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-      error: error.message,
-    });
-  }
-});
-
-// POST create new purchase return
+/** ✅ POST create purchase return */
 router.post("/purchase-return", async (req, res) => {
   try {
+    const data = req.body;
+    
+
     const {
-      recordingDate,
       invoiceNumber,
-      invoiceDate,
-      deliveryNumber,
-      receivedDate,
       productName,
       purchaseQty,
       returnQuantity,
       usedQty,
-      fob,
-      cif,
-      lcNumber,
-      amount,
-      returnAmount,
-      remarks,
-      returnReason,
-      supplierName,
-    } = req.body;
+    } = data;
 
-    // Check if purchase return with same invoice number and product already exists
     const existingReturn = await PurchaseReturn.findOne({
       invoiceNumber,
       productName,
     });
-
     if (existingReturn) {
       return res.status(400).json({
         success: false,
@@ -138,7 +177,6 @@ router.post("/purchase-return", async (req, res) => {
       });
     }
 
-    // Validate return quantity doesn't exceed purchase quantity
     if (returnQuantity > purchaseQty) {
       return res.status(400).json({
         success: false,
@@ -146,7 +184,6 @@ router.post("/purchase-return", async (req, res) => {
       });
     }
 
-    // Validate used quantity doesn't exceed purchase quantity
     if (usedQty > purchaseQty) {
       return res.status(400).json({
         success: false,
@@ -155,44 +192,28 @@ router.post("/purchase-return", async (req, res) => {
     }
 
     const newPurchaseReturn = new PurchaseReturn({
-      recordingDate,
-      invoiceNumber,
-      invoiceDate,
-      deliveryNumber,
-      receivedDate,
-      productName,
+      ...data,
       purchaseQty: parseFloat(purchaseQty),
       returnQuantity: parseFloat(returnQuantity),
       usedQty: parseFloat(usedQty) || 0,
-      fob: parseFloat(fob) || 0,
-      cif: parseFloat(cif) || 0,
-      lcNumber,
-      amount: parseFloat(amount),
-      returnAmount: parseFloat(returnAmount),
-      remarks,
-      returnReason,
-      supplierName: supplierName || "",
+      fob: parseFloat(data.fob) || 0,
+      cif: parseFloat(data.cif) || 0,
+      amount: parseFloat(data.amount),
+      returnAmount: parseFloat(data.returnAmount),
     });
 
-    const savedPurchaseReturn = await newPurchaseReturn.save();
+    const saved = await newPurchaseReturn.save();
+
+    
+    await updateReportInHandForReturn(saved, "subtract");
 
     res.status(201).json({
       success: true,
       message: "Purchase return created successfully",
-      data: savedPurchaseReturn,
+      data: saved,
     });
   } catch (error) {
-    console.error("Error creating purchase return:", error);
-
-    if (error.name === "ValidationError") {
-      const errors = Object.values(error.errors).map((err) => err.message);
-      return res.status(400).json({
-        success: false,
-        message: "Validation error",
-        errors,
-      });
-    }
-
+    console.error("❌ Error creating purchase return:", error);
     res.status(500).json({
       success: false,
       message: "Server error",
@@ -201,223 +222,107 @@ router.post("/purchase-return", async (req, res) => {
   }
 });
 
-// PUT update purchase return
+/** ✅ PUT update purchase return */
 router.put("/purchase-return/:id", async (req, res) => {
   try {
-    const {
-      recordingDate,
-      invoiceNumber,
-      invoiceDate,
-      deliveryNumber,
-      receivedDate,
-      productName,
-      purchaseQty,
-      returnQuantity,
-      usedQty,
-      fob,
-      cif,
-      lcNumber,
-      amount,
-      returnAmount,
-      remarks,
-      returnReason,
-      supplierName,
-      status,
-    } = req.body;
+    const { id } = req.params;
+    const updatedData = req.body;
 
-    // Check if another purchase return with same invoice number and product exists
-    const existingReturn = await PurchaseReturn.findOne({
-      invoiceNumber,
-      productName,
-      _id: { $ne: req.params.id },
-    });
-
-    if (existingReturn) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Another purchase return for this invoice and product already exists",
-      });
+    const originalReturn = await PurchaseReturn.findById(id);
+    if (!originalReturn) {
+      return res.status(404).json({ success: false, message: "Purchase return not found" });
     }
 
-    const updatedPurchaseReturn = await PurchaseReturn.findByIdAndUpdate(
-      req.params.id,
-      {
-        recordingDate,
-        invoiceNumber,
-        invoiceDate,
-        deliveryNumber,
-        receivedDate,
-        productName,
-        purchaseQty: parseFloat(purchaseQty),
-        returnQuantity: parseFloat(returnQuantity),
-        usedQty: parseFloat(usedQty) || 0,
-        fob: parseFloat(fob) || 0,
-        cif: parseFloat(cif) || 0,
-        lcNumber,
-        amount: parseFloat(amount),
-        returnAmount: parseFloat(returnAmount),
-        remarks,
-        returnReason,
-        supplierName: supplierName || "",
-        status: status || "pending",
-        updatedAt: Date.now(),
-      },
+    // Add back original stock first
+    await updateReportInHandForReturn(originalReturn, "add");
+
+    const updated = await PurchaseReturn.findByIdAndUpdate(
+      id,
+      updatedData,
       { new: true, runValidators: true }
     );
 
-    if (!updatedPurchaseReturn) {
-      return res.status(404).json({
-        success: false,
-        message: "Purchase return not found",
-      });
-    }
+    // Subtract new return quantity
+    await updateReportInHandForReturn(updated, "subtract");
 
     res.json({
       success: true,
       message: "Purchase return updated successfully",
-      data: updatedPurchaseReturn,
+      data: updated,
     });
   } catch (error) {
     console.error("Error updating purchase return:", error);
-
-    if (error.name === "ValidationError") {
-      const errors = Object.values(error.errors).map((err) => err.message);
-      return res.status(400).json({
-        success: false,
-        message: "Validation error",
-        errors,
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
   }
 });
 
-// DELETE purchase return
+/** ✅ DELETE single purchase return */
 router.delete("/purchase-return/:id", async (req, res) => {
   try {
-    const deletedPurchaseReturn = await PurchaseReturn.findByIdAndDelete(
-      req.params.id
-    );
+    const { id } = req.params;
+    const purchaseReturn = await PurchaseReturn.findById(id);
 
-    if (!deletedPurchaseReturn) {
-      return res.status(404).json({
-        success: false,
-        message: "Purchase return not found",
-      });
-    }
+    if (!purchaseReturn)
+      return res.status(404).json({ success: false, message: "Purchase return not found" });
 
-    res.json({
-      success: true,
-      message: "Purchase return deleted successfully",
-      data: deletedPurchaseReturn,
-    });
+    await updateReportInHandForReturn(purchaseReturn, "add");
+
+    const deleted = await PurchaseReturn.findByIdAndDelete(id);
+    res.json({ success: true, message: "Purchase return deleted successfully", data: deleted });
   } catch (error) {
     console.error("Error deleting purchase return:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
   }
 });
+
+/** ✅ BULK DELETE */
 router.delete("/purchase-return", async (req, res) => {
   try {
     const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0)
+      return res.status(400).json({ success: false, message: "No IDs provided" });
 
-    // Validate that ids array is provided and not empty
-    if (!ids || !Array.isArray(ids) || ids.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "No purchase return IDs provided for deletion",
-      });
+    const purchaseReturns = await PurchaseReturn.find({ _id: { $in: ids } });
+    for (const p of purchaseReturns) {
+      await updateReportInHandForReturn(p, "add");
     }
 
-    // Validate that all IDs are valid MongoDB ObjectIds
-    const invalidIds = ids.filter((id) => !mongoose.Types.ObjectId.isValid(id));
-    if (invalidIds.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid purchase return IDs provided",
-        invalidIds: invalidIds,
-      });
-    }
-
-    // Delete multiple purchase returns
-    const deleteResult = await PurchaseReturn.deleteMany({
-      _id: { $in: ids },
-    });
-
-    if (deleteResult.deletedCount === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No purchase returns found to delete",
-      });
-    }
-
+    const result = await PurchaseReturn.deleteMany({ _id: { $in: ids } });
     res.json({
       success: true,
-      message: `${deleteResult.deletedCount} purchase return(s) deleted successfully`,
-      data: {
-        deletedCount: deleteResult.deletedCount,
-      },
+      message: `${result.deletedCount} purchase returns deleted successfully`,
     });
   } catch (error) {
     console.error("Error deleting purchase returns:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error while deleting purchase returns",
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
   }
 });
 
-// GET purchase returns by invoice number
+/** ✅ GET by invoice */
 router.get("/purchase-return/invoice/:invoiceNumber", async (req, res) => {
   try {
-    const purchaseReturns = await PurchaseReturn.find({
-      invoiceNumber: new RegExp(req.params.invoiceNumber, "i"),
+    const { invoiceNumber } = req.params;
+    const results = await PurchaseReturn.find({
+      invoiceNumber: new RegExp(invoiceNumber, "i"),
     }).sort({ createdAt: -1 });
-
-    res.json({
-      success: true,
-      data: purchaseReturns,
-    });
+    res.json({ success: true, data: results });
   } catch (error) {
     console.error("Error fetching purchase returns by invoice:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
   }
 });
 
-// GET purchase returns statistics
+/** ✅ Stats summary */
 router.get("/purchase-return/stats/summary", async (req, res) => {
   try {
     const totalReturns = await PurchaseReturn.countDocuments();
-    const pendingReturns = await PurchaseReturn.countDocuments({
-      status: "pending",
-    });
-    const approvedReturns = await PurchaseReturn.countDocuments({
-      status: "approved",
-    });
-    const completedReturns = await PurchaseReturn.countDocuments({
-      status: "completed",
-    });
+    const pendingReturns = await PurchaseReturn.countDocuments({ status: "pending" });
+    const approvedReturns = await PurchaseReturn.countDocuments({ status: "approved" });
+    const completedReturns = await PurchaseReturn.countDocuments({ status: "completed" });
 
-    const totalAmount = await PurchaseReturn.aggregate([
-      { $group: { _id: null, total: { $sum: "$returnAmount" } } },
-    ]);
-
-    const totalQuantity = await PurchaseReturn.aggregate([
-      { $group: { _id: null, total: { $sum: "$returnQuantity" } } },
+    const [amountAgg, qtyAgg] = await Promise.all([
+      PurchaseReturn.aggregate([{ $group: { _id: null, total: { $sum: "$returnAmount" } } }]),
+      PurchaseReturn.aggregate([{ $group: { _id: null, total: { $sum: "$returnQuantity" } } }]),
     ]);
 
     res.json({
@@ -427,57 +332,37 @@ router.get("/purchase-return/stats/summary", async (req, res) => {
         pendingReturns,
         approvedReturns,
         completedReturns,
-        totalReturnAmount: totalAmount[0]?.total || 0,
-        totalReturnQuantity: totalQuantity[0]?.total || 0,
+        totalReturnAmount: amountAgg[0]?.total || 0,
+        totalReturnQuantity: qtyAgg[0]?.total || 0,
       },
     });
   } catch (error) {
-    console.error("Error fetching purchase return statistics:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-      error: error.message,
-    });
+    console.error("Error fetching stats:", error);
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
   }
 });
 
-// PATCH update purchase return status
+/** ✅ PATCH update status */
 router.patch("/purchase-return/:id/status", async (req, res) => {
   try {
     const { status } = req.body;
-
     if (!["pending", "approved", "rejected", "completed"].includes(status)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid status",
-      });
+      return res.status(400).json({ success: false, message: "Invalid status" });
     }
 
-    const updatedPurchaseReturn = await PurchaseReturn.findByIdAndUpdate(
+    const updated = await PurchaseReturn.findByIdAndUpdate(
       req.params.id,
       { status },
       { new: true }
     );
 
-    if (!updatedPurchaseReturn) {
-      return res.status(404).json({
-        success: false,
-        message: "Purchase return not found",
-      });
-    }
+    if (!updated)
+      return res.status(404).json({ success: false, message: "Purchase return not found" });
 
-    res.json({
-      success: true,
-      message: `Purchase return ${status} successfully`,
-      data: updatedPurchaseReturn,
-    });
+    res.json({ success: true, message: `Status updated to ${status}`, data: updated });
   } catch (error) {
-    console.error("Error updating purchase return status:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-      error: error.message,
-    });
+    console.error("Error updating status:", error);
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
   }
 });
 

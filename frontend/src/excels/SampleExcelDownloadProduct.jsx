@@ -7,7 +7,7 @@ const SampleExcelDownloadPriceListSimple = () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Product List");
 
-    worksheet.mergeCells("A1:K1");
+    worksheet.mergeCells("A1:L1");
     const titleCell = worksheet.getCell("A1");
     titleCell.value = "HEALTHCARE SOUTH EAST ASIA";
     titleCell.font = { bold: true, size: 16 };
@@ -15,20 +15,21 @@ const SampleExcelDownloadPriceListSimple = () => {
     worksheet.getRow(1).height = 25;
 
     // Subtitle row
-    worksheet.mergeCells("A2:K2");
+    worksheet.mergeCells("A2:L2");
     const subtitleCell = worksheet.getCell("A2");
     subtitleCell.value = "Product List";
     subtitleCell.font = { bold: true, size: 14 };
     subtitleCell.alignment = { vertical: "middle", horizontal: "center" };
     worksheet.getRow(2).height = 20;
 
-    // Define columns (removed No column and Qty per Carton column)
+    // Define columns (added FOB column after LC)
     worksheet.columns = [
       { key: "productName", header: "Product Name", width: 50 },
       { key: "type", header: "Type", width: 18 },
       { key: "packing", header: "Packing", width: 20 },
       { key: "sellingPrice", header: "Selling Price (USD)", width: 18 },
       { key: "lc", header: "LC (USD)", width: 12 },
+      { key: "fob", header: "FOB (USD)", width: 12 }, // NEW COLUMN ADDED
       { key: "taxSellingPrice", header: "Tax Selling Price (USD)", width: 22 },
       { key: "qtyPerBox", header: "Quantity per Box/Strip", width: 22 },
       { key: "supplierName", header: "Supplier Name", width: 25 },
@@ -36,7 +37,7 @@ const SampleExcelDownloadPriceListSimple = () => {
       {
         key: "licenseValidityDate",
         header: "Drug Registration License Validity Date",
-        width: 30,
+        width: 45,
       },
       { key: "remarks", header: "HEALTHCARE SOUTH EAST ASIA", width: 30 },
     ];
@@ -49,6 +50,7 @@ const SampleExcelDownloadPriceListSimple = () => {
       "Packing",
       "Selling Price (USD)",
       "LC (USD)",
+      "FOB (USD)", // NEW COLUMN HEADER
       "Tax Selling Price (USD)",
       "Quantity per Box/Strip",
       "Supplier Name",
@@ -60,8 +62,8 @@ const SampleExcelDownloadPriceListSimple = () => {
     headerRow.alignment = { vertical: "middle", horizontal: "center" };
     worksheet.getRow(3).height = 20;
 
-    // Format the date column (now column 10 since we removed No column)
-    worksheet.getColumn(10).numFmt = "dd-mmm-yyyy";
+    // Format the date column (now column 11 since we added FOB column)
+    worksheet.getColumn(11).numFmt = "dd-mmm-yyyy";
 
     // Fetch dropdown data
     try {
@@ -82,9 +84,9 @@ const SampleExcelDownloadPriceListSimple = () => {
         });
       }
 
-      // Add data validation (dropdown) for Supplier Name column (column H, index 8)
+      // Add data validation (dropdown) for Supplier Name column (column I, index 9)
       if (supplierOptions.length > 0) {
-        worksheet.dataValidations.add('H4:H1000', {
+        worksheet.dataValidations.add('I4:I1000', {
           type: 'list',
           allowBlank: true,
           formulae: [`"${supplierOptions.join(',')}"`]

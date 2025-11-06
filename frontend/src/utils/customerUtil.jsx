@@ -16,14 +16,6 @@ export const initialFormState = {
   remark: "",
 };
 
-// Get today's date in YYYY-MM-DD format
-export const getTodayDate = () => {
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, "0");
-  const day = String(today.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
 
 // Validation function
 export const validateCustomerForm = (form) => {
@@ -131,13 +123,13 @@ export const EXCEL_CONFIG = {
   fileName: "customer_list_sample.xlsx",
   columns: [
     { key: "date", width: 15, header: "Date" },
-    { key: "medicalRep", width: 28, header: "Medical Representative Name" },
-    { key: "customerName", width: 30, header: "Customer Name in English" },
-    { key: "businessType", width: 22, header: "Types of Business" },
-    { key: "customerNumber", width: 20, header: "Customer Number" },
+    { key: "medicalRep", width: 40, header: "Medical Representative Name" },
+    { key: "customerName", width: 55, header: "Customer Name in English" },
+    { key: "businessType", width: 25, header: "Types of Business" },
+    { key: "customerNumber", width: 55, header: "Customer Number" },
     { key: "customerAddress", width: 55, header: "Customer Address" },
-    { key: "zone", width: 18, header: "Zone" },
-    { key: "province", width: 20, header: "Province" },
+    { key: "zone", width: 25, header: "Zone" },
+    { key: "province", width: 25, header: "Province" },
     { key: "remark", width: 25, header: "Remark" },
   ],
   dropdownSheetName: "DropdownValues",

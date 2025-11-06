@@ -34,13 +34,15 @@ export const fetchSuppliers = async () => {
   try {
     const response = await axios.get(`${backendUrl}/api/suppliers`);
     const suppliers = response.data?.data || response.data;
-
+    
     if (Array.isArray(suppliers)) {
       return {
         success: true,
         data: suppliers.map((s) => ({
           value: s.name,
           label: s.name,
+          id:s._id,
+          name:s.name,
         })),
       };
     } else {

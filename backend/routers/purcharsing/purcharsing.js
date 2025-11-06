@@ -6,80 +6,97 @@ import ReportInHand from "../../models/reports/reportsInHand.js";
 
 const router = express.Router();
 
-const calculateStockStatus = (totalPieces) => {
-  if (totalPieces === 0) return "Out of Stock";
-  if (totalPieces < 10) return "Critical";
-  if (totalPieces < 25) return "Low Stock";
+const calculateStockStatus = (boxes) => {
+  if (boxes === 0) return "Out of Stock";
+  if (boxes < 10) return "Critical";
+  if (boxes < 25) return "Low Stock";
   return "In Stock";
 };
 
+// CORRECTED: updateReportInHand function to handle boxes field
 const updateReportInHand = async (productData, operation = "add") => {
-  const {
-    productName,
-    supplierName,
-    quantityPerBoxStrip,
-    category,
-    pricePerPiece,
-    pricePerBox,
-    minStockLevel,
-    lc,
-    fob,
-    cif,
-  } = productData;
-
-  const totalPieces = quantityPerBoxStrip || 0;
-  const existing = await ReportInHand.findOne({ productName });
-
-  if (existing) {
-    const multiplier = operation === "add" ? 1 : -1;
-    const newTotalPieces =
-      existing.quantity.totalPieces + totalPieces * multiplier;
-    const finalPieces = Math.max(0, newTotalPieces);
-    const newStatus = calculateStockStatus(finalPieces);
-
-    let newLc = existing.lc;
-    let newFob = existing.fob;
-    let newCif = existing.cif;
-
-    if (operation === "add" && totalPieces > 0) {
-      const oldPieces = existing.quantity.totalPieces;
-      const total = oldPieces + totalPieces;
-      if (total > 0) {
-        newLc = (existing.lc * oldPieces + lc * totalPieces) / total;
-        newFob = (existing.fob * oldPieces + fob * totalPieces) / total;
-        newCif = (existing.cif * oldPieces + cif * totalPieces) / total;
-      }
-    }
-
-    await ReportInHand.findByIdAndUpdate(existing._id, {
-      $set: {
-        "quantity.totalPieces": finalPieces,
-        status: newStatus,
-        supplierName: supplierName || existing.supplierName,
-        category: category || existing.category,
-        pricePerPiece: pricePerPiece || existing.pricePerPiece,
-        pricePerBox: pricePerBox || existing.pricePerBox,
-        minStockLevel: minStockLevel || existing.minStockLevel,
-        lc: newLc,
-        fob: newFob,
-        cif: newCif,
-      },
-    });
-  } else if (operation === "add") {
-    const status = calculateStockStatus(totalPieces);
-    await ReportInHand.create({
+  try {
+    const {
       productName,
-      supplierName: supplierName || "",
-      quantity: { totalPieces },
-      status,
-      category: category || "",
-      pricePerPiece: pricePerPiece || 0,
-      pricePerBox: pricePerBox || 0,
-      minStockLevel: minStockLevel || 0,
-      lc: lc || 0,
-      fob: fob || 0,
-      cif: cif || 0,
-    });
+      supplierName,
+      quantityPerBoxStrip,
+      qtyBox, // Add qtyBox for compatibility
+      category,
+      pricePerPiece,
+      pricePerBox,
+      minStockLevel,
+      lc,
+      fob,
+      cif,
+    } = productData;
+
+    // FIX 1: Ensure supplierName is not empty
+    const validSupplierName = supplierName?.trim() || "Unknown Supplier";
+
+    // CORRECTED: Use boxes instead of totalPieces
+    const boxesToUpdate = quantityPerBoxStrip || qtyBox || 0;
+    const existing = await ReportInHand.findOne({ productName });
+
+    if (existing) {
+      const multiplier = operation === "add" ? 1 : -1;
+
+      // CORRECTED: Update boxes field instead of totalPieces
+      const newBoxes = existing.quantity.boxes + boxesToUpdate * multiplier;
+      const finalBoxes = Math.max(0, newBoxes);
+      const newStatus = calculateStockStatus(finalBoxes);
+
+      let newLc = existing.lc;
+      let newFob = existing.fob;
+      let newCif = existing.cif;
+
+      if (operation === "add" && boxesToUpdate > 0) {
+        const oldBoxes = existing.quantity.boxes;
+        const total = oldBoxes + boxesToUpdate;
+        if (total > 0) {
+          newLc = (existing.lc * oldBoxes + (lc || 0) * boxesToUpdate) / total;
+          newFob =
+            (existing.fob * oldBoxes + (fob || 0) * boxesToUpdate) / total;
+          newCif =
+            (existing.cif * oldBoxes + (cif || 0) * boxesToUpdate) / total;
+        }
+      }
+
+      await ReportInHand.findByIdAndUpdate(existing._id, {
+        $set: {
+          "quantity.boxes": finalBoxes, // CORRECTED: Update boxes field
+          status: newStatus,
+          supplierName: validSupplierName,
+          category: category || existing.category,
+          pricePerPiece: pricePerPiece || existing.pricePerPiece,
+          pricePerBox: pricePerBox || existing.pricePerBox,
+          minStockLevel: minStockLevel || existing.minStockLevel,
+          lc: newLc,
+          fob: newFob,
+          cif: newCif,
+        },
+      });
+    } else if (operation === "add") {
+      const status = calculateStockStatus(boxesToUpdate);
+      await ReportInHand.create({
+        productName,
+        supplierName: validSupplierName,
+        quantity: {
+          boxes: boxesToUpdate, // CORRECTED: Set boxes field
+          pieces: 0,
+        },
+        status,
+        category: category || "",
+        pricePerPiece: pricePerPiece || 0,
+        pricePerBox: pricePerBox || 0,
+        minStockLevel: minStockLevel || 0,
+        lc: lc || 0,
+        fob: fob || 0,
+        cif: cif || 0,
+      });
+    }
+  } catch (error) {
+    console.error("Error in updateReportInHand:", error);
+    throw error;
   }
 };
 
@@ -174,17 +191,27 @@ router.delete("/purchase/:id", async (req, res) => {
   }
 });
 
-// 🧹 Bulk delete
+// 🧹 Bulk delete - FIXED
 router.delete("/purchase", async (req, res) => {
   try {
     const { ids } = req.body;
     if (!Array.isArray(ids) || ids.length === 0)
       return res.status(400).json({ error: "No IDs provided" });
 
-    const purchases = await purchaseInventory.find({ _id: { $in: ids } });
-    for (const p of purchases) await updateReportInHand(p, "subtract");
+    // FIX 2: Extract just the ID strings from the objects
+    const idStrings = ids.map((item) =>
+      typeof item === "object" && item.id ? item.id : item
+    );
 
-    const result = await purchaseInventory.deleteMany({ _id: { $in: ids } });
+    const purchases = await purchaseInventory.find({ _id: { $in: idStrings } });
+
+    for (const p of purchases) {
+      await updateReportInHand(p, "subtract");
+    }
+
+    const result = await purchaseInventory.deleteMany({
+      _id: { $in: idStrings },
+    });
 
     res.json({
       message: `Deleted ${result.deletedCount} purchases successfully`,
@@ -213,12 +240,15 @@ router.post("/purchase/import", async (req, res) => {
 
       const amount = lc * qtyValue;
 
+      // FIX 1: Ensure supplierName is not empty
+      const validSupplierName = item.supplierName?.trim() || "Unknown Supplier";
+
       return {
         ...item,
         invoiceDate: item.invoiceDate ? new Date(item.invoiceDate) : null,
         receivedDate: item.receivedDate ? new Date(item.receivedDate) : null,
         expiryDate: item.expiryDate ? new Date(item.expiryDate) : null,
-        supplierName: item.supplierName || "",
+        supplierName: validSupplierName,
         fob,
         cif,
         lcNumber: item.lc?.toString() || "",
@@ -240,10 +270,11 @@ router.post("/purchase/import", async (req, res) => {
   }
 });
 
-// ➕ Add new purchase manually
+// ➕ Add new purchase manually - FIXED
 router.post("/purchase", async (req, res) => {
   try {
     const data = req.body;
+
     if (
       !data.invoiceNumber ||
       !data.supplierName ||
@@ -255,6 +286,14 @@ router.post("/purchase", async (req, res) => {
       });
     }
 
+    // FIX 1: Ensure supplierName is not empty
+    const validSupplierName = data.supplierName?.trim();
+    if (!validSupplierName) {
+      return res.status(400).json({
+        message: "Supplier name is required and cannot be empty.",
+      });
+    }
+
     const saved = [];
     for (const p of data.products) {
       const qty = parseFloat(p.qtyBox || p.quantityPerBoxStrip) || 0;
@@ -263,7 +302,7 @@ router.post("/purchase", async (req, res) => {
       const cif = parseFloat(p.cif) || 0;
 
       // Use the amount from frontend as-is
-      const amount = parseFloat(p.amount) || lc * qty; // fallback if frontend missed
+      const amount = parseFloat(p.amount) || lc * qty;
 
       const doc = new purchaseInventory({
         invoiceNumber: data.invoiceNumber,
@@ -272,7 +311,7 @@ router.post("/purchase", async (req, res) => {
         receivedDate: data.receivedDate || null,
         expiryDate: p.expiredDate || null,
         productName: p.productName,
-        supplierName: data.supplierName,
+        supplierName: validSupplierName,
         quantityPerBoxStrip: qty,
         fob,
         cif,
@@ -284,7 +323,20 @@ router.post("/purchase", async (req, res) => {
 
       await doc.save();
       saved.push(doc);
-      await updateReportInHand(p, "add");
+
+      // CORRECTED: Pass both quantityPerBoxStrip and qtyBox for compatibility
+      await updateReportInHand(
+        {
+          ...p,
+          supplierName: validSupplierName,
+          quantityPerBoxStrip: qty,
+          qtyBox: qty, // Add qtyBox for compatibility
+          lc,
+          fob,
+          cif,
+        },
+        "add"
+      );
     }
 
     res.status(201).json({

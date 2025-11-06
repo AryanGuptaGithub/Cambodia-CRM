@@ -36,6 +36,7 @@ import SearchableDropdown from "../../components/common/SearchableDropdown";
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
+// CORRECTED: Added productId field to store the actual product ID
 const initialFormState = {
   _id: "",
   invoiceNumber: "",
@@ -43,7 +44,8 @@ const initialFormState = {
   deliveryNumber: "",
   receivedDate: "",
   expiryDate: "",
-  productName: "",
+  productId: "", // NEW: Store product ID separately
+  productName: "", // Store product name for display
   supplierName: "",
   quantityPerBoxStrip: 0,
   fob: 0,
@@ -642,8 +644,11 @@ function Purchase() {
     }
   };
 
-  // CORRECTED: Enhanced editPurchase function
+  // CORRECTED: Enhanced editPurchase function with proper product ID handling
   const editPurchase = (purchase) => {
+   console.log('values of pur', purchase);
+
+    
     setForm({
       _id: purchase._id || "",
       invoiceNumber: purchase.invoiceNumber || "",
@@ -651,7 +656,8 @@ function Purchase() {
       deliveryNumber: purchase.deliveryNumber || "",
       receivedDate: purchase.receivedDate || "",
       expiryDate: purchase.expiryDate || "",
-      productName: purchase.productName || "",
+      productId: purchase?._id || purchase.productName || "", 
+      productName: purchase?.productName || purchase.productName || "", // Store product name
       supplierName: purchase.supplierName || "",
       quantityPerBoxStrip: purchase.quantityPerBoxStrip || 0,
       fob: purchase.fob || 0,
@@ -777,7 +783,7 @@ function Purchase() {
     }
   };
 
-  // CORRECTED: Enhanced handlePurchaseUpdate function
+  // CORRECTED: Enhanced handlePurchaseUpdate function with proper product handling
   const handlePurchaseUpdate = async (e) => {
     e.preventDefault();
     console.log("Updating purchase with data:", form);
@@ -790,7 +796,7 @@ function Purchase() {
         deliveryNumber: form.deliveryNumber,
         receivedDate: form.receivedDate,
         expiryDate: form.expiryDate,
-        productName: form.productName,
+        productName: form.productName, // Send the actual product name, not ID
         supplierName: form.supplierName,
         quantityPerBoxStrip: Number(form.quantityPerBoxStrip) || 0,
         fob: Number(form.fob) || 0,
@@ -953,22 +959,41 @@ function Purchase() {
     return value;
   };
 
-  // Handle dropdown changes
-  const handleProductChange = (value) => {
-    setForm((prev) => ({
-      ...prev,
-      productName: value,
-    }));
+  // CORRECTED: Handle product selection - store both ID and name
+  const handleProductChange = (selectedProductId) => {
+    console.log('Selected product ID:', selectedProductId);
+    const selectedProduct = productOptions.find(product => product.value === selectedProductId);
+    if (selectedProduct) {
+      setForm((prev) => ({
+        ...prev,
+        productId: selectedProduct.value, // Store the actual product ID
+        productName: selectedProduct.label, // Store the product name
+      }));
+    }
   };
 
-  const handleSupplierChange = (value) => {
+  const handleSupplierChange = useCallback((selectedValue) => {
     setForm((prev) => ({
       ...prev,
-      supplierName: value,
+      supplierName: selectedValue,
     }));
-  };
+  }, []);
 
-  console.log("pro", purchases);
+  // CORRECTED: Initialize form with proper product data when products are loaded
+  useEffect(() => {
+    if (isEditModalOpen && productOptions.length > 0 && form.productId) {
+      // If we have productId but productName might be missing, find the product
+      const product = productOptions.find(p => p.value === form.productId);
+      if (product && form.productName !== product.label) {
+        setForm(prev => ({
+          ...prev,
+          productName: product.label
+        }));
+      }
+    }
+  }, [isEditModalOpen, productOptions, form.productId]);
+
+ 
   return (
     <div className="p-6">
       <div className="container">
@@ -1701,20 +1726,25 @@ function Purchase() {
                     />
                   </div>
 
-                  {/* Product Name - SearchableDropdown */}
+                  {/* Product Name - SearchableDropdown - CORRECTED */}
                   <div>
                     <label className="block font-medium text-gray-600">
                       Product Name
                     </label>
                     <SearchableDropdown
-                      value={form.productName}
-                      onChange={handleProductChange}
+                      value={form.productId} // Use productId for dropdown value
+                      onChange={handleProductChange} // This now sets both productId and productName
                       options={productOptions}
                       placeholder="Select Product"
                       required={false}
                       loading={loadingProducts}
                       label=""
                     />
+                    {form.productName && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Selected: {form.productName}
+                      </p>
+                    )}
                   </div>
 
                   {/* Supplier Name - SearchableDropdown */}

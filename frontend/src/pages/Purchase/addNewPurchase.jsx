@@ -13,7 +13,10 @@ import SearchableDropdown from "../../components/common/SearchableDropdown";
 import { Eye, EyeOff } from "lucide-react";
 
 // Import reusable API functions
-import { fetchProducts as fetchProductsAPI, fetchSuppliers as fetchSuppliersAPI } from "../../pages/ProductManager/common/fetchDropdown";
+import {
+  fetchProducts as fetchProductsAPI,
+  fetchSuppliers as fetchSuppliersAPI,
+} from "../../pages/ProductManager/common/fetchDropdown";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -55,7 +58,7 @@ const usePurchaseForm = () => {
   const [expandedProductIndex, setExpandedProductIndex] = useState(0);
   const [loading, setLoading] = useState({
     products: false,
-    suppliers: false
+    suppliers: false,
   });
 
   const parseNumber = useCallback((val) => {
@@ -67,14 +70,18 @@ const usePurchaseForm = () => {
     return 0;
   }, []);
 
-  // Calculate amount for each product when lcNumber or qtyBox changes
+  // Calculate amount for each product when lcNumber, fob, or qtyBox changes
   useEffect(() => {
     setForm((prev) => ({
       ...prev,
       products: prev.products.map((product) => {
         const lcValue = parseNumber(product.lcNumber);
+        const fobValue = parseNumber(product.fob);
         const qtyBoxValue = parseNumber(product.qtyBox);
-        const amount = lcValue * qtyBoxValue;
+
+        // Use FOB for amount calculation if available, otherwise use LC
+        const baseValue = lcValue;
+        const amount = baseValue * qtyBoxValue;
         const roundedAmount = Math.round(amount * 100) / 100;
 
         return {
@@ -84,7 +91,7 @@ const usePurchaseForm = () => {
       }),
     }));
   }, [
-    form.products.map((p) => p.lcNumber + p.qtyBox).join(","),
+    form.products.map((p) => p.lcNumber + p.fob + p.qtyBox).join(","),
     parseNumber,
   ]);
 
@@ -186,13 +193,14 @@ const usePurchaseForm = () => {
     [updateProductField]
   );
 
-  // Handle product selection from dropdown - UPDATED to use transformed product data
+  // Handle product selection from dropdown - UPDATED to handle FOB like LC
   const handleProductSelection = useCallback(
     (productIndex, productId) => {
       const selectedProduct = products.find(
         (product) => product.value === productId
       );
       if (selectedProduct) {
+        console.log("value  of selectedProduct", selectedProduct);
         setForm((prev) => ({
           ...prev,
           products: prev.products.map((product, index) =>
@@ -201,7 +209,7 @@ const usePurchaseForm = () => {
                   ...product,
                   productId: selectedProduct.value,
                   productName: selectedProduct.label,
-                  lcNumber: selectedProduct.lc || 0,
+                  lcNumber: selectedProduct.lc || selectedProduct.lcNumber || 0,
                   fob: selectedProduct.fob || 0,
                   cif: selectedProduct.cif || 0,
                 }
@@ -213,7 +221,22 @@ const usePurchaseForm = () => {
     [products]
   );
 
-  // Handle supplier selection from dropdown - UPDATED to use transformed supplier data
+  // Handle FOB update separately - NEW FUNCTION
+  const handleFobUpdate = useCallback((productIndex, fobValue) => {
+    setForm((prev) => ({
+      ...prev,
+      products: prev.products.map((product, index) =>
+        index === productIndex
+          ? {
+              ...product,
+              fob: fobValue,
+            }
+          : product
+      ),
+    }));
+  }, []);
+
+  // FIXED: Handle supplier selection - ensure we get both ID and name
   const handleSupplierChange = useCallback(
     (supplierId) => {
       const selectedSupplier = suppliers.find(
@@ -222,8 +245,8 @@ const usePurchaseForm = () => {
       if (selectedSupplier) {
         setForm((prev) => ({
           ...prev,
-          supplierId: selectedSupplier.value,
-          supplierName: selectedSupplier.label,
+          supplierId: selectedSupplier.value, // This should be the ID
+          supplierName: selectedSupplier.label, // This should be the name
         }));
       }
     },
@@ -237,7 +260,7 @@ const usePurchaseForm = () => {
       return (
         product.productId &&
         product.qtyBox > 0 &&
-        product.lcNumber &&
+        (product.lcNumber || product.fob) && // Updated to accept either LC or FOB
         product.expiredDate
       );
     },
@@ -330,7 +353,7 @@ const usePurchaseForm = () => {
       newErrors.receivedDate = "Received date cannot be in the future";
     }
 
-    // Validate products
+    // Validate products - UPDATED to require either LC or FOB
     form.products.forEach((product, index) => {
       if (!product.productId)
         newErrors[`productId_${index}`] = "Product selection is required";
@@ -344,8 +367,11 @@ const usePurchaseForm = () => {
         newErrors[`qtyBox_${index}`] = "Box quantity must be greater than 0";
       if (fobNum < 0) newErrors[`fob_${index}`] = "FOB cannot be negative";
       if (cifNum < 0) newErrors[`cif_${index}`] = "CIF cannot be negative";
-      if (!lcNumberStr.trim())
-        newErrors[`lcNumber_${index}`] = "LC is required";
+
+      // Updated: Require either LC or FOB, not necessarily both
+      if (!lcNumberStr.trim() && fobNum <= 0)
+        newErrors[`lcNumber_${index}`] = "Either LC or FOB is required";
+
       if (!product.expiredDate)
         newErrors[`expiredDate_${index}`] = "Expired date is required";
     });
@@ -354,14 +380,22 @@ const usePurchaseForm = () => {
     return Object.keys(newErrors).length === 0;
   }, [form, parseNumber]);
 
-  // Fetch products - UPDATED to use reusable API function
+  // Fetch products - UPDATED to include FOB data
   const fetchProducts = useCallback(async () => {
     try {
-      setLoading(prev => ({ ...prev, products: true }));
+      setLoading((prev) => ({ ...prev, products: true }));
       const result = await fetchProductsAPI();
-      
+
       if (result.success) {
-        setProducts(result.data);
+        // Transform product data to ensure proper format with FOB
+        const transformedProducts = result.data.map((product) => ({
+          value: product._id || product.id,
+          label: product.productName || product.name,
+          lc: product.lc || product.lcNumber || 0,
+          fob: product.fob || 0, // Ensure FOB is included
+          cif: product.cif || 0,
+        }));
+        setProducts(transformedProducts);
       } else {
         showToast("error", result.error || "Failed to fetch products");
         setProducts([]);
@@ -371,18 +405,22 @@ const usePurchaseForm = () => {
       showToast("error", "Failed to fetch products");
       setProducts([]);
     } finally {
-      setLoading(prev => ({ ...prev, products: false }));
+      setLoading((prev) => ({ ...prev, products: false }));
     }
   }, []);
 
-  // Fetch suppliers - UPDATED to use reusable API function
+  // Fetch suppliers
   const fetchSuppliers = useCallback(async () => {
     try {
-      setLoading(prev => ({ ...prev, suppliers: true }));
+      setLoading((prev) => ({ ...prev, suppliers: true }));
       const result = await fetchSuppliersAPI();
-      
+      console.log("values of result", result);
       if (result.success) {
-        setSuppliers(result.data);
+        const transformedSuppliers = result.data.map((supplier) => ({
+          value: supplier.id,
+          label: supplier.name || supplier.supplierName,
+        }));
+        setSuppliers(transformedSuppliers);
       } else {
         showToast("error", result.error || "Failed to fetch suppliers");
         setSuppliers([]);
@@ -392,7 +430,7 @@ const usePurchaseForm = () => {
       showToast("error", "Failed to fetch suppliers");
       setSuppliers([]);
     } finally {
-      setLoading(prev => ({ ...prev, suppliers: false }));
+      setLoading((prev) => ({ ...prev, suppliers: false }));
     }
   }, []);
 
@@ -411,6 +449,7 @@ const usePurchaseForm = () => {
     handleProductDateChange,
     handleProductSelection,
     handleSupplierChange,
+    handleFobUpdate, // NEW: Export the FOB update handler
     addProduct,
     removeProduct,
     toggleProductView,
@@ -599,6 +638,7 @@ const AddNewPurchase = () => {
     handleProductDateChange,
     handleProductSelection,
     handleSupplierChange,
+    handleFobUpdate, // NEW: Get the FOB update handler
     addProduct,
     removeProduct,
     toggleProductView,
@@ -608,20 +648,14 @@ const AddNewPurchase = () => {
     fetchSuppliers,
   } = usePurchaseForm();
 
-  // Memoized product options for dropdown - SIMPLIFIED (data already in correct format)
+  // Memoized product options for dropdown
   const productOptions = useMemo(() => {
-    return [
-      { value: "", label: "Select Product" },
-      ...products,
-    ];
+    return [{ value: "", label: "Select Product" }, ...products];
   }, [products]);
 
-  // Memoized supplier options for dropdown - SIMPLIFIED (data already in correct format)
+  // Memoized supplier options for dropdown
   const supplierOptions = useMemo(() => {
-    return [
-      { value: "", label: "Select Supplier" },
-      ...suppliers,
-    ];
+    return [{ value: "", label: "Select Supplier" }, ...suppliers];
   }, [suppliers]);
 
   useEffect(() => {
@@ -645,20 +679,25 @@ const AddNewPurchase = () => {
     [handleChange]
   );
 
-  // Numeric input handler for product fields
+  // Numeric input handler for product fields - UPDATED to handle FOB specifically
   const handleProductNumericInputChange = useCallback(
     (productIndex, e) => {
       const { name, value } = e.target;
 
       if (PRODUCT_NUMERIC_FIELDS.includes(name)) {
         if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
-          handleProductChange(productIndex, e);
+          // If it's FOB field, use the specific handler
+          if (name === "fob") {
+            handleFobUpdate(productIndex, value);
+          } else {
+            handleProductChange(productIndex, e);
+          }
         }
       } else {
         handleProductChange(productIndex, e);
       }
     },
-    [handleProductChange]
+    [handleProductChange, handleFobUpdate]
   );
 
   const handleSubmit = async (e) => {
@@ -689,7 +728,9 @@ const AddNewPurchase = () => {
           expiredDate: product.expiredDate,
         })),
       };
-console.log('values of submissionData', submissionData);
+
+      console.log("Submitting purchase data:", submissionData);
+
       const response = await fetch(`${backendUrl}/api/purchase`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -710,7 +751,7 @@ console.log('values of submissionData', submissionData);
     }
   };
 
-  // Check if form is valid for submission
+  // Check if form is valid for submission - UPDATED for FOB
   const isFormValid = useMemo(() => {
     const invoiceNumberStr = String(form.invoiceNumber || "");
     const deliveryNumberStr = String(form.deliveryNumber || "");
@@ -723,7 +764,7 @@ console.log('values of submissionData', submissionData);
       form.invoiceDate &&
       form.receivedDate;
 
-    // Check all products
+    // Check all products - UPDATED to require either LC or FOB
     const productsValid = form.products.every((product) => {
       const qtyBoxNum = parseFloat(product.qtyBox) || 0;
       const fobNum = parseFloat(product.fob) || 0;
@@ -735,7 +776,7 @@ console.log('values of submissionData', submissionData);
         qtyBoxNum > 0 &&
         fobNum >= 0 &&
         cifNum >= 0 &&
-        lcNumberStr.trim() &&
+        (lcNumberStr.trim() || fobNum > 0) && // Either LC or FOB is required
         product.expiredDate
       );
     });
@@ -783,6 +824,7 @@ console.log('values of submissionData', submissionData);
               required
             />
 
+            {/* Supplier dropdown */}
             <SearchableDropdown
               label="Supplier"
               value={form.supplierId}
@@ -924,7 +966,6 @@ console.log('values of submissionData', submissionData);
                       }
                       error={errors[`lcNumber_${productIndex}`]}
                       placeholder="0.00"
-                      required
                       allowDecimal={true}
                     />
 
@@ -979,7 +1020,7 @@ console.log('values of submissionData', submissionData);
                         readOnly
                       />
                       <p className="text-xs text-gray-500 mt-1">
-                        Calculated: LC Number × Box Quantity
+                        Calculated: (FOB or LC) × Box Quantity
                       </p>
                     </div>
                   </div>

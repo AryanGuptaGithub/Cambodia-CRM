@@ -21,6 +21,7 @@ import { confirmDialog } from "../../utils/confirmationDialog";
 import { fetchProductTypes, fetchSuppliers } from "./common/fetchDropdown";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import InputField from "../../components/common/InputField";
+import { parseExcelDate } from "../../utils/excelUtility";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
@@ -34,7 +35,6 @@ const Product = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [showImportModal, setShowImportModal] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [isOpen, setIsOpen] = useState(false);
   const [parsedData, setParsedData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [types, setTypes] = useState([]);
@@ -42,11 +42,12 @@ const Product = () => {
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [productTypes, setProductTypes] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
+  const [error, setError] = useState(null);
   const inputRef = useRef(null);
 
   const productsPerPage = 9;
 
-  const [form, setForm] = useState({
+  const initialFormState = {
     productName: "",
     type: "",
     packing: "",
@@ -55,7 +56,10 @@ const Product = () => {
     drugLicense: "",
     licenseValidityDate: "",
     remarks: "",
-  });
+    _id: null,
+  };
+
+  const [form, setForm] = useState(initialFormState);
 
   // Fetch dropdown data
   useEffect(() => {
@@ -67,11 +71,19 @@ const Product = () => {
         ]);
 
         if (typesResult.success) {
-          setProductTypes(typesResult.data);
+          const transformedTypes = typesResult.data.map((item) => ({
+            value: typeof item === "string" ? item : item.name || item.value,
+            label: typeof item === "string" ? item : item.name || item.value,
+          }));
+          setProductTypes(transformedTypes);
         }
 
         if (suppliersResult.success) {
-          setSuppliers(suppliersResult.data);
+          const transformedSuppliers = suppliersResult.data.map((item) => ({
+            value: typeof item === "string" ? item : item.name || item.value,
+            label: typeof item === "string" ? item : item.name || item.value,
+          }));
+          setSuppliers(transformedSuppliers);
         }
       } catch (error) {
         console.error("Error fetching dropdown data:", error);
@@ -81,9 +93,33 @@ const Product = () => {
     fetchDropdownData();
   }, []);
 
+  // Fetch products
+  const fetchProducts = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch(`${backendUrl}/api/products`);
+      if (!response.ok) throw new Error("Failed to fetch products");
+      const data = await response.json();
+      const uniqueTypes = Array.from(
+        new Set(data.map((item) => item.type?.toLowerCase()).filter(Boolean))
+      );
+      setTypes(["All", ...uniqueTypes]);
+      setProducts(data);
+      setSelected([]);
+    } catch (err) {
+      setError(err.message || "Something went wrong");
+      showToast("error", err.message || "Failed to fetch products");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProducts();
+  }, []);
+
   // Filter products by tab and search term
   const filteredProducts = useMemo(() => {
-    setCurrentPage(1);
     const lowerSearch = searchTerm.toLowerCase();
 
     return products.filter((product) => {
@@ -100,8 +136,8 @@ const Product = () => {
       const licenseMatch = product.drugLicense
         ?.toLowerCase()
         .includes(lowerSearch);
-
       const typeMatch = product.type?.toLowerCase().includes(lowerSearch);
+
       const licenseDateFormatted = product.licenseValidityDate
         ? formatDateToReadable(
             new Date(product.licenseValidityDate),
@@ -130,25 +166,6 @@ const Product = () => {
     currentPage * productsPerPage
   );
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const response = await fetch(`${backendUrl}/api/products`);
-        if (!response.ok) throw new Error("Failed to fetch products");
-        const data = await response.json();
-        const uniqueTypes = Array.from(
-          new Set(data.map((item) => item.type.toLowerCase()))
-        );
-        setTypes(["All", ...uniqueTypes]);
-        setProducts(data);
-      } catch (err) {
-        setError(err.message || "Something went wrong");
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
   const toggleSelect = useCallback((product) => {
     setSelected((prev) =>
       prev.some((c) => c.id === product._id)
@@ -157,7 +174,6 @@ const Product = () => {
     );
   }, []);
 
-  // Select / Deselect all visible staff
   const toggleSelectAll = useCallback(
     (checked) => {
       setSelected(
@@ -170,22 +186,6 @@ const Product = () => {
     },
     [currentProducts]
   );
-
-  // Handle delete selected products
-  const fetchProducts = async () => {
-    try {
-      const response = await fetch(`${backendUrl}/api/products`);
-      const data = await response.json();
-      const uniqueTypes = Array.from(
-        new Set(data.map((item) => item.type.toLowerCase()))
-      );
-      setTypes(["All", ...uniqueTypes]);
-      setProducts(data);
-      setSelected([]);
-    } catch (err) {
-      handleError(err);
-    }
-  };
 
   const handleProductImport = async () => {
     if (parsedData.length === 0) {
@@ -206,6 +206,7 @@ const Product = () => {
           res.data.message || "Product imported successfully!"
         );
         setShowImportModal(false);
+        setParsedData([]);
         fetchProducts();
       }
     } catch (err) {
@@ -215,135 +216,158 @@ const Product = () => {
     }
   };
 
-  const handleFileUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+ const handleFileUpload = (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
 
-    const reader = new FileReader();
+  const reader = new FileReader();
 
-    reader.onload = (evt) => {
-      const data = new Uint8Array(evt.target.result);
-      const workbook = XLSX.read(data, { type: "array" });
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
+  reader.onload = (evt) => {
+    const data = new Uint8Array(evt.target.result);
+    const workbook = XLSX.read(data, { type: "array" });
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
 
-      const rows = XLSX.utils.sheet_to_json(worksheet, {
-        header: 1,
-        defval: "",
-      });
+    const rows = XLSX.utils.sheet_to_json(worksheet, {
+      header: 1,
+      defval: "",
+    });
 
-      if (rows.length === 0) {
-        showToast("warning", "Excel file is empty");
-        return;
+    if (rows.length === 0) {
+      showToast("warning", "Excel file is empty");
+      return;
+    }
+
+    // Updated required headers list to include FOB (USD)
+    const requiredHeaders = [
+      "product name",
+      "type",
+      "packing",
+      "selling price (usd)",
+      "lc (usd)",
+      "fob (usd)", // NEW: Added FOB header
+      "tax selling price (usd)",
+      "quantity per box/strip",
+      "supplier name",
+      "drug registration license #",
+      "drug registration license validity date",
+      "remarks",
+    ];
+
+    // Find the header row dynamically
+    let headerRowIndex = -1;
+    let headerRow = [];
+
+    for (let i = 0; i < Math.min(rows.length, 15); i++) {
+      const cleanedRow = rows[i].map((cell) =>
+        (cell || "").toString().trim().toLowerCase()
+      );
+
+      const matchCount = requiredHeaders.filter((hdr) =>
+        cleanedRow.includes(hdr)
+      ).length;
+
+      if (matchCount >= requiredHeaders.length * 0.8) {
+        headerRowIndex = i;
+        headerRow = cleanedRow;
+        break;
       }
+    }
 
-      // Updated required headers without "no" and "qty per carton"
-      const requiredHeaders = [
-        "product name",
-        "type",
-        "packing",
-        "selling price (usd)",
-        "lc (usd)",
-        "tax selling price (usd)",
-        "quantity per box/strip",
-        "supplier name",
-        "drug registration license #",
-        "drug registration license validity date",
-        "remarks",
-      ];
+    if (headerRowIndex === -1) {
+      showToast("error", "❌ Could not find header row in Excel file");
+      return;
+    }
 
-      let headerRowIndex = -1;
-      let foundHeaders = [];
+    // Map column index → header name
+    const headersMap = {};
+    rows[headerRowIndex].forEach((headerText, colIndex) => {
+      const cleaned = headerText.toString().trim().toLowerCase();
+      if (requiredHeaders.includes(cleaned)) {
+        headersMap[colIndex] = cleaned;
+      }
+    });
 
-      for (let i = 0; i < Math.min(rows.length, 10); i++) {
-        const row = rows[i].map((cell) =>
-          (cell || "").toString().trim().toLowerCase()
+    // Extract data rows below the header row
+    const dataRows = rows.slice(headerRowIndex + 1);
+    if (dataRows.length === 0) {
+      showToast("warning", "No data rows in Excel file");
+      return;
+    }
+
+    const mappedData = dataRows
+      .map((row) => {
+        const item = {};
+        Object.entries(headersMap).forEach(([colIndex, key]) => {
+          item[key] = row[colIndex] || "";
+        });
+
+        // Parse the license validity date using parseExcelDate
+        const licenseValidityDate = parseExcelDate(
+          item["drug registration license validity date"]
         );
-        const matched = requiredHeaders.filter((hdr) => row.includes(hdr));
-        if (matched.length === requiredHeaders.length) {
-          headerRowIndex = i;
-          foundHeaders = matched;
-          break;
-        }
-      }
 
-      if (headerRowIndex === -1) {
-        const errorRow = rows
-          .find((_, i) => i < 10)
-          .map((cell) => (cell || "").toString().trim().toLowerCase());
-        const missing = requiredHeaders.filter(
-          (hdr) => !errorRow.includes(hdr)
-        );
-        const errorMsg = `❌ Required headers missing: ${missing.join(", ")}`;
-        showToast("error", errorMsg);
-        return;
-      }
+        return {
+          productName: item["product name"],
+          type: item["type"],
+          packing: item["packing"],
+          sellingPriceUSD: item["selling price (usd)"],
+          lcUSD: item["lc (usd)"],
+          fobUSD: item["fob (usd)"], // NEW: Added FOB field
+          taxSellingPriceUSD: item["tax selling price (usd)"],
+          qtyPerBoxStrip: item["quantity per box/strip"],
+          supplierName: item["supplier name"],
+          drugLicense: item["drug registration license #"],
+          licenseValidityDate: licenseValidityDate
+            ? licenseValidityDate.toISOString().split("T")[0]
+            : "",
+          remarks: item["remarks"],
+        };
+      })
+      .filter((entry) => entry.productName !== "");
 
-      const rawHeaders = rows[headerRowIndex];
-      const headersMap = {};
-      rawHeaders.forEach((headerText, colIndex) => {
-        if (!headerText) return;
-        const cleaned = headerText.toString().trim().toLowerCase();
-        if (requiredHeaders.includes(cleaned)) {
-          headersMap[colIndex] = cleaned;
-        }
-      });
-
-      const dataRows = rows.slice(headerRowIndex + 1);
-
-      if (dataRows.length === 0) {
-        showToast("warning", "No data rows in file");
-        return;
-      }
-
-      const mappedData = dataRows
-        .map((row, rowIndex) => {
-          const item = {};
-          Object.entries(headersMap).forEach(([colIndex, key]) => {
-            item[key] = row[colIndex] || "";
-          });
-
-          return {
-            productName: item["product name"],
-            type: item["type"],
-            packing: item["packing"],
-            sellingPrice: item["selling price (usd)"],
-            lc: item["lc (usd)"],
-            taxSellingPrice: item["tax selling price (usd)"],
-            qtyPerBoxStrip: item["quantity per box/strip"],
-            supplierName: item["supplier name"],
-            drugLicense: item["drug registration license #"],
-            licenseValidityDate:
-              item["drug registration license validity date"],
-            remarks: item["remarks"],
-          };
-        })
-        .filter((entry) => entry.productName !== "");
-
-      setParsedData(mappedData);
-    };
-
-    reader.readAsArrayBuffer(file);
+    setParsedData(mappedData);
   };
+
+  reader.readAsArrayBuffer(file);
+};
 
   function capitalizeFirstLetter(str) {
     if (!str) return "";
-    str = str.toString(); // ensure it's a string
+    str = str.toString();
     return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
   }
+
   const handleView = (product) => {
-    setForm(product);
+    setForm({
+      ...product,
+      licenseValidityDate: product.licenseValidityDate || "",
+    });
     setIsViewModalOpen(true);
   };
 
   const handleEdit = (product) => {
-    setForm(product);
+    setForm({
+      ...product,
+      licenseValidityDate: product.licenseValidityDate || "",
+    });
     setIsEditModalOpen(true);
   };
+
+  const closeEditModal = () => {
+    setIsEditModalOpen(false);
+    setForm(initialFormState);
+  };
+
+  const closeViewModal = () => {
+    setIsViewModalOpen(false);
+    setForm(initialFormState);
+  };
+
   // Delete selected
   const handleDeleteSelected = async () => {
     const confirm = await confirmDialog({
-      text: `Are you sure you want to delete <b>${selected.length}</b> product?`,
+      text: `Are you sure you want to delete <b>${selected.length}</b> product(s)?`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
@@ -352,18 +376,21 @@ const Product = () => {
     if (confirm.isConfirmed) {
       try {
         const res = await axios.delete(`${backendUrl}/api/products`, {
-          data: { ids: selected },
+          data: { ids: selected.map((s) => s.id) },
         });
 
         if (res.status === 200) {
-          showToast("success", res.data.message);
+          showToast(
+            "success",
+            res.data.message || "Products deleted successfully"
+          );
           fetchProducts();
         }
       } catch (err) {
         showToast("error", "Failed to delete products.");
       }
     } else {
-      setSelected([]); // uncheck all if user cancels
+      setSelected([]);
     }
   };
 
@@ -383,15 +410,17 @@ const Product = () => {
         );
 
         if (res.status === 200) {
-          showToast("success", res.data.message);
+          showToast(
+            "success",
+            res.data.message || "Product deleted successfully"
+          );
           fetchProducts();
         }
       } catch (error) {
-        showToast("error", error.message);
+        showToast("error", error.message || "Failed to delete product");
       }
     }
   };
-  console.log("products", products);
 
   const handleProductUpdate = async (e) => {
     e.preventDefault();
@@ -401,10 +430,10 @@ const Product = () => {
         `${backendUrl}/api/products/${form._id}`,
         form
       );
-
+     console.log(res);
       if (res.status === 200) {
-        showToast("success", "Product updated successfully");
-        setIsEditModalOpen(false);
+        showToast("success", `Product <b>${res.data.productName}</b> updated successfully`);
+        closeEditModal();
         fetchProducts();
       }
     } catch (err) {
@@ -412,12 +441,15 @@ const Product = () => {
       showToast("error", "Failed to update product.");
     }
   };
+
   const handleIconClick = () => {
     if (inputRef.current) {
       inputRef.current.focus();
       inputRef.current.classList.add("highlight");
       setTimeout(() => {
-        inputRef.current.classList.remove("highlight");
+        if (inputRef.current) {
+          inputRef.current.classList.remove("highlight");
+        }
       }, 1000);
     }
   };
@@ -425,21 +457,39 @@ const Product = () => {
   // Handle numeric input for quantity
   const handleNumericInput = (e, field) => {
     const value = e.target.value;
-    // Only allow numbers and empty string
     if (value === "" || /^\d+$/.test(value)) {
       setForm({ ...form, [field]: value });
     }
   };
 
   // Handle dropdown selection
-  const handleDropdownChange = (field, selectedOption) => {
-    setForm({
-      ...form,
-      [field]: selectedOption ? selectedOption.value : "",
-    });
-  };
+  const handleTypeChange = useCallback((selectedValue) => {
+    setForm((prev) => ({
+      ...prev,
+      type: selectedValue,
+    }));
+  }, []);
 
-  console.log("valueso f ", products);
+  const handleSupplierChange = useCallback((selectedValue) => {
+    setForm((prev) => ({
+      ...prev,
+      supplierName: selectedValue,
+    }));
+  }, []);
+
+  // Get selected values for dropdowns
+  const getSelectedType = useMemo(() => {
+    return form.type;
+  }, [form.type]);
+
+  const getSelectedSupplier = useMemo(() => {
+    return form.supplierName;
+  }, [form.supplierName]);
+
+  if (loading) {
+    return <div className="p-6">Loading products...</div>;
+  }
+
   return (
     <div className="p-6">
       <div className="container">
@@ -464,7 +514,7 @@ const Product = () => {
                 className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
                 onClick={handleDeleteSelected}
               >
-                <Trash2 size={18} /> Delete
+                <Trash2 size={18} /> Delete Selected ({selected.length})
               </button>
             )}
           </div>
@@ -472,11 +522,14 @@ const Product = () => {
 
         <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
           {products.length > 0 ? (
-            <div className="flex gap-4">
+            <div className="flex gap-4 flex-wrap">
               {types.map((tab) => (
                 <button
                   key={tab}
-                  onClick={() => setSelectedTab(tab)}
+                  onClick={() => {
+                    setSelectedTab(tab);
+                    setCurrentPage(1);
+                  }}
                   className={`px-4 py-2 rounded-lg cursor-pointer ${
                     selectedTab === tab
                       ? "bg-indigo-600 text-white"
@@ -540,14 +593,14 @@ const Product = () => {
                   </div>
                 </th>
                 <th className="p-3 text-sm font-medium">Product Type</th>
-                <th className="p-3  text-sm font-medium">Packing</th>
-                <th className="p-3  text-sm font-medium">
+                <th className="p-3 text-sm font-medium">Packing</th>
+                <th className="p-3 text-sm font-medium">
                   Quantity per Box/Strip
                 </th>
-                <th className="p-3  text-sm font-medium">Supplier</th>
-                <th className="p-3  text-sm font-medium">Drug License</th>
-                <th className="p-3  text-sm font-medium">License Validity</th>
-                <th className="p-3  text-sm font-medium">Action</th>
+                <th className="p-3 text-sm font-medium">Supplier</th>
+                <th className="p-3 text-sm font-medium">Drug License</th>
+                <th className="p-3 text-sm font-medium">License Validity</th>
+                <th className="p-3 text-sm font-medium">Action</th>
               </tr>
             </thead>
             <tbody>
@@ -576,7 +629,6 @@ const Product = () => {
                           onChange={() => toggleSelect(product)}
                         />
                         <span>
-                          {" "}
                           {capitalizeFirstLetter(product.productName)}
                         </span>
                       </div>
@@ -587,10 +639,11 @@ const Product = () => {
                     <td className="p-3">
                       {capitalizeFirstLetter(product.supplierName) || "--"}
                     </td>
-                    <td className="p-3">{product.drugLicense || "--"} </td>
+                    <td className="p-3">{product.drugLicense || "--"}</td>
                     <td className="p-3">
-                      {formatDateToReadable(product.licenseValidityDate) ||
-                        "--"}
+                      {product.licenseValidityDate
+                        ? formatDateToReadable(product.licenseValidityDate)
+                        : "--"}
                     </td>
                     <td className="p-3 flex items-center justify-center gap-3">
                       <button
@@ -657,13 +710,11 @@ const Product = () => {
             </div>
           )}
         </div>
+
+        {/* Import Modal */}
         {showImportModal &&
           ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-              <div
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setIsOpen(false)}
-              />
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
               <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
                 <button
                   onClick={() => setShowImportModal(false)}
@@ -694,9 +745,9 @@ const Product = () => {
                   </button>
                   <button
                     onClick={handleProductImport}
-                    disabled={isUploading}
+                    disabled={isUploading || parsedData.length === 0}
                     className={`px-5 py-2 rounded-lg cursor-pointer ${
-                      isUploading
+                      isUploading || parsedData.length === 0
                         ? "bg-blue-400 text-white cursor-not-allowed"
                         : "bg-blue-600 hover:bg-blue-700 text-white"
                     }`}
@@ -709,20 +760,13 @@ const Product = () => {
             document.body
           )}
 
+        {/* View Modal */}
         {isViewModalOpen &&
           ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-              {/* Backdrop */}
-              <div
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setIsOpen(false)}
-              />
-
-              {/* Modal Content */}
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
               <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
-                {/* Close Button */}
                 <button
-                  onClick={() => setIsViewModalOpen(false)}
+                  onClick={closeViewModal}
                   className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
                 >
                   <X size={20} />
@@ -810,7 +854,7 @@ const Product = () => {
 
                 <div className="mt-6 flex justify-end">
                   <button
-                    onClick={() => setIsViewModalOpen(false)}
+                    onClick={closeViewModal}
                     className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
                   >
                     Close
@@ -820,20 +864,14 @@ const Product = () => {
             </div>,
             document.body
           )}
+
+        {/* Edit Modal */}
         {isEditModalOpen &&
           ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-              {/* Backdrop */}
-              <div
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setIsOpen(false)}
-              />
-
-              {/* Modal Box */}
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
               <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
-                {/* Close Button */}
                 <button
-                  onClick={() => setIsEditModalOpen(false)}
+                  onClick={closeEditModal}
                   className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
                 >
                   <X size={20} />
@@ -841,174 +879,164 @@ const Product = () => {
 
                 <h2 className="text-xl font-semibold mb-4">Edit Product</h2>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Product Name */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600">
-                      Product Name
-                    </label>
+                <form onSubmit={handleProductUpdate}>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <InputField
-                        type="text"
-                        value={form.productName}
-                        onChange={(e) =>
-                          setForm({ ...form, productName: e.target.value })
-                        }
-                      />
+                      <label className="block text-sm font-medium text-gray-600">
+                        Product Name <span className="text-red-500">*</span>
+                      </label>
+                      <div>
+                        <InputField
+                          type="text"
+                          value={form.productName}
+                          onChange={(e) =>
+                            setForm({ ...form, productName: e.target.value })
+                          }
+                        />
+                      </div>
                     </div>
-                  </div>
 
-                  {/* Type Dropdown */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600">
-                      Type
-                    </label>
-                    <div className="rounded-lg">
-                      <SearchableDropdown
-                        options={productTypes}
-                        value={
-                          productTypes.find(
-                            (option) => option.value === form.type
-                          ) || null
-                        }
-                        onChange={(selectedOption) =>
-                          handleDropdownChange("type", selectedOption)
-                        }
-                        placeholder="Select Type"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Packing */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600">
-                      Packing
-                    </label>
+                    {/* Type Dropdown */}
                     <div>
-                      <InputField
-                        type="text"
-                        value={form.packing}
-                        onChange={(e) =>
-                          setForm({ ...form, packing: e.target.value })
-                        }
-                      />
+                      <label className="block text-sm font-medium text-gray-600">
+                        Type
+                      </label>
+                      <div className="rounded-lg">
+                        <SearchableDropdown
+                          value={getSelectedType}
+                          onChange={handleTypeChange}
+                          options={productTypes}
+                          placeholder="Select Type"
+                        />
+                      </div>
                     </div>
-                  </div>
 
-                  {/* Quantity per Box/Strip (Numeric only) */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600">
-                      Quantity per Box/Strip
-                    </label>
+                    {/* Packing */}
                     <div>
-                      <InputField
-                        type="text"
-                        value={form.qtyPerBoxStrip}
-                        onChange={(e) =>
-                          handleNumericInput(e, "qtyPerBoxStrip")
-                        }
-                        placeholder="Enter numbers only"
-                      />
+                      <label className="block text-sm font-medium text-gray-600">
+                        Packing
+                      </label>
+                      <div>
+                        <InputField
+                          type="text"
+                          value={form.packing}
+                          onChange={(e) =>
+                            setForm({ ...form, packing: e.target.value })
+                          }
+                        />
+                      </div>
                     </div>
-                  </div>
 
-                  {/* Supplier Name Dropdown */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600">
-                      Supplier Name
-                    </label>
-                    <div className="rounded-lg">
-                      <SearchableDropdown
-                        options={suppliers}
-                        value={
-                          suppliers.find(
-                            (option) => option.value === form.supplierName
-                          ) || null
-                        }
-                        onChange={(selectedOption) =>
-                          handleDropdownChange("supplierName", selectedOption)
-                        }
-                        placeholder="Select Supplier"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Drug License */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600">
-                      Drug License
-                    </label>
+                    {/* Quantity per Box/Strip (Numeric only) */}
                     <div>
-                      <InputField
-                        type="text"
-                        value={form.drugLicense}
-                        onChange={(e) =>
-                          setForm({ ...form, drugLicense: e.target.value })
-                        }
-                      />
+                      <label className="block text-sm font-medium text-gray-600">
+                        Quantity per Box/Strip
+                      </label>
+                      <div>
+                        <InputField
+                          type="text"
+                          value={form.qtyPerBoxStrip}
+                          onChange={(e) =>
+                            handleNumericInput(e, "qtyPerBoxStrip")
+                          }
+                          placeholder="Enter numbers only"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Supplier Name Dropdown */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Supplier Name
+                      </label>
+                      <div className="rounded-lg">
+                        <SearchableDropdown
+                          value={getSelectedSupplier}
+                          onChange={handleSupplierChange}
+                          options={suppliers}
+                          placeholder="Select Supplier"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Drug License */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Drug License
+                      </label>
+                      <div>
+                        <InputField
+                          type="text"
+                          value={form.drugLicense}
+                          onChange={(e) =>
+                            setForm({ ...form, drugLicense: e.target.value })
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    {/* License Validity Date */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        License Validity Date
+                      </label>
+                      <div className="rounded-lg border border-gray-300">
+                        <DatePicker
+                          selected={
+                            form.licenseValidityDate
+                              ? new Date(form.licenseValidityDate)
+                              : null
+                          }
+                          onChange={(date) =>
+                            setForm({
+                              ...form,
+                              licenseValidityDate: date
+                                ? date.toISOString().split("T")[0]
+                                : "",
+                            })
+                          }
+                          dateFormat="yyyy-MM-dd"
+                          placeholderText="Select date"
+                          className="w-full px-3 py-2 border-none rounded-lg focus:ring-0"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Remarks */}
+                    <div className="md:col-span-2">
+                      <label className="block text-sm font-medium text-gray-600">
+                        Remarks
+                      </label>
+                      <div className="border border-gray-300 rounded-lg bg-white">
+                        <textarea
+                          value={form.remarks}
+                          onChange={(e) =>
+                            setForm({ ...form, remarks: e.target.value })
+                          }
+                          className="w-full px-3 py-2 border-none rounded-lg focus:ring-0 resize-none"
+                          rows={3}
+                        />
+                      </div>
                     </div>
                   </div>
 
-                  {/* License Validity Date */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600">
-                      License Validity Date
-                    </label>
-                    <div className="rounded-lg border border-gray-300">
-                      <DatePicker
-                        selected={
-                          form.licenseValidityDate
-                            ? new Date(form.licenseValidityDate)
-                            : null
-                        }
-                        onChange={(date) =>
-                          date
-                            ? setForm({
-                                ...form,
-                                licenseValidityDate: date.toISOString(),
-                              })
-                            : null
-                        }
-                        dateFormat="yyyy-MM-dd"
-                        placeholderText="Select date"
-                        className="w-full px-3 py-2 border-none rounded-lg focus:ring-0"
-                      />
-                    </div>
+                  {/* Buttons */}
+                  <div className="mt-6 flex justify-end gap-3">
+                    <button
+                      type="button"
+                      onClick={closeEditModal}
+                      className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+                    >
+                      Update
+                    </button>
                   </div>
-
-                  {/* Remarks */}
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-600">
-                      Remarks
-                    </label>
-                    <div className="border border-gray-300 rounded-lg bg-white">
-                      <textarea
-                        value={form.remarks}
-                        onChange={(e) =>
-                          setForm({ ...form, remarks: e.target.value })
-                        }
-                        className="w-full px-3 py-2 border-none rounded-lg focus:ring-0 resize-none"
-                        rows={3}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Buttons */}
-                <div className="mt-6 flex justify-end gap-3">
-                  <button
-                    onClick={() => setIsEditModalOpen(false)}
-                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleProductUpdate}
-                    className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
-                  >
-                    Update
-                  </button>
-                </div>
+                </form>
               </div>
             </div>,
             document.body
