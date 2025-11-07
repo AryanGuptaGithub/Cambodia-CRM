@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+} from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { showToast } from "../../utils/toast";
 import DatePicker from "react-datepicker";
@@ -29,8 +35,9 @@ const INITIAL_FORM_STATE = {
   invoiceNumber: "",
   invoiceDate: "",
   mrName: "",
-  mrId: "", // Add mrId to store the selected MR ID
+  mrId: "",
   customerCode: "",
+  customerId: "",
   paymentStatus: "",
   remark: "",
   creditDays: "",
@@ -64,7 +71,6 @@ const useSuggestions = (items, filterField = "type", inputValue = "") => {
         .filter((item) => {
           const fieldValue =
             typeof item === "string" ? item : item[filterField];
-          // Show all items when input is empty, otherwise filter
           if (inputValue.trim() === "") {
             return true;
           }
@@ -153,7 +159,6 @@ const useProductSuggestions = (products, productNames) => {
   const inputRefs = useRef([]);
 
   useEffect(() => {
-    // Initialize suggestions for each product
     const initialSuggestions = products.map((product) => ({
       isOpen: false,
       highlightedIndex: -1,
@@ -161,7 +166,6 @@ const useProductSuggestions = (products, productNames) => {
     }));
     setSuggestionsList(initialSuggestions);
 
-    // Initialize refs array
     inputRefs.current = products.map(
       (_, i) => inputRefs.current[i] || React.createRef()
     );
@@ -178,12 +182,10 @@ const useProductSuggestions = (products, productNames) => {
           const fieldValue = typeof item === "string" ? item : item.name;
           const itemName = typeof item === "string" ? item : item.name;
 
-          // Filter out already selected products (except the current one)
           if (selectedProductNames.includes(itemName)) {
             return false;
           }
 
-          // Show all items when input is empty, otherwise filter
           if (product.productName.trim() === "") {
             return true;
           }
@@ -309,9 +311,12 @@ const useSaleForm = (initialCustomerCode = "") => {
   const [errors, setErrors] = useState({});
   const [expandedProductIndex, setExpandedProductIndex] = useState(0);
   const [mrList, setMrList] = useState([]);
+  const [customerList, setCustomerList] = useState([]);
   const [mrListLoading, setMrListLoading] = useState(true);
+  const [customerListLoading, setCustomerListLoading] = useState(true);
 
   const parseNumber = useCallback((val) => {
+    if (val === "" || val === null || val === undefined) return 0;
     const num = parseFloat(val);
     return isNaN(num) ? 0 : num;
   }, []);
@@ -328,6 +333,21 @@ const useSaleForm = (initialCustomerCode = "") => {
       showToast("error", "Failed to load Medical Representatives");
     } finally {
       setMrListLoading(false);
+    }
+  }, []);
+
+  // Fetch Customer list
+  const fetchCustomerList = useCallback(async () => {
+    try {
+      setCustomerListLoading(true);
+      const backendUrl = import.meta.env.VITE_BACKEND_URL;
+      const response = await axios.get(`${backendUrl}/api/customers`);
+      setCustomerList(response.data.customers || []);
+    } catch (error) {
+      console.error("Error fetching customer list:", error);
+      showToast("error", "Failed to load Customers");
+    } finally {
+      setCustomerListLoading(false);
     }
   }, []);
 
@@ -367,7 +387,25 @@ const useSaleForm = (initialCustomerCode = "") => {
     [mrList]
   );
 
-  // Toggle product view - only one product can be expanded at a time
+  // Handle Customer selection
+  const handleCustomerChange = useCallback(
+    (customerId) => {
+      const selectedCustomer = customerList.find(
+        (customer) => customer._id === customerId
+      );
+      if (selectedCustomer) {
+        setForm((prevForm) => ({
+          ...prevForm,
+          customerId: customerId,
+          customerCode: selectedCustomer.customerCode,
+        }));
+      }
+      setErrors((prev) => ({ ...prev, customerCode: "" }));
+    },
+    [customerList]
+  );
+
+  // Toggle product view
   const toggleView = useCallback((index) => {
     setExpandedProductIndex((prevIndex) => (prevIndex === index ? -1 : index));
   }, []);
@@ -433,7 +471,6 @@ const useSaleForm = (initialCustomerCode = "") => {
       };
     });
 
-    // Expand the new product and collapse others
     setExpandedProductIndex(form.products.length);
   }, [form.products.length, calculateTotalAmount, calculateTotalNetAmount]);
 
@@ -441,8 +478,6 @@ const useSaleForm = (initialCustomerCode = "") => {
   const removeProduct = useCallback(
     (index) => {
       if (form.products.length > 1) {
-        const removedProduct = form.products[index];
-
         setForm((prev) => {
           const newProducts = prev.products.filter((_, i) => i !== index);
           const totalAmount = calculateTotalAmount(newProducts);
@@ -458,7 +493,6 @@ const useSaleForm = (initialCustomerCode = "") => {
           };
         });
 
-        // Adjust expanded index after removal
         setExpandedProductIndex((prevIndex) => {
           if (prevIndex === index) {
             return 0;
@@ -470,35 +504,6 @@ const useSaleForm = (initialCustomerCode = "") => {
       }
     },
     [form.products, calculateTotalAmount, calculateTotalNetAmount]
-  );
-
-  // Update product field
-  const updateProduct = useCallback(
-    (index, field, value) => {
-      setForm((prev) => {
-        const updatedProducts = [...prev.products];
-        updatedProducts[index] = { ...updatedProducts[index], [field]: value };
-
-        // Recalculate derived fields for this product
-        const recalculatedProducts = updatedProducts.map((product) =>
-          calculateProductFields(product)
-        );
-
-        // Recalculate total amounts
-        const totalAmount = calculateTotalAmount(recalculatedProducts);
-        const totalNetAmount = calculateTotalNetAmount(recalculatedProducts);
-
-        return {
-          ...prev,
-          products: recalculatedProducts,
-          totalAmount,
-          dueAmount: (
-            parseFloat(totalNetAmount) - parseFloat(prev.paidAmount || 0)
-          ).toFixed(2),
-        };
-      });
-    },
-    [calculateTotalAmount, calculateTotalNetAmount]
   );
 
   // Calculate derived fields for a single product
@@ -530,6 +535,33 @@ const useSaleForm = (initialCustomerCode = "") => {
     };
   }, []);
 
+  // Update product field
+  const updateProduct = useCallback(
+    (index, field, value) => {
+      setForm((prev) => {
+        const updatedProducts = [...prev.products];
+        updatedProducts[index] = { ...updatedProducts[index], [field]: value };
+
+        const recalculatedProducts = updatedProducts.map((product) =>
+          calculateProductFields(product)
+        );
+
+        const totalAmount = calculateTotalAmount(recalculatedProducts);
+        const totalNetAmount = calculateTotalNetAmount(recalculatedProducts);
+
+        return {
+          ...prev,
+          products: recalculatedProducts,
+          totalAmount,
+          dueAmount: (
+            parseFloat(totalNetAmount) - parseFloat(prev.paidAmount || 0)
+          ).toFixed(2),
+        };
+      });
+    },
+    [calculateTotalAmount, calculateTotalNetAmount, calculateProductFields]
+  );
+
   const calculateDerivedFields = useCallback(
     (name, value, currentForm) => {
       const updatedForm = { ...currentForm, [name]: value };
@@ -540,8 +572,9 @@ const useSaleForm = (initialCustomerCode = "") => {
 
       if (name === "creditDays") {
         const creditDays = parseInt(value, 10);
-        if (!isNaN(creditDays)) {
-          const due = new Date();
+        if (!isNaN(creditDays) && creditDays > 0) {
+          const invoiceDate = new Date(currentForm.invoiceDate);
+          const due = new Date(invoiceDate);
           due.setDate(due.getDate() + creditDays);
           updatedForm.dueDate = due.toISOString().split("T")[0];
         } else {
@@ -549,7 +582,7 @@ const useSaleForm = (initialCustomerCode = "") => {
         }
       }
 
-      if (["paidAmount"].includes(name)) {
+      if (name === "paidAmount") {
         const totalNetAmount = calculateTotalNetAmount(currentForm.products);
         const paidAmount = parseNumber(value);
         updatedForm.dueAmount = (
@@ -570,57 +603,187 @@ const useSaleForm = (initialCustomerCode = "") => {
     [calculateDerivedFields]
   );
 
-  const validate = useCallback(() => {
-    const newErrors = {};
-    const requiredFields = [
-      "recordingDate",
-      "invoiceNumber",
-      "invoiceDate",
-      "mrName",
-      "customerCode",
-      "paymentStatus",
-    ];
+  // Validate total quantity (sales + bonus) against available stock
+  const validateTotalQuantity = useCallback((product, index, productsData) => {
+    if (!product.productName) return null;
 
-    // Validate common fields
-    requiredFields.forEach((field) => {
-      if (!form[field]) {
-        newErrors[field] = `${field.replace(/([A-Z])/g, " $1")} is required`;
-      }
-    });
+    const productData = productsData.find(
+      (p) => p.productName === product.productName
+    );
+    if (!productData || !productData.inStock) return null;
 
-    // Validate products
-    form.products.forEach((product, index) => {
-      if (!product.productName) {
-        newErrors[`productName_${index}`] = `Product Name for item ${
-          index + 1
-        } is required`;
+    const availableStock = productData.inStock.boxes || 0;
+    const salesQty = parseInt(product.salesQty) || 0;
+    const bonusQty = parseInt(product.bonusQty) || 0;
+    const totalQty = salesQty + bonusQty;
+
+    if (totalQty > availableStock) {
+      return `Total quantity (Sales + Bonus = ${totalQty}) cannot exceed available stock (${availableStock} boxes)`;
+    }
+
+    return null;
+  }, []);
+
+  // Check if product has stock issues
+  const hasStockIssue = useCallback((product, productsData) => {
+    if (!product.productName) return false;
+
+    const productData = productsData.find(
+      (p) => p.productName === product.productName
+    );
+    if (!productData || !productData.inStock) return false;
+
+    const availableStock = productData.inStock.boxes || 0;
+    const salesQty = parseInt(product.salesQty) || 0;
+    const bonusQty = parseInt(product.bonusQty) || 0;
+    const totalQty = salesQty + bonusQty;
+
+    return totalQty > availableStock;
+  }, []);
+
+  // Real-time validation for individual product fields
+  const validateProductField = useCallback((index, field, value, productsData) => {
+    const product = { ...form.products[index], [field]: value };
+    const newErrors = { ...errors };
+
+    // Clear previous errors for this field
+    delete newErrors[`${field}_${index}`];
+
+    if (field === 'productName' && !value.trim()) {
+      newErrors[`productName_${index}`] = `Product Name for item ${index + 1} is required`;
+    }
+
+    if (field === 'salesQty') {
+      const salesQtyStr = value?.toString().trim();
+      if (!salesQtyStr || salesQtyStr === "") {
+        newErrors[`salesQty_${index}`] = `Sales Quantity for item ${index + 1} is required`;
+      } else {
+        const qty = Number(salesQtyStr);
+        if (isNaN(qty) || qty <= 0) {
+          newErrors[`salesQty_${index}`] = `Sales Quantity for item ${index + 1} must be greater than 0`;
+        } else {
+          // Stock validation only if product name exists
+          if (form.products[index].productName) {
+            const stockError = validateTotalQuantity(
+              { ...form.products[index], salesQty: value },
+              index,
+              productsData
+            );
+            if (stockError) {
+              newErrors[`salesQty_${index}`] = stockError;
+            }
+          }
+        }
       }
-      if (!product.salesQty || Number(product.salesQty) <= 0) {
-        newErrors[`salesQty_${index}`] = `Sales Quantity for item ${
-          index + 1
-        } must be > 0`;
+    }
+
+    if (field === 'sellingPrice') {
+      const sellingPriceStr = value?.toString().trim();
+      if (!sellingPriceStr || sellingPriceStr === "") {
+        newErrors[`sellingPrice_${index}`] = `Selling Price for item ${index + 1} is required`;
+      } else {
+        const price = Number(sellingPriceStr);
+        if (isNaN(price) || price <= 0) {
+          newErrors[`sellingPrice_${index}`] = `Selling Price for item ${index + 1} must be greater than 0`;
+        }
       }
-      if (!product.sellingPrice || Number(product.sellingPrice) <= 0) {
-        newErrors[`sellingPrice_${index}`] = `Selling Price for item ${
-          index + 1
-        } must be > 0`;
-      }
-    });
+    }
 
     setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  }, [form]);
+  }, [form.products, errors, validateTotalQuantity]);
+
+  const validate = useCallback(
+    (productsData = []) => {
+      const newErrors = {};
+
+      // Validate common fields
+      if (!form.recordingDate?.trim()) {
+        newErrors.recordingDate = "Recording Date is required";
+      }
+      if (!form.invoiceNumber?.trim()) {
+        newErrors.invoiceNumber = "Invoice Number is required";
+      }
+      if (!form.invoiceDate?.trim()) {
+        newErrors.invoiceDate = "Invoice Date is required";
+      }
+      if (!form.mrName?.trim()) {
+        newErrors.mrName = "Medical Representative is required";
+      }
+      if (!form.customerCode?.trim()) {
+        newErrors.customerCode = "Customer is required";
+      }
+      if (!form.paymentStatus?.trim()) {
+        newErrors.paymentStatus = "Payment Status is required";
+      }
+
+      // Validate products
+      form.products.forEach((product, index) => {
+        if (product.productName.trim()) {
+          // Product Name validation
+          if (!product.productName.trim()) {
+            newErrors[`productName_${index}`] = `Product Name for item ${index + 1} is required`;
+          }
+
+          // Sales Quantity validation
+          const salesQtyStr = product.salesQty?.toString().trim();
+          if (!salesQtyStr || salesQtyStr === "") {
+            newErrors[`salesQty_${index}`] = `Sales Quantity for item ${index + 1} is required`;
+          } else {
+            const qty = Number(salesQtyStr);
+            if (isNaN(qty) || qty <= 0) {
+              newErrors[`salesQty_${index}`] = `Sales Quantity for item ${index + 1} must be greater than 0`;
+            }
+          }
+
+          // Selling Price validation
+          const sellingPriceStr = product.sellingPrice?.toString().trim();
+          if (!sellingPriceStr || sellingPriceStr === "") {
+            newErrors[`sellingPrice_${index}`] = `Selling Price for item ${index + 1} is required`;
+          } else {
+            const price = Number(sellingPriceStr);
+            if (isNaN(price) || price <= 0) {
+              newErrors[`sellingPrice_${index}`] = `Selling Price for item ${index + 1} must be greater than 0`;
+            }
+          }
+
+          // Stock validation
+          const stockError = validateTotalQuantity(product, index, productsData);
+          if (stockError) {
+            newErrors[`salesQty_${index}`] = stockError;
+          }
+        }
+      });
+
+      // Check if at least one product is filled
+      const hasProducts = form.products.some(
+        (product) => product.productName.trim() !== ""
+      );
+      if (!hasProducts) {
+        newErrors.products = "At least one product is required";
+      }
+
+      setErrors(newErrors);
+      return Object.keys(newErrors).length === 0;
+    },
+    [form, validateTotalQuantity]
+  );
 
   return {
     form,
     errors,
     mrList,
+    customerList,
     mrListLoading,
+    customerListLoading,
     handleChange,
     validate,
+    validateProductField,
+    hasStockIssue,
     updateFormField,
     handleMRChange,
+    handleCustomerChange,
     fetchMRList,
+    fetchCustomerList,
     addProduct,
     removeProduct,
     updateProduct,
@@ -645,44 +808,52 @@ const DatePickerField = React.memo(
     readOnly = false,
     placeholder = "Select a date",
     className = "",
-  }) => (
-    <div className="flex flex-col">
-      <label className="text-sm font-medium text-gray-700 mb-1">
-        {label}
-        {required && <span className="text-red-500 ml-1">*</span>}
-      </label>
-      <DatePicker
-        selected={value ? new Date(value) : null}
-        onChange={(date) => {
-          if (date) {
-            const event = {
-              target: {
-                name: name,
-                value: date.toISOString().split("T")[0],
-              },
-            };
-            onChange(event);
-          } else {
-            const event = {
-              target: {
-                name: name,
-                value: "",
-              },
-            };
-            onChange(event);
-          }
-        }}
-        dateFormat="yyyy-MM-dd"
-        placeholderText={placeholder}
-        readOnly={readOnly}
-        className={`w-full border rounded-md px-2 py-1 ${
-          error ? "border-red-500" : "border-gray-300"
-        } ${readOnly ? "bg-gray-200" : ""} ${className}`}
-        autoComplete="off"
-      />
-      {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
-    </div>
-  )
+    maxDate = null,
+    minDate = null,
+  }) => {
+    const today = useMemo(() => new Date(), []);
+
+    return (
+      <div className="flex flex-col">
+        <label className="text-sm font-medium text-gray-700 mb-1">
+          {label}
+          {required && <span className="text-red-500 ml-1">*</span>}
+        </label>
+        <DatePicker
+          selected={value ? new Date(value) : null}
+          onChange={(date) => {
+            if (date) {
+              const event = {
+                target: {
+                  name: name,
+                  value: date.toISOString().split("T")[0],
+                },
+              };
+              onChange(event);
+            } else {
+              const event = {
+                target: {
+                  name: name,
+                  value: "",
+                },
+              };
+              onChange(event);
+            }
+          }}
+          dateFormat="yyyy-MM-dd"
+          placeholderText={placeholder}
+          readOnly={readOnly}
+          maxDate={maxDate !== null ? maxDate : today}
+          minDate={minDate}
+          className={`w-full border rounded-md px-3 py-2 ${
+            error ? "border-red-500" : "border-gray-300"
+          } ${readOnly ? "bg-gray-200" : ""} ${className}`}
+          autoComplete="off"
+        />
+        {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
+      </div>
+    );
+  }
 );
 
 // Enhanced Suggestion Input Component
@@ -705,6 +876,7 @@ const SuggestionInput = React.memo(
     getSuggestionDisplay = (item) => item,
     setHighlightedIndex,
     handleKeyDown,
+    required = false,
   }) => {
     const handleMouseEnter = useCallback(
       (index) => {
@@ -725,6 +897,7 @@ const SuggestionInput = React.memo(
       <div className="relative flex flex-col">
         <label className="text-sm font-medium text-gray-700 mb-1">
           {label}
+          {required && <span className="text-red-500 ml-1">*</span>}
         </label>
         <input
           ref={inputRef}
@@ -735,7 +908,7 @@ const SuggestionInput = React.memo(
           onKeyDown={handleKeyDown}
           onFocus={onFocus}
           onBlur={onBlur}
-          className={`border rounded-md px-2 py-1 ${
+          className={`border rounded-md px-3 py-2 ${
             error ? "border-red-500" : "border-gray-300"
           }`}
           placeholder="Type to search..."
@@ -779,27 +952,33 @@ const AddSale = () => {
     form,
     errors,
     mrList,
+    customerList,
     mrListLoading,
+    customerListLoading,
     handleChange,
     validate,
+    validateProductField,
+    hasStockIssue,
     updateFormField,
     handleMRChange,
+    handleCustomerChange,
     fetchMRList,
+    fetchCustomerList,
     addProduct,
     removeProduct,
     updateProduct,
     toggleView,
     isProductExpanded,
-    isProductFilled,
     areCommonFieldsFilled,
     hasAtLeastOneProduct,
   } = useSaleForm(customerCode);
   const { statuses, products, productNames, loading } = useInitialSaleData();
 
-  // Fetch MR list on component mount
+  // Fetch MR and Customer lists on component mount
   useEffect(() => {
     fetchMRList();
-  }, [fetchMRList]);
+    fetchCustomerList();
+  }, [fetchMRList, fetchCustomerList]);
 
   // Memoized MR options for dropdown
   const mrOptions = useMemo(() => {
@@ -811,6 +990,17 @@ const AddSale = () => {
       })),
     ];
   }, [mrList]);
+
+  // Memoized Customer options for dropdown
+  const customerOptions = useMemo(() => {
+    return [
+      { value: "", label: "Select Customer" },
+      ...customerList.map((customer) => ({
+        value: customer._id,
+        label: `${customer.customerCode} - ${customer.name}`,
+      })),
+    ];
+  }, [customerList]);
 
   // Payment Status Suggestions
   const paymentStatusSuggestions = useSuggestions(
@@ -829,44 +1019,47 @@ const AddSale = () => {
       handleChange(e);
 
       if (name === "paymentStatus") {
-        // Always open suggestions on focus/typing, show all when empty
         paymentStatusSuggestions.setIsOpen(true);
-        if (value.trim().length > 0) {
-          paymentStatusSuggestions.setHighlightedIndex(0);
-        } else {
-          paymentStatusSuggestions.setHighlightedIndex(0); // Highlight first item when showing all
-        }
+        paymentStatusSuggestions.setHighlightedIndex(0);
       }
     },
     [handleChange, paymentStatusSuggestions]
   );
 
-  // Helper function to get product details
   const getProductDetails = (productName) => {
     const product = products.find((p) => p.productName === productName);
     return {
       lc: product ? product.lc : "",
-      sellingPrice: product ? product.sellingPrice : ""
+      sellingPrice: product ? product.sellingPrice : "",
+      inStock: product ? product.inStock : { boxes: 0 },
     };
   };
 
+  // Enhanced product change with real-time validation
   const enhancedProductChange = useCallback(
     (index, field, value) => {
-      // First, update the main field (e.g., productName)
+      // First update the product field
       updateProduct(index, field, value);
 
       if (field === "productName") {
         const productDetails = getProductDetails(value);
-        // Set both LC and Selling Price automatically when product is selected
         updateProduct(index, "lc", productDetails.lc);
         updateProduct(index, "sellingPrice", productDetails.sellingPrice);
-        
+
         productSuggestions.setIsOpen(index, true);
         productSuggestions.setDropdownTop(index);
         productSuggestions.setHighlightedIndex(index, 0);
       }
+
+      // Real-time validation for critical fields
+      if (['salesQty', 'bonusQty', 'sellingPrice', 'productName'].includes(field)) {
+        // Use setTimeout to ensure state is updated before validation
+        setTimeout(() => {
+          validateProductField(index, field, value, products);
+        }, 10);
+      }
     },
-    [updateProduct, productSuggestions, products]
+    [updateProduct, productSuggestions, validateProductField, products]
   );
 
   // Handle payment status keyboard events
@@ -889,13 +1082,13 @@ const AddSale = () => {
     [productSuggestions, enhancedProductChange]
   );
 
-  // Handle payment status focus - show all suggestions when focused
+  // Handle payment status focus
   const handlePaymentStatusFocus = useCallback(() => {
     paymentStatusSuggestions.setIsOpen(true);
     paymentStatusSuggestions.setHighlightedIndex(0);
   }, [paymentStatusSuggestions]);
 
-  // Handle product name focus - show all suggestions when focused
+  // Handle product name focus
   const handleProductNameFocus = useCallback(
     (index) => {
       productSuggestions.setIsOpen(index, true);
@@ -917,22 +1110,42 @@ const AddSale = () => {
     return areCommonFieldsFilled(form) && hasAtLeastOneProduct(form.products);
   }, [form, areCommonFieldsFilled, hasAtLeastOneProduct]);
 
-  // Check if "Add Product" button should be enabled
-  const isCurrentProductValid = () => {
+  // Check if "Add Product" button should be enabled - UPDATED with stock validation
+  const isCurrentProductValid = useCallback(() => {
     const currentProduct = form.products[form.products.length - 1];
-    return (
+    const salesQty = currentProduct.salesQty?.toString().trim();
+    const sellingPrice = currentProduct.sellingPrice?.toString().trim();
+
+    // Check basic validation
+    const basicValidation = 
       currentProduct.productName.trim() !== "" &&
-      currentProduct.salesQty.trim() !== "" &&
-      currentProduct.sellingPrice.toString().trim() !== ""
-    );
-  };
+      salesQty && salesQty !== "" && !isNaN(Number(salesQty)) && Number(salesQty) > 0 &&
+      sellingPrice && sellingPrice !== "" && !isNaN(Number(sellingPrice)) && Number(sellingPrice) > 0;
+
+    if (!basicValidation) {
+      return false;
+    }
+
+    // Check stock validation - disable button if stock is exceeded
+    const hasStockProblem = hasStockIssue(currentProduct, products);
+    if (hasStockProblem) {
+      return false;
+    }
+
+    return true;
+  }, [form.products, products, hasStockIssue]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!validate()) return;
+    
+    // First validate form fields
+    if (!validate(products)) {
+      showToast("error", "Please fix the validation errors before submitting");
+      return;
+    }
 
     try {
-      // Filter out empty products (where productName is empty)
+      // Filter out empty products
       const validProducts = form.products.filter(
         (product) => product.productName.trim() !== ""
       );
@@ -942,14 +1155,40 @@ const AddSale = () => {
         return;
       }
 
-      // Create sales data array with common fields + individual product data
+      // Validate total quantity (sales + bonus) for all products before submission
+      const stockErrors = [];
+      validProducts.forEach((product, index) => {
+        const productData = products.find(
+          (p) => p.productName === product.productName
+        );
+        if (productData && productData.inStock) {
+          const availableStock = productData.inStock.boxes || 0;
+          const salesQty = parseInt(product.salesQty) || 0;
+          const bonusQty = parseInt(product.bonusQty) || 0;
+          const totalQty = salesQty + bonusQty;
+
+          if (totalQty > availableStock) {
+            stockErrors.push(
+              `Product "${product.productName}": Total quantity (Sales + Bonus = ${totalQty}) exceeds available stock (${availableStock} boxes)`
+            );
+          }
+        }
+      });
+
+      if (stockErrors.length > 0) {
+        showToast("error", stockErrors.join(", "));
+        return;
+      }
+
+      // Create sales data array
       const salesData = validProducts.map((product) => ({
         recordingDate: form.recordingDate,
         invoiceNumber: form.invoiceNumber,
         invoiceDate: form.invoiceDate,
         mrName: form.mrName,
-        mrId: form.mrId, // Include MR ID
+        mrId: form.mrId,
         customerCode: form.customerCode,
+        customerId: form.customerId,
         productName: product.productName,
         salesQty: product.salesQty,
         bonusQty: product.bonusQty,
@@ -993,6 +1232,22 @@ const AddSale = () => {
     }
   };
 
+  // Handle numeric input change
+  const handleNumericInputChange = useCallback((e, updateFunc) => {
+    const value = e.target.value;
+    if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+      updateFunc(e);
+    }
+  }, []);
+
+  // Handle alphanumeric input for Invoice Number
+  const handleAlphanumericInputChange = useCallback((e, updateFunc) => {
+    const value = e.target.value;
+    if (value === "" || /^[a-zA-Z0-9\-\/\s]*$/.test(value)) {
+      updateFunc(e);
+    }
+  }, []);
+
   if (loading) {
     return (
       <div className="max-w-5xl mx-auto p-6 bg-white rounded-2xl shadow">
@@ -1002,13 +1257,6 @@ const AddSale = () => {
       </div>
     );
   }
-
-  const handleNumericInputChange = (e, updateFunc) => {
-    const value = e.target.value;
-    if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
-      updateFunc(e);
-    }
-  };
 
   return (
     <div className="max-w-5xl mx-auto p-6 bg-white rounded-2xl shadow">
@@ -1031,11 +1279,15 @@ const AddSale = () => {
 
       <div className="mb-6">
         {form.products.map((product, index) => {
-          // Find the product data to get stock information
           const productData = products.find(
             (p) => p.productName === product.productName
           );
           const stockInfo = productData?.inStock;
+          const availableStock = stockInfo?.boxes || 0;
+          const salesQty = parseInt(product.salesQty) || 0;
+          const bonusQty = parseInt(product.bonusQty) || 0;
+          const totalQty = salesQty + bonusQty;
+          const hasStockProblem = totalQty > availableStock;
 
           return (
             <div key={index} className="border p-4 mb-4 rounded shadow-sm">
@@ -1048,7 +1300,7 @@ const AddSale = () => {
                   {product.productName && stockInfo && (
                     <div className="flex items-center gap-2">
                       <span
-                        className={`text-sm px-2 py-1 rounded ${
+                        className={`text-sm px-3 py-2 rounded ${
                           stockInfo.status === "Out of Stock"
                             ? "bg-red-100 text-red-800 border border-red-300"
                             : stockInfo.status === "Low Stock" ||
@@ -1057,8 +1309,14 @@ const AddSale = () => {
                             : "bg-green-100 text-green-800 border border-green-300"
                         }`}
                       >
-                        Available: {stockInfo.boxes} boxes
+                        Available: {availableStock} boxes
                       </span>
+                      {/* Stock validation warning - now checks total quantity */}
+                      {hasStockProblem && (
+                        <span className="text-red-600 text-sm font-medium">
+                          ⚠️ Total quantity exceeds available stock
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1115,7 +1373,7 @@ const AddSale = () => {
                             150
                           )
                         }
-                        className={`border rounded-md px-2 py-1 ${
+                        className={`border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 ${
                           errors[`productName_${index}`]
                             ? "border-red-500"
                             : "border-gray-300"
@@ -1184,10 +1442,13 @@ const AddSale = () => {
                       type="text"
                       value={product.salesQty}
                       onChange={(e) => {
-                        const value = e.target.value;
-                        if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
-                          updateProduct(index, "salesQty", value);
-                        }
+                        handleNumericInputChange(e, (e) =>
+                          enhancedProductChange(
+                            index,
+                            "salesQty",
+                            e.target.value
+                          )
+                        );
                       }}
                       error={errors[`salesQty_${index}`]}
                       required
@@ -1199,10 +1460,13 @@ const AddSale = () => {
                       type="text"
                       value={product.bonusQty}
                       onChange={(e) => {
-                        const value = e.target.value;
-                        if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
-                          updateProduct(index, "bonusQty", value);
-                        }
+                        handleNumericInputChange(e, (e) =>
+                          enhancedProductChange(
+                            index,
+                            "bonusQty",
+                            e.target.value
+                          )
+                        );
                       }}
                       error={errors[`bonusQty_${index}`]}
                     />
@@ -1213,10 +1477,13 @@ const AddSale = () => {
                       type="text"
                       value={product.sellingPrice}
                       onChange={(e) => {
-                        const value = e.target.value;
-                        if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
-                          updateProduct(index, "sellingPrice", value);
-                        }
+                        handleNumericInputChange(e, (e) =>
+                          enhancedProductChange(
+                            index,
+                            "sellingPrice",
+                            e.target.value
+                          )
+                        );
                       }}
                       error={errors[`sellingPrice_${index}`]}
                       required
@@ -1228,10 +1495,13 @@ const AddSale = () => {
                       type="text"
                       value={product.discount}
                       onChange={(e) => {
-                        const value = e.target.value;
-                        if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
-                          updateProduct(index, "discount", value);
-                        }
+                        handleNumericInputChange(e, (e) =>
+                          enhancedProductChange(
+                            index,
+                            "discount",
+                            e.target.value
+                          )
+                        );
                       }}
                       error={errors[`discount_${index}`]}
                     />
@@ -1294,14 +1564,18 @@ const AddSale = () => {
             error={errors.recordingDate}
             required
             placeholder="Select recording date"
+            maxDate={new Date()}
           />
           <InputField
             label="Invoice Number"
             name="invoiceNumber"
             value={form.invoiceNumber}
-            onChange={(e) => handleNumericInputChange(e, enhancedHandleChange)}
+            onChange={(e) =>
+              handleAlphanumericInputChange(e, enhancedHandleChange)
+            }
             error={errors.invoiceNumber}
             required
+            placeholder="Enter invoice number"
           />
           <DatePickerField
             label="Invoice Date"
@@ -1311,6 +1585,7 @@ const AddSale = () => {
             error={errors.invoiceDate}
             required
             placeholder="Select invoice date"
+            maxDate={new Date()}
           />
 
           {/* Medical Representative Dropdown */}
@@ -1325,14 +1600,18 @@ const AddSale = () => {
             label="Medical Representative"
           />
 
-          <InputField
-            label="Customer Code"
-            name="customerCode"
-            value={form.customerCode}
-            onChange={(e) => handleNumericInputChange(e, enhancedHandleChange)}
+          {/* Customer Dropdown */}
+          <SearchableDropdown
+            value={form.customerId}
+            onChange={handleCustomerChange}
+            options={customerOptions}
+            placeholder="Select Customer"
+            required={true}
+            loading={customerListLoading}
             error={errors.customerCode}
-            required
+            label="Customer"
           />
+
           <DatePickerField
             label="Delivery Date"
             name="deliveryDate"
@@ -1427,6 +1706,12 @@ const AddSale = () => {
             />
           </div>
         </div>
+
+        {errors.products && (
+          <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded">
+            <p className="text-red-700 text-sm">{errors.products}</p>
+          </div>
+        )}
 
         <div className="flex justify-end mt-6 gap-3">
           <button

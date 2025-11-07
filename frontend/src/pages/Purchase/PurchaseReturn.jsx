@@ -24,6 +24,9 @@ import "react-datepicker/dist/react-datepicker.css";
 import { confirmDialog } from "../../utils/confirmationDialog";
 import { showToast } from "../../utils/toast";
 import axios from "axios";
+import SearchableDropdown from "../../components/common/SearchableDropdown";
+
+const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
 const INITIAL_FORM_STATE = {
   _id: null,
@@ -32,7 +35,10 @@ const INITIAL_FORM_STATE = {
   invoiceDate: "",
   deliveryNumber: "",
   receivedDate: "",
+  productId: "",
   productName: "",
+  supplierId: "",
+  supplierName: "",
   purchaseQty: 0,
   returnQuantity: 0,
   usedQty: 0,
@@ -43,7 +49,19 @@ const INITIAL_FORM_STATE = {
   returnAmount: 0,
   remarks: "",
   returnReason: "",
+  expiredDate: "",
 };
+
+// Define numeric fields for proper handling
+const NUMERIC_FIELDS = [
+  "purchaseQty",
+  "returnQuantity",
+  "usedQty",
+  "fob",
+  "cif",
+  "amount",
+  "returnAmount",
+];
 
 // Custom hook for suggestions
 const useSuggestions = (items = [], inputValue = "") => {
@@ -143,6 +161,12 @@ const PurchaseReturn = () => {
   const navigate = useNavigate();
   const inputRef = useRef(null);
 
+  // NEW: States for dropdown data
+  const [productOptions, setProductOptions] = useState([]);
+  const [supplierOptions, setSupplierOptions] = useState([]);
+  const [loadingProducts, setLoadingProducts] = useState(false);
+  const [loadingSuppliers, setLoadingSuppliers] = useState(false);
+
   // Column configuration state
   const [isColumnModalOpen, setIsColumnModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("add");
@@ -150,7 +174,6 @@ const PurchaseReturn = () => {
   const [allSelected, setAllSelected] = useState(false);
 
   const returnsPerPage = 10;
-  const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
   // Define all available table columns
   const allFields = useMemo(
@@ -225,11 +248,7 @@ const PurchaseReturn = () => {
         name: "Return Amount ($)",
         dbName: "returnAmount",
       },
-      {
-        id: "returnReason",
-        name: "Return Reason",
-        dbName: "returnReason",
-      },
+    
       {
         id: "remarks",
         name: "Remarks",
@@ -245,11 +264,6 @@ const PurchaseReturn = () => {
   );
 
   // Sample data for suggestions
-  const productNameStrings = useMemo(
-    () => ["Product A", "Product B", "Product C", "Product D"],
-    []
-  );
-
   const returnReasonStrings = useMemo(
     () => [
       "Damaged Goods",
@@ -263,11 +277,6 @@ const PurchaseReturn = () => {
   );
 
   // Use the custom hook for suggestions
-  const productNameSuggestions = useSuggestions(
-    productNameStrings,
-    form.productName
-  );
-
   const returnReasonSuggestions = useSuggestions(
     returnReasonStrings,
     form.returnReason
@@ -314,6 +323,51 @@ const PurchaseReturn = () => {
     }
     return chunks;
   }, [activeTab, availableColumns, removableColumns]);
+
+  // NEW: Fetch products and suppliers for dropdowns
+  const fetchProducts = async () => {
+    setLoadingProducts(true);
+    try {
+      const response = await axios.get(`${backendUrl}/api/products`);
+      const transformedProducts = response.data.map((product) => ({
+        value: product._id,
+        label: product.productName,
+      }));
+      setProductOptions(transformedProducts);
+    } catch (err) {
+      console.error("Error fetching products:", err);
+      showToast("error", "Failed to fetch products");
+      setProductOptions([]);
+    } finally {
+      setLoadingProducts(false);
+    }
+  };
+
+  const fetchSuppliers = async () => {
+    setLoadingSuppliers(true);
+    try {
+      const response = await axios.get(`${backendUrl}/api/suppliers`);
+      const transformedSuppliers = response.data.map((supplier) => ({
+        value: supplier._id,
+        label: supplier.supplierName || supplier.name,
+      }));
+      setSupplierOptions(transformedSuppliers);
+    } catch (err) {
+      console.error("Error fetching suppliers:", err);
+      showToast("error", "Failed to fetch suppliers");
+      setSupplierOptions([]);
+    } finally {
+      setLoadingSuppliers(false);
+    }
+  };
+
+  // NEW: Load dropdown data when edit modal opens
+  useEffect(() => {
+    if (isEditModalOpen) {
+      fetchProducts();
+      fetchSuppliers();
+    }
+  }, [isEditModalOpen]);
 
   // Toggle item selection
   const toggleItem = (id) => {
@@ -380,14 +434,33 @@ const PurchaseReturn = () => {
     setIsColumnModalOpen(false);
   };
 
-  // Select product from suggestions
-  const selectProduct = (product) => {
-    setForm((prev) => ({
-      ...prev,
-      productName: product,
-    }));
-    productNameSuggestions.setIsOpen(false);
-  };
+  // CORRECTED: Handle product selection from dropdown
+  const handleProductChange = useCallback((productId) => {
+    const selectedProduct = productOptions.find(
+      (product) => product.value === productId
+    );
+    if (selectedProduct) {
+      setForm((prev) => ({
+        ...prev,
+        productId: selectedProduct.value,
+        productName: selectedProduct.label,
+      }));
+    }
+  }, [productOptions]);
+
+  // CORRECTED: Handle supplier selection from dropdown
+  const handleSupplierChange = useCallback((supplierId) => {
+    const selectedSupplier = supplierOptions.find(
+      (supplier) => supplier.value === supplierId
+    );
+    if (selectedSupplier) {
+      setForm((prev) => ({
+        ...prev,
+        supplierId: selectedSupplier.value,
+        supplierName: selectedSupplier.label,
+      }));
+    }
+  }, [supplierOptions]);
 
   // Select return reason from suggestions
   const selectReturnReason = (reason) => {
@@ -450,10 +523,7 @@ const PurchaseReturn = () => {
     });
 
     // Autocomplete trigger
-    if (name === "productName") {
-      productNameSuggestions.setIsOpen(true);
-      productNameSuggestions.setHighlightedIndex(-1);
-    } else if (name === "returnReason") {
+    if (name === "returnReason") {
       returnReasonSuggestions.setIsOpen(true);
       returnReasonSuggestions.setHighlightedIndex(-1);
     }
@@ -670,7 +740,7 @@ const PurchaseReturn = () => {
               </button>
             )}
 
-            {/* Column Configuration Button - UNCOMMENTED */}
+            {/* Column Configuration Button */}
             <button
               className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
               onClick={() => setIsColumnModalOpen(true)}
@@ -1045,7 +1115,7 @@ const PurchaseReturn = () => {
                     ["LC Number", "lcNumber"],
                     ["Amount", "amount"],
                     ["Return Amount", "returnAmount"],
-                    ["Return Reason", "returnReason"],
+                    
                   ].map(([label, key]) => (
                     <div key={key}>
                       <label className="block text-sm font-medium text-gray-600">
@@ -1099,7 +1169,7 @@ const PurchaseReturn = () => {
             document.body
           )}
 
-        {/* Edit Modal */}
+        {/* Edit Modal - CORRECTED with dropdowns */}
         {isEditModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -1113,7 +1183,6 @@ const PurchaseReturn = () => {
                   onClick={() => {
                     setIsEditModalOpen(false);
                     setForm(INITIAL_FORM_STATE);
-                    productNameSuggestions.setIsOpen(false);
                     returnReasonSuggestions.setIsOpen(false);
                   }}
                   className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
@@ -1143,7 +1212,7 @@ const PurchaseReturn = () => {
                       }
                       dateFormat="yyyy-MM-dd"
                       placeholderText="Select a date"
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
                     />
                   </div>
 
@@ -1158,7 +1227,7 @@ const PurchaseReturn = () => {
                       onChange={(date) => handleDateChange(date, "invoiceDate")}
                       dateFormat="yyyy-MM-dd"
                       placeholderText="Select a date"
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
                     />
                   </div>
 
@@ -1175,7 +1244,7 @@ const PurchaseReturn = () => {
                       }
                       dateFormat="yyyy-MM-dd"
                       placeholderText="Select a date"
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
                     />
                   </div>
 
@@ -1189,7 +1258,7 @@ const PurchaseReturn = () => {
                       name="invoiceNumber"
                       value={form.invoiceNumber || ""}
                       onChange={enhancedHandleChange}
-                      className="w-full border px-3 py-2 rounded-lg capitalize"
+                      className="w-full border px-3 py-2 rounded-lg capitalize border-gray-300"
                       autoComplete="off"
                     />
                   </div>
@@ -1203,84 +1272,39 @@ const PurchaseReturn = () => {
                       name="deliveryNumber"
                       value={form.deliveryNumber || ""}
                       onChange={enhancedHandleChange}
-                      className="w-full border px-3 py-2 rounded-lg capitalize"
+                      className="w-full border px-3 py-2 rounded-lg capitalize border-gray-300"
                       autoComplete="off"
                     />
                   </div>
 
-                  {/* Product Name with Suggestions */}
-                  <div className="relative">
+                  {/* CORRECTED: Product Dropdown */}
+                  <div>
                     <label className="block text-sm font-medium">
                       Product Name
                     </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        name="productName"
-                        value={form.productName || ""}
-                        onChange={enhancedHandleChange}
-                        onFocus={() => productNameSuggestions.setIsOpen(true)}
-                        onBlur={() =>
-                          setTimeout(
-                            () => productNameSuggestions.setIsOpen(false),
-                            200
-                          )
-                        }
-                        onKeyDown={(e) =>
-                          productNameSuggestions.handleKeyDown(e, selectProduct)
-                        }
-                        className="w-full border px-3 py-2 rounded-lg capitalize"
-                        autoComplete="off"
-                        ref={productNameSuggestions.inputRef}
-                      />
-                      <button
-                        type="button"
-                        className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400"
-                        onClick={() =>
-                          productNameSuggestions.setIsOpen(
-                            !productNameSuggestions.isOpen
-                          )
-                        }
-                      >
-                        {productNameSuggestions.isOpen ? (
-                          <ChevronUp size={16} />
-                        ) : (
-                          <ChevronDown size={16} />
-                        )}
-                      </button>
+                    <SearchableDropdown
+                      value={form.productId}
+                      onChange={handleProductChange}
+                      options={[{ value: "", label: "Select Product" }, ...productOptions]}
+                      placeholder="Select Product"
+                      required={true}
+                      loading={loadingProducts}
+                    />
+                  </div>
 
-                      {productNameSuggestions.isOpen &&
-                        productNameSuggestions.filteredItems.length > 0 && (
-                          <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                            {productNameSuggestions.filteredItems.map(
-                              (product, index) => (
-                                <div
-                                  key={index}
-                                  className={`px-3 py-2 hover:bg-gray-100 cursor-pointer ${
-                                    index ===
-                                    productNameSuggestions.highlightedIndex
-                                      ? "bg-blue-50"
-                                      : ""
-                                  }`}
-                                  onMouseDown={() =>
-                                    productNameSuggestions.selectSuggestion(
-                                      product,
-                                      selectProduct
-                                    )
-                                  }
-                                  onMouseEnter={() =>
-                                    productNameSuggestions.setHighlightedIndex(
-                                      index
-                                    )
-                                  }
-                                >
-                                  {product}
-                                </div>
-                              )
-                            )}
-                          </div>
-                        )}
-                    </div>
+                  {/* CORRECTED: Supplier Dropdown */}
+                  <div>
+                    <label className="block text-sm font-medium">
+                      Supplier Name
+                    </label>
+                    <SearchableDropdown
+                      value={form.supplierId}
+                      onChange={handleSupplierChange}
+                      options={[{ value: "", label: "Select Supplier" }, ...supplierOptions]}
+                      placeholder="Select Supplier"
+                      required={true}
+                      loading={loadingSuppliers}
+                    />
                   </div>
 
                   {/* Quantity Fields */}
@@ -1295,7 +1319,7 @@ const PurchaseReturn = () => {
                       onChange={(e) =>
                         handleNumericInputChange(e, enhancedHandleChange)
                       }
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
                       autoComplete="off"
                     />
                   </div>
@@ -1311,7 +1335,7 @@ const PurchaseReturn = () => {
                       onChange={(e) =>
                         handleNumericInputChange(e, enhancedHandleChange)
                       }
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
                       autoComplete="off"
                     />
                   </div>
@@ -1324,7 +1348,7 @@ const PurchaseReturn = () => {
                       type="text"
                       name="usedQty"
                       value={form.usedQty || ""}
-                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
+                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700 border-gray-300"
                       autoComplete="off"
                       disabled
                     />
@@ -1340,7 +1364,7 @@ const PurchaseReturn = () => {
                       onChange={(e) =>
                         handleNumericInputChange(e, enhancedHandleChange)
                       }
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
                       autoComplete="off"
                     />
                   </div>
@@ -1354,21 +1378,21 @@ const PurchaseReturn = () => {
                       onChange={(e) =>
                         handleNumericInputChange(e, enhancedHandleChange)
                       }
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
                       autoComplete="off"
                     />
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium">
-                      LC Number
+                      LC
                     </label>
                     <input
                       type="text"
                       name="lcNumber"
                       value={form.lcNumber || ""}
                       onChange={enhancedHandleChange}
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300"
                       autoComplete="off"
                     />
                   </div>
@@ -1383,7 +1407,7 @@ const PurchaseReturn = () => {
                       onChange={(e) =>
                         handleNumericInputChange(e, enhancedHandleChange)
                       }
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300"
                       autoComplete="off"
                     />
                   </div>
@@ -1395,97 +1419,19 @@ const PurchaseReturn = () => {
                     <input
                       type="text"
                       value={form.returnAmount || ""}
-                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
+                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700 border border-gray-300"
                       disabled
                     />
                   </div>
 
-                  {/* Return Reason with Suggestions */}
-                  <div className="relative">
-                    <label className="block text-sm font-medium">
-                      Return Reason
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        name="returnReason"
-                        value={form.returnReason || ""}
-                        onChange={enhancedHandleChange}
-                        onFocus={() => returnReasonSuggestions.setIsOpen(true)}
-                        onBlur={() =>
-                          setTimeout(
-                            () => returnReasonSuggestions.setIsOpen(false),
-                            200
-                          )
-                        }
-                        onKeyDown={(e) =>
-                          returnReasonSuggestions.handleKeyDown(
-                            e,
-                            selectReturnReason
-                          )
-                        }
-                        className="w-full border px-3 py-2 rounded-lg capitalize"
-                        autoComplete="off"
-                        ref={returnReasonSuggestions.inputRef}
-                      />
-                      <button
-                        type="button"
-                        className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400"
-                        onClick={() =>
-                          returnReasonSuggestions.setIsOpen(
-                            !returnReasonSuggestions.isOpen
-                          )
-                        }
-                      >
-                        {returnReasonSuggestions.isOpen ? (
-                          <ChevronUp size={16} />
-                        ) : (
-                          <ChevronDown size={16} />
-                        )}
-                      </button>
-
-                      {returnReasonSuggestions.isOpen &&
-                        returnReasonSuggestions.filteredItems.length > 0 && (
-                          <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                            {returnReasonSuggestions.filteredItems.map(
-                              (reason, index) => (
-                                <div
-                                  key={index}
-                                  className={`px-3 py-2 hover:bg-gray-100 cursor-pointer ${
-                                    index ===
-                                    returnReasonSuggestions.highlightedIndex
-                                      ? "bg-blue-50"
-                                      : ""
-                                  }`}
-                                  onMouseDown={() =>
-                                    returnReasonSuggestions.selectSuggestion(
-                                      reason,
-                                      selectReturnReason
-                                    )
-                                  }
-                                  onMouseEnter={() =>
-                                    returnReasonSuggestions.setHighlightedIndex(
-                                      index
-                                    )
-                                  }
-                                >
-                                  {reason}
-                                </div>
-                              )
-                            )}
-                          </div>
-                        )}
-                    </div>
-                  </div>
-
-                  {/* Remarks - Full width */}
+                
                   <div className="md:col-span-3">
                     <label className="block text-sm font-medium">Remarks</label>
                     <textarea
                       name="remarks"
                       value={form.remarks || ""}
                       onChange={enhancedHandleChange}
-                      className="w-full border px-3 py-2 rounded-lg capitalize resize-vertical min-h-[80px]"
+                      className="w-full border border-gray-300 px-3 py-2 rounded-lg capitalize resize-vertical min-h-[80px]"
                       autoComplete="off"
                     />
                   </div>
@@ -1497,7 +1443,6 @@ const PurchaseReturn = () => {
                       onClick={() => {
                         setIsEditModalOpen(false);
                         setForm(INITIAL_FORM_STATE);
-                        productNameSuggestions.setIsOpen(false);
                         returnReasonSuggestions.setIsOpen(false);
                       }}
                       className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-6 py-2 rounded-lg cursor-pointer transition-colors"

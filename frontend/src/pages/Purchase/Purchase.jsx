@@ -1738,11 +1738,11 @@ function Purchase() {
                       loading={loadingProducts}
                       label=""
                     />
-                    {/* {form.productName && (
+                    {form.productName && (
                       <p className="text-xs text-gray-500 mt-1">
                         Selected: {form.productName}
                       </p>
-                    )} */}
+                    )}
                   </div>
 
                   {/* ---------- SUPPLIER NAME (searchable dropdown – FIXED) ---------- */}
@@ -1856,6 +1856,7 @@ function Purchase() {
                 </form>
 
                 <div className="mt-6 flex justify-end gap-3">
+                
                   <button
                     onClick={() => {
                       setIsEditModalOpen(false);

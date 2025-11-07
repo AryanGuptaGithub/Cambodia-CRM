@@ -5,6 +5,10 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { showToast } from "../../utils/toast";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
+import {
+  fetchProducts as fetchProductsAPI,
+  fetchSuppliers as fetchSuppliersAPI,
+} from "../../pages/ProductManager/common/fetchDropdown";
 import axios from "axios";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
@@ -210,7 +214,7 @@ const useReturnForm = () => {
     setShowInvoiceSuggestions(false);
   };
 
-  // Handle product selection from dropdown - CORRECTED
+  // CORRECTED: Handle product selection from dropdown
   const handleProductChange = useCallback(
     (productId) => {
       const selectedProduct = products.find(
@@ -222,12 +226,17 @@ const useReturnForm = () => {
           productId: selectedProduct.value,
           productName: selectedProduct.label,
         }));
+
+        // Clear product error
+        if (errors.productId) {
+          setErrors((prev) => ({ ...prev, productId: "" }));
+        }
       }
     },
-    [products]
+    [products, errors]
   );
 
-  // Handle supplier selection from dropdown - CORRECTED
+  // CORRECTED: Handle supplier selection from dropdown
   const handleSupplierChange = useCallback(
     (supplierId) => {
       const selectedSupplier = suppliers.find(
@@ -239,9 +248,14 @@ const useReturnForm = () => {
           supplierId: selectedSupplier.value,
           supplierName: selectedSupplier.label,
         }));
+
+        // Clear supplier error
+        if (errors.supplierId) {
+          setErrors((prev) => ({ ...prev, supplierId: "" }));
+        }
       }
     },
-    [suppliers]
+    [suppliers, errors]
   );
 
   const validate = useCallback(() => {
@@ -286,7 +300,7 @@ const useReturnForm = () => {
     return Object.keys(newErrors).length === 0;
   }, [form, parseNumber]);
 
-  // Fetch products - CORRECTED to use SearchableDropdown format
+  // CORRECTED: Fetch products with proper error handling
   const fetchProducts = useCallback(async () => {
     try {
       setLoading((prev) => ({ ...prev, products: true }));
@@ -302,12 +316,13 @@ const useReturnForm = () => {
     } catch (err) {
       console.error("Error fetching products:", err);
       showToast("error", "Failed to fetch products");
+      setProducts([]);
     } finally {
       setLoading((prev) => ({ ...prev, products: false }));
     }
   }, []);
 
-  // Fetch suppliers - CORRECTED to use SearchableDropdown format
+  // CORRECTED: Fetch suppliers with proper error handling
   const fetchSuppliers = useCallback(async () => {
     try {
       setLoading((prev) => ({ ...prev, suppliers: true }));
@@ -323,6 +338,7 @@ const useReturnForm = () => {
     } catch (err) {
       console.error("Error fetching suppliers:", err);
       showToast("error", "Failed to fetch suppliers");
+      setSuppliers([]);
     } finally {
       setLoading((prev) => ({ ...prev, suppliers: false }));
     }
@@ -339,6 +355,8 @@ const useReturnForm = () => {
     } catch (err) {
       console.error("Error fetching purchases:", err);
       showToast("error", "Failed to fetch purchases");
+      setPurchases([]);
+      setFilteredPurchases([]);
     } finally {
       setLoading((prev) => ({ ...prev, purchases: false }));
     }
@@ -530,12 +548,12 @@ const AddReturnPurchase = () => {
     };
   }, []);
 
-  // Memoized product options for dropdown
+  // CORRECTED: Memoized product options for dropdown
   const productOptions = useMemo(() => {
     return [{ value: "", label: "Select Product" }, ...products];
   }, [products]);
 
-  // Memoized supplier options for dropdown
+  // CORRECTED: Memoized supplier options for dropdown
   const supplierOptions = useMemo(() => {
     return [{ value: "", label: "Select Supplier" }, ...suppliers];
   }, [suppliers]);
@@ -767,7 +785,7 @@ const AddReturnPurchase = () => {
 
         {/* Second Row - Product and Supplier */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
-          {/* Product Dropdown */}
+          {/* CORRECTED: Product Dropdown */}
           <SearchableDropdown
             label="Product"
             value={form.productId}
@@ -779,7 +797,7 @@ const AddReturnPurchase = () => {
             loading={loading.products}
           />
 
-          {/* Supplier Dropdown */}
+          {/* CORRECTED: Supplier Dropdown */}
           <SearchableDropdown
             label="Supplier"
             value={form.supplierId}

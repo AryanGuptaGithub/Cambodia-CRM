@@ -82,7 +82,6 @@ const updateReportInHand = async (productData, operation = "add") => {
         supplierName: validSupplierName,
         quantity: {
           boxes: boxesToUpdate, // CORRECTED: Set boxes field
-          pieces: 0,
         },
         status,
         category: category || "",
@@ -227,7 +226,7 @@ router.delete("/purchase", async (req, res) => {
 router.post("/purchase/import", async (req, res) => {
   try {
     const data = req.body;
-
+    console.log('values of data', data);
     if (!Array.isArray(data) || data.length === 0)
       return res.status(400).json({ message: "No data received" });
 
