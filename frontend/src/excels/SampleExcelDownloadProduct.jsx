@@ -1,12 +1,13 @@
 import React from "react";
 import ExcelJS from "exceljs";
-import { fetchProductTypes, fetchSuppliers } from "../pages/ProductManager/common/fetchDropdown";
+import { fetchProductTypes, fetchSuppliers, fetchProductPackingType } from "../pages/ProductManager/common/fetchDropdown";
 
 const SampleExcelDownloadPriceListSimple = () => {
   const generateExcel = async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Product List");
 
+    // Title
     worksheet.mergeCells("A1:L1");
     const titleCell = worksheet.getCell("A1");
     titleCell.value = "HEALTHCARE SOUTH EAST ASIA";
@@ -14,7 +15,7 @@ const SampleExcelDownloadPriceListSimple = () => {
     titleCell.alignment = { vertical: "middle", horizontal: "center" };
     worksheet.getRow(1).height = 25;
 
-    // Subtitle row
+    // Subtitle
     worksheet.mergeCells("A2:L2");
     const subtitleCell = worksheet.getCell("A2");
     subtitleCell.value = "Product List";
@@ -22,23 +23,19 @@ const SampleExcelDownloadPriceListSimple = () => {
     subtitleCell.alignment = { vertical: "middle", horizontal: "center" };
     worksheet.getRow(2).height = 20;
 
-    // Define columns (added FOB column after LC)
+    // Define columns
     worksheet.columns = [
       { key: "productName", header: "Product Name", width: 50 },
       { key: "type", header: "Type", width: 18 },
       { key: "packing", header: "Packing", width: 20 },
       { key: "sellingPrice", header: "Selling Price (USD)", width: 18 },
       { key: "lc", header: "LC (USD)", width: 12 },
-      { key: "fob", header: "FOB (USD)", width: 12 }, // NEW COLUMN ADDED
+      { key: "fob", header: "FOB (USD)", width: 12 },
       { key: "taxSellingPrice", header: "Tax Selling Price (USD)", width: 22 },
       { key: "qtyPerBox", header: "Quantity per Box/Strip", width: 22 },
       { key: "supplierName", header: "Supplier Name", width: 25 },
       { key: "drugLicense", header: "Drug Registration License #", width: 30 },
-      {
-        key: "licenseValidityDate",
-        header: "Drug Registration License Validity Date",
-        width: 45,
-      },
+      { key: "licenseValidityDate", header: "Drug Registration License Validity Date", width: 45 },
       { key: "remarks", header: "HEALTHCARE SOUTH EAST ASIA", width: 30 },
     ];
 
@@ -50,7 +47,7 @@ const SampleExcelDownloadPriceListSimple = () => {
       "Packing",
       "Selling Price (USD)",
       "LC (USD)",
-      "FOB (USD)", // NEW COLUMN HEADER
+      "FOB (USD)",
       "Tax Selling Price (USD)",
       "Quantity per Box/Strip",
       "Supplier Name",
@@ -62,41 +59,51 @@ const SampleExcelDownloadPriceListSimple = () => {
     headerRow.alignment = { vertical: "middle", horizontal: "center" };
     worksheet.getRow(3).height = 20;
 
-    // Format the date column (now column 11 since we added FOB column)
+    // Format the date column
     worksheet.getColumn(11).numFmt = "dd-mmm-yyyy";
 
     // Fetch dropdown data
     try {
-      // Fetch product types
       const typesResult = await fetchProductTypes();
       const typeOptions = typesResult.success ? typesResult.data.map(item => item.value) : [];
 
-      // Fetch suppliers
       const suppliersResult = await fetchSuppliers();
       const supplierOptions = suppliersResult.success ? suppliersResult.data.map(item => item.value) : [];
 
-      // Add data validation (dropdown) for Type column (column B, index 2)
+      const packingResult = await fetchProductPackingType();
+      const packingOptions = packingResult.success ? packingResult.data.map(item => item.value) : [];
+
+      // Type dropdown (Column B)
       if (typeOptions.length > 0) {
-        worksheet.dataValidations.add('B4:B1000', {
-          type: 'list',
+        worksheet.dataValidations.add("B4:B1000", {
+          type: "list",
           allowBlank: true,
-          formulae: [`"${typeOptions.join(',')}"`]
+          formulae: [`"${typeOptions.join(",")}"`],
         });
       }
 
-      // Add data validation (dropdown) for Supplier Name column (column I, index 9)
+      // Packing dropdown (Column C)
+      if (packingOptions.length > 0) {
+        worksheet.dataValidations.add("C4:C1000", {
+          type: "list",
+          allowBlank: true,
+          formulae: [`"${packingOptions.join(",")}"`],
+        });
+      }
+
+      // Supplier dropdown (Column I)
       if (supplierOptions.length > 0) {
-        worksheet.dataValidations.add('I4:I1000', {
-          type: 'list',
+        worksheet.dataValidations.add("I4:I1000", {
+          type: "list",
           allowBlank: true,
-          formulae: [`"${supplierOptions.join(',')}"`]
+          formulae: [`"${supplierOptions.join(",")}"`],
         });
       }
-
     } catch (error) {
       console.error("Error setting up dropdowns:", error);
     }
 
+    // Generate Excel file
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

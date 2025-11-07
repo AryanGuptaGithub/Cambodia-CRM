@@ -5,6 +5,8 @@ import { getVisiblePages } from "../../utils/useVisiblePages";
 import ReactDOM from "react-dom";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
+import axios from "axios"; // Added missing import
+import { showToast } from "../../utils/toast"; // Added missing import
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -33,24 +35,27 @@ function PriceList() {
     licenseValidityDate: "",
   });
 
+  // Fetch price list data
+  const fetchPriceList = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch(`${backendUrl}/api/pricelist`);
+      if (!response.ok) throw new Error("Failed to fetch products");
+      const data = await response.json();
+      const uniqueTypes = Array.from(
+        new Set(data.map((item) => item.type?.toLowerCase()).filter(Boolean))
+      );
+      setTypes(["All", ...uniqueTypes]);
+      setPriceList(data);
+    } catch (err) {
+      setError(err.message || "Something went wrong");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const response = await fetch(`${backendUrl}/api/pricelist`);
-        if (!response.ok) throw new Error("Failed to fetch products");
-        const data = await response.json();
-        const uniqueTypes = Array.from(
-          new Set(data.map((item) => item.type.toLowerCase()))
-        );
-        setTypes(["All", ...uniqueTypes]);
-        setPriceList(data);
-      } catch (err) {
-        setError(err.message || "Something went wrong");
-      } finally {
-        setLoading(false);
-      }
-    })();
+    fetchPriceList();
   }, []);
 
   const filteredPriceList = useMemo(() => {
@@ -97,7 +102,7 @@ function PriceList() {
 
   function capitalizeFirstLetter(str) {
     if (!str) return "";
-    str = str.toString(); // ensure it's a string
+    str = str.toString();
     return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
   }
 
@@ -123,7 +128,7 @@ function PriceList() {
       if (res.status === 200) {
         showToast("success", "Product updated successfully");
         setIsEditModalOpen(false);
-        fetchProducts();
+        fetchPriceList(); // Fixed function name
       }
     } catch (err) {
       console.error("Update error:", err);
@@ -136,8 +141,19 @@ function PriceList() {
       inputRef.current.focus();
       inputRef.current.classList.add("highlight");
       setTimeout(() => {
-        inputRef.current.classList.remove("highlight");
+        if (inputRef.current) {
+          inputRef.current.classList.remove("highlight");
+        }
       }, 1000);
+    }
+  };
+
+  // Handle numeric input for price fields
+  const handleNumericInput = (e, field) => {
+    const value = e.target.value;
+    // Allow only numbers and decimal point
+    if (value === "" || /^\d*\.?\d*$/.test(value)) {
+      setForm({ ...form, [field]: value });
     }
   };
 
@@ -162,7 +178,6 @@ function PriceList() {
           </div>
         )}
 
-        {/* Right-aligned Total Count & Search */}
         <div className="flex items-center gap-6 ml-auto">
           <p className="text-sm md:text-base font-semibold text-gray-700 whitespace-nowrap">
             Total Count:{" "}
@@ -296,12 +311,14 @@ function PriceList() {
           </div>
         )}
       </div>
+
+      {/* Edit Modal */}
       {isEditModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsOpen(false)}
+              onClick={() => setIsEditModalOpen(false)}
             />
 
             {/* Modal Box */}
@@ -319,9 +336,9 @@ function PriceList() {
               </h2>
 
               {/* Form Fields */}
-              <form className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <form onSubmit={handleProductUpdate} className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium">
+                  <label className="block text-sm font-medium text-gray-600">
                     Product Name
                   </label>
                   <input
@@ -330,60 +347,66 @@ function PriceList() {
                     onChange={(e) =>
                       setForm({ ...form, productName: e.target.value })
                     }
-                    className="w-full border px-3 py-2 rounded-lg"
+                    className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium">Type</label>
+                  <label className="block text-sm font-medium text-gray-600">
+                    Type
+                  </label>
                   <input
                     type="text"
                     value={form.type}
                     onChange={(e) => setForm({ ...form, type: e.target.value })}
-                    className="w-full border px-3 py-2 rounded-lg"
+                    className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
                   />
                 </div>
 
+                {/* Selling Price - Changed to text input with numeric validation */}
                 <div>
-                  <label className="block text-sm font-medium">
+                  <label className="block text-sm font-medium text-gray-600">
                     Selling Price (USD)
                   </label>
                   <input
-                    type="number"
+                    type="text"
                     value={form.sellingPrice}
-                    onChange={(e) =>
-                      setForm({ ...form, sellingPrice: e.target.value })
-                    }
-                    className="w-full border px-3 py-2 rounded-lg"
+                    onChange={(e) => handleNumericInput(e, 'sellingPrice')}
+                    className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                    placeholder="Enter numbers only"
                   />
                 </div>
 
+                {/* LC - Changed to text input with numeric validation */}
                 <div>
-                  <label className="block text-sm font-medium">LC</label>
+                  <label className="block text-sm font-medium text-gray-600">
+                    LC
+                  </label>
                   <input
-                    type="number"
+                    type="text"
                     value={form.lc}
-                    onChange={(e) => setForm({ ...form, lc: e.target.value })}
-                    className="w-full border px-3 py-2 rounded-lg"
+                    onChange={(e) => handleNumericInput(e, 'lc')}
+                    className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                    placeholder="Enter numbers only"
                   />
                 </div>
 
+                {/* Tax Selling Price - Changed to text input with numeric validation */}
                 <div>
-                  <label className="block text-sm font-medium">
+                  <label className="block text-sm font-medium text-gray-600">
                     Tax Selling Price (USD)
                   </label>
                   <input
-                    type="number"
+                    type="text"
                     value={form.taxSellingPrice}
-                    onChange={(e) =>
-                      setForm({ ...form, taxSellingPrice: e.target.value })
-                    }
-                    className="w-full border px-3 py-2 rounded-lg"
+                    onChange={(e) => handleNumericInput(e, 'taxSellingPrice')}
+                    className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                    placeholder="Enter numbers only"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium">
+                  <label className="block text-sm font-medium text-gray-600">
                     Drug License
                   </label>
                   <input
@@ -392,12 +415,12 @@ function PriceList() {
                     onChange={(e) =>
                       setForm({ ...form, drugLicense: e.target.value })
                     }
-                    className="w-full border px-3 py-2 rounded-lg"
+                    className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium">
+                  <label className="block text-sm font-medium text-gray-600">
                     License Validity Date
                   </label>
                   <DatePicker
@@ -407,16 +430,14 @@ function PriceList() {
                         : null
                     }
                     onChange={(date) =>
-                      date
-                        ? setForm({
-                            ...form,
-                            licenseValidityDate: date.toISOString(),
-                          })
-                        : null
+                      setForm({
+                        ...form,
+                        licenseValidityDate: date ? date.toISOString().split('T')[0] : "",
+                      })
                     }
                     dateFormat="yyyy-MM-dd"
                     placeholderText="Select date"
-                    className="w-full border px-3 py-2 rounded-lg"
+                    className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
                   />
                 </div>
               </form>
@@ -425,13 +446,13 @@ function PriceList() {
               <div className="mt-6 flex justify-end gap-3">
                 <button
                   onClick={() => setIsEditModalOpen(false)}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleProductUpdate}
-                  className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+                  className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer transition-colors"
                 >
                   Update
                 </button>
@@ -440,18 +461,17 @@ function PriceList() {
           </div>,
           document.body
         )}
+
+      {/* View Modal (unchanged) */}
       {isViewModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            {/* Backdrop */}
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsOpen(false)}
+              onClick={() => setIsViewModalOpen(false)}
             />
 
-            {/* Modal Content */}
             <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
-              {/* Close Button */}
               <button
                 onClick={() => setIsViewModalOpen(false)}
                 className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
@@ -464,7 +484,6 @@ function PriceList() {
               </h2>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Product Name */}
                 <div>
                   <label className="block text-sm font-medium text-gray-600">
                     Product Name
@@ -474,7 +493,6 @@ function PriceList() {
                   </p>
                 </div>
 
-                {/* Type */}
                 <div>
                   <label className="block text-sm font-medium text-gray-600">
                     Type
@@ -484,7 +502,6 @@ function PriceList() {
                   </p>
                 </div>
 
-                {/* Selling Price (USD) */}
                 <div>
                   <label className="block text-sm font-medium text-gray-600">
                     Selling Price (USD)
@@ -496,9 +513,8 @@ function PriceList() {
                   </p>
                 </div>
 
-                {/* LC */}
                 <div>
-                  <label className="block text-sm font.medium text-gray-600">
+                  <label className="block text-sm font-medium text-gray-600">
                     LC
                   </label>
                   <p className="border px-3 py-2 rounded-lg bg-gray-100">
@@ -506,9 +522,8 @@ function PriceList() {
                   </p>
                 </div>
 
-                {/* Tax Selling Price (USD) */}
                 <div>
-                  <label className="block text.sm font-medium text-gray-600">
+                  <label className="block text-sm font-medium text-gray-600">
                     Tax Selling Price (USD)
                   </label>
                   <p className="border px-3 py-2 rounded-lg bg-gray-100">
@@ -518,9 +533,8 @@ function PriceList() {
                   </p>
                 </div>
 
-                {/* Drug License */}
                 <div>
-                  <label className="block text-sm font.medium text-gray-600">
+                  <label className="block text-sm font-medium text-gray-600">
                     Drug License
                   </label>
                   <p className="border px-3 py-2 rounded-lg bg-gray-100">
@@ -528,7 +542,6 @@ function PriceList() {
                   </p>
                 </div>
 
-                {/* License Validity Date */}
                 <div>
                   <label className="block text-sm font-medium text-gray-600">
                     License Validity Date

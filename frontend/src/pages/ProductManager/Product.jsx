@@ -18,10 +18,15 @@ import { getVisiblePages } from "../../utils/useVisiblePages";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { confirmDialog } from "../../utils/confirmationDialog";
-import { fetchProductTypes, fetchSuppliers } from "./common/fetchDropdown";
+import {
+  fetchProductTypes,
+  fetchSuppliers,
+  fetchProductPackingType,
+} from "./common/fetchDropdown"; // Added fetchProductPackingType
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import InputField from "../../components/common/InputField";
 import { parseExcelDate } from "../../utils/excelUtility";
+import LoadingOverlay from "../../components/Loading";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
@@ -42,6 +47,7 @@ const Product = () => {
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [productTypes, setProductTypes] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
+  const [packingOptions, setPackingOptions] = useState([]); // Added packing options state
   const [error, setError] = useState(null);
   const inputRef = useRef(null);
 
@@ -65,10 +71,13 @@ const Product = () => {
   useEffect(() => {
     const fetchDropdownData = async () => {
       try {
-        const [typesResult, suppliersResult] = await Promise.all([
-          fetchProductTypes(),
-          fetchSuppliers(),
-        ]);
+        const [typesResult, suppliersResult, packingResult] = await Promise.all(
+          [
+            fetchProductTypes(),
+            fetchSuppliers(),
+            fetchProductPackingType(), // Added packing types fetch
+          ]
+        );
 
         if (typesResult.success) {
           const transformedTypes = typesResult.data.map((item) => ({
@@ -84,6 +93,14 @@ const Product = () => {
             label: typeof item === "string" ? item : item.name || item.value,
           }));
           setSuppliers(transformedSuppliers);
+        }
+
+        if (packingResult.success) {
+          const transformedPacking = packingResult.data.map((item) => ({
+            value: typeof item === "string" ? item : item.name || item.value,
+            label: typeof item === "string" ? item : item.name || item.value,
+          }));
+          setPackingOptions(transformedPacking);
         }
       } catch (error) {
         console.error("Error fetching dropdown data:", error);
@@ -216,121 +233,120 @@ const Product = () => {
     }
   };
 
- const handleFileUpload = (e) => {
-  const file = e.target.files?.[0];
-  if (!file) return;
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-  const reader = new FileReader();
+    const reader = new FileReader();
 
-  reader.onload = (evt) => {
-    const data = new Uint8Array(evt.target.result);
-    const workbook = XLSX.read(data, { type: "array" });
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
+    reader.onload = (evt) => {
+      const data = new Uint8Array(evt.target.result);
+      const workbook = XLSX.read(data, { type: "array" });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
 
-    const rows = XLSX.utils.sheet_to_json(worksheet, {
-      header: 1,
-      defval: "",
-    });
+      const rows = XLSX.utils.sheet_to_json(worksheet, {
+        header: 1,
+        defval: "",
+      });
 
-    if (rows.length === 0) {
-      showToast("warning", "Excel file is empty");
-      return;
-    }
-
-    // Updated required headers list to include FOB (USD)
-    const requiredHeaders = [
-      "product name",
-      "type",
-      "packing",
-      "selling price (usd)",
-      "lc (usd)",
-      "fob (usd)", // NEW: Added FOB header
-      "tax selling price (usd)",
-      "quantity per box/strip",
-      "supplier name",
-      "drug registration license #",
-      "drug registration license validity date",
-      "remarks",
-    ];
-
-    // Find the header row dynamically
-    let headerRowIndex = -1;
-    let headerRow = [];
-
-    for (let i = 0; i < Math.min(rows.length, 15); i++) {
-      const cleanedRow = rows[i].map((cell) =>
-        (cell || "").toString().trim().toLowerCase()
-      );
-
-      const matchCount = requiredHeaders.filter((hdr) =>
-        cleanedRow.includes(hdr)
-      ).length;
-
-      if (matchCount >= requiredHeaders.length * 0.8) {
-        headerRowIndex = i;
-        headerRow = cleanedRow;
-        break;
+      if (rows.length === 0) {
+        showToast("warning", "Excel file is empty");
+        return;
       }
-    }
 
-    if (headerRowIndex === -1) {
-      showToast("error", "❌ Could not find header row in Excel file");
-      return;
-    }
+      // Updated required headers list to include FOB (USD)
+      const requiredHeaders = [
+        "product name",
+        "type",
+        "packing",
+        "selling price (usd)",
+        "lc (usd)",
+        "fob (usd)", // NEW: Added FOB header
+        "tax selling price (usd)",
+        "quantity per box/strip",
+        "supplier name",
+        "drug registration license #",
+        "drug registration license validity date",
+        "remarks",
+      ];
 
-    // Map column index → header name
-    const headersMap = {};
-    rows[headerRowIndex].forEach((headerText, colIndex) => {
-      const cleaned = headerText.toString().trim().toLowerCase();
-      if (requiredHeaders.includes(cleaned)) {
-        headersMap[colIndex] = cleaned;
-      }
-    });
+      // Find the header row dynamically
+      let headerRowIndex = -1;
+      let headerRow = [];
 
-    // Extract data rows below the header row
-    const dataRows = rows.slice(headerRowIndex + 1);
-    if (dataRows.length === 0) {
-      showToast("warning", "No data rows in Excel file");
-      return;
-    }
-
-    const mappedData = dataRows
-      .map((row) => {
-        const item = {};
-        Object.entries(headersMap).forEach(([colIndex, key]) => {
-          item[key] = row[colIndex] || "";
-        });
-
-        // Parse the license validity date using parseExcelDate
-        const licenseValidityDate = parseExcelDate(
-          item["drug registration license validity date"]
+      for (let i = 0; i < Math.min(rows.length, 15); i++) {
+        const cleanedRow = rows[i].map((cell) =>
+          (cell || "").toString().trim().toLowerCase()
         );
 
-        return {
-          productName: item["product name"],
-          type: item["type"],
-          packing: item["packing"],
-          sellingPriceUSD: item["selling price (usd)"],
-          lcUSD: item["lc (usd)"],
-          fobUSD: item["fob (usd)"], // NEW: Added FOB field
-          taxSellingPriceUSD: item["tax selling price (usd)"],
-          qtyPerBoxStrip: item["quantity per box/strip"],
-          supplierName: item["supplier name"],
-          drugLicense: item["drug registration license #"],
-          licenseValidityDate: licenseValidityDate
-            ? licenseValidityDate.toISOString().split("T")[0]
-            : "",
-          remarks: item["remarks"],
-        };
-      })
-      .filter((entry) => entry.productName !== "");
+        const matchCount = requiredHeaders.filter((hdr) =>
+          cleanedRow.includes(hdr)
+        ).length;
 
-    setParsedData(mappedData);
+        if (matchCount >= requiredHeaders.length * 0.8) {
+          headerRowIndex = i;
+          headerRow = cleanedRow;
+          break;
+        }
+      }
+
+      if (headerRowIndex === -1) {
+        showToast("error", "❌ Could not find header row in Excel file");
+        return;
+      }
+
+      // Map column index → header name
+      const headersMap = {};
+      rows[headerRowIndex].forEach((headerText, colIndex) => {
+        const cleaned = headerText.toString().trim().toLowerCase();
+        if (requiredHeaders.includes(cleaned)) {
+          headersMap[colIndex] = cleaned;
+        }
+      });
+
+      // Extract data rows below the header row
+      const dataRows = rows.slice(headerRowIndex + 1);
+      if (dataRows.length === 0) {
+        showToast("warning", "No data rows in Excel file");
+        return;
+      }
+
+      const mappedData = dataRows
+        .map((row) => {
+          const item = {};
+          Object.entries(headersMap).forEach(([colIndex, key]) => {
+            item[key] = row[colIndex] || "";
+          });
+
+          const licenseValidityDate = parseExcelDate(
+            item["drug registration license validity date"]
+          );
+
+          return {
+            productName: item["product name"],
+            type: item["type"],
+            packing: item["packing"],
+            sellingPriceUSD: item["selling price (usd)"],
+            lcUSD: item["lc (usd)"],
+            fobUSD: item["fob (usd)"], // NEW: Added FOB field
+            taxSellingPriceUSD: item["tax selling price (usd)"],
+            qtyPerBoxStrip: item["quantity per box/strip"],
+            supplierName: item["supplier name"],
+            drugLicense: item["drug registration license #"],
+            licenseValidityDate: licenseValidityDate
+              ? licenseValidityDate.toISOString().split("T")[0]
+              : "",
+            remarks: item["remarks"],
+          };
+        })
+        .filter((entry) => entry.productName !== "");
+
+      setParsedData(mappedData);
+    };
+
+    reader.readAsArrayBuffer(file);
   };
-
-  reader.readAsArrayBuffer(file);
-};
 
   function capitalizeFirstLetter(str) {
     if (!str) return "";
@@ -430,9 +446,12 @@ const Product = () => {
         `${backendUrl}/api/products/${form._id}`,
         form
       );
-     console.log(res);
+      console.log(res);
       if (res.status === 200) {
-        showToast("success", `Product <b>${res.data.productName}</b> updated successfully`);
+        showToast(
+          "success",
+          `Product <b>${res.data.productName}</b> updated successfully`
+        );
         closeEditModal();
         fetchProducts();
       }
@@ -477,6 +496,14 @@ const Product = () => {
     }));
   }, []);
 
+  // NEW: Handle packing dropdown selection
+  const handlePackingChange = useCallback((selectedValue) => {
+    setForm((prev) => ({
+      ...prev,
+      packing: selectedValue,
+    }));
+  }, []);
+
   // Get selected values for dropdowns
   const getSelectedType = useMemo(() => {
     return form.type;
@@ -486,10 +513,12 @@ const Product = () => {
     return form.supplierName;
   }, [form.supplierName]);
 
-  if (loading) {
-    return <div className="p-6">Loading products...</div>;
-  }
+  // NEW: Get selected packing value
+  const getSelectedPacking = useMemo(() => {
+    return form.packing;
+  }, [form.packing]);
 
+  if (loading) return <LoadingOverlay text="Loading products..." />;
   return (
     <div className="p-6">
       <div className="container">
@@ -911,18 +940,17 @@ const Product = () => {
                       </div>
                     </div>
 
-                    {/* Packing */}
+                    {/* Packing Dropdown - CHANGED FROM INPUT TO DROPDOWN */}
                     <div>
                       <label className="block text-sm font-medium text-gray-600">
                         Packing
                       </label>
-                      <div>
-                        <InputField
-                          type="text"
-                          value={form.packing}
-                          onChange={(e) =>
-                            setForm({ ...form, packing: e.target.value })
-                          }
+                      <div className="rounded-lg">
+                        <SearchableDropdown
+                          value={getSelectedPacking}
+                          onChange={handlePackingChange}
+                          options={packingOptions}
+                          placeholder="Select Packing"
                         />
                       </div>
                     </div>

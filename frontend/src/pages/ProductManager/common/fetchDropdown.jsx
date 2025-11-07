@@ -1,10 +1,6 @@
 import axios from "axios";
-
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-/* -------------------------------------------------------------------------- */
-/*                            🔹 Fetch Product Types                          */
-/* -------------------------------------------------------------------------- */
 export const fetchProductTypes = async () => {
   try {
     const response = await axios.get(`${backendUrl}/api/product-types`);
@@ -27,9 +23,6 @@ export const fetchProductTypes = async () => {
   }
 };
 
-/* -------------------------------------------------------------------------- */
-/*                            🔹 Fetch Suppliers                              */
-/* -------------------------------------------------------------------------- */
 export const fetchSuppliers = async () => {
   try {
     const response = await axios.get(`${backendUrl}/api/suppliers`);
@@ -41,8 +34,8 @@ export const fetchSuppliers = async () => {
         data: suppliers.map((s) => ({
           value: s.name,
           label: s.name,
-          id:s._id,
-          name:s.name,
+          id: s._id,
+          name: s.name,
         })),
       };
     } else {
@@ -54,9 +47,6 @@ export const fetchSuppliers = async () => {
   }
 };
 
-/* -------------------------------------------------------------------------- */
-/*                             🔹 Fetch Products                              */
-/* -------------------------------------------------------------------------- */
 export const fetchProducts = async () => {
   try {
     const response = await axios.get(`${backendUrl}/api/products`);
@@ -68,7 +58,6 @@ export const fetchProducts = async () => {
 
     // ✅ Remove duplicate product names (case-insensitive)
     const uniqueProductsMap = new Map();
-
     products.forEach((product) => {
       const name = product.productName?.trim().toLowerCase();
       if (name && !uniqueProductsMap.has(name)) {
@@ -91,3 +80,27 @@ export const fetchProducts = async () => {
     return { success: false, error: "Failed to load products" };
   }
 };
+
+export const fetchProductPackingType = async () => {
+  try {
+    const response = await axios.get(`${backendUrl}/api/product-packing-types`);
+    const packingTypes = response.data?.data || response.data;
+
+    if (!Array.isArray(packingTypes)) {
+      return { success: false, error: "Invalid product packing types data format" };
+    }
+
+    return {
+      success: true,
+      data: packingTypes.map((type) => ({
+        value: type.name,
+        label: type.name,
+        ...type,
+      })),
+    };
+  } catch (error) {
+    console.error("❌ Error fetching product packing types:", error);
+    return { success: false, error: "Failed to load product packing types" };
+  }
+};
+

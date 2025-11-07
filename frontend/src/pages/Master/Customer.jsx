@@ -5,7 +5,16 @@ import React, {
   useCallback,
   useRef,
 } from "react";
-import { UserPlus, Upload, Trash2, Eye, X, Edit, Search } from "lucide-react";
+import {
+  UserPlus,
+  Upload,
+  Trash2,
+  Eye,
+  X,
+  Edit,
+  Search,
+  LoaderPinwheelIcon,
+} from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import axios from "axios";
@@ -20,6 +29,7 @@ import SampleExcelDownloadCustomer from "../../excels/SampleExcelDownloadCustome
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import InputField from "../../components/common/InputField";
 import { parseExcelDate } from "../../utils/excelUtility";
+import LoadingOverlay from "../../components/Loading";
 
 // Import API functions
 import {
@@ -31,7 +41,6 @@ import {
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
-
 const customersPerPage = 9;
 
 /* ────────────────────── Custom hook for form ────────────────────── */
@@ -50,9 +59,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
     remark: "",
     _id: null,
   });
-
   const [errors, setErrors] = useState({});
-
   const handleChange = useCallback(
     (name, value) => {
       setForm((prev) => ({ ...prev, [name]: value }));
@@ -60,7 +67,6 @@ const useCustomerForm = (initialCustomerCode = "") => {
     },
     [errors]
   );
-
   const handleDropdownChange = useCallback(
     (field, option) => {
       const value = option ? option.value : "";
@@ -68,7 +74,6 @@ const useCustomerForm = (initialCustomerCode = "") => {
     },
     [handleChange]
   );
-
   const handleNumericInput = useCallback(
     (e, field) => {
       const value = e.target.value;
@@ -78,10 +83,8 @@ const useCustomerForm = (initialCustomerCode = "") => {
     },
     [handleChange]
   );
-
   const validateForm = useCallback(() => {
     const newErrors = {};
-
     if (!form.name?.trim()) newErrors.name = "Customer name is required";
     if (!form.typeOfBusiness)
       newErrors.typeOfBusiness = "Business type is required";
@@ -90,11 +93,9 @@ const useCustomerForm = (initialCustomerCode = "") => {
     if (!form.zone) newErrors.zone = "Zone is required";
     if (!form.province) newErrors.province = "Province is required";
     if (!form.date) newErrors.date = "Date is required";
-
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   }, [form]);
-
   const resetForm = useCallback(() => {
     setForm({
       customerCode: initialCustomerCode || "",
@@ -112,7 +113,6 @@ const useCustomerForm = (initialCustomerCode = "") => {
     });
     setErrors({});
   }, [initialCustomerCode]);
-
   return {
     form,
     errors,
@@ -128,7 +128,6 @@ const useCustomerForm = (initialCustomerCode = "") => {
 /* ────────────────────── Main Component ────────────────────── */
 const Customer = () => {
   const navigate = useNavigate();
-
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState([]);
@@ -139,19 +138,16 @@ const Customer = () => {
   const [parsedData, setParsedData] = useState([]);
   const [nextCustomerCode, setNextCustomerCode] = useState(null);
   const inputRef = useRef(null);
-
   // Dropdown data
   const [provinces, setProvinces] = useState([]);
   const [mrList, setMrList] = useState([]);
   const [zones, setZones] = useState([]);
   const [businessTypes, setBusinessTypes] = useState([]);
   const [isDropdownsLoading, setIsDropdownsLoading] = useState(true);
-
   // Modal states
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [errors, setErrors] = useState({});
-
   const {
     form,
     handleChange,
@@ -160,6 +156,9 @@ const Customer = () => {
     resetForm,
     setForm,
   } = useCustomerForm();
+
+  /* ──────── Helper: Display -- for empty values ──────── */
+  const displayValue = (value) => (value ? value : "--");
 
   /* ──────── Data fetching ──────── */
   useEffect(() => {
@@ -177,7 +176,6 @@ const Customer = () => {
           fetchZonesAPI(),
           fetchBusinessTypesAPI(),
         ]);
-
       if (provincesResult.success) setProvinces(provincesResult.data || []);
       if (mrResult.success) setMrList(mrResult.data || []);
       if (zonesResult.success) setZones(zonesResult.data || []);
@@ -256,7 +254,6 @@ const Customer = () => {
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
     });
-
     if (confirm.isConfirmed) {
       try {
         const res = await axios.delete(`${backendUrl}/api/customers`, {
@@ -280,7 +277,6 @@ const Customer = () => {
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
     });
-
     if (confirm.isConfirmed) {
       try {
         const res = await axios.delete(
@@ -316,7 +312,6 @@ const Customer = () => {
         );
         actualMrId = found?._id || found?.id || "";
       }
-
       setForm({
         customerCode: customer.customerCode || "",
         date: customer.date || "",
@@ -411,7 +406,6 @@ const Customer = () => {
       showToast("error", "Please fill all required fields");
       return;
     }
-
     try {
       const payload = {
         customerCode: form.customerCode,
@@ -426,12 +420,10 @@ const Customer = () => {
         province: form.province,
         remark: form.remark,
       };
-
       const res = await axios.put(
         `${backendUrl}/api/customers/${form._id}`,
         payload
       );
-
       if (res.status === 200) {
         showToast("success", `${form.name} updated successfully`);
         setIsEditModalOpen(false);
@@ -458,7 +450,6 @@ const Customer = () => {
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = (evt) => {
       try {
@@ -466,12 +457,10 @@ const Customer = () => {
         const workbook = XLSX.read(data, { type: "array" });
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
-
         if (!rows.length) {
           showToast("warning", "Excel file is empty");
           return;
         }
-
         const expectedHeaders = [
           "date",
           "medical representative name",
@@ -495,10 +484,8 @@ const Customer = () => {
           showToast("error", "Header row not found");
           return;
         }
-
         const headers = rows[headerIdx].map((h) => h.toString().trim());
         const dataRows = rows.slice(headerIdx + 1);
-
         const json = dataRows
           .map((row) => {
             const obj = {};
@@ -506,10 +493,8 @@ const Customer = () => {
             return obj;
           })
           .filter((o) => Object.values(o).some((v) => v !== ""));
-
         const final = json.map((i) => {
           const parsedDate = parseExcelDate(i["Date"] || i["date"]);
-
           return {
             date: parsedDate ? parsedDate.toISOString().split("T")[0] : "",
             medicalRepName:
@@ -530,7 +515,6 @@ const Customer = () => {
             remark: i["Remark"] || i["remark"] || "",
           };
         });
-
         setParsedData(final);
       } catch (err) {
         console.error(err);
@@ -584,7 +568,6 @@ const Customer = () => {
       })),
     [provinces]
   );
-
   const mrOptions = useMemo(
     () =>
       mrList.map((mr) => {
@@ -594,7 +577,6 @@ const Customer = () => {
       }),
     [mrList]
   );
-
   const zoneOptions = useMemo(
     () =>
       zones.map((z, i) => {
@@ -603,7 +585,6 @@ const Customer = () => {
       }),
     [zones]
   );
-
   const businessTypeOptions = useMemo(
     () =>
       businessTypes.map((t) => {
@@ -613,8 +594,8 @@ const Customer = () => {
     [businessTypes]
   );
 
-  if (loading) return <p className="p-6">Loading...</p>;
-  console.log("values of currentCustomers", currentCustomers);
+  if (loading) return <LoadingOverlay text="Please wait..." />;
+
   return (
     <div className="p-6">
       <div className="container">
@@ -631,14 +612,12 @@ const Customer = () => {
             >
               <UserPlus size={18} /> Add New Customer
             </button>
-
             <button
               onClick={handleImportClick}
               className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
             >
               <Upload size={18} /> Import Customer
             </button>
-
             {selected.length > 0 && (
               <button
                 className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
@@ -648,7 +627,6 @@ const Customer = () => {
               </button>
             )}
           </div>
-
           <div className="flex items-center gap-8">
             <p className="text-lg font-semibold text-gray-700">
               Total Count:{" "}
@@ -656,7 +634,6 @@ const Customer = () => {
                 {filteredCustomers.length}
               </span>
             </p>
-
             <div className="relative w-full md:w-72">
               <Search
                 className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
@@ -731,22 +708,24 @@ const Customer = () => {
                           onChange={() => toggleSelect(customer)}
                         />
                         <span className="capitalize">
-                          {customer.name || "--"}
+                          {displayValue(customer.name)}
                         </span>
                       </div>
                     </td>
                     <td className="p-3 capitalize">
-                      {customer.typeOfBusiness || "--"}
+                      {displayValue(customer.typeOfBusiness)}
                     </td>
                     <td className="p-3 capitalize">
-                      {customer.medicalRepName || "--"}
+                      {displayValue(customer.medicalRepName)}
                     </td>
                     <td className="p-3 capitalize">
-                      {customer.address || "--"}
+                      {displayValue(customer.address)}
                     </td>
-                    <td className="p-3 capitalize">{customer.zone || "--"}</td>
                     <td className="p-3 capitalize">
-                      {customer.province || "--"}
+                      {displayValue(customer.zone)}
+                    </td>
+                    <td className="p-3 capitalize">
+                      {displayValue(customer.province)}
                     </td>
                     <td className="p-3">
                       {formatDateToReadable(customer.date) || "--"}
@@ -795,7 +774,6 @@ const Customer = () => {
           {/* Pagination */}
           {currentCustomers.length > 0 && (
             <div className="mt-4 p-5 flex justify-start gap-2">
-              {/* Prev button */}
               <button
                 onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
                 disabled={currentPage === 1}
@@ -803,8 +781,6 @@ const Customer = () => {
               >
                 Prev
               </button>
-
-              {/* Page buttons */}
               {visiblePages.map((p, index) => (
                 <button
                   key={index}
@@ -821,8 +797,6 @@ const Customer = () => {
                   {p}
                 </button>
               ))}
-
-              {/* Next button */}
               <button
                 onClick={() =>
                   setCurrentPage((p) => Math.min(p + 1, totalPages))
@@ -888,7 +862,7 @@ const Customer = () => {
             document.body
           )}
 
-        {/* View Modal */}
+        {/* ────────────────────── VIEW MODAL ────────────────────── */}
         {isViewModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
@@ -904,19 +878,19 @@ const Customer = () => {
                   <div>
                     <p className="text-gray-700 font-medium">Customer Code</p>
                     <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
-                      {form.customerCode}
+                      {displayValue(form.customerCode)}
                     </p>
                   </div>
                   <div>
                     <p className="text-gray-700 font-medium">Name</p>
                     <p className="capitalize bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
-                      {form.name}
+                      {displayValue(form.name)}
                     </p>
                   </div>
                   <div>
                     <p className="text-gray-700 font-medium">Customer Number</p>
                     <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
-                      {form.customerNumber}
+                      {displayValue(form.customerNumber)}
                     </p>
                   </div>
                   <div>
@@ -924,7 +898,7 @@ const Customer = () => {
                       Type of Business
                     </p>
                     <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
-                      {form.typeOfBusiness}
+                      {displayValue(form.typeOfBusiness)}
                     </p>
                   </div>
                   <div>
@@ -932,38 +906,45 @@ const Customer = () => {
                       Medical Representative
                     </p>
                     <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
-                      {form.medicalRepName}
+                      {displayValue(form.medicalRepName)}
                     </p>
                   </div>
-                  <div>
-                    <p className="text-gray-700 font-medium">Address</p>
-                    <p className="capitalize bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
-                      {form.address}
-                    </p>
-                  </div>
+
+                  {/* ADDRESS as textarea (read-only) */}
+
                   <div>
                     <p className="text-gray-700 font-medium">Zone</p>
                     <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
-                      {form.zone}
+                      {displayValue(form.zone)}
                     </p>
                   </div>
                   <div>
                     <p className="text-gray-700 font-medium">Province</p>
                     <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
-                      {form.province}
+                      {displayValue(form.province)}
                     </p>
                   </div>
                   <div>
                     <p className="text-gray-700 font-medium">Joining Date</p>
                     <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
-                      {form.date ? formatDateToReadable(form.date) : "-"}
+                      {form.date ? formatDateToReadable(form.date) : "--"}
                     </p>
                   </div>
                   <div className="md:col-span-2">
+                    <p className="text-gray-700 font-medium">Address</p>
+                    <textarea
+                      value={displayValue(form.address)}
+                      className="w-full rounded-lg border border-gray-300 p-3 bg-gray-50 resize-none"
+                      rows={2}
+                      disabled
+                    />
+                  </div>
+                  {/* REMARKS (still after address) */}
+                  <div className="md:col-span-2">
                     <p className="text-gray-700 font-medium">Remarks</p>
                     <textarea
-                      value={form.remark}
-                      className="w-full rounded-lg border border-gray-300 p-3"
+                      value={displayValue(form.remark)}
+                      className="w-full rounded-lg border border-gray-300 p-3 bg-gray-50 resize-none"
                       rows={3}
                       disabled
                     />
@@ -982,7 +963,7 @@ const Customer = () => {
             document.body
           )}
 
-        {/* Edit Modal */}
+        {/* ────────────────────── EDIT MODAL ────────────────────── */}
         {isEditModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
@@ -996,9 +977,7 @@ const Customer = () => {
                 >
                   <X size={20} />
                 </button>
-
                 <h2 className="text-xl font-semibold mb-4">Edit Customer</h2>
-
                 <form onSubmit={handleCustomerUpdate}>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {/* Customer Code */}
@@ -1006,7 +985,7 @@ const Customer = () => {
                       <InputField
                         label="Customer Code"
                         name="customerCode"
-                        value={form.customerCode}
+                        value={displayValue(form.customerCode)}
                         disabled
                         className="bg-gray-100 text-gray-700 border rounded px-3 py-2 border-gray-300"
                       />
@@ -1019,7 +998,7 @@ const Customer = () => {
                       </label>
                       <InputField
                         type="text"
-                        value={form.name}
+                        value={form.name || ""}
                         onChange={(e) => handleChange("name", e.target.value)}
                         error={errors.name}
                         className="capitalize px-3 py-2 border-gray-300 border rounded-lg w-full"
@@ -1039,7 +1018,7 @@ const Customer = () => {
                       </label>
                       <InputField
                         type="text"
-                        value={form.customerNumber}
+                        value={form.customerNumber || ""}
                         onChange={(e) =>
                           handleNumericInput(e, "customerNumber")
                         }
@@ -1055,7 +1034,7 @@ const Customer = () => {
                         <span className="text-red-500">*</span>
                       </label>
                       <SearchableDropdown
-                        value={form.typeOfBusiness}
+                        value={form.typeOfBusiness || ""}
                         onChange={handleBusinessTypeChange}
                         options={businessTypeOptions}
                         placeholder="Select Business Type"
@@ -1072,7 +1051,7 @@ const Customer = () => {
                         <span className="text-red-500">*</span>
                       </label>
                       <SearchableDropdown
-                        value={form.medicalRepId}
+                        value={form.medicalRepId || ""}
                         onChange={handleMRChange}
                         options={mrOptions}
                         placeholder="Select MR"
@@ -1082,29 +1061,13 @@ const Customer = () => {
                       />
                     </div>
 
-                    {/* Address */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600">
-                        Address
-                      </label>
-                      <InputField
-                        type="text"
-                        value={form.address}
-                        onChange={(e) =>
-                          handleChange("address", e.target.value)
-                        }
-                        className="capitalize px-3 py-2 border-gray-300 border rounded-lg w-full"
-                        placeholder="Enter address"
-                      />
-                    </div>
-
                     {/* Zone */}
                     <div>
                       <label className="block text-sm font-medium text-gray-600">
                         Zone <span className="text-red-500">*</span>
                       </label>
                       <SearchableDropdown
-                        value={form.zone}
+                        value={form.zone || ""}
                         onChange={handleZoneChange}
                         options={zoneOptions}
                         placeholder="Select Zone"
@@ -1120,7 +1083,7 @@ const Customer = () => {
                         Province <span className="text-red-500">*</span>
                       </label>
                       <SearchableDropdown
-                        value={form.province}
+                        value={form.province || ""}
                         onChange={handleProvinceChange}
                         options={provinceOptions}
                         placeholder="Select Province"
@@ -1155,15 +1118,31 @@ const Customer = () => {
                       )}
                     </div>
 
-                    {/* Remarks */}
+                    {/* ADDRESS as textarea (editable) – placed BEFORE Remarks */}
+                    <div className="md:col-span-2">
+                      <label className="block text-sm font-medium text-gray-600">
+                        Address
+                      </label>
+                      <textarea
+                        value={form.address || ""}
+                        onChange={(e) =>
+                          handleChange("address", e.target.value)
+                        }
+                        className="w-full rounded-lg border border-gray-300 p-3 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 resize-none"
+                        rows={2}
+                        placeholder="Enter address"
+                      />
+                    </div>
+
+                    {/* REMARKS – after Address */}
                     <div className="md:col-span-2">
                       <label className="block text-sm font-medium text-gray-600">
                         Remarks
                       </label>
                       <textarea
-                        value={form.remark}
+                        value={form.remark || ""}
                         onChange={(e) => handleChange("remark", e.target.value)}
-                        className="w-full rounded-lg border border-gray-300 p-3 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                        className="w-full rounded-lg border border-gray-300 p-3 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 resize-none"
                         rows={3}
                         placeholder="Enter any remarks"
                       />

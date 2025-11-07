@@ -646,9 +646,8 @@ function Purchase() {
 
   // CORRECTED: Enhanced editPurchase function with proper product ID handling
   const editPurchase = (purchase) => {
-   console.log('values of pur', purchase);
+    console.log("values of pur", purchase);
 
-    
     setForm({
       _id: purchase._id || "",
       invoiceNumber: purchase.invoiceNumber || "",
@@ -656,7 +655,7 @@ function Purchase() {
       deliveryNumber: purchase.deliveryNumber || "",
       receivedDate: purchase.receivedDate || "",
       expiryDate: purchase.expiryDate || "",
-      productId: purchase?._id || purchase.productName || "", 
+      productId: purchase?._id || purchase.productName || "",
       productName: purchase?.productName || purchase.productName || "", // Store product name
       supplierName: purchase.supplierName || "",
       quantityPerBoxStrip: purchase.quantityPerBoxStrip || 0,
@@ -961,8 +960,11 @@ function Purchase() {
 
   // CORRECTED: Handle product selection - store both ID and name
   const handleProductChange = (selectedProductId) => {
-    console.log('Selected product ID:', selectedProductId);
-    const selectedProduct = productOptions.find(product => product.value === selectedProductId);
+    console.log('valuesof productOptions', productOptions);
+    console.log("Selected product ID:", selectedProductId);
+    const selectedProduct = productOptions.find(
+      (product) => product.productName === selectedProductId
+    );
     if (selectedProduct) {
       setForm((prev) => ({
         ...prev,
@@ -983,17 +985,16 @@ function Purchase() {
   useEffect(() => {
     if (isEditModalOpen && productOptions.length > 0 && form.productId) {
       // If we have productId but productName might be missing, find the product
-      const product = productOptions.find(p => p.value === form.productId);
+      const product = productOptions.find((p) => p.value === form.productId);
       if (product && form.productName !== product.label) {
-        setForm(prev => ({
+        setForm((prev) => ({
           ...prev,
-          productName: product.label
+          productName: product.label,
         }));
       }
     }
   }, [isEditModalOpen, productOptions, form.productId]);
 
- 
   return (
     <div className="p-6">
       <div className="container">
@@ -1605,6 +1606,7 @@ function Purchase() {
           )}
 
         {/* EDIT MODAL - CORRECTED */}
+        {/* EDIT MODAL - CORRECTED */}
         {isEditModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -1615,7 +1617,6 @@ function Purchase() {
                   setForm(initialFormState);
                 }}
               />
-
               <div className="bg-white w-full max-w-3xl p-6 rounded-xl shadow-lg relative max-h-screen overflow-y-auto">
                 <button
                   onClick={() => {
@@ -1726,17 +1727,16 @@ function Purchase() {
                     />
                   </div>
 
-                  {/* Product Name - SearchableDropdown - CORRECTED */}
+                  {/* ---------- PRODUCT NAME (searchable dropdown) ---------- */}
                   <div>
                     <label className="block font-medium text-gray-600">
                       Product Name
                     </label>
                     <SearchableDropdown
-                      value={form.productId} // Use productId for dropdown value
-                      onChange={handleProductChange} // This now sets both productId and productName
+                      value={form.productId} // <-- uses the stored productId
+                      onChange={handleProductChange} // sets both productId & productName
                       options={productOptions}
                       placeholder="Select Product"
-                      required={false}
                       loading={loadingProducts}
                       label=""
                     />
@@ -1747,17 +1747,16 @@ function Purchase() {
                     )}
                   </div>
 
-                  {/* Supplier Name - SearchableDropdown */}
+                  {/* ---------- SUPPLIER NAME (searchable dropdown – FIXED) ---------- */}
                   <div>
                     <label className="block font-medium text-gray-600">
                       Supplier Name
                     </label>
                     <SearchableDropdown
-                      value={form.supplierName}
-                      onChange={handleSupplierChange}
+                      value={form.supplierName} // <-- plain string (supplier name)
+                      onChange={handleSupplierChange} // updates supplierName only
                       options={supplierOptions}
                       placeholder="Select Supplier"
-                      required={false}
                       loading={loadingSuppliers}
                       label=""
                     />
@@ -1828,7 +1827,7 @@ function Purchase() {
                     />
                   </div>
 
-                  {/* Amount - Read-only calculated field */}
+                  {/* Amount – read-only calculated */}
                   <div>
                     <label className="block font-medium text-gray-600">
                       Amount (USD)
@@ -1843,7 +1842,7 @@ function Purchase() {
                     />
                   </div>
 
-                  {/* Remarks - Full width */}
+                  {/* Remarks – full width */}
                   <div className="md:col-span-3">
                     <label className="block font-medium text-gray-600">
                       Remarks
@@ -1868,6 +1867,7 @@ function Purchase() {
                   >
                     Cancel
                   </button>
+
                   <button
                     onClick={handlePurchaseUpdate}
                     className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"

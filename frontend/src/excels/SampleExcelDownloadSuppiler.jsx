@@ -25,14 +25,14 @@ const SampleExcelDownloadSupplier = () => {
     // ===== Header Row (Row 3) =====
     const headerRow = worksheet.getRow(3);
     headerRow.values = [
-      "Product Name",
+      "Supplier Name",
       "Address",
       "Site Registration Date",
       "Site Registration Expiry Date",
     ];
 
     worksheet.columns = [
-      { key: "productName", width: 30 },
+      { key: "suppilerName", width: 30 },
       { key: "address", width: 40 },
       { key: "regDate", width: 25 },
       { key: "expiryDate", width: 25 },

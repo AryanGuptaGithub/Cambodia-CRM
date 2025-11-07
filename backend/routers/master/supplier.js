@@ -196,22 +196,8 @@ router.post("/suppliers/import", async (req, res) => {
       });
     }
 
-    // You can skip normalizeKeys if your keys are already in correct format,
-    // or normalize only lowercase for safety but keep camelCase keys intact:
-    const normalizeKeys = (obj) => {
-      const newObj = {};
-      for (const key in obj) {
-        if (Object.hasOwn(obj, key)) {
-          // Keep camelCase keys as-is (no spaces), lowercase simple keys:
-          // If you want, just keep keys as they are to avoid mismatch:
-          newObj[key] = obj[key];
-        }
-      }
-      return newObj;
-    };
-
     const requiredFields = [
-      "name",
+      "supplierName",
       "address",
       "siteRegistrationDate",
       "siteRegistrationExpiryDate",
@@ -220,35 +206,47 @@ router.post("/suppliers/import", async (req, res) => {
     const results = [];
 
     for (let supplier of suppliers) {
-      supplier = normalizeKeys(supplier);
+      // Normalize field names (to support both frontend naming styles)
+      const name =
+        supplier.supplierName?.toString().trim() ||
+        supplier.name?.toString().trim() ||
+        "";
+      const address = supplier.address?.toString().trim() || "";
+      const siteRegistrationDate = supplier.siteRegistrationDate
+        ? new Date(supplier.siteRegistrationDate)
+        : null;
+      const siteRegistrationExpiryDate = supplier.siteRegistrationExpiryDate
+        ? new Date(supplier.siteRegistrationExpiryDate)
+        : null;
 
-      // Check missing fields for this data shape
-      const missing = requiredFields.filter(
-        (f) => !supplier[f] || supplier[f].toString().trim() === ""
-      );
+      // Validate required fields
+      const missing = [];
+      if (!name) missing.push("Supplier Name");
+      if (!address) missing.push("Address");
+      if (!siteRegistrationDate) missing.push("Site Registration Date");
+      if (!siteRegistrationExpiryDate)
+        missing.push("Site Registration Expiry Date");
+
       if (missing.length > 0) {
         results.push({
-          supplier: supplier["name"] || "Unnamed",
+          supplier: name || "Unnamed",
           status: "failed",
           message: `Missing required field(s): ${missing.join(", ")}.`,
         });
         continue;
       }
 
-      // For ISO date strings just do new Date() conversion
       const mappedSupplier = {
-        name: supplier["name"].trim(),
-        address: supplier["address"].trim(),
-        siteRegistrationDate: new Date(supplier["siteRegistrationDate"]),
-        siteRegistrationExpiryDate: new Date(
-          supplier["siteRegistrationExpiryDate"]
-        ),
+        name,
+        address,
+        siteRegistrationDate,
+        siteRegistrationExpiryDate,
         enabled: true,
       };
 
-      // Check if supplier already exists
+      // Check if supplier already exists (case-insensitive name match)
       const exists = await Supplier.findOne({
-        name: mappedSupplier.name,
+        name: { $regex: new RegExp(`^${mappedSupplier.name}$`, "i") },
         address: mappedSupplier.address,
       });
 
@@ -284,5 +282,6 @@ router.post("/suppliers/import", async (req, res) => {
     });
   }
 });
+
 
 export default router;

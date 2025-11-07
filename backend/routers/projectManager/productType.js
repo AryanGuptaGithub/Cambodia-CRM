@@ -20,7 +20,7 @@ router.get('/product-types', async (req, res) => {
 });
 
 // GET /api/product-types/:id - Get single product type
-router.get('/:id', async (req, res) => {
+router.get('/product-types/:id', async (req, res) => {
   try {
     const productType = await ProductType.findById(req.params.id);
     

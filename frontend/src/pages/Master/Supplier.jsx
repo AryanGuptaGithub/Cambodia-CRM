@@ -12,6 +12,7 @@ import SampleExcelDownloadSupplier from "../../excels/SampleExcelDownloadSuppile
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import ReactDOM from "react-dom";
+import LoadingOverlay from "../../components/Loading"
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
@@ -649,7 +650,6 @@ const Supplier = () => {
       }
     }
   };
-
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -665,8 +665,9 @@ const Supplier = () => {
         defval: "",
       });
 
+      // Expected headers (normalized)
       const EXPECTED_HEADERS = [
-        "product name",
+        "supplier name",
         "address",
         "site registration date",
         "site registration expiry date",
@@ -674,6 +675,7 @@ const Supplier = () => {
       const normalizeHeader = (header) =>
         header?.toString().trim().toLowerCase();
 
+      // Find the header row (skip title rows)
       let headerRowIndex = -1;
       for (let i = 0; i < allRows.length; i++) {
         const row = allRows[i].map(normalizeHeader);
@@ -709,7 +711,7 @@ const Supplier = () => {
           );
 
           return {
-            name: obj["product name"]?.toString().trim() || "",
+            supplierName: obj["supplier name"]?.toString().trim() || "",
             address: obj["address"]?.toString().trim() || "",
             siteRegistrationDate:
               siteRegistrationDate && !isNaN(siteRegistrationDate.getTime())
@@ -726,7 +728,7 @@ const Supplier = () => {
           const hasValidDates =
             item.siteRegistrationDate !== null &&
             item.siteRegistrationExpiryDate !== null;
-          const hasRequiredFields = item.name && item.address;
+          const hasRequiredFields = item.supplierName && item.address;
           if (!hasValidDates) {
             console.warn("Skipping item with invalid dates:", item);
           }
@@ -738,6 +740,7 @@ const Supplier = () => {
     reader.readAsArrayBuffer(file);
   };
 
+  // ✅ handleImport function stays the same
   const handleImport = async () => {
     if (parsedData.length === 0) {
       showToast("warning", "Excel File is Empty");
@@ -827,7 +830,7 @@ const Supplier = () => {
     }
   };
 
-  if (loading) return <p>Loading...</p>;
+  if (loading) return <LoadingOverlay text="Please wait..." />;
   if (error) return <p className="text-red-500">{error}</p>;
 
   return (

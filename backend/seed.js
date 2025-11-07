@@ -12,6 +12,7 @@ import HTab from "./models/settings/tabSetting.js";
 import Zone from "./models/master/zone.js";
 import BusinessType from "./models/master/businessTypes.js";
 import ProductType from "./models/projectManger/productType.js"; 
+import ProductPackingType from "./models/projectManger/ProductPackingType.js";
 
 dotenv.config();
 
@@ -362,20 +363,56 @@ async function seedBusinessTypes() {
 }
 
 async function seedProductTypes() {
-  await ProductType.deleteMany({});
-  const productTypes = [
-    { name: "Tablet", code: "tablet" },
-    { name: "Capsule", code: "capsule" },
-    { name: "Syrup", code: "syrup" },
-    { name: "Injection", code: "injection" },
-    { name: "Cream", code: "cream" },
-    { name: "Ointment", code: "ointment" },
-    { name: "Drops", code: "drops" },
-  ];
+  try {
+    // Remove all existing product types
+    await ProductType.deleteMany({});
 
-  await ProductType.insertMany(productTypes);
-  console.log("✅ Product Types seeded successfully");
+    // Define the new product types
+    const productTypes = [
+      { name: "Tab", code: "tab" },
+      { name: "Cap", code: "cap" },
+      { name: "Bottle", code: "bottle" },
+      { name: "Injection", code: "injection" },
+      { name: "Eye Drop", code: "eye_drop" },
+    ];
+
+    // Insert the new product types
+    await ProductType.insertMany(productTypes);
+
+    console.log("✅ Product Types seeded successfully with new values");
+  } catch (error) {
+    console.error("❌ Error seeding product types:", error);
+  }
 }
+
+async function seedProductPackingTypes() {
+  try {
+    // Remove all existing product packing types
+    await ProductPackingType.deleteMany({});
+
+    // Define the new packing types
+    const packingTypes = [
+      { name: "10x10", code: "10x10" },
+      { name: "3x10", code: "3x10" },
+      { name: "10x3", code: "10x3" },
+      { name: "2x15", code: "2x15" },
+      { name: "1 bottle", code: "1_bottle" },
+      { name: "10x1x10", code: "10x1x10" },
+      { name: "50x1", code: "50x1" },
+      { name: "5x10", code: "5x10" },
+      { name: "1x5", code: "1x5" },
+      { name: "1 Vial", code: "1_vial" },
+    ];
+
+    // Insert new packing types
+    await ProductPackingType.insertMany(packingTypes);
+
+    console.log("✅ Product Packing Types seeded successfully with new values");
+  } catch (error) {
+    console.error("❌ Error seeding product packing types:", error);
+  }
+}
+
 
 async function seedHTabs() {
   await HTab.deleteMany({});
@@ -1194,6 +1231,7 @@ async function runSeeders() {
     await seedBusinessTypes(); 
     await seedProductTypes(); // Add product types seeding
     await seedHTabs();
+    await seedProductPackingTypes();
     
     console.log("✅ All seeders completed successfully!");
   } catch (error) {
