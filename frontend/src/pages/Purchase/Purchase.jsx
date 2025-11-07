@@ -960,10 +960,8 @@ function Purchase() {
 
   // CORRECTED: Handle product selection - store both ID and name
   const handleProductChange = (selectedProductId) => {
-    console.log('valuesof productOptions', productOptions);
-    console.log("Selected product ID:", selectedProductId);
     const selectedProduct = productOptions.find(
-      (product) => product.productName === selectedProductId
+      (product) => product._id === selectedProductId
     );
     if (selectedProduct) {
       setForm((prev) => ({
@@ -1740,11 +1738,11 @@ function Purchase() {
                       loading={loadingProducts}
                       label=""
                     />
-                    {form.productName && (
+                    {/* {form.productName && (
                       <p className="text-xs text-gray-500 mt-1">
                         Selected: {form.productName}
                       </p>
-                    )}
+                    )} */}
                   </div>
 
                   {/* ---------- SUPPLIER NAME (searchable dropdown – FIXED) ---------- */}
