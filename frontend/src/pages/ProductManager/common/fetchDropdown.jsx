@@ -1,6 +1,38 @@
 import axios from "axios";
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
+// Medical Representatives
+export const fetchMRList = async () => {
+  try {
+    const response = await axios.get(`${backendUrl}/api/staffs`);
+    const mrList = response.data || [];
+    
+    return {
+      success: true,
+      data: mrList,
+    };
+  } catch (error) {
+    console.error("❌ Error fetching MR list:", error);
+    return { success: false, error: "Failed to load Medical Representatives" };
+  }
+};
+
+// Customers
+export const fetchCustomerList = async () => {
+  try {
+    const response = await axios.get(`${backendUrl}/api/customers`);
+    const customers = response.data.customers || [];
+    
+    return {
+      success: true,
+      data: customers,
+    };
+  } catch (error) {
+    console.error("❌ Error fetching customer list:", error);
+    return { success: false, error: "Failed to load Customers" };
+  }
+};
+
 export const fetchProductTypes = async () => {
   try {
     const response = await axios.get(`${backendUrl}/api/product-types`);
@@ -103,4 +135,3 @@ export const fetchProductPackingType = async () => {
     return { success: false, error: "Failed to load product packing types" };
   }
 };
-

@@ -1,38 +1,87 @@
 import React from "react";
 import ExcelJS from "exceljs";
 import { useInitialSaleData } from "../pages/Sale/IntialLoading";
+import { fetchMRList, fetchCustomerList } from "../pages/ProductManager/common/fetchDropdown";
 
 const SampleExcelDownloadSale = ({ data = [] }) => {
   const { statuses = [], productNames = [], loading } = useInitialSaleData();
+  const [mrList, setMrList] = React.useState([]);
+  const [customerList, setCustomerList] = React.useState([]);
+  const [mrLoading, setMrLoading] = React.useState(false);
+  const [customerLoading, setCustomerLoading] = React.useState(false);
+
+  // Fetch MR list
+  const fetchMRData = async () => {
+    try {
+      setMrLoading(true);
+      const mrListResult = await fetchMRList();
+      
+      if (mrListResult.success) {
+        setMrList(mrListResult.data || []);
+      } else {
+        console.warn("Failed to fetch MR list:", mrListResult.error);
+      }
+    } catch (error) {
+      console.error("Error fetching MR list:", error);
+    } finally {
+      setMrLoading(false);
+    }
+  };
+
+  // Fetch Customer list
+  const fetchCustomerData = async () => {
+    try {
+      setCustomerLoading(true);
+      const customerListResult = await fetchCustomerList();
+      
+      if (customerListResult.success) {
+        setCustomerList(customerListResult.data || []);
+      } else {
+        console.warn("Failed to fetch customer list:", customerListResult.error);
+      }
+    } catch (error) {
+      console.error("Error fetching customer list:", error);
+    } finally {
+      setCustomerLoading(false);
+    }
+  };
+
+  React.useEffect(() => {
+    fetchMRData();
+    fetchCustomerData();
+  }, []);
 
   const generateExcel = async () => {
+    if (loading || mrLoading || customerLoading) {
+      return;
+    }
+
     try {
       const workbook = new ExcelJS.Workbook();
       const worksheet = workbook.addWorksheet("Sale Summary");
 
       // === Sheet Titles ===
-      worksheet.mergeCells("A1:O1");
+      worksheet.mergeCells("A1:N1"); // Changed from O1 to N1 (14 columns now)
       const titleCell = worksheet.getCell("A1");
       titleCell.value = "HEALTHCARE SOUTH EAST ASIA";
       titleCell.font = { bold: true, size: 16 };
       titleCell.alignment = { vertical: "middle", horizontal: "center" };
       worksheet.getRow(1).height = 25;
 
-      worksheet.mergeCells("A2:O2");
+      worksheet.mergeCells("A2:N2"); // Changed from O2 to N2 (14 columns now)
       const subtitleCell = worksheet.getCell("A2");
       subtitleCell.value = "Sale Summary List";
       subtitleCell.font = { bold: true, size: 14 };
       subtitleCell.alignment = { vertical: "middle", horizontal: "center" };
       worksheet.getRow(2).height = 20;
 
-      // === Define Columns ===
+      // === Define Columns (removed "no" column) ===
       worksheet.columns = [
-        { key: "no", width: 5 },
         { key: "recordingDate", width: 15 },
         { key: "invoiceNumber", width: 15 },
         { key: "invoiceDate", width: 15 },
         { key: "mrName", width: 20 },
-        { key: "customerCode", width: 25 },
+        { key: "customerName", width: 25 },
         { key: "productName", width: 25 },
         { key: "salesQty", width: 15 },
         { key: "bonusQty", width: 15 },
@@ -44,15 +93,14 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
         { key: "remark", width: 25 },
       ];
 
-      // === Header Row ===
+      // === Header Row (removed "No" column) ===
       const headerRow = worksheet.getRow(3);
       headerRow.values = [
-        "No",
         "Recording Date",
         "Invoice #",
         "Invoice Date",
         "MR Name",
-        "Customer Code",
+        "Customer Name",
         "Product Name",
         "Sales Qty",
         "Bonus Qty",
@@ -73,18 +121,17 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
         if (col) col.numFmt = "dd/mm/yyyy";
       });
 
-      // === Add Data Rows ===
+      // === Add Data Rows (removed "no" column) ===
       if (data && data.length > 0) {
         data.forEach((item, index) => {
           const row = worksheet.addRow({
-            no: index + 1,
             recordingDate: item.recordingDate
               ? new Date(item.recordingDate)
               : null,
             invoiceNumber: item.invoiceNumber || "",
             invoiceDate: item.invoiceDate ? new Date(item.invoiceDate) : null,
             mrName: item.mrName || "",
-            customerCode: item.customerCode || "",
+            customerName: item.customerName || item.customerCode || "",
             productName: item.productName || "",
             salesQty: item.salesQty || 0,
             bonusQty: item.bonusQty || 0,
@@ -130,80 +177,88 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
         .filter(Boolean)
       )];
 
-      // Write payment status dropdown values
+      // Prepare MR names dropdown values
+      const mrNames = mrList
+        .map((mr) => {
+          if (typeof mr === "string") return mr;
+          const name =
+            mr.name ||
+            mr.staffName ||
+            mr.medicalRepName ||
+            `${mr.firstName || ""} ${mr.lastName || ""}`.trim();
+          return name;
+        })
+        .filter(Boolean);
+
+      // Prepare Customer names dropdown values
+      const customerNames = customerList
+        .map((customer) => {
+          if (typeof customer === "string") return customer;
+          const name =
+            customer.name ||
+            customer.customerName ||
+            customer.companyName ||
+            `${customer.firstName || ""} ${customer.lastName || ""}`.trim();
+          return name;
+        })
+        .filter(Boolean);
+
+      // Write dropdown values to hidden sheet
+      // Payment Status (Column A)
       paymentStatusTypes.forEach((status, index) => {
         dropdownSheet.getCell(`A${index + 1}`).value = status;
       });
 
-      // Write product name dropdown values
+      // Product Name (Column B)
       uniqueProductNames.forEach((product, index) => {
         dropdownSheet.getCell(`B${index + 1}`).value = product;
       });
 
-      // Set up dropdown for Payment Status column (Column N)
-      if (paymentStatusTypes.length > 0) {
-        try {
-          worksheet.getColumn("N").eachCell((cell, rowNumber) => {
-            if (rowNumber >= startRow) {
-              cell.dataValidation = {
-                type: "list",
-                allowBlank: true,
-                formulae: [
-                  `=DropdownValues!$A$1:$A$${paymentStatusTypes.length}`,
-                ],
-                showErrorMessage: true,
-                errorTitle: "Invalid Input",
-                error: "Please select a value from the list",
-                showDropDown: true,
-              };
-            }
-          });
-        } catch (error) {
-          console.warn(
-            "Failed to set column-wide data validation for Payment Status:",
-            error
-          );
-        }
-      }
+      // MR Names (Column C)
+      mrNames.forEach((mr, index) => {
+        dropdownSheet.getCell(`C${index + 1}`).value = mr;
+      });
 
-      // Set up dropdown for Product Name column (Column G)
-      if (uniqueProductNames.length > 0) {
-        try {
-          worksheet.getColumn("G").eachCell((cell, rowNumber) => {
-            if (rowNumber >= startRow) {
-              cell.dataValidation = {
-                type: "list",
-                allowBlank: true,
-                formulae: [
-                  `=DropdownValues!$B$1:$B$${uniqueProductNames.length}`,
-                ],
-                showErrorMessage: true,
-                errorTitle: "Invalid Input",
-                error: "Please select a value from the list",
-                showDropDown: true,
-              };
-            }
-          });
-        } catch (error) {
-          console.warn(
-            "Failed to set column-wide data validation for Product Name:",
-            error
-          );
-        }
-      }
+      // Customer Names (Column D)
+      customerNames.forEach((customer, index) => {
+        dropdownSheet.getCell(`D${index + 1}`).value = customer;
+      });
 
-      // Alternative method for setting dropdowns (if above doesn't work)
-      // Set dropdown for each cell individually
+      // ===== Set up dropdowns for all rows (updated column references) =====
       for (let i = startRow; i <= endRow; i++) {
         try {
-          // Product Name dropdown (Column G)
-          if (uniqueProductNames.length > 0) {
-            worksheet.getCell(`G${i}`).dataValidation = {
+          // MR Name dropdown (now Column D instead of E)
+          if (mrNames.length > 0) {
+            worksheet.getCell(`D${i}`).dataValidation = {
               type: "list",
               allowBlank: true,
-              formulae: [
-                `=DropdownValues!$B$1:$B$${uniqueProductNames.length}`,
-              ],
+              formulae: [`=DropdownValues!$C$1:$C$${mrNames.length}`],
+              showErrorMessage: true,
+              errorTitle: "Invalid Input",
+              error: "Please select a medical representative from the list",
+              showDropDown: true,
+            };
+          }
+
+          // Customer Name dropdown (now Column E instead of F)
+          if (customerNames.length > 0) {
+            worksheet.getCell(`E${i}`).dataValidation = {
+              type: "list",
+              allowBlank: true,
+              formulae: [`=DropdownValues!$D$1:$D$${customerNames.length}`],
+              showErrorMessage: true,
+              errorTitle: "Invalid Input",
+              error: "Please select a customer from the list",
+              showDropDown: true,
+            };
+          }
+
+          // Product Name dropdown (now Column F instead of G)
+          if (uniqueProductNames.length > 0) {
+            worksheet.getCell(`F${i}`).dataValidation = {
+              type: "list",
+              allowBlank: true,
+              formulae: [`=DropdownValues!$B$1:$B$${uniqueProductNames.length}`],
               showErrorMessage: true,
               errorTitle: "Invalid Input",
               error: "Please select a product from the list",
@@ -211,14 +266,12 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
             };
           }
 
-          // Payment Status dropdown (Column N)
+          // Payment Status dropdown (now Column M instead of N)
           if (paymentStatusTypes.length > 0) {
-            worksheet.getCell(`N${i}`).dataValidation = {
+            worksheet.getCell(`M${i}`).dataValidation = {
               type: "list",
               allowBlank: true,
-              formulae: [
-                `=DropdownValues!$A$1:$A$${paymentStatusTypes.length}`,
-              ],
+              formulae: [`=DropdownValues!$A$1:$A$${paymentStatusTypes.length}`],
               showErrorMessage: true,
               errorTitle: "Invalid Input",
               error: "Please select a payment status from the list",
@@ -267,14 +320,20 @@ const SampleExcelDownloadSale = ({ data = [] }) => {
     }
   };
 
-  if (loading) return <p>Loading sample data...</p>;
+  const isLoading = loading || mrLoading || customerLoading;
+
+  if (isLoading) return <p>Loading sample data...</p>;
 
   return (
     <button
       onClick={generateExcel}
-      className="text-blue-600 hover:underline text-sm mb-4 block cursor-pointer"
+      disabled={isLoading}
+      className="text-blue-600 hover:underline text-sm mb-4 block cursor-pointer
+       disabled:opacity-50 disabled:cursor-not-allowed"
     >
-      Download Sales Summary Sample Excel
+      {isLoading
+        ? "Loading dropdown data..."
+        : "Download Sales Summary Sample Excel"}
     </button>
   );
 };

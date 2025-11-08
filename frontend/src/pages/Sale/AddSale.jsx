@@ -14,6 +14,7 @@ import { PlusSquare, MinusSquare } from "lucide-react";
 import axios from "axios";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import InputField from "../../components/common/InputField";
+import { fetchMRList, fetchCustomerList } from "../../pages/ProductManager/common/fetchDropdown.jsx";
 
 const INITIAL_PRODUCT_STATE = {
   productName: "",
@@ -321,13 +322,36 @@ const useSaleForm = (initialCustomerCode = "") => {
     return isNaN(num) ? 0 : num;
   }, []);
 
-  // Fetch MR list
-  const fetchMRList = useCallback(async () => {
+  // Auto-set payment status based on paid amount and total amount
+  const autoSetPaymentStatus = useCallback((currentForm) => {
+    const totalAmount = parseFloat(currentForm.totalAmount) || 0;
+    const paidAmount = parseFloat(currentForm.paidAmount) || 0;
+    const dueAmount = parseFloat(currentForm.dueAmount) || 0;
+
+    let paymentStatus = currentForm.paymentStatus;
+
+    if (paidAmount === totalAmount && totalAmount > 0) {
+      paymentStatus = "Cash";
+    } else if (dueAmount === totalAmount && totalAmount > 0) {
+      paymentStatus = "Credit";
+    } else if (paidAmount > 0 && paidAmount < totalAmount) {
+      paymentStatus = "Partial Paid";
+    }
+
+    return paymentStatus;
+  }, []);
+
+  // Fetch MR list using imported function
+  const fetchMRListData = useCallback(async () => {
     try {
       setMrListLoading(true);
-      const backendUrl = import.meta.env.VITE_BACKEND_URL;
-      const response = await axios.get(`${backendUrl}/api/staffs`);
-      setMrList(response.data || []);
+      const result = await fetchMRList();
+      if (result.success) {
+        setMrList(result.data || []);
+      } else {
+        console.error("Error fetching MR list:", result.error);
+        showToast("error", result.error);
+      }
     } catch (error) {
       console.error("Error fetching MR list:", error);
       showToast("error", "Failed to load Medical Representatives");
@@ -336,13 +360,17 @@ const useSaleForm = (initialCustomerCode = "") => {
     }
   }, []);
 
-  // Fetch Customer list
-  const fetchCustomerList = useCallback(async () => {
+  // Fetch Customer list using imported function
+  const fetchCustomerListData = useCallback(async () => {
     try {
       setCustomerListLoading(true);
-      const backendUrl = import.meta.env.VITE_BACKEND_URL;
-      const response = await axios.get(`${backendUrl}/api/customers`);
-      setCustomerList(response.data.customers || []);
+      const result = await fetchCustomerList();
+      if (result.success) {
+        setCustomerList(result.data || []);
+      } else {
+        console.error("Error fetching customer list:", result.error);
+        showToast("error", result.error);
+      }
     } catch (error) {
       console.error("Error fetching customer list:", error);
       showToast("error", "Failed to load Customers");
@@ -588,11 +616,23 @@ const useSaleForm = (initialCustomerCode = "") => {
         updatedForm.dueAmount = (
           parseFloat(totalNetAmount) - paidAmount
         ).toFixed(2);
+        
+        // Auto-set payment status when paid amount changes
+        updatedForm.paymentStatus = autoSetPaymentStatus({
+          ...updatedForm,
+          paidAmount: value,
+          dueAmount: (parseFloat(totalNetAmount) - paidAmount).toFixed(2)
+        });
+      }
+
+      // Auto-set payment status when total amount changes
+      if (name === "totalAmount" || name === "dueAmount") {
+        updatedForm.paymentStatus = autoSetPaymentStatus(updatedForm);
       }
 
       return updatedForm;
     },
-    [parseNumber, calculateTotalNetAmount]
+    [parseNumber, calculateTotalNetAmount, autoSetPaymentStatus]
   );
 
   const handleChange = useCallback(
@@ -639,6 +679,23 @@ const useSaleForm = (initialCustomerCode = "") => {
     const totalQty = salesQty + bonusQty;
 
     return totalQty > availableStock;
+  }, []);
+
+  // Calculate remaining stock for a product
+  const calculateRemainingStock = useCallback((product, productsData) => {
+    if (!product.productName) return null;
+
+    const productData = productsData.find(
+      (p) => p.productName === product.productName
+    );
+    if (!productData || !productData.inStock) return null;
+
+    const availableStock = productData.inStock.boxes || 0;
+    const salesQty = parseInt(product.salesQty) || 0;
+    const bonusQty = parseInt(product.bonusQty) || 0;
+    const totalQty = salesQty + bonusQty;
+
+    return availableStock - totalQty;
   }, []);
 
   // Real-time validation for individual product fields
@@ -779,11 +836,12 @@ const useSaleForm = (initialCustomerCode = "") => {
     validate,
     validateProductField,
     hasStockIssue,
+    calculateRemainingStock,
     updateFormField,
     handleMRChange,
     handleCustomerChange,
-    fetchMRList,
-    fetchCustomerList,
+    fetchMRList: fetchMRListData,
+    fetchCustomerList: fetchCustomerListData,
     addProduct,
     removeProduct,
     updateProduct,
@@ -959,6 +1017,7 @@ const AddSale = () => {
     validate,
     validateProductField,
     hasStockIssue,
+    calculateRemainingStock,
     updateFormField,
     handleMRChange,
     handleCustomerChange,
@@ -1287,6 +1346,7 @@ const AddSale = () => {
           const salesQty = parseInt(product.salesQty) || 0;
           const bonusQty = parseInt(product.bonusQty) || 0;
           const totalQty = salesQty + bonusQty;
+          const remainingStock = calculateRemainingStock(product, products);
           const hasStockProblem = totalQty > availableStock;
 
           return (
@@ -1296,20 +1356,19 @@ const AddSale = () => {
                   <h3 className="text-lg font-semibold">
                     {product.productName || `Product ${index + 1}`}
                   </h3>
-                  {/* Stock information display */}
+                  
                   {product.productName && stockInfo && (
                     <div className="flex items-center gap-2">
                       <span
                         className={`text-sm px-3 py-2 rounded ${
-                          stockInfo.status === "Out of Stock"
+                          remainingStock < 0
                             ? "bg-red-100 text-red-800 border border-red-300"
-                            : stockInfo.status === "Low Stock" ||
-                              stockInfo.status === "Critical"
+                            : remainingStock <= 10
                             ? "bg-yellow-100 text-yellow-800 border border-yellow-300"
                             : "bg-green-100 text-green-800 border border-green-300"
                         }`}
                       >
-                        Available: {availableStock} boxes
+                        Remaining: {remainingStock} boxes
                       </span>
                       {/* Stock validation warning - now checks total quantity */}
                       {hasStockProblem && (
