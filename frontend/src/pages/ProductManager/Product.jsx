@@ -446,7 +446,7 @@ const Product = () => {
         `${backendUrl}/api/products/${form._id}`,
         form
       );
-      console.log(res);
+      
       if (res.status === 200) {
         showToast(
           "success",

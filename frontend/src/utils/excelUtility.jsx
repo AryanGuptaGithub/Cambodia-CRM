@@ -13,7 +13,6 @@ export const parseExcelDate = (value) => {
         return null;
       }
 
-      console.log("Converted Excel serial to date:", jsDate);
       return jsDate;
     } catch (error) {
       console.error("Error converting Excel date:", error);
@@ -35,7 +34,6 @@ export const parseExcelDate = (value) => {
 
     for (const date of dateFormats) {
       if (!isNaN(date.getTime())) {
-        console.log("Parsed string date:", date);
         return date;
       }
     }
@@ -48,6 +46,6 @@ export const parseExcelDate = (value) => {
   if (value instanceof Date) {
     return !isNaN(value.getTime()) ? value : null;
   }
-  
+
   return null;
 };

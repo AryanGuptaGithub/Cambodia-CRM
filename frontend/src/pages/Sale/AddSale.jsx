@@ -1444,7 +1444,7 @@ const AddSale = () => {
         paymentStatus: form.paymentStatus,
         remark: form.remark || "",
       };
-
+     
       const response = await fetch(`${backendUrl}/api/sales`, {
         method: "POST",
         headers: {

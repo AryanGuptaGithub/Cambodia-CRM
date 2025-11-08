@@ -33,7 +33,7 @@ const formatDateToReadable = (isoString) => {
   }).format(date);
 };
 
-// Function to update ReportInHand inventory after sale
+// Function to update ReportInHand inventory after sale - CORRECTED VERSION
 const updateReportInHandAfterSale = async (productName, salesQty, bonusQty) => {
   try {
     const totalQtyToDeduct = salesQty + bonusQty;
@@ -52,81 +52,29 @@ const updateReportInHandAfterSale = async (productName, salesQty, bonusQty) => {
       return 0; // Return 0 as LC value
     }
 
-    // Handle case where piecesPerBox is 0 or invalid
-    const piecesPerBox = existingProduct.quantity.piecesPerBox || 1;
-
-    // If piecesPerBox is 0, we cannot calculate boxes properly
-    // So we'll work directly with totalPieces
-    if (piecesPerBox === 0) {
-      console.warn(
-        `⚠️ Product "${productName}" has piecesPerBox = 0, working with totalPieces only`
-      );
-
-      // Check if there's enough stock
-      if (existingProduct.quantity.totalPieces < totalQtyToDeduct) {
-        throw new Error(
-          `Insufficient stock for product "${productName}". Available: ${existingProduct.quantity.totalPieces}, Required: ${totalQtyToDeduct}`
-        );
-      }
-
-      // Update the inventory - only update totalPieces since boxes calculation is invalid
-      const updatedTotalPieces =
-        existingProduct.quantity.totalPieces - totalQtyToDeduct;
-
-      // Update status based on new total quantity
-      let updatedStatus = "In Stock";
-      if (updatedTotalPieces === 0) {
-        updatedStatus = "Out of Stock";
-      } else if (updatedTotalPieces < 10) {
-        updatedStatus = "Critical";
-      } else if (updatedTotalPieces < 25) {
-        updatedStatus = "Low Stock";
-      }
-
-      await ReportInHand.findByIdAndUpdate(existingProduct._id, {
-        $set: {
-          "quantity.totalPieces": updatedTotalPieces,
-          status: updatedStatus,
-        },
-      });
-
-      return existingProduct.lc || 0;
-    }
-
-    // Normal case: piecesPerBox is valid (not 0)
-    // Check if there's enough stock
+    // Check if there's enough stock (using boxes field only)
     if (existingProduct.quantity.boxes < totalQtyToDeduct) {
       throw new Error(
-        `Insufficient stock for product "${productName}". Available: ${existingProduct.quantity.totalPieces}, Required: ${totalQtyToDeduct}`
+        `Insufficient stock for product "${productName}". Available: ${existingProduct.quantity.boxes}, Required: ${totalQtyToDeduct}`
       );
     }
 
-    // Calculate how many boxes and pieces to deduct
-    let remainingPiecesToDeduct = totalQtyToDeduct;
+    // Update the inventory - only boxes field
+    const updatedBoxes = existingProduct.quantity.boxes - totalQtyToDeduct;
 
-    // Calculate boxes to deduct
-    const boxesToDeduct = Math.floor(remainingPiecesToDeduct / piecesPerBox);
-    remainingPiecesToDeduct -= boxesToDeduct * piecesPerBox;
-
-    // Update the inventory
-    const updatedBoxes = existingProduct.quantity.boxes - boxesToDeduct;
-    const updatedTotalPieces =
-      existingProduct.quantity.totalPieces - totalQtyToDeduct;
-
-    // Update status based on new total quantity
+    // Update status based on new boxes quantity (using the same logic as your model's pre-save)
     let updatedStatus = "In Stock";
-    if (updatedTotalPieces === 0) {
+    if (updatedBoxes === 0) {
       updatedStatus = "Out of Stock";
-    } else if (updatedTotalPieces < 10) {
+    } else if (updatedBoxes < 5) {
       updatedStatus = "Critical";
-    } else if (updatedTotalPieces < 25) {
+    } else if (updatedBoxes < 15) {
       updatedStatus = "Low Stock";
     }
 
     await ReportInHand.findByIdAndUpdate(existingProduct._id, {
       $set: {
         "quantity.boxes": updatedBoxes,
-        "quantity.totalPieces": updatedTotalPieces,
         status: updatedStatus,
       },
     });
@@ -159,57 +107,22 @@ const restoreReportInHandAfterSaleDeletion = async (
       return;
     }
 
-    const piecesPerBox = existingProduct.quantity.piecesPerBox || 1;
-    
-    // Handle case where piecesPerBox is 0
-    if (piecesPerBox === 0) {
-      console.warn(`⚠️ Product "${productName}" has piecesPerBox = 0, working with totalPieces only`);
-      
-      const updatedTotalPieces = existingProduct.quantity.totalPieces + totalQtyToRestore;
+    // Update the inventory - only boxes field
+    const updatedBoxes = existingProduct.quantity.boxes + totalQtyToRestore;
 
-      // Update status based on new total quantity
-      let updatedStatus = "In Stock";
-      if (updatedTotalPieces === 0) {
-        updatedStatus = "Out of Stock";
-      } else if (updatedTotalPieces < 10) {
-        updatedStatus = "Critical";
-      } else if (updatedTotalPieces < 25) {
-        updatedStatus = "Low Stock";
-      }
-
-      await ReportInHand.findByIdAndUpdate(existingProduct._id, {
-        $set: {
-          "quantity.totalPieces": updatedTotalPieces,
-          status: updatedStatus,
-        },
-      });
-      return;
-    }
-
-    // Normal case: piecesPerBox is valid
-    let remainingPiecesToRestore = totalQtyToRestore;
-
-    // Calculate boxes to restore
-    const boxesToRestore = Math.floor(remainingPiecesToRestore / piecesPerBox);
-    remainingPiecesToRestore -= boxesToRestore * piecesPerBox;
-
-    const updatedBoxes = existingProduct.quantity.boxes + boxesToRestore;
-    const updatedTotalPieces = existingProduct.quantity.totalPieces + totalQtyToRestore;
-
-    // Update status based on new total quantity
+    // Update status based on new boxes quantity
     let updatedStatus = "In Stock";
-    if (updatedTotalPieces === 0) {
+    if (updatedBoxes === 0) {
       updatedStatus = "Out of Stock";
-    } else if (updatedTotalPieces < 10) {
+    } else if (updatedBoxes < 5) {
       updatedStatus = "Critical";
-    } else if (updatedTotalPieces < 25) {
+    } else if (updatedBoxes < 15) {
       updatedStatus = "Low Stock";
     }
 
     await ReportInHand.findByIdAndUpdate(existingProduct._id, {
       $set: {
         "quantity.boxes": updatedBoxes,
-        "quantity.totalPieces": updatedTotalPieces,
         status: updatedStatus,
       },
     });
@@ -235,13 +148,13 @@ const checkInvoiceNumberExists = async (invoiceNumber, excludeId = null) => {
 // ==================== PRODUCT-WISE SALES ENDPOINT ====================
 router.get("/sales/product-wise", async (req, res) => {
   try {
-    const { 
-      page = 1, 
-      limit = 10, 
-      search = "", 
-      startDate, 
+    const {
+      page = 1,
+      limit = 10,
+      search = "",
+      startDate,
       endDate,
-      productName 
+      productName,
     } = req.query;
 
     // Convert page and limit to numbers
@@ -261,14 +174,17 @@ router.get("/sales/product-wise", async (req, res) => {
       if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
         matchConditions.recordingDate = {
           $gte: start,
-          $lte: end
+          $lte: end,
         };
       }
     }
 
     // Product name filter
     if (productName && productName.trim() !== "") {
-      matchConditions["products.productName"] = new RegExp(productName.trim(), "i");
+      matchConditions["products.productName"] = new RegExp(
+        productName.trim(),
+        "i"
+      );
     }
 
     // Search filter (for general search across multiple fields)
@@ -286,10 +202,10 @@ router.get("/sales/product-wise", async (req, res) => {
     const productWiseAggregate = await SaleSummary.aggregate([
       // Match documents based on filters
       { $match: matchConditions },
-      
+
       // Unwind the products array to get each product as a separate document
       { $unwind: "$products" },
-      
+
       // Lookup customer information
       {
         $lookup: {
@@ -299,7 +215,7 @@ router.get("/sales/product-wise", async (req, res) => {
           as: "customerInfo",
         },
       },
-      
+
       // Unwind customer info (there should be only one customer per code)
       {
         $unwind: {
@@ -307,7 +223,7 @@ router.get("/sales/product-wise", async (req, res) => {
           preserveNullAndEmptyArrays: true,
         },
       },
-      
+
       // Group by product to get summary (for total count)
       {
         $group: {
@@ -319,7 +235,7 @@ router.get("/sales/product-wise", async (req, res) => {
           totalProfitLoss: { $sum: "$products.profitLoss" },
         },
       },
-      
+
       // Count total unique products for pagination
       {
         $group: {
@@ -333,7 +249,7 @@ router.get("/sales/product-wise", async (req, res) => {
     // Get total count and products
     let totalProducts = 0;
     let productSummary = [];
-    
+
     if (productWiseAggregate.length > 0) {
       totalProducts = productWiseAggregate[0].totalProducts;
       productSummary = productWiseAggregate[0].products;
@@ -345,15 +261,15 @@ router.get("/sales/product-wise", async (req, res) => {
 
     // Now get detailed records for the paginated products
     if (paginatedProducts.length > 0) {
-      const productNames = paginatedProducts.map(p => p._id);
-      
+      const productNames = paginatedProducts.map((p) => p._id);
+
       const detailedRecords = await SaleSummary.aggregate([
         { $match: matchConditions },
         { $unwind: "$products" },
         {
           $match: {
-            "products.productName": { $in: productNames }
-          }
+            "products.productName": { $in: productNames },
+          },
         },
         {
           $lookup: {
@@ -406,7 +322,7 @@ router.get("/sales/product-wise", async (req, res) => {
       ]);
 
       // Combine summary with detailed records
-      const result = paginatedProducts.map(product => ({
+      const result = paginatedProducts.map((product) => ({
         productName: product._id,
         summary: {
           totalSalesQty: product.totalSalesQty,
@@ -415,9 +331,9 @@ router.get("/sales/product-wise", async (req, res) => {
           totalProfitLoss: product.totalProfitLoss,
           totalRecords: product.totalRecords,
         },
-        details: detailedRecords.filter(record => 
-          record.productName === product._id
-        ).slice(0, 100) // Limit details to 100 records per product
+        details: detailedRecords
+          .filter((record) => record.productName === product._id)
+          .slice(0, 100), // Limit details to 100 records per product
       }));
 
       res.status(200).json({
@@ -444,9 +360,9 @@ router.get("/sales/product-wise", async (req, res) => {
     }
   } catch (error) {
     console.error("❌ Error fetching product-wise sales:", error);
-    res.status(500).json({ 
+    res.status(500).json({
       message: "Failed to fetch product-wise sales.",
-      error: error.message 
+      error: error.message,
     });
   }
 });
@@ -464,7 +380,7 @@ router.get("/sales/product/:productName", async (req, res) => {
 
     // Build match conditions
     const matchConditions = {
-      "products.productName": decodeURIComponent(productName)
+      "products.productName": decodeURIComponent(productName),
     };
 
     // Date range filter
@@ -476,7 +392,7 @@ router.get("/sales/product/:productName", async (req, res) => {
       if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
         matchConditions.recordingDate = {
           $gte: start,
-          $lte: end
+          $lte: end,
         };
       }
     }
@@ -488,10 +404,10 @@ router.get("/sales/product/:productName", async (req, res) => {
     const salesData = await SaleSummary.aggregate([
       { $match: matchConditions },
       { $unwind: "$products" },
-      { 
-        $match: { 
-          "products.productName": decodeURIComponent(productName) 
-        } 
+      {
+        $match: {
+          "products.productName": decodeURIComponent(productName),
+        },
       },
       {
         $lookup: {
@@ -549,10 +465,10 @@ router.get("/sales/product/:productName", async (req, res) => {
     const productSummary = await SaleSummary.aggregate([
       { $match: matchConditions },
       { $unwind: "$products" },
-      { 
-        $match: { 
-          "products.productName": decodeURIComponent(productName) 
-        } 
+      {
+        $match: {
+          "products.productName": decodeURIComponent(productName),
+        },
       },
       {
         $group: {
@@ -568,16 +484,19 @@ router.get("/sales/product/:productName", async (req, res) => {
       },
     ]);
 
-    const summary = productSummary.length > 0 ? productSummary[0] : {
-      _id: decodeURIComponent(productName),
-      totalSalesQty: 0,
-      totalBonusQty: 0,
-      totalNetSellingAmount: 0,
-      totalProfitLoss: 0,
-      totalRecords: 0,
-      averageSellingPrice: 0,
-      averageProfitLoss: 0,
-    };
+    const summary =
+      productSummary.length > 0
+        ? productSummary[0]
+        : {
+            _id: decodeURIComponent(productName),
+            totalSalesQty: 0,
+            totalBonusQty: 0,
+            totalNetSellingAmount: 0,
+            totalProfitLoss: 0,
+            totalRecords: 0,
+            averageSellingPrice: 0,
+            averageProfitLoss: 0,
+          };
 
     const totalPages = Math.ceil(totalCount / limitNum);
 
@@ -595,9 +514,9 @@ router.get("/sales/product/:productName", async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Error fetching product sales details:", error);
-    res.status(500).json({ 
+    res.status(500).json({
       message: "Failed to fetch product sales details.",
-      error: error.message 
+      error: error.message,
     });
   }
 });
@@ -609,16 +528,27 @@ router.post("/sales", async (req, res) => {
     const saleData = req.body;
 
     // Validate required fields
-    if (!saleData.recordingDate || !saleData.invoiceNumber || !saleData.invoiceDate || 
-        !saleData.mrName || !saleData.customerCode || !saleData.products || !Array.isArray(saleData.products)) {
-      return res.status(400).json({ error: "Missing required fields or products array" });
+    if (
+      !saleData.recordingDate ||
+      !saleData.invoiceNumber ||
+      !saleData.invoiceDate ||
+      !saleData.mrName ||
+      !saleData.customerCode ||
+      !saleData.products ||
+      !Array.isArray(saleData.products)
+    ) {
+      return res
+        .status(400)
+        .json({ error: "Missing required fields or products array" });
     }
 
     // Check if invoice number already exists
-    const invoiceExists = await checkInvoiceNumberExists(saleData.invoiceNumber);
+    const invoiceExists = await checkInvoiceNumberExists(
+      saleData.invoiceNumber
+    );
     if (invoiceExists) {
-      return res.status(400).json({ 
-        error: `Invoice number "${saleData.invoiceNumber}" already exists. Please use a different invoice number.` 
+      return res.status(400).json({
+        error: `Invoice number "${saleData.invoiceNumber}" already exists. Please use a different invoice number.`,
       });
     }
 
@@ -639,7 +569,7 @@ router.post("/sales", async (req, res) => {
       mrId: saleData.mrId || "",
       customerCode: saleData.customerCode,
       customerId: saleData.customerId || "",
-      products: saleData.products.map(product => ({
+      products: saleData.products.map((product) => ({
         productName: product.productName,
         salesQty: Number(product.salesQty),
         bonusQty: Number(product.bonusQty) || 0,
@@ -651,11 +581,16 @@ router.post("/sales", async (req, res) => {
         averageUnitPrice: Number(product.averageUnitPrice),
         lc: Number(product.lc) || 0,
         profitLoss: Number(product.profitLoss) || 0,
-        isProductAccept: product.isProductAccept !== undefined ? product.isProductAccept : true
+        isProductAccept:
+          product.isProductAccept !== undefined
+            ? product.isProductAccept
+            : true,
       })),
       creditDays: saleData.creditDays ? Number(saleData.creditDays) : null,
       dueDate: saleData.dueDate ? new Date(saleData.dueDate) : null,
-      deliveryDate: saleData.deliveryDate ? new Date(saleData.deliveryDate) : null,
+      deliveryDate: saleData.deliveryDate
+        ? new Date(saleData.deliveryDate)
+        : null,
       paidAmount: Number(saleData.paidAmount) || 0,
       dueAmount: dueAmount,
       totalAmount: totalAmount,
@@ -665,7 +600,7 @@ router.post("/sales", async (req, res) => {
 
     // Update inventory for all products
     const inventoryUpdates = [];
-    
+
     for (const product of newSaleData.products) {
       if (product.salesQty > 0 || product.bonusQty > 0) {
         try {
@@ -678,7 +613,8 @@ router.post("/sales", async (req, res) => {
 
           // Update product with actual LC and recalculate profit/loss
           product.lc = lcValue;
-          product.profitLoss = product.netSellingAmount - product.totalQty * lcValue;
+          product.profitLoss =
+            product.netSellingAmount - product.totalQty * lcValue;
 
           inventoryUpdates.push({
             productName: product.productName,
@@ -693,8 +629,8 @@ router.post("/sales", async (req, res) => {
             error: error.message,
           });
           // If inventory update fails for any product, return error
-          return res.status(400).json({ 
-            error: `Inventory update failed for ${product.productName}: ${error.message}` 
+          return res.status(400).json({
+            error: `Inventory update failed for ${product.productName}: ${error.message}`,
           });
         }
       }
@@ -713,8 +649,8 @@ router.post("/sales", async (req, res) => {
 
     // Handle duplicate invoice number error from MongoDB
     if (error.code === 11000) {
-      return res.status(400).json({ 
-        error: `Invoice number "${req.body.invoiceNumber}" already exists. Please use a different invoice number.` 
+      return res.status(400).json({
+        error: `Invoice number "${req.body.invoiceNumber}" already exists. Please use a different invoice number.`,
       });
     }
 
@@ -725,6 +661,144 @@ router.post("/sales", async (req, res) => {
     res.status(500).json({ error: "Failed to add new sale" });
   }
 });
+
+// ✅ Bulk Sale Import Route (Improved Error Propagation)
+router.post("/sale/import", async (req, res) => {
+  try {
+    const salesData = req.body;
+    console.log("📦 values of sales:", JSON.stringify(salesData, null, 2));
+
+    if (!Array.isArray(salesData) || salesData.length === 0) {
+      return res.status(400).json({
+        error: "Invalid data format. Expected an array of sale records.",
+      });
+    }
+
+    const results = {
+      total: salesData.length,
+      success: 0,
+      failed: 0,
+      errors: [],
+    };
+
+    for (let i = 0; i < salesData.length; i++) {
+      const saleData = salesData[i];
+
+      try {
+        if (
+          !saleData.recordingDate ||
+          !saleData.invoiceNumber ||
+          !saleData.invoiceDate ||
+          !saleData.mrName ||
+          !saleData.customerName ||
+          !saleData.products ||
+          !Array.isArray(saleData.products)
+        ) {
+          throw new Error("Missing required fields or products array");
+        }
+
+        const invoiceExists = await checkInvoiceNumberExists(
+          saleData.invoiceNumber
+        );
+        if (invoiceExists) {
+          throw new Error(
+            `Invoice number "${saleData.invoiceNumber}" already exists`
+          );
+        }
+
+        const totalAmount = saleData.products.reduce((sum, p) => {
+          const qty = Number(p.salesQty) || 0;
+          const price = Number(p.sellingPrice) || 0;
+          const discount = Number(p.discount) || 0;
+          return sum + qty * price - discount;
+        }, 0);
+
+        const paidAmount = Number(saleData.paidAmount) || 0;
+        const dueAmount = totalAmount - paidAmount;
+
+        const newSaleData = {
+          recordingDate: new Date(saleData.recordingDate),
+          invoiceNumber: saleData.invoiceNumber,
+          invoiceDate: new Date(saleData.invoiceDate),
+          mrName: saleData.mrName,
+          customerName: saleData.customerName,
+          creditDays: Number(saleData.creditDays) || 0,
+          paidAmount,
+          dueAmount,
+          totalAmount,
+          paymentStatus: saleData.paymentStatus || "Credit",
+          remark: saleData.remarks || "",
+          products: [],
+        };
+
+        for (const product of saleData.products) {
+          const salesQty = Number(product.salesQty) || 0;
+          const bonusQty = Number(product.bonusQty) || 0;
+          const totalQty = salesQty + bonusQty;
+          const sellingPrice = Number(product.sellingPrice) || 0;
+          const discount = Number(product.discount) || 0;
+          const amount = salesQty * sellingPrice;
+          const netSellingAmount = amount - discount;
+
+          try {
+            const lcValue = await updateReportInHandAfterSale(
+              product.productName,
+              salesQty,
+              bonusQty
+            );
+
+            const profitLoss = netSellingAmount - totalQty * lcValue;
+
+            newSaleData.products.push({
+              productName: product.productName,
+              salesQty,
+              bonusQty,
+              totalQty,
+              sellingPrice,
+              amount,
+              discount,
+              netSellingAmount,
+              averageUnitPrice: sellingPrice,
+              lc: lcValue,
+              profitLoss,
+              isProductAccept: true,
+            });
+          } catch (err) {
+            // Format stock error with <b> tags
+            throw new Error(
+              `Insufficient stock for product <b>${product.productName}</b>. Available: <b>${err.available || 0}</b>, Required: <b>${salesQty}</b>`
+            );
+          }
+        }
+
+        await SaleSummary.create(newSaleData);
+        results.success++;
+      } catch (error) {
+        console.error(`❌ Failed to import sale at index ${i}:`, error.message);
+        results.failed++;
+        results.errors.push({
+          index: i,
+          invoiceNumber: saleData.invoiceNumber,
+          error: error.message,
+        });
+      }
+    }
+
+    const detailedErrors = results.errors.map(
+      (e) => `Invoice ${e.invoiceNumber || "N/A"}: ${e.error}`
+    );
+
+    res.status(200).json({
+      success: results.failed === 0,
+      message: detailedErrors.join("<br>"), // send HTML formatted error
+      results,
+    });
+  } catch (error) {
+    console.error("💥 Bulk import error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 
 // Updated PUT /sales/:id endpoint with invoice number validation
 router.put("/sales/:id", async (req, res) => {
@@ -738,11 +812,17 @@ router.put("/sales/:id", async (req, res) => {
     }
 
     // Check if invoice number is being changed and if it already exists
-    if (req.body.invoiceNumber && req.body.invoiceNumber !== originalSale.invoiceNumber) {
-      const invoiceExists = await checkInvoiceNumberExists(req.body.invoiceNumber, id);
+    if (
+      req.body.invoiceNumber &&
+      req.body.invoiceNumber !== originalSale.invoiceNumber
+    ) {
+      const invoiceExists = await checkInvoiceNumberExists(
+        req.body.invoiceNumber,
+        id
+      );
       if (invoiceExists) {
-        return res.status(400).json({ 
-          error: `Invoice number "${req.body.invoiceNumber}" already exists. Please use a different invoice number.` 
+        return res.status(400).json({
+          error: `Invoice number "${req.body.invoiceNumber}" already exists. Please use a different invoice number.`,
         });
       }
     }
@@ -779,7 +859,8 @@ router.put("/sales/:id", async (req, res) => {
 
         // Update LC and profit/loss with actual values
         product.lc = lcValue;
-        product.profitLoss = product.netSellingAmount - product.totalQty * lcValue;
+        product.profitLoss =
+          product.netSellingAmount - product.totalQty * lcValue;
       }
     }
 
@@ -791,8 +872,8 @@ router.put("/sales/:id", async (req, res) => {
 
     // Handle duplicate invoice number error from MongoDB
     if (err.code === 11000) {
-      return res.status(400).json({ 
-        error: `Invoice number "${req.body.invoiceNumber}" already exists. Please use a different invoice number.` 
+      return res.status(400).json({
+        error: `Invoice number "${req.body.invoiceNumber}" already exists. Please use a different invoice number.`,
       });
     }
 
@@ -906,7 +987,7 @@ router.get("/sales", async (req, res) => {
           totalAmount: 1,
           createdAt: 1,
           updatedAt: 1,
-          
+
           // Products array with all product fields
           products: {
             $map: {
@@ -924,17 +1005,17 @@ router.get("/sales", async (req, res) => {
                 averageUnitPrice: "$$product.averageUnitPrice",
                 lc: "$$product.lc",
                 profitLoss: "$$product.profitLoss",
-                isProductAccept: "$$product.isProductAccept"
-              }
-            }
+                isProductAccept: "$$product.isProductAccept",
+              },
+            },
           },
-          
+
           // Customer info - only name
           customerInfo: {
-            name: "$customerInfo.name"
-          }
-        }
-      }
+            name: "$customerInfo.name",
+          },
+        },
+      },
     ]);
 
     res.status(200).json({
@@ -989,7 +1070,6 @@ router.delete("/sales/:id", async (req, res) => {
     res.status(500).json({ error: "Failed to delete sales record." });
   }
 });
-
 
 router.post("/sales/download-excel", async (req, res) => {
   try {
@@ -1108,12 +1188,36 @@ router.post("/sales/download-excel", async (req, res) => {
     // === Header Row ===
     const headerRow = worksheet.getRow(3);
     headerRow.values = [
-      "No", "Recording Date", "Invoice Number", "Invoice Date", "MR Name", 
-      "Customer Code", "Customer Name", "Customer Number", "Address", "Zone",
-      "Product Name", "Sales Qty", "Bonus Qty", "Total Qty", "Selling Price",
-      "Amount", "Discount", "Net Selling Amount", "Average Unit Price", "LC",
-      "Profit/Loss", "Product Accept", "Credit Days", "Due Date", "Delivery Date",
-      "Paid Amount", "Due Amount", "Total Amount", "Payment Status", "Remark"
+      "No",
+      "Recording Date",
+      "Invoice Number",
+      "Invoice Date",
+      "MR Name",
+      "Customer Code",
+      "Customer Name",
+      "Customer Number",
+      "Address",
+      "Zone",
+      "Product Name",
+      "Sales Qty",
+      "Bonus Qty",
+      "Total Qty",
+      "Selling Price",
+      "Amount",
+      "Discount",
+      "Net Selling Amount",
+      "Average Unit Price",
+      "LC",
+      "Profit/Loss",
+      "Product Accept",
+      "Credit Days",
+      "Due Date",
+      "Delivery Date",
+      "Paid Amount",
+      "Due Amount",
+      "Total Amount",
+      "Payment Status",
+      "Remark",
     ];
     headerRow.font = { bold: true };
     headerRow.alignment = { vertical: "middle", horizontal: "center" };

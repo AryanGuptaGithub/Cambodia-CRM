@@ -604,8 +604,6 @@ const Supplier = () => {
     if (confirm.isConfirmed) {
       try {
         const idsToDelete = selected.map((s) => s.id);
-        console.log("Deleting supplier IDs:", idsToDelete); // Debug log
-
         const res = await axios.delete(`${backendUrl}/api/suppliers`, {
           data: { ids: idsToDelete },
         });

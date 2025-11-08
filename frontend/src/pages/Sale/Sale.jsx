@@ -13,7 +13,6 @@ import {
   X,
   Eye,
   Search,
-  Settings,
   Package,
 } from "lucide-react";
 import ReactDOM from "react-dom";
@@ -30,6 +29,14 @@ import { confirmDialog } from "../../utils/confirmationDialog";
 import { useNavigate } from "react-router-dom";
 import SaleExcelDownload from "../../excels/download/SaleExcelDownload";
 import { useInitialSaleData } from "./IntialLoading.jsx";
+import {
+  fetchMRList,
+  fetchCustomerList,
+  fetchProducts,
+} from "../../pages/ProductManager/common/fetchDropdown.jsx";
+import SearchableDropdown from "../../components/common/SearchableDropdown";
+import InputField from "../../components/common/InputField";
+import LoadingOverlay from "../../components/Loading";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
@@ -46,31 +53,147 @@ const Sales = () => {
   const [parsedData, setParsedData] = useState([]);
   const [types, setTypes] = useState([]);
   const [loadingData, setLoadingData] = useState(true);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedItems, setSelectedItems] = useState([]);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
-  const [selectedFields, setSelectedFields] = useState([]);
-  const [allSelected, setAllSelected] = useState(false);
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [selectedSaleProducts, setSelectedSaleProducts] = useState([]);
+  const [mrList, setMrList] = useState([]);
+  const [customerList, setCustomerList] = useState([]);
+  const [productsList, setProductsList] = useState([]); // NEW: State for products
   const inputRef = useRef(null);
   const { statuses, productNames, loading } = useInitialSaleData();
   const [errors, setErrors] = useState({});
-  const [activeTab, setActiveTab] = useState("add");
-  const [tableColumns, setTableColumns] = useState([
-    "invoiceNumber",
-    "invoiceDate",
-    "productCount",
-    "mrName",
-    "customerName",
-    "totalAmount",
-    "paymentStatus",
-    "actions",
-  ]);
 
-  // Add the missing allFields definition
+  const [currentProduct, setCurrentProduct] = useState(null);
+  const [currentProductIndex, setCurrentProductIndex] = useState(null);
+  const [isProductEditModalOpen, setIsProductEditModalOpen] = useState(false);
+  const [expandedProductIndex, setExpandedProductIndex] = useState(-1);
+
+  const toggleProductView = (index) => {
+    setExpandedProductIndex(expandedProductIndex === index ? -1 : index);
+  };
+
+  const tableColumns = useMemo(
+    () => [
+      "invoiceNumber",
+      "invoiceDate",
+      "productCount",
+      "mrName",
+      "customerName",
+      "totalAmount",
+      "paymentStatus",
+      "actions",
+    ],
+    []
+  );
+  // Helper function to capitalize first letter
+  const capitalizeFirstLetter = (string) => {
+    if (!string) return "--";
+    return string.charAt(0).toUpperCase() + string.slice(1);
+  };
+
+  // Get field value from sale object
+  const getFieldValue = (sale, dbName) => {
+    if (dbName === "customerInfo.name") {
+      return sale.customerInfo?.name || "--";
+    }
+
+    if (dbName === "products") {
+      const productCount = sale.products?.length || 0;
+      return productCount;
+    }
+
+    if (
+      ["recordingDate", "dueDate", "deliveryDate", "invoiceDate"].includes(
+        dbName
+      )
+    ) {
+      return formatDateToReadable(sale[dbName]) || "--";
+    }
+
+    if (dbName === "amount") {
+      return Math.ceil(sale.amount || 0);
+    }
+
+    if (dbName === "totalAmount") {
+      return `${Math.ceil(sale.totalAmount || 0).toLocaleString()}`;
+    }
+
+    if (
+      dbName === "salesQty" ||
+      dbName === "totalQty" ||
+      dbName === "bonusQty"
+    ) {
+      return Math.ceil(sale[dbName] || 0);
+    }
+
+    // Handle object values by converting to string
+    const value = sale[dbName];
+    if (value && typeof value === "object") {
+      return value.name || value.displayName || JSON.stringify(value);
+    }
+
+    return value ?? "--";
+  };
+
+  // Function to open product details modal for viewing
+  const handleProductCountClick = (sale) => {
+    setSelectedSaleProducts(sale.products || []);
+    setIsProductModalOpen(true);
+  };
+
+  // Function to open product edit modal from edit form
+  const openProductEditModal = (product, index) => {
+    setCurrentProduct({ ...product });
+    setCurrentProductIndex(index);
+    setIsProductEditModalOpen(true);
+  };
+
+  // Function to handle product changes in the product edit modal
+  const handleProductChange = (e) => {
+    const { name, value } = e.target;
+    setCurrentProduct((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  };
+
+  // Function to update product in the main form
+  const updateProductInForm = () => {
+    setForm((prev) => {
+      const updatedProducts = [...prev.products];
+      updatedProducts[currentProductIndex] = currentProduct;
+
+      // Recalculate totals after product update
+      const totals = calculateProductTotals(updatedProducts);
+
+      return {
+        ...prev,
+        products: updatedProducts,
+        totalAmount: totals.totalAmount,
+        netSellingAmount: totals.netAmount,
+        dueAmount: (
+          totals.netAmount - parseFloat(prev.paidAmount || 0)
+        ).toFixed(2),
+      };
+    });
+    setIsProductEditModalOpen(false);
+    setCurrentProduct(null);
+    setCurrentProductIndex(null);
+  };
+
+  // Function to handle numeric input for product modal
+  const handleProductNumericChange = (e) => {
+    const { name, value } = e.target;
+    if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+      setCurrentProduct((prev) => ({
+        ...prev,
+        [name]: value,
+      }));
+    }
+  };
+
   const allFields = useMemo(
     () => [
       {
@@ -191,34 +314,6 @@ const Sales = () => {
     []
   );
 
-  const requiredColumns = [
-    "invoiceNumber",
-    "invoiceDate",
-    "productCount",
-    "actions",
-  ];
-
-  // Get available columns for Add tab (columns not currently in table)
-  const availableColumns = useMemo(() => {
-    return allFields.filter((item) => !tableColumns.includes(item.id));
-  }, [allFields, tableColumns]);
-
-  const removableColumns = useMemo(() => {
-    return allFields.filter(
-      (item) =>
-        tableColumns.includes(item.id) && !requiredColumns.includes(item.id)
-    );
-  }, [allFields, tableColumns]);
-
-  const chunkedItems = useMemo(() => {
-    const items = activeTab === "add" ? availableColumns : removableColumns;
-    const chunks = [];
-    for (let i = 0; i < items.length; i += 2) {
-      chunks.push(items.slice(i, i + 2));
-    }
-    return chunks;
-  }, [activeTab, availableColumns, removableColumns]);
-
   const [form, setForm] = useState({
     _id: null,
     recordingDate: "",
@@ -243,196 +338,84 @@ const Sales = () => {
     dueAmount: 0,
     paymentStatus: "",
     remark: "",
+    products: [],
   });
 
   // Constants for pagination
   const SALES_PER_PAGE = 9;
 
-  // Add the missing function to fix the ReferenceError
-  const handleProductNameHighlight = useCallback(
-    (value, shouldUpdateForm = false) => {
-      if (shouldUpdateForm && typeof value === "string") {
-        setForm((prevForm) => ({
-          ...prevForm,
-          productName: value,
-        }));
-      }
-    },
-    []
-  );
+  // Fetch MR, Customer, and Products lists
+  useEffect(() => {
+    const fetchDropdownData = async () => {
+      try {
+        const [mrs, customers, products] = await Promise.all([
+          fetchMRList(),
+          fetchCustomerList(),
+          fetchProducts(), // NEW: Fetch products
+        ]);
 
-  // Also add the payment status highlight function if needed
-  const handlePaymentStatusHighlight = useCallback(
-    (value, shouldUpdateForm = false) => {
-      if (shouldUpdateForm && typeof value === "string") {
-        setForm((prevForm) => ({
-          ...prevForm,
-          paymentStatus: value,
-        }));
-      }
-    },
-    []
-  );
+        if (mrs?.success && Array.isArray(mrs.data)) {
+          const mrNames = mrs.data
+            .map((mr) => {
+              if (typeof mr === "string") return mr;
+              if (mr && typeof mr === "object") {
+                return (
+                  mr.medicalRepName ||
+                  mr.name ||
+                  mr.MRId ||
+                  mr._id ||
+                  "Unknown MR"
+                );
+              }
+              return "Unknown MR";
+            })
+            .filter((name) => name && name !== "Unknown MR");
 
-  // Custom hook for suggestions
-  const useSuggestions = (items, filterField = "type", inputValue = "") => {
-    const [isOpen, setIsOpen] = useState(false);
-    const [highlightedIndex, setHighlightedIndex] = useState(-1);
-    const inputRef = useRef(null);
-    const [dropdownTop, setDropdownTop] = useState(0);
-
-    const filteredItems = useMemo(
-      () =>
-        items
-          .filter((item) => {
-            const fieldValue =
-              typeof item === "string" ? item : item[filterField];
-            return fieldValue;
-          })
-          .sort((a, b) => {
-            const aVal = typeof a === "string" ? a : a[filterField];
-            const bVal = typeof b === "string" ? b : b[filterField];
-            return aVal.localeCompare(bVal);
-          }),
-      [items, filterField, inputValue]
-    );
-
-    const calculatePosition = useCallback(() => {
-      if (isOpen && inputRef.current) {
-        const height = inputRef.current.offsetHeight;
-        setDropdownTop(2 * height - 8);
-      }
-    }, [isOpen]);
-
-    useEffect(() => {
-      calculatePosition();
-    }, [calculatePosition]);
-
-    const handleKeyDown = useCallback(
-      (e, onSelect) => {
-        if (!isOpen || filteredItems.length === 0) return;
-
-        switch (e.key) {
-          case "ArrowDown":
-            e.preventDefault();
-            setHighlightedIndex((prev) =>
-              prev < filteredItems.length - 1 ? prev + 1 : 0
-            );
-            break;
-          case "ArrowUp":
-            e.preventDefault();
-            setHighlightedIndex((prev) =>
-              prev > 0 ? prev - 1 : filteredItems.length - 1
-            );
-            break;
-          case "Enter":
-            e.preventDefault();
-            if (highlightedIndex >= 0) {
-              const selected = filteredItems[highlightedIndex];
-              const value =
-                typeof selected === "string" ? selected : selected[filterField];
-              onSelect(value);
-            }
-            break;
-          case "Escape":
-            setIsOpen(false);
-            break;
-          default:
-            break;
+          setMrList(mrNames);
+        } else {
+          console.warn("MR list data is not in expected format:", mrs);
+          setMrList([]);
         }
-      },
-      [isOpen, filteredItems, highlightedIndex, filterField]
-    );
 
-    const selectSuggestion = useCallback((value, onSelect) => {
-      onSelect(value);
-      setIsOpen(false);
-      setHighlightedIndex(-1);
-    }, []);
+        if (customers?.success && Array.isArray(customers.data)) {
+          setCustomerList(customers.data);
+        } else {
+          console.warn(
+            "Customer list data is not in expected format:",
+            customers
+          );
+          setCustomerList([]);
+        }
 
-    return {
-      isOpen,
-      setIsOpen,
-      highlightedIndex,
-      setHighlightedIndex,
-      inputRef,
-      dropdownTop,
-      filteredItems,
-      handleKeyDown,
-      selectSuggestion,
+        // NEW: Handle products data
+        if (products?.success && Array.isArray(products.data)) {
+          setProductsList(products.data);
+        } else {
+          console.warn(
+            "Products list data is not in expected format:",
+            products
+          );
+          setProductsList([]);
+        }
+      } catch (error) {
+        console.error("Error fetching dropdown data:", error);
+        showToast("error", "Failed to load dropdown data");
+        setMrList([]);
+        setCustomerList([]);
+        setProductsList([]);
+      }
     };
-  };
 
-  const paymentStatusSuggestions = useSuggestions(
-    statuses,
-    "type",
-    form.paymentStatus
-  );
-  const productNameSuggestions = useSuggestions(
-    productNames,
-    "name",
-    form.productName
-  );
+    fetchDropdownData();
+  }, []);
 
-  // Helper function to capitalize first letter
-  const capitalizeFirstLetter = (string) => {
-    if (!string) return "--";
-    return string.charAt(0).toUpperCase() + string.slice(1);
-  };
-
-  // Get field value from sale object
-  const getFieldValue = (sale, dbName) => {
-    if (dbName === "customerInfo.name") {
-      return sale.customerInfo?.name || "--";
-    }
-
-    if (dbName === "products") {
-      // Return product count with clickable badge
-      const productCount = sale.products?.length || 0;
-      return productCount;
-    }
-
-    if (
-      ["recordingDate", "dueDate", "deliveryDate", "invoiceDate"].includes(
-        dbName
-      )
-    ) {
-      return formatDateToReadable(sale[dbName]) || "--";
-    }
-
-    if (dbName === "amount") {
-      return Math.ceil(sale.amount || 0);
-    }
-
-    if (dbName === "totalAmount") {
-      return `${Math.ceil(sale.totalAmount || 0).toLocaleString()}`;
-    }
-
-    if (
-      dbName === "salesQty" ||
-      dbName === "totalQty" ||
-      dbName === "bonusQty"
-    ) {
-      return Math.ceil(sale[dbName] || 0);
-    }
-
-    return sale[dbName] ?? "--";
-  };
-
-  // Function to handle product count click
-  const handleProductCountClick = (sale) => {
-    setSelectedSaleProducts(sale.products || []);
-    setIsProductModalOpen(true);
-  };
-
-  // CORRECTED fetch function
+  // Fetch sales data
   const fetchSaleSummaries = async () => {
     try {
       const res = await fetch(`${backendUrl}/api/sales`);
       if (!res.ok) throw new Error("Failed to fetch sale summaries");
 
       const data = await res.json();
-      console.log("valuesof data", data);
       const salesData = data.summaries || data;
 
       const uniqueTypes = Array.from(
@@ -440,7 +423,7 @@ const Sales = () => {
       );
 
       setTypes(["All", ...uniqueTypes]);
-      setSales(salesData); // Set the actual array, not the response object
+      setSales(salesData);
     } catch (error) {
       console.error("❌ Fetch error:", error);
       showToast("error", error.message || "Error fetching sale summaries");
@@ -454,9 +437,8 @@ const Sales = () => {
     fetchSaleSummaries();
   }, []);
 
-  // Memoized filtered sales - WITH SAFETY CHECK
+  // Memoized filtered sales
   const filteredSales = useMemo(() => {
-    // Safety check - ensure sales is an array
     if (!Array.isArray(sales)) {
       console.warn("Sales is not an array:", sales);
       return [];
@@ -490,7 +472,7 @@ const Sales = () => {
     });
   }, [sales, searchTerm, selectedTab]);
 
-  // Current page sales - ONLY SHOW 9 RECORDS
+  // Current page sales
   const currentSales = useMemo(() => {
     const start = (currentPage - 1) * SALES_PER_PAGE;
     return filteredSales.slice(start, start + SALES_PER_PAGE);
@@ -532,89 +514,6 @@ const Sales = () => {
     }
   };
 
-  // Toggle item selection
-  const toggleItem = (id) => {
-    if (id === "all") {
-      if (allSelected) {
-        setSelectedItems([]);
-        setAllSelected(false);
-      } else {
-        const allIds = chunkedItems.flat().map((item) => item.id);
-        setSelectedItems(allIds);
-        setAllSelected(true);
-      }
-    } else {
-      let updatedItems;
-      if (selectedItems.includes(id)) {
-        updatedItems = selectedItems.filter((itemId) => itemId !== id);
-      } else {
-        updatedItems = [...selectedItems, id];
-      }
-
-      setSelectedItems(updatedItems);
-      setAllSelected(updatedItems.length === chunkedItems.flat().length);
-    }
-  };
-
-  // Handle save for column configuration
-  const handleSave = () => {
-    if (activeTab === "add") {
-      // Add selected columns to table
-      const newColumns = [...tableColumns, ...selectedItems];
-      setTableColumns(newColumns);
-    } else {
-      const requiredColumns = [
-        "invoiceNumber",
-        "invoiceDate",
-        "productCount",
-        "actions",
-      ];
-      const newColumns = tableColumns.filter(
-        (id) => !selectedItems.includes(id) || requiredColumns.includes(id)
-      );
-      setTableColumns(newColumns);
-    }
-    setSelectedItems([]);
-    setAllSelected(false);
-    setIsModalOpen(false);
-  };
-
-  const handleReset = () => {
-    setSelectedItems([]);
-    setAllSelected(false);
-    // Reset to default columns
-    setTableColumns([
-      "invoiceNumber",
-      "invoiceDate",
-      "productCount",
-      "mrName",
-      "customerName",
-      "totalAmount",
-      "paymentStatus",
-      "actions",
-    ]);
-  };
-
-  const handleCancelEvent = () => {
-    setSelectedItems([]);
-    setAllSelected(false);
-    setIsModalOpen(false);
-  };
-
-  // Update allSelected state when individual selections change
-  useEffect(() => {
-    const currentItems = chunkedItems.flat();
-    if (
-      currentItems.length > 0 &&
-      selectedItems.length === currentItems.length
-    ) {
-      setAllSelected(true);
-    } else {
-      setAllSelected(false);
-    }
-  }, [selectedItems, chunkedItems]);
-
-  // Add the rest of your missing functions here...
   const handleView = (sale) => {
     setForm({ ...sale });
     setIsOpen(true);
@@ -700,163 +599,120 @@ const Sales = () => {
     if (!file) return;
 
     const reader = new FileReader();
+
     reader.onload = (evt) => {
       try {
         const data = new Uint8Array(evt.target.result);
         const workbook = XLSX.read(data, { type: "array" });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(worksheet, {
-          header: 1,
-          defval: "",
-        });
-
-        if (rows.length === 0) {
-          showToast("warning", "Excel file is empty");
-          return;
-        }
-
-        let headerRowIndex = -1;
-        let headersMap = {};
-
-        const headerPatterns = [
-          "no",
-          "recording date",
-          "invoice #",
-          "invoice date",
-          "mr name",
+        const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        const expectedHeaders = [
+          "Recording Date",
+          "Invoice #",
+          "Invoice Date",
+          "MR Name",
+          "Customer Name",
+          "Product Name",
+          "Sales Qty",
+          "Bonus Qty",
+          "Selling Price (USD)",
+          "Discount (USD)",
+          "Credit Days",
+          "Paid Amount",
+          "Payment Status",
+          "Remarks",
         ];
 
-        for (let i = 0; i < Math.min(rows.length, 10); i++) {
-          const row = rows[i].map((cell) =>
-            (cell || "").toString().trim().toLowerCase()
-          );
-
-          const matches = headerPatterns.filter((pattern) =>
-            row.some((cell) => cell.includes(pattern))
-          );
-
-          if (matches.length >= 3) {
-            headerRowIndex = i;
+        let headerIdx = -1;
+        for (let i = 0; i < rows.length; i++) {
+          const row = rows[i].map((c) => c?.toString().trim());
+          const normalized = row.map((c) => c.toLowerCase());
+          const matchCount = expectedHeaders.filter((h) =>
+            normalized.includes(h.toLowerCase())
+          ).length;
+          if (matchCount >= 5) {
+            headerIdx = i;
             break;
           }
         }
 
-        if (headerRowIndex === -1) {
-          showToast("error", "❌ Could not identify header row in Excel file");
+        if (headerIdx === -1) {
+          showToast("error", "Header row not found");
           return;
         }
 
-        const rawHeaders = rows[headerRowIndex];
+        const headers = rows[headerIdx].map((h) => h?.toString().trim());
+        const dataRows = rows.slice(headerIdx + 1);
 
-        const columnMapping = [
-          { index: 0, key: "no" },
-          { index: 1, key: "recordingDate" },
-          { index: 2, key: "invoiceNumber" },
-          { index: 3, key: "invoiceDate" },
-          { index: 4, key: "mrName" },
-          { index: 5, key: "customerCode" },
-          { index: 6, key: "productName" },
-          { index: 7, key: "salesQty" },
-          { index: 8, key: "bonusQty" },
-          { index: 9, key: "sellingPrice" },
-          { index: 10, key: "discount" },
-          { index: 11, key: "creditDays" },
-          { index: 12, key: "paidAmount" },
-          { index: 13, key: "paymentStatus" },
-          { index: 14, key: "remark" },
-        ];
-
-        columnMapping.forEach(({ index, key }) => {
-          if (index < rawHeaders.length) {
-            headersMap[index] = key;
-          }
-        });
-
-        const essentialHeaders = [
-          "productName",
-          "salesQty",
-          "sellingPrice",
-          "paymentStatus",
-        ];
-        const missingEssential = essentialHeaders.filter(
-          (header) => !Object.values(headersMap).includes(header)
+        const missingHeaders = expectedHeaders.filter(
+          (h) => !headers.includes(h)
         );
-
-        if (missingEssential.length > 0) {
+        if (missingHeaders.length > 0) {
           showToast(
             "error",
-            `❌ Missing essential columns: ${missingEssential.join(", ")}`
+            `Missing headers in file: ${missingHeaders.join(", ")}`
           );
           return;
         }
 
-        const dataRows = rows.slice(headerRowIndex + 1);
+        // 🔄 Convert to JSON
+        const json = dataRows.map((row) => {
+          const obj = {};
+          headers.forEach((h, i) => (obj[h] = row[i] ?? ""));
+          return obj;
+        });
 
-        const mappedData = dataRows
-          .map((row, index) => {
-            if (
-              !row ||
-              row.length === 0 ||
-              row.every((cell) => !cell || cell.toString().trim() === "")
-            ) {
-              return null;
-            }
+        // 🧾 Group by Invoice #
+        const groupedInvoices = {};
 
-            const item = {};
-            Object.entries(headersMap).forEach(([colIndex, key]) => {
-              const colIndexNum = parseInt(colIndex);
-              const value = row[colIndexNum] ?? "";
+        json.forEach((row) => {
+          const invoiceNumber = row["Invoice #"] || "UNKNOWN";
 
-              if (
-                [
-                  "salesQty",
-                  "bonusQty",
-                  "sellingPrice",
-                  "discount",
-                  "paidAmount",
-                  "creditDays",
-                ].includes(key)
-              ) {
-                const numValue = parseFloat(value);
-                item[key] = !isNaN(numValue) ? numValue : 0;
-              } else {
-                item[key] = value.toString().trim();
-              }
-            });
-
-            if (!item.productName || item.productName === "") {
-              return null;
-            }
-
-            return {
-              recordingDate: item.recordingDate,
-              invoiceNumber: item.invoiceNumber || "",
-              invoiceDate: item.invoiceDate,
-              mrName: item.mrName || "",
-              customerCode: item.customerCode || "",
-              productName: item.productName,
-              salesQty: item.salesQty || 0,
-              bonusQty: item.bonusQty || 0,
-              sellingPrice: item.sellingPrice || 0,
-              discount: item.discount || 0,
-              creditDays: item.creditDays || 0,
-              paidAmount: item.paidAmount || 0,
-              paymentStatus: item.paymentStatus || "",
-              remark: item.remark || "",
-              _rowIndex: headerRowIndex + index + 2,
+          if (!groupedInvoices[invoiceNumber]) {
+            groupedInvoices[invoiceNumber] = {
+              recordingDate: row["Recording Date"] || "",
+              invoiceNumber,
+              invoiceDate: row["Invoice Date"] || "",
+              mrName: row["MR Name"] || "",
+              customerName: row["Customer Name"] || "",
+              creditDays: Number(row["Credit Days"]) || 0,
+              paidAmount: Number(row["Paid Amount"]) || 0,
+              paymentStatus: row["Payment Status"] || "",
+              remarks: row["Remarks"] || "",
+              products: [],
+              totalAmount: 0,
+              dueAmount: 0,
             };
-          })
-          .filter((entry) => entry !== null);
+          }
 
-        if (mappedData.length === 0) {
-          showToast("warning", "No valid data records found in the Excel file");
-          return;
-        }
+          const salesQty = Number(row["Sales Qty"]) || 0;
+          const sellingPrice = Number(row["Selling Price (USD)"]) || 0;
+          const discount = Number(row["Discount (USD)"]) || 0;
+          const productTotal = sellingPrice * salesQty - discount;
 
-        setParsedData(mappedData);
+          groupedInvoices[invoiceNumber].products.push({
+            productName: row["Product Name"] || "",
+            salesQty,
+            bonusQty: Number(row["Bonus Qty"]) || 0,
+            sellingPrice,
+            discount,
+            productTotal,
+          });
+
+          groupedInvoices[invoiceNumber].totalAmount += productTotal;
+        });
+
+        // 💰 Calculate due amount
+        Object.values(groupedInvoices).forEach((invoice) => {
+          invoice.dueAmount = invoice.totalAmount - invoice.paidAmount;
+        });
+
+        const invoicesArray = Object.values(groupedInvoices);
+
+        setParsedData(invoicesArray);
       } catch (error) {
-        console.error("Error reading Excel file:", error);
-        showToast("error", "Failed to process the Excel file");
+        console.error("❌ Error reading file:", error);
+        showToast("error", "Failed to process Excel file");
       }
     };
 
@@ -864,25 +720,49 @@ const Sales = () => {
   };
 
   const handleProductImport = async () => {
-    if (parsedData.length === 0) {
-      showToast("warning", "Please upload a valid file first");
+    if (!parsedData || parsedData.length === 0) {
+      showToast("warning", "Please upload and validate a file first.");
       return;
     }
 
     setIsUploading(true);
 
     try {
-      const res = await axios.post(`${backendUrl}/api/sale/import`, parsedData);
+      const res = await axios.post(
+        `${backendUrl}/api/sale/import`,
+        parsedData,
+        {
+          headers: { "Content-Type": "application/json" },
+        }
+      );
 
-      if (res.status === 200) {
-        showToast(
-          "success",
-          res.data.message || "Sale Summary imported successfully!"
-        );
+      if (res?.status === 200 && res?.data) {
+        if (res.data.success) {
+          showToast(
+            "success",
+            res.data.message || "Sale summary imported successfully!"
+          );
+        } else {
+          // ✅ show detailed errors returned from backend
+          const errorMessage =
+            res.data.message?.length > 300
+              ? res.data.message.slice(0, 300) + "..."
+              : res.data.message;
+
+          showToast("error", errorMessage || "Some records failed to import.");
+        }
+
         setShowImportModal(false);
+        await new Promise((resolve) => setTimeout(resolve, 500));
         fetchSaleSummaries();
+      } else {
+        showToast(
+          "error",
+          res?.data?.message || "Unexpected response from the server."
+        );
       }
     } catch (err) {
+      console.error("❌ Import failed:", err);
       handleAxiosError(err, showToast);
     } finally {
       setIsUploading(false);
@@ -950,7 +830,6 @@ const Sales = () => {
       ).toFixed(2);
     }
 
-    // Profit / Loss = amount - discount - (lc * totalQty)
     if (
       ["amount", "discount", "lc", "totalQty", "salesQty", "bonusQty"].includes(
         name
@@ -963,11 +842,11 @@ const Sales = () => {
       ).toFixed(2);
     }
 
-    // Due Amount = netSellingAmount - paidAmount
+    // Due Amount = netSellingAmount - paidAmount (FIXED CALCULATION)
     if (["netSellingAmount", "paidAmount"].includes(name)) {
-      updatedForm.dueAmount = (
-        getNum("netSellingAmount") - getNum("paidAmount")
-      ).toFixed(2);
+      const netAmount = getNum("netSellingAmount");
+      const paidAmount = getNum("paidAmount");
+      updatedForm.dueAmount = (netAmount - paidAmount).toFixed(2);
     }
 
     // Average Unit Price = netSellingAmount / totalQty
@@ -988,28 +867,10 @@ const Sales = () => {
     return updatedForm;
   };
 
-  const enhancedHandleChange = useCallback(
-    (e) => {
-      const { name, value } = e.target;
-      if (name === "paymentStatus" || name === "productName") {
-        updateFormField(name, value);
-      } else {
-        setForm((prev) => handleChangeEvent(name, value, prev));
-      }
-
-      // Suggestion logic
-      if (name === "paymentStatus" && value.length > 0) {
-        paymentStatusSuggestions.setIsOpen(true);
-        paymentStatusSuggestions.setHighlightedIndex(-1);
-      }
-
-      if (name === "productName" && value.length > 0) {
-        productNameSuggestions.setIsOpen(true);
-        productNameSuggestions.setHighlightedIndex(-1);
-      }
-    },
-    [updateFormField, paymentStatusSuggestions, productNameSuggestions]
-  );
+  const enhancedHandleChange = useCallback((e) => {
+    const { name, value } = e.target;
+    setForm((prev) => handleChangeEvent(name, value, prev));
+  }, []);
 
   const handleDateChange = (date, fieldName) => {
     setForm((prev) => {
@@ -1025,159 +886,51 @@ const Sales = () => {
     });
   };
 
-  // Fixed SuggestionInput component with proper highlighting
-  const SuggestionInput = React.memo(
-    ({
-      label,
-      name,
-      value,
-      onChange,
-      onFocus,
-      onBlur,
-      error,
-      suggestions,
-      isOpen,
-      highlightedIndex,
-      inputRef,
-      dropdownTop,
-      onSuggestionSelect,
-      getSuggestionValue = (item) => item,
-      getSuggestionDisplay = (item) => item,
-      setHighlightedIndex,
-    }) => {
-      const handleMouseEnter = useCallback(
-        (index) => {
-          setHighlightedIndex(index);
-          // Get the suggestion value for highlighting
-          if (index >= 0 && index < suggestions.length) {
-            const suggestion = suggestions[index];
-            const suggestionValue = getSuggestionValue(suggestion);
-            // Call onSuggestionSelect with highlight only (no form update)
-            onSuggestionSelect && onSuggestionSelect(suggestionValue, true);
-          }
-        },
-        [
-          suggestions,
-          getSuggestionValue,
-          onSuggestionSelect,
-          setHighlightedIndex,
-        ]
-      );
+  // Get customer name from customer code
+  const getCustomerName = (customerCode) => {
+    const customer = customerList.find((c) => c.code === customerCode);
+    return customer ? customer.name : customerCode;
+  };
 
-      const handleClick = useCallback(
-        (item) => {
-          const value = getSuggestionValue(item);
-          onSuggestionSelect && onSuggestionSelect(value, false);
-        },
-        [onSuggestionSelect, getSuggestionValue]
-      );
+  // Calculate product totals
+  const calculateProductTotals = (products) => {
+    if (!products || !Array.isArray(products))
+      return {
+        totalAmount: 0,
+        totalDiscount: 0,
+        netAmount: 0,
+        totalProfitLoss: 0,
+      };
 
-      const handleKeyDown = useCallback(
-        (e) => {
-          if (!isOpen || suggestions.length === 0) return;
+    const totals = products.reduce(
+      (acc, product) => {
+        acc.totalAmount += parseFloat(product.amount || 0);
+        acc.totalDiscount += parseFloat(product.discount || 0);
+        acc.netAmount += parseFloat(product.netSellingAmount || 0);
+        acc.totalProfitLoss += parseFloat(product.profitLoss || 0);
+        return acc;
+      },
+      { totalAmount: 0, totalDiscount: 0, netAmount: 0, totalProfitLoss: 0 }
+    );
 
-          switch (e.key) {
-            case "ArrowDown":
-              e.preventDefault();
-              setHighlightedIndex((prev) =>
-                prev < suggestions.length - 1 ? prev + 1 : 0
-              );
-              // Auto-highlight when navigating with keyboard
-              if (highlightedIndex < suggestions.length - 1) {
-                const nextIndex = highlightedIndex + 1;
-                const nextSuggestion = suggestions[nextIndex];
-                const nextValue = getSuggestionValue(nextSuggestion);
-                onSuggestionSelect && onSuggestionSelect(nextValue, true);
-              }
-              break;
-            case "ArrowUp":
-              e.preventDefault();
-              setHighlightedIndex((prev) =>
-                prev > 0 ? prev - 1 : suggestions.length - 1
-              );
-              // Auto-highlight when navigating with keyboard
-              if (highlightedIndex > 0) {
-                const prevIndex = highlightedIndex - 1;
-                const prevSuggestion = suggestions[prevIndex];
-                const prevValue = getSuggestionValue(prevSuggestion);
-                onSuggestionSelect && onSuggestionSelect(prevValue, true);
-              }
-              break;
-            case "Enter":
-              e.preventDefault();
-              if (
-                highlightedIndex >= 0 &&
-                highlightedIndex < suggestions.length
-              ) {
-                const selectedItem = suggestions[highlightedIndex];
-                const value = getSuggestionValue(selectedItem);
-                onSuggestionSelect && onSuggestionSelect(value, false);
-              }
-              break;
-            default:
-              break;
-          }
-        },
-        [
-          highlightedIndex,
-          suggestions,
-          isOpen,
-          onSuggestionSelect,
-          getSuggestionValue,
-          setHighlightedIndex,
-        ]
-      );
+    return totals;
+  };
 
-      return (
-        <div className="relative flex flex-col">
-          <label className="text-sm font-medium text-gray-700 mb-1">
-            {label}
-          </label>
-          <input
-            ref={inputRef}
-            type="text"
-            name={name}
-            value={value}
-            onChange={onChange}
-            onKeyDown={handleKeyDown}
-            onFocus={onFocus}
-            onBlur={onBlur}
-            className={`border rounded-md px-2 py-1 ${
-              error ? "border-red-500" : "border-gray-300"
-            }`}
-            placeholder="Type to search..."
-            autoComplete="off"
-            aria-autocomplete="list"
-            aria-expanded={isOpen}
-            role="combobox"
-          />
-          {isOpen && suggestions.length > 0 && (
-            <ul
-              className="absolute z-10 bg-white border border-gray-300 w-full rounded-md max-h-60 overflow-auto shadow-lg"
-              style={{ top: dropdownTop }}
-            >
-              {suggestions.map((item, idx) => (
-                <li
-                  key={typeof item === "object" ? item._id ?? idx : idx}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => handleClick(item)}
-                  onMouseEnter={() => handleMouseEnter(idx)}
-                  className={`cursor-pointer px-3 py-2 ${
-                    highlightedIndex === idx
-                      ? "bg-blue-600 text-white"
-                      : "bg-white text-gray-900 hover:bg-gray-100"
-                  }`}
-                >
-                  {getSuggestionDisplay(item)}
-                </li>
-              ))}
-            </ul>
-          )}
-          {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
-        </div>
-      );
+  // Calculate due amount when form changes
+  useEffect(() => {
+    if (form.netSellingAmount !== undefined && form.paidAmount !== undefined) {
+      const netAmount = parseFloat(form.netSellingAmount) || 0;
+      const paidAmount = parseFloat(form.paidAmount) || 0;
+      const dueAmount = (netAmount - paidAmount).toFixed(2);
+
+      if (parseFloat(form.dueAmount || 0) !== parseFloat(dueAmount)) {
+        setForm((prev) => ({
+          ...prev,
+          dueAmount: dueAmount,
+        }));
+      }
     }
-  );
+  }, [form.netSellingAmount, form.paidAmount]);
 
   // Render loading
   if (loadingData) {
@@ -1192,6 +945,8 @@ const Sales = () => {
       </div>
     );
   }
+
+  const productTotals = calculateProductTotals(form.products);
 
   return (
     <div className="p-6">
@@ -1229,7 +984,7 @@ const Sales = () => {
               <div className="flex gap-4">
                 {types.map((tab) => (
                   <button
-                    key={tab}
+                    key={`tab-${tab}`}
                     onClick={() => {
                       setSelectedTab(tab);
                       setCurrentPage(1);
@@ -1245,13 +1000,6 @@ const Sales = () => {
                   </button>
                 ))}
               </div>
-
-              {/* <button
-                className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-                onClick={() => setIsModalOpen(true)}
-              >
-                <Settings size={18} /> Add /Remove Column
-              </button> */}
             </div>
           ) : (
             <div></div>
@@ -1262,7 +1010,6 @@ const Sales = () => {
               Total Count:{" "}
               <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
                 {filteredSales.length}{" "}
-                {filteredSales.length === 1 ? "record" : "records"}
               </span>
               {filteredSales.length > SALES_PER_PAGE && (
                 <span className="ml-2 text-sm text-gray-600">
@@ -1300,7 +1047,7 @@ const Sales = () => {
                   .filter((item) => tableColumns.includes(item.id))
                   .map((item) => (
                     <th
-                      key={item.id}
+                      key={`header-${item.id}`}
                       className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium"
                     >
                       {item.name === "Invoice No" ? (
@@ -1334,13 +1081,17 @@ const Sales = () => {
                     colSpan={tableColumns.length}
                     className="p-4 text-center text-gray-500"
                   >
-                    {loadingData ? "Loading..." : "No Sales found."}
+                    {loadingData ? (
+                      <LoadingOverlay text="Please wait..." />
+                    ) : (
+                      ""
+                    )}
                   </td>
                 </tr>
               ) : (
                 currentSales.map((sale, index) => (
                   <tr
-                    key={sale._id}
+                    key={`sale-${sale._id || index}`}
                     className={`hover:bg-gray-50 ${
                       index < currentSales.length - 1 ? "border-b" : ""
                     }`}
@@ -1349,7 +1100,7 @@ const Sales = () => {
                       .filter((item) => tableColumns.includes(item.id))
                       .map((item) => (
                         <td
-                          key={item.id}
+                          key={`cell-${sale._id}-${item.id}`}
                           className="p-3 whitespace-nowrap min-w-[120px]"
                         >
                           {item.id === "invoiceNumber" ? (
@@ -1444,7 +1195,7 @@ const Sales = () => {
                     </span>
                   ) : (
                     <button
-                      key={page}
+                      key={`sales-page-${page}`}
                       onClick={() => {
                         setCurrentPage(page);
                         window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1554,7 +1305,7 @@ const Sales = () => {
                         ) : (
                           selectedSaleProducts.map((product, index) => (
                             <tr
-                              key={index}
+                              key={`product-${product._id || index}`}
                               className={`hover:bg-gray-50 ${
                                 index < selectedSaleProducts.length - 1
                                   ? "border-b"
@@ -1622,13 +1373,14 @@ const Sales = () => {
             </div>,
             document.body
           )}
-        {/* Rest of your existing modals (Import, Edit, View, Column Configuration) remain the same */}
+
+        {/* Import Modal */}
         {showImportModal &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
               <div
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setIsOpen(false)}
+                onClick={() => setShowImportModal(false)}
               />
               <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
                 <button
@@ -1648,7 +1400,7 @@ const Sales = () => {
                 />
                 <div className="flex justify-end gap-3">
                   <button
-                    onClick={() => handleCancelEvent}
+                    onClick={() => setShowImportModal(false)}
                     disabled={isUploading}
                     className={`px-5 py-2 rounded-lg cursor-pointer ${
                       isUploading
@@ -1674,159 +1426,7 @@ const Sales = () => {
             </div>,
             document.body
           )}
-        {/* Rest of your existing modals remain unchanged */}
-        {isModalOpen &&
-          ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-              <div
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setIsModalOpen(false)}
-              />
-              <div
-                className="relative bg-white p-6 rounded shadow-lg max-w-4xl w-full z-10 max-h-[90vh] overflow-hidden flex flex-col"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <h2 className="text-xl font-semibold mb-4">
-                  {activeTab === "add" ? "Add Columns" : "Remove Columns"}
-                </h2>
 
-                <div className="flex w-full gap-2 mb-4">
-                  <div className="w-1/2">
-                    <button
-                      onClick={() => {
-                        setActiveTab("add");
-                        setSelectedItems([]);
-                        setAllSelected(false);
-                      }}
-                      className={`w-full px-4 py-2 font-medium text-center rounded-lg ${
-                        activeTab === "add"
-                          ? "bg-green-600 text-white"
-                          : "bg-gray-200 text-gray-700"
-                      }`}
-                    >
-                      Add Columns ({availableColumns.length})
-                    </button>
-                  </div>
-                  <div className="w-1/2">
-                    <button
-                      onClick={() => {
-                        setActiveTab("remove");
-                        setSelectedItems([]);
-                        setAllSelected(false);
-                      }}
-                      className={`w-full px-4 py-2 font-medium text-center rounded-lg ${
-                        activeTab === "remove"
-                          ? "bg-red-600 text-white"
-                          : "bg-gray-200 text-gray-700"
-                      }`}
-                    >
-                      Remove Columns ({removableColumns.length})
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex-1 overflow-y-auto">
-                  {chunkedItems.length > 0 ? (
-                    <div className="grid grid-cols-1 gap-3">
-                      {/* Select All option (only when not in required tab) */}
-                      {chunkedItems.flat().length > 0 && (
-                        <div className="flex gap-4 border-b pb-2 mb-2 sticky top-0 bg-white">
-                          <label className="flex items-center gap-2 flex-1 cursor-pointer select-none font-semibold">
-                            <input
-                              type="checkbox"
-                              checked={allSelected}
-                              onChange={() => toggleItem("all")}
-                            />
-                            Select All
-                          </label>
-                          <div className="flex-1"></div>
-                        </div>
-                      )}
-
-                      {chunkedItems.map((pair, index) => (
-                        <div key={index} className="flex gap-4">
-                          {pair.map(({ id, name }) => (
-                            <label
-                              key={id}
-                              className="flex items-center gap-1 flex-1 cursor-pointer select-none hover:bg-gray-50 rounded"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={selectedItems.includes(id)}
-                                onChange={() => toggleItem(id)}
-                              />
-                              <span className="flex-1">{name}</span>
-                            </label>
-                          ))}
-                          {pair.length === 1 && <div className="flex-1"></div>}
-                        </div>
-                      ))}
-
-                      {/* REQUIRED COLUMNS shown on Remove tab */}
-                      {activeTab === "remove" && (
-                        <div className="mt-6 border-t pt-4">
-                          <h3 className="text-sm font-semibold text-gray-600 mb-2">
-                            Compulsory Fields
-                          </h3>
-                          <div className="grid grid-cols-2 gap-3 text-gray-400 text-sm">
-                            {allFields
-                              .filter((field) =>
-                                requiredColumns.includes(field.id)
-                              )
-                              .map((field) => (
-                                <div
-                                  key={field.id}
-                                  className="flex items-center gap-2 bg-gray-100 rounded px-2 py-1 cursor-not-allowed"
-                                >
-                                  <input type="checkbox" checked disabled />
-                                  <div className="flex flex-col">
-                                    <span>{field.name}</span>
-                                    <span className="text-xs text-red-500">
-                                      This field is compulsory
-                                    </span>
-                                  </div>
-                                </div>
-                              ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-gray-500">
-                      {activeTab === "add"
-                        ? "All available columns are already in the table."
-                        : "No columns available to remove."}
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-4 pt-4 border-t flex justify-between items-center">
-                  <button
-                    onClick={handleReset}
-                    className="px-4 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200 cursor-pointer"
-                  >
-                    Reset to Default
-                  </button>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleCancelEvent}
-                      className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 cursor-pointer"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleSave}
-                      disabled={selectedItems.length === 0}
-                      className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 cursor-pointer disabled:bg-gray-400 disabled:cursor-not-allowed"
-                    >
-                      Save Changes
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>,
-            document.body
-          )}
         {isEditModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -1834,7 +1434,7 @@ const Sales = () => {
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
                 onClick={() => setIsOpen(false)}
               />
-              <div className="bg-white w-full max-w-4xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+              <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
                 <button
                   onClick={() => setIsEditModalOpen(false)}
                   className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
@@ -1861,7 +1461,7 @@ const Sales = () => {
                       }
                       dateFormat="yyyy-MM-dd"
                       placeholderText="Select a date"
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
                     />
                   </div>
 
@@ -1870,14 +1470,14 @@ const Sales = () => {
                     <label className="block text-sm font-medium">
                       Invoice Number
                     </label>
-                    <input
+                    <InputField
                       type="text"
                       name="invoiceNumber"
                       value={form.invoiceNumber}
                       onChange={(e) =>
                         handleNumericInputChange(e, enhancedHandleChange)
                       }
-                      className="w-full border px-3 py-2 rounded-lg capitalize"
+                      className="w-full border px-3 py-2 rounded-lg capitalize border-gray-300"
                       autoComplete="off"
                     />
                   </div>
@@ -1894,234 +1494,219 @@ const Sales = () => {
                       onChange={(date) => handleDateChange(date, "invoiceDate")}
                       dateFormat="yyyy-MM-dd"
                       placeholderText="Select a date"
-                      className="w-full border px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
                     />
                   </div>
 
-                  {/* MR Name */}
+                  {/* MR Name - Using SearchableDropdown */}
                   <div>
                     <label className="block text-sm font-medium">MR Name</label>
-                    <input
-                      type="text"
-                      name="mrName"
+                    <SearchableDropdown
+                      options={mrList.map((mr) => ({ value: mr, label: mr }))}
                       value={form.mrName}
-                      onChange={enhancedHandleChange}
-                      className="w-full border px-3 py-2 rounded-lg capitalize"
-                      autoComplete="off"
+                      onChange={(value) => updateFormField("mrName", value)}
+                      placeholder="Select MR"
+                      className="w-full"
                     />
                   </div>
 
-                  {/* Customer Code */}
+                  {/* Customer - Using SearchableDropdown */}
                   <div>
                     <label className="block text-sm font-medium">
-                      Customer Code
+                      Customer
                     </label>
-                    <input
-                      type="text"
-                      name="customerCode"
+                    <SearchableDropdown
+                      options={customerList.map((customer) => ({
+                        value: customer.code,
+                        label: customer.name,
+                      }))}
                       value={form.customerCode}
-                      onChange={(e) =>
-                        handleNumericInputChange(e, enhancedHandleChange)
+                      onChange={(value) =>
+                        updateFormField("customerCode", value)
                       }
-                      className="w-full border px-3 py-2 rounded-lg capitalize"
-                      autoComplete="off"
+                      placeholder="Select Customer"
+                      className="w-full"
                     />
                   </div>
 
-                  {/* Product Name - Fixed SuggestionInput */}
-                  <div>
-                    <SuggestionInput
-                      label="Product Name"
-                      name="productName"
-                      value={form.productName || ""}
-                      onChange={enhancedHandleChange}
-                      suggestions={productNameSuggestions.filteredItems}
-                      isOpen={productNameSuggestions.isOpen}
-                      highlightedIndex={productNameSuggestions.highlightedIndex}
-                      inputRef={productNameSuggestions.inputRef}
-                      dropdownTop={productNameSuggestions.dropdownTop}
-                      onFocus={() => productNameSuggestions.setIsOpen(true)}
-                      onBlur={() =>
-                        setTimeout(
-                          () => productNameSuggestions.setIsOpen(false),
-                          150
-                        )
-                      }
-                      onSuggestionSelect={(value, isHighlight) => {
-                        if (isHighlight) {
-                          // Just highlight, don't update form
-                          handleProductNameHighlight(value, false);
-                        } else {
-                          // Actually select the value and update form
-                          productNameSuggestions.selectSuggestion(
-                            value,
-                            (val) => updateFormField("productName", val)
-                          );
+                  {/* Products List */}
+                  <div className="md:col-span-3">
+                    <label className="block text-sm font-medium mb-2">
+                      Products ({form.products?.length || 0})
+                    </label>
+                    <div className="space-y-3 border rounded-lg p-4 bg-gray-50">
+                      {form.products && form.products.length > 0 ? (
+                        form.products.map((product, index) => (
+                          <div
+                            key={`edit-product-${index}`}
+                            className="flex items-center justify-between p-3 bg-white rounded border border-gray-300"
+                          >
+                            <div className="flex-1">
+                              <span className="font-medium text-gray-700">
+                                {product.productName || `Product ${index + 1}`}
+                              </span>
+                              <div className="text-sm text-gray-500 mt-1">
+                                Qty: {product.salesQty || 0} | Bonus:{" "}
+                                {product.bonusQty || 0} | Price: $
+                                {(product.sellingPrice || 0).toFixed(2)}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openProductEditModal(product, index)
+                              }
+                              className="ml-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm cursor-pointer"
+                            >
+                              Edit Details
+                            </button>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-center text-gray-500 py-4">
+                          No products added
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Financial Summary */}
+                  <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-4 gap-4 pt-4 border-t border-gray-300">
+                    <div>
+                      <label className="block text-sm font-medium">
+                        Total Amount
+                      </label>
+                      <InputField
+                        type="text"
+                        value={productTotals.totalAmount.toFixed(2)}
+                        className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700 border-gray-300"
+                        disabled
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium">
+                        Total Discount
+                      </label>
+                      <InputField
+                        type="text"
+                        value={productTotals.totalDiscount.toFixed(2)}
+                        className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700 border-gray-300"
+                        disabled
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium">
+                        Net Amount
+                      </label>
+                      <InputField
+                        type="text"
+                        value={productTotals.netAmount.toFixed(2)}
+                        className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700 border-gray-300"
+                        disabled
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium">
+                        Profit / Loss
+                      </label>
+                      <InputField
+                        type="text"
+                        value={productTotals.totalProfitLoss.toFixed(2)}
+                        disabled
+                        className={`w-full border px-3 py-2 rounded-lg bg-gray-200 border-gray-300 ${
+                          productTotals?.totalProfitLoss > 0
+                            ? "text-green-600"
+                            : productTotals?.totalProfitLoss < 0
+                            ? "text-red-600"
+                            : "text-gray-700"
+                        }`}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Payment Information */}
+                  <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium">
+                        Credit Days
+                      </label>
+                      <InputField
+                        type="text"
+                        name="creditDays"
+                        value={form.creditDays}
+                        onChange={(e) =>
+                          handleNumericInputChange(e, enhancedHandleChange)
                         }
-                      }}
-                      getSuggestionValue={(item) =>
-                        typeof item === "string" ? item : item.name
+                        className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                        autoComplete="off"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium">
+                        Due Date
+                      </label>
+                      <DatePicker
+                        selected={form.dueDate ? new Date(form.dueDate) : null}
+                        dateFormat="yyyy-MM-dd"
+                        placeholderText="Select a date"
+                        className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700 border-gray-300"
+                        disabled
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium">
+                        Paid Amount
+                      </label>
+                      <InputField
+                        type="text"
+                        name="paidAmount"
+                        value={form.paidAmount}
+                        onChange={(e) =>
+                          handleNumericInputChange(e, enhancedHandleChange)
+                        }
+                        className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                        autoComplete="off"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium">
+                        Due Amount
+                      </label>
+                      <InputField
+                        type="text"
+                        value={form.dueAmount}
+                        className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700 border-gray-300"
+                        disabled
+                      />
+                    </div>
+                  </div>
+
+                  {/* Payment Status */}
+                  <div>
+                    <label className="block text-sm font-medium">
+                      Payment Status
+                    </label>
+                    <SearchableDropdown
+                      options={statuses.map((status) => ({
+                        value: status.type,
+                        label: status.type,
+                      }))}
+                      value={form.paymentStatus}
+                      onChange={(value) =>
+                        updateFormField("paymentStatus", value)
                       }
-                      getSuggestionDisplay={(item) =>
-                        typeof item === "string" ? item : item.name
-                      }
-                      setHighlightedIndex={
-                        productNameSuggestions.setHighlightedIndex
-                      }
+                      placeholder="Select Status"
+                      className="w-full"
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Sales Quantity
-                    </label>
-                    <input
-                      type="text"
-                      name="salesQty"
-                      value={form.salesQty}
-                      onChange={(e) =>
-                        handleNumericInputChange(e, enhancedHandleChange)
-                      }
-                      className="w-full border px-3 py-2 rounded-lg"
-                      autoComplete="off"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Bonus Quantity
-                    </label>
-                    <input
-                      type="text"
-                      name="bonusQty"
-                      value={form.bonusQty}
-                      onChange={(e) =>
-                        handleNumericInputChange(e, enhancedHandleChange)
-                      }
-                      className="w-full border px-3 py-2 rounded-lg"
-                      autoComplete="off"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Total Quantity
-                    </label>
-                    <input
-                      type="text"
-                      value={form.totalQty}
-                      disabled
-                      className="w-full border px-3 py-2 rounded-lg bg-gray-200"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Selling Price
-                    </label>
-                    <input
-                      type="text"
-                      name="sellingPrice"
-                      value={form.sellingPrice}
-                      onChange={(e) =>
-                        handleNumericInputChange(e, enhancedHandleChange)
-                      }
-                      className="w-full border px-3 py-2 rounded-lg"
-                      autoComplete="off"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">Amount</label>
-                    <input
-                      type="text"
-                      disabled
-                      value={form.amount}
-                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Discount
-                    </label>
-                    <input
-                      type="text"
-                      name="discount"
-                      value={form.discount}
-                      onChange={(e) =>
-                        handleNumericInputChange(e, enhancedHandleChange)
-                      }
-                      className="w-full border px-3 py-2 rounded-lg"
-                      autoComplete="off"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Net Selling Amount
-                    </label>
-                    <input
-                      type="text"
-                      value={form.netSellingAmount}
-                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
-                      disabled
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Average Unit Price
-                    </label>
-                    <input
-                      type="text"
-                      value={form.averageUnitPrice}
-                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
-                      disabled
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Profit / Loss
-                    </label>
-                    <input
-                      type="text"
-                      value={form.profitLoss}
-                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
-                      disabled
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Credit Days
-                    </label>
-                    <input
-                      type="text"
-                      name="creditDays"
-                      value={form.creditDays}
-                      onChange={(e) =>
-                        handleNumericInputChange(e, enhancedHandleChange)
-                      }
-                      className="w-full border px-3 py-2 rounded-lg"
-                      autoComplete="off"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Due Date
-                    </label>
-                    <DatePicker
-                      selected={form.dueDate ? new Date(form.dueDate) : null}
-                      dateFormat="yyyy-MM-dd"
-                      placeholderText="Select a date"
-                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
-                      disabled
-                    />
-                  </div>
-
+                  {/* Delivery Date */}
                   <div>
                     <label className="block text-sm font-medium">
                       Delivery Date
@@ -2132,94 +1717,26 @@ const Sales = () => {
                       }
                       dateFormat="yyyy-MM-dd"
                       placeholderText="Select a date"
-                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
+                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700 border-gray-300"
                       disabled
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Paid Amount
-                    </label>
-                    <input
-                      type="text"
-                      name="paidAmount"
-                      value={form.paidAmount}
-                      onChange={(e) =>
-                        handleNumericInputChange(e, enhancedHandleChange)
-                      }
-                      className="w-full border px-3 py-2 rounded-lg"
-                      autoComplete="off"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Due Amount
-                    </label>
-                    <input
-                      type="text"
-                      value={form.dueAmount}
-                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
-                      disabled
-                    />
-                  </div>
-
-                  {/* Payment Status */}
-                  <div>
-                    <SuggestionInput
-                      label="Payment Status"
-                      name="paymentStatus"
-                      onChange={enhancedHandleChange}
-                      value={form.paymentStatus}
-                      error={errors.paymentStatus}
-                      suggestions={paymentStatusSuggestions.filteredItems}
-                      isOpen={paymentStatusSuggestions.isOpen}
-                      highlightedIndex={
-                        paymentStatusSuggestions.highlightedIndex
-                      }
-                      inputRef={paymentStatusSuggestions.inputRef}
-                      dropdownTop={paymentStatusSuggestions.dropdownTop}
-                      onFocus={() => paymentStatusSuggestions.setIsOpen(true)}
-                      onBlur={() =>
-                        setTimeout(
-                          () => paymentStatusSuggestions.setIsOpen(false),
-                          150
-                        )
-                      }
-                      onSuggestionSelect={(value, isHighlight) => {
-                        if (isHighlight) {
-                          // Just highlight, don't update form
-                          handlePaymentStatusHighlight(value, false);
-                        } else {
-                          // Actually select the value and update form
-                          paymentStatusSuggestions.selectSuggestion(
-                            value,
-                            (val) => updateFormField("paymentStatus", val)
-                          );
-                        }
-                      }}
-                      getSuggestionValue={(item) => item.type}
-                      getSuggestionDisplay={(item) => item.type}
-                      setHighlightedIndex={
-                        paymentStatusSuggestions.setHighlightedIndex
-                      }
-                    />
-                  </div>
-
-                  {/* Remark - full width */}
+                  {/* Remark - Changed to textarea with border */}
                   <div className="md:col-span-3">
                     <label className="block text-sm font-medium">Remark</label>
-                    <input
-                      type="text"
+                    <textarea
+                      name="remark"
                       value={form.remark}
                       onChange={enhancedHandleChange}
-                      className="w-full border px-3 py-2 rounded-lg capitalize"
+                      className="w-full border border-gray-300 px-3 py-2 rounded-lg capitalize"
+                      rows={3}
+                      placeholder="Enter remarks..."
                     />
                   </div>
 
-                  {/* Footer buttons - full width */}
-                  <div className="md:col-span-3 mt-4 flex justify-end gap-3">
+                  {/* Footer buttons */}
+                  <div className="md:col-span-3 mt-4 flex justify-end gap-3 border-t border-gray-300 pt-4">
                     <button
                       type="button"
                       onClick={() => setIsEditModalOpen(false)}
@@ -2240,12 +1757,208 @@ const Sales = () => {
             </div>,
             document.body
           )}
+
+        {/* Product Edit Modal (from Edit Form) */}
+        {isProductEditModalOpen &&
+          ReactDOM.createPortal(
+            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+              <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                onClick={() => setIsProductEditModalOpen(false)}
+              />
+              <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative">
+                <button
+                  onClick={() => setIsProductEditModalOpen(false)}
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                >
+                  <X size={20} />
+                </button>
+
+                <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                  Edit Product - {currentProduct?.productName || "Product"}
+                </h2>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Product Name - UPDATED: Using fetchProducts instead of productNames */}
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium">
+                      Product Name
+                    </label>
+                    <SearchableDropdown
+                      options={productsList.map((product) => ({
+                        value: product.name || product.productName,
+                        label: product.name || product.productName,
+                      }))}
+                      value={currentProduct?.productName || ""}
+                      onChange={(value) =>
+                        setCurrentProduct((prev) => ({
+                          ...prev,
+                          productName: value,
+                        }))
+                      }
+                      placeholder="Select Product"
+                      className="w-full"
+                    />
+                  </div>
+
+                  {/* Sales Quantity */}
+                  <div>
+                    <label className="block text-sm font-medium">
+                      Sales Quantity
+                    </label>
+                    <InputField
+                      type="text"
+                      name="salesQty"
+                      value={currentProduct?.salesQty || ""}
+                      onChange={handleProductNumericChange}
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  {/* Bonus Quantity */}
+                  <div>
+                    <label className="block text-sm font-medium">
+                      Bonus Quantity
+                    </label>
+                    <InputField
+                      type="text"
+                      name="bonusQty"
+                      value={currentProduct?.bonusQty || ""}
+                      onChange={handleProductNumericChange}
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  {/* Total Quantity */}
+                  <div>
+                    <label className="block text-sm font-medium">
+                      Total Quantity
+                    </label>
+                    <InputField
+                      type="text"
+                      value={currentProduct?.totalQty || ""}
+                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 border-gray-300"
+                      disabled
+                    />
+                  </div>
+
+                  {/* Selling Price */}
+                  <div>
+                    <label className="block text-sm font-medium">
+                      Selling Price
+                    </label>
+                    <InputField
+                      type="text"
+                      name="sellingPrice"
+                      value={currentProduct?.sellingPrice || ""}
+                      onChange={handleProductNumericChange}
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  {/* Amount */}
+                  <div>
+                    <label className="block text-sm font-medium">Amount</label>
+                    <InputField
+                      type="text"
+                      value={currentProduct?.amount || ""}
+                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700 border-gray-300"
+                      disabled
+                    />
+                  </div>
+
+                  {/* Discount */}
+                  <div>
+                    <label className="block text-sm font-medium">
+                      Discount
+                    </label>
+                    <InputField
+                      type="text"
+                      name="discount"
+                      value={currentProduct?.discount || ""}
+                      onChange={handleProductNumericChange}
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  {/* Net Selling Amount */}
+                  <div>
+                    <label className="block text-sm font-medium">
+                      Net Selling Amount
+                    </label>
+                    <InputField
+                      type="text"
+                      value={currentProduct?.netSellingAmount || ""}
+                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700 border-gray-300"
+                      disabled
+                    />
+                  </div>
+
+                  {/* Average Unit Price */}
+                  <div>
+                    <label className="block text-sm font-medium">
+                      Average Unit Price
+                    </label>
+                    <InputField
+                      type="text"
+                      value={currentProduct?.averageUnitPrice || ""}
+                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700 border-gray-300"
+                      disabled
+                    />
+                  </div>
+
+                  {/* Profit / Loss */}
+                  <div>
+                    <label className="block text-sm font-medium">
+                      Profit / Loss
+                    </label>
+                    <InputField
+                      type="text"
+                      value={currentProduct?.profitLoss ?? ""}
+                      className={`w-full border px-3 py-2 rounded-lg bg-gray-200 border-gray-300 ${
+                        currentProduct?.profitLoss > 0
+                          ? "text-green-600"
+                          : currentProduct?.profitLoss < 0
+                          ? "text-red-600"
+                          : "text-gray-700"
+                      }`}
+                      disabled
+                    />
+                  </div>
+                </div>
+
+                {/* Footer buttons */}
+                <div className="mt-6 flex justify-end gap-3 border-t border-gray-300 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setIsProductEditModalOpen(false)}
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+                    onClick={updateProductInForm}
+                  >
+                    Update Product
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
         {isViewModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
               <div
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setIsOpen(false)}
+                onClick={() => setIsViewModalOpen(false)}
               />
 
               <div className="bg-white w-full max-w-4xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
@@ -2260,125 +1973,220 @@ const Sales = () => {
                   View Sales Record
                 </h2>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-h-[70vh] overflow-y-auto">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600">
-                      Recording Date
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                      {form.recordingDate
-                        ? new Date(form.recordingDate).toLocaleDateString()
-                        : "-"}
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600">
-                      Invoice Number
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                      {form.invoiceNumber || "-"}
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600">
-                      Invoice Date
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                      {form.invoiceDate
-                        ? new Date(form.invoiceDate).toLocaleDateString()
-                        : "-"}
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600">
-                      MR Name
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                      {form.mrName || "-"}
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600">
-                      Customer Code
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                      {form.customerCode || "-"}
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600">
-                      Product Name
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                      {form.productName || "-"}
-                    </p>
-                  </div>
-
-                  {[
-                    ["Sales Quantity", "salesQty"],
-                    ["Bonus Quantity", "bonusQty"],
-                    ["Total Quantity", "totalQty"],
-                    ["Selling Price", "sellingPrice"],
-                    ["Amount", "amount"],
-                    ["Discount", "discount"],
-                    ["Net Selling Amount", "netSellingAmount"],
-                    ["Average Unit Price", "averageUnitPrice"],
-                    ["Profit / Loss", "profitLoss"],
-                    ["Credit Days", "creditDays"],
-                    ["Paid Amount", "paidAmount"],
-                    ["Due Amount", "dueAmount"],
-                  ].map(([label, key]) => (
-                    <div key={key}>
+                {/* Common Fields Section */}
+                <div className="mb-6">
+                  <h3 className="text-lg font-medium text-gray-700 mb-3">
+                    Record Information
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
                       <label className="block text-sm font-medium text-gray-600">
-                        {label}
+                        Recording Date
                       </label>
                       <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                        {form[key] ?? 0}
-                      </p>
-                    </div>
-                  ))}
-
-                  {[
-                    ["Due Date", "dueDate"],
-                    ["Delivery Date", "deliveryDate"],
-                  ].map(([label, key]) => (
-                    <div key={key}>
-                      <label className="block text-sm font-medium text-gray-600">
-                        {label}
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                        {form[key]
-                          ? new Date(form[key]).toLocaleDateString()
+                        {form.recordingDate
+                          ? formatDateToReadable(form.recordingDate)
                           : "-"}
                       </p>
                     </div>
-                  ))}
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600">
-                      Payment Status
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                      {form.paymentStatus || "-"}
-                    </p>
-                  </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Invoice Number
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                        {form.invoiceNumber || "-"}
+                      </p>
+                    </div>
 
-                  <div className="md:col-span-3">
-                    <label className="block text-sm font-medium text-gray-600">
-                      Remark
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                      {form.remark || "-"}
-                    </p>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Invoice Date
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                        {form.invoiceDate
+                          ? formatDateToReadable(form.invoiceDate)
+                          : "-"}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        MR Name
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                        {form.mrName || "-"}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Customer Name
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                        {form.customerInfo?.name || "-"}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Payment Status
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                        {form.paymentStatus || "-"}
+                      </p>
+                    </div>
                   </div>
                 </div>
 
-                <div className="mt-6 flex justify-end">
+                {/* Product List Section */}
+                <div className="mb-6">
+                  <h3 className="text-lg font-medium text-gray-700 mb-3">
+                    Product Information
+                  </h3>
+
+                  {form.products && form.products.length > 0 ? (
+                    <div className="space-y-4">
+                      {form.products.map((product, index) => (
+                        <div
+                          key={index}
+                          className="border rounded-lg p-4 bg-gray-50"
+                        >
+                          {/* Product Header with Name and View Button */}
+                          <div className="flex justify-between items-center mb-2">
+                            {/* Product Name on Left */}
+                            <div className="flex-1">
+                              <h4 className="text-lg font-semibold text-gray-800 capitalize">
+                                {product.productName || `Product ${index + 1}`}
+                              </h4>
+                            </div>
+
+                            {/* View/Hide Button on Right */}
+                            <button
+                              className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg cursor-pointer text-sm"
+                              onClick={() => toggleProductView(index)}
+                            >
+                              {expandedProductIndex === index
+                                ? "Hide Details"
+                                : "View Details"}
+                            </button>
+                          </div>
+
+                          {/* Product Details - Conditionally Rendered */}
+                          {expandedProductIndex === index && (
+                            <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                              {[
+                                ["Sales Quantity", "salesQty"],
+                                ["Bonus Quantity", "bonusQty"],
+                                ["Total Quantity", "totalQty"],
+                                ["Selling Price", "sellingPrice"],
+                                ["Amount", "amount"],
+                                ["Discount", "discount"],
+                                ["Net Selling Amount", "netSellingAmount"],
+                                ["Average Unit Price", "averageUnitPrice"],
+                                ["Profit / Loss", "profitLoss"],
+                              ].map(([label, key]) => (
+                                <div key={key}>
+                                  <label className="block text-sm font-medium text-gray-600">
+                                    {label}
+                                  </label>
+                                  <p className="border px-3 py-2 rounded-lg bg-white">
+                                    {product[key] ?? 0}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="border rounded-lg p-4 bg-gray-50 text-center text-gray-500">
+                      No products found
+                    </div>
+                  )}
+                </div>
+
+                {/* Payment & Delivery Section */}
+                <div className="mb-6">
+                  <h3 className="text-lg font-medium text-gray-700 mb-3">
+                    Payment & Delivery
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Credit Days
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                        {form.creditDays ?? 0}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Paid Amount
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                        {form.paidAmount ?? 0}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Due Amount
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                        {form.dueAmount ?? 0}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Due Date
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                        {form.dueDate
+                          ? formatDateToReadable(form.dueDate)
+                          : "-"}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Delivery Date
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                        {form.deliveryDate
+                          ? formatDateToReadable(form.deliveryDate)
+                          : "-"}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Total Amount
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                        {form.totalAmount ?? 0}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Remark Section */}
+                <div className="mb-6">
+                  <label className="block text-sm font-medium text-gray-600 mb-2">
+                    Remark
+                  </label>
+                  <textarea
+                    value={form.remark || "-"}
+                    className="w-full border border-gray-300 px-3 py-2 rounded-lg bg-gray-100 capitalize"
+                    rows={3}
+                    disabled
+                  />
+                </div>
+
+                <div className="mt-6 flex justify-end border-t border-gray-300 pt-4">
                   <button
                     onClick={() => setIsViewModalOpen(false)}
                     className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"

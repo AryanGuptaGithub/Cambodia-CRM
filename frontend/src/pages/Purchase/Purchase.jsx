@@ -646,8 +646,6 @@ function Purchase() {
 
   // CORRECTED: Enhanced editPurchase function with proper product ID handling
   const editPurchase = (purchase) => {
-    console.log("values of pur", purchase);
-
     setForm({
       _id: purchase._id || "",
       invoiceNumber: purchase.invoiceNumber || "",
@@ -785,7 +783,6 @@ function Purchase() {
   // CORRECTED: Enhanced handlePurchaseUpdate function with proper product handling
   const handlePurchaseUpdate = async (e) => {
     e.preventDefault();
-    console.log("Updating purchase with data:", form);
 
     try {
       // ✅ Prepare data with correct field names matching backend
@@ -804,8 +801,6 @@ function Purchase() {
         remarks: form.remarks,
         amount: Number(form.amount) || 0,
       };
-
-      console.log("Sending update data:", updateData);
 
       const res = await axios.put(
         `${backendUrl}/api/purchase/${form._id}`,
@@ -901,7 +896,6 @@ function Purchase() {
   // CORRECTED: Enhanced handle change with proper number conversion
   const enhancedHandleChange = useCallback((e) => {
     const { name, value } = e.target;
-    console.log(`Field ${name} changed to:`, value);
 
     setForm((prev) => {
       let processedValue = value;
@@ -930,7 +924,6 @@ function Purchase() {
         [name]: processedValue,
       };
 
-      console.log("Updated form:", updatedForm);
       return updatedForm;
     });
   }, []);
@@ -1856,7 +1849,6 @@ function Purchase() {
                 </form>
 
                 <div className="mt-6 flex justify-end gap-3">
-                
                   <button
                     onClick={() => {
                       setIsEditModalOpen(false);

@@ -342,8 +342,6 @@ const StaffMember = () => {
               entry.contactNo ||
               entry.email
           );
-
-        console.log("Parsed data with dates:", mappedData);
         setParsedData(mappedData);
       } catch (error) {
         console.error("Error parsing file:", error);

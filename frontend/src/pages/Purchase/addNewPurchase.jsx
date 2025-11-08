@@ -200,7 +200,7 @@ const usePurchaseForm = () => {
         (product) => product.value === productId
       );
       if (selectedProduct) {
-        console.log("value  of selectedProduct", selectedProduct);
+        
         setForm((prev) => ({
           ...prev,
           products: prev.products.map((product, index) =>
@@ -414,7 +414,7 @@ const usePurchaseForm = () => {
     try {
       setLoading((prev) => ({ ...prev, suppliers: true }));
       const result = await fetchSuppliersAPI();
-      console.log("values of result", result);
+      
       if (result.success) {
         const transformedSuppliers = result.data.map((supplier) => ({
           value: supplier.id,
@@ -729,7 +729,7 @@ const AddNewPurchase = () => {
         })),
       };
 
-      console.log("Submitting purchase data:", submissionData);
+      
 
       const response = await fetch(`${backendUrl}/api/purchase`, {
         method: "POST",
