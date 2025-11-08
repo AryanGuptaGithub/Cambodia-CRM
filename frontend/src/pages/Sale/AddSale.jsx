@@ -14,7 +14,10 @@ import { PlusSquare, MinusSquare } from "lucide-react";
 import axios from "axios";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import InputField from "../../components/common/InputField";
-import { fetchMRList, fetchCustomerList } from "../../pages/ProductManager/common/fetchDropdown.jsx";
+import {
+  fetchMRList,
+  fetchCustomerList,
+} from "../../pages/ProductManager/common/fetchDropdown.jsx";
 
 const INITIAL_PRODUCT_STATE = {
   productName: "",
@@ -322,24 +325,121 @@ const useSaleForm = (initialCustomerCode = "") => {
     return isNaN(num) ? 0 : num;
   }, []);
 
+  // Calculate total amount from all products
+  const calculateTotalAmount = useCallback((products) => {
+    const total = products.reduce((sum, product) => {
+      return sum + parseFloat(product.netSellingAmount || 0);
+    }, 0);
+    return total.toFixed(2);
+  }, []);
+
+  // Calculate total net amount from all products
+  const calculateTotalNetAmount = useCallback((products) => {
+    const total = products.reduce((sum, product) => {
+      return sum + parseFloat(product.netSellingAmount || 0);
+    }, 0);
+    return total.toFixed(2);
+  }, []);
+
   // Auto-set payment status based on paid amount and total amount
   const autoSetPaymentStatus = useCallback((currentForm) => {
     const totalAmount = parseFloat(currentForm.totalAmount) || 0;
     const paidAmount = parseFloat(currentForm.paidAmount) || 0;
     const dueAmount = parseFloat(currentForm.dueAmount) || 0;
 
-    let paymentStatus = currentForm.paymentStatus;
+    let paymentStatus = "Credit"; // Default to Credit
 
-    if (paidAmount === totalAmount && totalAmount > 0) {
-      paymentStatus = "Cash";
-    } else if (dueAmount === totalAmount && totalAmount > 0) {
-      paymentStatus = "Credit";
-    } else if (paidAmount > 0 && paidAmount < totalAmount) {
-      paymentStatus = "Partial Paid";
+    if (totalAmount > 0) {
+      if (paidAmount === totalAmount) {
+        paymentStatus = "Cash";
+      } else if (dueAmount === totalAmount || paidAmount === 0) {
+        paymentStatus = "Credit";
+      } else if (paidAmount > 0 && paidAmount < totalAmount) {
+        paymentStatus = "Partial Paid";
+      }
     }
 
     return paymentStatus;
   }, []);
+
+  const calculateDerivedFields = useCallback(
+    (name, value, currentForm) => {
+      const updatedForm = { ...currentForm, [name]: value };
+
+      if (name === "invoiceDate") {
+        updatedForm.deliveryDate = value;
+        // Remove due date calculation from invoice date
+      }
+
+      if (name === "creditDays") {
+        const creditDays = parseInt(value, 10);
+        if (!isNaN(creditDays) && creditDays > 0) {
+          try {
+            // Use current date instead of invoice date for due date calculation
+            const currentDate = new Date();
+            const due = new Date(currentDate);
+            due.setDate(due.getDate() + creditDays);
+            if (!isNaN(due.getTime())) {
+              updatedForm.dueDate = due.toISOString().split("T")[0];
+            } else {
+              updatedForm.dueDate = "";
+            }
+          } catch (error) {
+            console.error("Error calculating due date:", error);
+            updatedForm.dueDate = "";
+          }
+        } else {
+          updatedForm.dueDate = "";
+        }
+      }
+
+      if (name === "paidAmount") {
+        const totalNetAmount = calculateTotalNetAmount(currentForm.products);
+        const paidAmount = parseNumber(value);
+        const newDueAmount = (parseFloat(totalNetAmount) - paidAmount).toFixed(
+          2
+        );
+
+        updatedForm.dueAmount = newDueAmount;
+
+        // Auto-set payment status when paid amount changes
+        updatedForm.paymentStatus = autoSetPaymentStatus({
+          ...updatedForm,
+          paidAmount: value,
+          dueAmount: newDueAmount,
+          totalAmount: totalNetAmount,
+        });
+      }
+
+      // Auto-set payment status when total amount changes (from product updates)
+      if (name === "totalAmount") {
+        const totalAmount = parseFloat(value) || 0;
+        const paidAmount = parseFloat(currentForm.paidAmount) || 0;
+        const dueAmount = totalAmount - paidAmount;
+
+        updatedForm.dueAmount = dueAmount.toFixed(2);
+        updatedForm.paymentStatus = autoSetPaymentStatus({
+          ...updatedForm,
+          totalAmount: value,
+          dueAmount: dueAmount.toFixed(2),
+        });
+      }
+
+      return updatedForm;
+    },
+    [parseNumber, calculateTotalNetAmount, autoSetPaymentStatus]
+  );
+
+  // Handle form field changes
+  const handleChange = useCallback(
+    (e) => {
+      const { name, value } = e.target;
+      setForm((prev) => {
+        return calculateDerivedFields(name, value, prev);
+      });
+    },
+    [calculateDerivedFields]
+  );
 
   // Fetch MR list using imported function
   const fetchMRListData = useCallback(async () => {
@@ -377,22 +477,6 @@ const useSaleForm = (initialCustomerCode = "") => {
     } finally {
       setCustomerListLoading(false);
     }
-  }, []);
-
-  // Calculate total amount from all products
-  const calculateTotalAmount = useCallback((products) => {
-    const total = products.reduce((sum, product) => {
-      return sum + parseFloat(product.netSellingAmount || 0);
-    }, 0);
-    return total.toFixed(2);
-  }, []);
-
-  // Calculate total net amount from all products
-  const calculateTotalNetAmount = useCallback((products) => {
-    const total = products.reduce((sum, product) => {
-      return sum + parseFloat(product.netSellingAmount || 0);
-    }, 0);
-    return total.toFixed(2);
   }, []);
 
   const updateFormField = useCallback((name, value) => {
@@ -488,19 +572,34 @@ const useSaleForm = (initialCustomerCode = "") => {
 
       const totalAmount = calculateTotalAmount(newProducts);
       const totalNetAmount = calculateTotalNetAmount(newProducts);
+      const dueAmount = (
+        parseFloat(totalNetAmount) - parseFloat(prev.paidAmount || 0)
+      ).toFixed(2);
+
+      // Recalculate payment status
+      const paymentStatus = autoSetPaymentStatus({
+        ...prev,
+        totalAmount,
+        dueAmount,
+        products: newProducts,
+      });
 
       return {
         ...prev,
         products: newProducts,
         totalAmount,
-        dueAmount: (
-          parseFloat(totalNetAmount) - parseFloat(prev.paidAmount || 0)
-        ).toFixed(2),
+        dueAmount,
+        paymentStatus,
       };
     });
 
     setExpandedProductIndex(form.products.length);
-  }, [form.products.length, calculateTotalAmount, calculateTotalNetAmount]);
+  }, [
+    form.products.length,
+    calculateTotalAmount,
+    calculateTotalNetAmount,
+    autoSetPaymentStatus,
+  ]);
 
   // Remove product
   const removeProduct = useCallback(
@@ -510,14 +609,24 @@ const useSaleForm = (initialCustomerCode = "") => {
           const newProducts = prev.products.filter((_, i) => i !== index);
           const totalAmount = calculateTotalAmount(newProducts);
           const totalNetAmount = calculateTotalNetAmount(newProducts);
+          const dueAmount = (
+            parseFloat(totalNetAmount) - parseFloat(prev.paidAmount || 0)
+          ).toFixed(2);
+
+          // Recalculate payment status
+          const paymentStatus = autoSetPaymentStatus({
+            ...prev,
+            totalAmount,
+            dueAmount,
+            products: newProducts,
+          });
 
           return {
             ...prev,
             products: newProducts,
             totalAmount,
-            dueAmount: (
-              parseFloat(totalNetAmount) - parseFloat(prev.paidAmount || 0)
-            ).toFixed(2),
+            dueAmount,
+            paymentStatus,
           };
         });
 
@@ -531,7 +640,12 @@ const useSaleForm = (initialCustomerCode = "") => {
         });
       }
     },
-    [form.products, calculateTotalAmount, calculateTotalNetAmount]
+    [
+      form.products,
+      calculateTotalAmount,
+      calculateTotalNetAmount,
+      autoSetPaymentStatus,
+    ]
   );
 
   // Calculate derived fields for a single product
@@ -576,71 +690,33 @@ const useSaleForm = (initialCustomerCode = "") => {
 
         const totalAmount = calculateTotalAmount(recalculatedProducts);
         const totalNetAmount = calculateTotalNetAmount(recalculatedProducts);
+        const dueAmount = (
+          parseFloat(totalNetAmount) - parseFloat(prev.paidAmount || 0)
+        ).toFixed(2);
+
+        // Recalculate payment status
+        const paymentStatus = autoSetPaymentStatus({
+          ...prev,
+          totalAmount,
+          dueAmount,
+          products: recalculatedProducts,
+        });
 
         return {
           ...prev,
           products: recalculatedProducts,
           totalAmount,
-          dueAmount: (
-            parseFloat(totalNetAmount) - parseFloat(prev.paidAmount || 0)
-          ).toFixed(2),
+          dueAmount,
+          paymentStatus,
         };
       });
     },
-    [calculateTotalAmount, calculateTotalNetAmount, calculateProductFields]
-  );
-
-  const calculateDerivedFields = useCallback(
-    (name, value, currentForm) => {
-      const updatedForm = { ...currentForm, [name]: value };
-
-      if (name === "invoiceDate") {
-        updatedForm.deliveryDate = value;
-      }
-
-      if (name === "creditDays") {
-        const creditDays = parseInt(value, 10);
-        if (!isNaN(creditDays) && creditDays > 0) {
-          const invoiceDate = new Date(currentForm.invoiceDate);
-          const due = new Date(invoiceDate);
-          due.setDate(due.getDate() + creditDays);
-          updatedForm.dueDate = due.toISOString().split("T")[0];
-        } else {
-          updatedForm.dueDate = "";
-        }
-      }
-
-      if (name === "paidAmount") {
-        const totalNetAmount = calculateTotalNetAmount(currentForm.products);
-        const paidAmount = parseNumber(value);
-        updatedForm.dueAmount = (
-          parseFloat(totalNetAmount) - paidAmount
-        ).toFixed(2);
-        
-        // Auto-set payment status when paid amount changes
-        updatedForm.paymentStatus = autoSetPaymentStatus({
-          ...updatedForm,
-          paidAmount: value,
-          dueAmount: (parseFloat(totalNetAmount) - paidAmount).toFixed(2)
-        });
-      }
-
-      // Auto-set payment status when total amount changes
-      if (name === "totalAmount" || name === "dueAmount") {
-        updatedForm.paymentStatus = autoSetPaymentStatus(updatedForm);
-      }
-
-      return updatedForm;
-    },
-    [parseNumber, calculateTotalNetAmount, autoSetPaymentStatus]
-  );
-
-  const handleChange = useCallback(
-    (e) => {
-      const { name, value } = e.target;
-      setForm((prev) => calculateDerivedFields(name, value, prev));
-    },
-    [calculateDerivedFields]
+    [
+      calculateTotalAmount,
+      calculateTotalNetAmount,
+      calculateProductFields,
+      autoSetPaymentStatus,
+    ]
   );
 
   // Validate total quantity (sales + bonus) against available stock
@@ -699,55 +775,68 @@ const useSaleForm = (initialCustomerCode = "") => {
   }, []);
 
   // Real-time validation for individual product fields
-  const validateProductField = useCallback((index, field, value, productsData) => {
-    const product = { ...form.products[index], [field]: value };
-    const newErrors = { ...errors };
+  const validateProductField = useCallback(
+    (index, field, value, productsData) => {
+      const product = { ...form.products[index], [field]: value };
+      const newErrors = { ...errors };
 
-    // Clear previous errors for this field
-    delete newErrors[`${field}_${index}`];
+      // Clear previous errors for this field
+      delete newErrors[`${field}_${index}`];
 
-    if (field === 'productName' && !value.trim()) {
-      newErrors[`productName_${index}`] = `Product Name for item ${index + 1} is required`;
-    }
+      if (field === "productName" && !value.trim()) {
+        newErrors[`productName_${index}`] = `Product Name for item ${
+          index + 1
+        } is required`;
+      }
 
-    if (field === 'salesQty') {
-      const salesQtyStr = value?.toString().trim();
-      if (!salesQtyStr || salesQtyStr === "") {
-        newErrors[`salesQty_${index}`] = `Sales Quantity for item ${index + 1} is required`;
-      } else {
-        const qty = Number(salesQtyStr);
-        if (isNaN(qty) || qty <= 0) {
-          newErrors[`salesQty_${index}`] = `Sales Quantity for item ${index + 1} must be greater than 0`;
+      if (field === "salesQty") {
+        const salesQtyStr = value?.toString().trim();
+        if (!salesQtyStr || salesQtyStr === "") {
+          newErrors[`salesQty_${index}`] = `Sales Quantity for item ${
+            index + 1
+          } is required`;
         } else {
-          // Stock validation only if product name exists
-          if (form.products[index].productName) {
-            const stockError = validateTotalQuantity(
-              { ...form.products[index], salesQty: value },
-              index,
-              productsData
-            );
-            if (stockError) {
-              newErrors[`salesQty_${index}`] = stockError;
+          const qty = Number(salesQtyStr);
+          if (isNaN(qty) || qty <= 0) {
+            newErrors[`salesQty_${index}`] = `Sales Quantity for item ${
+              index + 1
+            } must be greater than 0`;
+          } else {
+            // Stock validation only if product name exists
+            if (form.products[index].productName) {
+              const stockError = validateTotalQuantity(
+                { ...form.products[index], salesQty: value },
+                index,
+                productsData
+              );
+              if (stockError) {
+                newErrors[`salesQty_${index}`] = stockError;
+              }
             }
           }
         }
       }
-    }
 
-    if (field === 'sellingPrice') {
-      const sellingPriceStr = value?.toString().trim();
-      if (!sellingPriceStr || sellingPriceStr === "") {
-        newErrors[`sellingPrice_${index}`] = `Selling Price for item ${index + 1} is required`;
-      } else {
-        const price = Number(sellingPriceStr);
-        if (isNaN(price) || price <= 0) {
-          newErrors[`sellingPrice_${index}`] = `Selling Price for item ${index + 1} must be greater than 0`;
+      if (field === "sellingPrice") {
+        const sellingPriceStr = value?.toString().trim();
+        if (!sellingPriceStr || sellingPriceStr === "") {
+          newErrors[`sellingPrice_${index}`] = `Selling Price for item ${
+            index + 1
+          } is required`;
+        } else {
+          const price = Number(sellingPriceStr);
+          if (isNaN(price) || price <= 0) {
+            newErrors[`sellingPrice_${index}`] = `Selling Price for item ${
+              index + 1
+            } must be greater than 0`;
+          }
         }
       }
-    }
 
-    setErrors(newErrors);
-  }, [form.products, errors, validateTotalQuantity]);
+      setErrors(newErrors);
+    },
+    [form.products, errors, validateTotalQuantity]
+  );
 
   const validate = useCallback(
     (productsData = []) => {
@@ -778,33 +867,47 @@ const useSaleForm = (initialCustomerCode = "") => {
         if (product.productName.trim()) {
           // Product Name validation
           if (!product.productName.trim()) {
-            newErrors[`productName_${index}`] = `Product Name for item ${index + 1} is required`;
+            newErrors[`productName_${index}`] = `Product Name for item ${
+              index + 1
+            } is required`;
           }
 
           // Sales Quantity validation
           const salesQtyStr = product.salesQty?.toString().trim();
           if (!salesQtyStr || salesQtyStr === "") {
-            newErrors[`salesQty_${index}`] = `Sales Quantity for item ${index + 1} is required`;
+            newErrors[`salesQty_${index}`] = `Sales Quantity for item ${
+              index + 1
+            } is required`;
           } else {
             const qty = Number(salesQtyStr);
             if (isNaN(qty) || qty <= 0) {
-              newErrors[`salesQty_${index}`] = `Sales Quantity for item ${index + 1} must be greater than 0`;
+              newErrors[`salesQty_${index}`] = `Sales Quantity for item ${
+                index + 1
+              } must be greater than 0`;
             }
           }
 
           // Selling Price validation
           const sellingPriceStr = product.sellingPrice?.toString().trim();
           if (!sellingPriceStr || sellingPriceStr === "") {
-            newErrors[`sellingPrice_${index}`] = `Selling Price for item ${index + 1} is required`;
+            newErrors[`sellingPrice_${index}`] = `Selling Price for item ${
+              index + 1
+            } is required`;
           } else {
             const price = Number(sellingPriceStr);
             if (isNaN(price) || price <= 0) {
-              newErrors[`sellingPrice_${index}`] = `Selling Price for item ${index + 1} must be greater than 0`;
+              newErrors[`sellingPrice_${index}`] = `Selling Price for item ${
+                index + 1
+              } must be greater than 0`;
             }
           }
 
           // Stock validation
-          const stockError = validateTotalQuantity(product, index, productsData);
+          const stockError = validateTotalQuantity(
+            product,
+            index,
+            productsData
+          );
           if (stockError) {
             newErrors[`salesQty_${index}`] = stockError;
           }
@@ -871,6 +974,41 @@ const DatePickerField = React.memo(
   }) => {
     const today = useMemo(() => new Date(), []);
 
+    const handleDateChange = useCallback(
+      (date) => {
+        if (date && !isNaN(date.getTime())) {
+          const event = {
+            target: {
+              name: name,
+              value: date.toISOString().split("T")[0],
+            },
+          };
+          onChange(event);
+        } else {
+          const event = {
+            target: {
+              name: name,
+              value: "",
+            },
+          };
+          onChange(event);
+        }
+      },
+      [name, onChange]
+    );
+
+    // Safely parse the date value
+    const selectedDate = useMemo(() => {
+      if (!value) return null;
+      try {
+        const date = new Date(value);
+        return isNaN(date.getTime()) ? null : date;
+      } catch (error) {
+        console.error("Invalid date value:", value, error);
+        return null;
+      }
+    }, [value]);
+
     return (
       <div className="flex flex-col">
         <label className="text-sm font-medium text-gray-700 mb-1">
@@ -878,26 +1016,8 @@ const DatePickerField = React.memo(
           {required && <span className="text-red-500 ml-1">*</span>}
         </label>
         <DatePicker
-          selected={value ? new Date(value) : null}
-          onChange={(date) => {
-            if (date) {
-              const event = {
-                target: {
-                  name: name,
-                  value: date.toISOString().split("T")[0],
-                },
-              };
-              onChange(event);
-            } else {
-              const event = {
-                target: {
-                  name: name,
-                  value: "",
-                },
-              };
-              onChange(event);
-            }
-          }}
+          selected={selectedDate}
+          onChange={handleDateChange}
           dateFormat="yyyy-MM-dd"
           placeholderText={placeholder}
           readOnly={readOnly}
@@ -1075,14 +1195,47 @@ const AddSale = () => {
   const enhancedHandleChange = useCallback(
     (e) => {
       const { name, value } = e.target;
-      handleChange(e);
 
+      // Handle payment status input separately to allow manual selection
       if (name === "paymentStatus") {
+        updateFormField("paymentStatus", value);
         paymentStatusSuggestions.setIsOpen(true);
         paymentStatusSuggestions.setHighlightedIndex(0);
+      } else {
+        handleChange(e);
+      }
+
+      if (name === "paidAmount") {
+        // Force payment status update when paid amount changes
+        setTimeout(() => {
+          const totalAmount = parseFloat(form.totalAmount) || 0;
+          const paidAmount = parseFloat(value) || 0;
+          const dueAmount = totalAmount - paidAmount;
+
+          if (totalAmount > 0) {
+            let newPaymentStatus = "Credit";
+            if (paidAmount === totalAmount) {
+              newPaymentStatus = "Cash";
+            } else if (dueAmount === totalAmount || paidAmount === 0) {
+              newPaymentStatus = "Credit";
+            } else if (paidAmount > 0 && paidAmount < totalAmount) {
+              newPaymentStatus = "Partial Paid";
+            }
+
+            if (newPaymentStatus !== form.paymentStatus) {
+              updateFormField("paymentStatus", newPaymentStatus);
+            }
+          }
+        }, 100);
       }
     },
-    [handleChange, paymentStatusSuggestions]
+    [
+      handleChange,
+      paymentStatusSuggestions,
+      updateFormField,
+      form.totalAmount,
+      form.paymentStatus,
+    ]
   );
 
   const getProductDetails = (productName) => {
@@ -1111,7 +1264,9 @@ const AddSale = () => {
       }
 
       // Real-time validation for critical fields
-      if (['salesQty', 'bonusQty', 'sellingPrice', 'productName'].includes(field)) {
+      if (
+        ["salesQty", "bonusQty", "sellingPrice", "productName"].includes(field)
+      ) {
         // Use setTimeout to ensure state is updated before validation
         setTimeout(() => {
           validateProductField(index, field, value, products);
@@ -1176,10 +1331,16 @@ const AddSale = () => {
     const sellingPrice = currentProduct.sellingPrice?.toString().trim();
 
     // Check basic validation
-    const basicValidation = 
+    const basicValidation =
       currentProduct.productName.trim() !== "" &&
-      salesQty && salesQty !== "" && !isNaN(Number(salesQty)) && Number(salesQty) > 0 &&
-      sellingPrice && sellingPrice !== "" && !isNaN(Number(sellingPrice)) && Number(sellingPrice) > 0;
+      salesQty &&
+      salesQty !== "" &&
+      !isNaN(Number(salesQty)) &&
+      Number(salesQty) > 0 &&
+      sellingPrice &&
+      sellingPrice !== "" &&
+      !isNaN(Number(sellingPrice)) &&
+      Number(sellingPrice) > 0;
 
     if (!basicValidation) {
       return false;
@@ -1196,7 +1357,7 @@ const AddSale = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     // First validate form fields
     if (!validate(products)) {
       showToast("error", "Please fix the validation errors before submitting");
@@ -1239,42 +1400,57 @@ const AddSale = () => {
         return;
       }
 
-      // Create sales data array
-      const salesData = validProducts.map((product) => ({
-        recordingDate: form.recordingDate,
+      // Helper function to safely format dates
+      const safeFormatDate = (dateString) => {
+        if (!dateString) return "";
+        try {
+          const date = new Date(dateString);
+          return isNaN(date.getTime()) ? "" : date.toISOString().split("T")[0];
+        } catch (error) {
+          console.error("Invalid date format:", dateString, error);
+          return "";
+        }
+      };
+
+      // Create sales data object with products array (single sale record)
+      const saleData = {
+        recordingDate: safeFormatDate(form.recordingDate),
         invoiceNumber: form.invoiceNumber,
-        invoiceDate: form.invoiceDate,
+        invoiceDate: safeFormatDate(form.invoiceDate),
         mrName: form.mrName,
         mrId: form.mrId,
         customerCode: form.customerCode,
         customerId: form.customerId,
-        productName: product.productName,
-        salesQty: product.salesQty,
-        bonusQty: product.bonusQty,
-        totalQty: product.totalQty,
-        sellingPrice: product.sellingPrice,
-        amount: product.amount,
-        discount: product.discount,
-        netSellingAmount: product.netSellingAmount,
-        averageUnitPrice: product.averageUnitPrice,
-        lc: product.lc,
-        profitLoss: product.profitLoss,
-        creditDays: form.creditDays,
-        dueDate: form.dueDate,
-        deliveryDate: form.deliveryDate,
-        paidAmount: form.paidAmount,
-        dueAmount: form.dueAmount,
-        totalAmount: form.totalAmount,
+        products: validProducts.map((product) => ({
+          productName: product.productName,
+          salesQty: Number(product.salesQty),
+          bonusQty: Number(product.bonusQty) || 0,
+          totalQty: Number(product.totalQty),
+          sellingPrice: Number(product.sellingPrice),
+          amount: Number(product.amount),
+          discount: Number(product.discount) || 0,
+          netSellingAmount: Number(product.netSellingAmount),
+          averageUnitPrice: Number(product.averageUnitPrice),
+          lc: Number(product.lc) || 0,
+          profitLoss: Number(product.profitLoss) || 0,
+          isProductAccept: true,
+        })),
+        creditDays: form.creditDays ? Number(form.creditDays) : null,
+        dueDate: safeFormatDate(form.dueDate),
+        deliveryDate: safeFormatDate(form.deliveryDate),
+        paidAmount: Number(form.paidAmount) || 0,
+        dueAmount: Number(form.dueAmount) || 0,
+        totalAmount: Number(form.totalAmount),
         paymentStatus: form.paymentStatus,
-        remark: form.remark,
-      }));
+        remark: form.remark || "",
+      };
 
       const response = await fetch(`${backendUrl}/api/sales`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(salesData),
+        body: JSON.stringify(saleData), // Send single sale object with products array
       });
 
       const respData = await response.json();
@@ -1283,11 +1459,11 @@ const AddSale = () => {
         throw new Error(respData.error || "Something went wrong");
       }
 
-      showToast("success", respData.message || "Sales added successfully");
+      showToast("success", respData.message || "Sale added successfully");
       navigate("/salelayout/sale");
     } catch (err) {
-      console.error("Error submitting sales:", err);
-      showToast("error", err.message || "Error submitting sales");
+      console.error("Error submitting sale:", err);
+      showToast("error", err.message || "Error submitting sale");
     }
   };
 
@@ -1356,7 +1532,7 @@ const AddSale = () => {
                   <h3 className="text-lg font-semibold">
                     {product.productName || `Product ${index + 1}`}
                   </h3>
-                  
+
                   {product.productName && stockInfo && (
                     <div className="flex items-center gap-2">
                       <span
@@ -1700,7 +1876,7 @@ const AddSale = () => {
             onChange={enhancedHandleChange}
             error={errors.dueDate}
             readOnly
-            placeholder="Due date will be calculated"
+            placeholder="Due date will be calculated from current date + credit days"
           />
 
           <InputField

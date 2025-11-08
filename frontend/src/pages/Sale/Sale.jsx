@@ -14,6 +14,7 @@ import {
   Eye,
   Search,
   Settings,
+  Package,
 } from "lucide-react";
 import ReactDOM from "react-dom";
 import SampleExcelDownloadSale from "../../excels/SampleExcelDownloadSale";
@@ -52,6 +53,8 @@ const Sales = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [selectedFields, setSelectedFields] = useState([]);
   const [allSelected, setAllSelected] = useState(false);
+  const [isProductModalOpen, setIsProductModalOpen] = useState(false);
+  const [selectedSaleProducts, setSelectedSaleProducts] = useState([]);
   const inputRef = useRef(null);
   const { statuses, productNames, loading } = useInitialSaleData();
   const [errors, setErrors] = useState({});
@@ -59,11 +62,10 @@ const Sales = () => {
   const [tableColumns, setTableColumns] = useState([
     "invoiceNumber",
     "invoiceDate",
-    "productName",
+    "productCount",
     "mrName",
     "customerName",
-    "salesQty",
-    "amount",
+    "totalAmount",
     "paymentStatus",
     "actions",
   ]);
@@ -82,15 +84,20 @@ const Sales = () => {
         dbName: "invoiceDate",
       },
       {
-        id: "productName",
-        name: "Product Name",
-        dbName: "productName",
+        id: "productCount",
+        name: "Products",
+        dbName: "products",
       },
       { id: "mrName", name: "MR Name", dbName: "mrName" },
       {
         id: "customerName",
         name: "Customer Name",
         dbName: "customerInfo.name",
+      },
+      {
+        id: "totalAmount",
+        name: "Total Amount ($)",
+        dbName: "totalAmount",
       },
       {
         id: "salesQty",
@@ -129,7 +136,7 @@ const Sales = () => {
       },
       {
         id: "amount",
-        name: "Total Amount ($)",
+        name: "Product Amount ($)",
         dbName: "amount",
       },
       {
@@ -187,7 +194,7 @@ const Sales = () => {
   const requiredColumns = [
     "invoiceNumber",
     "invoiceDate",
-    "productName",
+    "productCount",
     "actions",
   ];
 
@@ -379,6 +386,12 @@ const Sales = () => {
       return sale.customerInfo?.name || "--";
     }
 
+    if (dbName === "products") {
+      // Return product count with clickable badge
+      const productCount = sale.products?.length || 0;
+      return productCount;
+    }
+
     if (
       ["recordingDate", "dueDate", "deliveryDate", "invoiceDate"].includes(
         dbName
@@ -389,6 +402,10 @@ const Sales = () => {
 
     if (dbName === "amount") {
       return Math.ceil(sale.amount || 0);
+    }
+
+    if (dbName === "totalAmount") {
+      return `${Math.ceil(sale.totalAmount || 0).toLocaleString()}`;
     }
 
     if (
@@ -402,6 +419,12 @@ const Sales = () => {
     return sale[dbName] ?? "--";
   };
 
+  // Function to handle product count click
+  const handleProductCountClick = (sale) => {
+    setSelectedSaleProducts(sale.products || []);
+    setIsProductModalOpen(true);
+  };
+
   // CORRECTED fetch function
   const fetchSaleSummaries = async () => {
     try {
@@ -409,6 +432,7 @@ const Sales = () => {
       if (!res.ok) throw new Error("Failed to fetch sale summaries");
 
       const data = await res.json();
+      console.log("valuesof data", data);
       const salesData = data.summaries || data;
 
       const uniqueTypes = Array.from(
@@ -542,7 +566,7 @@ const Sales = () => {
       const requiredColumns = [
         "invoiceNumber",
         "invoiceDate",
-        "productName",
+        "productCount",
         "actions",
       ];
       const newColumns = tableColumns.filter(
@@ -562,11 +586,10 @@ const Sales = () => {
     setTableColumns([
       "invoiceNumber",
       "invoiceDate",
-      "productName",
+      "productCount",
       "mrName",
       "customerName",
-      "salesQty",
-      "amount",
+      "totalAmount",
       "paymentStatus",
       "actions",
     ]);
@@ -1200,7 +1223,6 @@ const Sales = () => {
           </div>
           <SaleExcelDownload />
         </div>
-
         <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
           {sales.length > 0 ? (
             <div className="flex items-center gap-6">
@@ -1224,12 +1246,12 @@ const Sales = () => {
                 ))}
               </div>
 
-              <button
+              {/* <button
                 className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
                 onClick={() => setIsModalOpen(true)}
               >
                 <Settings size={18} /> Add /Remove Column
-              </button>
+              </button> */}
             </div>
           ) : (
             <div></div>
@@ -1270,7 +1292,6 @@ const Sales = () => {
             </div>
           </div>
         </div>
-
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
           <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
             <thead className="bg-gray-100 text-gray-700 border-b">
@@ -1344,6 +1365,17 @@ const Sales = () => {
                                 {sale.invoiceNumber}
                               </span>
                             </div>
+                          ) : item.id === "productCount" ? (
+                            <button
+                              onClick={() => handleProductCountClick(sale)}
+                              className="flex items-center justify-center gap-2 bg-blue-100 text-blue-700 px-3 py-1 rounded-full hover:bg-blue-200 transition-colors cursor-pointer mx-auto"
+                              title="View Products"
+                            >
+                              <Package size={14} />
+                              <span className="font-medium">
+                                {getFieldValue(sale, item.dbName)}
+                              </span>
+                            </button>
                           ) : item.id === "actions" ? (
                             <div className="flex items-center justify-center gap-3 min-w-[150px]">
                               <button className="text-blue-600 hover:text-blue-800 cursor-pointer">
@@ -1446,6 +1478,151 @@ const Sales = () => {
           )}
         </div>
 
+        {isProductModalOpen &&
+          ReactDOM.createPortal(
+            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+              <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                onClick={() => setIsOpen(false)}
+              />
+              <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+                <button
+                  onClick={() => setIsProductModalOpen(false)}
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                >
+                  <X size={20} />
+                </button>
+
+                <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                  Product Details
+                </h2>
+
+                {selectedSaleProducts.length === 0 ? (
+                  <p className="text-gray-500 text-center py-8">
+                    No products found for this sale.
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
+                    <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
+                      <thead className="bg-gray-100 text-gray-700 border-b">
+                        <tr>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            Product Name
+                          </th>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            Sales Qty
+                          </th>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            Bonus Qty
+                          </th>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            Total Qty
+                          </th>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            Selling Price ($)
+                          </th>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            Amount ($)
+                          </th>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            Discount ($)
+                          </th>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            Net Amount ($)
+                          </th>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            Avg Unit Price ($)
+                          </th>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            Profit/Loss ($)
+                          </th>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            LC ($)
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedSaleProducts.length === 0 ? (
+                          <tr>
+                            <td
+                              colSpan={11}
+                              className="p-4 text-center text-gray-500"
+                            >
+                              No products found.
+                            </td>
+                          </tr>
+                        ) : (
+                          selectedSaleProducts.map((product, index) => (
+                            <tr
+                              key={index}
+                              className={`hover:bg-gray-50 ${
+                                index < selectedSaleProducts.length - 1
+                                  ? "border-b"
+                                  : ""
+                              }`}
+                            >
+                              <td className="p-3 whitespace-nowrap min-w-[120px] capitalize">
+                                {product.productName || "--"}
+                              </td>
+                              <td className="p-3 whitespace-nowrap min-w-[120px]">
+                                {Math.ceil(product.salesQty || 0)}
+                              </td>
+                              <td className="p-3 whitespace-nowrap min-w-[120px]">
+                                {Math.ceil(product.bonusQty || 0)}
+                              </td>
+                              <td className="p-3 whitespace-nowrap min-w-[120px]">
+                                {Math.ceil(product.totalQty || 0)}
+                              </td>
+                              <td className="p-3 whitespace-nowrap min-w-[120px]">
+                                {(product.sellingPrice || 0).toFixed(2)}
+                              </td>
+                              <td className="p-3 whitespace-nowrap min-w-[120px]">
+                                {(product.amount || 0).toFixed(2)}
+                              </td>
+                              <td className="p-3 whitespace-nowrap min-w-[120px]">
+                                {(product.discount || 0).toFixed(2)}
+                              </td>
+                              <td className="p-3 whitespace-nowrap min-w-[120px]">
+                                {(product.netSellingAmount || 0).toFixed(2)}
+                              </td>
+                              <td className="p-3 whitespace-nowrap min-w-[120px]">
+                                {(product.averageUnitPrice || 0).toFixed(2)}
+                              </td>
+                              <td
+                                className={`p-3 whitespace-nowrap min-w-[120px] font-semibold ${
+                                  (product.profitLoss || 0) > 0
+                                    ? "text-green-600"
+                                    : (product.profitLoss || 0) < 0
+                                    ? "text-red-600"
+                                    : "text-gray-600"
+                                }`}
+                              >
+                                {(product.profitLoss || 0).toFixed(2)}
+                              </td>
+                              <td className="p-3 whitespace-nowrap min-w-[120px]">
+                                {(product.lc || 0).toFixed(2)}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                <div className="mt-6 flex justify-end">
+                  <button
+                    onClick={() => setIsProductModalOpen(false)}
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+        {/* Rest of your existing modals (Import, Edit, View, Column Configuration) remain the same */}
         {showImportModal &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -1497,7 +1674,7 @@ const Sales = () => {
             </div>,
             document.body
           )}
-
+        {/* Rest of your existing modals remain unchanged */}
         {isModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -1650,7 +1827,6 @@ const Sales = () => {
             </div>,
             document.body
           )}
-
         {isEditModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
