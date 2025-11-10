@@ -135,7 +135,7 @@ const tabService = {
       // Products sub-tabs
       products_products: { visible: true, sequence: 1 },
       products_pricelist: { visible: true, sequence: 2 },
-      products_printbarcode: { visible: true, sequence: 3 },
+      // products_printbarcode: { visible: true, sequence: 3 },
 
       // Purchase sub-tabs
       purchase_purchase: { visible: true, sequence: 1 },
@@ -753,20 +753,21 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                         <span className="mx-auto">Price List</span>
                       </Link>
                     );
-                  } else if (tabId === "products_printbarcode") {
-                    return (
-                      <Link
-                        key={tabId}
-                        to="/productmanagerlayout/printbarcode"
-                        className={getChildLinkClass(
-                          "/productmanagerlayout/printbarcode"
-                        )}
-                      >
-                        <Barcode className="w-4 h-4" />
-                        <span className="mx-auto">Print Barcode</span>
-                      </Link>
-                    );
                   }
+                  // } else if (tabId === "products_printbarcode") {
+                  //   return (
+                  //     <Link
+                  //       key={tabId}
+                  //       to="/productmanagerlayout/printbarcode"
+                  //       className={getChildLinkClass(
+                  //         "/productmanagerlayout/printbarcode"
+                  //       )}
+                  //     >
+                  //       <Barcode className="w-4 h-4" />
+                  //       <span className="mx-auto">Print Barcode</span>
+                  //     </Link>
+                  //   );
+                  // }
                   return null;
                 })}
               </div>

@@ -95,8 +95,8 @@ const Sales = () => {
 
   // Get field value from sale object
   const getFieldValue = (sale, dbName) => {
-    if (dbName === "customerInfo.name") {
-      return sale.customerInfo?.name || "--";
+    if (dbName === "customerName") {
+      return sale?.customerName || "--";
     }
 
     if (dbName === "products") {
@@ -215,7 +215,7 @@ const Sales = () => {
       {
         id: "customerName",
         name: "Customer Name",
-        dbName: "customerInfo.name",
+        dbName: "customerName",
       },
       {
         id: "totalAmount",
@@ -594,18 +594,19 @@ const Sales = () => {
     }
   };
 
-  const handleFileUpload = (e) => {
+  const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
     const reader = new FileReader();
 
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
         const data = new Uint8Array(evt.target.result);
         const workbook = XLSX.read(data, { type: "array" });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
         const expectedHeaders = [
           "Recording Date",
           "Invoice #",
@@ -655,33 +656,47 @@ const Sales = () => {
           return;
         }
 
-        // 🔄 Convert to JSON
+        // Convert rows to JSON
         const json = dataRows.map((row) => {
           const obj = {};
           headers.forEach((h, i) => (obj[h] = row[i] ?? ""));
           return obj;
         });
 
-        // 🧾 Group by Invoice #
+        // Group by Invoice #
         const groupedInvoices = {};
 
-        json.forEach((row) => {
+        for (const row of json) {
           const invoiceNumber = row["Invoice #"] || "UNKNOWN";
 
+          // Use customer info directly from the Excel
+          const customerName = row["Customer Name"]?.trim() || "";
+          const customerCode = row["Customer Code"]?.trim() || ""; // optional column
+          const customerId = row["Customer ID"]?.trim() || ""; // optional column
+
           if (!groupedInvoices[invoiceNumber]) {
+            // Calculate due date: current date + credit days
+            const creditDays = Number(row["Credit Days"]) || 0;
+            const currentDate = new Date();
+            const dueDate = new Date(currentDate);
+            dueDate.setDate(currentDate.getDate() + creditDays);
+
             groupedInvoices[invoiceNumber] = {
               recordingDate: row["Recording Date"] || "",
               invoiceNumber,
               invoiceDate: row["Invoice Date"] || "",
               mrName: row["MR Name"] || "",
-              customerName: row["Customer Name"] || "",
-              creditDays: Number(row["Credit Days"]) || 0,
+              customerName,
+              customerCode,
+              customerId,
+              creditDays: creditDays,
               paidAmount: Number(row["Paid Amount"]) || 0,
               paymentStatus: row["Payment Status"] || "",
               remarks: row["Remarks"] || "",
               products: [],
               totalAmount: 0,
               dueAmount: 0,
+              dueDate: dueDate.toISOString().split("T")[0], // Format as YYYY-MM-DD
             };
           }
 
@@ -700,15 +715,14 @@ const Sales = () => {
           });
 
           groupedInvoices[invoiceNumber].totalAmount += productTotal;
-        });
+        }
 
-        // 💰 Calculate due amount
+        // Calculate due amount
         Object.values(groupedInvoices).forEach((invoice) => {
           invoice.dueAmount = invoice.totalAmount - invoice.paidAmount;
         });
 
         const invoicesArray = Object.values(groupedInvoices);
-
         setParsedData(invoicesArray);
       } catch (error) {
         console.error("❌ Error reading file:", error);
@@ -2024,7 +2038,7 @@ const Sales = () => {
                         Customer Name
                       </label>
                       <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                        {form.customerInfo?.name || "-"}
+                        {form?.customerName || "-"}
                       </p>
                     </div>
 

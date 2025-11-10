@@ -42,6 +42,7 @@ const INITIAL_FORM_STATE = {
   mrId: "",
   customerCode: "",
   customerId: "",
+  customerName: "", // Added customerName
   paymentStatus: "",
   remark: "",
   creditDays: "",
@@ -499,7 +500,7 @@ const useSaleForm = (initialCustomerCode = "") => {
     [mrList]
   );
 
-  // Handle Customer selection
+  // Handle Customer selection - UPDATED to include customerName
   const handleCustomerChange = useCallback(
     (customerId) => {
       const selectedCustomer = customerList.find(
@@ -510,6 +511,7 @@ const useSaleForm = (initialCustomerCode = "") => {
           ...prevForm,
           customerId: customerId,
           customerCode: selectedCustomer.customerCode,
+          customerName: selectedCustomer.name, // Added customerName
         }));
       }
       setErrors((prev) => ({ ...prev, customerCode: "" }));
@@ -1412,7 +1414,7 @@ const AddSale = () => {
         }
       };
 
-      // Create sales data object with products array (single sale record)
+      // Create sales data object with products array (single sale record) - UPDATED to include customerName
       const saleData = {
         recordingDate: safeFormatDate(form.recordingDate),
         invoiceNumber: form.invoiceNumber,
@@ -1421,6 +1423,7 @@ const AddSale = () => {
         mrId: form.mrId,
         customerCode: form.customerCode,
         customerId: form.customerId,
+        customerName: form.customerName, // Added customerName
         products: validProducts.map((product) => ({
           productName: product.productName,
           salesQty: Number(product.salesQty),
@@ -1846,6 +1849,15 @@ const AddSale = () => {
             error={errors.customerCode}
             label="Customer"
           />
+
+          {/* Customer Name Display (Read-only)
+          <InputField
+            label="Customer Name"
+            name="customerName"
+            value={form.customerName}
+            readOnly
+            placeholder="Customer name will be auto-filled"
+          /> */}
 
           <DatePickerField
             label="Delivery Date"

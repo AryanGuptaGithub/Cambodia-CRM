@@ -51,7 +51,7 @@ const INITIAL_FORM_STATE = {
   usedAmount: "",
 };
 
-// Custom hook for suggestions (simplified for string arrays)
+// Fixed useSuggestions hook
 const useSuggestions = (items = [], inputValue = "") => {
   const [isOpen, setIsOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
@@ -60,13 +60,15 @@ const useSuggestions = (items = [], inputValue = "") => {
 
   const filteredItems = useMemo(() => {
     if (!items || items.length === 0) return [];
-
+    
     return items
       .filter((item) => {
         if (!item) return false;
-        return item.toLowerCase().includes(inputValue.toLowerCase());
+        // Convert item to string before calling toLowerCase
+        const stringItem = String(item);
+        return stringItem.toLowerCase().includes(inputValue.toLowerCase());
       })
-      .sort((a, b) => a.localeCompare(b));
+      .sort((a, b) => String(a).localeCompare(String(b)));
   }, [items, inputValue]);
 
   const calculatePosition = useCallback(() => {
@@ -266,14 +268,14 @@ const SaleReturn = () => {
     []
   );
 
-  // Extract just the string values from the objects
+  // Extract just the string values from the objects - FIXED with proper string conversion
   const paymentStatusStrings = useMemo(
-    () => (statuses ? statuses.map((s) => s.type) : []),
+    () => (statuses ? statuses.map((s) => String(s.type || s)) : []),
     [statuses]
   );
 
   const productNameStrings = useMemo(
-    () => (productNames ? productNames.map((p) => p) : []),
+    () => (productNames ? productNames.map((p) => String(p)) : []),
     [productNames]
   );
 
@@ -728,6 +730,7 @@ const SaleReturn = () => {
     },
     []
   );
+
   // Helper function to render form field based on type
   const renderFormField = (fieldId) => {
     const fieldConfig = allFields.find((f) => f.id === fieldId);
@@ -878,7 +881,7 @@ const SaleReturn = () => {
                           productNameSuggestions.setHighlightedIndex(index)
                         }
                       >
-                        {product}
+                        {String(product)}
                       </li>
                     )
                   )}
@@ -945,7 +948,7 @@ const SaleReturn = () => {
                           paymentStatusSuggestions.setHighlightedIndex(index)
                         }
                       >
-                        {status}
+                        {String(status)}
                       </li>
                     )
                   )}
@@ -1649,21 +1652,8 @@ const SaleReturn = () => {
                                       index
                                     )
                                   }
-                                  onSuggestionSelect={(value, isHighlight) => {
-                                    if (isHighlight) {
-                                      // Just highlight, don't update form
-                                      handleProductNameHighlight(value, false);
-                                    } else {
-                                      // Actually select the value and update form
-                                      productNameSuggestions.selectSuggestion(
-                                        value,
-                                        (val) =>
-                                          updateFormField("productName", val)
-                                      );
-                                    }
-                                  }}
                                 >
-                                  {product}
+                                  {String(product)}
                                 </div>
                               )
                             )}
@@ -1914,7 +1904,7 @@ const SaleReturn = () => {
                                     )
                                   }
                                 >
-                                  {status}
+                                  {String(status)}
                                 </div>
                               )
                             )}

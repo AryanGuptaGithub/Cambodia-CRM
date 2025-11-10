@@ -2,10 +2,10 @@ import express from "express";
 import SaleSummary from "../../models/sale/saleSummary.js";
 import paymentStatus from "../../models/paymentStatus.js";
 import Product from "../../models/projectManger/product.js";
-import customer from "../../models/master/customer.js";
 import ExcelJS from "exceljs";
 import SalesReturn from "../../models/sale/saleReturn.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
+import Customer from "../../models/master/customer.js";
 
 const router = express.Router();
 
@@ -524,25 +524,40 @@ router.get("/sales/product/:productName", async (req, res) => {
 // Updated POST /sales endpoint to handle array of products with invoice number validation
 router.post("/sales", async (req, res) => {
   try {
-    // Now req.body should be a single sale object with products array
     const saleData = req.body;
-
-    // Validate required fields
-    if (
-      !saleData.recordingDate ||
-      !saleData.invoiceNumber ||
-      !saleData.invoiceDate ||
-      !saleData.mrName ||
-      !saleData.customerCode ||
-      !saleData.products ||
-      !Array.isArray(saleData.products)
-    ) {
-      return res
-        .status(400)
-        .json({ error: "Missing required fields or products array" });
+    if (!saleData || typeof saleData !== "object") {
+      return res.status(400).json({ error: "Invalid or missing request body" });
     }
 
-    // Check if invoice number already exists
+    const requiredFields = [
+      "recordingDate",
+      "invoiceNumber",
+      "invoiceDate",
+      "mrName",
+      "customerCode",
+      "products",
+    ];
+
+    const missingFields = requiredFields.filter(
+      (field) =>
+        saleData[field] === undefined ||
+        saleData[field] === null ||
+        saleData[field] === ""
+    );
+
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        error: `Missing required fields: ${missingFields.join(", ")}`,
+      });
+    }
+
+    if (!Array.isArray(saleData.products) || saleData.products.length === 0) {
+      return res
+        .status(400)
+        .json({ error: "Products array is missing or empty" });
+    }
+
+    // ✅ Check if invoice number already exists
     const invoiceExists = await checkInvoiceNumberExists(
       saleData.invoiceNumber
     );
@@ -552,21 +567,45 @@ router.post("/sales", async (req, res) => {
       });
     }
 
-    // Calculate total amount from all products
-    const totalAmount = saleData.products.reduce((total, product) => {
-      return total + (parseFloat(product.netSellingAmount) || 0);
-    }, 0);
+    // 🧩 Fetch customer name if missing but customerId is provided
+    let customerName = saleData.customerName;
+    if ((!customerName || customerName.trim() === "") && saleData.customerId) {
+      const customer = await Customer.findById(saleData.customerId).select(
+        "customerName"
+      );
 
-    // Calculate due amount
-    const dueAmount = totalAmount - (parseFloat(saleData.paidAmount) || 0);
+      if (customer) {
+        customerName = customer?.name;
+      } else {
+        return res.status(400).json({
+          error: `Customer not found for ID: ${saleData.customerId}`,
+        });
+      }
+    }
 
-    // Prepare sale data
+    if (!customerName) {
+      return res.status(400).json({
+        error: "Missing customerName and no valid customerId provided",
+      });
+    }
+
+    // 🧮 Calculate totals
+    const totalAmount = saleData.products.reduce(
+      (total, product) => total + (parseFloat(product.netSellingAmount) || 0),
+      0
+    );
+
+    const paidAmount = parseFloat(saleData.paidAmount) || 0;
+    const dueAmount = totalAmount - paidAmount;
+
+    // ✅ Construct sale object
     const newSaleData = {
       recordingDate: new Date(saleData.recordingDate),
       invoiceNumber: saleData.invoiceNumber,
       invoiceDate: new Date(saleData.invoiceDate),
       mrName: saleData.mrName,
       mrId: saleData.mrId || "",
+      customerName, // ✅ fetched or provided
       customerCode: saleData.customerCode,
       customerId: saleData.customerId || "",
       products: saleData.products.map((product) => ({
@@ -586,32 +625,29 @@ router.post("/sales", async (req, res) => {
             ? product.isProductAccept
             : true,
       })),
-      creditDays: saleData.creditDays ? Number(saleData.creditDays) : null,
+      creditDays: saleData.creditDays ? Number(saleData.creditDays) : 0,
       dueDate: saleData.dueDate ? new Date(saleData.dueDate) : null,
       deliveryDate: saleData.deliveryDate
         ? new Date(saleData.deliveryDate)
         : null,
-      paidAmount: Number(saleData.paidAmount) || 0,
-      dueAmount: dueAmount,
-      totalAmount: totalAmount,
+      paidAmount,
+      dueAmount,
+      totalAmount,
       paymentStatus: saleData.paymentStatus || "Credit",
-      remark: saleData.remark || "",
+      remark: saleData.remark || saleData.remarks || "",
     };
 
-    // Update inventory for all products
+    // 🔁 Update inventory for each product
     const inventoryUpdates = [];
-
     for (const product of newSaleData.products) {
       if (product.salesQty > 0 || product.bonusQty > 0) {
         try {
-          // Update inventory and get LC value
           const lcValue = await updateReportInHandAfterSale(
             product.productName,
             product.salesQty,
             product.bonusQty
           );
 
-          // Update product with actual LC and recalculate profit/loss
           product.lc = lcValue;
           product.profitLoss =
             product.netSellingAmount - product.totalQty * lcValue;
@@ -623,12 +659,6 @@ router.post("/sales", async (req, res) => {
             lc: lcValue,
           });
         } catch (error) {
-          inventoryUpdates.push({
-            productName: product.productName,
-            status: "failed",
-            error: error.message,
-          });
-          // If inventory update fails for any product, return error
           return res.status(400).json({
             error: `Inventory update failed for ${product.productName}: ${error.message}`,
           });
@@ -636,21 +666,20 @@ router.post("/sales", async (req, res) => {
       }
     }
 
-    // Create the sale record
+    // 💾 Save sale
     const savedSale = await SaleSummary.create(newSaleData);
 
     res.status(201).json({
-      message: `Sale with ${savedSale.products.length} products added successfully`,
+      message: `✅ Sale with ${savedSale.products.length} product(s) added successfully`,
       sale: savedSale,
       inventoryUpdates,
     });
   } catch (error) {
-    console.error("Sale creation error:", error);
+    console.error("❌ Sale creation error:", error);
 
-    // Handle duplicate invoice number error from MongoDB
     if (error.code === 11000) {
       return res.status(400).json({
-        error: `Invoice number "${req.body.invoiceNumber}" already exists. Please use a different invoice number.`,
+        error: `Invoice number "${req.body.invoiceNumber}" already exists.`,
       });
     }
 
@@ -663,10 +692,27 @@ router.post("/sales", async (req, res) => {
 });
 
 // ✅ Bulk Sale Import Route (Improved Error Propagation)
+function parseDateString(dateStr) {
+  if (!dateStr) return null;
+
+  // If ISO or valid Date string
+  const isoDate = new Date(dateStr);
+  if (!isNaN(isoDate)) return isoDate;
+
+  // If DD/MM/YYYY
+  const parts = dateStr.split("/");
+  if (parts.length === 3) {
+    const [day, month, year] = parts;
+    const formatted = new Date(`${year}-${month}-${day}`);
+    if (!isNaN(formatted)) return formatted;
+  }
+
+  return null;
+}
+
 router.post("/sale/import", async (req, res) => {
   try {
     const salesData = req.body;
-    console.log("📦 values of sales:", JSON.stringify(salesData, null, 2));
 
     if (!Array.isArray(salesData) || salesData.length === 0) {
       return res.status(400).json({
@@ -685,6 +731,7 @@ router.post("/sale/import", async (req, res) => {
       const saleData = salesData[i];
 
       try {
+        // Validate required fields
         if (
           !saleData.recordingDate ||
           !saleData.invoiceNumber ||
@@ -697,15 +744,49 @@ router.post("/sale/import", async (req, res) => {
           throw new Error("Missing required fields or products array");
         }
 
-        const invoiceExists = await checkInvoiceNumberExists(
-          saleData.invoiceNumber
-        );
-        if (invoiceExists) {
+        // Parse dates
+        const recordingDate = parseDateString(saleData.recordingDate);
+        const invoiceDate = parseDateString(saleData.invoiceDate);
+        if (!recordingDate || !invoiceDate) {
           throw new Error(
-            `Invoice number "${saleData.invoiceNumber}" already exists`
+            `Invalid date format. recordingDate: "${saleData.recordingDate}", invoiceDate: "${saleData.invoiceDate}"`
           );
         }
 
+        // Calculate due date
+        let dueDate;
+        if (saleData.dueDate) {
+          dueDate = parseDateString(saleData.dueDate);
+        } else {
+          const creditDays = Number(saleData.creditDays) || 0;
+          const currentDate = new Date();
+          dueDate = new Date(currentDate);
+          dueDate.setDate(currentDate.getDate() + creditDays);
+        }
+        if (!dueDate) throw new Error("Invalid due date format");
+
+        // Check duplicate invoice
+        const invoiceExists = await checkInvoiceNumberExists(saleData.invoiceNumber);
+        if (invoiceExists) {
+          throw new Error(`Invoice number "${saleData.invoiceNumber}" already exists`);
+        }
+
+        // Resolve customerId from customerName
+        let customerId = saleData.customerId;
+        if (!customerId) {
+          const customer = await Customer.findOne({ name: saleData.customerName.trim() });
+          if (!customer) {
+            throw new Error(`Customer not found: "${saleData.name}"`);
+          }
+          customerId = customer._id;
+        } else {
+          const customerExists = await Customer.findById(customerId);
+          if (!customerExists) {
+            throw new Error(`Invalid customerId: ${customerId}`);
+          }
+        }
+
+        // Calculate totals
         const totalAmount = saleData.products.reduce((sum, p) => {
           const qty = Number(p.salesQty) || 0;
           const price = Number(p.sellingPrice) || 0;
@@ -717,20 +798,23 @@ router.post("/sale/import", async (req, res) => {
         const dueAmount = totalAmount - paidAmount;
 
         const newSaleData = {
-          recordingDate: new Date(saleData.recordingDate),
+          recordingDate,
           invoiceNumber: saleData.invoiceNumber,
-          invoiceDate: new Date(saleData.invoiceDate),
+          invoiceDate,
           mrName: saleData.mrName,
           customerName: saleData.customerName,
+          customerId, // ← Store customerId
           creditDays: Number(saleData.creditDays) || 0,
           paidAmount,
           dueAmount,
           totalAmount,
+          dueDate,
           paymentStatus: saleData.paymentStatus || "Credit",
           remark: saleData.remarks || "",
           products: [],
         };
 
+        // Process products
         for (const product of saleData.products) {
           const salesQty = Number(product.salesQty) || 0;
           const bonusQty = Number(product.bonusQty) || 0;
@@ -740,65 +824,57 @@ router.post("/sale/import", async (req, res) => {
           const amount = salesQty * sellingPrice;
           const netSellingAmount = amount - discount;
 
-          try {
-            const lcValue = await updateReportInHandAfterSale(
-              product.productName,
-              salesQty,
-              bonusQty
-            );
+          const lcValue = await updateReportInHandAfterSale(
+            product.productName,
+            salesQty,
+            bonusQty
+          );
 
-            const profitLoss = netSellingAmount - totalQty * lcValue;
+          const profitLoss = netSellingAmount - totalQty * lcValue;
 
-            newSaleData.products.push({
-              productName: product.productName,
-              salesQty,
-              bonusQty,
-              totalQty,
-              sellingPrice,
-              amount,
-              discount,
-              netSellingAmount,
-              averageUnitPrice: sellingPrice,
-              lc: lcValue,
-              profitLoss,
-              isProductAccept: true,
-            });
-          } catch (err) {
-            // Format stock error with <b> tags
-            throw new Error(
-              `Insufficient stock for product <b>${product.productName}</b>. Available: <b>${err.available || 0}</b>, Required: <b>${salesQty}</b>`
-            );
-          }
+          newSaleData.products.push({
+            productName: product.productName,
+            salesQty,
+            bonusQty,
+            totalQty,
+            sellingPrice,
+            amount,
+            discount,
+            netSellingAmount,
+            averageUnitPrice: sellingPrice,
+            lc: lcValue,
+            profitLoss,
+            isProductAccept: true,
+          });
         }
 
         await SaleSummary.create(newSaleData);
         results.success++;
       } catch (error) {
-        console.error(`❌ Failed to import sale at index ${i}:`, error.message);
+        console.error(`Failed to import sale at index ${i}:`, error.message);
         results.failed++;
         results.errors.push({
           index: i,
-          invoiceNumber: saleData.invoiceNumber,
+          invoiceNumber: saleData.invoiceNumber || "N/A",
           error: error.message,
         });
       }
     }
 
     const detailedErrors = results.errors.map(
-      (e) => `Invoice ${e.invoiceNumber || "N/A"}: ${e.error}`
+      (e) => `Invoice ${e.invoiceNumber}: ${e.error}`
     );
 
     res.status(200).json({
       success: results.failed === 0,
-      message: detailedErrors.join("<br>"), // send HTML formatted error
+      message: detailedErrors.length > 0 ? detailedErrors.join("<br>") : "All imported successfully",
       results,
     });
   } catch (error) {
-    console.error("💥 Bulk import error:", error);
+    console.error("Bulk import error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
-
 
 // Updated PUT /sales/:id endpoint with invoice number validation
 router.put("/sales/:id", async (req, res) => {
@@ -899,7 +975,7 @@ router.get("/sales", async (req, res) => {
       const searchRegex = new RegExp(search.trim(), "i");
       matchConditions.$or = [
         { invoiceNumber: searchRegex },
-        { "customerInfo.name": searchRegex },
+        { customerName: searchRegex },
         { "products.productName": searchRegex },
       ];
     }
@@ -910,113 +986,36 @@ router.get("/sales", async (req, res) => {
     }
 
     // Get total count for pagination
-    const totalCountAggregate = await SaleSummary.aggregate([
-      {
-        $lookup: {
-          from: "customers",
-          localField: "customerCode",
-          foreignField: "customerCode",
-          as: "customerInfo",
-        },
-      },
-      {
-        $unwind: {
-          path: "$customerInfo",
-          preserveNullAndEmptyArrays: true,
-        },
-      },
-      {
-        $match: matchConditions,
-      },
-      {
-        $count: "totalCount",
-      },
-    ]);
-
-    const totalCount =
-      totalCountAggregate.length > 0 ? totalCountAggregate[0].totalCount : 0;
+    const totalCount = await SaleSummary.countDocuments(matchConditions);
     const totalPages = Math.ceil(totalCount / limitNum);
 
-    // Get paginated data with proper projection
-    const summaries = await SaleSummary.aggregate([
-      {
-        $lookup: {
-          from: "customers",
-          localField: "customerCode",
-          foreignField: "customerCode",
-          as: "customerInfo",
-        },
-      },
-      {
-        $unwind: {
-          path: "$customerInfo",
-          preserveNullAndEmptyArrays: true,
-        },
-      },
-      {
-        $match: matchConditions,
-      },
-      {
-        $sort: {
-          recordingDate: -1,
-        },
-      },
-      {
-        $skip: skip,
-      },
-      {
-        $limit: limitNum,
-      },
-      {
-        $project: {
-          // Sale main fields
-          recordingDate: 1,
-          invoiceNumber: 1,
-          invoiceDate: 1,
-          mrName: 1,
-          mrId: 1,
-          customerCode: 1,
-          customerId: 1,
-          paymentStatus: 1,
-          remark: 1,
-          creditDays: 1,
-          dueDate: 1,
-          deliveryDate: 1,
-          paidAmount: 1,
-          dueAmount: 1,
-          totalAmount: 1,
-          createdAt: 1,
-          updatedAt: 1,
-
-          // Products array with all product fields
-          products: {
-            $map: {
-              input: "$products",
-              as: "product",
-              in: {
-                productName: "$$product.productName",
-                salesQty: "$$product.salesQty",
-                bonusQty: "$$product.bonusQty",
-                totalQty: "$$product.totalQty",
-                sellingPrice: "$$product.sellingPrice",
-                amount: "$$product.amount",
-                discount: "$$product.discount",
-                netSellingAmount: "$$product.netSellingAmount",
-                averageUnitPrice: "$$product.averageUnitPrice",
-                lc: "$$product.lc",
-                profitLoss: "$$product.profitLoss",
-                isProductAccept: "$$product.isProductAccept",
-              },
-            },
-          },
-
-          // Customer info - only name
-          customerInfo: {
-            name: "$customerInfo.name",
-          },
-        },
-      },
-    ]);
+    // Get paginated data
+    const summaries = await SaleSummary.find(matchConditions)
+      .sort({ recordingDate: -1 })
+      .skip(skip)
+      .limit(limitNum)
+      .select({
+        // Include all fields you want
+        recordingDate: 1,
+        invoiceNumber: 1,
+        invoiceDate: 1,
+        mrName: 1,
+        mrId: 1,
+        customerCode: 1,
+        customerId: 1,
+        customerName: 1, // Now directly from SaleSummary
+        paymentStatus: 1,
+        remark: 1,
+        creditDays: 1,
+        dueDate: 1,
+        deliveryDate: 1,
+        paidAmount: 1,
+        dueAmount: 1,
+        totalAmount: 1,
+        products: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      });
 
     res.status(200).json({
       summaries,
@@ -1029,10 +1028,7 @@ router.get("/sales", async (req, res) => {
       },
     });
   } catch (error) {
-    console.error(
-      "❌ Error fetching sale summaries with customer info:",
-      error
-    );
+    console.error("❌ Error fetching sale summaries:", error);
     res.status(500).json({ message: "Failed to fetch sale summaries." });
   }
 });

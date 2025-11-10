@@ -9,7 +9,6 @@ const router = express.Router();
 router.post("/salesreturn", async (req, res) => {
   try {
     const data = req.body;
-
     if (!Array.isArray(data) || data.length === 0) {
       return res.status(400).json({
         message: "Expected a non-empty array of sales return records",
@@ -21,7 +20,7 @@ router.post("/salesreturn", async (req, res) => {
       "invoiceNumber",
       "invoiceDate",
       "mrName",
-      "customerCode",
+      "customerId",
       "customerName",
       "productName",
       "salesQty",
@@ -42,14 +41,18 @@ router.post("/salesreturn", async (req, res) => {
     const processedData = data.map((record, index) => {
       for (const field of requiredFields) {
         if (record[field] === undefined || record[field] === null) {
-          throw new Error(
-            `Missing required field "${field}" in record ${index + 1}`
-          );
+          throw new Error(`Missing required field "${field}" in record ${index + 1}`);
         }
+      }
+
+      // Validate customerId is a valid ObjectId
+      if (!mongoose.Types.ObjectId.isValid(record.customerId)) {
+        throw new Error(`Invalid customerId in record ${index + 1}`);
       }
 
       return {
         ...record,
+        customerId: new mongoose.Types.ObjectId(record.customerId),
         salesQty: Number(record.salesQty),
         returnQuantity: Number(record.returnQuantity),
         usedQty: Number(record.usedQty),
@@ -68,13 +71,13 @@ router.post("/salesreturn", async (req, res) => {
     // Save all sales return records
     const savedReturns = await SalesReturn.insertMany(processedData);
 
-    // ✅ Update SaleSummary: set isProductAccept = false
+    // Update SaleSummary: set isProductAccept = false using customerId
     const updatePromises = processedData.map((record) =>
       SaleSummary.updateMany(
         {
           invoiceNumber: record.invoiceNumber,
           productName: record.productName,
-          customerCode: record.customerCode,
+          customerId: record.customerId, // Use ObjectId
         },
         { $set: { isProductAccept: false } }
       )
@@ -88,7 +91,6 @@ router.post("/salesreturn", async (req, res) => {
     });
   } catch (error) {
     console.error("Error saving sales returns:", error);
-
     return res.status(500).json({
       message: "Server error",
       error: error.message,
@@ -102,9 +104,6 @@ router.get("/salesreturn", async (req, res) => {
     const filters = {};
     if (req.query.invoiceNumber) {
       filters.invoiceNumber = req.query.invoiceNumber;
-    }
-    if (req.query.customerCode) {
-      filters.customerCode = req.query.customerCode;
     }
 
     const returns = await SalesReturn.find(filters).sort({ createdAt: -1 });
@@ -134,7 +133,6 @@ router.delete("/salesreturn", async (req, res) => {
       });
     }
 
-    // Validate MongoDB ObjectIds
     const validIds = [];
     const invalidIds = [];
 
@@ -154,10 +152,7 @@ router.delete("/salesreturn", async (req, res) => {
       });
     }
 
-    // Delete the sales returns
-    const result = await SalesReturn.deleteMany({
-      _id: { $in: validIds },
-    });
+    const result = await SalesReturn.deleteMany({ _id: { $in: validIds } });
 
     if (result.deletedCount === 0) {
       return res.status(404).json({
@@ -187,7 +182,6 @@ router.put("/salesreturn/:id", async (req, res) => {
     const { id } = req.params;
     const updatedData = req.body;
 
-    // Validate the ID
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
@@ -195,13 +189,12 @@ router.put("/salesreturn/:id", async (req, res) => {
       });
     }
 
-    // Optional: Validate required fields
     const requiredFields = [
       "recordingDate",
       "invoiceNumber",
       "invoiceDate",
       "mrName",
-      "customerCode",
+      "customerId",
       "customerName",
       "productName",
       "salesQty",
@@ -227,7 +220,13 @@ router.put("/salesreturn/:id", async (req, res) => {
       }
     }
 
-    // Convert numeric fields
+    if (!mongoose.Types.ObjectId.isValid(updatedData.customerId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid customerId",
+      });
+    }
+
     const numericFields = [
       "salesQty",
       "returnQuantity",
@@ -246,12 +245,11 @@ router.put("/salesreturn/:id", async (req, res) => {
       updatedData[field] = Number(updatedData[field]);
     });
 
-    // Perform the update
-    const updatedReturn = await SalesReturn.findByIdAndUpdate(
-      id,
-      updatedData,
-      { new: true } // Return the updated document
-    );
+    updatedData.customerId = new mongoose.Types.ObjectId(updatedData.customerId);
+
+    const updatedReturn = await SalesReturn.findByIdAndUpdate(id, updatedData, {
+      new: true,
+    });
 
     if (!updatedReturn) {
       return res.status(404).json({
@@ -279,7 +277,6 @@ router.put("/salesreturn/:id", async (req, res) => {
 router.delete("/salesreturn/:id", async (req, res) => {
   const { id } = req.params;
 
-  // Validate MongoDB ObjectId
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return res.status(400).json({
       success: false,

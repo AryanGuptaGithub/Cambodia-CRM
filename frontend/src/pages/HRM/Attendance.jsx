@@ -9,6 +9,7 @@ import {
   ChevronUp,
 } from "lucide-react";
 import axios from "axios";
+import { showToast } from "../../utils/toast";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -174,19 +175,19 @@ const Attendance = () => {
     const start = new Date(startDateStr);
     const end = new Date(endDateStr);
     const dates = [];
-    
+
     // If start and end date are the same, return just that date
     if (start.toDateString() === end.toDateString()) {
       return [start];
     }
-    
+
     // Add all dates between start and end (inclusive)
     const current = new Date(start);
     while (current <= end) {
       dates.push(new Date(current));
       current.setDate(current.getDate() + 1);
     }
-    
+
     return dates;
   };
 
@@ -207,7 +208,7 @@ const Attendance = () => {
 
     return holidays.some((holiday) => {
       if (!holiday || !holiday.date) return false;
-      
+
       const holidayDate = new Date(holiday.date);
       holidayDate.setHours(0, 0, 0, 0);
 
@@ -218,7 +219,7 @@ const Attendance = () => {
   // UPDATED: Check if any date in range is holiday
   const isDateRangeHasHoliday = (startDateStr, endDateStr) => {
     const datesInRange = getDatesBetween(startDateStr, endDateStr);
-    return datesInRange.some(date => isHoliday(date));
+    return datesInRange.some((date) => isHoliday(date));
   };
 
   // Get holiday name for a date - with proper date comparison
@@ -246,14 +247,14 @@ const Attendance = () => {
   const getHolidayNamesInRange = (startDateStr, endDateStr) => {
     const datesInRange = getDatesBetween(startDateStr, endDateStr);
     const holidayNames = [];
-    
-    datesInRange.forEach(date => {
+
+    datesInRange.forEach((date) => {
       const holidayName = getHolidayName(date);
       if (holidayName && !holidayNames.includes(holidayName)) {
         holidayNames.push(holidayName);
       }
     });
-    
+
     return holidayNames;
   };
 
@@ -446,7 +447,7 @@ const Attendance = () => {
     // Check if any date in range is Sunday
     const loginDateTime = new Date(`${startDate}T${startTime}`);
     const logoutDateTime = new Date(`${startDate}T${endTime}`);
-    
+
     // If it's a single day, check if it's Sunday
     if (isSunday(startDate)) {
       alert("Cannot record attendance on Sunday");
@@ -454,7 +455,8 @@ const Attendance = () => {
     }
 
     // Check if any date in range is holiday
-    if (isDateRangeHasHoliday(startDate, startDate)) { // For single day, start and end are same
+    if (isDateRangeHasHoliday(startDate, startDate)) {
+      // For single day, start and end are same
       const holidayNames = getHolidayNamesInRange(startDate, startDate);
       alert(`Cannot record attendance on holiday: ${holidayNames.join(", ")}`);
       return;
@@ -475,7 +477,10 @@ const Attendance = () => {
       );
 
       if (response.data.success) {
-        alert("Attendance recorded successfully!");
+        showToast(
+          "success",
+          `Attendance ${selectedAttendanceMr} for date {} successfully!`
+        );
         setShowAddAttendanceModal(false);
         setSelectedAttendanceMr(null);
         setStartDate("");

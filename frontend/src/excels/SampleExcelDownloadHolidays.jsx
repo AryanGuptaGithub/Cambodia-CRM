@@ -58,7 +58,7 @@ const SampleExcelDownloadHolidays = () => {
         { key: "holidayName", width: 35 },
         { key: "startDate", width: 15 },
         { key: "endDate", width: 15 },
-        { key: "description", width: 40 },
+        { key: "description", width: 120 },
       ];
 
       // Format Date columns
