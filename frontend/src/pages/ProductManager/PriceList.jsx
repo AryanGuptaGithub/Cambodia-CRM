@@ -178,33 +178,35 @@ function PriceList() {
           </div>
         )}
 
-        <div className="flex items-center gap-6 ml-auto">
-          <p className="text-sm md:text-base font-semibold text-gray-700 whitespace-nowrap">
-            Total Count:{" "}
-            <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs md:text-sm font-medium shadow-sm">
-              {filteredPriceList.length}
-            </span>
-          </p>
+        {priceList.length > 0 && (
+          <div className="flex items-center gap-6 ml-auto">
+            <p className="text-sm md:text-base font-semibold text-gray-700 whitespace-nowrap">
+              Total Count:{" "}
+              <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs md:text-sm font-medium shadow-sm">
+                {filteredPriceList.length}
+              </span>
+            </p>
 
-          <div className="relative w-full md:w-72">
-            <Search
-              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-              size={16}
-              onClick={handleIconClick}
-            />
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder="Search..."
-              value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-            />
+            <div className="relative w-full md:w-72">
+              <Search
+                className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                size={16}
+                onClick={handleIconClick}
+              />
+              <input
+                ref={inputRef}
+                type="text"
+                placeholder="Search..."
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+              />
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Table */}
@@ -216,7 +218,9 @@ function PriceList() {
               <th className="p-3 text-sm font-medium">Type</th>
               <th className="p-3 text-sm font-medium">Selling Price (USD)</th>
               <th className="p-3 text-sm font-medium">LC</th>
-              <th className="p-3 text-sm font-medium">Tax Selling Price (USD)</th>
+              <th className="p-3 text-sm font-medium">
+                Tax Selling Price (USD)
+              </th>
               <th className="p-3 text-sm font-medium">Drug License</th>
               <th className="p-3 text-sm font-medium">License Validity</th>
               <th className="p-3 text-sm font-medium">Action</th>
@@ -336,7 +340,10 @@ function PriceList() {
               </h2>
 
               {/* Form Fields */}
-              <form onSubmit={handleProductUpdate} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <form
+                onSubmit={handleProductUpdate}
+                className="grid grid-cols-1 md:grid-cols-2 gap-4"
+              >
                 <div>
                   <label className="block text-sm font-medium text-gray-600">
                     Product Name
@@ -371,7 +378,7 @@ function PriceList() {
                   <input
                     type="text"
                     value={form.sellingPrice}
-                    onChange={(e) => handleNumericInput(e, 'sellingPrice')}
+                    onChange={(e) => handleNumericInput(e, "sellingPrice")}
                     className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
                     placeholder="Enter numbers only"
                   />
@@ -385,7 +392,7 @@ function PriceList() {
                   <input
                     type="text"
                     value={form.lc}
-                    onChange={(e) => handleNumericInput(e, 'lc')}
+                    onChange={(e) => handleNumericInput(e, "lc")}
                     className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
                     placeholder="Enter numbers only"
                   />
@@ -399,7 +406,7 @@ function PriceList() {
                   <input
                     type="text"
                     value={form.taxSellingPrice}
-                    onChange={(e) => handleNumericInput(e, 'taxSellingPrice')}
+                    onChange={(e) => handleNumericInput(e, "taxSellingPrice")}
                     className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
                     placeholder="Enter numbers only"
                   />
@@ -432,7 +439,9 @@ function PriceList() {
                     onChange={(date) =>
                       setForm({
                         ...form,
-                        licenseValidityDate: date ? date.toISOString().split('T')[0] : "",
+                        licenseValidityDate: date
+                          ? date.toISOString().split("T")[0]
+                          : "",
                       })
                     }
                     dateFormat="yyyy-MM-dd"

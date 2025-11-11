@@ -115,6 +115,7 @@ import Dashboard from "./pages/HRM/Dashboard";
 import Holidays from "./pages/HRM/Holidays";
 import Leaves from "./pages/HRM/Leaves";
 import Payroll from "./pages/HRM/Payroll";
+import AddPayroll from "./pages/HRM/addPayroll";
 
 import CashAndBank from "./pages/Account/CashAndBank";
 
@@ -340,7 +341,10 @@ function App() {
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="holidays" element={<Holidays />} />
             <Route path="leaves" element={<Leaves />} />
-            <Route path="payroll" element={<Payroll />} />
+            <Route path="payroll">
+              <Route index element={<Payroll />} />
+              <Route path="new" element={<AddPayroll />} />
+            </Route>
           </Route>
         </Route>
       </Routes>

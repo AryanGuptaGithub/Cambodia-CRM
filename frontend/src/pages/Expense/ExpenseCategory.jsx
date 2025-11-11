@@ -341,7 +341,7 @@ const ExpenseCategory = () => {
         <div className="flex items-center">
           <button
             onClick={() => navigate("/expenselayout/expensecategories/new")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer`}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-colors bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer`}
           >
             {loading ? (
               <Loader className="animate-spin" size={18} />
@@ -352,24 +352,25 @@ const ExpenseCategory = () => {
           </button>
         </div>
 
-        {/* Right side - Search Box */}
-        <div className="flex items-center gap-4">
-          <div className="relative w-72">
-            <Search
-              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-              size={16}
-              onClick={() => inputRef.current?.focus()}
-            />
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder="Search categories or descriptions..."
-              className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-              value={search}
-              onChange={handleSearchChange}
-            />
+        {categories.length > 0 && (
+          <div className="flex items-center gap-4">
+            <div className="relative w-72">
+              <Search
+                className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                size={16}
+                onClick={() => inputRef.current?.focus()}
+              />
+              <input
+                ref={inputRef}
+                type="text"
+                placeholder="Search categories or descriptions..."
+                className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+                value={search}
+                onChange={handleSearchChange}
+              />
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       <div className="bg-white shadow rounded-xl overflow-hidden w-full">

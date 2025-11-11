@@ -19,6 +19,7 @@ import { formatDateToReadable } from "../../utils/dateUtil";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import ReactDOM from "react-dom";
+import { parseExcelDate } from "../../utils/excelUtility";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
@@ -55,39 +56,45 @@ const Payroll = () => {
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const response = await fetch(`${backendUrl}/api/payrolls`);
-        if (!response.ok) throw new Error("Failed to fetch payrolls");
-        const data = await response.json();
-        setPayrolls(data.payrolls);
-        if (data.nextPayrollCode) {
-          setNextPayrollCode(data.nextPayrollCode);
-        }
-      } catch (err) {
-        setError(err.message || "Something went wrong");
-      } finally {
-        setLoading(false);
-      }
-    })();
+    fetchPayrolls();
   }, []);
+
+  const fetchPayrolls = async () => {
+    try {
+      const response = await fetch(`${backendUrl}/api/payrolls`);
+      if (!response.ok) throw new Error("Failed to fetch payrolls");
+      const data = await response.json();
+
+      setPayrolls(data.data || []);
+      if (data.nextPayrollCode) {
+        setNextPayrollCode(data.nextPayrollCode);
+      }
+    } catch (err) {
+      setError(err.message || "Something went wrong");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm]);
 
-  const filteredPayrolls = payrolls.filter(
-    (r) =>
-      r.employeeName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.department.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.designation.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.paymentMethod.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.status.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.payrollCode.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredPayrolls = useMemo(() => {
+    if (!payrolls.length) return [];
+    
+    return payrolls.filter(
+      (r) =>
+        r.employeeName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        r.department?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        r.designation?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        r.paymentMethod?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        r.status?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        r.payrollCode?.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }, [payrolls, searchTerm]);
 
   // Pagination calculations
   const totalPages = Math.ceil(filteredPayrolls.length / payrollsPerPage);
@@ -119,10 +126,8 @@ const Payroll = () => {
       const exists = prev.some((p) => p.id === payroll._id);
 
       if (exists) {
-        // If already selected, remove it
         return prev.filter((p) => p.id !== payroll._id);
       } else {
-        // If not selected, add it
         return [...prev, { id: payroll._id, name: payroll.employeeName }];
       }
     });
@@ -152,15 +157,12 @@ const Payroll = () => {
     if (confirm.isConfirmed) {
       try {
         const res = await axios.delete(`${backendUrl}/api/payrolls`, {
-          data: { ids: selected },
+          data: { ids: selected.map(s => s.id) }, // Fix: Send only IDs
         });
 
         if (res.status === 200) {
           showToast("success", "Selected payroll records deleted successfully");
-          const updated = await fetch(`${backendUrl}/api/payrolls`);
-          const data = await updated.json();
-          setPayrolls(data.payrolls);
-          setNextPayrollCode(data.nextPayrollCode);
+          await fetchPayrolls(); // Use the refetch function
           setSelected([]);
         }
       } catch (error) {
@@ -174,14 +176,12 @@ const Payroll = () => {
   // Open edit modal with selected payroll data
   const editPayroll = (payroll) => {
     setForm({ ...payroll });
-    setIsOpen(true);
     setIsEditModalOpen(true);
   };
 
   // Open view modal with selected payroll data
   const handleView = (payroll) => {
     setForm({ ...payroll });
-    setIsOpen(true);
     setIsViewModalOpen(true);
   };
 
@@ -206,10 +206,7 @@ const Payroll = () => {
             "success",
             `Payroll record for <b>${payroll.employeeName}</b> deleted successfully`
           );
-          const updated = await axios.get(`${backendUrl}/api/payrolls`);
-          const payrolls = updated.data.payrolls;
-          setPayrolls(payrolls);
-          setNextPayrollCode(updated.data.nextPayrollCode);
+          await fetchPayrolls(); // Use the refetch function
           setSelected([]);
         }
       } catch (error) {
@@ -226,132 +223,145 @@ const Payroll = () => {
     const reader = new FileReader();
 
     reader.onload = (evt) => {
-      const data = new Uint8Array(evt.target.result);
-      const workbook = XLSX.read(data, { type: "array" });
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
+      try {
+        const data = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(data, { type: "array" });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
 
-      const rows = XLSX.utils.sheet_to_json(worksheet, {
-        header: 1,
-        defval: "",
-      });
+        const rows = XLSX.utils.sheet_to_json(worksheet, {
+          header: 1,
+          defval: "",
+        });
 
-      if (rows.length === 0) {
-        showToast("warning", "Excel file is empty");
-        return;
-      }
-
-      // ✅ Expected headers for payroll
-      const requiredHeaders = [
-        "payroll code",
-        "date",
-        "employee name",
-        "department",
-        "designation",
-        "basic salary",
-        "allowances",
-        "deductions",
-        "net salary",
-        "payment method",
-        "bank account",
-        "payment date",
-        "status",
-        "remarks",
-      ];
-
-      let headerRowIndex = -1;
-      let matchedHeaders = [];
-
-      // ✅ Find header row (first 10 rows max)
-      for (let i = 0; i < Math.min(rows.length, 10); i++) {
-        const row = rows[i].map((cell) =>
-          cell?.toString().trim().toLowerCase()
-        );
-        const matched = requiredHeaders.filter((header) =>
-          row.includes(header)
-        );
-        if (matched.length >= 5) {
-          headerRowIndex = i;
-          matchedHeaders = matched;
-          break;
+        if (rows.length === 0) {
+          showToast("warning", "Excel file is empty");
+          return;
         }
-      }
 
-      // ❌ If required headers not found
-      if (
-        headerRowIndex === -1 ||
-        matchedHeaders.length < requiredHeaders.length
-      ) {
-        const missingHeaders = requiredHeaders.filter(
-          (header) => !matchedHeaders.includes(header)
-        );
-        const errorMsg = `❌ Required headers not found in Excel file:\n\n${missingHeaders.join(
-          ", "
-        )}`;
-        showToast("error", errorMsg);
-        return;
-      }
+        // ✅ Expected headers for payroll
+        const requiredHeaders = [
+          "payroll code",
+          "date",
+          "employee name",
+          "department",
+          "designation",
+          "basic salary",
+          "allowances",
+          "deductions",
+          "net salary",
+          "payment method",
+          "bank account",
+          "payment date",
+          "status",
+          "remarks",
+        ];
 
-      // ✅ Map header keys to column indexes
-      const rawHeaders = rows[headerRowIndex];
-      const headersMap = {};
-      rawHeaders.forEach((header, index) => {
-        if (!header) return;
-        const cleaned = header.toString().trim().toLowerCase();
-        headersMap[index] = cleaned;
-      });
+        let headerRowIndex = -1;
+        let matchedHeaders = [];
 
-      // ✅ Parse data rows
-      const dataRows = rows.slice(headerRowIndex + 1);
-      if (dataRows.length == 0) {
-        showToast("warning", "Excel file is empty");
-        return;
-      }
+        // ✅ Find header row (first 10 rows max)
+        for (let i = 0; i < Math.min(rows.length, 10); i++) {
+          const row = rows[i].map((cell) =>
+            cell?.toString().trim().toLowerCase()
+          );
+          const matched = requiredHeaders.filter((header) =>
+            row.includes(header)
+          );
+          if (matched.length >= 5) {
+            headerRowIndex = i;
+            matchedHeaders = matched;
+            break;
+          }
+        }
 
-      const mappedData = dataRows
-        .map((row, rowIndex) => {
-          const item = {};
-          Object.entries(headersMap).forEach(([index, key]) => {
-            item[key] = row[index] || "";
+        // ❌ If required headers not found
+        if (
+          headerRowIndex === -1 ||
+          matchedHeaders.length < requiredHeaders.length
+        ) {
+          const missingHeaders = requiredHeaders.filter(
+            (header) => !matchedHeaders.includes(header)
+          );
+          const errorMsg = `❌ Required headers not found in Excel file:\n\n${missingHeaders.join(
+            ", "
+          )}`;
+          showToast("error", errorMsg);
+          return;
+        }
+
+        // ✅ Map header keys to column indexes
+        const rawHeaders = rows[headerRowIndex];
+        const headersMap = {};
+        rawHeaders.forEach((header, index) => {
+          if (!header) return;
+          const cleaned = header.toString().trim().toLowerCase();
+          headersMap[index] = cleaned;
+        });
+
+        // ✅ Parse data rows
+        const dataRows = rows.slice(headerRowIndex + 1);
+        if (dataRows.length === 0) {
+          showToast("warning", "No data rows found in Excel file");
+          return;
+        }
+
+        const mappedData = dataRows
+          .map((row, rowIndex) => {
+            const item = {};
+            Object.entries(headersMap).forEach(([index, key]) => {
+              item[key] = row[index] || "";
+            });
+
+            // Calculate net salary if not provided
+            const basicSalary = parseFloat(item["basic salary"]) || 0;
+            const allowances = parseFloat(item["allowances"]) || 0;
+            const deductions = parseFloat(item["deductions"]) || 0;
+            const netSalary = parseFloat(item["net salary"]) || (basicSalary + allowances - deductions);
+
+            return {
+              payrollCode: item["payroll code"]?.toString().trim(),
+              date: parseExcelDate(item["date"]),
+              employeeName: item["employee name"]?.toString().trim(),
+              department: item["department"]?.toString().trim(),
+              designation: item["designation"]?.toString().trim(),
+              basicSalary: basicSalary,
+              allowances: allowances,
+              deductions: deductions,
+              netSalary: netSalary,
+              paymentMethod: item["payment method"]?.toString().trim(),
+              bankAccount: item["bank account"]?.toString().trim(),
+              paymentDate: parseExcelDate(item["payment date"]),
+              status: (item["status"] || "pending")?.toString().trim(),
+              remarks: item["remarks"]?.toString().trim(),
+            };
+          })
+          .filter((entry, index) => {
+            const keep = !!entry.payrollCode && !!entry.employeeName;
+            if (!keep) {
+              console.warn(`Skipping row ${index + headerRowIndex + 2}: Missing payrollCode or employeeName`);
+            }
+            return keep;
           });
 
-          return {
-            payrollCode: item["payroll code"],
-            date: parseExcelDate(item["date"]),
-            employeeName: item["employee name"],
-            department: item["department"],
-            designation: item["designation"],
-            basicSalary: parseFloat(item["basic salary"]) || 0,
-            allowances: parseFloat(item["allowances"]) || 0,
-            deductions: parseFloat(item["deductions"]) || 0,
-            netSalary: parseFloat(item["net salary"]) || 0,
-            paymentMethod: item["payment method"],
-            bankAccount: item["bank account"],
-            paymentDate: parseExcelDate(item["payment date"]),
-            status: item["status"] || "pending",
-            remarks: item["remarks"],
-          };
-        })
-        .filter((entry, index) => {
-          const keep = !!entry.payrollCode && !!entry.employeeName;
-          return keep;
-        });
-      setParsedData(mappedData);
+        if (mappedData.length === 0) {
+          showToast("warning", "No valid data found after parsing");
+          return;
+        }
+
+        setParsedData(mappedData);
+        showToast("success", `Successfully parsed ${mappedData.length} records`);
+      } catch (error) {
+        console.error("File parsing error:", error);
+        showToast("error", "Error parsing file. Please check the format.");
+      }
+    };
+
+    reader.onerror = () => {
+      showToast("error", "Error reading file");
     };
 
     reader.readAsArrayBuffer(file);
-  };
-
-  const parseExcelDate = (value) => {
-    if (!value) return null;
-
-    if (typeof value === "number") {
-      const jsDate = new Date(Math.round((value - 25569) * 86400 * 1000));
-      return jsDate.toISOString();
-    }
-
-    const parsed = new Date(value);
-    return isNaN(parsed.getTime()) ? null : parsed.toISOString();
   };
 
   // Import parsed payrolls to backend
@@ -368,24 +378,20 @@ const Payroll = () => {
         parsedData
       );
 
-      // If import is successful
       if (res.status === 200) {
         showToast(
           "success",
           res.data.message || "Payroll records imported successfully!"
         );
         setShowImportModal(false);
-        const response = await fetch(`${backendUrl}/api/payrolls`);
-        const data = await response.json();
-        setPayrolls(data.payrolls);
-        setNextPayrollCode(data.nextPayrollCode);
+        setParsedData([]);
+        await fetchPayrolls();
       }
     } catch (err) {
       console.error("Import error:", err);
       if (err.response) {
         const { message } = err.response.data;
         const cleanMessage = message.replace(/<[^>]+>/g, "");
-
         showToast("error", cleanMessage || "Failed to import payroll records.");
       } else {
         showToast("error", "Network error. Please try again.");
@@ -399,9 +405,20 @@ const Payroll = () => {
   const handleUpdatePayroll = async (e) => {
     e.preventDefault();
     try {
+      // Calculate net salary before sending
+      const basicSalary = parseFloat(form.basicSalary) || 0;
+      const allowances = parseFloat(form.allowances) || 0;
+      const deductions = parseFloat(form.deductions) || 0;
+      const netSalary = basicSalary + allowances - deductions;
+
+      const updatedForm = {
+        ...form,
+        netSalary: netSalary
+      };
+
       const res = await axios.put(
         `${backendUrl}/api/payrolls/${form._id}`,
-        form
+        updatedForm
       );
       if (res.status === 200) {
         showToast(
@@ -409,10 +426,7 @@ const Payroll = () => {
           `Payroll record for <b>${form.employeeName}</b> updated successfully`
         );
         setIsEditModalOpen(false);
-        const updated = await fetch(`${backendUrl}/api/payrolls`);
-        const data = await updated.json();
-        setPayrolls(data.payrolls);
-        setNextPayrollCode(data.nextPayrollCode);
+        await fetchPayrolls();
       }
     } catch (err) {
       showToast("error", "Failed to update payroll record.");
@@ -440,6 +454,7 @@ const Payroll = () => {
       );
     } catch (err) {
       console.error("Error updating payroll:", err);
+      showToast("error", "Failed to update payroll status");
     }
   };
 
@@ -448,7 +463,9 @@ const Payroll = () => {
       inputRef.current.focus();
       inputRef.current.classList.add("highlight");
       setTimeout(() => {
-        inputRef.current.classList.remove("highlight");
+        if (inputRef.current) {
+          inputRef.current.classList.remove("highlight");
+        }
       }, 1000);
     }
   };
@@ -458,7 +475,24 @@ const Payroll = () => {
     return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: "USD",
-    }).format(amount);
+    }).format(amount || 0);
+  };
+
+  // Handle form input changes for edit modal
+  const handleFormChange = (field, value) => {
+    setForm(prev => {
+      const updatedForm = { ...prev, [field]: value };
+      
+      // Auto-calculate net salary when financial fields change
+      if (['basicSalary', 'allowances', 'deductions'].includes(field)) {
+        const basicSalary = parseFloat(updatedForm.basicSalary) || 0;
+        const allowances = parseFloat(updatedForm.allowances) || 0;
+        const deductions = parseFloat(updatedForm.deductions) || 0;
+        updatedForm.netSalary = basicSalary + allowances - deductions;
+      }
+      
+      return updatedForm;
+    });
   };
 
   if (loading) return <p>Loading...</p>;
@@ -470,7 +504,7 @@ const Payroll = () => {
         <div className="flex gap-3">
           <button
             onClick={() =>
-              navigate("/masterlayout/payroll/new", {
+              navigate("/hrmlayout/payroll/new", {
                 state: { payrollCode: nextPayrollCode },
               })
             }
@@ -488,7 +522,7 @@ const Payroll = () => {
           {selected.length > 0 && (
             <button
               className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-              onClick={() => handleDeleteSelected()}
+              onClick={handleDeleteSelected}
             >
               <Trash2 size={18} /> Delete
             </button>
@@ -598,11 +632,17 @@ const Payroll = () => {
                     </button>
                   </td>
                   <td className="p-3 flex items-center justify-center gap-3">
-                    <button className="text-blue-600 hover:text-blue-800 cursor-pointer">
-                      <Eye onClick={() => handleView(payroll)} size={18} />
+                    <button 
+                      onClick={() => handleView(payroll)}
+                      className="text-blue-600 hover:text-blue-800 cursor-pointer"
+                    >
+                      <Eye size={18} />
                     </button>
-                    <button className="text-green-600 hover:text-green-800 cursor-pointer">
-                      <Edit onClick={() => editPayroll(payroll)} size={18} />
+                    <button 
+                      onClick={() => editPayroll(payroll)}
+                      className="text-green-600 hover:text-green-800 cursor-pointer"
+                    >
+                      <Edit size={18} />
                     </button>
                     <button
                       onClick={() => deletePayroll(payroll)}
@@ -667,16 +707,16 @@ const Payroll = () => {
         )}
       </div>
 
+      {/* Import Modal */}
       {showImportModal &&
         ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            <div
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsOpen(false)}
-            />
+          <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50">
             <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
               <button
-                onClick={() => setShowImportModal(false)}
+                onClick={() => {
+                  setShowImportModal(false);
+                  setParsedData([]);
+                }}
                 className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
                 disabled={isUploading}
               >
@@ -690,14 +730,23 @@ const Payroll = () => {
                 <label className="block text-gray-700 mb-2">File</label>
                 <input
                   type="file"
-                  accept=".csv, .xlsx"
+                  accept=".csv, .xlsx, .xls"
                   onChange={handleFileUpload}
                   className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
+                  disabled={isUploading}
                 />
+                {parsedData.length > 0 && (
+                  <p className="text-sm text-green-600 mt-2">
+                    ✅ {parsedData.length} records ready to import
+                  </p>
+                )}
               </div>
               <div className="flex justify-end gap-3">
                 <button
-                  onClick={() => setShowImportModal(false)}
+                  onClick={() => {
+                    setShowImportModal(false);
+                    setParsedData([]);
+                  }}
                   disabled={isUploading}
                   className={`px-5 py-2 rounded-lg cursor-pointer ${
                     isUploading
@@ -709,9 +758,9 @@ const Payroll = () => {
                 </button>
                 <button
                   onClick={handleImport}
-                  disabled={isUploading}
+                  disabled={isUploading || parsedData.length === 0}
                   className={`px-5 py-2 rounded-lg cursor-pointer ${
-                    isUploading
+                    isUploading || parsedData.length === 0
                       ? "bg-blue-400 text-white cursor-not-allowed"
                       : "bg-blue-600 hover:bg-blue-700 text-white"
                   }`}
@@ -727,11 +776,7 @@ const Payroll = () => {
       {/* Edit Payroll Modal */}
       {isEditModalOpen &&
         ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            <div
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsOpen(false)}
-            />
+          <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50">
             <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
               <button
                 onClick={() => setIsEditModalOpen(false)}
@@ -752,10 +797,8 @@ const Payroll = () => {
                   </label>
                   <input
                     type="text"
-                    value={form.payrollCode}
-                    onChange={(e) =>
-                      setForm({ ...form, payrollCode: e.target.value })
-                    }
+                    value={form.payrollCode || ""}
+                    onChange={(e) => handleFormChange('payrollCode', e.target.value)}
                     className="w-full border px-3 py-2 rounded-lg bg-gray-100 text-gray-500 cursor-not-allowed"
                     disabled
                   />
@@ -766,11 +809,10 @@ const Payroll = () => {
                   </label>
                   <input
                     type="text"
-                    value={form.employeeName}
-                    onChange={(e) =>
-                      setForm({ ...form, employeeName: e.target.value })
-                    }
+                    value={form.employeeName || ""}
+                    onChange={(e) => handleFormChange('employeeName', e.target.value)}
                     className="w-full border px-3 py-2 rounded-lg capitalize"
+                    required
                   />
                 </div>
                 <div>
@@ -779,10 +821,8 @@ const Payroll = () => {
                   </label>
                   <input
                     type="text"
-                    value={form.department}
-                    onChange={(e) =>
-                      setForm({ ...form, department: e.target.value })
-                    }
+                    value={form.department || ""}
+                    onChange={(e) => handleFormChange('department', e.target.value)}
                     className="w-full border px-3 py-2 rounded-lg capitalize"
                   />
                 </div>
@@ -792,10 +832,8 @@ const Payroll = () => {
                   </label>
                   <input
                     type="text"
-                    value={form.designation}
-                    onChange={(e) =>
-                      setForm({ ...form, designation: e.target.value })
-                    }
+                    value={form.designation || ""}
+                    onChange={(e) => handleFormChange('designation', e.target.value)}
                     className="w-full border px-3 py-2 rounded-lg capitalize"
                   />
                 </div>
@@ -805,10 +843,9 @@ const Payroll = () => {
                   </label>
                   <input
                     type="number"
-                    value={form.basicSalary}
-                    onChange={(e) =>
-                      setForm({ ...form, basicSalary: e.target.value })
-                    }
+                    step="0.01"
+                    value={form.basicSalary || ""}
+                    onChange={(e) => handleFormChange('basicSalary', e.target.value)}
                     className="w-full border px-3 py-2 rounded-lg"
                   />
                 </div>
@@ -818,10 +855,9 @@ const Payroll = () => {
                   </label>
                   <input
                     type="number"
-                    value={form.allowances}
-                    onChange={(e) =>
-                      setForm({ ...form, allowances: e.target.value })
-                    }
+                    step="0.01"
+                    value={form.allowances || ""}
+                    onChange={(e) => handleFormChange('allowances', e.target.value)}
                     className="w-full border px-3 py-2 rounded-lg"
                   />
                 </div>
@@ -831,10 +867,9 @@ const Payroll = () => {
                   </label>
                   <input
                     type="number"
-                    value={form.deductions}
-                    onChange={(e) =>
-                      setForm({ ...form, deductions: e.target.value })
-                    }
+                    step="0.01"
+                    value={form.deductions || ""}
+                    onChange={(e) => handleFormChange('deductions', e.target.value)}
                     className="w-full border px-3 py-2 rounded-lg"
                   />
                 </div>
@@ -844,10 +879,9 @@ const Payroll = () => {
                   </label>
                   <input
                     type="number"
-                    value={form.netSalary}
-                    onChange={(e) =>
-                      setForm({ ...form, netSalary: e.target.value })
-                    }
+                    step="0.01"
+                    value={form.netSalary || ""}
+                    onChange={(e) => handleFormChange('netSalary', e.target.value)}
                     className="w-full border px-3 py-2 rounded-lg bg-gray-100"
                     disabled
                   />
@@ -857,10 +891,8 @@ const Payroll = () => {
                     Payment Method
                   </label>
                   <select
-                    value={form.paymentMethod}
-                    onChange={(e) =>
-                      setForm({ ...form, paymentMethod: e.target.value })
-                    }
+                    value={form.paymentMethod || ""}
+                    onChange={(e) => handleFormChange('paymentMethod', e.target.value)}
                     className="w-full border px-3 py-2 rounded-lg"
                   >
                     <option value="cash">Cash</option>
@@ -874,10 +906,8 @@ const Payroll = () => {
                   </label>
                   <input
                     type="text"
-                    value={form.bankAccount}
-                    onChange={(e) =>
-                      setForm({ ...form, bankAccount: e.target.value })
-                    }
+                    value={form.bankAccount || ""}
+                    onChange={(e) => handleFormChange('bankAccount', e.target.value)}
                     className="w-full border px-3 py-2 rounded-lg"
                   />
                 </div>
@@ -890,9 +920,7 @@ const Payroll = () => {
                       form.paymentDate ? new Date(form.paymentDate) : null
                     }
                     onChange={(date) =>
-                      date
-                        ? setForm({ ...form, paymentDate: date.toISOString() })
-                        : null
+                      handleFormChange('paymentDate', date ? date.toISOString() : null)
                     }
                     dateFormat="yyyy-MM-dd"
                     placeholderText="Select payment date"
@@ -902,10 +930,8 @@ const Payroll = () => {
                 <div>
                   <label className="block text-sm font-medium">Status</label>
                   <select
-                    value={form.status}
-                    onChange={(e) =>
-                      setForm({ ...form, status: e.target.value })
-                    }
+                    value={form.status || "pending"}
+                    onChange={(e) => handleFormChange('status', e.target.value)}
                     className="w-full border px-3 py-2 rounded-lg"
                   >
                     <option value="pending">Pending</option>
@@ -916,42 +942,37 @@ const Payroll = () => {
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium">Remarks</label>
                   <textarea
-                    value={form.remarks}
-                    onChange={(e) =>
-                      setForm({ ...form, remarks: e.target.value })
-                    }
+                    value={form.remarks || ""}
+                    onChange={(e) => handleFormChange('remarks', e.target.value)}
                     className="w-full border px-3 py-2 rounded-lg"
                     rows="3"
                   />
                 </div>
+                <div className="md:col-span-2 flex justify-end gap-3 mt-4">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditModalOpen(false)}
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+                  >
+                    Update
+                  </button>
+                </div>
               </form>
-              <div className="mt-6 flex justify-end gap-3">
-                <button
-                  onClick={() => setIsEditModalOpen(false)}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  onClick={handleUpdatePayroll}
-                  className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
-                >
-                  Update
-                </button>
-              </div>
             </div>
           </div>,
           document.body
         )}
 
+      {/* View Payroll Modal */}
       {isViewModalOpen &&
         ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            <div
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsOpen(false)}
-            />
+          <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50">
             <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
               <button
                 onClick={() => setIsViewModalOpen(false)}

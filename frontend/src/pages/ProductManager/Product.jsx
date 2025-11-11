@@ -204,11 +204,30 @@ const Product = () => {
     [currentProducts]
   );
 
+  // ADDED: Import click handler with supplier validation
+  const handleImportClick = () => {
+    if (!suppliers.length) {
+      showToast(
+        "error",
+        "No suppliers found. Please add at least one supplier first."
+      );
+      return;
+    }
+    setShowImportModal(true);
+  };
+
   const handleProductImport = async () => {
     if (parsedData.length === 0) {
       showToast("warning", "Please upload a valid file first");
       return;
     }
+
+    // ADDED: Double check suppliers before import
+    if (!suppliers.length) {
+      showToast("error", "No suppliers found – cannot import");
+      return;
+    }
+
     setIsUploading(true);
 
     try {
@@ -446,7 +465,7 @@ const Product = () => {
         `${backendUrl}/api/products/${form._id}`,
         form
       );
-      
+
       if (res.status === 200) {
         showToast(
           "success",
@@ -531,8 +550,9 @@ const Product = () => {
               <UserPlus size={18} /> Add New Product
             </button>
 
+            {/* CHANGED: Added handleImportClick with supplier validation */}
             <button
-              onClick={() => setShowImportModal(true)}
+              onClick={handleImportClick}
               className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
             >
               <Upload size={18} /> Import Product
@@ -573,33 +593,35 @@ const Product = () => {
             <div></div>
           )}
 
-          <div className="flex items-center gap-8">
-            <p className="text-lg font-semibold text-gray-700">
-              Total Count:{" "}
-              <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-                {filteredProducts.length}
-              </span>
-            </p>
+          {products.length > 0 && (
+            <div className="flex items-center gap-8">
+              <p className="text-lg font-semibold text-gray-700">
+                Total Count:{" "}
+                <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+                  {filteredProducts.length}
+                </span>
+              </p>
 
-            <div className="relative w-full md:w-72">
-              <Search
-                className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-                size={16}
-                onClick={handleIconClick}
-              />
-              <input
-                ref={inputRef}
-                type="text"
-                placeholder="Search..."
-                value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-              />
+              <div className="relative w-full md:w-72">
+                <Search
+                  className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                  size={16}
+                  onClick={handleIconClick}
+                />
+                <input
+                  ref={inputRef}
+                  type="text"
+                  placeholder="Search..."
+                  value={searchTerm}
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+                />
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">

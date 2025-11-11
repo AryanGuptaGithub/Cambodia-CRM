@@ -25,6 +25,7 @@ const CONFIG = {
     ENTER_BOX_QUANTITY: "Please enter box quantity",
     ENTER_QTY_PER_CARTON: "Please enter quantity per carton",
     SELECT_TYPE: "Please select adjustment type",
+    NO_PRODUCTS: "No products available for stock adjustment",
   },
 };
 
@@ -42,6 +43,7 @@ const StockAdjustment = () => {
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingAdjustment, setEditingAdjustment] = useState(null);
+  const [isProductsEmpty, setIsProductsEmpty] = useState(false);
   const inputRef = useRef(null);
 
   const [formData, setFormData] = useState({
@@ -59,6 +61,15 @@ const StockAdjustment = () => {
     fetchAdjustments();
     fetchProducts();
   }, []);
+
+  // Check if products are empty
+  useEffect(() => {
+    if (!loading && products.length === 0) {
+      setIsProductsEmpty(true);
+    } else {
+      setIsProductsEmpty(false);
+    }
+  }, [products, loading]);
 
   const fetchAdjustments = async () => {
     setLoading(true);
@@ -141,6 +152,16 @@ const StockAdjustment = () => {
 
   // Prepare product options for dropdown with current stock
   const productOptions = useMemo(() => {
+    if (isProductsEmpty) {
+      return [
+        {
+          value: "",
+          label: "No Products Available",
+          disabled: true,
+        },
+      ];
+    }
+
     return [
       { value: "", label: "Select Product" },
       ...products.map((product) => {
@@ -152,7 +173,7 @@ const StockAdjustment = () => {
         };
       }),
     ];
-  }, [products]);
+  }, [products, isProductsEmpty]);
 
   // Selection handlers
   const handleSelect = (id) => {
@@ -232,6 +253,11 @@ const StockAdjustment = () => {
   };
 
   const handleEdit = (adjustment) => {
+    if (isProductsEmpty) {
+      showToast("error", CONFIG.MESSAGES.NO_PRODUCTS);
+      return;
+    }
+    
     setEditingAdjustment(adjustment);
     setFormData({
       product: adjustment.productId?._id || adjustment.productId,
@@ -337,6 +363,11 @@ const StockAdjustment = () => {
 
   const handleModalSubmit = async (e) => {
     e.preventDefault();
+
+    if (isProductsEmpty) {
+      showToast("error", CONFIG.MESSAGES.NO_PRODUCTS);
+      return;
+    }
 
     // Basic validation
     if (!formData.product) {
@@ -458,11 +489,48 @@ const StockAdjustment = () => {
   return (
     <div className="p-6">
       <div className="container">
+        {/* Warning message if products are empty */}
+        {isProductsEmpty && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <svg
+                  className="h-5 w-5 text-red-400"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </div>
+              <div className="ml-3">
+                <h3 className="text-sm font-medium text-red-800">
+                  No Products Available
+                </h3>
+                <div className="mt-2 text-sm text-red-700">
+                  <p>
+                    You need to add at least one product before creating stock adjustments. 
+                    Add products in the product management section first.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
           <div className="flex gap-3 flex-wrap">
             <button
-              className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 transition-colors duration-200 cursor-pointer"
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-colors duration-200 ${
+                isProductsEmpty
+                  ? "bg-gray-400 text-white opacity-50 cursor-not-allowed"
+                  : "bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer"
+              }`}
               onClick={() => setModalVisible(true)}
+              disabled={isProductsEmpty}
             >
               <Plus size={18} /> Add New Adjustment
             </button>
@@ -476,33 +544,37 @@ const StockAdjustment = () => {
               </button>
             )}
           </div>
-
-          <div className="flex items-center gap-8">
-            <p className="text-lg font-semibold text-gray-700">
-              Total Count:{" "}
-              <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-                {filteredAdjustments.length}
-              </span>
-            </p>
-            <div className="relative w-full md:w-72">
-              <Search
-                className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-                size={16}
-                onClick={() => inputRef.current?.focus()}
-              />
-              <input
-                ref={inputRef}
-                type="text"
-                placeholder="Search by Product Name,Box Quantity....."
-                value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-              />
+          {adjustments.length > 0 && (
+            <div className="flex items-center gap-8">
+              <p className="text-lg font-semibold text-gray-700">
+                Total Count:{" "}
+                <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+                  {filteredAdjustments.length}
+                </span>
+              </p>
+              <div className="relative w-full md:w-72">
+                <Search
+                  className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                  size={16}
+                  onClick={() => inputRef.current?.focus()}
+                />
+                <input
+                  ref={inputRef}
+                  type="text"
+                  placeholder="Search by Product Name,Box Quantity....."
+                  value={searchTerm}
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  disabled={isProductsEmpty}
+                  className={`pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200 ${
+                    isProductsEmpty ? "bg-gray-100 cursor-not-allowed" : ""
+                  }`}
+                />
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
@@ -537,6 +609,7 @@ const StockAdjustment = () => {
                                 toggleSelectAll(e.target.checked)
                               }
                               className="cursor-pointer"
+                              disabled={isProductsEmpty}
                             />
                           )}
                           <span className="text-sm font-medium">
@@ -579,7 +652,12 @@ const StockAdjustment = () => {
                                 type="checkbox"
                                 checked={selectedIds.includes(adj._id)}
                                 onChange={() => toggleSelect(adj)}
-                                className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                className={`rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 ${
+                                  isProductsEmpty 
+                                    ? "cursor-not-allowed opacity-50" 
+                                    : "cursor-pointer"
+                                }`}
+                                disabled={isProductsEmpty}
                               />
                               <span className="font-medium text-left">
                                 {adj.productId?.productName || "N/A"}
@@ -612,9 +690,14 @@ const StockAdjustment = () => {
                           ) : item.id === "actions" ? (
                             <div className="flex items-center justify-center gap-3 min-w-[150px]">
                               <button
-                                className="text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                                className={`${
+                                  isProductsEmpty
+                                    ? "text-gray-400 cursor-not-allowed"
+                                    : "text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                                }`}
                                 onClick={() => handleEdit(adj)}
                                 title="Edit"
+                                disabled={isProductsEmpty}
                               >
                                 <Edit size={18} />
                               </button>
@@ -641,8 +724,12 @@ const StockAdjustment = () => {
             <div className="mt-4 p-5 flex justify-start gap-2">
               <button
                 onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-                disabled={currentPage === 1}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+                disabled={currentPage === 1 || isProductsEmpty}
+                className={`px-3 py-1 rounded hover:bg-gray-300 ${
+                  currentPage === 1 || isProductsEmpty
+                    ? "bg-gray-200 opacity-50 cursor-not-allowed"
+                    : "bg-gray-200 cursor-pointer"
+                }`}
               >
                 Prev
               </button>
@@ -658,10 +745,13 @@ const StockAdjustment = () => {
                   <button
                     key={page}
                     onClick={() => setCurrentPage(page)}
-                    className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
+                    disabled={isProductsEmpty}
+                    className={`px-3 py-1 rounded w-10 text-center transition ${
                       currentPage === page
                         ? "bg-indigo-600 text-white"
-                        : "bg-gray-200 hover:bg-gray-300"
+                        : isProductsEmpty
+                        ? "bg-gray-200 opacity-50 cursor-not-allowed"
+                        : "bg-gray-200 hover:bg-gray-300 cursor-pointer"
                     }`}
                   >
                     {page}
@@ -672,8 +762,12 @@ const StockAdjustment = () => {
                 onClick={() =>
                   setCurrentPage((prev) => Math.min(prev + 1, totalPages))
                 }
-                disabled={currentPage === totalPages}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+                disabled={currentPage === totalPages || isProductsEmpty}
+                className={`px-3 py-1 rounded hover:bg-gray-300 ${
+                  currentPage === totalPages || isProductsEmpty
+                    ? "bg-gray-200 opacity-50 cursor-not-allowed"
+                    : "bg-gray-200 cursor-pointer"
+                }`}
               >
                 Next
               </button>
@@ -706,8 +800,8 @@ const StockAdjustment = () => {
                     <CustomDropdown
                       value={formData.product}
                       onChange={(value) => handleFormChange("product", value)}
-                      disabled={!!editingAdjustment}
-                      placeholder="Select Product"
+                      disabled={!!editingAdjustment || isProductsEmpty}
+                      placeholder={isProductsEmpty ? "No Products Available" : "Select Product"}
                       options={productOptions}
                       required
                     />
@@ -722,7 +816,10 @@ const StockAdjustment = () => {
                       onChange={(e) =>
                         handleFormChange("adjustmentType", e.target.value)
                       }
-                      className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent cursor-pointer"
+                      disabled={isProductsEmpty}
+                      className={`w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
+                        isProductsEmpty ? "bg-gray-100 cursor-not-allowed" : "cursor-pointer"
+                      }`}
                       required
                     >
                       {CONFIG.ADJUSTMENT_TYPES.map((type) => (
@@ -766,7 +863,10 @@ const StockAdjustment = () => {
                       onBlur={(e) =>
                         handleNumericBlur("boxQuantity", e.target.value)
                       }
-                      className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      disabled={isProductsEmpty}
+                      className={`w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
+                        isProductsEmpty ? "bg-gray-100 cursor-not-allowed" : ""
+                      }`}
                       placeholder="Enter box quantity"
                       required
                     />
@@ -784,7 +884,10 @@ const StockAdjustment = () => {
                       handleFormChange("remarks", e.target.value)
                     }
                     rows="3"
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-vertical"
+                    disabled={isProductsEmpty}
+                    className={`w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-vertical ${
+                      isProductsEmpty ? "bg-gray-100 cursor-not-allowed" : ""
+                    }`}
                     placeholder="Enter remarks (optional)"
                   />
                 </div>
@@ -793,7 +896,12 @@ const StockAdjustment = () => {
                 <div className="flex gap-3 pt-6 mt-6 border-t border-gray-200">
                   <button
                     type="submit"
-                    className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 transition-colors duration-200 flex-1 justify-center cursor-pointer"
+                    disabled={isProductsEmpty}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors duration-200 flex-1 justify-center ${
+                      isProductsEmpty
+                        ? "bg-gray-400 text-white opacity-50 cursor-not-allowed"
+                        : "bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer"
+                    }`}
                   >
                     <Save size={16} />
                     {editingAdjustment

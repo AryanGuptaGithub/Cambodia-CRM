@@ -280,6 +280,7 @@ const InputField = React.memo(
     required = false,
     readOnly = false,
     className = "",
+    disabled = false,
     ...p
   }) => (
     <div className="flex flex-col">
@@ -293,12 +294,13 @@ const InputField = React.memo(
         value={value}
         onChange={onChange}
         placeholder={placeholder}
-        readOnly={readOnly}
+        readOnly={readOnly || disabled}
+        disabled={disabled}
         className={`border rounded-md px-3 py-2 ${className} ${
           error ? "border-red-500" : "border-gray-300"
-        } ${readOnly ? "bg-gray-200" : ""}`}
+        } ${readOnly || disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
         autoComplete="off"
-        tabIndex={readOnly ? -1 : 0}
+        tabIndex={readOnly || disabled ? -1 : 0}
         {...p}
       />
       {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
@@ -307,7 +309,7 @@ const InputField = React.memo(
 );
 
 const TextAreaField = React.memo(
-  ({ label, name, value, onChange, error, rows = 2 }) => (
+  ({ label, name, value, onChange, error, rows = 2, disabled = false }) => (
     <div className="flex flex-col">
       <label className="text-sm font-medium text-gray-700 mb-1">{label}</label>
       <textarea
@@ -315,9 +317,10 @@ const TextAreaField = React.memo(
         value={value}
         onChange={onChange}
         rows={rows}
+        disabled={disabled}
         className={`border rounded-md px-3 py-2 ${
           error ? "border-red-500" : "border-gray-300"
-        }`}
+        } ${disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
         autoComplete="off"
       />
       {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
@@ -337,6 +340,7 @@ const DatePickerField = React.memo(
     placeholder = "Select a date",
     className = "",
     maxDate,
+    disabled = false,
   }) => (
     <div className="flex flex-col">
       <label className="text-sm font-medium text-gray-700 mb-1">
@@ -353,11 +357,12 @@ const DatePickerField = React.memo(
         }}
         dateFormat="yyyy-MM-dd"
         placeholderText={placeholder}
-        readOnly={readOnly}
+        readOnly={readOnly || disabled}
+        disabled={disabled}
         maxDate={maxDate}
         className={`w-full border rounded-md px-3 py-2 ${
           error ? "border-red-500" : "border-gray-300"
-        } ${readOnly ? "bg-gray-200" : ""} ${className}`}
+        } ${readOnly || disabled ? "bg-gray-200 cursor-not-allowed" : ""} ${className}`}
         autoComplete="off"
       />
       {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
@@ -375,6 +380,7 @@ const AddReturnSale = () => {
   const [lastInvoiceNumber, setLastInvoiceNumber] = useState("");
   const [loadingSales, setLoadingSales] = useState(false);
   const [loadingSaleReturns, setLoadingSaleReturns] = useState(false);
+  const [isSalesEmpty, setIsSalesEmpty] = useState(false);
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
   const {
@@ -395,6 +401,20 @@ const AddReturnSale = () => {
   } = useReturnSaleForm();
 
   const { loading } = useInitialSaleData();
+
+  /* ───── Check if sales data is empty ───── */
+  const checkIfSalesEmpty = useCallback(() => {
+    if (!loadingSales && Array.isArray(sales) && sales.length === 0) {
+      setIsSalesEmpty(true);
+      return true;
+    }
+    setIsSalesEmpty(false);
+    return false;
+  }, [sales, loadingSales]);
+
+  useEffect(() => {
+    checkIfSalesEmpty();
+  }, [checkIfSalesEmpty]);
 
   /* ───── Get returned products for an invoice ───── */
   const getReturnedProductsForInvoice = useCallback(
@@ -437,6 +457,16 @@ const AddReturnSale = () => {
 
   /* ───── Invoice Dropdown Options (FILTERED) ───── */
   const invoiceOptions = useMemo(() => {
+    if (isSalesEmpty) {
+      return [
+        {
+          value: "",
+          label: "No Invoices Available",
+          disabled: true,
+        },
+      ];
+    }
+
     if (!Array.isArray(sales)) {
       return [{ value: "", label: "Loading invoices...", disabled: true }];
     }
@@ -464,7 +494,7 @@ const AddReturnSale = () => {
       { value: "", label: "Select Invoice Number" },
       ...uniq.map((inv) => ({ value: inv, label: inv })),
     ];
-  }, [sales, isInvoiceFullyReturned]);
+  }, [sales, isInvoiceFullyReturned, isSalesEmpty]);
 
   /* ───── Product Dropdown Options (per row) - FILTERED ───── */
   const productOptions = useMemo(() => {
@@ -479,7 +509,7 @@ const AddReturnSale = () => {
 
       const options = filteredProducts
         .filter(
-          (name) => !selected.includes(name) && !returnedProducts.has(name) // Filter out already returned products
+          (name) => !selected.includes(name) && !returnedProducts.has(name)
         )
         .map((name) => ({ value: name, label: name }));
 
@@ -568,15 +598,16 @@ const AddReturnSale = () => {
 
   const isAddReturnSaleEnabled = useMemo(
     () =>
+      !isSalesEmpty &&
       isInvoiceDataFetched &&
       areCommonFieldsFilled(form) &&
       hasAtLeastOneProduct(form.products),
-    [isInvoiceDataFetched, form, areCommonFieldsFilled, hasAtLeastOneProduct]
+    [isSalesEmpty, isInvoiceDataFetched, form, areCommonFieldsFilled, hasAtLeastOneProduct]
   );
 
   const isAddProductEnabled = useMemo(
-    () => isInvoiceDataFetched && getAvailableProductsCount() > 0,
-    [isInvoiceDataFetched, getAvailableProductsCount]
+    () => !isSalesEmpty && isInvoiceDataFetched && getAvailableProductsCount() > 0,
+    [isSalesEmpty, isInvoiceDataFetched, getAvailableProductsCount]
   );
 
   const enhancedAddProduct = useCallback(() => {
@@ -713,6 +744,11 @@ const AddReturnSale = () => {
   /* ───── Submit ───── */
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isSalesEmpty) {
+      showToast("error", "Cannot add return sale. No sales data available.");
+      return;
+    }
+
     if (!validate()) return;
 
     const validProds = form.products.filter((p) => p.productName.trim());
@@ -786,7 +822,7 @@ const AddReturnSale = () => {
           Add New Sale Return
         </h2>
         <div className="flex items-center gap-4">
-          {isInvoiceDataFetched && (
+          {!isSalesEmpty && isInvoiceDataFetched && (
             <span className="text-sm text-gray-600">
               Available products: {getAvailableProductsCount()}
             </span>
@@ -806,7 +842,39 @@ const AddReturnSale = () => {
           </button>
         </div>
       </div>
-      <SaleExcelDownload type="salesreturn" />
+
+      {/* Warning message if sales data is empty */}
+      {isSalesEmpty && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <div className="flex items-center">
+            <div className="flex-shrink-0">
+              <svg
+                className="h-5 w-5 text-red-400"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </div>
+            <div className="ml-3">
+              <h3 className="text-sm font-medium text-red-800">
+                No Sales Data Available
+              </h3>
+              <div className="mt-2 text-sm text-red-700">
+                <p>
+                  You need to add at least one sale before creating return sales. 
+                  Add sales in the sales management section first.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Common Fields */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         <SearchableDropdown
@@ -819,6 +887,7 @@ const AddReturnSale = () => {
           error={errors.invoiceNumber}
           loading={loadingSales || loadingSaleReturns}
           disabled={
+            isSalesEmpty ||
             loadingSales ||
             loadingSaleReturns ||
             (invoiceOptions.length === 1 && invoiceOptions[0].disabled)
@@ -832,6 +901,7 @@ const AddReturnSale = () => {
           error={errors.recordingDate}
           required
           maxDate={new Date()}
+          disabled={isSalesEmpty}
         />
 
         <DatePickerField
@@ -841,6 +911,7 @@ const AddReturnSale = () => {
           onChange={enhancedHandleChange}
           error={errors.invoiceDate}
           readOnly
+          disabled={isSalesEmpty}
         />
         <InputField
           label="Medical Representative Name"
@@ -849,6 +920,7 @@ const AddReturnSale = () => {
           onChange={enhancedHandleChange}
           error={errors.mrName}
           readOnly
+          disabled={isSalesEmpty}
         />
         <InputField
           label="Customer Name"
@@ -856,6 +928,7 @@ const AddReturnSale = () => {
           value={form.customerName}
           onChange={enhancedHandleChange}
           readOnly
+          disabled={isSalesEmpty}
         />
         <InputField
           label="Credit Days"
@@ -864,6 +937,7 @@ const AddReturnSale = () => {
           onChange={(e) => handleNumericInputChange(e, enhancedHandleChange)}
           type="text"
           readOnly
+          disabled={isSalesEmpty}
         />
       </div>
 
@@ -875,6 +949,7 @@ const AddReturnSale = () => {
           value={form.totalAmount}
           readOnly
           className="bg-gray-100 font-semibold"
+          disabled={isSalesEmpty}
         />
         <InputField
           label="Paid Amount"
@@ -883,12 +958,14 @@ const AddReturnSale = () => {
           value={form.paidAmount}
           onChange={(e) => handleNumericInputChange(e, enhancedHandleChange)}
           error={errors.paidAmount}
+          disabled={isSalesEmpty}
         />
         <InputField
           label="Due Amount"
           name="dueAmount"
           value={form.dueAmount}
           readOnly
+          disabled={isSalesEmpty}
         />
         <DatePickerField
           label="Due Date"
@@ -896,6 +973,7 @@ const AddReturnSale = () => {
           value={form.dueDate}
           onChange={enhancedHandleChange}
           readOnly
+          disabled={isSalesEmpty}
         />
         <DatePickerField
           label="Delivery Date"
@@ -903,6 +981,7 @@ const AddReturnSale = () => {
           value={form.deliveryDate}
           onChange={enhancedHandleChange}
           readOnly
+          disabled={isSalesEmpty}
         />
         <InputField
           label="Payment Status*"
@@ -910,6 +989,7 @@ const AddReturnSale = () => {
           value={form.paymentStatus}
           readOnly
           className="bg-blue-50"
+          disabled={isSalesEmpty}
         />
       </div>
 
@@ -928,7 +1008,7 @@ const AddReturnSale = () => {
                   placeholder="Select product"
                   required
                   error={errors[`productName_${idx}`]}
-                  disabled={!isInvoiceDataFetched}
+                  disabled={isSalesEmpty || !isInvoiceDataFetched}
                 />
               </div>
               <div className="flex gap-2 mt-5">
@@ -936,7 +1016,12 @@ const AddReturnSale = () => {
                   <button
                     type="button"
                     onClick={() => toggleView(idx)}
-                    className="text-blue-600 underline px-3 py-1 border border-blue-600 rounded"
+                    disabled={isSalesEmpty}
+                    className={`px-3 py-1 border rounded ${
+                      isSalesEmpty
+                        ? "text-gray-400 border-gray-400 cursor-not-allowed"
+                        : "text-blue-600 border-blue-600"
+                    }`}
                   >
                     {isProductExpanded(idx) ? "Hide Details" : "Show Details"}
                   </button>
@@ -945,7 +1030,12 @@ const AddReturnSale = () => {
                   <button
                     type="button"
                     onClick={() => removeProduct(idx)}
-                    className="text-red-600 underline px-3 py-1 border border-red-600 rounded"
+                    disabled={isSalesEmpty}
+                    className={`px-3 py-1 border rounded ${
+                      isSalesEmpty
+                        ? "text-gray-400 border-gray-400 cursor-not-allowed"
+                        : "text-red-600 border-red-600"
+                    }`}
                   >
                     Remove
                   </button>
@@ -968,59 +1058,85 @@ const AddReturnSale = () => {
                     }}
                     error={errors[`returnQuantity_${idx}`]}
                     required
+                    disabled={isSalesEmpty}
                   />
                   <InputField
                     label="Sales Quantity"
                     value={prod.salesQty}
                     readOnly
+                    disabled={isSalesEmpty}
                   />
                   <InputField
                     label="Bonus Quantity"
                     value={prod.bonusQty}
                     readOnly
+                    disabled={isSalesEmpty}
                   />
                   <InputField
                     label="Total Quantity"
                     value={prod.totalQty}
                     readOnly
+                    disabled={isSalesEmpty}
                   />
                   <InputField
                     label="Used Quantity"
                     value={prod.usedQty}
                     readOnly
+                    disabled={isSalesEmpty}
                   />
                   <InputField
                     label="Selling Price"
                     value={prod.sellingPrice}
                     readOnly
+                    disabled={isSalesEmpty}
                   />
-                  <InputField label="Amount" value={prod.amount} readOnly />
-                  <InputField label="Discount" value={prod.discount} readOnly />
+                  <InputField 
+                    label="Amount" 
+                    value={prod.amount} 
+                    readOnly 
+                    disabled={isSalesEmpty}
+                  />
+                  <InputField 
+                    label="Discount" 
+                    value={prod.discount} 
+                    readOnly 
+                    disabled={isSalesEmpty}
+                  />
                   <InputField
                     label="Net Selling Amount"
                     value={prod.netSellingAmount}
                     readOnly
+                    disabled={isSalesEmpty}
                   />
                   <InputField
                     label="Average Unit Price"
                     value={prod.averageUnitPrice}
                     readOnly
+                    disabled={isSalesEmpty}
                   />
-                  <InputField label="LC" value={prod.lc} readOnly />
+                  <InputField 
+                    label="LC" 
+                    value={prod.lc} 
+                    readOnly 
+                    disabled={isSalesEmpty}
+                  />
                   <InputField
                     label="Profit/Loss"
                     value={prod.profitLoss}
                     readOnly
+                    disabled={isSalesEmpty}
                   />
                   <InputField
                     label="Used Price"
                     value={prod.usedPrice}
                     readOnly
+                    disabled={isSalesEmpty}
                   />
                   <InputField
                     label="Used Amount"
                     value={prod.usedAmount}
                     readOnly
+                    disabled={isSalesEmpty}
                   />
                 </div>
               </div>
@@ -1037,6 +1153,7 @@ const AddReturnSale = () => {
           value={form.remark}
           onChange={enhancedHandleChange}
           rows={2}
+          disabled={isSalesEmpty}
         />
       </div>
 

@@ -445,58 +445,57 @@ const StockTransfer = () => {
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex flex-row justify-between items-center gap-4 mb-6">
-        {/* Tabs Section */}
-        <div className="flex gap-3">
-          {["send", "receive"].map((tab) => (
-            <button
-              key={tab}
-              onClick={() => handleTabChange(tab)}
-              className={`px-5 py-2 rounded-lg capitalize font-medium transition-colors cursor-pointer ${
-                activeTab === tab
-                  ? "bg-indigo-600 text-white shadow-md"
-                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-              }`}
-            >
-              {tab}
-            </button>
-          ))}
-        </div>
-
-        {/* Right Section - Total Count and Search */}
-        <div className="flex items-center gap-4">
-          {/* Total Count */}
-          <div className="flex items-center">
-            <p className="text-base font-semibold text-gray-700 whitespace-nowrap">
-              Total Count:{" "}
-              <span className="inline-block bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-sm font-medium">
-                {filteredStockTransfers.length}
-              </span>
-            </p>
+      {stockTransferData.length > 0 && (
+        <div className="flex flex-row justify-between items-center gap-4 mb-6">
+          <div className="flex gap-3">
+            {["send", "receive"].map((tab) => (
+              <button
+                key={tab}
+                onClick={() => handleTabChange(tab)}
+                className={`px-5 py-2 rounded-lg capitalize font-medium transition-colors cursor-pointer ${
+                  activeTab === tab
+                    ? "bg-indigo-600 text-white shadow-md"
+                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                }`}
+              >
+                {tab}
+              </button>
+            ))}
           </div>
 
-          {/* Search Input */}
-          <div className="relative w-60">
-            <Search
-              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-              size={16}
-              onClick={() => inputRef.current?.focus()}
-            />
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder="Search by Invoice or Remarks"
-              value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
-            />
+          <div className="flex items-center gap-4">
+            {/* Total Count */}
+            <div className="flex items-center">
+              <p className="text-base font-semibold text-gray-700 whitespace-nowrap">
+                Total Count:{" "}
+                <span className="inline-block bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-sm font-medium">
+                  {filteredStockTransfers.length}
+                </span>
+              </p>
+            </div>
+
+            {/* Search Input */}
+            <div className="relative w-60">
+              <Search
+                className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                size={16}
+                onClick={() => inputRef.current?.focus()}
+              />
+              <input
+                ref={inputRef}
+                type="text"
+                placeholder="Search by Invoice or Remarks"
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none"
+              />
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">

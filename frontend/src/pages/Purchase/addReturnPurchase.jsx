@@ -1,14 +1,10 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { showToast } from "../../utils/toast";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
-import {
-  fetchProducts as fetchProductsAPI,
-  fetchSuppliers as fetchSuppliersAPI,
-} from "../../pages/ProductManager/common/fetchDropdown";
 import axios from "axios";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
@@ -61,6 +57,12 @@ const useReturnForm = () => {
     suppliers: false,
     purchases: false,
   });
+  const [isPurchasesEmpty, setIsPurchasesEmpty] = useState(false);
+  const [isProductsEmpty, setIsProductsEmpty] = useState(false);
+  const [isSuppliersEmpty, setIsSuppliersEmpty] = useState(false);
+  const isPurchasesEmptyRef = useRef(false);
+  const isProductsEmptyRef = useRef(false);
+  const isSuppliersEmptyRef = useRef(false);
 
   const parseNumber = useCallback((val) => {
     if (typeof val === "number") return val;
@@ -214,7 +216,7 @@ const useReturnForm = () => {
     setShowInvoiceSuggestions(false);
   };
 
-  // CORRECTED: Handle product selection from dropdown
+  // Handle product selection from dropdown
   const handleProductChange = useCallback(
     (productId) => {
       const selectedProduct = products.find(
@@ -236,7 +238,7 @@ const useReturnForm = () => {
     [products, errors]
   );
 
-  // CORRECTED: Handle supplier selection from dropdown
+  // Handle supplier selection from dropdown
   const handleSupplierChange = useCallback(
     (supplierId) => {
       const selectedSupplier = suppliers.find(
@@ -300,45 +302,79 @@ const useReturnForm = () => {
     return Object.keys(newErrors).length === 0;
   }, [form, parseNumber]);
 
-  // CORRECTED: Fetch products with proper error handling
+  // Fetch products with proper error handling
   const fetchProducts = useCallback(async () => {
     try {
       setLoading((prev) => ({ ...prev, products: true }));
       const response = await axios.get(`${backendUrl}/api/products`);
+      const productsData = response.data || [];
 
       // Transform to SearchableDropdown format
-      const transformedProducts = response.data.map((product) => ({
+      const transformedProducts = productsData.map((product) => ({
         value: product._id,
         label: product.productName,
       }));
 
       setProducts(transformedProducts);
+
+      if (transformedProducts.length === 0) {
+        if (!isProductsEmptyRef.current) {
+          setIsProductsEmpty(true);
+          isProductsEmptyRef.current = true;
+          // showToast(
+          //   "error",
+          //   "No products found. Please add at least one product first."
+          // );
+        }
+      } else {
+        setIsProductsEmpty(false);
+        isProductsEmptyRef.current = false;
+      }
     } catch (err) {
       console.error("Error fetching products:", err);
       showToast("error", "Failed to fetch products");
       setProducts([]);
+      setIsProductsEmpty(true);
+      isProductsEmptyRef.current = true;
     } finally {
       setLoading((prev) => ({ ...prev, products: false }));
     }
   }, []);
 
-  // CORRECTED: Fetch suppliers with proper error handling
+  // Fetch suppliers with proper error handling
   const fetchSuppliers = useCallback(async () => {
     try {
       setLoading((prev) => ({ ...prev, suppliers: true }));
       const response = await axios.get(`${backendUrl}/api/suppliers`);
+      const suppliersData = response.data || [];
 
       // Transform to SearchableDropdown format
-      const transformedSuppliers = response.data.map((supplier) => ({
+      const transformedSuppliers = suppliersData.map((supplier) => ({
         value: supplier._id,
         label: supplier.supplierName || supplier.name,
       }));
 
       setSuppliers(transformedSuppliers);
+
+      if (transformedSuppliers.length === 0) {
+        if (!isSuppliersEmptyRef.current) {
+          setIsSuppliersEmpty(true);
+          isSuppliersEmptyRef.current = true;
+          // showToast(
+          //   "error",
+          //   "No suppliers found. Please add at least one supplier first."
+          // );
+        }
+      } else {
+        setIsSuppliersEmpty(false);
+        isSuppliersEmptyRef.current = false;
+      }
     } catch (err) {
       console.error("Error fetching suppliers:", err);
       showToast("error", "Failed to fetch suppliers");
       setSuppliers([]);
+      setIsSuppliersEmpty(true);
+      isSuppliersEmptyRef.current = true;
     } finally {
       setLoading((prev) => ({ ...prev, suppliers: false }));
     }
@@ -350,13 +386,30 @@ const useReturnForm = () => {
       setLoading((prev) => ({ ...prev, purchases: true }));
       const response = await axios.get(`${backendUrl}/api/purchase`);
       const purchaseData = response.data.reports || response.data || [];
+      
       setPurchases(purchaseData);
       setFilteredPurchases(purchaseData);
+
+      if (purchaseData.length === 0) {
+        if (!isPurchasesEmptyRef.current) {
+          setIsPurchasesEmpty(true);
+          isPurchasesEmptyRef.current = true;
+          // showToast(
+          //   "error",
+          //   "No purchases found. Please add at least one purchase first."
+          // );
+        }
+      } else {
+        setIsPurchasesEmpty(false);
+        isPurchasesEmptyRef.current = false;
+      }
     } catch (err) {
       console.error("Error fetching purchases:", err);
       showToast("error", "Failed to fetch purchases");
       setPurchases([]);
       setFilteredPurchases([]);
+      setIsPurchasesEmpty(true);
+      isPurchasesEmptyRef.current = true;
     } finally {
       setLoading((prev) => ({ ...prev, purchases: false }));
     }
@@ -371,6 +424,9 @@ const useReturnForm = () => {
     loading,
     showInvoiceSuggestions,
     filteredPurchases,
+    isPurchasesEmpty,
+    isProductsEmpty,
+    isSuppliersEmpty,
     handleChange,
     validate,
     updateFormField,
@@ -399,6 +455,7 @@ const InputField = React.memo(
     placeholder = "",
     required = false,
     readOnly = false,
+    disabled = false,
     className = "",
     ...props
   }) => (
@@ -414,11 +471,12 @@ const InputField = React.memo(
         onChange={onChange}
         placeholder={placeholder}
         readOnly={readOnly}
+        disabled={disabled}
         className={`w-full border px-3 py-2 rounded-lg ${className} ${
           error ? "border-red-500" : "border-gray-300"
-        } ${readOnly ? "bg-gray-100" : ""}`}
+        } ${readOnly || disabled ? "bg-gray-100 cursor-not-allowed" : ""}`}
         autoComplete="off"
-        tabIndex={readOnly ? -1 : 0}
+        tabIndex={readOnly || disabled ? -1 : 0}
         {...props}
       />
       {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
@@ -436,6 +494,7 @@ const DatePickerField = React.memo(
     error,
     required = false,
     readOnly = false,
+    disabled = false,
     placeholder = "Select a date",
     className = "",
   }) => (
@@ -450,9 +509,10 @@ const DatePickerField = React.memo(
         dateFormat="yyyy-MM-dd"
         placeholderText={placeholder}
         readOnly={readOnly}
+        disabled={disabled}
         className={`w-full border px-3 py-2 rounded-lg ${
           error ? "border-red-500" : "border-gray-300"
-        } ${readOnly ? "bg-gray-100" : ""} ${className}`}
+        } ${readOnly || disabled ? "bg-gray-100 cursor-not-allowed" : ""} ${className}`}
         autoComplete="off"
       />
       {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
@@ -471,6 +531,7 @@ const NumericInputField = React.memo(
     placeholder = "",
     required = false,
     readOnly = false,
+    disabled = false,
     className = "",
     allowDecimal = true,
   }) => {
@@ -497,9 +558,10 @@ const NumericInputField = React.memo(
           onChange={handleNumericChange}
           placeholder={placeholder}
           readOnly={readOnly}
+          disabled={disabled}
           className={`w-full border px-3 py-2 rounded-lg ${className} ${
             error ? "border-red-500" : "border-gray-300"
-          } ${readOnly ? "bg-gray-100" : ""}`}
+          } ${readOnly || disabled ? "bg-gray-100 cursor-not-allowed" : ""}`}
           autoComplete="off"
           inputMode={allowDecimal ? "decimal" : "numeric"}
         />
@@ -520,6 +582,9 @@ const AddReturnPurchase = () => {
     loading,
     showInvoiceSuggestions,
     filteredPurchases,
+    isPurchasesEmpty,
+    isProductsEmpty,
+    isSuppliersEmpty,
     handleChange,
     validate,
     updateFormField,
@@ -548,15 +613,33 @@ const AddReturnPurchase = () => {
     };
   }, []);
 
-  // CORRECTED: Memoized product options for dropdown
+  // Memoized product options for dropdown
   const productOptions = useMemo(() => {
+    if (isProductsEmpty) {
+      return [
+        {
+          value: "",
+          label: "No Products Available",
+          disabled: true,
+        },
+      ];
+    }
     return [{ value: "", label: "Select Product" }, ...products];
-  }, [products]);
+  }, [products, isProductsEmpty]);
 
-  // CORRECTED: Memoized supplier options for dropdown
+  // Memoized supplier options for dropdown
   const supplierOptions = useMemo(() => {
+    if (isSuppliersEmpty) {
+      return [
+        {
+          value: "",
+          label: "No Suppliers Available",
+          disabled: true,
+        },
+      ];
+    }
     return [{ value: "", label: "Select Supplier" }, ...suppliers];
-  }, [suppliers]);
+  }, [suppliers, isSuppliersEmpty]);
 
   useEffect(() => {
     fetchProducts();
@@ -582,6 +665,16 @@ const AddReturnPurchase = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    // Check if any required data is empty
+    if (isPurchasesEmpty || isProductsEmpty || isSuppliersEmpty) {
+      showToast(
+        "error",
+        "Cannot add purchase return. Required data is not available."
+      );
+      return;
+    }
+
     if (!validate()) return;
 
     try {
@@ -641,6 +734,9 @@ const AddReturnPurchase = () => {
     const returnAmountNum = parseFloat(form.returnAmount) || 0;
 
     return (
+      !isPurchasesEmpty &&
+      !isProductsEmpty &&
+      !isSuppliersEmpty &&
       form.invoiceNumber?.trim() &&
       form.productId &&
       form.supplierId &&
@@ -658,7 +754,7 @@ const AddReturnPurchase = () => {
       returnAmountNum >= 0 &&
       returnAmountNum <= amountNum
     );
-  }, [form]);
+  }, [form, isPurchasesEmpty, isProductsEmpty, isSuppliersEmpty]);
 
   // Calculate used quantity automatically
   useEffect(() => {
@@ -694,11 +790,53 @@ const AddReturnPurchase = () => {
     }
   };
 
+  // Check if form should be disabled
+  const isFormDisabled = isPurchasesEmpty || isProductsEmpty || isSuppliersEmpty;
+
   return (
     <div className="max-w-4xl mx-auto p-8 bg-white rounded-2xl shadow">
       <h2 className="text-2xl font-bold mb-6 text-gray-800">
         Add Purchase Return
       </h2>
+
+      {/* Warning messages if data is empty */}
+      {(isPurchasesEmpty || isProductsEmpty || isSuppliersEmpty) && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <div className="flex items-center">
+            <div className="flex-shrink-0">
+              <svg
+                className="h-5 w-5 text-red-400"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </div>
+            <div className="ml-3">
+              <h3 className="text-sm font-medium text-red-800">
+                Missing Required Data
+              </h3>
+              <div className="mt-2 text-sm text-red-700">
+                <ul className="list-disc list-inside space-y-1">
+                  {isPurchasesEmpty && (
+                    <li>No purchases found. Please add at least one purchase first.</li>
+                  )}
+                  {isProductsEmpty && (
+                    <li>No products found. Please add at least one product first.</li>
+                  )}
+                  {isSuppliersEmpty && (
+                    <li>No suppliers found. Please add at least one supplier first.</li>
+                  )}
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit}>
         {/* First Row - Basic Information */}
@@ -715,10 +853,13 @@ const AddReturnPurchase = () => {
                 value={form.invoiceNumber}
                 onChange={handleInvoiceNumberChange}
                 onFocus={() => setShowInvoiceSuggestions(true)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-600"
-                placeholder="Enter invoice number"
+                className={`w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-600 ${
+                  isFormDisabled ? "bg-gray-100 cursor-not-allowed" : ""
+                }`}
+                placeholder={isPurchasesEmpty ? "No purchases available" : "Enter invoice number"}
                 required
                 autoComplete="off"
+                disabled={isFormDisabled}
               />
               <button
                 type="button"
@@ -726,6 +867,7 @@ const AddReturnPurchase = () => {
                 onClick={() =>
                   setShowInvoiceSuggestions(!showInvoiceSuggestions)
                 }
+                disabled={isFormDisabled}
               >
                 {showInvoiceSuggestions ? (
                   <ChevronUp size={16} />
@@ -736,23 +878,33 @@ const AddReturnPurchase = () => {
             </div>
 
             {/* Invoice Suggestions Dropdown */}
-            {showInvoiceSuggestions && filteredPurchases.length > 0 && (
+            {showInvoiceSuggestions && !isPurchasesEmpty && (
               <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                {filteredPurchases.map((purchase) => (
-                  <div
-                    key={purchase._id || purchase.id}
-                    className="px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b border-gray-100 last:border-b-0"
-                    onClick={() => handleInvoiceSelect(purchase)}
-                  >
-                    <div className="font-medium text-gray-800">
-                      {purchase.invoiceNumber}
-                    </div>
-                    <div className="text-sm text-gray-600">
-                      {purchase.productName} • {purchase.supplierName} •{" "}
-                      {formatDate(purchase.invoiceDate)}
-                    </div>
+                {loading.purchases ? (
+                  <div className="px-3 py-2 text-gray-500 text-center">
+                    Loading purchases...
                   </div>
-                ))}
+                ) : filteredPurchases.length === 0 ? (
+                  <div className="px-3 py-2 text-gray-500 text-center">
+                    No matching purchases found
+                  </div>
+                ) : (
+                  filteredPurchases.map((purchase) => (
+                    <div
+                      key={purchase._id || purchase.id}
+                      className="px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                      onClick={() => handleInvoiceSelect(purchase)}
+                    >
+                      <div className="font-medium text-gray-800">
+                        {purchase.invoiceNumber}
+                      </div>
+                      <div className="text-sm text-gray-600">
+                        {purchase.productName} • {purchase.supplierName} •{" "}
+                        {formatDate(purchase.invoiceDate)}
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             )}
             {errors.invoiceNumber && (
@@ -771,6 +923,7 @@ const AddReturnPurchase = () => {
             placeholder="Enter delivery number"
             required
             readOnly
+            disabled={isFormDisabled}
           />
 
           <DatePickerField
@@ -780,33 +933,36 @@ const AddReturnPurchase = () => {
             onChange={handleDateChange}
             error={errors.recordingDate}
             required
+            disabled={isFormDisabled}
           />
         </div>
 
         {/* Second Row - Product and Supplier */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
-          {/* CORRECTED: Product Dropdown */}
+          {/* Product Dropdown */}
           <SearchableDropdown
             label="Product"
             value={form.productId}
             onChange={handleProductChange}
             options={productOptions}
-            placeholder="Select Product"
+            placeholder={isProductsEmpty ? "No Products Available" : "Select Product"}
             required={true}
             error={errors.productId}
             loading={loading.products}
+            disabled={isFormDisabled || isProductsEmpty}
           />
 
-          {/* CORRECTED: Supplier Dropdown */}
+          {/* Supplier Dropdown */}
           <SearchableDropdown
             label="Supplier"
             value={form.supplierId}
             onChange={handleSupplierChange}
             options={supplierOptions}
-            placeholder="Select Supplier"
+            placeholder={isSuppliersEmpty ? "No Suppliers Available" : "Select Supplier"}
             required={true}
             error={errors.supplierId}
             loading={loading.suppliers}
+            disabled={isFormDisabled || isSuppliersEmpty}
           />
 
           <InputField
@@ -817,6 +973,7 @@ const AddReturnPurchase = () => {
             error={errors.lcNumber}
             placeholder="Enter LC number"
             readOnly
+            disabled={isFormDisabled}
           />
         </div>
 
@@ -830,6 +987,7 @@ const AddReturnPurchase = () => {
             error={errors.invoiceDate}
             required
             readOnly
+            disabled={isFormDisabled}
           />
 
           <DatePickerField
@@ -840,6 +998,7 @@ const AddReturnPurchase = () => {
             error={errors.receivedDate}
             required
             readOnly
+            disabled={isFormDisabled}
           />
 
           <DatePickerField
@@ -849,6 +1008,7 @@ const AddReturnPurchase = () => {
             onChange={handleDateChange}
             placeholder="Select expired date"
             readOnly
+            disabled={isFormDisabled}
           />
         </div>
 
@@ -863,6 +1023,7 @@ const AddReturnPurchase = () => {
             placeholder="0"
             required
             readOnly
+            disabled={isFormDisabled}
           />
 
           <NumericInputField
@@ -873,6 +1034,7 @@ const AddReturnPurchase = () => {
             error={errors.usedQty}
             placeholder="0"
             readOnly
+            disabled={isFormDisabled}
           />
 
           <NumericInputField
@@ -883,6 +1045,7 @@ const AddReturnPurchase = () => {
             error={errors.returnQuantity}
             placeholder="0"
             required
+            disabled={isFormDisabled}
           />
         </div>
 
@@ -896,6 +1059,7 @@ const AddReturnPurchase = () => {
             error={errors.fob}
             placeholder="0.00"
             readOnly
+            disabled={isFormDisabled}
           />
 
           <NumericInputField
@@ -906,6 +1070,7 @@ const AddReturnPurchase = () => {
             error={errors.cif}
             placeholder="0.00"
             readOnly
+            disabled={isFormDisabled}
           />
 
           <div className="flex flex-col">
@@ -917,6 +1082,7 @@ const AddReturnPurchase = () => {
               value={unitPrice.toFixed(2)}
               className="w-full border px-3 py-2 rounded-lg bg-gray-100 border-gray-300"
               readOnly
+              disabled={isFormDisabled}
             />
           </div>
 
@@ -928,6 +1094,7 @@ const AddReturnPurchase = () => {
             error={errors.amount}
             placeholder="0.00"
             readOnly
+            disabled={isFormDisabled}
           />
         </div>
 
@@ -942,6 +1109,7 @@ const AddReturnPurchase = () => {
             placeholder="0.00"
             required
             readOnly
+            disabled={isFormDisabled}
           />
 
           <InputField
@@ -952,6 +1120,7 @@ const AddReturnPurchase = () => {
             error={errors.returnReason}
             placeholder="Enter return reason"
             required
+            disabled={isFormDisabled}
           />
         </div>
 
@@ -966,7 +1135,10 @@ const AddReturnPurchase = () => {
             onChange={handleChange}
             placeholder="Additional notes or comments"
             rows={3}
-            className="w-full border border-gray-300 rounded-md px-3 py-2 mt-1"
+            className={`w-full border border-gray-300 rounded-md px-3 py-2 mt-1 ${
+              isFormDisabled ? "bg-gray-100 cursor-not-allowed" : ""
+            }`}
+            disabled={isFormDisabled}
           />
         </div>
 
@@ -974,9 +1146,9 @@ const AddReturnPurchase = () => {
         <div className="flex justify-end mt-8 gap-4">
           <button
             type="submit"
-            disabled={!isFormValid}
+            disabled={!isFormValid || isFormDisabled}
             className={`px-6 py-2 rounded-lg cursor-pointer transition-colors ${
-              isFormValid
+              isFormValid && !isFormDisabled
                 ? "bg-green-600 hover:bg-green-700 text-white"
                 : "bg-gray-400 text-white opacity-50 cursor-not-allowed"
             }`}

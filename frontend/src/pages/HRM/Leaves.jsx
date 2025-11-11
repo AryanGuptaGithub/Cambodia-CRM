@@ -65,18 +65,19 @@ const Leaves = () => {
   // Calculate months of service for paid leave calculation
   const getMonthsOfService = (joinDate) => {
     if (!joinDate) return 0;
-    
+
     const join = new Date(joinDate);
     const today = new Date();
-    
+
     // Calculate difference in months
-    const months = (today.getFullYear() - join.getFullYear()) * 12 + 
-                   (today.getMonth() - join.getMonth());
-    
+    const months =
+      (today.getFullYear() - join.getFullYear()) * 12 +
+      (today.getMonth() - join.getMonth());
+
     // Only count months after 30 days (1 month) of service
     const daysInMonth = today.getDate() - join.getDate();
     const adjustedMonths = daysInMonth >= 30 ? months : Math.max(0, months - 1);
-    
+
     return Math.max(0, adjustedMonths);
   };
 
@@ -591,30 +592,32 @@ const Leaves = () => {
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-bold text-gray-800">MR List</h1>
 
-          <div className="flex items-center gap-4">
-            <p className="text-lg font-semibold text-gray-700">
-              Total Count:{" "}
-              <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">
-                {filteredMRList.length}
-              </span>
-            </p>
-            <div className="relative w-72">
-              <Search
-                className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
-                size={16}
-              />
-              <input
-                type="text"
-                placeholder="Search MRs..."
-                value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-              />
+          {mrList.length > 0 && (
+            <div className="flex items-center gap-4">
+              <p className="text-lg font-semibold text-gray-700">
+                Total Count:{" "}
+                <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">
+                  {filteredMRList.length}
+                </span>
+              </p>
+              <div className="relative w-72">
+                <Search
+                  className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
+                  size={16}
+                />
+                <input
+                  type="text"
+                  placeholder="Search MRs..."
+                  value={searchTerm}
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+                />
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -705,7 +708,9 @@ const Leaves = () => {
                       </td>
 
                       <td className="p-3 text-gray-600">
-                        {mr.date ? new Date(mr.date).toLocaleDateString() : 'N/A'}
+                        {mr.date
+                          ? new Date(mr.date).toLocaleDateString()
+                          : "N/A"}
                       </td>
 
                       <td className="p-3">

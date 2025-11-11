@@ -12,7 +12,7 @@ import SampleExcelDownloadSupplier from "../../excels/SampleExcelDownloadSuppile
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import ReactDOM from "react-dom";
-import LoadingOverlay from "../../components/Loading"
+import LoadingOverlay from "../../components/Loading";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
@@ -845,21 +845,23 @@ const Supplier = () => {
           setActiveTab={setActiveTab}
           totalSuppliers={suppliers.length}
         />
-        <div className="flex items-center gap-8">
-          <p className="text-lg font-semibold text-gray-700">
-            Total Count:{" "}
-            <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-              {filteredSuppliers.length}
-            </span>
-          </p>
-          <SearchBar
-            search={search}
-            setSearch={setSearch}
-            setCurrentPage={setCurrentPage}
-            inputRef={inputRef}
-            handleIconClick={handleIconClick}
-          />
-        </div>
+        {suppliers.length > 0 && (
+          <div className="flex items-center gap-8">
+            <p className="text-lg font-semibold text-gray-700">
+              Total Count:{" "}
+              <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+                {filteredSuppliers.length}
+              </span>
+            </p>
+            <SearchBar
+              search={search}
+              setSearch={setSearch}
+              setCurrentPage={setCurrentPage}
+              inputRef={inputRef}
+              handleIconClick={handleIconClick}
+            />
+          </div>
+        )}
       </div>
       <SupplierTable
         currentSuppliers={currentSuppliers}

@@ -176,10 +176,10 @@ const useCustomerForm = (initialCustomerCode = "") => {
           if (!isMrListEmptyRef.current) {
             setIsMrListEmpty(true);
             isMrListEmptyRef.current = true;
-            showToast(
-              "error",
-              "No Medical Representatives found. Please add at least one MR first."
-            );
+            // showToast(
+            //   "error",
+            //   "No Medical Representatives found. Please add at least one MR first."
+            // );
           }
         } else {
           setIsMrListEmpty(false);
@@ -647,7 +647,8 @@ const AddCustomer = () => {
           <button
             type="button"
             onClick={() => navigate("/masterlayout/customer")}
-            className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-3 rounded-lg cursor-pointer transition-colors text-lg font-medium transform hover:scale-105 transition-transform focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
+            className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-3 rounded-lg cursor-pointer transition-colors text-lg font-medium
+             transform hover:scale-105 transition-transform focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
           >
             Cancel
           </button>

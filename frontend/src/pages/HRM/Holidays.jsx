@@ -214,9 +214,7 @@ const Holidays = () => {
       .sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
   }, [allHolidaysForCalendar, currentMonth, currentYear]);
 
-  // Rest of your existing code remains the same until calendar functions...
-
-  // Calendar view functions - UPDATED to use allHolidaysForCalendar
+  // Calendar view functions
   const isSunday = (date) => {
     return date.getDay() === 0;
   };
@@ -291,7 +289,7 @@ const Holidays = () => {
     return holiday ? holiday.name : "";
   };
 
-  // Calendar date click - UPDATED to use allHolidaysForCalendar
+  // Calendar date click
   const handleCalendarDateClick = (date) => {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -316,10 +314,450 @@ const Holidays = () => {
     }
   };
 
-  // Rest of your existing code remains the same...
+  // Missing functions - ADD THESE
+  const handleAddButtonClick = () => {
+    setIsAddModalOpen(true);
+    setForm({
+      startDate: "",
+      endDate: "",
+      name: "",
+      description: "",
+      _id: null,
+    });
+  };
 
-  // The renderMonthlyCalendar and renderAnnualCalendar functions will now use allHolidaysForCalendar
-  // So they will show both 2025 and 2026 holidays
+  const handleIconClick = () => {
+    inputRef.current?.focus();
+    inputRef.current?.classList.add("highlight");
+    setTimeout(() => inputRef.current?.classList.remove("highlight"), 1000);
+  };
+
+  const toggleSelectAll = (checked) => {
+    if (checked) {
+      const allSelected = currentHolidays.map((h) => ({ id: h._id }));
+      setSelected(allSelected);
+    } else {
+      setSelected([]);
+    }
+  };
+
+  const toggleSelect = (holiday) => {
+    setSelected((prev) => {
+      const exists = prev.some((h) => h.id === holiday._id);
+      if (exists) {
+        return prev.filter((h) => h.id !== holiday._id);
+      } else {
+        return [...prev, { id: holiday._id }];
+      }
+    });
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selected.length === 0) return;
+
+    const confirm = await confirmDialog({
+      text: `Are you sure you want to delete <b>${selected.length}</b> holiday(s)?`,
+      icon: "warning",
+      confirmButtonText: "Yes, delete",
+      cancelButtonText: "Cancel",
+    });
+
+    if (confirm.isConfirmed) {
+      try {
+        const res = await axios.delete(`${backendUrl}/api/holidays`, {
+          data: { ids: selected.map((s) => s.id) },
+        });
+
+        if (res.status === 200) {
+          showToast("success", "Selected holidays deleted successfully");
+          fetchHolidays();
+          setSelected([]);
+        }
+      } catch (error) {
+        showToast("error", "Failed to delete selected holidays.");
+      }
+    }
+  };
+
+  const handleView = (holiday) => {
+    setForm(holiday);
+    setIsViewModalOpen(true);
+  };
+
+  const editHoliday = (holiday) => {
+    setForm(holiday);
+    setIsEditModalOpen(true);
+  };
+
+  const deleteHoliday = async (holiday) => {
+    const confirm = await confirmDialog({
+      text: `Are you sure you want to delete <b>${holiday.name}</b>?`,
+      icon: "warning",
+      confirmButtonText: "Yes, delete",
+      cancelButtonText: "Cancel",
+    });
+
+    if (confirm.isConfirmed) {
+      try {
+        const res = await axios.delete(`${backendUrl}/api/holidays/${holiday._id}`);
+        if (res.status === 200) {
+          showToast("success", `${holiday.name} deleted successfully`);
+          fetchHolidays();
+        }
+      } catch (error) {
+        showToast("error", "Failed to delete holiday.");
+      }
+    }
+  };
+
+  const handleCloseImportModal = () => {
+    setShowImportModal(false);
+    setParsedData([]);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+
+    reader.onload = (evt) => {
+      try {
+        const data = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(data, { type: "array" });
+        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+        const expectedHeaders = ["Date", "Holiday Name", "Description"];
+        let headerIdx = -1;
+
+        for (let i = 0; i < rows.length; i++) {
+          const row = rows[i].map((c) => c?.toString().trim());
+          const normalized = row.map((c) => c.toLowerCase());
+          const matchCount = expectedHeaders.filter((h) =>
+            normalized.includes(h.toLowerCase())
+          ).length;
+          if (matchCount >= 2) {
+            headerIdx = i;
+            break;
+          }
+        }
+
+        if (headerIdx === -1) {
+          showToast("error", "Header row not found in the Excel file");
+          return;
+        }
+
+        const headers = rows[headerIdx].map((h) => h?.toString().trim());
+        const dataRows = rows.slice(headerIdx + 1);
+
+        const json = dataRows.map((row) => {
+          const obj = {};
+          headers.forEach((h, i) => (obj[h] = row[i] ?? ""));
+          return obj;
+        });
+
+        const finalData = json
+          .filter((item) => item.Date && item["Holiday Name"])
+          .map((item) => ({
+            startDate: item.Date,
+            endDate: item.Date,
+            name: item["Holiday Name"],
+            description: item.Description || "",
+          }));
+
+        setParsedData(finalData);
+        showToast("success", `Found ${finalData.length} holidays to import`);
+      } catch (error) {
+        console.error("Error reading file:", error);
+        showToast("error", "Failed to process Excel file");
+      }
+    };
+
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleImport = async () => {
+    if (!parsedData.length) {
+      showToast("warning", "Please upload a file first");
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const res = await axios.post(`${backendUrl}/api/holidays/import`, parsedData);
+      if (res.status === 200) {
+        showToast("success", "Holidays imported successfully");
+        setShowImportModal(false);
+        setParsedData([]);
+        fetchHolidays();
+      }
+    } catch (err) {
+      showToast("error", "Failed to import holidays");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleStartDateChange = (date) => {
+    setForm((prev) => ({
+      ...prev,
+      startDate: date ? date.toISOString().split("T")[0] : "",
+    }));
+  };
+
+  const handleEndDateChange = (date) => {
+    setForm((prev) => ({
+      ...prev,
+      endDate: date ? date.toISOString().split("T")[0] : "",
+    }));
+  };
+
+  const handleAddHoliday = async (e) => {
+    e.preventDefault();
+    if (!form.name || !form.startDate) {
+      showToast("error", "Please fill in all required fields");
+      return;
+    }
+
+    try {
+      const payload = {
+        name: form.name,
+        startDate: form.startDate,
+        endDate: form.endDate || form.startDate,
+        description: form.description,
+      };
+
+      const res = await axios.post(`${backendUrl}/api/holidays`, payload);
+      if (res.status === 201) {
+        showToast("success", "Holiday added successfully");
+        setIsAddModalOpen(false);
+        setForm({ startDate: "", endDate: "", name: "", description: "", _id: null });
+        fetchHolidays();
+      }
+    } catch (err) {
+      showToast("error", "Failed to add holiday");
+    }
+  };
+
+  const handleUpdateHoliday = async (e) => {
+    e.preventDefault();
+    if (!form.name || !form.startDate) {
+      showToast("error", "Please fill in all required fields");
+      return;
+    }
+
+    try {
+      const payload = {
+        name: form.name,
+        startDate: form.startDate,
+        endDate: form.endDate || form.startDate,
+        description: form.description,
+      };
+
+      const res = await axios.put(`${backendUrl}/api/holidays/${form._id}`, payload);
+      if (res.status === 200) {
+        showToast("success", "Holiday updated successfully");
+        setIsEditModalOpen(false);
+        setForm({ startDate: "", endDate: "", name: "", description: "", _id: null });
+        fetchHolidays();
+      }
+    } catch (err) {
+      showToast("error", "Failed to update holiday");
+    }
+  };
+
+  // Calendar rendering functions
+  const renderMonthlyCalendar = () => {
+    const days = getDaysInMonth();
+    const monthNames = [
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"
+    ];
+    const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    return (
+      <div className="bg-white rounded-2xl shadow border border-gray-200 p-6">
+        <div className="flex justify-between items-center mb-6">
+          <button
+            onClick={prevMonth}
+            className="p-2 hover:bg-gray-100 rounded-lg cursor-pointer"
+          >
+            <ChevronLeft size={20} />
+          </button>
+          <h2 className="text-xl font-semibold">
+            {monthNames[currentMonth]} {currentYear}
+          </h2>
+          <button
+            onClick={nextMonth}
+            className="p-2 hover:bg-gray-100 rounded-lg cursor-pointer"
+          >
+            <ChevronRight size={20} />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-7 gap-1 mb-2">
+          {dayNames.map((day) => (
+            <div key={day} className="p-2 text-center font-medium text-gray-600 text-sm">
+              {day}
+            </div>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-7 gap-1">
+          {days.map((date, index) => {
+            if (!date) {
+              return <div key={`empty-${index}`} className="p-2" />;
+            }
+
+            const isCurrentMonth = date.getMonth() === currentMonth;
+            const isToday = date.toDateString() === today.toDateString();
+            const dateString = date.toISOString().split("T")[0];
+            const isHolidayDate = isHoliday(date);
+            const isSundayDate = isSunday(date);
+            const holidayName = getHolidayName(dateString);
+
+            let bgColor = "bg-white";
+            let borderColor = "border-gray-200";
+            let textColor = "text-gray-700";
+
+            if (isSundayDate) {
+              bgColor = "bg-gray-400";
+              borderColor = "border-gray-500";
+              textColor = "text-white";
+            } else if (isHolidayDate) {
+              bgColor = "bg-red-500";
+              borderColor = "border-red-600";
+              textColor = "text-white";
+            } else if (isToday) {
+              bgColor = "bg-blue-50";
+              borderColor = "border-blue-500";
+            } else if (!isCurrentMonth) {
+              bgColor = "bg-gray-50";
+              textColor = "text-gray-400";
+            }
+
+            return (
+              <div
+                key={dateString}
+                onClick={() => handleCalendarDateClick(date)}
+                className={`min-h-[80px] p-2 border-2 rounded-lg cursor-pointer transition-all hover:shadow-md ${bgColor} ${borderColor} ${textColor} ${
+                  !isCurrentMonth ? "opacity-50" : ""
+                }`}
+              >
+                <div className="flex justify-between items-start">
+                  <span className={`text-sm font-medium ${isSundayDate || isHolidayDate ? "text-white" : "text-gray-900"}`}>
+                    {date.getDate()}
+                  </span>
+                </div>
+                {isHolidayDate && holidayName && (
+                  <div className="mt-1">
+                    <span className="text-xs font-medium truncate block">
+                      {holidayName}
+                    </span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const renderAnnualCalendar = () => {
+    const monthNames = [
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"
+    ];
+
+    return (
+      <div className="bg-white rounded-2xl shadow border border-gray-200 p-6">
+        <div className="flex justify-between items-center mb-6">
+          <button
+            onClick={prevYear}
+            className="p-2 hover:bg-gray-100 rounded-lg cursor-pointer"
+          >
+            <ChevronLeft size={20} />
+          </button>
+          <h2 className="text-xl font-semibold">{currentYear}</h2>
+          <button
+            onClick={nextYear}
+            className="p-2 hover:bg-gray-100 rounded-lg cursor-pointer"
+          >
+            <ChevronRight size={20} />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {monthNames.map((month, monthIndex) => {
+            const monthHolidays = currentYearFilteredHolidays.filter(
+              (holiday) => new Date(holiday.startDate).getMonth() === monthIndex
+            );
+
+            return (
+              <div key={month} className="border rounded-lg p-4">
+                <h3 className="font-semibold text-lg mb-3">{month}</h3>
+                {monthHolidays.length > 0 ? (
+                  <div className="space-y-2">
+                    {monthHolidays.map((holiday, index) => (
+                      <div
+                        key={index}
+                        className="flex items-center justify-between p-2 bg-red-50 rounded border border-red-200"
+                      >
+                        <span className="text-sm font-medium text-red-800">
+                          {formatDateToShort(holiday.startDate)}
+                        </span>
+                        <span className="text-sm text-red-700 capitalize">
+                          {holiday.name}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-gray-500 text-sm text-center py-4">
+                    No holidays
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  // Calculate pagination variables
+  const totalPages = Math.ceil(filteredHolidays.length / holidaysPerPage);
+  const currentHolidays = filteredHolidays.slice(
+    (currentPage - 1) * holidaysPerPage,
+    currentPage * holidaysPerPage
+  );
+
+  const getVisiblePages = (currentPage, totalPages) => {
+    const visiblePages = [];
+    const showPages = 5;
+    
+    let startPage = Math.max(1, currentPage - Math.floor(showPages / 2));
+    let endPage = Math.min(totalPages, startPage + showPages - 1);
+    
+    if (endPage - startPage + 1 < showPages) {
+      startPage = Math.max(1, endPage - showPages + 1);
+    }
+    
+    for (let i = startPage; i <= endPage; i++) {
+      visiblePages.push(i);
+    }
+    
+    return visiblePages;
+  };
+
+  const visiblePages = getVisiblePages(currentPage, totalPages);
 
   if (loading) return <div className="p-6 text-center">Loading...</div>;
   if (error) return <div className="p-6 text-red-500 text-center">{error}</div>;
@@ -360,12 +798,12 @@ const Holidays = () => {
           )}
         </div>
 
-        {!showCalendarView && (
+        {!showCalendarView &&  holidays.length > 0 && (
           <div className="flex items-center gap-8">
             <p className="text-lg font-semibold text-gray-700">
               Total Count:{" "}
               <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-                {filteredHolidays.length} ({currentYearString} only)
+                {filteredHolidays.length} ({currentYearString})
               </span>
             </p>
             <div className="relative w-full md:w-72">

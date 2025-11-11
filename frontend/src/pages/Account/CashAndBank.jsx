@@ -1927,29 +1927,31 @@ const CashAndBank = () => {
             ))}
           </div>
 
-          <div className="flex items-center gap-4 ml-4">
-            <p className="text-lg font-semibold text-gray-700 whitespace-nowrap">
-              Total Count:{" "}
-              <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-                {totalCount}
-              </span>
-            </p>
-            <div className="relative w-72">
-              <Search
-                className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-                size={16}
-                onClick={() => inputRef.current?.focus()}
-              />
-              <input
-                ref={inputRef}
-                type="text"
-                placeholder={getSearchPlaceholder()}
-                value={searchTerm}
-                onChange={handleSearchChange}
-                className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-              />
+          {currentData.length > 0 && (
+            <div className="flex items-center gap-4 ml-4">
+              <p className="text-lg font-semibold text-gray-700 whitespace-nowrap">
+                Total Count:{" "}
+                <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+                  {totalCount}
+                </span>
+              </p>
+              <div className="relative w-72">
+                <Search
+                  className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                  size={16}
+                  onClick={() => inputRef.current?.focus()}
+                />
+                <input
+                  ref={inputRef}
+                  type="text"
+                  placeholder={getSearchPlaceholder()}
+                  value={searchTerm}
+                  onChange={handleSearchChange}
+                  className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+                />
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Account Summary */}

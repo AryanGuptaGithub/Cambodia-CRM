@@ -392,21 +392,23 @@ const Expenses = () => {
           <Plus size={18} /> Add New Expense
         </button>
 
-        <div className="relative w-72">
-          <Search
-            className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-            size={16}
-            onClick={() => inputRef.current?.focus()}
-          />
-          <input
-            ref={inputRef}
-            type="text"
-            placeholder="Search by Source Account, Expense Category, or description..."
-            className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-            value={searchQuery}
-            onChange={handleSearchChange}
-          />
-        </div>
+        {currentExpenses.length > 0 && (
+          <div className="relative w-72">
+            <Search
+              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+              size={16}
+              onClick={() => inputRef.current?.focus()}
+            />
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Search by Source Account, Expense Category, or description..."
+              className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+              value={searchQuery}
+              onChange={handleSearchChange}
+            />
+          </div>
+        )}
       </div>
 
       <div className="bg-white shadow rounded-xl overflow-hidden w-full">

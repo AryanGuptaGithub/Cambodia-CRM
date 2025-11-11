@@ -5,17 +5,7 @@ import React, {
   useCallback,
   useRef,
 } from "react";
-import {
-  UserPlus,
-  Trash2,
-  Edit,
-  X,
-  Settings,
-  Eye,
-  Search,
-  ChevronDown,
-  ChevronUp,
-} from "lucide-react";
+import { UserPlus, Trash2, Edit, X, Eye, Search, Settings } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { formatDateToReadable } from "../../utils/dateUtil";
 import ReactDOM from "react-dom";
@@ -164,8 +154,10 @@ const PurchaseReturn = () => {
   // NEW: States for dropdown data
   const [productOptions, setProductOptions] = useState([]);
   const [supplierOptions, setSupplierOptions] = useState([]);
+  const [purchaseOptions, setPurchaseOptions] = useState([]);
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [loadingSuppliers, setLoadingSuppliers] = useState(false);
+  const [loadingPurchases, setLoadingPurchases] = useState(false);
 
   // Column configuration state
   const [isColumnModalOpen, setIsColumnModalOpen] = useState(false);
@@ -174,6 +166,13 @@ const PurchaseReturn = () => {
   const [allSelected, setAllSelected] = useState(false);
 
   const returnsPerPage = 10;
+
+  // ADDED: Validation function for products, suppliers, and purchases
+
+  // ADDED: Enhanced add new purchase return handler with validation
+  const handleAddNewPurchaseReturn = () => {
+    navigate("/purchaselayout/purchasereturn/new");
+  };
 
   // Define all available table columns
   const allFields = useMemo(
@@ -248,7 +247,7 @@ const PurchaseReturn = () => {
         name: "Return Amount ($)",
         dbName: "returnAmount",
       },
-    
+
       {
         id: "remarks",
         name: "Remarks",
@@ -324,7 +323,7 @@ const PurchaseReturn = () => {
     return chunks;
   }, [activeTab, availableColumns, removableColumns]);
 
-  // NEW: Fetch products and suppliers for dropdowns
+  // NEW: Fetch products, suppliers, and purchases for dropdowns and validation
   const fetchProducts = async () => {
     setLoadingProducts(true);
     try {
@@ -361,11 +360,38 @@ const PurchaseReturn = () => {
     }
   };
 
+  const fetchPurchases = async () => {
+    setLoadingPurchases(true);
+    try {
+      const response = await axios.get(`${backendUrl}/api/purchase`);
+      const transformedPurchases =
+        response.data.reports?.map((purchase) => ({
+          value: purchase._id,
+          label: `${purchase.invoiceNumber} - ${purchase.productName}`,
+        })) || [];
+      setPurchaseOptions(transformedPurchases);
+    } catch (err) {
+      console.error("Error fetching purchases:", err);
+      showToast("error", "Failed to fetch purchases");
+      setPurchaseOptions([]);
+    } finally {
+      setLoadingPurchases(false);
+    }
+  };
+
+  // NEW: Load dropdown data when component mounts for validation
+  useEffect(() => {
+    fetchProducts();
+    fetchSuppliers();
+    fetchPurchases();
+  }, []);
+
   // NEW: Load dropdown data when edit modal opens
   useEffect(() => {
     if (isEditModalOpen) {
       fetchProducts();
       fetchSuppliers();
+      fetchPurchases();
     }
   }, [isEditModalOpen]);
 
@@ -435,32 +461,38 @@ const PurchaseReturn = () => {
   };
 
   // CORRECTED: Handle product selection from dropdown
-  const handleProductChange = useCallback((productId) => {
-    const selectedProduct = productOptions.find(
-      (product) => product.value === productId
-    );
-    if (selectedProduct) {
-      setForm((prev) => ({
-        ...prev,
-        productId: selectedProduct.value,
-        productName: selectedProduct.label,
-      }));
-    }
-  }, [productOptions]);
+  const handleProductChange = useCallback(
+    (productId) => {
+      const selectedProduct = productOptions.find(
+        (product) => product.value === productId
+      );
+      if (selectedProduct) {
+        setForm((prev) => ({
+          ...prev,
+          productId: selectedProduct.value,
+          productName: selectedProduct.label,
+        }));
+      }
+    },
+    [productOptions]
+  );
 
   // CORRECTED: Handle supplier selection from dropdown
-  const handleSupplierChange = useCallback((supplierId) => {
-    const selectedSupplier = supplierOptions.find(
-      (supplier) => supplier.value === supplierId
-    );
-    if (selectedSupplier) {
-      setForm((prev) => ({
-        ...prev,
-        supplierId: selectedSupplier.value,
-        supplierName: selectedSupplier.label,
-      }));
-    }
-  }, [supplierOptions]);
+  const handleSupplierChange = useCallback(
+    (supplierId) => {
+      const selectedSupplier = supplierOptions.find(
+        (supplier) => supplier.value === supplierId
+      );
+      if (selectedSupplier) {
+        setForm((prev) => ({
+          ...prev,
+          supplierId: selectedSupplier.value,
+          supplierName: selectedSupplier.label,
+        }));
+      }
+    },
+    [supplierOptions]
+  );
 
   // Select return reason from suggestions
   const selectReturnReason = (reason) => {
@@ -724,9 +756,10 @@ const PurchaseReturn = () => {
       <div className="container">
         <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
           <div className="flex gap-3 items-center">
+            {/* CHANGED: Added handleAddNewPurchaseReturn with validation */}
             <button
               className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-              onClick={() => navigate("/purchaselayout/purchasereturn/new")}
+              onClick={handleAddNewPurchaseReturn}
             >
               <UserPlus size={18} /> Add New Purchase Return
             </button>
@@ -749,29 +782,31 @@ const PurchaseReturn = () => {
             </button>
           </div>
 
-          <div className="flex items-center gap-8">
-            <p className="text-lg font-semibold text-gray-700">
-              Total Count:{" "}
-              <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-                {filteredReturns.length}
-              </span>
-            </p>
-            <div className="relative w-full md:w-72">
-              <Search
-                className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-                size={16}
-                onClick={() => inputRef.current?.focus()}
-              />
-              <input
-                ref={inputRef}
-                type="text"
-                placeholder="Search invoice, delivery, product..."
-                value={searchTerm}
-                onChange={handleSearchChange}
-                className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-              />
+          {purchaseReturns.length > 0 && (
+            <div className="flex items-center gap-8">
+              <p className="text-lg font-semibold text-gray-700">
+                Total Count:{" "}
+                <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+                  {filteredReturns.length}
+                </span>
+              </p>
+              <div className="relative w-full md:w-72">
+                <Search
+                  className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                  size={16}
+                  onClick={() => inputRef.current?.focus()}
+                />
+                <input
+                  ref={inputRef}
+                  type="text"
+                  placeholder="Search invoice, delivery, product..."
+                  value={searchTerm}
+                  onChange={handleSearchChange}
+                  className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+                />
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
@@ -1115,7 +1150,6 @@ const PurchaseReturn = () => {
                     ["LC Number", "lcNumber"],
                     ["Amount", "amount"],
                     ["Return Amount", "returnAmount"],
-                    
                   ].map(([label, key]) => (
                     <div key={key}>
                       <label className="block text-sm font-medium text-gray-600">
@@ -1285,7 +1319,10 @@ const PurchaseReturn = () => {
                     <SearchableDropdown
                       value={form.productId}
                       onChange={handleProductChange}
-                      options={[{ value: "", label: "Select Product" }, ...productOptions]}
+                      options={[
+                        { value: "", label: "Select Product" },
+                        ...productOptions,
+                      ]}
                       placeholder="Select Product"
                       required={true}
                       loading={loadingProducts}
@@ -1300,7 +1337,10 @@ const PurchaseReturn = () => {
                     <SearchableDropdown
                       value={form.supplierId}
                       onChange={handleSupplierChange}
-                      options={[{ value: "", label: "Select Supplier" }, ...supplierOptions]}
+                      options={[
+                        { value: "", label: "Select Supplier" },
+                        ...supplierOptions,
+                      ]}
                       placeholder="Select Supplier"
                       required={true}
                       loading={loadingSuppliers}
@@ -1384,9 +1424,7 @@ const PurchaseReturn = () => {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium">
-                      LC
-                    </label>
+                    <label className="block text-sm font-medium">LC</label>
                     <input
                       type="text"
                       name="lcNumber"
@@ -1399,7 +1437,9 @@ const PurchaseReturn = () => {
 
                   {/* Amount Fields */}
                   <div>
-                    <label className="block text-sm font-medium">Amount ($)</label>
+                    <label className="block text-sm font-medium">
+                      Amount ($)
+                    </label>
                     <input
                       type="text"
                       name="amount"
@@ -1424,7 +1464,6 @@ const PurchaseReturn = () => {
                     />
                   </div>
 
-                
                   <div className="md:col-span-3">
                     <label className="block text-sm font-medium">Remarks</label>
                     <textarea

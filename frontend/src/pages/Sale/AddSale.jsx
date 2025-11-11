@@ -42,7 +42,7 @@ const INITIAL_FORM_STATE = {
   mrId: "",
   customerCode: "",
   customerId: "",
-  customerName: "", // Added customerName
+  customerName: "",
   paymentStatus: "",
   remark: "",
   creditDays: "",
@@ -969,6 +969,7 @@ const DatePickerField = React.memo(
     error,
     required = false,
     readOnly = false,
+    disabled = false,
     placeholder = "Select a date",
     className = "",
     maxDate = null,
@@ -978,7 +979,7 @@ const DatePickerField = React.memo(
 
     const handleDateChange = useCallback(
       (date) => {
-        if (date && !isNaN(date.getTime())) {
+        if (!disabled && date && !isNaN(date.getTime())) {
           const event = {
             target: {
               name: name,
@@ -986,17 +987,9 @@ const DatePickerField = React.memo(
             },
           };
           onChange(event);
-        } else {
-          const event = {
-            target: {
-              name: name,
-              value: "",
-            },
-          };
-          onChange(event);
         }
       },
-      [name, onChange]
+      [name, onChange, disabled]
     );
 
     // Safely parse the date value
@@ -1022,12 +1015,13 @@ const DatePickerField = React.memo(
           onChange={handleDateChange}
           dateFormat="yyyy-MM-dd"
           placeholderText={placeholder}
-          readOnly={readOnly}
+          readOnly={readOnly || disabled}
+          disabled={disabled}
           maxDate={maxDate !== null ? maxDate : today}
           minDate={minDate}
           className={`w-full border rounded-md px-3 py-2 ${
             error ? "border-red-500" : "border-gray-300"
-          } ${readOnly ? "bg-gray-200" : ""} ${className}`}
+          } ${disabled ? "bg-gray-100 cursor-not-allowed" : ""} ${readOnly ? "bg-gray-200" : ""} ${className}`}
           autoComplete="off"
         />
         {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
@@ -1057,20 +1051,25 @@ const SuggestionInput = React.memo(
     setHighlightedIndex,
     handleKeyDown,
     required = false,
+    disabled = false,
   }) => {
     const handleMouseEnter = useCallback(
       (index) => {
-        setHighlightedIndex(index);
+        if (!disabled) {
+          setHighlightedIndex(index);
+        }
       },
-      [setHighlightedIndex]
+      [setHighlightedIndex, disabled]
     );
 
     const handleClick = useCallback(
       (item) => {
-        const value = getSuggestionValue(item);
-        onSuggestionSelect && onSuggestionSelect(value);
+        if (!disabled) {
+          const value = getSuggestionValue(item);
+          onSuggestionSelect && onSuggestionSelect(value);
+        }
       },
-      [onSuggestionSelect, getSuggestionValue]
+      [onSuggestionSelect, getSuggestionValue, disabled]
     );
 
     return (
@@ -1088,13 +1087,14 @@ const SuggestionInput = React.memo(
           onKeyDown={handleKeyDown}
           onFocus={onFocus}
           onBlur={onBlur}
+          disabled={disabled}
           className={`border rounded-md px-3 py-2 ${
             error ? "border-red-500" : "border-gray-300"
-          }`}
+          } ${disabled ? "bg-gray-100 cursor-not-allowed" : ""}`}
           placeholder="Type to search..."
           autoComplete="off"
         />
-        {isOpen && suggestions.length > 0 && (
+        {isOpen && suggestions.length > 0 && !disabled && (
           <ul
             className="absolute z-10 bg-white border border-gray-300 w-full rounded-md max-h-60 overflow-auto shadow-lg"
             style={{ top: dropdownTop }}
@@ -1155,6 +1155,11 @@ const AddSale = () => {
   } = useSaleForm(customerCode);
   const { statuses, products, productNames, loading } = useInitialSaleData();
 
+  // State for showing upload message
+  const [showUploadMessage, setShowUploadMessage] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState("");
+  const [isFormDisabled, setIsFormDisabled] = useState(false);
+
   // Fetch MR and Customer lists on component mount
   useEffect(() => {
     fetchMRList();
@@ -1163,6 +1168,16 @@ const AddSale = () => {
 
   // Memoized MR options for dropdown
   const mrOptions = useMemo(() => {
+    if (mrList.length === 0 && !mrListLoading) {
+      return [
+        {
+          value: "",
+          label: "No Medical Representatives Available",
+          disabled: true,
+        },
+      ];
+    }
+
     return [
       { value: "", label: "Select Medical Representative" },
       ...mrList.map((mr) => ({
@@ -1170,10 +1185,20 @@ const AddSale = () => {
         label: `${mr.medicalRepName}`,
       })),
     ];
-  }, [mrList]);
+  }, [mrList, mrListLoading]);
 
   // Memoized Customer options for dropdown
   const customerOptions = useMemo(() => {
+    if (customerList.length === 0 && !customerListLoading) {
+      return [
+        {
+          value: "",
+          label: "No Customers Available",
+          disabled: true,
+        },
+      ];
+    }
+
     return [
       { value: "", label: "Select Customer" },
       ...customerList.map((customer) => ({
@@ -1181,7 +1206,7 @@ const AddSale = () => {
         label: `${customer.customerCode} - ${customer.name}`,
       })),
     ];
-  }, [customerList]);
+  }, [customerList, customerListLoading]);
 
   // Payment Status Suggestions
   const paymentStatusSuggestions = useSuggestions(
@@ -1193,9 +1218,42 @@ const AddSale = () => {
   // Product Suggestions using custom hook for product rows
   const productSuggestions = useProductSuggestions(form.products, productNames);
 
+  // Function to check if required data is available and set form disabled state
+  const checkRequiredData = useCallback(() => {
+    const missingFields = [];
+
+    if (productNames.length === 0) {
+      missingFields.push("product names");
+    }
+    if (mrList.length === 0 && !mrListLoading) {
+      missingFields.push("medical representatives");
+    }
+    if (customerList.length === 0 && !customerListLoading) {
+      missingFields.push("customers");
+    }
+
+    if (missingFields.length > 0) {
+      setUploadMessage(`Please upload ${missingFields.join(", ")} first`);
+      setShowUploadMessage(true);
+      setIsFormDisabled(true);
+      return false;
+    }
+
+    setShowUploadMessage(false);
+    setIsFormDisabled(false);
+    return true;
+  }, [productNames.length, mrList.length, mrListLoading, customerList.length, customerListLoading]);
+
+  // Check required data when dependencies change
+  useEffect(() => {
+    checkRequiredData();
+  }, [checkRequiredData]);
+
   // Enhanced handleChange for payment status
   const enhancedHandleChange = useCallback(
     (e) => {
+      if (isFormDisabled) return;
+
       const { name, value } = e.target;
 
       // Handle payment status input separately to allow manual selection
@@ -1237,6 +1295,7 @@ const AddSale = () => {
       updateFormField,
       form.totalAmount,
       form.paymentStatus,
+      isFormDisabled,
     ]
   );
 
@@ -1252,6 +1311,8 @@ const AddSale = () => {
   // Enhanced product change with real-time validation
   const enhancedProductChange = useCallback(
     (index, field, value) => {
+      if (isFormDisabled) return;
+
       // First update the product field
       updateProduct(index, field, value);
 
@@ -1275,59 +1336,66 @@ const AddSale = () => {
         }, 10);
       }
     },
-    [updateProduct, productSuggestions, validateProductField, products]
+    [updateProduct, productSuggestions, validateProductField, products, isFormDisabled]
   );
 
   // Handle payment status keyboard events
   const handlePaymentStatusKeyDown = useCallback(
     (e) => {
+      if (isFormDisabled) return;
       paymentStatusSuggestions.handleKeyDown(e, (value) => {
         updateFormField("paymentStatus", value);
       });
     },
-    [paymentStatusSuggestions, updateFormField]
+    [paymentStatusSuggestions, updateFormField, isFormDisabled]
   );
 
   // Handle product name keyboard events for specific index
   const handleProductNameKeyDown = useCallback(
     (index, e) => {
+      if (isFormDisabled) return;
       productSuggestions.handleKeyDown(index, e, (value) => {
         enhancedProductChange(index, "productName", value);
       });
     },
-    [productSuggestions, enhancedProductChange]
+    [productSuggestions, enhancedProductChange, isFormDisabled]
   );
 
   // Handle payment status focus
   const handlePaymentStatusFocus = useCallback(() => {
+    if (isFormDisabled) return;
     paymentStatusSuggestions.setIsOpen(true);
     paymentStatusSuggestions.setHighlightedIndex(0);
-  }, [paymentStatusSuggestions]);
+  }, [paymentStatusSuggestions, isFormDisabled]);
 
   // Handle product name focus
   const handleProductNameFocus = useCallback(
     (index) => {
+      if (isFormDisabled) return;
       productSuggestions.setIsOpen(index, true);
       productSuggestions.setDropdownTop(index);
       productSuggestions.setHighlightedIndex(index, 0);
     },
-    [productSuggestions]
+    [productSuggestions, isFormDisabled]
   );
 
   const handleProductRowHighlight = useCallback(
     (productIndex, suggestionIndex) => {
+      if (isFormDisabled) return;
       productSuggestions.setHighlightedIndex(productIndex, suggestionIndex);
     },
-    [productSuggestions]
+    [productSuggestions, isFormDisabled]
   );
 
   // Check if "Add Sale" button should be enabled
   const isAddSaleEnabled = useMemo(() => {
-    return areCommonFieldsFilled(form) && hasAtLeastOneProduct(form.products);
-  }, [form, areCommonFieldsFilled, hasAtLeastOneProduct]);
+    return areCommonFieldsFilled(form) && hasAtLeastOneProduct(form.products) && !isFormDisabled;
+  }, [form, areCommonFieldsFilled, hasAtLeastOneProduct, isFormDisabled]);
 
   // Check if "Add Product" button should be enabled - UPDATED with stock validation
   const isCurrentProductValid = useCallback(() => {
+    if (isFormDisabled) return false;
+
     const currentProduct = form.products[form.products.length - 1];
     const salesQty = currentProduct.salesQty?.toString().trim();
     const sellingPrice = currentProduct.sellingPrice?.toString().trim();
@@ -1355,10 +1423,15 @@ const AddSale = () => {
     }
 
     return true;
-  }, [form.products, products, hasStockIssue]);
+  }, [form.products, products, hasStockIssue, isFormDisabled]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    // Check if required data is available
+    if (!checkRequiredData()) {
+      return;
+    }
 
     // First validate form fields
     if (!validate(products)) {
@@ -1472,19 +1545,21 @@ const AddSale = () => {
 
   // Handle numeric input change
   const handleNumericInputChange = useCallback((e, updateFunc) => {
+    if (isFormDisabled) return;
     const value = e.target.value;
     if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
       updateFunc(e);
     }
-  }, []);
+  }, [isFormDisabled]);
 
   // Handle alphanumeric input for Invoice Number
   const handleAlphanumericInputChange = useCallback((e, updateFunc) => {
+    if (isFormDisabled) return;
     const value = e.target.value;
     if (value === "" || /^[a-zA-Z0-9\-\/\s]*$/.test(value)) {
       updateFunc(e);
     }
-  }, []);
+  }, [isFormDisabled]);
 
   if (loading) {
     return (
@@ -1498,14 +1573,43 @@ const AddSale = () => {
 
   return (
     <div className="max-w-5xl mx-auto p-6 bg-white rounded-2xl shadow">
+      {/* Upload Message Banner - CHANGED TO RED */}
+      {showUploadMessage && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <div className="flex items-center">
+            <div className="flex-shrink-0">
+              <svg
+                className="h-5 w-5 text-red-400"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </div>
+            <div className="ml-3">
+              <h3 className="text-sm font-medium text-red-800">
+                Required Data Missing
+              </h3>
+              <div className="mt-2 text-sm text-red-700">
+                <p>{uploadMessage}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold text-gray-800">Add New Sale</h2>
         <button
           type="button"
-          disabled={!isCurrentProductValid()}
+          disabled={!isCurrentProductValid() || isFormDisabled}
           onClick={addProduct}
           className={`flex items-center gap-2 px-3 py-2 rounded-lg ${
-            isCurrentProductValid()
+            isCurrentProductValid() && !isFormDisabled
               ? "bg-green-600 text-white hover:bg-green-700"
               : "bg-gray-400 text-white opacity-50 cursor-not-allowed"
           }`}
@@ -1561,7 +1665,12 @@ const AddSale = () => {
                 <button
                   type="button"
                   onClick={() => toggleView(index)}
-                  className="text-blue-600 hover:text-blue-800 font-medium"
+                  disabled={isFormDisabled}
+                  className={`font-medium ${
+                    isFormDisabled 
+                      ? "text-gray-400 cursor-not-allowed" 
+                      : "text-blue-600 hover:text-blue-800"
+                  }`}
                 >
                   {isProductExpanded(index) ? "Hide" : "View"}
                 </button>
@@ -1578,7 +1687,12 @@ const AddSale = () => {
                       <button
                         type="button"
                         onClick={() => removeProduct(index)}
-                        className="text-red-600 hover:text-red-800"
+                        disabled={isFormDisabled}
+                        className={`${
+                          isFormDisabled 
+                            ? "text-gray-400 cursor-not-allowed" 
+                            : "text-red-600 hover:text-red-800"
+                        }`}
                       >
                         <MinusSquare className="w-5 h-5" />
                       </button>
@@ -1611,16 +1725,17 @@ const AddSale = () => {
                             150
                           )
                         }
+                        disabled={isFormDisabled}
                         className={`border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 ${
                           errors[`productName_${index}`]
                             ? "border-red-500"
                             : "border-gray-300"
-                        }`}
+                        } ${isFormDisabled ? "bg-gray-100 cursor-not-allowed" : ""}`}
                         placeholder="Type to search or click to see all options"
                         autoComplete="off"
                       />
                       {productSuggestions.suggestionsList[index]?.isOpen &&
-                        productSuggestions.filteredItems[index]?.length > 0 && (
+                        productSuggestions.filteredItems[index]?.length > 0 && !isFormDisabled && (
                           <ul
                             className="absolute z-10 bg-white border border-gray-300 w-full rounded-md max-h-60 overflow-auto shadow-lg"
                             style={{
@@ -1690,6 +1805,7 @@ const AddSale = () => {
                       }}
                       error={errors[`salesQty_${index}`]}
                       required
+                      disabled={isFormDisabled}
                     />
 
                     {/* Bonus Quantity - ReadOnly and Disabled */}
@@ -1708,6 +1824,7 @@ const AddSale = () => {
                         );
                       }}
                       error={errors[`bonusQty_${index}`]}
+                      disabled={isFormDisabled}
                     />
 
                     <InputField
@@ -1725,7 +1842,7 @@ const AddSale = () => {
                         );
                       }}
                       readOnly
-                      disabled
+                      disabled={true} // Always disabled as per requirement
                       error={errors[`sellingPrice_${index}`]}
                       required
                     />
@@ -1746,6 +1863,7 @@ const AddSale = () => {
                         );
                       }}
                       error={errors[`discount_${index}`]}
+                      disabled={isFormDisabled}
                     />
 
                     <InputField
@@ -1753,7 +1871,7 @@ const AddSale = () => {
                       name={`lc_${index}`}
                       value={product.lc}
                       readOnly
-                      disabled
+                      disabled={true} // Always disabled as per requirement
                     />
 
                     {/* Calculated Fields */}
@@ -1762,35 +1880,35 @@ const AddSale = () => {
                       name={`totalQty_${index}`}
                       value={product.totalQty}
                       readOnly
-                      disabled
+                      disabled={true} // Always disabled as per requirement
                     />
                     <InputField
                       label="Amount"
                       name={`amount_${index}`}
                       value={product.amount}
                       readOnly
-                      disabled
+                      disabled={true} // Always disabled as per requirement
                     />
                     <InputField
                       label="Net Selling Amount"
                       name={`netSellingAmount_${index}`}
                       value={product.netSellingAmount}
                       readOnly
-                      disabled
+                      disabled={true} // Always disabled as per requirement
                     />
                     <InputField
                       label="Average Unit Price"
                       name={`averageUnitPrice_${index}`}
                       value={product.averageUnitPrice}
                       readOnly
-                      disabled
+                      disabled={true} // Always disabled as per requirement
                     />
                     <InputField
                       label="Profit / Loss"
                       name={`profitLoss_${index}`}
                       value={product.profitLoss}
                       readOnly
-                      disabled
+                      disabled={true} // Always disabled as per requirement
                     />
                   </div>
                 </div>
@@ -1813,6 +1931,7 @@ const AddSale = () => {
             required
             placeholder="Select recording date"
             maxDate={new Date()}
+            disabled={isFormDisabled}
           />
           <InputField
             label="Invoice Number"
@@ -1824,6 +1943,7 @@ const AddSale = () => {
             error={errors.invoiceNumber}
             required
             placeholder="Enter invoice number"
+            disabled={isFormDisabled}
           />
           <DatePickerField
             label="Invoice Date"
@@ -1834,6 +1954,7 @@ const AddSale = () => {
             required
             placeholder="Select invoice date"
             maxDate={new Date()}
+            disabled={isFormDisabled}
           />
 
           {/* Medical Representative Dropdown */}
@@ -1846,6 +1967,7 @@ const AddSale = () => {
             loading={mrListLoading}
             error={errors.mrName}
             label="Medical Representative"
+            disabled={isFormDisabled}
           />
 
           {/* Customer Dropdown */}
@@ -1858,6 +1980,7 @@ const AddSale = () => {
             loading={customerListLoading}
             error={errors.customerCode}
             label="Customer"
+            disabled={isFormDisabled}
           />
 
           <DatePickerField
@@ -1868,6 +1991,7 @@ const AddSale = () => {
             error={errors.deliveryDate}
             readOnly
             placeholder="Delivery date will be set automatically"
+            disabled={isFormDisabled}
           />
         </div>
 
@@ -1880,6 +2004,7 @@ const AddSale = () => {
             value={form.creditDays}
             onChange={(e) => handleNumericInputChange(e, enhancedHandleChange)}
             error={errors.creditDays}
+            disabled={isFormDisabled}
           />
 
           <DatePickerField
@@ -1890,6 +2015,7 @@ const AddSale = () => {
             error={errors.dueDate}
             readOnly
             placeholder="Due date will be calculated from current date + credit days"
+            disabled={isFormDisabled}
           />
 
           {/* Total Amount - ReadOnly and Disabled */}
@@ -1900,7 +2026,7 @@ const AddSale = () => {
             onChange={enhancedHandleChange}
             error={errors.totalAmount}
             readOnly
-            disabled
+            disabled={true} // Always disabled as per requirement
           />
 
           <InputField
@@ -1910,6 +2036,7 @@ const AddSale = () => {
             value={form.paidAmount}
             onChange={(e) => handleNumericInputChange(e, enhancedHandleChange)}
             error={errors.paidAmount}
+            disabled={isFormDisabled}
           />
 
           {/* Due Amount - ReadOnly and Disabled */}
@@ -1920,7 +2047,7 @@ const AddSale = () => {
             onChange={enhancedHandleChange}
             error={errors.dueAmount}
             readOnly
-            disabled
+            disabled={true} // Always disabled as per requirement
           />
 
           <SuggestionInput
@@ -1946,6 +2073,7 @@ const AddSale = () => {
             setHighlightedIndex={paymentStatusSuggestions.setHighlightedIndex}
             handleKeyDown={handlePaymentStatusKeyDown}
             required
+            disabled={isFormDisabled}
           />
 
           {/* Remarks as Textarea with 2 rows */}
@@ -1958,9 +2086,10 @@ const AddSale = () => {
               value={form.remark}
               onChange={enhancedHandleChange}
               rows={2}
+              disabled={isFormDisabled}
               className={`border rounded-md px-3 py-2 w-full ${
                 errors.remark ? "border-red-500" : "border-gray-300"
-              }`}
+              } ${isFormDisabled ? "bg-gray-100 cursor-not-allowed" : ""}`}
               placeholder="Enter remarks"
             />
             {errors.remark && (
@@ -1978,9 +2107,9 @@ const AddSale = () => {
         <div className="flex justify-end mt-6 gap-3">
           <button
             type="submit"
-            disabled={!isAddSaleEnabled}
+            disabled={!isAddSaleEnabled || isFormDisabled}
             className={`flex items-center gap-2 px-6 py-2 rounded-lg shadow transition-colors ${
-              isAddSaleEnabled
+              isAddSaleEnabled && !isFormDisabled
                 ? "bg-green-600 hover:bg-green-700 text-white cursor-pointer"
                 : "bg-gray-400 text-white opacity-50 cursor-not-allowed"
             }`}

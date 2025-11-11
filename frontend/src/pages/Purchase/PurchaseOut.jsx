@@ -29,6 +29,8 @@ const PurchaseOut = () => {
   const [showInvoiceSuggestions, setShowInvoiceSuggestions] = useState(false);
   const [filteredInvoices, setFilteredInvoices] = useState([]);
   const [paymentDate, setPaymentDate] = useState(null);
+  const [invoicesLoading, setInvoicesLoading] = useState(true);
+  const [isInvoicesEmpty, setIsInvoicesEmpty] = useState(false);
   const inputRef = useRef(null);
 
   const [newPayment, setNewPayment] = useState({
@@ -78,11 +80,26 @@ const PurchaseOut = () => {
 
   const fetchInvoices = async () => {
     try {
+      setInvoicesLoading(true);
       const response = await axios.get(`${backendUrl}/api/purchase-invoice`);
-      setInvoices(response.data || []);
+      const invoicesData = response.data || [];
+      setInvoices(invoicesData);
+
+      if (invoicesData.length === 0) {
+        setIsInvoicesEmpty(true);
+        // showToast(
+        //   "error",
+        //   "No invoices found. Please add at least one invoice first."
+        // );
+      } else {
+        setIsInvoicesEmpty(false);
+      }
     } catch (error) {
       console.error("Error fetching invoices:", error);
       showToast("error", "Failed to fetch invoices");
+      setIsInvoicesEmpty(true);
+    } finally {
+      setInvoicesLoading(false);
     }
   };
 
@@ -306,6 +323,15 @@ const PurchaseOut = () => {
   const handleSubmitPayment = async (e) => {
     e.preventDefault();
 
+    // Check if invoices are empty
+    if (isInvoicesEmpty) {
+      showToast(
+        "error",
+        "Cannot add payment. No invoices available. Please add at least one invoice first."
+      );
+      return;
+    }
+
     // Validate required fields
     if (
       !newPayment.paymentDate ||
@@ -420,14 +446,18 @@ const PurchaseOut = () => {
     return isNaN(num) ? "" : num.toFixed(2);
   };
 
+  // Check if form is disabled due to empty invoices
+  const isFormDisabled = isInvoicesEmpty;
+
   return (
     <div className="p-6">
       <div className="container">
         <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
           <div className="flex gap-3 items-center">
             <button
-              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:bg-indigo-400 disabled:cursor-not-allowed"
               onClick={handleAddNewPayment}
+              disabled={isInvoicesEmpty}
             >
               <UserPlus size={18} /> Add New Payment Out
             </button>
@@ -441,25 +471,58 @@ const PurchaseOut = () => {
               </button>
             )}
           </div>
-
-          <div className="relative w-full md:w-72">
-            <Search
-              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-              size={16}
-              onClick={() => inputRef.current?.focus()}
-            />
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder="Search payment date, invoice no, supplier, bank..."
-              value={searchTerm}
-              onChange={handleSearchChange}
-              onKeyPress={handleSearchKeyPress}
-              className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-              autoComplete="off"
-            />
-          </div>
+          {payments.length > 0 && (
+            <div className="relative w-full md:w-72">
+              <Search
+                className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                size={16}
+                onClick={() => inputRef.current?.focus()}
+              />
+              <input
+                ref={inputRef}
+                type="text"
+                placeholder="Search payment date, invoice no, supplier, bank..."
+                value={searchTerm}
+                onChange={handleSearchChange}
+                onKeyPress={handleSearchKeyPress}
+                className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+                autoComplete="off"
+              />
+            </div>
+          )}
         </div>
+
+        {/* Warning message if invoices list is empty */}
+        {isInvoicesEmpty && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <svg
+                  className="h-5 w-5 text-red-400"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </div>
+              <div className="ml-3">
+                <h3 className="text-sm font-medium text-red-800">
+                  No Invoices Available
+                </h3>
+                <div className="mt-2 text-sm text-red-700">
+                  <p>
+                    You need to add at least one invoice before creating
+                    payments. Add invoices in the purchase invoice section.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
           <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
@@ -476,12 +539,24 @@ const PurchaseOut = () => {
                     autoComplete="off"
                   />
                 </th>
-                <th className="p-3 bg-gray-100 text-sm font-medium">Invoice No</th>
-                <th className="p-3 bg-gray-100 text-sm font-medium">Payment Date</th>
-                <th className="p-3 bg-gray-100 text-sm font-medium">Invoice Date</th>
-                <th className="p-3 bg-gray-100 text-sm font-medium">Supplier Name</th>
-                <th className="p-3 bg-gray-100 text-sm font-medium">Invoice Amount($)</th>
-                <th className="p-3 bg-gray-100 text-sm font-medium">Paid Amount($)</th>
+                <th className="p-3 bg-gray-100 text-sm font-medium">
+                  Invoice No
+                </th>
+                <th className="p-3 bg-gray-100 text-sm font-medium">
+                  Payment Date
+                </th>
+                <th className="p-3 bg-gray-100 text-sm font-medium">
+                  Invoice Date
+                </th>
+                <th className="p-3 bg-gray-100 text-sm font-medium">
+                  Supplier Name
+                </th>
+                <th className="p-3 bg-gray-100 text-sm font-medium">
+                  Invoice Amount($)
+                </th>
+                <th className="p-3 bg-gray-100 text-sm font-medium">
+                  Paid Amount($)
+                </th>
                 <th className="p-3 bg-gray-100 text-sm font-medium">Bank</th>
                 <th className="p-3 bg-gray-100 text-sm font-medium">Remarks</th>
                 <th className="p-3 bg-gray-100 text-sm font-medium">Actions</th>
@@ -519,9 +594,7 @@ const PurchaseOut = () => {
                     <td className="p-3">{formatDate(payment.paymentDate)}</td>
                     <td className="p-3">{formatDate(payment.invoiceDate)}</td>
                     <td className="p-3">{payment.supplierName}</td>
-                    <td className="p-3 font-medium">
-                      {payment.invoiceAmount}
-                    </td>
+                    <td className="p-3 font-medium">{payment.invoiceAmount}</td>
                     <td className="p-3 font-semibold">
                       {payment.paidAmount || payment.amount}
                     </td>
@@ -675,6 +748,39 @@ const PurchaseOut = () => {
                 className="p-6"
                 autoComplete="off"
               >
+                {/* Warning message in modal if invoices are empty */}
+                {isInvoicesEmpty && (
+                  <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+                    <div className="flex items-center">
+                      <div className="flex-shrink-0">
+                        <svg
+                          className="h-5 w-5 text-red-400"
+                          viewBox="0 0 20 20"
+                          fill="currentColor"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                      </div>
+                      <div className="ml-3">
+                        <h3 className="text-sm font-medium text-red-800">
+                          No Invoices Available
+                        </h3>
+                        <div className="mt-2 text-sm text-red-700">
+                          <p>
+                            You need to add at least one invoice before creating
+                            payments. Add invoices in the purchase invoice
+                            section.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                   {/* Invoice No - Text Input with Suggestions */}
                   <div className="invoice-suggestions-container relative">
@@ -688,10 +794,19 @@ const PurchaseOut = () => {
                         value={newPayment.invoiceNo}
                         onChange={handleInputChange}
                         onFocus={() => setShowInvoiceSuggestions(true)}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-600"
-                        placeholder="Enter invoice number"
+                        className={`w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-600 ${
+                          isInvoicesEmpty
+                            ? "bg-gray-100 cursor-not-allowed"
+                            : ""
+                        }`}
+                        placeholder={
+                          isInvoicesEmpty
+                            ? "No invoices available"
+                            : "Enter invoice number"
+                        }
                         required
                         autoComplete="off"
+                        disabled={isInvoicesEmpty}
                       />
                       <button
                         type="button"
@@ -699,6 +814,7 @@ const PurchaseOut = () => {
                         onClick={() =>
                           setShowInvoiceSuggestions(!showInvoiceSuggestions)
                         }
+                        disabled={isInvoicesEmpty}
                       >
                         {showInvoiceSuggestions ? (
                           <ChevronUp size={16} />
@@ -709,23 +825,33 @@ const PurchaseOut = () => {
                     </div>
 
                     {/* Invoice Suggestions Dropdown */}
-                    {showInvoiceSuggestions && filteredInvoices.length > 0 && (
+                    {showInvoiceSuggestions && !isInvoicesEmpty && (
                       <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                        {filteredInvoices.map((invoice) => (
-                          <div
-                            key={invoice._id || invoice.id}
-                            className="px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b border-gray-100 last:border-b-0"
-                            onClick={() => handleInvoiceSelect(invoice)}
-                          >
-                            <div className="font-medium text-gray-800">
-                              {invoice.invoiceNumber}
-                            </div>
-                            <div className="text-sm text-gray-600">
-                              {invoice.supplierName} •{" "}
-                              {formatDate(invoice.invoiceDate)}
-                            </div>
+                        {invoicesLoading ? (
+                          <div className="px-3 py-2 text-gray-500 text-center">
+                            Loading invoices...
                           </div>
-                        ))}
+                        ) : filteredInvoices.length === 0 ? (
+                          <div className="px-3 py-2 text-gray-500 text-center">
+                            No matching invoices found
+                          </div>
+                        ) : (
+                          filteredInvoices.map((invoice) => (
+                            <div
+                              key={invoice._id || invoice.id}
+                              className="px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                              onClick={() => handleInvoiceSelect(invoice)}
+                            >
+                              <div className="font-medium text-gray-800">
+                                {invoice.invoiceNumber}
+                              </div>
+                              <div className="text-sm text-gray-600">
+                                {invoice.supplierName} •{" "}
+                                {formatDate(invoice.invoiceDate)}
+                              </div>
+                            </div>
+                          ))
+                        )}
                       </div>
                     )}
                   </div>
@@ -741,10 +867,15 @@ const PurchaseOut = () => {
                         onChange={handlePaymentDateChange}
                         dateFormat="yyyy-MM-dd"
                         placeholderText="Select payment date"
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-600 pr-10"
+                        className={`w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-600 pr-10 ${
+                          isInvoicesEmpty
+                            ? "bg-gray-100 cursor-not-allowed"
+                            : ""
+                        }`}
                         required
                         autoComplete="off"
                         showPopperArrow={false}
+                        disabled={isInvoicesEmpty}
                       />
                       <Calendar
                         className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 pointer-events-none"
@@ -808,10 +939,13 @@ const PurchaseOut = () => {
                       name="amount"
                       value={newPayment.amount}
                       onChange={handleInputChange}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                      className={`w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-600 ${
+                        isInvoicesEmpty ? "bg-gray-100 cursor-not-allowed" : ""
+                      }`}
                       placeholder="0.00"
                       required
                       autoComplete="off"
+                      disabled={isInvoicesEmpty}
                     />
                   </div>
 
@@ -825,9 +959,12 @@ const PurchaseOut = () => {
                       name="bank"
                       value={newPayment.bank}
                       onChange={handleInputChange}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                      className={`w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-600 ${
+                        isInvoicesEmpty ? "bg-gray-100 cursor-not-allowed" : ""
+                      }`}
                       placeholder="Enter bank name"
                       autoComplete="off"
+                      disabled={isInvoicesEmpty}
                     />
                   </div>
                 </div>
@@ -841,9 +978,12 @@ const PurchaseOut = () => {
                     value={newPayment.remarks}
                     onChange={handleInputChange}
                     rows="3"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-600"
+                    className={`w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-600 ${
+                      isInvoicesEmpty ? "bg-gray-100 cursor-not-allowed" : ""
+                    }`}
                     placeholder="Additional notes..."
                     autoComplete="off"
+                    disabled={isInvoicesEmpty}
                   />
                 </div>
 
@@ -858,9 +998,11 @@ const PurchaseOut = () => {
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 cursor-pointer
-                     disabled:bg-indigo-400 disabled:cursor-not-allowed"
-                    disabled={loading}
+                    className={`px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 cursor-pointer
+                     disabled:bg-indigo-400 disabled:cursor-not-allowed ${
+                       isInvoicesEmpty ? "bg-indigo-400 cursor-not-allowed" : ""
+                     }`}
+                    disabled={loading || isInvoicesEmpty}
                   >
                     {loading ? "Adding..." : "Add Payment"}
                   </button>

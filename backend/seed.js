@@ -13,6 +13,7 @@ import Zone from "./models/master/zone.js";
 import BusinessType from "./models/master/businessTypes.js";
 import ProductType from "./models/projectManger/productType.js"; 
 import ProductPackingType from "./models/projectManger/ProductPackingType.js";
+import AllowanceType from "./models/Hrm/AllowanceType.js"; 
 
 dotenv.config();
 
@@ -114,13 +115,10 @@ async function seedProvinces() {
   console.log("✅ Provinces seeded successfully");
 }
 
-
 async function seedZones() {
   try {
-    // Remove all existing zones
     await Zone.deleteMany({});
 
-    // New list of zones
     const zones = [
       { name: "271", code: "zone_271" },
       { name: "7 Makara", code: "zone_7_makara" },
@@ -290,9 +288,7 @@ async function seedZones() {
       { name: "Veng Sreng", code: "zone_veng_sreng" }
     ];
 
-    // Insert all zones
     await Zone.insertMany(zones);
-
     console.log("✅ Zones seeded successfully");
   } catch (error) {
     console.error("❌ Error seeding zones:", error);
@@ -364,10 +360,8 @@ async function seedBusinessTypes() {
 
 async function seedProductTypes() {
   try {
-    // Remove all existing product types
     await ProductType.deleteMany({});
 
-    // Define the new product types
     const productTypes = [
       { name: "Tab", code: "tab" },
       { name: "Cap", code: "cap" },
@@ -376,9 +370,7 @@ async function seedProductTypes() {
       { name: "Eye Drop", code: "eye_drop" },
     ];
 
-    // Insert the new product types
     await ProductType.insertMany(productTypes);
-
     console.log("✅ Product Types seeded successfully with new values");
   } catch (error) {
     console.error("❌ Error seeding product types:", error);
@@ -387,10 +379,8 @@ async function seedProductTypes() {
 
 async function seedProductPackingTypes() {
   try {
-    // Remove all existing product packing types
     await ProductPackingType.deleteMany({});
 
-    // Define the new packing types
     const packingTypes = [
       { name: "10x10", code: "10x10" },
       { name: "3x10", code: "3x10" },
@@ -404,15 +394,35 @@ async function seedProductPackingTypes() {
       { name: "1 Vial", code: "1_vial" },
     ];
 
-    // Insert new packing types
     await ProductPackingType.insertMany(packingTypes);
-
     console.log("✅ Product Packing Types seeded successfully with new values");
   } catch (error) {
     console.error("❌ Error seeding product packing types:", error);
   }
 }
 
+async function seedAllowanceTypes() {
+  try {
+    await AllowanceType.deleteMany({});
+
+    const allowanceTypes = [
+      { name: "House Rent Allowance", code: "house_rent_allowance" },
+      { name: "Dearness Allowance", code: "dearness_allowance" },
+      { name: "Conveyance Allowance", code: "conveyance_allowance" },
+      { name: "Medical Allowance", code: "medical_allowance" },
+      { name: "Special Allowance", code: "special_allowance" },
+      { name: "Travel Allowance", code: "travel_allowance" },
+      { name: "Bonus", code: "bonus" },
+      { name: "Overtime", code: "overtime" },
+      { name: "Incentive", code: "incentive" },
+      { name: "Other", code: "other" },
+    ];
+
+    await AllowanceType.insertMany(allowanceTypes);
+  } catch (error) {
+    console.error("❌ Error seeding allowance types:", error);
+  }
+}
 
 async function seedHTabs() {
   await HTab.deleteMany({});
@@ -1229,9 +1239,10 @@ async function runSeeders() {
     await seedProvinces();
     await seedZones(); 
     await seedBusinessTypes(); 
-    await seedProductTypes(); // Add product types seeding
-    await seedHTabs();
+    await seedProductTypes();
     await seedProductPackingTypes();
+    await seedAllowanceTypes(); // Add allowance types seeding
+    await seedHTabs();
     
     console.log("✅ All seeders completed successfully!");
   } catch (error) {

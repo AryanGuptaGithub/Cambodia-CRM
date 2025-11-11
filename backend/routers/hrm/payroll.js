@@ -1,79 +1,118 @@
 import express from "express";
 import Payroll from "../../models/Hrm/Payroll.js";
+import Staff from "../../models/staffMember/staff.js"; 
+import mongoose from "mongoose";
+
 const router = express.Router();
 
-// @desc    Get all payrolls with pagination and search
-// @route   GET /api/payrolls
-router.get('/payrolls', async (req, res) => {
+const generateNextPayrollCode = async () => {
+  const latestPayroll = await Payroll.findOne({}).sort({ createdAt: -1 });
+  let nextNumber = 1;
+  
+  if (latestPayroll && latestPayroll.payrollCode) {
+    const matches = latestPayroll.payrollCode.match(/PR-(\d+)/);
+    if (matches && matches[1]) {
+      nextNumber = parseInt(matches[1]) + 1;
+    }
+  }
+  
+  return `PR-${nextNumber.toString().padStart(4, '0')}`;
+};
+
+router.get("/payrolls", async (req, res) => {
   try {
     const {
       page = 1,
       limit = 10,
-      search = '',
-      department = '',
-      sortBy = 'createdAt',
-      sortOrder = 'desc'
+      search = "",
+      status = "",
+      period = "",
+      sortBy = "createdAt",
+      sortOrder = "desc"
     } = req.query;
 
-    // Build filter object
-    const filter = {};
+    // Convert page and limit to numbers
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
 
-    if (search) {
-      filter.$or = [
-        { employeeName: { $regex: search, $options: 'i' } },
-        { designation: { $regex: search, $options: 'i' } },
-        { department: { $regex: search, $options: 'i' } }
-      ];
+    // Build match conditions for filtering
+    const matchConditions = {};
+
+    // Status filter
+    if (status && status !== "all") {
+      matchConditions.status = status;
     }
 
-    if (department) {
-      filter.department = { $regex: department, $options: 'i' };
+    // Period filter
+    if (period) {
+      matchConditions.period = period;
+    }
+
+    // Search filter
+    if (search && search.trim() !== "") {
+      const searchRegex = new RegExp(search.trim(), "i");
+      matchConditions.$or = [
+        { payrollCode: searchRegex },
+        { employeeName: searchRegex },
+        { designation: searchRegex },
+        { department: searchRegex },
+        { paymentMethod: searchRegex }
+      ];
     }
 
     // Sort configuration
     const sort = {};
-    sort[sortBy] = sortOrder === 'desc' ? -1 : 1;
+    sort[sortBy] = sortOrder === "desc" ? -1 : 1;
 
-    // Execute query with pagination
-    const payrolls = await Payroll.find(filter)
+    // Get payrolls with population
+    const payrolls = await Payroll.find(matchConditions)
+      .populate("employeeId", "employeeName designation department")
       .sort(sort)
-      .limit(limit * 1)
-      .skip((page - 1) * limit)
+      .skip(skip)
+      .limit(limitNum)
       .lean();
 
     // Get total count for pagination
-    const total = await Payroll.countDocuments(filter);
+    const total = await Payroll.countDocuments(matchConditions);
+
+    // Get next payroll code
+    const nextPayrollCode = await generateNextPayrollCode();
 
     res.status(200).json({
       success: true,
       data: payrolls,
       pagination: {
-        currentPage: parseInt(page),
-        totalPages: Math.ceil(total / limit),
+        currentPage: pageNum,
+        totalPages: Math.ceil(total / limitNum),
         totalItems: total,
-        itemsPerPage: parseInt(limit)
-      }
+        itemsPerPage: limitNum
+      },
+      nextPayrollCode
     });
   } catch (error) {
+    console.error("❌ Error fetching payrolls:", error);
     res.status(500).json({
       success: false,
-      message: 'Server error: ' + error.message
+      message: "Failed to fetch payrolls",
+      error: error.message
     });
   }
 });
 
-// @desc    Get single payroll by ID
-// @route   GET /api/payrolls/:id
-router.get('/payrolls/:id', async (req, res) => {
+// ==================== GET SINGLE PAYROLL BY ID ====================
+router.get("/payrolls/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
-    const payroll = await Payroll.findById(id);
+    const payroll = await Payroll.findById(id)
+      .populate("employeeId", "employeeName designation department phone email")
+      .populate("createdBy", "name email");
 
     if (!payroll) {
       return res.status(404).json({
         success: false,
-        message: 'Payroll not found'
+        message: "Payroll not found"
       });
     }
 
@@ -82,217 +121,304 @@ router.get('/payrolls/:id', async (req, res) => {
       data: payroll
     });
   } catch (error) {
+    console.error("❌ Error fetching payroll:", error);
+    
+    if (error.name === "CastError") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid payroll ID"
+      });
+    }
+
     res.status(500).json({
       success: false,
-      message: 'Server error: ' + error.message
+      message: "Failed to fetch payroll",
+      error: error.message
     });
   }
 });
 
-// @desc    Create new payroll
-// @route   POST /api/payrolls
-router.post('/payrolls', async (req, res) => {
+// ==================== CREATE NEW PAYROLL ====================
+router.post("/payrolls", async (req, res) => {
   try {
     const {
-      employeeName,
-      department,
-      designation,
+      employeeId,
+      period,
       basicSalary,
       allowances,
       deductions,
+      status,
+      paymentMethod,
+      bankAccount,
+      paymentDate,
       remarks
     } = req.body;
 
     // Validate required fields
-    if (!employeeName || !department || !designation || !basicSalary) {
+    if (!employeeId || !period || !basicSalary) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide all required fields: employeeName, department, designation, basicSalary'
+        message: "Employee ID, period, and basic salary are required"
       });
     }
 
-    // Validate numeric fields
-    if (isNaN(basicSalary) || basicSalary < 0) {
+    // Validate period format (YYYY-MM)
+    const periodRegex = /^\d{4}-\d{2}$/;
+    if (!periodRegex.test(period)) {
       return res.status(400).json({
         success: false,
-        message: 'Basic salary must be a valid positive number'
+        message: "Period must be in YYYY-MM format"
       });
     }
 
-    if (allowances && (isNaN(allowances) || allowances < 0)) {
-      return res.status(400).json({
+    // Check if employee exists
+    const employee = await Staff.findById(employeeId);
+    if (!employee) {
+      return res.status(404).json({
         success: false,
-        message: 'Allowances must be a valid positive number'
+        message: "Employee not found"
       });
     }
 
-    if (deductions && (isNaN(deductions) || deductions < 0)) {
-      return res.status(400).json({
+    // Check for duplicate payroll (same employee and period)
+    const existingPayroll = await Payroll.findOne({
+      employeeId,
+      period
+    });
+
+    if (existingPayroll) {
+      return res.status(409).json({
         success: false,
-        message: 'Deductions must be a valid positive number'
+        message: "Payroll record already exists for this employee in the selected period"
       });
     }
 
-    // Calculate net salary
-    const netSalary = parseFloat(basicSalary) + parseFloat(allowances || 0) - parseFloat(deductions || 0);
+    // Validate allowances array
+    if (allowances && Array.isArray(allowances)) {
+      for (let allowance of allowances) {
+        if (!allowance.type || allowance.amount === undefined) {
+          return res.status(400).json({
+            success: false,
+            message: "Each allowance must have type and amount"
+          });
+        }
+        if (isNaN(parseFloat(allowance.amount)) || parseFloat(allowance.amount) < 0) {
+          return res.status(400).json({
+            success: false,
+            message: "Allowance amount must be a valid non-negative number"
+          });
+        }
+      }
+    }
 
-    // Validate net salary
-    if (netSalary < 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Net salary cannot be negative'
-      });
+    // Create payroll object
+    const payrollData = {
+      employeeId,
+      period,
+      basicSalary: parseFloat(basicSalary),
+      deductions: parseFloat(deductions) || 0,
+      status: status || "pending",
+      paymentMethod: paymentMethod || "bank",
+      bankAccount: bankAccount || "",
+      paymentDate: paymentDate || null,
+      remarks: remarks || "",
+      createdBy: req.user?._id // Assuming you have user authentication
+    };
+
+    // Add allowances if provided
+    if (allowances && Array.isArray(allowances)) {
+      payrollData.allowances = allowances.map(allowance => ({
+        type: allowance.type.trim(),
+        amount: parseFloat(allowance.amount)
+      }));
     }
 
     // Create payroll
-    const payroll = new Payroll({
-      employeeName,
-      department,
-      designation,
-      basicSalary: parseFloat(basicSalary),
-      allowances: parseFloat(allowances || 0),
-      deductions: parseFloat(deductions || 0),
-      netSalary,
-      remarks: remarks || ''
-    });
+    const payroll = new Payroll(payrollData);
+    await payroll.save();
 
-    const savedPayroll = await payroll.save();
+    // Populate employee details in response
+    await payroll.populate("employeeId", "employeeName designation department");
 
     res.status(201).json({
       success: true,
-      message: 'Payroll created successfully',
-      data: savedPayroll
+      message: "Payroll created successfully",
+      data: payroll
     });
+
   } catch (error) {
+    console.error("❌ Payroll creation error:", error);
+    
+    if (error.name === "ValidationError") {
+      const messages = Object.values(error.errors).map(val => val.message);
+      return res.status(400).json({
+        success: false,
+        message: "Validation error",
+        errors: messages
+      });
+    }
+    
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "Payroll record already exists for this period"
+      });
+    }
+
     res.status(500).json({
       success: false,
-      message: 'Server error: ' + error.message
+      message: "Failed to create payroll",
+      error: error.message
     });
   }
 });
 
-// @desc    Update payroll
-// @route   PUT /api/payrolls/:id
-router.put('/payrolls/:id', async (req, res) => {
+// ==================== UPDATE PAYROLL ====================
+router.put("/payrolls/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const updateData = { ...req.body };
+    const {
+      basicSalary,
+      allowances,
+      deductions,
+      status,
+      paymentMethod,
+      bankAccount,
+      paymentDate,
+      remarks,
+      enabled
+    } = req.body;
 
-    // Check if payroll exists
-    const existingPayroll = await Payroll.findById(id);
-    if (!existingPayroll) {
-      return res.status(404).json({
-        success: false,
-        message: 'Payroll not found'
-      });
-    }
-
-    // Validate numeric fields if provided
-    if (updateData.basicSalary && (isNaN(updateData.basicSalary) || updateData.basicSalary < 0)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Basic salary must be a valid positive number'
-      });
-    }
-
-    if (updateData.allowances && (isNaN(updateData.allowances) || updateData.allowances < 0)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Allowances must be a valid positive number'
-      });
-    }
-
-    if (updateData.deductions && (isNaN(updateData.deductions) || updateData.deductions < 0)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Deductions must be a valid positive number'
-      });
-    }
-
-    // Calculate net salary if salary components are updated
-    if (updateData.basicSalary || updateData.allowances || updateData.deductions) {
-      const basicSalary = updateData.basicSalary !== undefined ? parseFloat(updateData.basicSalary) : existingPayroll.basicSalary;
-      const allowances = updateData.allowances !== undefined ? parseFloat(updateData.allowances) : existingPayroll.allowances;
-      const deductions = updateData.deductions !== undefined ? parseFloat(updateData.deductions) : existingPayroll.deductions;
-      
-      const netSalary = basicSalary + allowances - deductions;
-      
-      if (netSalary < 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'Net salary cannot be negative'
-        });
-      }
-      
-      updateData.netSalary = netSalary;
-    }
-
-    const updatedPayroll = await Payroll.findByIdAndUpdate(
-      id,
-      updateData,
-      { new: true, runValidators: true }
-    );
-
-    res.status(200).json({
-      success: true,
-      message: 'Payroll updated successfully',
-      data: updatedPayroll
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Server error: ' + error.message
-    });
-  }
-});
-
-// @desc    Delete payroll
-// @route   DELETE /api/payrolls/:id
-router.delete('/payrolls/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const payroll = await Payroll.findByIdAndDelete(id);
-
+    // Find payroll
+    const payroll = await Payroll.findById(id);
     if (!payroll) {
       return res.status(404).json({
         success: false,
-        message: 'Payroll not found'
+        message: "Payroll not found"
       });
     }
 
+    // Update fields
+    if (basicSalary !== undefined) payroll.basicSalary = parseFloat(basicSalary);
+    if (deductions !== undefined) payroll.deductions = parseFloat(deductions);
+    if (status) payroll.status = status;
+    if (paymentMethod) payroll.paymentMethod = paymentMethod;
+    if (bankAccount !== undefined) payroll.bankAccount = bankAccount;
+    if (paymentDate !== undefined) payroll.paymentDate = paymentDate;
+    if (remarks !== undefined) payroll.remarks = remarks;
+    if (enabled !== undefined) payroll.enabled = enabled;
+
+    // Update allowances if provided
+    if (allowances && Array.isArray(allowances)) {
+      payroll.allowances = allowances.map(allowance => ({
+        type: allowance.type.trim(),
+        amount: parseFloat(allowance.amount)
+      }));
+    }
+
+    await payroll.save();
+    await payroll.populate("employeeId", "employeeName designation department");
+
     res.status(200).json({
       success: true,
-      message: 'Payroll deleted successfully',
-      data: { id }
+      message: "Payroll updated successfully",
+      data: payroll
     });
+
   } catch (error) {
+    console.error("❌ Error updating payroll:", error);
+    
+    if (error.name === "ValidationError") {
+      const messages = Object.values(error.errors).map(val => val.message);
+      return res.status(400).json({
+        success: false,
+        message: "Validation error",
+        errors: messages
+      });
+    }
+    
+    if (error.name === "CastError") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid payroll ID"
+      });
+    }
+
     res.status(500).json({
       success: false,
-      message: 'Server error: ' + error.message
+      message: "Failed to update payroll",
+      error: error.message
     });
   }
 });
 
-// @desc    Bulk delete payrolls
-// @route   DELETE /api/payrolls
-router.delete('/payrolls', async (req, res) => {
+// ==================== DELETE PAYROLL ====================
+router.delete("/payrolls/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const payroll = await Payroll.findById(id);
+    
+    if (!payroll) {
+      return res.status(404).json({
+        success: false,
+        message: "Payroll not found"
+      });
+    }
+
+    await Payroll.findByIdAndDelete(id);
+
+    res.status(200).json({
+      success: true,
+      message: "Payroll deleted successfully",
+      data: { id }
+    });
+
+  } catch (error) {
+    console.error("❌ Error deleting payroll:", error);
+    
+    if (error.name === "CastError") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid payroll ID"
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete payroll",
+      error: error.message
+    });
+  }
+});
+
+// ==================== BULK DELETE PAYROLLS ====================
+router.delete("/payrolls", async (req, res) => {
   try {
     const { ids } = req.body;
 
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide an array of payroll IDs to delete'
+        message: "Array of payroll IDs is required"
       });
     }
 
-    const result = await Payroll.deleteMany({ _id: { $in: ids } });
+    // Validate IDs
+    const validIds = ids.filter(id => mongoose.Types.ObjectId.isValid(id));
+    if (validIds.length !== ids.length) {
+      return res.status(400).json({
+        success: false,
+        message: "Some payroll IDs are invalid"
+      });
+    }
+
+    const result = await Payroll.deleteMany({ _id: { $in: validIds } });
 
     if (result.deletedCount === 0) {
       return res.status(404).json({
         success: false,
-        message: 'No payrolls found to delete'
+        message: "No payrolls found to delete"
       });
     }
 
@@ -301,32 +427,121 @@ router.delete('/payrolls', async (req, res) => {
       message: `${result.deletedCount} payroll(s) deleted successfully`,
       data: { deletedCount: result.deletedCount }
     });
+
   } catch (error) {
+    console.error("❌ Error deleting multiple payrolls:", error);
     res.status(500).json({
       success: false,
-      message: 'Server error: ' + error.message
+      message: "Failed to delete payrolls",
+      error: error.message
     });
   }
 });
 
-// @desc    Get payroll statistics
-// @route   GET /api/payrolls/stats
-router.get('/payrolls/stats', async (req, res) => {
+// ==================== IMPORT PAYROLLS FROM EXCEL/CSV ====================
+router.post("/payrolls/import", async (req, res) => {
+  try {
+    const payrollData = req.body;
+
+    if (!Array.isArray(payrollData) || payrollData.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Payroll data array is required"
+      });
+    }
+
+    const results = {
+      success: 0,
+      failed: 0,
+      errors: []
+    };
+
+    // Process each payroll record
+    for (let [index, data] of payrollData.entries()) {
+      try {
+        // Validate required fields
+        if (!data.employeeId || !data.period || !data.basicSalary) {
+          results.failed++;
+          results.errors.push(`Row ${index + 1}: Missing required fields`);
+          continue;
+        }
+
+        // Check if employee exists
+        const employee = await Staff.findById(data.employeeId);
+        if (!employee) {
+          results.failed++;
+          results.errors.push(`Row ${index + 1}: Employee not found`);
+          continue;
+        }
+
+        // Check for duplicate
+        const existingPayroll = await Payroll.findOne({
+          employeeId: data.employeeId,
+          period: data.period
+        });
+
+        if (existingPayroll) {
+          results.failed++;
+          results.errors.push(`Row ${index + 1}: Payroll already exists for this period`);
+          continue;
+        }
+
+        // Create payroll
+        const payroll = new Payroll({
+          employeeId: data.employeeId,
+          period: data.period,
+          basicSalary: parseFloat(data.basicSalary) || 0,
+          deductions: parseFloat(data.deductions) || 0,
+          status: data.status || "pending",
+          paymentMethod: data.paymentMethod || "bank",
+          bankAccount: data.bankAccount || "",
+          paymentDate: data.paymentDate || null,
+          remarks: data.remarks || "",
+          createdBy: req.user?._id
+        });
+
+        await payroll.save();
+        results.success++;
+
+      } catch (error) {
+        results.failed++;
+        results.errors.push(`Row ${index + 1}: ${error.message}`);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Import completed: ${results.success} successful, ${results.failed} failed`,
+      results
+    });
+
+  } catch (error) {
+    console.error("❌ Error importing payrolls:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to import payrolls",
+      error: error.message
+    });
+  }
+});
+
+// ==================== GET PAYROLL STATISTICS ====================
+router.get("/payrolls/stats", async (req, res) => {
   try {
     const stats = await Payroll.aggregate([
       {
         $group: {
           _id: null,
           totalPayrolls: { $sum: 1 },
-          totalNetSalary: { $sum: '$netSalary' },
-          totalBasicSalary: { $sum: '$basicSalary' },
-          totalAllowances: { $sum: '$allowances' },
-          totalDeductions: { $sum: '$deductions' },
-          averageNetSalary: { $avg: '$netSalary' },
+          totalNetSalary: { $sum: "$netSalary" },
+          totalBasicSalary: { $sum: "$basicSalary" },
+          totalAllowances: { $sum: "$totalAllowance" },
+          totalDeductions: { $sum: "$deductions" },
+          averageNetSalary: { $avg: "$netSalary" },
           byDepartment: {
             $push: {
-              department: '$department',
-              amount: '$netSalary'
+              department: "$department",
+              amount: "$netSalary"
             }
           }
         }
@@ -342,19 +557,19 @@ router.get('/payrolls/stats', async (req, res) => {
           departmentBreakdown: {
             $arrayToObject: {
               $map: {
-                input: '$byDepartment',
-                as: 'item',
+                input: "$byDepartment",
+                as: "item",
                 in: {
-                  k: '$$item.department',
+                  k: "$$item.department",
                   v: {
                     $reduce: {
-                      input: '$byDepartment',
+                      input: "$byDepartment",
                       initialValue: 0,
                       in: {
                         $cond: [
-                          { $eq: ['$$item.department', '$$this.department'] },
-                          { $add: ['$$value', '$$this.amount'] },
-                          '$$value'
+                          { $eq: ["$$item.department", "$$this.department"] },
+                          { $add: ["$$value", "$$this.amount"] },
+                          "$$value"
                         ]
                       }
                     }
@@ -382,9 +597,11 @@ router.get('/payrolls/stats', async (req, res) => {
       data: result
     });
   } catch (error) {
+    console.error("❌ Error fetching payroll statistics:", error);
     res.status(500).json({
       success: false,
-      message: 'Server error: ' + error.message
+      message: "Failed to fetch payroll statistics",
+      error: error.message
     });
   }
 });

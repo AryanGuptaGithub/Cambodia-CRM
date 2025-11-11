@@ -95,10 +95,10 @@ const AddProduct = () => {
 
   useEffect(() => {
     if (isSupplierListEmpty && !loadingSuppliers) {
-      showToast(
-        "error",
-        "No suppliers found. Please add at least one supplier first."
-      );
+      // showToast(
+      //   "error",
+      //   "No suppliers found. Please add at least one supplier first."
+      // );
     }
   }, [isSupplierListEmpty, loadingSuppliers]);
 

@@ -116,6 +116,43 @@ function Purchase() {
     "actions",
   ]);
 
+  // ADDED: Validation function for suppliers and products
+  const validateSuppliersAndProducts = () => {
+    if (!supplierOptions.length && !productOptions.length) {
+      showToast(
+        "error",
+        "No suppliers and products found. Please add at least one supplier and one product first."
+      );
+      return false;
+    } else if (!supplierOptions.length) {
+      showToast(
+        "error",
+        "No suppliers found. Please add at least one supplier first."
+      );
+      return false;
+    } else if (!productOptions.length) {
+      showToast(
+        "error",
+        "No products found. Please add at least one product first."
+      );
+      return false;
+    }
+    return true;
+  };
+
+  // ADDED: Enhanced import click handler with validation
+  const handleImportClick = () => {
+    if (!validateSuppliersAndProducts()) {
+      return;
+    }
+    setShowImportModal(true);
+  };
+
+  // ADDED: Enhanced add new purchase handler with validation
+  const handleAddNewPurchase = () => {
+    navigate("/purchaselayout/purchase/new");
+  };
+
   const allFields = useMemo(
     () => [
       {
@@ -288,6 +325,12 @@ function Purchase() {
       fetchSuppliers();
     }
   }, [isEditModalOpen]);
+
+  // ADDED: Fetch products and suppliers on component mount for validation
+  useEffect(() => {
+    fetchProducts();
+    fetchSuppliers();
+  }, []);
 
   const fetchProducts = async () => {
     setLoadingProducts(true);
@@ -618,6 +661,11 @@ function Purchase() {
   const handlePurchaseImport = async () => {
     if (parsedData.length === 0) {
       showToast("warning", "Please upload a valid file first");
+      return;
+    }
+
+    // ADDED: Validation before import
+    if (!validateSuppliersAndProducts()) {
       return;
     }
 
@@ -991,14 +1039,17 @@ function Purchase() {
       <div className="container">
         <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
           <div className="flex gap-3 items-center">
+            {/* CHANGED: Added handleAddNewPurchase with validation */}
             <button
               className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-              onClick={() => navigate("/purchaselayout/purchase/new")}
+              onClick={handleAddNewPurchase}
             >
               <UserPlus size={18} /> Add New Purchase
             </button>
+
+            {/* CHANGED: Added handleImportClick with validation */}
             <button
-              onClick={() => setShowImportModal(true)}
+              onClick={handleImportClick}
               className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
             >
               <Upload size={18} /> Import Purchase
@@ -1044,32 +1095,34 @@ function Purchase() {
             <div></div>
           )}
 
-          <div className="flex items-center gap-8">
-            <p className="text-lg font-semibold text-gray-700">
-              Total Count:{" "}
-              <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-                {filteredPurchases.length}
-              </span>
-            </p>
-            <div className="relative w-full md:w-72">
-              <Search
-                className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-                size={16}
-                onClick={handleIconClick}
-              />
-              <input
-                ref={inputRef}
-                type="text"
-                placeholder="Search invoice,Product Name , Received Date..."
-                value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-              />
+          {purchases.length > 0 && (
+            <div className="flex items-center gap-8">
+              <p className="text-lg font-semibold text-gray-700">
+                Total Count:{" "}
+                <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+                  {filteredPurchases.length}
+                </span>
+              </p>
+              <div className="relative w-full md:w-72">
+                <Search
+                  className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                  size={16}
+                  onClick={handleIconClick}
+                />
+                <input
+                  ref={inputRef}
+                  type="text"
+                  placeholder="Search invoice,Product Name , Received Date..."
+                  value={searchTerm}
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+                />
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Table */}
@@ -1596,7 +1649,6 @@ function Purchase() {
             document.body
           )}
 
-        {/* EDIT MODAL - CORRECTED */}
         {/* EDIT MODAL - CORRECTED */}
         {isEditModalOpen &&
           ReactDOM.createPortal(

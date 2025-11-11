@@ -1034,32 +1034,33 @@ const Attendance = () => {
           <h1 className="text-2xl font-bold text-gray-800">
             MR Attendance Records
           </h1>
+          {mrList.length > 0 && (
+            <div className="flex items-center gap-4">
+              <p className="text-lg font-semibold text-gray-700">
+                Total Count:{" "}
+                <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">
+                  {filteredMRList.length}
+                </span>
+              </p>
 
-          <div className="flex items-center gap-4">
-            <p className="text-lg font-semibold text-gray-700">
-              Total Count:{" "}
-              <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">
-                {filteredMRList.length}
-              </span>
-            </p>
-
-            <div className="relative w-72">
-              <Search
-                className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
-                size={16}
-              />
-              <input
-                type="text"
-                placeholder="Search MRs..."
-                value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-              />
+              <div className="relative w-72">
+                <Search
+                  className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
+                  size={16}
+                />
+                <input
+                  type="text"
+                  placeholder="Search MRs..."
+                  value={searchTerm}
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+                />
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -1107,16 +1108,17 @@ const Attendance = () => {
       ) : (
         /* Table View */
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-          <div className="flex justify-between items-center p-4 bg-gray-50 border-b">
-            <button
-              onClick={handleAddAttendance}
-              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg cursor-pointer"
-            >
-              <Clock size={16} />
-              Record Attendance
-            </button>
-          </div>
-
+          {mrList.length > 0 && (
+            <div className="flex justify-between items-center p-4 bg-gray-50 border-b">
+              <button
+                onClick={handleAddAttendance}
+                className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg cursor-pointer"
+              >
+                <Clock size={16} />
+                Record Attendance
+              </button>
+            </div>
+          )}
           <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
             <thead className="bg-gray-100 text-gray-700 border-b text-sm">
               <tr>

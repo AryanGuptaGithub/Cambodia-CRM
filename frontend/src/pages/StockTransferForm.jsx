@@ -271,6 +271,7 @@ const SelectField = React.memo(
     error,
     placeholder = "",
     required = false,
+    disabled = false,
     className = "",
   }) => (
     <div className="flex flex-col">
@@ -282,9 +283,10 @@ const SelectField = React.memo(
         name={name}
         value={value}
         onChange={onChange}
+        disabled={disabled}
         className={`border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
           error ? "border-red-500" : "border-gray-300"
-        } ${className}`}
+        } ${disabled ? "bg-gray-100 cursor-not-allowed" : ""} ${className}`}
       >
         <option value="">{placeholder}</option>
         {options.map((option) => (
@@ -307,6 +309,7 @@ const TextAreaField = React.memo(
     error,
     placeholder = "",
     rows = 3,
+    disabled = false,
     className = "",
   }) => (
     <div className="flex flex-col">
@@ -317,9 +320,10 @@ const TextAreaField = React.memo(
         onChange={onChange}
         placeholder={placeholder}
         rows={rows}
+        disabled={disabled}
         className={`border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
           error ? "border-red-500" : "border-gray-300"
-        } ${className}`}
+        } ${disabled ? "bg-gray-100 cursor-not-allowed" : ""} ${className}`}
       />
       {error && <p className="text-red-500 text-xs mt-1">{error}</p>}
     </div>
@@ -330,16 +334,26 @@ const TextAreaField = React.memo(
 const useProductsWithStock = () => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isProductsEmpty, setIsProductsEmpty] = useState(false);
 
   const fetchProducts = useCallback(async () => {
     try {
       setLoading(true);
       const backendUrl = import.meta.env.VITE_BACKEND_URL;
       const response = await axios.get(`${backendUrl}/api/products-with-in-stock`);
-      setProducts(response.data || []);
+      const productsData = response.data || [];
+      setProducts(productsData);
+      
+      // Check if products are empty
+      if (productsData.length === 0) {
+        setIsProductsEmpty(true);
+      } else {
+        setIsProductsEmpty(false);
+      }
     } catch (err) {
       console.error("Error fetching products:", err);
       showToast("error", "Failed to fetch products");
+      setIsProductsEmpty(true);
     } finally {
       setLoading(false);
     }
@@ -349,7 +363,7 @@ const useProductsWithStock = () => {
     fetchProducts();
   }, [fetchProducts]);
 
-  return { products, loading, refetch: fetchProducts };
+  return { products, loading, isProductsEmpty, refetch: fetchProducts };
 };
 
 const StockTransferForm = () => {
@@ -372,11 +386,24 @@ const StockTransferForm = () => {
     calculateTotals,
   } = useStockTransferForm();
 
-  const { products, loading } = useProductsWithStock();
+  const { products, loading, isProductsEmpty } = useProductsWithStock();
   const { totalExpenses, shipping, grandTotal } = calculateTotals();
+
+  // Check if form should be disabled
+  const isFormDisabled = isProductsEmpty;
 
   // Memoized options with stock information
   const productOptions = useMemo(() => {
+    if (isProductsEmpty) {
+      return [
+        {
+          value: "",
+          label: "No Products Available",
+          disabled: true,
+        },
+      ];
+    }
+
     if (!products || products.length === 0) {
       return [{ value: "", label: "Loading products..." }];
     }
@@ -397,7 +424,7 @@ const StockTransferForm = () => {
         };
       }),
     ];
-  }, [products, form.transferType]);
+  }, [products, form.transferType, isProductsEmpty]);
 
   const orderStatusOptions = useMemo(
     () => [
@@ -431,12 +458,21 @@ const StockTransferForm = () => {
 
   const handleFormChange = useCallback(
     (field, value) => {
+      if (isProductsEmpty) {
+        showToast("error", "Cannot modify form. No products available.");
+        return;
+      }
       handleSelectChange(field, value);
     },
-    [handleSelectChange]
+    [handleSelectChange, isProductsEmpty]
   );
 
   const handleAddItem = useCallback(() => {
+    if (isProductsEmpty) {
+      showToast("error", "Cannot add items. No products available.");
+      return;
+    }
+
     if (!form.product) {
       showToast("error", "Please select a product first");
       return;
@@ -457,10 +493,15 @@ const StockTransferForm = () => {
 
     addItem(newItem);
     handleFormChange("product", "");
-  }, [form.product, products, addItem, handleFormChange]);
+  }, [form.product, products, addItem, handleFormChange, isProductsEmpty]);
 
   const handleItemChange = useCallback(
     (id, field, value) => {
+      if (isProductsEmpty) {
+        showToast("error", "Cannot modify items. No products available.");
+        return;
+      }
+
       if (field === "boxQuantity" && form.transferType === "send") {
         const item = items.find(item => item.id === id);
         if (item && item.productId) {
@@ -480,12 +521,17 @@ const StockTransferForm = () => {
       
       updateItem(id, field, value);
     },
-    [updateItem, items, products, form.transferType]
+    [updateItem, items, products, form.transferType, isProductsEmpty]
   );
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     
+    if (isProductsEmpty) {
+      showToast("error", "Cannot create stock transfer. No products available.");
+      return;
+    }
+
     // Pass products to validate for stock validation
     if (!validate(products)) {
       showToast("error", "Please fix the form errors before submitting");
@@ -554,6 +600,7 @@ const StockTransferForm = () => {
 
   const isCurrentProductValid = useMemo(
     () =>
+      !isProductsEmpty &&
       form.product &&
       form.product.trim() !== "" &&
       form.shipping &&
@@ -579,6 +626,7 @@ const StockTransferForm = () => {
       form.transferType,
       form.destination,
       form.source,
+      isProductsEmpty,
     ]
   );
 
@@ -590,6 +638,38 @@ const StockTransferForm = () => {
         </h2>
       </div>
 
+      {/* Warning message if products are empty */}
+      {isProductsEmpty && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <div className="flex items-center">
+            <div className="flex-shrink-0">
+              <svg
+                className="h-5 w-5 text-red-400"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </div>
+            <div className="ml-3">
+              <h3 className="text-sm font-medium text-red-800">
+                No Products Available
+              </h3>
+              <div className="mt-2 text-sm text-red-700">
+                <p>
+                  You need to add at least one product before creating stock transfers. 
+                  Add products in the product management section first.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <form onSubmit={handleSubmit}>
         {/* Form Fields */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
@@ -600,7 +680,7 @@ const StockTransferForm = () => {
             onChange={handleChange}
             placeholder="Auto-generated"
             readOnly
-            disabled
+            disabled={isFormDisabled}
           />
           <SelectField
             label="Order Status"
@@ -611,6 +691,7 @@ const StockTransferForm = () => {
             error={errors.orderStatus}
             placeholder="Select Order Status"
             required
+            disabled={isFormDisabled}
           />
           <InputField
             label="Transfer Date"
@@ -620,6 +701,7 @@ const StockTransferForm = () => {
             onChange={handleChange}
             error={errors.transferDate}
             required
+            disabled={isFormDisabled}
           />
           <SelectField
             label="Transfer Type"
@@ -630,6 +712,7 @@ const StockTransferForm = () => {
             error={errors.transferType}
             placeholder="Select Transfer Type"
             required
+            disabled={isFormDisabled}
           />
 
           {/* Conditional Destination/Source Field */}
@@ -642,6 +725,7 @@ const StockTransferForm = () => {
               error={errors.destination}
               placeholder="Enter destination"
               required
+              disabled={isFormDisabled}
             />
           )}
 
@@ -654,6 +738,7 @@ const StockTransferForm = () => {
               error={errors.source}
               placeholder="Enter source"
               required
+              disabled={isFormDisabled}
             />
           )}
 
@@ -664,6 +749,7 @@ const StockTransferForm = () => {
             onChange={(e) => handleNumberChange("shipping", e.target.value)}
             placeholder="Enter Shipping"
             type="text"
+            disabled={isFormDisabled}
           />
         </div>
 
@@ -683,19 +769,20 @@ const StockTransferForm = () => {
                 <CustomDropdown
                   value={form.product}
                   onChange={(value) => handleFormChange("product", value)}
-                  placeholder="Select Product"
+                  placeholder={isProductsEmpty ? "No Products Available" : "Select Product"}
                   options={productOptions}
                   required
+                  disabled={isFormDisabled}
                 />
               )}
             </div>
             <button
               type="button"
               onClick={handleAddItem}
-              disabled={!isCurrentProductValid}
+              disabled={!isCurrentProductValid || isFormDisabled}
               className={`px-4 py-2 rounded-lg transition-colors ${
-                isCurrentProductValid
-                  ? "bg-blue-600 hover:bg-blue-700 text-white"
+                isCurrentProductValid && !isFormDisabled
+                  ? "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
                   : "bg-gray-400 text-gray-200 cursor-not-allowed"
               }`}
             >
@@ -741,7 +828,12 @@ const StockTransferForm = () => {
                       <button
                         type="button"
                         onClick={() => removeItem(item.id)}
-                        className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm transition-colors"
+                        disabled={isFormDisabled}
+                        className={`px-3 py-1 rounded text-sm transition-colors ${
+                          isFormDisabled
+                            ? "bg-gray-400 text-white opacity-50 cursor-not-allowed"
+                            : "bg-red-600 hover:bg-red-700 text-white cursor-pointer"
+                        }`}
                       >
                         Remove
                       </button>
@@ -762,9 +854,10 @@ const StockTransferForm = () => {
                               e.target.value
                             )
                           }
+                          disabled={isFormDisabled}
                           className={`w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
                             errors[`boxQuantity_${index}`] ? "border-red-500" : "border-gray-300"
-                          }`}
+                          } ${isFormDisabled ? "bg-gray-100 cursor-not-allowed" : ""}`}
                           placeholder="Enter box quantity"
                           max={form.transferType === "send" ? stockInfo?.boxes : undefined} // Only set max for send transfers
                         />
@@ -795,7 +888,10 @@ const StockTransferForm = () => {
                               e.target.value
                             )
                           }
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          disabled={isFormDisabled}
+                          className={`w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                            isFormDisabled ? "bg-gray-100 cursor-not-allowed" : ""
+                          }`}
                           placeholder="Enter expenses"
                         />
                       </div>
@@ -816,6 +912,7 @@ const StockTransferForm = () => {
             onChange={handleChange}
             placeholder="Enter remarks or additional information"
             rows={4}
+            disabled={isFormDisabled}
             className="w-full"
           />
         </div>
@@ -856,8 +953,12 @@ const StockTransferForm = () => {
           </button>
           <button
             type="submit"
-            disabled={isLoading}
-            className="bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white px-6 py-2 rounded-lg transition-colors cursor-pointer"
+            disabled={isLoading || isFormDisabled}
+            className={`px-6 py-2 rounded-lg transition-colors ${
+              isLoading || isFormDisabled
+                ? "bg-gray-400 text-gray-200 cursor-not-allowed"
+                : "bg-green-600 hover:bg-green-700 text-white cursor-pointer"
+            }`}
           >
             {isLoading ? "Saving..." : "Save Transfer"}
           </button>

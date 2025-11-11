@@ -60,6 +60,10 @@ const usePurchaseForm = () => {
     products: false,
     suppliers: false,
   });
+  const [isSuppliersEmpty, setIsSuppliersEmpty] = useState(false);
+  const [isProductsEmpty, setIsProductsEmpty] = useState(false);
+  const isSuppliersEmptyRef = useRef(false);
+  const isProductsEmptyRef = useRef(false);
 
   const parseNumber = useCallback((val) => {
     if (typeof val === "number") return val;
@@ -396,14 +400,32 @@ const usePurchaseForm = () => {
           cif: product.cif || 0,
         }));
         setProducts(transformedProducts);
+
+        if (transformedProducts.length === 0) {
+          if (!isProductsEmptyRef.current) {
+            setIsProductsEmpty(true);
+            isProductsEmptyRef.current = true;
+            // showToast(
+            //   "error",
+            //   "No products found. Please add at least one product first."
+            // );
+          }
+        } else {
+          setIsProductsEmpty(false);
+          isProductsEmptyRef.current = false;
+        }
       } else {
         showToast("error", result.error || "Failed to fetch products");
         setProducts([]);
+        setIsProductsEmpty(true);
+        isProductsEmptyRef.current = true;
       }
     } catch (err) {
       console.error("Error fetching products:", err);
       showToast("error", "Failed to fetch products");
       setProducts([]);
+      setIsProductsEmpty(true);
+      isProductsEmptyRef.current = true;
     } finally {
       setLoading((prev) => ({ ...prev, products: false }));
     }
@@ -421,14 +443,32 @@ const usePurchaseForm = () => {
           label: supplier.name || supplier.supplierName,
         }));
         setSuppliers(transformedSuppliers);
+
+        if (transformedSuppliers.length === 0) {
+          if (!isSuppliersEmptyRef.current) {
+            setIsSuppliersEmpty(true);
+            isSuppliersEmptyRef.current = true;
+            // showToast(
+            //   "error",
+            //   "No suppliers found. Please add at least one supplier first."
+            // );
+          }
+        } else {
+          setIsSuppliersEmpty(false);
+          isSuppliersEmptyRef.current = false;
+        }
       } else {
         showToast("error", result.error || "Failed to fetch suppliers");
         setSuppliers([]);
+        setIsSuppliersEmpty(true);
+        isSuppliersEmptyRef.current = true;
       }
     } catch (err) {
       console.error("Error fetching suppliers:", err);
       showToast("error", "Failed to fetch suppliers");
       setSuppliers([]);
+      setIsSuppliersEmpty(true);
+      isSuppliersEmptyRef.current = true;
     } finally {
       setLoading((prev) => ({ ...prev, suppliers: false }));
     }
@@ -440,6 +480,8 @@ const usePurchaseForm = () => {
     products,
     suppliers,
     loading,
+    isSuppliersEmpty,
+    isProductsEmpty,
     handleChange,
     handleProductChange,
     validate,
@@ -474,6 +516,7 @@ const InputField = React.memo(
     required = false,
     readOnly = false,
     className = "",
+    disabled = false,
     ...props
   }) => (
     <div className="flex flex-col">
@@ -488,11 +531,12 @@ const InputField = React.memo(
         onChange={onChange}
         placeholder={placeholder}
         readOnly={readOnly}
+        disabled={disabled}
         className={`w-full border px-3 py-2 rounded-lg ${className} ${
           error ? "border-red-500" : "border-gray-300"
-        } ${readOnly ? "bg-gray-100" : ""}`}
+        } ${readOnly || disabled ? "bg-gray-100 cursor-not-allowed" : ""}`}
         autoComplete="off"
-        tabIndex={readOnly ? -1 : 0}
+        tabIndex={readOnly || disabled ? -1 : 0}
         {...props}
       />
       {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
@@ -510,6 +554,7 @@ const DatePickerField = React.memo(
     error,
     required = false,
     readOnly = false,
+    disabled = false,
     placeholder = "Select a date",
     className = "",
     maxDate = null,
@@ -528,10 +573,11 @@ const DatePickerField = React.memo(
           dateFormat="yyyy-MM-dd"
           placeholderText={placeholder}
           readOnly={readOnly}
+          disabled={disabled}
           maxDate={maxDate || today}
           className={`w-full border px-3 py-2 rounded-lg ${
             error ? "border-red-500" : "border-gray-300"
-          } ${readOnly ? "bg-gray-100" : ""} ${className}`}
+          } ${readOnly || disabled ? "bg-gray-100 cursor-not-allowed" : ""} ${className}`}
           autoComplete="off"
         />
         {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
@@ -550,6 +596,7 @@ const ProductDatePickerField = React.memo(
     error,
     required = false,
     readOnly = false,
+    disabled = false,
     placeholder = "Select a date",
     className = "",
   }) => (
@@ -564,9 +611,10 @@ const ProductDatePickerField = React.memo(
         dateFormat="yyyy-MM-dd"
         placeholderText={placeholder}
         readOnly={readOnly}
+        disabled={disabled}
         className={`w-full border px-3 py-2 rounded-lg ${
           error ? "border-red-500" : "border-gray-300"
-        } ${readOnly ? "bg-gray-100" : ""} ${className}`}
+        } ${readOnly || disabled ? "bg-gray-100 cursor-not-allowed" : ""} ${className}`}
         autoComplete="off"
       />
       {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
@@ -585,6 +633,7 @@ const NumericInputField = React.memo(
     placeholder = "",
     required = false,
     readOnly = false,
+    disabled = false,
     className = "",
     allowDecimal = true,
   }) => {
@@ -611,9 +660,10 @@ const NumericInputField = React.memo(
           onChange={handleNumericChange}
           placeholder={placeholder}
           readOnly={readOnly}
+          disabled={disabled}
           className={`w-full border px-3 py-2 rounded-lg ${className} ${
             error ? "border-red-500" : "border-gray-300"
-          } ${readOnly ? "bg-gray-100" : ""}`}
+          } ${readOnly || disabled ? "bg-gray-100 cursor-not-allowed" : ""}`}
           autoComplete="off"
           inputMode={allowDecimal ? "decimal" : "numeric"}
         />
@@ -631,6 +681,8 @@ const AddNewPurchase = () => {
     products,
     suppliers,
     loading,
+    isSuppliersEmpty,
+    isProductsEmpty,
     handleChange,
     handleProductChange,
     validate,
@@ -648,15 +700,36 @@ const AddNewPurchase = () => {
     fetchSuppliers,
   } = usePurchaseForm();
 
+  // Check if form should be disabled
+  const isFormDisabled = isSuppliersEmpty || isProductsEmpty;
+
   // Memoized product options for dropdown
   const productOptions = useMemo(() => {
+    if (isProductsEmpty) {
+      return [
+        {
+          value: "",
+          label: "No Products Available",
+          disabled: true,
+        },
+      ];
+    }
     return [{ value: "", label: "Select Product" }, ...products];
-  }, [products]);
+  }, [products, isProductsEmpty]);
 
   // Memoized supplier options for dropdown
   const supplierOptions = useMemo(() => {
+    if (isSuppliersEmpty) {
+      return [
+        {
+          value: "",
+          label: "No Suppliers Available",
+          disabled: true,
+        },
+      ];
+    }
     return [{ value: "", label: "Select Supplier" }, ...suppliers];
-  }, [suppliers]);
+  }, [suppliers, isSuppliersEmpty]);
 
   useEffect(() => {
     fetchProducts();
@@ -702,6 +775,15 @@ const AddNewPurchase = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    if (isFormDisabled) {
+      showToast(
+        "error",
+        "Cannot add purchase. No suppliers or products available."
+      );
+      return;
+    }
+
     if (!validate()) return;
 
     try {
@@ -729,8 +811,6 @@ const AddNewPurchase = () => {
         })),
       };
 
-      
-
       const response = await fetch(`${backendUrl}/api/purchase`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -753,6 +833,8 @@ const AddNewPurchase = () => {
 
   // Check if form is valid for submission - UPDATED for FOB
   const isFormValid = useMemo(() => {
+    if (isFormDisabled) return false;
+
     const invoiceNumberStr = String(form.invoiceNumber || "");
     const deliveryNumberStr = String(form.deliveryNumber || "");
 
@@ -782,19 +864,55 @@ const AddNewPurchase = () => {
     });
 
     return commonFieldsValid && productsValid;
-  }, [form]);
+  }, [form, isFormDisabled]);
 
   // Check if "Add Product" button should be enabled for current product
   const isAddProductEnabled = useMemo(() => {
+    if (isFormDisabled) return false;
     const currentProductIndex = form.products.length - 1;
     return isCurrentProductValid(currentProductIndex);
-  }, [form.products, isCurrentProductValid]);
+  }, [form.products, isCurrentProductValid, isFormDisabled]);
 
   return (
     <div className="max-w-3xl mx-auto p-8 bg-white rounded-2xl shadow">
       <h2 className="text-2xl font-bold mb-6 text-gray-800">
         Add New Purchase
       </h2>
+
+      {/* Warning message if suppliers or products are empty */}
+      {(isSuppliersEmpty || isProductsEmpty) && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <div className="flex items-center">
+            <div className="flex-shrink-0">
+              <svg
+                className="h-5 w-5 text-red-400"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </div>
+            <div className="ml-3">
+              <h3 className="text-sm font-medium text-red-800">
+                Missing Required Data
+              </h3>
+              <div className="mt-2 text-sm text-red-700">
+                <p>
+                  {isSuppliersEmpty && isProductsEmpty
+                    ? "No suppliers and products found. Please add at least one supplier and one product first."
+                    : isSuppliersEmpty
+                    ? "No suppliers found. Please add at least one supplier first."
+                    : "No products found. Please add at least one product first."}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit}>
         {/* Common Fields Section */}
@@ -812,6 +930,7 @@ const AddNewPurchase = () => {
               error={errors.invoiceNumber}
               placeholder="INV-001-A"
               required
+              disabled={isFormDisabled}
             />
 
             <InputField
@@ -822,6 +941,7 @@ const AddNewPurchase = () => {
               error={errors.deliveryNumber}
               placeholder="DEL-001-A"
               required
+              disabled={isFormDisabled}
             />
 
             {/* Supplier dropdown */}
@@ -830,10 +950,11 @@ const AddNewPurchase = () => {
               value={form.supplierId}
               onChange={handleSupplierChange}
               options={supplierOptions}
-              placeholder="Select Supplier"
+              placeholder={isSuppliersEmpty ? "No Suppliers Available" : "Select Supplier"}
               required={true}
               error={errors.supplierId}
               loading={loading.suppliers}
+              disabled={isSuppliersEmpty}
             />
 
             <DatePickerField
@@ -844,6 +965,7 @@ const AddNewPurchase = () => {
               error={errors.invoiceDate}
               required
               maxDate={new Date()}
+              disabled={isFormDisabled}
             />
 
             <DatePickerField
@@ -854,6 +976,7 @@ const AddNewPurchase = () => {
               error={errors.receivedDate}
               required
               maxDate={new Date()}
+              disabled={isFormDisabled}
             />
           </div>
         </div>
@@ -901,6 +1024,7 @@ const AddNewPurchase = () => {
                       type="button"
                       onClick={() => toggleProductView(productIndex)}
                       className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-sm"
+                      disabled={isFormDisabled}
                     >
                       {isProductExpanded(productIndex) ? (
                         <>
@@ -919,6 +1043,7 @@ const AddNewPurchase = () => {
                         type="button"
                         onClick={() => removeProduct(productIndex)}
                         className="text-red-600 hover:text-red-800 text-sm ml-2"
+                        disabled={isFormDisabled}
                       >
                         Remove
                       </button>
@@ -938,10 +1063,11 @@ const AddNewPurchase = () => {
                         handleProductSelection(productIndex, productId)
                       }
                       options={productOptions}
-                      placeholder="Select Product"
+                      placeholder={isProductsEmpty ? "No Products Available" : "Select Product"}
                       required={true}
                       error={errors[`productId_${productIndex}`]}
                       loading={loading.products}
+                      disabled={isProductsEmpty}
                     />
 
                     <NumericInputField
@@ -955,6 +1081,7 @@ const AddNewPurchase = () => {
                       placeholder="0"
                       required
                       allowDecimal={false}
+                      disabled={isFormDisabled}
                     />
 
                     <NumericInputField
@@ -967,6 +1094,7 @@ const AddNewPurchase = () => {
                       error={errors[`lcNumber_${productIndex}`]}
                       placeholder="0.00"
                       allowDecimal={true}
+                      disabled={isFormDisabled}
                     />
 
                     <NumericInputField
@@ -979,6 +1107,7 @@ const AddNewPurchase = () => {
                       error={errors[`fob_${productIndex}`]}
                       placeholder="0.00"
                       allowDecimal={true}
+                      disabled={isFormDisabled}
                     />
 
                     <NumericInputField
@@ -991,6 +1120,7 @@ const AddNewPurchase = () => {
                       error={errors[`cif_${productIndex}`]}
                       placeholder="0.00"
                       allowDecimal={true}
+                      disabled={isFormDisabled}
                     />
 
                     <ProductDatePickerField
@@ -1002,6 +1132,7 @@ const AddNewPurchase = () => {
                       }
                       error={errors[`expiredDate_${productIndex}`]}
                       required
+                      disabled={isFormDisabled}
                     />
 
                     <div className="flex flex-col">
@@ -1039,7 +1170,10 @@ const AddNewPurchase = () => {
             onChange={handleChange}
             placeholder="Additional notes or comments"
             rows={3}
-            className="w-full border border-gray-300 rounded-md px-3 py-2 mt-1"
+            disabled={isFormDisabled}
+            className={`w-full border border-gray-300 rounded-md px-3 py-2 mt-1 ${
+              isFormDisabled ? "bg-gray-100 cursor-not-allowed" : ""
+            }`}
           />
         </div>
 
@@ -1047,9 +1181,9 @@ const AddNewPurchase = () => {
         <div className="flex justify-end gap-4">
           <button
             type="submit"
-            disabled={!isFormValid}
+            disabled={!isFormValid || isFormDisabled}
             className={`px-6 py-2 rounded-lg cursor-pointer transition-colors ${
-              isFormValid
+              isFormValid && !isFormDisabled
                 ? "bg-green-600 hover:bg-green-700 text-white"
                 : "bg-gray-400 text-white opacity-50 cursor-not-allowed"
             }`}

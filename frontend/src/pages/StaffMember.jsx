@@ -524,23 +524,24 @@ const StaffMember = () => {
         ) : (
           <div></div>
         )}
+        {staff.length > 0 && (
+          <div className="flex items-center gap-8">
+            <p className="text-lg font-semibold text-gray-700">
+              Total Count:{" "}
+              <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+                {filteredStaff.length}
+              </span>
+            </p>
 
-        <div className="flex items-center gap-8">
-          <p className="text-lg font-semibold text-gray-700">
-            Total Count:{" "}
-            <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-              {filteredStaff.length}
-            </span>
-          </p>
-
-          <input
-            type="text"
-            placeholder="Search..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="border px-4 py-2 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-          />
-        </div>
+            <input
+              type="text"
+              placeholder="Search..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="border px-4 py-2 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+            />
+          </div>
+        )}
       </div>
 
       {/* Table */}
