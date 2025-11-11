@@ -6,6 +6,8 @@ import "react-datepicker/dist/react-datepicker.css";
 import { useInitialSaleData } from "./IntialLoading.jsx";
 import { PlusSquare } from "lucide-react";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
+import LoadingOverlay from "../../components/Loading.jsx";
+import { handleNumericInputChange } from "../../utils/inputValidators.jsx";
 
 const INITIAL_PRODUCT_STATE = {
   productName: "",
@@ -18,6 +20,12 @@ const INITIAL_PRODUCT_STATE = {
   netSellingAmount: "",
   usedPrice: "",
   usedAmount: "",
+  bonusQty: "",
+  totalQty: "",
+  averageUnitPrice: "",
+  lc: "",
+  profitLoss: "",
+  isProductAccept: false,
 };
 
 const INITIAL_FORM_STATE = {
@@ -27,11 +35,13 @@ const INITIAL_FORM_STATE = {
   invoiceDate: "",
   mrName: "",
   customerName: "",
-  customerId: "", // ← Hidden ID field
-  saleDate: "",
-  totalAmount: "",
-  paidAmount: "",
-  dueAmount: "",
+  customerId: "",
+  creditDays: 0,
+  dueDate: "",
+  deliveryDate: "",
+  totalAmount: 0,
+  paidAmount: 0,
+  dueAmount: 0,
   paymentStatus: "",
   remark: "",
   products: [{ ...INITIAL_PRODUCT_STATE }],
@@ -90,24 +100,29 @@ const useReturnSaleForm = () => {
     const returnQty = parseInt(prod.returnQuantity) || 0;
     const price = parseFloat(prod.sellingPrice) || 0;
     const disc = parseFloat(prod.discount) || 0;
+    const bonusQty = parseInt(prod.bonusQty) || 0;
 
     const validReturn = Math.min(returnQty, salesQty);
     const used = Math.max(salesQty - validReturn, 0);
+    const totalQty = salesQty + bonusQty;
     const amount = (price * salesQty).toFixed(2);
     const net = (parseFloat(amount) - disc).toFixed(2);
-    const usedPrice = (price * used).toFixed(2);
-    const usedAmt = (parseFloat(usedPrice) - (disc / salesQty) * used).toFixed(
-      2
-    );
+    const usedPrice = price;
+    const usedAmt = (used * usedPrice).toFixed(2);
+    const avgUnitPrice =
+      totalQty > 0 ? (parseFloat(net) / totalQty).toFixed(2) : "0.00";
 
     return {
       ...prod,
       returnQuantity: validReturn.toString(),
       usedQty: used.toString(),
+      totalQty: totalQty.toString(),
       amount,
       netSellingAmount: net,
       usedPrice,
       usedAmount: usedAmt,
+      averageUnitPrice: avgUnitPrice,
+      isProductAccept: false,
     };
   }, []);
 
@@ -116,17 +131,28 @@ const useReturnSaleForm = () => {
       setForm((prev) => {
         const prods = [...prev.products];
         prods[idx] = { ...prods[idx], [field]: value };
-        const recalculated = prods.map(calculateProductFields);
-        const total = recalculated
-          .reduce((s, p) => s + parseFloat(p.usedAmount || 0), 0)
-          .toFixed(2);
-        const paid = parseNumber(prev.paidAmount);
-        const due = (total - paid).toFixed(2);
+
+        // Recalculate product fields when return quantity changes
+        if (field === "returnQuantity") {
+          const recalculated = prods.map(calculateProductFields);
+          const total = recalculated
+            .reduce((s, p) => s + parseFloat(p.netSellingAmount || 0), 0)
+            .toFixed(2);
+          const paid = parseNumber(prev.paidAmount);
+          const due = Math.max(0, total - paid).toFixed(2);
+
+          return {
+            ...prev,
+            products: recalculated,
+            totalAmount: total,
+            dueAmount: due,
+          };
+        }
+
+        // Just update the single product without recalculating all
         return {
           ...prev,
-          products: recalculated,
-          totalAmount: total,
-          dueAmount: due,
+          products: prods,
         };
       });
     },
@@ -135,11 +161,32 @@ const useReturnSaleForm = () => {
 
   const calculateDerivedFields = useCallback((name, value, cur) => {
     const upd = { ...cur, [name]: value };
+
     if (name === "paidAmount") {
       const tot = parseNumber(cur.totalAmount);
       const paid = parseNumber(value);
-      upd.dueAmount = (tot - paid).toFixed(2);
+      upd.dueAmount = Math.max(0, tot - paid).toFixed(2);
     }
+
+    // Calculate due date when credit days or invoice date changes
+    if (
+      (name === "creditDays" && cur.invoiceDate) ||
+      (name === "invoiceDate" && cur.creditDays)
+    ) {
+      const creditDays = parseNumber(cur.creditDays);
+      const invoiceDate = name === "invoiceDate" ? value : cur.invoiceDate;
+      if (invoiceDate && creditDays > 0) {
+        const dueDate = new Date(invoiceDate);
+        dueDate.setDate(dueDate.getDate() + creditDays);
+        upd.dueDate = dueDate.toISOString().split("T")[0];
+      }
+    }
+
+    // Set delivery date same as invoice date
+    if (name === "invoiceDate" && value) {
+      upd.deliveryDate = value;
+    }
+
     return upd;
   }, []);
 
@@ -289,6 +336,7 @@ const DatePickerField = React.memo(
     readOnly = false,
     placeholder = "Select a date",
     className = "",
+    maxDate,
   }) => (
     <div className="flex flex-col">
       <label className="text-sm font-medium text-gray-700 mb-1">
@@ -306,6 +354,7 @@ const DatePickerField = React.memo(
         dateFormat="yyyy-MM-dd"
         placeholderText={placeholder}
         readOnly={readOnly}
+        maxDate={maxDate}
         className={`w-full border rounded-md px-3 py-2 ${
           error ? "border-red-500" : "border-gray-300"
         } ${readOnly ? "bg-gray-200" : ""} ${className}`}
@@ -320,9 +369,12 @@ const DatePickerField = React.memo(
 const AddReturnSale = () => {
   const navigate = useNavigate();
   const [sales, setSales] = useState([]);
+  const [saleReturns, setSaleReturns] = useState([]);
   const [filteredProducts, setFilteredProducts] = useState([]);
   const [isInvoiceDataFetched, setIsInvoiceDataFetched] = useState(false);
   const [lastInvoiceNumber, setLastInvoiceNumber] = useState("");
+  const [loadingSales, setLoadingSales] = useState(false);
+  const [loadingSaleReturns, setLoadingSaleReturns] = useState(false);
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
   const {
@@ -344,30 +396,101 @@ const AddReturnSale = () => {
 
   const { loading } = useInitialSaleData();
 
-  /* ───── Invoice Dropdown Options ───── */
+  /* ───── Get returned products for an invoice ───── */
+  const getReturnedProductsForInvoice = useCallback(
+    (invoiceNumber) => {
+      if (!invoiceNumber) return new Set();
+
+      const returnsForInvoice = saleReturns.filter(
+        (sr) => sr.invoiceNumber === invoiceNumber
+      );
+
+      const returnedProducts = new Set();
+      returnsForInvoice.forEach((returnItem) => {
+        returnItem.products.forEach((product) => {
+          returnedProducts.add(product.productName);
+        });
+      });
+
+      return returnedProducts;
+    },
+    [saleReturns]
+  );
+
+  /* ───── Check if all products are returned for an invoice ───── */
+  const isInvoiceFullyReturned = useCallback(
+    (invoiceNumber) => {
+      if (!invoiceNumber) return false;
+
+      const sale = sales.find((s) => s.invoiceNumber === invoiceNumber);
+      if (!sale || !sale.products) return false;
+
+      const returnedProducts = getReturnedProductsForInvoice(invoiceNumber);
+
+      // Check if every product in the sale has been returned
+      return sale.products.every((product) =>
+        returnedProducts.has(product.productName)
+      );
+    },
+    [sales, getReturnedProductsForInvoice]
+  );
+
+  /* ───── Invoice Dropdown Options (FILTERED) ───── */
   const invoiceOptions = useMemo(() => {
-    if (!Array.isArray(sales)) return [];
+    if (!Array.isArray(sales)) {
+      return [{ value: "", label: "Loading invoices...", disabled: true }];
+    }
+
+    // Filter out invoices where all products are already returned
+    const availableInvoices = sales.filter(
+      (sale) => !isInvoiceFullyReturned(sale.invoiceNumber)
+    );
+
     const uniq = [
-      ...new Set(sales.map((s) => s.invoiceNumber).filter(Boolean)),
+      ...new Set(availableInvoices.map((s) => s.invoiceNumber).filter(Boolean)),
     ];
+
+    if (uniq.length === 0) {
+      return [
+        {
+          value: "",
+          label: "No invoices available for return",
+          disabled: true,
+        },
+      ];
+    }
+
     return [
       { value: "", label: "Select Invoice Number" },
       ...uniq.map((inv) => ({ value: inv, label: inv })),
     ];
-  }, [sales]);
+  }, [sales, isInvoiceFullyReturned]);
 
-  /* ───── Product Dropdown Options (per row) ───── */
+  /* ───── Product Dropdown Options (per row) - FILTERED ───── */
   const productOptions = useMemo(() => {
     return form.products.map((_, idx) => {
       const selected = form.products
         .filter((p, i) => i !== idx && p.productName.trim())
         .map((p) => p.productName);
+
+      const returnedProducts = getReturnedProductsForInvoice(
+        form.invoiceNumber
+      );
+
       const options = filteredProducts
-        .filter((name) => !selected.includes(name))
+        .filter(
+          (name) => !selected.includes(name) && !returnedProducts.has(name) // Filter out already returned products
+        )
         .map((name) => ({ value: name, label: name }));
+
       return [{ value: "", label: "Select Product" }, ...options];
     });
-  }, [form.products, filteredProducts]);
+  }, [
+    form.products,
+    form.invoiceNumber,
+    filteredProducts,
+    getReturnedProductsForInvoice,
+  ]);
 
   /* ───── Auto Update Payment Status ───── */
   useEffect(() => {
@@ -399,9 +522,27 @@ const AddReturnSale = () => {
       const sale = sales.find((s) => s.invoiceNumber === form.invoiceNumber);
       const prod = sale?.products?.find((p) => p.productName === selectedName);
       if (prod) {
+        // Set all product fields from the original sale
         updateProduct(idx, "salesQty", prod.salesQty?.toString() ?? "");
+        updateProduct(idx, "bonusQty", prod.bonusQty?.toString() ?? "0");
+        updateProduct(idx, "totalQty", prod.totalQty?.toString() ?? "");
         updateProduct(idx, "sellingPrice", prod.sellingPrice?.toString() ?? "");
-        updateProduct(idx, "discount", prod.discount?.toString() ?? "");
+        updateProduct(idx, "discount", prod.discount?.toString() ?? "0");
+        updateProduct(idx, "amount", prod.amount?.toString() ?? "");
+        updateProduct(
+          idx,
+          "netSellingAmount",
+          prod.netSellingAmount?.toString() ?? ""
+        );
+        updateProduct(
+          idx,
+          "averageUnitPrice",
+          prod.averageUnitPrice?.toString() ?? ""
+        );
+        updateProduct(idx, "lc", prod.lc?.toString() ?? "0");
+        updateProduct(idx, "profitLoss", prod.profitLoss?.toString() ?? "0");
+        updateProduct(idx, "isProductAccept", false);
+
         expandProduct(idx);
       }
     },
@@ -412,8 +553,18 @@ const AddReturnSale = () => {
     const selected = form.products
       .filter((p) => p.productName.trim())
       .map((p) => p.productName);
-    return filteredProducts.filter((p) => !selected.includes(p)).length;
-  }, [form.products, filteredProducts]);
+
+    const returnedProducts = getReturnedProductsForInvoice(form.invoiceNumber);
+
+    return filteredProducts.filter(
+      (p) => !selected.includes(p) && !returnedProducts.has(p)
+    ).length;
+  }, [
+    form.products,
+    form.invoiceNumber,
+    filteredProducts,
+    getReturnedProductsForInvoice,
+  ]);
 
   const isAddReturnSaleEnabled = useMemo(
     () =>
@@ -470,16 +621,34 @@ const AddReturnSale = () => {
     if (form.invoiceNumber && form.invoiceNumber !== lastInvoiceNumber) {
       const sale = filterSalesByInvoice(form.invoiceNumber);
       const prods = getProductNamesFromFilteredSales(sale);
-      setFilteredProducts(prods);
+
+      // Filter out already returned products
+      const returnedProducts = getReturnedProductsForInvoice(
+        form.invoiceNumber
+      );
+      const availableProds = prods.filter((p) => !returnedProducts.has(p));
+
+      setFilteredProducts(availableProds);
       setLastInvoiceNumber(form.invoiceNumber);
-      
+
       if (sale) {
         setIsInvoiceDataFetched(true);
         updateFormField("invoiceDate", sale.invoiceDate?.split("T")[0] ?? "");
         updateFormField("mrName", sale.mrName ?? "");
         updateFormField("customerName", sale.customerName ?? "");
-        updateFormField("customerId", sale.customerId ?? ""); // ← Auto-fill ID
-        updateFormField("saleDate", sale.invoiceDate?.split("T")[0] ?? "");
+        updateFormField("customerId", sale.customerId ?? "");
+        updateFormField("creditDays", sale.creditDays ?? 0);
+        updateFormField("dueDate", sale.dueDate?.split("T")[0] ?? "");
+        updateFormField(
+          "deliveryDate",
+          sale.deliveryDate?.split("T")[0] ??
+            sale.invoiceDate?.split("T")[0] ??
+            ""
+        );
+        updateFormField("totalAmount", sale.totalAmount ?? 0);
+        updateFormField("paidAmount", sale.paidAmount ?? 0);
+        updateFormField("dueAmount", sale.dueAmount ?? 0);
+        updateFormField("paymentStatus", sale.paymentStatus ?? "");
         updateFormField("remark", sale.remark ?? "");
       } else {
         setIsInvoiceDataFetched(false);
@@ -496,11 +665,33 @@ const AddReturnSale = () => {
     lastInvoiceNumber,
     filterSalesByInvoice,
     getProductNamesFromFilteredSales,
+    getReturnedProductsForInvoice,
     updateFormField,
   ]);
 
+  /* ───── Fetch Sale Returns ───── */
+  const fetchSaleReturn = async () => {
+    setLoadingSaleReturns(true);
+    try {
+      const res = await fetch(`${backendUrl}/api/salesreturn`);
+      if (!res.ok) throw new Error("Failed to fetch sale returns");
+      const data = await res.json();
+      setSaleReturns(data.data || []);
+    } catch (error) {
+      console.error("❌ Fetch error:", error);
+      showToast("error", error.message || "Error fetching sale returns");
+    } finally {
+      setLoadingSaleReturns(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSaleReturn();
+  }, []);
+
   /* ───── Fetch Sales ───── */
   const fetchSaleSummaries = async () => {
+    setLoadingSales(true);
     try {
       const res = await fetch(`${backendUrl}/api/sales`);
       if (!res.ok) throw new Error("Failed to fetch sales");
@@ -510,6 +701,8 @@ const AddReturnSale = () => {
       console.error(err);
       showToast("error", err.message || "Error loading sales");
       setSales([]);
+    } finally {
+      setLoadingSales(false);
     }
   };
 
@@ -528,29 +721,41 @@ const AddReturnSale = () => {
       return;
     }
 
-    const payload = validProds.map((p) => ({
+    // Create payload with products array structure
+    const payload = {
       recordingDate: form.recordingDate,
       invoiceNumber: form.invoiceNumber,
       invoiceDate: form.invoiceDate,
       mrName: form.mrName,
       customerName: form.customerName,
-      customerId: form.customerId, // ← Send ID
-      productName: p.productName,
-      salesQty: p.salesQty,
-      returnQuantity: p.returnQuantity,
-      usedQty: p.usedQty,
-      sellingPrice: p.sellingPrice,
-      amount: p.amount,
-      discount: p.discount,
-      netSellingAmount: p.netSellingAmount,
-      usedPrice: p.usedPrice,
-      usedAmount: p.usedAmount,
-      totalAmount: form.totalAmount,
-      paidAmount: form.paidAmount,
-      dueAmount: form.dueAmount,
+      customerId: form.customerId,
+      products: validProds.map((p) => ({
+        productName: p.productName,
+        salesQty: parseNumber(p.salesQty),
+        bonusQty: parseNumber(p.bonusQty),
+        totalQty: parseNumber(p.totalQty),
+        sellingPrice: parseNumber(p.sellingPrice),
+        amount: parseNumber(p.amount),
+        discount: parseNumber(p.discount),
+        netSellingAmount: parseNumber(p.netSellingAmount),
+        averageUnitPrice: parseNumber(p.averageUnitPrice),
+        lc: parseNumber(p.lc),
+        profitLoss: parseNumber(p.profitLoss),
+        returnQuantity: parseNumber(p.returnQuantity),
+        usedQty: parseNumber(p.usedQty),
+        usedPrice: parseNumber(p.usedPrice),
+        usedAmount: parseNumber(p.usedAmount),
+        isProductAccept: false,
+      })),
+      creditDays: parseNumber(form.creditDays),
+      dueDate: form.dueDate,
+      deliveryDate: form.deliveryDate,
+      paidAmount: parseNumber(form.paidAmount),
+      dueAmount: parseNumber(form.dueAmount),
+      totalAmount: parseNumber(form.totalAmount),
       paymentStatus: form.paymentStatus,
       remark: form.remark,
-    }));
+    };
 
     try {
       const res = await fetch(`${backendUrl}/api/salesreturn`, {
@@ -560,7 +765,7 @@ const AddReturnSale = () => {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Submit failed");
-      showToast("success", json.message || "Return sale added");
+      showToast("success", json.message || "Return sale added successfully");
       navigate("/salelayout/salereturn");
     } catch (err) {
       console.error(err);
@@ -568,18 +773,7 @@ const AddReturnSale = () => {
     }
   };
 
-  const handleNumericInputChange = (e, fn) => {
-    const v = e.target.value;
-    if (v === "" || /^-?\d*\.?\d*$/.test(v)) fn(e);
-  };
-
-  if (loading) {
-    return (
-      <div className="max-w-5xl mx-auto p-6 bg-white rounded-2xl shadow flex justify-center items-center h-32">
-        <p className="text-gray-600">Loading...</p>
-      </div>
-    );
-  }
+  if (loading) return <LoadingOverlay text="Please wait..." />;
 
   return (
     <div className="max-w-5xl mx-auto p-6 bg-white rounded-2xl shadow">
@@ -612,7 +806,7 @@ const AddReturnSale = () => {
           </button>
         </div>
       </div>
-
+      <SaleExcelDownload type="salesreturn" />
       {/* Common Fields */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         <SearchableDropdown
@@ -623,7 +817,12 @@ const AddReturnSale = () => {
           placeholder="Select Invoice Number"
           required
           error={errors.invoiceNumber}
-          loading={loading}
+          loading={loadingSales || loadingSaleReturns}
+          disabled={
+            loadingSales ||
+            loadingSaleReturns ||
+            (invoiceOptions.length === 1 && invoiceOptions[0].disabled)
+          }
         />
         <DatePickerField
           label="Recording Date"
@@ -632,7 +831,9 @@ const AddReturnSale = () => {
           onChange={handleRecordingDateChange}
           error={errors.recordingDate}
           required
+          maxDate={new Date()}
         />
+
         <DatePickerField
           label="Invoice Date"
           name="invoiceDate"
@@ -656,12 +857,65 @@ const AddReturnSale = () => {
           onChange={enhancedHandleChange}
           readOnly
         />
-        <div />
+        <InputField
+          label="Credit Days"
+          name="creditDays"
+          value={form.creditDays}
+          onChange={(e) => handleNumericInputChange(e, enhancedHandleChange)}
+          type="text"
+          readOnly
+        />
+      </div>
+
+      {/* Payment Section */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+        <InputField
+          label="Total Amount"
+          name="totalAmount"
+          value={form.totalAmount}
+          readOnly
+          className="bg-gray-100 font-semibold"
+        />
+        <InputField
+          label="Paid Amount"
+          name="paidAmount"
+          type="text"
+          value={form.paidAmount}
+          onChange={(e) => handleNumericInputChange(e, enhancedHandleChange)}
+          error={errors.paidAmount}
+        />
+        <InputField
+          label="Due Amount"
+          name="dueAmount"
+          value={form.dueAmount}
+          readOnly
+        />
+        <DatePickerField
+          label="Due Date"
+          name="dueDate"
+          value={form.dueDate}
+          onChange={enhancedHandleChange}
+          readOnly
+        />
+        <DatePickerField
+          label="Delivery Date"
+          name="deliveryDate"
+          value={form.deliveryDate}
+          onChange={enhancedHandleChange}
+          readOnly
+        />
+        <InputField
+          label="Payment Status*"
+          name="paymentStatus"
+          value={form.paymentStatus}
+          readOnly
+          className="bg-blue-50"
+        />
       </div>
 
       {/* Products */}
       <div className="mb-6">
-        <h3 className="text-lg font-semibold mb-4">Products</h3>
+        <h3 className="text-lg font-semibold mb-4">Return Products</h3>
         {form.products.map((prod, idx) => (
           <div key={idx} className="border p-4 mb-4 rounded shadow-sm">
             <div className="flex justify-between items-center mb-2">
@@ -677,7 +931,7 @@ const AddReturnSale = () => {
                   disabled={!isInvoiceDataFetched}
                 />
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 mt-5">
                 {prod.productName && (
                   <button
                     type="button"
@@ -721,6 +975,16 @@ const AddReturnSale = () => {
                     readOnly
                   />
                   <InputField
+                    label="Bonus Quantity"
+                    value={prod.bonusQty}
+                    readOnly
+                  />
+                  <InputField
+                    label="Total Quantity"
+                    value={prod.totalQty}
+                    readOnly
+                  />
+                  <InputField
                     label="Used Quantity"
                     value={prod.usedQty}
                     readOnly
@@ -738,8 +1002,19 @@ const AddReturnSale = () => {
                     readOnly
                   />
                   <InputField
+                    label="Average Unit Price"
+                    value={prod.averageUnitPrice}
+                    readOnly
+                  />
+                  <InputField label="LC" value={prod.lc} readOnly />
+                  <InputField
+                    label="Profit/Loss"
+                    value={prod.profitLoss}
+                    readOnly
+                  />
+                  <InputField
                     label="Used Price"
-                    value={prod.usedImports}
+                    value={prod.usedPrice}
                     readOnly
                   />
                   <InputField
@@ -754,45 +1029,15 @@ const AddReturnSale = () => {
         ))}
       </div>
 
-      {/* Payment Section */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-        <InputField
-          label="Total Amount"
-          name="totalAmount"
-          value={form.totalAmount}
-          readOnly
-          className="bg-gray-100 font-semibold"
+      {/* Remark */}
+      <div className="mb-6">
+        <TextAreaField
+          label="Remark"
+          name="remark"
+          value={form.remark}
+          onChange={enhancedHandleChange}
+          rows={2}
         />
-        <InputField
-          label="Paid Amount"
-          name="paidAmount"
-          type="text"
-          value={form.paidAmount}
-          onChange={(e) => handleNumericInputChange(e, enhancedHandleChange)}
-          error={errors.paidAmount}
-        />
-        <InputField
-          label="Due Amount"
-          name="dueAmount"
-          value={form.dueAmount}
-          readOnly
-        />
-        <InputField
-          label="Payment Status*"
-          name="paymentStatus"
-          value={form.paymentStatus}
-          readOnly
-          className="bg-blue-50"
-        />
-        <div className="sm:col-span-3">
-          <TextAreaField
-            label="Remark"
-            name="remark"
-            value={form.remark}
-            onChange={enhancedHandleChange}
-            rows={2}
-          />
-        </div>
       </div>
 
       {/* Action Buttons */}

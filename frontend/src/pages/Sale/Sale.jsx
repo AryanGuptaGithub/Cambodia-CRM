@@ -448,6 +448,7 @@ const Sales = () => {
     const selectedTabLower = selectedTab.toLowerCase();
 
     return sales.filter((sale) => {
+      console.log("values of sale", sale);
       const paymentStatus = (sale.paymentStatus || "pending").toLowerCase();
 
       // Tab filter
@@ -460,11 +461,7 @@ const Sales = () => {
       }
 
       // Prepare searchable values
-      const fields = [
-        sale.invoiceNumber,
-        sale.customerInfo?.name,
-        sale.productName,
-      ];
+      const fields = [sale.invoiceNumber, sale.customerName, sale.mrName];
 
       return fields.some((f) =>
         (f ?? "").toString().toLowerCase().includes(lowerSearch)
@@ -946,19 +943,7 @@ const Sales = () => {
     }
   }, [form.netSellingAmount, form.paidAmount]);
 
-  // Render loading
-  if (loadingData) {
-    return (
-      <div className="fixed inset-0 flex items-center justify-center z-50">
-        <div className="text-xl font-medium text-gray-600 flex gap-1">
-          Loading
-          <span className="animate-bounce [animation-delay:0s]">.</span>
-          <span className="animate-bounce [animation-delay:0.2s]">.</span>
-          <span className="animate-bounce [animation-delay:0.4s]">.</span>
-        </div>
-      </div>
-    );
-  }
+  if (loading) return <LoadingOverlay text="Please wait..." />;
 
   const productTotals = calculateProductTotals(form.products);
 
@@ -990,7 +975,7 @@ const Sales = () => {
               </button>
             )}
           </div>
-          <SaleExcelDownload />
+          <SaleExcelDownload type="sales" />
         </div>
         <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
           {sales.length > 0 ? (
@@ -1042,7 +1027,7 @@ const Sales = () => {
               <input
                 ref={inputRef}
                 type="text"
-                placeholder="Search invoice,product name, customer name..."
+                placeholder="Search invoice,MR name, Customer name..."
                 value={searchTerm}
                 onChange={(e) => {
                   setSearchTerm(e.target.value);

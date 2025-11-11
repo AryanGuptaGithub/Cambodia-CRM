@@ -766,15 +766,21 @@ router.post("/sale/import", async (req, res) => {
         if (!dueDate) throw new Error("Invalid due date format");
 
         // Check duplicate invoice
-        const invoiceExists = await checkInvoiceNumberExists(saleData.invoiceNumber);
+        const invoiceExists = await checkInvoiceNumberExists(
+          saleData.invoiceNumber
+        );
         if (invoiceExists) {
-          throw new Error(`Invoice number "${saleData.invoiceNumber}" already exists`);
+          throw new Error(
+            `Invoice number "${saleData.invoiceNumber}" already exists`
+          );
         }
 
         // Resolve customerId from customerName
         let customerId = saleData.customerId;
         if (!customerId) {
-          const customer = await Customer.findOne({ name: saleData.customerName.trim() });
+          const customer = await Customer.findOne({
+            name: saleData.customerName.trim(),
+          });
           if (!customer) {
             throw new Error(`Customer not found: "${saleData.name}"`);
           }
@@ -867,7 +873,10 @@ router.post("/sale/import", async (req, res) => {
 
     res.status(200).json({
       success: results.failed === 0,
-      message: detailedErrors.length > 0 ? detailedErrors.join("<br>") : "All imported successfully",
+      message:
+        detailedErrors.length > 0
+          ? detailedErrors.join("<br>")
+          : "All imported successfully",
       results,
     });
   } catch (error) {
@@ -1071,6 +1080,7 @@ router.post("/sales/download-excel", async (req, res) => {
   try {
     const { startDate, endDate } = req.body;
 
+    // --- Validation ---
     if (!startDate || !endDate) {
       return res.status(400).json({
         success: false,
@@ -1095,12 +1105,9 @@ router.post("/sales/download-excel", async (req, res) => {
       });
     }
 
-    // ✅ Fetch filtered sales data from MongoDB
+    // --- Fetch filtered sales data ---
     const filteredSalesData = await SaleSummary.find({
-      invoiceDate: {
-        $gte: start,
-        $lte: end,
-      },
+      invoiceDate: { $gte: start, $lte: end },
     }).sort({ invoiceDate: 1 });
 
     if (filteredSalesData.length === 0) {
@@ -1110,23 +1117,25 @@ router.post("/sales/download-excel", async (req, res) => {
       });
     }
 
-    // ✅ Extract all unique customerCodes
-    const customerCodes = [
-      ...new Set(filteredSalesData.map((sale) => sale.customerCode)),
+    console.log("values of sale", filteredSalesData);
+
+    // ✅ Extract all unique customerIds
+    const customerIds = [
+      ...new Set(filteredSalesData.map((sale) => sale.customerId?.toString())),
     ];
 
-    // ✅ Fetch customer details for those codes
-    const customers = await customer.find({
-      customerCode: { $in: customerCodes },
+    // ✅ Fetch customer details using _id
+    const customers = await Customer.find({
+      _id: { $in: customerIds },
     });
 
-    // ✅ Create lookup map
+    // ✅ Create lookup map (by _id)
     const customerMap = {};
     customers.forEach((cust) => {
-      customerMap[cust.customerCode] = cust;
+      customerMap[cust._id.toString()] = cust;
     });
 
-    // ✅ Create Excel Workbook & Sheet
+    // === Create Excel Workbook & Sheet ===
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Sale Summary");
 
@@ -1248,31 +1257,29 @@ router.post("/sales/download-excel", async (req, res) => {
 
     // === Add Data Rows ===
     let rowIndex = 0;
-    filteredSalesData.forEach((sale, saleIndex) => {
-      const customer = customerMap[sale.customerCode] || {};
+    filteredSalesData.forEach((sale) => {
+      const customer = customerMap[sale.customerId?.toString()] || {};
 
       const formatDate = (dateStr) => {
         const date = new Date(dateStr);
         return isNaN(date.getTime()) ? null : date;
       };
 
-      const formatCustomerCode = (code) => {
-        return code ? code.toString().padStart(5, "0") : "";
-      };
+      const formatCustomerCode = (code) =>
+        code ? code.toString().padStart(4, "0") : "";
 
-      // Create a row for each product in the sale
-      sale.products.forEach((product, productIndex) => {
+      sale.products.forEach((product) => {
         const row = worksheet.addRow({
-          no: rowIndex + 1,
+          no: ++rowIndex,
           recordingDate: formatDate(sale.recordingDate),
           invoiceNumber: sale.invoiceNumber,
           invoiceDate: formatDate(sale.invoiceDate),
           mrName: sale.mrName,
-          customerCode: formatCustomerCode(sale.customerCode),
-          customerName: customer.name || "",
-          customerNumber: customer.customerNumber || "",
-          address: customer.address || "",
-          zone: customer.zone || "",
+          customerCode: formatCustomerCode(customer.customerCode),
+          customerName: customer.name || "--",
+          customerNumber: customer.customerNumber || "--",
+          address: customer.address || "--",
+          zone: customer.zone || "--",
           productName: product.productName,
           salesQty: product.salesQty,
           bonusQty: product.bonusQty,
@@ -1287,7 +1294,7 @@ router.post("/sales/download-excel", async (req, res) => {
           isProductAccept: product.isProductAccept ? "Yes" : "No",
           creditDays: sale.creditDays,
           dueDate: formatDate(sale.dueDate),
-          deliveryDate: formatDate(sale.deliveryDate),
+          deliveryDate: formatDate(sale.recordingDate),
           paidAmount: sale.paidAmount,
           dueAmount: sale.dueAmount,
           totalAmount: sale.totalAmount,
@@ -1295,6 +1302,7 @@ router.post("/sales/download-excel", async (req, res) => {
           remark: sale.remark,
         });
 
+        // Add borders
         row.eachCell((cell) => {
           cell.border = {
             top: { style: "thin" },
@@ -1303,14 +1311,14 @@ router.post("/sales/download-excel", async (req, res) => {
             right: { style: "thin" },
           };
         });
-
-        rowIndex++;
       });
     });
 
+    // === Send File to Client ===
     const fileName = `sale_summary_${formatDateToReadable(
       startDate
     )}_to_${formatDateToReadable(endDate)}.xlsx`;
+
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

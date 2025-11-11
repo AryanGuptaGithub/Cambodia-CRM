@@ -1447,7 +1447,7 @@ const AddSale = () => {
         paymentStatus: form.paymentStatus,
         remark: form.remark || "",
       };
-     
+
       const response = await fetch(`${backendUrl}/api/sales`, {
         method: "POST",
         headers: {
@@ -1692,6 +1692,7 @@ const AddSale = () => {
                       required
                     />
 
+                    {/* Bonus Quantity - ReadOnly and Disabled */}
                     <InputField
                       label="Bonus Quantity"
                       name={`bonusQty_${index}`}
@@ -1723,10 +1724,13 @@ const AddSale = () => {
                           )
                         );
                       }}
+                      readOnly
+                      disabled
                       error={errors[`sellingPrice_${index}`]}
                       required
                     />
 
+                    {/* Discount - ReadOnly and Disabled */}
                     <InputField
                       label="Discount"
                       name={`discount_${index}`}
@@ -1749,6 +1753,7 @@ const AddSale = () => {
                       name={`lc_${index}`}
                       value={product.lc}
                       readOnly
+                      disabled
                     />
 
                     {/* Calculated Fields */}
@@ -1757,30 +1762,35 @@ const AddSale = () => {
                       name={`totalQty_${index}`}
                       value={product.totalQty}
                       readOnly
+                      disabled
                     />
                     <InputField
                       label="Amount"
                       name={`amount_${index}`}
                       value={product.amount}
                       readOnly
+                      disabled
                     />
                     <InputField
                       label="Net Selling Amount"
                       name={`netSellingAmount_${index}`}
                       value={product.netSellingAmount}
                       readOnly
+                      disabled
                     />
                     <InputField
                       label="Average Unit Price"
                       name={`averageUnitPrice_${index}`}
                       value={product.averageUnitPrice}
                       readOnly
+                      disabled
                     />
                     <InputField
                       label="Profit / Loss"
                       name={`profitLoss_${index}`}
                       value={product.profitLoss}
                       readOnly
+                      disabled
                     />
                   </div>
                 </div>
@@ -1850,15 +1860,6 @@ const AddSale = () => {
             label="Customer"
           />
 
-          {/* Customer Name Display (Read-only)
-          <InputField
-            label="Customer Name"
-            name="customerName"
-            value={form.customerName}
-            readOnly
-            placeholder="Customer name will be auto-filled"
-          /> */}
-
           <DatePickerField
             label="Delivery Date"
             name="deliveryDate"
@@ -1891,6 +1892,7 @@ const AddSale = () => {
             placeholder="Due date will be calculated from current date + credit days"
           />
 
+          {/* Total Amount - ReadOnly and Disabled */}
           <InputField
             label="Total Amount"
             name="totalAmount"
@@ -1898,6 +1900,7 @@ const AddSale = () => {
             onChange={enhancedHandleChange}
             error={errors.totalAmount}
             readOnly
+            disabled
           />
 
           <InputField
@@ -1909,6 +1912,7 @@ const AddSale = () => {
             error={errors.paidAmount}
           />
 
+          {/* Due Amount - ReadOnly and Disabled */}
           <InputField
             label="Due Amount"
             name="dueAmount"
@@ -1916,6 +1920,7 @@ const AddSale = () => {
             onChange={enhancedHandleChange}
             error={errors.dueAmount}
             readOnly
+            disabled
           />
 
           <SuggestionInput
@@ -1943,14 +1948,24 @@ const AddSale = () => {
             required
           />
 
+          {/* Remarks as Textarea with 2 rows */}
           <div className="sm:col-span-3">
-            <InputField
-              label="Remark"
+            <label className="text-sm font-medium text-gray-700 mb-1">
+              Remark
+            </label>
+            <textarea
               name="remark"
               value={form.remark}
               onChange={enhancedHandleChange}
-              error={errors.remark}
+              rows={2}
+              className={`border rounded-md px-3 py-2 w-full ${
+                errors.remark ? "border-red-500" : "border-gray-300"
+              }`}
+              placeholder="Enter remarks"
             />
+            {errors.remark && (
+              <p className="text-red-500 text-xs mt-0.5">{errors.remark}</p>
+            )}
           </div>
         </div>
 

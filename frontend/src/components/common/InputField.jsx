@@ -43,7 +43,7 @@ const InputField = ({
           disabled={disabled}
           className={`border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:border-black-500 ${
             error ? "border-red-500" : "border-gray-300"
-          } ${disabled ? "bg-gray-100 cursor-not-allowed" : "bg-white"}`}
+          } ${disabled ? "bg-gray-200 cursor-not-allowed" : "bg-white"}`}
           {...props}
         />
       ) : (
@@ -56,7 +56,7 @@ const InputField = ({
           disabled={disabled}
           className={`border rounded-lg px-3 py-2 focus:outline-none focus:ring-2  ${
             error ? "border-red-500" : "border-gray-300"
-          } ${disabled ? "bg-gray-100 cursor-not-allowed" : "bg-white"}`}
+          } ${disabled ? "bg-gray-200 cursor-not-allowed" : "bg-white"}`}
           {...props}
         />
       )}
