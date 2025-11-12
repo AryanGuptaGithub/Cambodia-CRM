@@ -51,6 +51,15 @@ const allowanceTypes = [
   "Other",
 ];
 
+// Source types array
+const sourceTypes = [
+  "Bank Transfer",
+  "Cash",
+  "Check",
+  "Digital Wallet",
+  "Other",
+];
+
 // Custom hook for form management
 const usePayrollForm = (initialForm = {}) => {
   const [form, setForm] = useState({
@@ -67,6 +76,7 @@ const usePayrollForm = (initialForm = {}) => {
     paymentDate: "",
     remarks: "",
     payrollCode: "",
+    source: "", // Added source field
     ...initialForm,
   });
 
@@ -117,6 +127,16 @@ const usePayrollForm = (initialForm = {}) => {
   const allowanceOptions = useMemo(
     () =>
       allowanceTypes.map((t) => ({
+        value: t,
+        label: t,
+      })),
+    []
+  );
+
+  // Source options
+  const sourceOptions = useMemo(
+    () =>
+      sourceTypes.map((t) => ({
         value: t,
         label: t,
       })),
@@ -209,6 +229,7 @@ const usePayrollForm = (initialForm = {}) => {
     mrListLoading,
     isMrListEmpty,
     allowanceOptions,
+    sourceOptions, // Added sourceOptions
     totalAllowance,
     showAllowanceBreakdown,
     setShowAllowanceBreakdown,
@@ -221,7 +242,7 @@ const usePayrollForm = (initialForm = {}) => {
   };
 };
 
-// MultipleSelectDropdown Component
+// MultipleSelectDropdown Component (unchanged)
 const MultipleSelectDropdown = ({
   label,
   value = [],
@@ -345,7 +366,7 @@ const MultipleSelectDropdown = ({
   );
 };
 
-// Allowance Breakdown Modal Component
+// Allowance Breakdown Modal Component (unchanged)
 const AllowanceBreakdownModal = ({
   allowances,
   isOpen,
@@ -473,6 +494,7 @@ const Payroll = () => {
     mrListLoading,
     isMrListEmpty,
     allowanceOptions,
+    sourceOptions, // Added sourceOptions
     totalAllowance,
     showAllowanceBreakdown,
     setShowAllowanceBreakdown,
@@ -647,6 +669,7 @@ const Payroll = () => {
         paymentDate: payroll.paymentDate || "",
         remarks: payroll.remarks || "",
         payrollCode: payroll.payrollCode || "",
+        source: payroll.source || "", // Added source field
         _id: payroll._id,
       });
 
@@ -656,6 +679,40 @@ const Payroll = () => {
       showToast("error", "Failed to load payroll data for editing");
     }
   };
+  const fetchSourceOptions = useCallback(async () => {
+    try {
+      setSourceLoading(true);
+      const destinationResponse = await axios.get(
+        `${backendUrl}/api/accounts/destinations`
+      );
+
+      console.log("values of des", destinationResponse);
+      if (destinationResponse.data && Array.isArray(destinationResponse.data)) {
+        const options = destinationResponse.data
+          .filter((destination) => destination.totalAmount > 0) // Filter where totalAmount > 0
+          .map((destination) => ({
+            value: destination._id || destination.id,
+            label:
+              destination.name ||
+              destination.destinationName ||
+              `Destination ${destination._id}`,
+          }));
+        setSourceOptions(options);
+      } else {
+        setSourceOptions([]);
+        console.warn(
+          "Unexpected response format for destinations:",
+          destinationResponse.data
+        );
+      }
+    } catch (error) {
+      console.error("Error fetching destination options:", error);
+      toast.error("Failed to load source options");
+      setSourceOptions([]);
+    } finally {
+      setSourceLoading(false);
+    }
+  }, []);
 
   // Open view modal with selected payroll data
   const handleView = async (payroll) => {
@@ -698,6 +755,7 @@ const Payroll = () => {
         paymentDate: payroll.paymentDate || "",
         remarks: payroll.remarks || "",
         payrollCode: payroll.payrollCode || "",
+        source: payroll.source || "", // Added source field
         _id: payroll._id,
       });
 
@@ -761,7 +819,7 @@ const Payroll = () => {
     }
   };
 
-  // File upload and parsing logic for import
+  // File upload and parsing logic for import (unchanged)
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -810,7 +868,6 @@ const Payroll = () => {
           "allowances",
           "deductions",
           "net salary",
-          "payment method",
           "bank account",
           "payment date",
           "status",
@@ -886,8 +943,6 @@ const Payroll = () => {
               allowances: allowances,
               deductions: deductions,
               netSalary: netSalary,
-              paymentMethod: item["payment method"]?.toString().trim(),
-              bankAccount: item["bank account"]?.toString().trim(),
               paymentDate: parseExcelDate(item["payment date"]),
               status: (item["status"] || "pending")?.toString().trim(),
               remarks: item["remarks"]?.toString().trim(),
@@ -1671,82 +1726,45 @@ const Payroll = () => {
                     </div>
                   </div>
 
-                  {/* Additional Fields */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Payment Method
-                      </label>
-                      <select
-                        value={form.paymentMethod || ""}
-                        onChange={(e) =>
-                          setForm((prev) => ({
-                            ...prev,
-                            paymentMethod: e.target.value,
-                          }))
-                        }
-                        className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
-                      >
-                        <option value="">Select Payment Method</option>
-                        <option value="cash">Cash</option>
-                        <option value="bank">Bank Transfer</option>
-                        <option value="check">Check</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Bank Account
-                      </label>
-                      <input
-                        type="text"
-                        value={form.bankAccount || ""}
-                        onChange={(e) =>
-                          setForm((prev) => ({
-                            ...prev,
-                            bankAccount: e.target.value,
-                          }))
-                        }
-                        className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
-                      />
-                    </div>
+                  {/* Source Field - Always visible in edit modal */}
+                  <div className="mb-6">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Source
+                    </label>
+                    <select
+                      value={form.source || ""}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          source: e.target.value,
+                        }))
+                      }
+                      className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                    >
+                      <option value="">Select Source</option>
+                      {sourceOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Payment Date
-                      </label>
-                      <DatePicker
-                        selected={
-                          form.paymentDate ? new Date(form.paymentDate) : null
-                        }
-                        onChange={(date) =>
-                          setForm((prev) => ({
-                            ...prev,
-                            paymentDate: date ? date.toISOString() : null,
-                          }))
-                        }
-                        dateFormat="yyyy-MM-dd"
-                        placeholderText="Select payment date"
-                        className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
-                      />
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Remarks
-                      </label>
-                      <textarea
-                        value={form.remarks || ""}
-                        onChange={(e) =>
-                          setForm((prev) => ({
-                            ...prev,
-                            remarks: e.target.value,
-                          }))
-                        }
-                        className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
-                        rows="3"
-                      />
-                    </div>
+                  <div className="mb-6">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Remarks
+                    </label>
+                    <textarea
+                      value={form.remarks || ""}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          remarks: e.target.value,
+                        }))
+                      }
+                      className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                      rows="3"
+                    />
                   </div>
 
                   {/* Salary Summary */}
@@ -1875,7 +1893,13 @@ const Payroll = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div
+                  className={`grid gap-4 mb-6 ${
+                    form.status === "paid"
+                      ? "grid-cols-1 md:grid-cols-2"
+                      : "grid-cols-1 md:grid-cols-3"
+                  }`}
+                >
                   <div>
                     <label className="block text-sm font-medium text-gray-600 mb-1">
                       Net Salary
@@ -1884,14 +1908,27 @@ const Payroll = () => {
                       {formatCurrency(form.netSalary)}
                     </p>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">
-                      Payment Method
-                    </label>
-                    <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 capitalize">
-                      {form.paymentMethod}
-                    </p>
-                  </div>
+
+                  {form.status === "paid" ? (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600 mb-1">
+                        Source
+                      </label>
+                      <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 capitalize">
+                        {form.source || "Not specified"}
+                      </p>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600 mb-1">
+                        Payment Method
+                      </label>
+                      <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 capitalize">
+                        {form.paymentMethod}
+                      </p>
+                    </div>
+                  )}
+
                   <div>
                     <label className="block text-sm font-medium text-gray-600 mb-1">
                       Status
@@ -1955,7 +1992,7 @@ const Payroll = () => {
                   </div>
                 )}
 
-                <div className="md:col-span-2">
+                <div>
                   <label className="block text-sm font-medium text-gray-600 mb-1">
                     Remarks
                   </label>
