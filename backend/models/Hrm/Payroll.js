@@ -26,7 +26,7 @@ const payrollSchema = new mongoose.Schema({
     required: true
   },
   period: {
-    type: String, // YYYY-MM format
+    type: String,
     required: true
   },
   basicSalary: {
@@ -71,6 +71,12 @@ const payrollSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  // ADD THIS SOURCE FIELD
+  source: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Destination',
+    required: true
+  },
   enabled: {
     type: Boolean,
     default: true
@@ -83,9 +89,9 @@ const payrollSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Auto-generate payroll code before saving
-payrollSchema.pre('save', async function(next) {
-  if (this.isNew) {
+// FIXED: Generate payroll code before validation
+payrollSchema.pre('validate', async function(next) {
+  if (this.isNew && !this.payrollCode) {
     try {
       const latestPayroll = await this.constructor
         .findOne({})
@@ -100,13 +106,11 @@ payrollSchema.pre('save', async function(next) {
       }
       
       this.payrollCode = `PR-${nextNumber.toString().padStart(4, '0')}`;
-      next();
     } catch (error) {
-      next(error);
+      return next(error);
     }
-  } else {
-    next();
   }
+  next();
 });
 
 // Calculate total allowance before saving
@@ -130,7 +134,7 @@ payrollSchema.pre('save', function(next) {
   next();
 });
 
-// Index for better query performance
+// Indexes
 payrollSchema.index({ employeeId: 1, period: 1 }, { unique: true });
 payrollSchema.index({ status: 1 });
 payrollSchema.index({ period: 1 });

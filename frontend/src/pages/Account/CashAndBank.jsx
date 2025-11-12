@@ -422,7 +422,7 @@ const AddTransactionModal = ({
           layout: "half",
         });
       }
-      // For PAYMENT INWARD: Use DESTINATION account (original behavior)
+      
       else if (isPaymentInward) {
         baseFields.splice(2, 0, {
           key: "destination",

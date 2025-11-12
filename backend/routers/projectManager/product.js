@@ -66,47 +66,159 @@ const parseDate = (dateStr) => {
 
 router.post("/product/import", async (req, res) => {
   try {
-    const products = req.body;    
-    for (const productData of products) {
-      const {
-        productName,
-        type,
-        packing,
-        sellingPriceUSD,
-        lcUSD,
-        fobUSD, // NEW: Added FOB field
-        taxSellingPriceUSD,
-        qtyPerBoxStrip,
-        supplierName,
-        drugLicense,
-        licenseValidityDate,
-        remarks,
-      } = productData;
+    const products = req.body;
+    const errors = [];
+    const successfulImports = [];
 
-      const parsedDate = parseDate(licenseValidityDate);
+    for (const [index, productData] of products.entries()) {
+      try {
+        const {
+          productName,
+          type,
+          packing,
+          sellingPriceUSD,
+          lcUSD,
+          fobUSD,
+          taxSellingPriceUSD,
+          qtyPerBoxStrip,
+          supplierName,
+          drugLicense,
+          licenseValidityDate,
+          remarks,
+        } = productData;
 
-      const product = new Product({
-        productName,
-        type,
-        packing,
-        sellingPrice: sellingPriceUSD, // map incoming key to your DB field
-        lc: lcUSD,
-        fob: fobUSD, // NEW: Map FOB field to database
-        taxSellingPrice: taxSellingPriceUSD,
-        qtyPerBoxStrip,
-        supplierName,
-        drugLicense,
-        licenseValidityDate: parsedDate,
-        remarks,
-      });
+        // Validate required fields
+        if (!productName) {
+          errors.push(`Row ${index + 1}: Product name is required`);
+          continue;
+        }
 
-      await product.save();
+        // Enhanced qtyPerBoxStrip validation
+        let parsedQtyPerBoxStrip;
+        
+        if (qtyPerBoxStrip === undefined || qtyPerBoxStrip === null || qtyPerBoxStrip === '') {
+          errors.push(`Row ${index + 1}: Quantity per box/strip is required`);
+          continue;
+        }
+
+        const qtyString = qtyPerBoxStrip.toString().trim();
+        
+        // Check if it's already a valid number
+        if (!isNaN(qtyString) && qtyString !== '') {
+          parsedQtyPerBoxStrip = parseInt(qtyString, 10);
+        } else {
+          // Extract numbers from string (e.g., "100 tablets", "50 capsules", "25 ml")
+          const numericMatch = qtyString.match(/\d+/);
+          if (numericMatch) {
+            parsedQtyPerBoxStrip = parseInt(numericMatch[0], 10);
+          } else {
+            errors.push(`Row ${index + 1}: Quantity must be a number. Examples: "100", "50 tablets", "25ml". Received: "${qtyString}"`);
+            continue;
+          }
+        }
+
+        // Final validation
+        if (isNaN(parsedQtyPerBoxStrip) || parsedQtyPerBoxStrip <= 0) {
+          errors.push(`Row ${index + 1}: Quantity must be a positive number. Received: "${qtyString}"`);
+          continue;
+        }
+
+        // Parse other numeric fields
+        const parseNumericField = (value, fieldName, defaultValue = 0) => {
+          if (value === undefined || value === null || value === '') return defaultValue;
+          
+          const num = parseFloat(value);
+          if (isNaN(num)) {
+            errors.push(`Row ${index + 1}: ${fieldName} must be a number. Using default value: ${defaultValue}`);
+            return defaultValue;
+          }
+          return num;
+        };
+
+        const parsedSellingPrice = parseNumericField(sellingPriceUSD, 'Selling Price');
+        const parsedLc = parseNumericField(lcUSD, 'LC Price');
+        const parsedFob = parseNumericField(fobUSD, 'FOB Price');
+        const parsedTaxSellingPrice = parseNumericField(taxSellingPriceUSD, 'Tax Selling Price');
+
+        const parsedDate = parseDate(licenseValidityDate);
+
+        // Create and save product
+        const product = new Product({
+          productName: productName.toString().trim(),
+          type: type?.toString().trim(),
+          packing: packing?.toString().trim(),
+          sellingPrice: parsedSellingPrice,
+          lc: parsedLc,
+          fob: parsedFob,
+          taxSellingPrice: parsedTaxSellingPrice,
+          qtyPerBoxStrip: parsedQtyPerBoxStrip,
+          supplierName: supplierName?.toString().trim(),
+          drugLicense: drugLicense?.toString().trim(),
+          licenseValidityDate: parsedDate,
+          remarks: remarks?.toString().trim(),
+        });
+
+        await product.save();
+        successfulImports.push({
+          name: productName,
+          row: index + 1
+        });
+
+      } catch (productError) {
+        console.error(`Error importing product at row ${index + 1}:`, productError);
+        
+        let errorMessage = `Row ${index + 1}: Failed to import product`;
+        
+        if (productError.name === 'ValidationError') {
+          const validationErrors = Object.values(productError.errors).map(err => 
+            `${err.path}: ${err.message}`
+          );
+          errorMessage = `Row ${index + 1}: ${validationErrors.join(', ')}`;
+        } else if (productError.code === 11000) {
+          errorMessage = `Row ${index + 1}: Product "${productData.productName}" already exists`;
+        } else {
+          errorMessage = `Row ${index + 1}: ${productError.message}`;
+        }
+        
+        errors.push(errorMessage);
+      }
     }
 
-    res.status(200).json({ message: "Products imported successfully!" });
+    // Response logic remains the same as above
+    if (errors.length > 0 && successfulImports.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "All products failed to import",
+        errors: errors,
+        importedCount: 0,
+        failedCount: errors.length
+      });
+    } else if (errors.length > 0) {
+      return res.status(207).json({
+        success: true,
+        message: `Successfully imported ${successfulImports.length} products, ${errors.length} failed`,
+        importedCount: successfulImports.length,
+        failedCount: errors.length,
+        importedProducts: successfulImports,
+        errors: errors
+      });
+    } else {
+      return res.status(200).json({
+        success: true,
+        message: `All ${successfulImports.length} products imported successfully!`,
+        importedCount: successfulImports.length,
+        importedProducts: successfulImports
+      });
+    }
+
   } catch (err) {
     console.error("Error importing products:", err);
-    res.status(500).json({ message: "Failed to import products." });
+    
+    res.status(500).json({
+      success: false,
+      message: "Failed to import products due to server error",
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
   }
 });
 

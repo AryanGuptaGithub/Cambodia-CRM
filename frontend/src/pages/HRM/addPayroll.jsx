@@ -8,6 +8,7 @@ import React, {
 } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-hot-toast";
+import axios from "axios";
 
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import InputField from "../../components/common/InputField";
@@ -53,6 +54,7 @@ const usePayrollForm = () => {
     deductions: "",
     netSalary: "0.00",
     status: "pending",
+    source: "", // Added source field
   });
 
   const [errors, setErrors] = useState({});
@@ -61,6 +63,10 @@ const usePayrollForm = () => {
   const [mrListLoading, setMrListLoading] = useState(true);
   const [isMrListEmpty, setIsMrListEmpty] = useState(false);
   const [showAllowanceBreakdown, setShowAllowanceBreakdown] = useState(false);
+
+  // Added state for source/destination options
+  const [sourceOptions, setSourceOptions] = useState([]);
+  const [sourceLoading, setSourceLoading] = useState(true);
 
   /* -------------------------- Fetch MR List -------------------------- */
   const fetchMRList = useCallback(async () => {
@@ -90,6 +96,42 @@ const usePayrollForm = () => {
     }
   }, []);
 
+  /* -------------------------- Fetch Source/Destination Options -------------------------- */
+  const fetchSourceOptions = useCallback(async () => {
+    try {
+      setSourceLoading(true);
+      const destinationResponse = await axios.get(
+        `${backendUrl}/api/accounts/destinations`
+      );
+
+      console.log("values of des", destinationResponse);
+      if (destinationResponse.data && Array.isArray(destinationResponse.data)) {
+        const options = destinationResponse.data
+          .filter((destination) => destination.totalAmount > 0) // Filter where totalAmount > 0
+          .map((destination) => ({
+            value: destination._id || destination.id,
+            label:
+              destination.name ||
+              destination.destinationName ||
+              `Destination ${destination._id}`,
+          }));
+        setSourceOptions(options);
+      } else {
+        setSourceOptions([]);
+        console.warn(
+          "Unexpected response format for destinations:",
+          destinationResponse.data
+        );
+      }
+    } catch (error) {
+      console.error("Error fetching destination options:", error);
+      toast.error("Failed to load source options");
+      setSourceOptions([]);
+    } finally {
+      setSourceLoading(false);
+    }
+  }, []);
+
   const validate = useCallback(() => {
     const newErrors = {};
 
@@ -99,6 +141,7 @@ const usePayrollForm = () => {
       newErrors.period = "Future months are not allowed";
 
     if (!form.basicSalary) newErrors.basicSalary = "Basic Salary is required";
+    if (!form.source) newErrors.source = "Source is required"; // Added source validation
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -111,6 +154,12 @@ const usePayrollForm = () => {
       setForm((prev) => ({ ...prev, [name]: value }));
       setErrors((prev) => ({ ...prev, [name]: "" }));
     }
+  }, []);
+
+  /* -------------------------- source handling -------------------------- */
+  const handleSourceChange = useCallback((sourceId) => {
+    setForm((prev) => ({ ...prev, source: sourceId }));
+    setErrors((prev) => ({ ...prev, source: "" }));
   }, []);
 
   /* -------------------------- allowance handling -------------------------- */
@@ -187,13 +236,13 @@ const usePayrollForm = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validate()) return;
-
     try {
       setLoading(true);
       const payload = {
         ...form,
         totalAllowance: totalAllowance.toFixed(2),
       };
+      console.log("value of payload", payload);
 
       const res = await fetch(`${backendUrl}/api/payrolls`, {
         method: "POST",
@@ -219,7 +268,8 @@ const usePayrollForm = () => {
   /* -------------------------- load data on mount -------------------------- */
   useEffect(() => {
     fetchMRList();
-  }, [fetchMRList]);
+    fetchSourceOptions();
+  }, [fetchMRList, fetchSourceOptions]);
 
   return {
     form,
@@ -232,11 +282,14 @@ const usePayrollForm = () => {
     totalAllowance,
     showAllowanceBreakdown,
     setShowAllowanceBreakdown,
+    sourceOptions,
+    sourceLoading,
     handleNumeric,
     handleAllowanceChange,
     handleAllowanceAmountChange,
     removeAllowance,
     handleEmployeeChange,
+    handleSourceChange,
     handleSubmit,
     setForm,
     validate,
@@ -464,11 +517,14 @@ const AddPayroll = () => {
     totalAllowance,
     showAllowanceBreakdown,
     setShowAllowanceBreakdown,
+    sourceOptions,
+    sourceLoading,
     handleNumeric,
     handleAllowanceChange,
     handleAllowanceAmountChange,
     removeAllowance,
     handleEmployeeChange,
+    handleSourceChange,
     handleSubmit,
     setForm,
   } = usePayrollForm();
@@ -509,9 +565,11 @@ const AddPayroll = () => {
       form.employeeId &&
       form.period &&
       form.basicSalary &&
+      form.source && // Added source to form validation
       !errors.period &&
       !errors.employeeId &&
-      !errors.basicSalary,
+      !errors.basicSalary &&
+      !errors.source,
     [form, errors]
   );
 
@@ -554,8 +612,8 @@ const AddPayroll = () => {
       )}
 
       <form onSubmit={handleSubmit}>
-        {/* First Row: Employee ID* and Pay Period* */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        {/* First Row: Employee ID*, Pay Period*, and Source* */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
           <SearchableDropdown
             label="MR Name"
             value={form.employeeId}
@@ -580,6 +638,18 @@ const AddPayroll = () => {
             max={getCurrentMonth()}
             required
             disabled={isMrListEmpty}
+          />
+
+          <SearchableDropdown
+            label="Source"
+            value={form.source}
+            onChange={handleSourceChange}
+            options={sourceOptions}
+            placeholder={sourceLoading ? "Loading sources..." : "Select Source"}
+            required={true}
+            loading={sourceLoading}
+            error={errors.source}
+            disabled={isMrListEmpty || sourceLoading}
           />
         </div>
 

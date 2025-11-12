@@ -264,10 +264,6 @@ router.put("/salesreturn/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const updatedData = req.body;
-
-    console.log("values of id", id);
-    console.log("values of updatedData", updatedData);
-
     // ✅ Validate main ID
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
@@ -529,8 +525,6 @@ router.post("/salesreturn/download-excel", async (req, res) => {
         message: "No sales return data found for the selected date range",
       });
     }
-
-    console.log("✅ Sales Return Records Found:", filteredReturns.length);
 
     // === Create Excel Workbook ===
     const workbook = new ExcelJS.Workbook();

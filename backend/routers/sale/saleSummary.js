@@ -1117,8 +1117,6 @@ router.post("/sales/download-excel", async (req, res) => {
       });
     }
 
-    console.log("values of sale", filteredSalesData);
-
     // ✅ Extract all unique customerIds
     const customerIds = [
       ...new Set(filteredSalesData.map((sale) => sale.customerId?.toString())),
