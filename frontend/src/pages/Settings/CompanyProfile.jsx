@@ -1,5 +1,13 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Eye, Edit, Trash2, UserPlus, Download, X } from "lucide-react";
+import {
+  Eye,
+  Edit,
+  Trash2,
+  UserPlus,
+  Download,
+  X,
+  FileText,
+} from "lucide-react";
 import * as XLSX from "xlsx";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
@@ -9,6 +17,8 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import ReactDOM from "react-dom";
 import ExcelJS from "exceljs";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const companiesPerPage = 7;
@@ -93,6 +103,226 @@ const CompanyProfile = () => {
     return [1, "...", currentPage, "...", totalPages];
   }
 
+  // Download PDF Function
+  const downloadPDF = () => {
+    if (filteredCompanies.length === 0) {
+      showToast("warning", "No data to download");
+      return;
+    }
+
+    try {
+      const doc = new jsPDF("p", "mm", "a4");
+
+      // Title (Centered)
+      doc.setFontSize(18);
+      doc.setFont("helvetica", "bold");
+      doc.text(
+        "HEALTHCARE SOUTH EAST ASIA",
+        doc.internal.pageSize.width / 2,
+        15,
+        {
+          align: "center",
+        }
+      );
+
+      // Subtitle (Centered)
+      doc.setFontSize(14);
+      doc.setFont("helvetica", "normal");
+      doc.text("Company Profiles", doc.internal.pageSize.width / 2, 25, {
+        align: "center",
+      });
+
+      // Table headers
+      const headers = [
+        "Sr No.",
+        "Company Name",
+        "Registration No",
+        "Phone",
+        "Email",
+        "Established Date",
+      ];
+
+      // Table data
+      const data = filteredCompanies.map((company, index) => [
+        (index + 1).toString(),
+        company.companyName || "-",
+        company.registrationNumber || "-",
+        company.phone || "-",
+        company.email || "-",
+        company.establishedDate
+          ? formatDateToReadable(company.establishedDate)
+          : "-",
+      ]);
+
+      autoTable(doc, {
+        head: [headers],
+        body: data,
+        startY: 35,
+        styles: {
+          fontSize: 8,
+          cellPadding: 2,
+          halign: "center", // 👈 centers all text horizontally
+          valign: "middle", // 👈 vertically center aligns the text
+        },
+        headStyles: {
+          fillColor: [66, 114, 196],
+          textColor: 255,
+          fontStyle: "bold",
+          halign: "center", // 👈 center-align headers too
+        },
+        alternateRowStyles: {
+          fillColor: [242, 242, 242],
+        },
+        columnStyles: {
+          0: { cellWidth: 15, halign: "center" }, // Sr No.
+          1: { cellWidth: 40, halign: "center" }, // Company Name
+          2: { cellWidth: 30, halign: "center" }, // Registration No.
+          3: { cellWidth: 25, halign: "center" }, // Phone
+          4: { cellWidth: 40, halign: "center" }, // Email
+          5: { cellWidth: 25, halign: "center" }, // Established Date
+        },
+        tableWidth: "wrap",
+        margin: { top: 35, left: (doc.internal.pageSize.width - 175) / 2 },
+      });
+
+      // Footer (Centered)
+      const pageCount = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(10);
+        const pageWidth = doc.internal.pageSize.width;
+        const pageHeight = doc.internal.pageSize.height;
+        doc.text(`Page ${i} of ${pageCount}`, pageWidth / 2, pageHeight - 10, {
+          align: "center",
+        });
+        doc.text(
+          `Generated on: ${new Date().toLocaleDateString()}`,
+          pageWidth - 20,
+          pageHeight - 10,
+          { align: "right" }
+        );
+      }
+
+      // Save file
+      doc.save(
+        `companies_profile_${new Date().toISOString().split("T")[0]}.pdf`
+      );
+
+      showToast("success", "PDF downloaded successfully");
+    } catch (error) {
+      console.error("Error generating PDF:", error);
+      showToast("error", "Failed to generate PDF");
+    }
+  };
+
+  const downloadCompanyDetailPDF = (company) => {
+    try {
+      const doc = new jsPDF("p", "mm", "a4");
+      const pageWidth = doc.internal.pageSize.width;
+
+      // Title (Centered)
+      doc.setFontSize(16);
+      doc.setFont("helvetica", "bold");
+      doc.text("COMPANY PROFILE DETAILS", pageWidth / 2, 20, {
+        align: "center",
+      });
+
+      let yPosition = 40;
+
+      // Section Header: Basic Information (Centered)
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "bold");
+      doc.text("Basic Information", pageWidth / 2, yPosition, {
+        align: "center",
+      });
+      yPosition += 10;
+
+      // Company Details (Centered as label: value)
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      const companyDetails = [
+        { label: "Company Code", value: company.companyCode || "-" },
+        { label: "Company Name", value: company.companyName || "-" },
+        {
+          label: "Registration Number",
+          value: company.registrationNumber || "-",
+        },
+        { label: "Tax Number", value: company.taxNumber || "-" },
+        {
+          label: "Established Date",
+          value: company.establishedDate
+            ? formatDateToReadable(company.establishedDate)
+            : "-",
+        },
+      ];
+
+      companyDetails.forEach((detail) => {
+        const line = `${detail.label}: ${detail.value}`;
+        doc.text(line, pageWidth / 2, yPosition, { align: "center" });
+        yPosition += 7;
+      });
+
+      yPosition += 10;
+
+      // Contact Information (Centered)
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text("Contact Information", pageWidth / 2, yPosition, {
+        align: "center",
+      });
+      yPosition += 10;
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+
+      const contactDetails = [
+        { label: "Address", value: company.address || "-" },
+        { label: "Phone", value: company.phone || "-" },
+        { label: "Email", value: company.email || "-" },
+        { label: "Website", value: company.website || "-" },
+      ];
+
+      contactDetails.forEach((detail) => {
+        const line = `${detail.label}: ${detail.value}`;
+        const wrapped = doc.splitTextToSize(line, pageWidth - 40);
+        doc.text(wrapped, pageWidth / 2, yPosition, { align: "center" });
+        yPosition += wrapped.length * 6;
+      });
+
+      yPosition += 10;
+
+      // Description (Centered multi-line)
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text("Description", pageWidth / 2, yPosition, { align: "center" });
+      yPosition += 10;
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      const desc =
+        company.description || "No description provided by the company.";
+      const descLines = doc.splitTextToSize(desc, pageWidth - 40);
+      doc.text(descLines, pageWidth / 2, yPosition, { align: "center" });
+
+      // Footer
+      const pageHeight = doc.internal.pageSize.height;
+      doc.setFontSize(8);
+      doc.text(
+        `Generated on: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`,
+        pageWidth / 2,
+        pageHeight - 10,
+        { align: "center" }
+      );
+
+      // Save the PDF
+      doc.save(`${company.companyName || "company"}_profile.pdf`);
+      showToast("success", "Company details PDF downloaded");
+    } catch (error) {
+      console.error("Error generating company PDF:", error);
+      showToast("error", "Failed to generate company PDF");
+    }
+  };
+
   const downloadExcel = async () => {
     if (filteredCompanies.length === 0) {
       showToast("warning", "No data to download");
@@ -163,7 +393,7 @@ const CompanyProfile = () => {
       });
 
       worksheet.eachRow((row, rowNumber) => {
-        if (rowNumber <= 2) return; 
+        if (rowNumber <= 2) return;
 
         row.height = 20;
         row.alignment = { horizontal: "center", vertical: "middle" };
@@ -199,15 +429,13 @@ const CompanyProfile = () => {
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 100);
 
-      showToast(
-        "success",
-        `Downloaded companies profile successfully`
-      );
+      showToast("success", `Downloaded companies profile successfully`);
     } catch (error) {
       console.error("Error downloading Excel:", error);
       showToast("error", "Failed to generate Excel file");
     }
   };
+
   const editCompany = (company) => {
     setForm({
       ...company,
@@ -315,12 +543,20 @@ const CompanyProfile = () => {
       <div className="flex justify-between items-center mb-6">
         <div className="flex gap-3">
           {hasCompanyProfile && (
-            <button
-              onClick={downloadExcel}
-              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer transition-colors"
-            >
-              <Download size={18} /> Download Excel
-            </button>
+            <>
+              <button
+                onClick={downloadPDF}
+                className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer transition-colors"
+              >
+                <FileText size={18} /> Download PDF
+              </button>
+              <button
+                onClick={downloadExcel}
+                className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer transition-colors"
+              >
+                <Download size={18} /> Download Excel
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -373,6 +609,13 @@ const CompanyProfile = () => {
                         className="text-green-600 hover:text-green-800 cursor-pointer transition-colors"
                       >
                         <Edit size={18} />
+                      </button>
+                      <button
+                        onClick={() => downloadCompanyDetailPDF(company)}
+                        className="text-purple-600 hover:text-purple-800 cursor-pointer transition-colors"
+                        title="Download PDF"
+                      >
+                        <FileText size={18} />
                       </button>
                       <button
                         onClick={() => deleteCompany(company)}
@@ -454,6 +697,7 @@ const CompanyProfile = () => {
         </div>
       )}
 
+      {/* Rest of your modals remain the same */}
       {/* Add Company Modal */}
       {isAddModalOpen &&
         ReactDOM.createPortal(
@@ -473,6 +717,7 @@ const CompanyProfile = () => {
                 className="grid grid-cols-1 md:grid-cols-2 gap-4"
                 autoComplete="off"
               >
+                {/* Form fields remain the same */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Company Code
@@ -928,7 +1173,13 @@ const CompanyProfile = () => {
                   </p>
                 </div>
               </div>
-              <div className="mt-6 flex justify-end">
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  onClick={() => downloadCompanyDetailPDF(form)}
+                  className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg cursor-pointer transition-colors"
+                >
+                  <FileText size={16} /> Download PDF
+                </button>
                 <button
                   onClick={() => setIsViewModalOpen(false)}
                   className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer transition-colors"

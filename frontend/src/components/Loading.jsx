@@ -1,5 +1,5 @@
 import React from "react";
-import { LoaderPinwheelIcon } from "lucide-react"; // or wherever you're importing it from
+import { LoaderPinwheelIcon, BriefcaseMedical } from "lucide-react"; // or wherever you're importing it from
 
 const LoadingOverlay = ({ text = "Loading...", color = "text-blue-600", bg = "bg-white" }) => {
   return (

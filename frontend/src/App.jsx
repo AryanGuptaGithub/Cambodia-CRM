@@ -70,7 +70,7 @@ import ProductSalesSummary from "./pages/Reports/ProductSalesSummary";
 import StockAlert from "./pages/Reports/StockAlert";
 import DailySample from "./pages/Reports/DailySample";
 import RateList from "./pages/Reports/RateList";
-import ProfitLoss from "./pages/Reports/ProfitLoss";
+import ProfitLoss from "./pages/Reports/PLReport";
 import SaleSummary from "./pages/Reports/SaleSummary";
 import UserReport from "./pages/Reports/UserReport";
 import PaymentReports from "./pages/Reports/PaymentReports";

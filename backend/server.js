@@ -38,19 +38,20 @@ import newCustomer from "./routers/reports/newCustomer.js";
 import zoneWiseCustomer from "./routers/reports/zoneWiseCustomer.js";
 import customerRetention from "./routers/reports/customerRetentions.js";
 import customerExpentationRatio from "./routers/reports/customerExpentationRatio.js";
-import provinceWiseSaleRoutes from './routers/reports/provinceWiseSale.js';
-import provinceWiseCustomerRoutes from './routers/reports/provinceWiseCustomer.js';
+import provinceWiseSaleRoutes from "./routers/reports/provinceWiseSale.js";
+import provinceWiseCustomerRoutes from "./routers/reports/provinceWiseCustomer.js";
 import stockInHand from "./routers/reports/stockInHand.js";
 import companyProfile from "./routers/settings/companyProfile.js";
-import hTabsRoutes from './routers/settings/tabSetting.js'; 
+import hTabsRoutes from "./routers/settings/tabSetting.js";
 import Holiday from "./routers/hrm/Holiday.js";
 import Attendance from "./routers/hrm/Attendance.js";
-import Payroll from './routers/hrm/payroll.js';
+import Payroll from "./routers/hrm/payroll.js";
 import zone from "./routers/master/zone.js";
 import businessTypes from "./routers/master/businessType.js";
 import productType from "./routers/projectManager/productType.js";
 import productPackingType from "./routers/projectManager/productPackingType.js";
-
+import saleAndSalary from "./routers/reports/saleAndSalary.js";
+import profitAndLoss from "./routers/reports/profitAndLoss.js";
 
 dotenv.config();
 
@@ -121,13 +122,15 @@ app.use("/api", provinceWiseCustomerRoutes);
 app.use("/api", stockInHand);
 app.use("/api", companyProfile);
 app.use("/api", hTabsRoutes);
-app.use("/api", Holiday); 
+app.use("/api", Holiday);
 app.use("/api", Attendance);
 app.use("/api", Payroll);
 app.use("/api", zone);
 app.use("/api", businessTypes);
 app.use("/api", productType);
 app.use("/api", productPackingType);
+app.use("/api", saleAndSalary);
+app.use("/api", profitAndLoss);
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);

@@ -625,7 +625,7 @@ const DateSelectionTabs = ({ onDateRangeSelect, selectedRange }) => {
     }
 
     const start = new Date(currentYear, 0, 1); // January 1st
-    const end = new Date(currentYear, currentMonth, 0); // Last day of previous month
+    const end = new Date(currentYear, currentMonth - 1, 0); // Last day of month before current
 
     // Get month names for label
     const monthNames = [
@@ -740,7 +740,6 @@ const Payroll = () => {
   const navigate = useNavigate();
 
   const [payrolls, setPayrolls] = useState([]);
-  const [allPayrolls, setAllPayrolls] = useState([]); // Store all payrolls for client-side filtering
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [sourceOptions, setSourceOptions] = useState([]);
@@ -840,21 +839,27 @@ const Payroll = () => {
     fetchSourceOptions();
   }, []);
 
-  // Modified fetchPayrolls to store all data for client-side filtering
-  const fetchPayrolls = async () => {
+  // Modified fetchPayrolls to handle period-based filtering
+  const fetchPayrolls = async (periodRange = null) => {
     try {
       setLoading(true);
       setError(null);
-
-      const url = `${backendUrl}/api/payrolls`;
+      
+      let url = `${backendUrl}/api/payrolls`;
+      
+      // If period range is provided, add it as query parameters
+      if (periodRange) {
+        const params = new URLSearchParams();
+        if (periodRange.startPeriod) params.append('startPeriod', periodRange.startPeriod);
+        if (periodRange.endPeriod) params.append('endPeriod', periodRange.endPeriod);
+        url += `?${params.toString()}`;
+      }
+      
       const response = await fetch(url);
       if (!response.ok) throw new Error("Failed to fetch payrolls");
       const data = await response.json();
 
-      const payrollData = data.data || [];
-      setAllPayrolls(payrollData); // Store all payrolls
-      setPayrolls(payrollData); // Initialize with all payrolls
-
+      setPayrolls(data.data || []);
       if (data.nextPayrollCode) {
         setNextPayrollCode(data.nextPayrollCode);
       }
@@ -866,95 +871,24 @@ const Payroll = () => {
     }
   };
 
-  // Function to filter payrolls by date range - FIXED VERSION
-  const filterPayrollsByDateRange = (
-    dateRange,
-    payrollsToFilter = allPayrolls
-  ) => {
-    console.log("Input dateRange:", dateRange);
-    console.log("Input payrollsToFilter:", payrollsToFilter);
-
-    if (!dateRange || !dateRange.start || !dateRange.end) {
-      console.log("Invalid or missing dateRange, returning all payrolls.");
-      return payrollsToFilter;
-    }
-
-    const startDate = new Date(dateRange.start);
-    const endDate = new Date(dateRange.end);
-
-    // Set time to beginning and end of day for proper comparison
-    startDate.setHours(0, 0, 0, 0);
-    endDate.setHours(23, 59, 59, 999);
-
-    console.log("Filtering payrolls between dates:", startDate, "to", endDate);
-
-    const filteredPayrolls = payrollsToFilter.filter((payroll) => {
-      if (!payroll.period) return false;
-
-      // Parse payroll period (format: "YYYY-MM")
-      const [year, month] = payroll.period.split("-").map(Number);
-
-      // Create date for the first day of the payroll period month
-      const payrollDate = new Date(year, month - 1, 1); // month is 0-indexed in Date
-
-      console.log(
-        `Payroll period: ${payroll.period}, Payroll date: ${payrollDate}`
-      );
-
-      // Check if payroll date falls within the selected date range
-      const isInRange = payrollDate >= startDate && payrollDate <= endDate;
-      console.log(`Is payroll in range?`, isInRange);
-
-      return isInRange;
-    });
-
-    console.log("Filtered payrolls count:", filteredPayrolls.length);
-    return filteredPayrolls;
+  // Convert date range to period range for API call
+  const convertDateRangeToPeriodRange = (dateRange) => {
+    if (!dateRange) return null;
+    
+    const startPeriod = `${dateRange.start.getFullYear()}-${(dateRange.start.getMonth() + 1).toString().padStart(2, '0')}`;
+    const endPeriod = `${dateRange.end.getFullYear()}-${(dateRange.end.getMonth() + 1).toString().padStart(2, '0')}`;
+    
+    return { startPeriod, endPeriod };
   };
 
-  // Helper function to extract date from payroll object
-  const getPayrollDate = (payroll) => {
-    // Try different possible date fields
-    if (payroll.paymentDate) {
-      return new Date(payroll.paymentDate);
-    }
-    if (payroll.date) {
-      return new Date(payroll.date);
-    }
-    if (payroll.createdAt) {
-      return new Date(payroll.createdAt);
-    }
-    if (payroll.period) {
-      // If period is in format "YYYY-MM", convert to first day of month
-      const periodMatch = payroll.period.match(/^(\d{4})-(\d{2})$/);
-      if (periodMatch) {
-        return new Date(
-          parseInt(periodMatch[1]),
-          parseInt(periodMatch[2]) - 1,
-          1
-        );
-      }
-    }
-    return null;
-  };
-
-  // Handle date range selection - now filters on client side
-  const handleDateRangeSelect = (dateRange) => {
-    console.log("Date range selected:", dateRange);
+  // Handle date range selection - now fetches data from API
+  const handleDateRangeSelect = async (dateRange) => {
     setSelectedDateRange(dateRange);
     setCurrentPage(1);
-
-    // Apply the filter to all payrolls
-    const filtered = filterPayrollsByDateRange(dateRange, allPayrolls);
-    console.log("After filtering, payrolls count:", filtered.length);
-    setPayrolls(filtered);
-  };
-
-  // Reset to show all payrolls
-  const handleClearDateFilter = () => {
-    setSelectedDateRange(null);
-    setPayrolls(allPayrolls); // Reset to show all payrolls
-    setCurrentPage(1);
+    
+    // Convert date range to period range and fetch payrolls
+    const periodRange = convertDateRangeToPeriodRange(dateRange);
+    await fetchPayrolls(periodRange);
   };
 
   useEffect(() => {
@@ -974,6 +908,7 @@ const Payroll = () => {
         r.payrollCode?.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
+    // Note: We're now filtering on the backend based on period, so no need for frontend date filtering
     return filtered;
   }, [payrolls, searchTerm]);
 
@@ -1054,68 +989,6 @@ const Payroll = () => {
     }
   };
 
-  // Delete single payroll
-  const deletePayroll = async (payroll) => {
-    if (!payroll._id) return;
-    const confirmDelete = await confirmDialog({
-      title: "Delete",
-      text: `Are you sure you want to delete payroll record for <b>${payroll.employeeName}</b>?`,
-      icon: "warning",
-      confirmButtonText: "Yes, delete",
-      cancelButtonText: "Cancel",
-    });
-
-    if (confirmDelete.isConfirmed) {
-      try {
-        const res = await axios.delete(
-          `${backendUrl}/api/payrolls/${payroll._id}`
-        );
-
-        if (res.status === 200) {
-          showToast(
-            "success",
-            `Payroll record for <b>${payroll.employeeName}</b> deleted successfully`
-          );
-          await fetchPayrolls();
-          setSelected([]);
-        }
-      } catch (error) {
-        showToast("error", "Failed to delete payroll record.");
-      }
-    }
-  };
-
-  // Function to format period to month name (e.g., "2024-10" -> "Oct")
-  const formatPeriodToMonth = (period) => {
-    if (!period) return "N/A";
-
-    try {
-      const [year, month] = period.split("-").map(Number);
-      const monthNames = [
-        "Jan",
-        "Feb",
-        "Mar",
-        "Apr",
-        "May",
-        "Jun",
-        "Jul",
-        "Aug",
-        "Sep",
-        "Oct",
-        "Nov",
-        "Dec",
-      ];
-
-      if (month >= 1 && month <= 12) {
-        return monthNames[month - 1];
-      }
-      return "N/A";
-    } catch (error) {
-      console.error("Error formatting period:", error);
-      return "N/A";
-    }
-  };
-
   // Open edit modal with selected payroll data
   const editPayroll = async (payroll) => {
     try {
@@ -1160,11 +1033,7 @@ const Payroll = () => {
         paymentDate: payroll.paymentDate || "",
         remarks: payroll.remarks || "",
         payrollCode: payroll.payrollCode || "",
-        // FIX: Handle source object properly
-        source:
-          (typeof payroll.source === "object"
-            ? payroll.source._id
-            : payroll.source) || "",
+        source: payroll.source || "",
         _id: payroll._id,
       });
 
@@ -1175,6 +1044,7 @@ const Payroll = () => {
     }
   };
 
+  // Open view modal with selected payroll data
   const handleView = async (payroll) => {
     try {
       // Convert allowances from backend format to array format
@@ -1215,11 +1085,7 @@ const Payroll = () => {
         paymentDate: payroll.paymentDate || "",
         remarks: payroll.remarks || "",
         payrollCode: payroll.payrollCode || "",
-        // FIX: Handle source object properly
-        source:
-          (typeof payroll.source === "object"
-            ? payroll.source._id
-            : payroll.source) || "",
+        source: payroll.source || "",
         _id: payroll._id,
       });
 
@@ -1230,6 +1096,7 @@ const Payroll = () => {
     }
   };
 
+  // Open allowance modal with selected payroll allowances
   const handleViewAllowances = (payroll) => {
     let allowances = [];
 
@@ -1252,10 +1119,34 @@ const Payroll = () => {
     setIsAllowanceModalOpen(true);
   };
 
-  const handleIconClick = () => {
-    inputRef.current?.focus();
-    inputRef.current?.classList.add("highlight");
-    setTimeout(() => inputRef.current?.classList.remove("highlight"), 1000);
+  const deletePayroll = async (payroll) => {
+    if (!payroll._id) return;
+    const confirmDelete = await confirmDialog({
+      title: "Delete",
+      text: `Are you sure you want to delete payroll record for <b>${payroll.employeeName}</b>?`,
+      icon: "warning",
+      confirmButtonText: "Yes, delete",
+      cancelButtonText: "Cancel",
+    });
+
+    if (confirmDelete.isConfirmed) {
+      try {
+        const res = await axios.delete(
+          `${backendUrl}/api/payrolls/${payroll._id}`
+        );
+
+        if (res.status === 200) {
+          showToast(
+            "success",
+            `Payroll record for <b>${payroll.employeeName}</b> deleted successfully`
+          );
+          await fetchPayrolls();
+          setSelected([]);
+        }
+      } catch (error) {
+        showToast("error", "Failed to delete payroll record.");
+      }
+    }
   };
 
   // File upload and parsing logic for import
@@ -1459,6 +1350,7 @@ const Payroll = () => {
     }
   };
 
+  // Update payroll on backend
   const handleUpdatePayroll = async (e) => {
     e.preventDefault();
     try {
@@ -1485,6 +1377,18 @@ const Payroll = () => {
     } catch (err) {
       console.error("Update error:", err);
       showToast("error", "Failed to update payroll record.");
+    }
+  };
+
+  const handleIconClick = () => {
+    if (inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.classList.add("highlight");
+      setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.classList.remove("highlight");
+        }
+      }, 1000);
     }
   };
 
@@ -1522,7 +1426,7 @@ const Payroll = () => {
     return 0;
   };
 
-  // MR options for dropdown
+  // MR options for dropdown - FIXED: Include current employee if not in mrList
   const mrOptions = useMemo(() => {
     if (isMrListEmpty) {
       // If no employees available but we have a current employee in form, include it
@@ -1571,25 +1475,11 @@ const Payroll = () => {
     return (form.allowances || []).map((allowance) => allowance.type);
   }, [form.allowances]);
 
-  // FIXED: Get source label for display - handle objects properly
+  // Get source label for display
   const getSourceLabel = (sourceId) => {
     if (!sourceId) return "Not specified";
-
-    // Handle case where sourceId might be an object
-    if (typeof sourceId === "object") {
-      // If it's an object with the structure from the error, use the name property
-      if (sourceId.name) {
-        return sourceId.name.toString();
-      }
-      if (sourceId.destinationName) {
-        return sourceId.destinationName.toString();
-      }
-      return `Destination ${sourceId._id || sourceId.id || "Unknown"}`;
-    }
-
-    // If it's a string ID, find the corresponding option
     const source = sourceOptions.find((opt) => opt.value === sourceId);
-    return source ? source.label.toString() : sourceId.toString();
+    return source ? source.label.toString() : sourceId;
   };
 
   // Add keyboard navigation support
@@ -1717,7 +1607,6 @@ const Payroll = () => {
                   <span className="text-sm font-medium">Employee</span>
                 </div>
               </th>
-              <th className="p-3 text-sm font-medium">Month</th>
               <th className="p-3 text-sm font-medium">Team Name</th>
               <th className="p-3 text-sm font-medium">Contact No</th>
               <th className="p-3 text-sm font-medium">Basic Salary ($)</th>
@@ -1730,10 +1619,8 @@ const Payroll = () => {
           <tbody>
             {currentPayrolls.length === 0 ? (
               <tr>
-                <td colSpan={9} className="p-4 text-center text-gray-500">
-                  {selectedDateRange
-                    ? "No payroll records found for the selected date range."
-                    : "No payroll records found."}
+                <td colSpan={8} className="p-4 text-center text-gray-500">
+                  No payroll records found.
                 </td>
               </tr>
             ) : (
@@ -1756,9 +1643,6 @@ const Payroll = () => {
                         {payroll.employeeName}
                       </span>
                     </div>
-                  </td>
-                  <td className="p-3 text-gray-600 font-medium">
-                    {formatPeriodToMonth(payroll.period)}
                   </td>
                   <td className="p-3 text-gray-600 capitalize">
                     {payroll.employeeId?.teamName}
@@ -2301,7 +2185,7 @@ const Payroll = () => {
                       Payroll Code
                     </label>
                     <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50">
-                      {form.payrollCode || "N/A"}
+                      {form.payrollCode}
                     </p>
                   </div>
                   <div>
@@ -2309,7 +2193,7 @@ const Payroll = () => {
                       Employee Name
                     </label>
                     <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 capitalize">
-                      {form.employeeName || "N/A"}
+                      {form.employeeName}
                     </p>
                   </div>
                 </div>
@@ -2357,7 +2241,7 @@ const Payroll = () => {
                     </p>
                   </div>
 
-                  {/* Show Source in view modal - FIXED: Using getSourceLabel safely */}
+                  {/* Show Source in view modal */}
                   <div>
                     <label className="block text-sm font-medium text-gray-600 mb-1">
                       Source
@@ -2380,7 +2264,7 @@ const Payroll = () => {
                           : "text-red-600"
                       }`}
                     >
-                      {form.status || "N/A"}
+                      {form.status}
                     </p>
                   </div>
                 </div>
