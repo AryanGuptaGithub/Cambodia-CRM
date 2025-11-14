@@ -49,7 +49,7 @@ import {
   Layers,
   Building,
   Eye,
-  Clock,
+  Clock, // Clock icon for expiry stock
 } from "lucide-react";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
@@ -79,6 +79,7 @@ const tabService = {
         return transformed;
       }
 
+      // If it's already in the expected format
       if (data.data && typeof data.data === "object") {
         return data.data;
       }
@@ -135,6 +136,7 @@ const tabService = {
       // Products sub-tabs
       products_products: { visible: true, sequence: 1 },
       products_pricelist: { visible: true, sequence: 2 },
+      // products_printbarcode: { visible: true, sequence: 3 },
 
       // Purchase sub-tabs
       purchase_purchase: { visible: true, sequence: 1 },
@@ -171,7 +173,7 @@ const tabService = {
       reports_salesummary: { visible: true, sequence: 19 },
       reports_dailysample: { visible: true, sequence: 20 },
       reports_profitloss: { visible: true, sequence: 21 },
-      reports_expirystock: { visible: true, sequence: 22 },
+      reports_expirystock: { visible: true, sequence: 22 }, 
 
       // Master Customer Report sub-tabs
       masterCustomerReports_retention: { visible: true, sequence: 1 },
@@ -274,7 +276,7 @@ const reportPaths = [
   "/reportlayout/slow-moving-items",
   "/reportlayout/product-profitability",
   "/reportlayout/product-report",
-  "/reportlayout/expiry-stock-report",
+  "/reportlayout/expiry-stock-report", // Make sure this path is correct
 ];
 
 // Finance Report paths
@@ -315,6 +317,7 @@ const settingsPaths = [
 
 const accountPaths = ["/accountlayout"];
 
+// Define utility paths - updated to settings paths
 const utilityPaths = [
   "/utilitylayout/companyprofile",
   "/utilitylayout/tabHideView",
@@ -346,10 +349,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
       try {
         const tabs = await tabService.getVisibleTabs();
         setVisibleTabs(tabs);
-        if (tabs.reports_expirystock) {
-        }
       } catch (error) {
-        console.error("Error loading tabs:", error);
         setVisibleTabs(tabService.getDefaultVisibleTabs());
       } finally {
         setLoading(false);
@@ -358,9 +358,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
 
     loadVisibleTabs();
   }, [lastUpdate]);
-
-  // Debug effect to check visible tabs
-  useEffect(() => {}, [visibleTabs, loading]);
 
   useEffect(() => {
     if (location.pathname.startsWith("/masterlayout")) {
@@ -375,6 +372,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
       setActiveParentMenu("expense");
     } else if (location.pathname.startsWith("/reportlayout")) {
       setActiveParentMenu("reports");
+      // Check if current path is under master customer reports
       if (
         masterCustomerReportPaths.some((path) =>
           location.pathname.startsWith(path)
@@ -382,11 +380,13 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
       ) {
         setActiveSubMenu("masterCustomerReports");
       }
+      // Check if current path is under finance reports
       if (
         financeReportPaths.some((path) => location.pathname.startsWith(path))
       ) {
         setActiveFinanceSubMenu("financeReports");
       }
+      // Check if current path is under reports in hand
       if (
         reportsInHandPaths.some((path) => location.pathname.startsWith(path))
       ) {
@@ -416,7 +416,9 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
       refreshTabData();
     };
 
+    // Listen for custom event
     window.addEventListener("tabVisibilityChanged", handleTabVisibilityChange);
+
     return () => {
       window.removeEventListener(
         "tabVisibilityChanged",
@@ -434,6 +436,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
     };
 
     window.addEventListener("storage", handleStorageChange);
+
     return () => {
       window.removeEventListener("storage", handleStorageChange);
     };
@@ -471,19 +474,22 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
 
   const shouldShowTab = (tabId) => {
     if (loading) {
-      return true;
+      return true; // Show all tabs while loading
     }
 
     const tabConfig = visibleTabs[tabId];
 
+    // If tab is not configured at all, don't show it
     if (tabConfig === undefined || tabConfig === null) {
       return false;
     }
 
+    // Handle object structure with visible property
     if (typeof tabConfig === "object" && tabConfig !== null) {
       return tabConfig.visible === true;
     }
 
+    // For backward compatibility - if it's a direct boolean
     return tabConfig === true;
   };
 
@@ -524,7 +530,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
         : "hover:bg-gray-600 text-gray-200"
     }`;
 
-  const getReportsInHandSubDropdownButtonClass = (key, paths) =>
+  const getReportsInHandSubDropdownButtonClass = (key, paths) =
     `flex items-center justify-between w-full p-2 rounded-md transition-all duration-150 ${
       activeReportsInHandSubMenu === key ||
       (activeReportsInHandSubMenu === key && isChildActive(paths))
@@ -532,7 +538,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
         : "hover:bg-gray-600 text-gray-200"
     }`;
 
-  const getProductReportSubDropdownButtonClass = (key, paths) =>
+  const getProductReportSubDropdownButtonClass = (key, paths) =
     `flex items-center justify-between w-full p-2 rounded-md transition-all duration-150 ${
       activeProductReportSubMenu === key ||
       (activeProductReportSubMenu === key && isChildActive(paths))
@@ -549,8 +555,10 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
       .sort((a, b) => {
         const seqA = visibleTabs[a]?.sequence || 0;
         const seqB = visibleTabs[b]?.sequence || 0;
+
         return seqA - seqB;
       });
+
     return filteredTabs;
   };
 
@@ -600,399 +608,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
           </Link>
         )}
 
-        {/* Master */}
-        {shouldShowTab("master") && (
-          <div>
-            <button
-              onClick={() => toggleMenu("master")}
-              className={getDropdownButtonClass("master", masterPaths)}
-            >
-              <span className="flex items-center gap-3">
-                <Users className="w-5 h-5" />
-              </span>
-              <span>{isOpen && "Master"}</span>
-              {isOpen && (
-                <ChevronDown
-                  className={`w-4 h-4 transform transition-transform ${
-                    activeParentMenu === "master" ? "rotate-180" : ""
-                  }`}
-                />
-              )}
-            </button>
-            {activeParentMenu === "master" && isOpen && (
-              <div className="ml-6 mt-1 space-y-1">
-                {shouldShowTab("master_customers") && (
-                  <Link
-                    to="/masterlayout/customer"
-                    className={getChildLinkClass("/masterlayout/customer")}
-                  >
-                    <Users className="w-4 h-4" />
-                    <span className="mx-auto">Customers</span>
-                  </Link>
-                )}
-                {shouldShowTab("master_suppliers") && (
-                  <Link
-                    to="/masterlayout/supplier"
-                    className={getChildLinkClass("/masterlayout/supplier")}
-                  >
-                    <Truck className="w-4 h-4" />
-                    <span className="mx-auto">Suppliers</span>
-                  </Link>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Settings */}
-        {shouldShowTab("settings") && (
-          <div>
-            <button
-              onClick={() => toggleMenu("settings")}
-              className={getDropdownButtonClass("settings", [
-                "/settingslayout/company-profile",
-                "/settingslayout/tab-manipulation",
-              ])}
-            >
-              <span className="flex items-center gap-3">
-                <Settings className="w-5 h-5" />
-              </span>
-              <span>{isOpen && "Settings"}</span>
-              {isOpen && (
-                <ChevronDown
-                  className={`w-4 h-4 transform transition-transform ${
-                    activeParentMenu === "settings" ? "rotate-180" : ""
-                  }`}
-                />
-              )}
-            </button>
-            {activeParentMenu === "settings" && isOpen && (
-              <div className="ml-6 mt-1 space-y-1">
-                {shouldShowTab("settings_companyprofile") && (
-                  <Link
-                    to="/settingslayout/company-profile"
-                    className={getChildLinkClass(
-                      "/settingslayout/company-profile"
-                    )}
-                  >
-                    <Building className="w-4 h-4" />
-                    <span className="mx-auto">Company Profile</span>
-                  </Link>
-                )}
-                {shouldShowTab("settings_tabmanipulation") && (
-                  <Link
-                    to="/settingslayout/tab-manipulation"
-                    className={getChildLinkClass(
-                      "/settingslayout/tab-manipulation"
-                    )}
-                  >
-                    <Eye className="w-4 h-4" />
-                    <span className="mx-auto">Tab Manipulation</span>
-                  </Link>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Product Manager */}
-        {shouldShowTab("products") && (
-          <div>
-            <button
-              onClick={() => toggleMenu("products")}
-              className={getDropdownButtonClass("products", productPaths)}
-            >
-              <span className="flex items-center gap-3">
-                <Package className="w-5 h-5" />
-              </span>
-              <span>{isOpen && "Product Manager"}</span>
-              {isOpen && (
-                <ChevronDown
-                  className={`w-4 h-4 transform transition-transform ${
-                    activeParentMenu === "products" ? "rotate-180" : ""
-                  }`}
-                />
-              )}
-            </button>
-            {activeParentMenu === "products" && isOpen && (
-              <div className="ml-6 mt-1 space-y-1">
-                {getSortedTabs(["products_products", "products_pricelist"]).map(
-                  (tabId) => {
-                    if (tabId === "products_products") {
-                      return (
-                        <Link
-                          key={tabId}
-                          to="/productmanagerlayout/product"
-                          className={getChildLinkClass(
-                            "/productmanagerlayout/product"
-                          )}
-                        >
-                          <Boxes className="w-4 h-4" />
-                          <span className="mx-auto">Products</span>
-                        </Link>
-                      );
-                    } else if (tabId === "products_pricelist") {
-                      return (
-                        <Link
-                          key={tabId}
-                          to="/productmanagerlayout/pricelist"
-                          className={getChildLinkClass(
-                            "/productmanagerlayout/pricelist"
-                          )}
-                        >
-                          <ClipboardList className="w-4 h-4" />
-                          <span className="mx-auto">Price List</span>
-                        </Link>
-                      );
-                    }
-                    return null;
-                  }
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Purchase */}
-        {shouldShowTab("purchase") && (
-          <div>
-            <button
-              onClick={() => toggleMenu("purchase")}
-              className={getDropdownButtonClass("purchase", purchasePaths)}
-            >
-              <span className="flex items-center gap-3">
-                <ShoppingCart className="w-5 h-5" />
-              </span>
-              <span>{isOpen && "Purchase"}</span>
-              {isOpen && (
-                <ChevronDown
-                  className={`w-4 h-4 transform transition-transform ${
-                    activeParentMenu === "purchase" ? "rotate-180" : ""
-                  }`}
-                />
-              )}
-            </button>
-            {activeParentMenu === "purchase" && isOpen && (
-              <div className="ml-6 mt-1 space-y-1">
-                {getSortedTabs([
-                  "purchase_purchase",
-                  "purchase_purchasereturn",
-                  "purchase_purchaseout",
-                ]).map((tabId) => {
-                  if (tabId === "purchase_purchase") {
-                    return (
-                      <Link
-                        key={tabId}
-                        to="/purchaselayout/purchase"
-                        className={getChildLinkClass(
-                          "/purchaselayout/purchase"
-                        )}
-                      >
-                        <Package className="w-4 h-4" />
-                        <span className="mx-auto">Purchase</span>
-                      </Link>
-                    );
-                  } else if (tabId === "purchase_purchasereturn") {
-                    return (
-                      <Link
-                        key={tabId}
-                        to="/purchaselayout/purchasereturn"
-                        className={getChildLinkClass(
-                          "/purchaselayout/purchasereturn"
-                        )}
-                      >
-                        <FileText className="w-4 h-4" />
-                        <span className="mx-auto">Purchase/Cr.Note</span>
-                      </Link>
-                    );
-                  } else if (tabId === "purchase_purchaseout") {
-                    return (
-                      <Link
-                        key={tabId}
-                        to="/purchaselayout/purchaseout"
-                        className={getChildLinkClass(
-                          "/purchaselayout/purchaseout"
-                        )}
-                      >
-                        <Truck className="w-4 h-4" />
-                        <span className="mx-auto">Purchase Out</span>
-                      </Link>
-                    );
-                  }
-                  return null;
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Sales */}
-        {shouldShowTab("sales") && (
-          <div>
-            <button
-              onClick={() => toggleMenu("sales")}
-              className={getDropdownButtonClass("sales", salesPaths)}
-            >
-              <span className="flex items-center gap-3">
-                <TrendingUp className="w-5 h-5" />
-              </span>
-              <span>{isOpen && "Sales"}</span>
-              {isOpen && (
-                <ChevronDown
-                  className={`w-4 h-4 transform transition-transform ${
-                    activeParentMenu === "sales" ? "rotate-180" : ""
-                  }`}
-                />
-              )}
-            </button>
-            {activeParentMenu === "sales" && isOpen && (
-              <div className="ml-6 mt-1 space-y-1">
-                {getSortedTabs(["sales_sale", "sales_salereturn"]).map(
-                  (tabId) => {
-                    if (tabId === "sales_sale") {
-                      return (
-                        <Link
-                          key={tabId}
-                          to="/salelayout/sale"
-                          className={getChildLinkClass("/salelayout/sale")}
-                        >
-                          <DollarSign className="w-4 h-4" />
-                          <span className="mx-auto">Sale</span>
-                        </Link>
-                      );
-                    } else if (tabId === "sales_salereturn") {
-                      return (
-                        <Link
-                          key={tabId}
-                          to="/salelayout/salereturn"
-                          className={getChildLinkClass(
-                            "/salelayout/salereturn"
-                          )}
-                        >
-                          <FileText className="w-4 h-4" />
-                          <span className="mx-auto">Sale Return/Cr.Note</span>
-                        </Link>
-                      );
-                    }
-                    return null;
-                  }
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Stock Adjustment */}
-        {shouldShowTab("stockAdjustment") && (
-          <Link
-            to="/stockadjustment"
-            className={getLinkClass("/stockadjustment")}
-          >
-            <ListChecks className="w-5 h-5" />
-            {isOpen && <span className="mx-auto">Stock Adjustment</span>}
-          </Link>
-        )}
-
-        {/* Stock Transfer */}
-        {shouldShowTab("stockTransfer") && (
-          <Link to="/stocktransfer" className={getLinkClass("/stocktransfer")}>
-            <Truck className="w-5 h-5" />
-            {isOpen && <span className="mx-auto">Stock Transfer</span>}
-          </Link>
-        )}
-
-        {/* Accounts */}
-        {shouldShowTab("accounts") && (
-          <div>
-            <button
-              onClick={() => toggleMenu("accounts")}
-              className={getDropdownButtonClass("accounts", accountPaths)}
-            >
-              <span className="flex items-center gap-3">
-                <Landmark className="w-5 h-5" />
-              </span>
-              <span>{isOpen && "Accounts"}</span>
-              {isOpen && (
-                <ChevronDown
-                  className={`w-4 h-4 transform transition-transform ${
-                    activeParentMenu === "accounts" ? "rotate-180" : ""
-                  }`}
-                />
-              )}
-            </button>
-            {activeParentMenu === "accounts" && isOpen && (
-              <div className="ml-6 mt-1 space-y-1">
-                <Link
-                  to="/accountlayout"
-                  className={getChildLinkClass("/accountlayout")}
-                >
-                  <Wallet className="w-4 h-4" />
-                  <span className="mx-auto">Cash & Bank</span>
-                </Link>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Expense */}
-        {shouldShowTab("expense") && (
-          <div>
-            <button
-              onClick={() => toggleMenu("expense")}
-              className={getDropdownButtonClass("expense", expensePaths)}
-            >
-              <span className="flex items-center gap-3">
-                <FileText className="w-5 h-5" />
-              </span>
-              <span>{isOpen && "Expense"}</span>
-              {isOpen && (
-                <ChevronDown
-                  className={`w-4 h-4 transform transition-transform ${
-                    activeParentMenu === "expense" ? "rotate-180" : ""
-                  }`}
-                />
-              )}
-            </button>
-            {activeParentMenu === "expense" && isOpen && (
-              <div className="ml-6 mt-1 space-y-1">
-                {getSortedTabs(["expense_categories", "expense_expenses"]).map(
-                  (tabId) => {
-                    if (tabId === "expense_categories") {
-                      return (
-                        <Link
-                          key={tabId}
-                          to="/expenselayout/expensecategories"
-                          className={getChildLinkClass(
-                            "/expenselayout/expensecategories"
-                          )}
-                        >
-                          <Layers className="w-4 h-4" />
-                          <span className="mx-auto">Expense Categories</span>
-                        </Link>
-                      );
-                    } else if (tabId === "expense_expenses") {
-                      return (
-                        <Link
-                          key={tabId}
-                          to="/expenselayout/expenses"
-                          className={getChildLinkClass(
-                            "/expenselayout/expenses"
-                          )}
-                        >
-                          <DollarSign className="w-4 h-4" />
-                          <span className="mx-auto">Expenses</span>
-                        </Link>
-                      );
-                    }
-                    return null;
-                  }
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Reports */}
+        {/* Reports Section - Updated with proper expiry stock handling */}
         {shouldShowTab("reports") && (
           <div>
             <button
@@ -1014,6 +630,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
 
             {activeParentMenu === "reports" && isOpen && (
               <div className="ml-6 mt-1 space-y-1">
+                {/* Render sorted report tabs */}
                 {getSortedTabs([
                   "reports_dailyreport",
                   "reports_averageprice",
@@ -1036,7 +653,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                   "reports_salesummary",
                   "reports_dailysample",
                   "reports_profitloss",
-                  "reports_expirystockreport",
+                  "reports_expirystock", // Expiry stock report
                 ]).map((tabId) => {
                   // Handle master customer reports dropdown
                   if (
@@ -1210,7 +827,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                     );
                   }
 
-                  // Handle regular report links
+                  // Handle regular report links - UPDATED WITH EXPIRY STOCK
                   const linkMap = {
                     reports_dailyreport: "/reportlayout/dailyreport",
                     reports_averageprice: "/reportlayout/averageprice",
@@ -1237,8 +854,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                     reports_salesummary: "/reportlayout/salesummary",
                     reports_dailysample: "/reportlayout/dailysample",
                     reports_profitloss: "/reportlayout/profitloss",
-                    reports_expirystockreport:
-                      "/reportlayout/expiry-stock-report",
+                    reports_expirystock: "/reportlayout/expiry-stock-report", // CORRECT PATH
                   };
 
                   const iconMap = {
@@ -1261,7 +877,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                     reports_salesummary: TrendingUp,
                     reports_dailysample: Boxes,
                     reports_profitloss: DollarSign,
-                    reports_expirystockreport: Clock,
+                    reports_expirystock: Clock, // Clock icon for expiry stock
                   };
 
                   const IconComponent = iconMap[tabId];
@@ -1276,12 +892,13 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                       >
                         <IconComponent className="w-4 h-4" />
                         <span>
-                          {tabId === "reports_expirystock"
-                            ? "Expiry Stock Report"
+                          {tabId === "reports_expirystock" 
+                            ? "Expiry Stock Report" // Proper display name
                             : tabId
                                 .split("_")[1]
                                 .replace(/([A-Z])/g, " $1")
-                                .trim()}
+                                .trim()
+                          }
                         </span>
                       </Link>
                     );
@@ -1293,138 +910,142 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
             )}
           </div>
         )}
-        {/* 
+
+        {/* Other menu items remain the same */}
         {shouldShowTab("staff") && (
-          <Link to="/staffmemberLayout/staffmember" className={getLinkClass("/staffmemberLayout")}>
+          <Link
+            to="/staffmemberLayout/staffmember"
+            className={getLinkClass("/staffmemberLayout")}
+          >
             <UserCog className="w-5 h-5" />
             {isOpen && <span className="mx-auto">Staff Members</span>}
           </Link>
-        )} */}
-
-        {/* Utility */}
-        {shouldShowTab("utility") && (
-          <div>
-            <button
-              onClick={() => toggleMenu("utility")}
-              className={getDropdownButtonClass("utility", utilityPaths)}
-            >
-              <span className="flex items-center gap-3">
-                <Settings className="w-5 h-5" />
-              </span>
-              <span>{isOpen && "Settings"}</span>
-              {isOpen && (
-                <ChevronDown
-                  className={`w-4 h-4 transform transition-transform ${
-                    activeParentMenu === "utility" ? "rotate-180" : ""
-                  }`}
-                />
-              )}
-            </button>
-            {activeParentMenu === "utility" && isOpen && (
-              <div className="ml-6 mt-1 space-y-1">
-                {getSortedTabs([
-                  "utility_companyprofile",
-                  "utility_tabhideview",
-                ]).map((tabId) => {
-                  if (tabId === "utility_companyprofile") {
-                    return (
-                      <Link
-                        key={tabId}
-                        to="/utilitylayout/companyprofile"
-                        className={getChildLinkClass(
-                          "/utilitylayout/companyprofile"
-                        )}
-                      >
-                        <Building className="w-4 h-4" />
-                        <span className="mx-auto">Company Profile</span>
-                      </Link>
-                    );
-                  } else if (tabId === "utility_tabhideview") {
-                    return (
-                      <Link
-                        key={tabId}
-                        to="/utilitylayout/tabHideView"
-                        className={getChildLinkClass(
-                          "/utilitylayout/tabHideView"
-                        )}
-                      >
-                        <Eye className="w-4 h-4" />
-                        <span className="mx-auto">Tab Hide and Show</span>
-                      </Link>
-                    );
-                  }
-                  return null;
-                })}
-              </div>
-            )}
-          </div>
         )}
 
-        {/* HRM */}
-        {shouldShowTab("hrm") && (
-          <div>
-            <button
-              onClick={() => toggleMenu("hrm")}
-              className={getDropdownButtonClass("hrm", hrmPaths)}
-            >
-              <span className="flex items-center gap-3">
-                <UserCog className="w-5 h-5" />
-              </span>
-              <span>{isOpen && "HRM"}</span>
-              {isOpen && (
-                <ChevronDown
-                  className={`w-4 h-4 transform transition-transform ${
-                    activeParentMenu === "hrm" ? "rotate-180" : ""
-                  }`}
-                />
+              {shouldShowTab("utility") && (
+                <div>
+                  <button
+                    onClick={() => toggleMenu("utility")}
+                    className={getDropdownButtonClass("utility", utilityPaths)}
+                  >
+                    <span className="flex items-center gap-3">
+                      <Settings className="w-5 h-5" />
+                    </span>
+                    <span>{isOpen && "Settings"}</span>
+                    {isOpen && (
+                      <ChevronDown
+                        className={`w-4 h-4 transform transition-transform ${
+                          activeParentMenu === "utility" ? "rotate-180" : ""
+                        }`}
+                      />
+                    )}
+                  </button>
+                  {activeParentMenu === "utility" && isOpen && (
+                    <div className="ml-6 mt-1 space-y-1">
+                      {getSortedTabs([
+                        "utility_companyprofile",
+                        "utility_tabhideview",
+                      ]).map((tabId) => {
+                        if (tabId === "utility_companyprofile") {
+                          return (
+                            <Link
+                              key={tabId}
+                              to="/utilitylayout/companyprofile"
+                              className={getChildLinkClass(
+                                "/utilitylayout/companyprofile"
+                              )}
+                            >
+                              <Building className="w-4 h-4" />
+                              <span className="mx-auto">Company Profile</span>
+                            </Link>
+                          );
+                        } else if (tabId === "utility_tabhideview") {
+                          return (
+                            <Link
+                              key={tabId}
+                              to="/utilitylayout/tabHideView"
+                              className={getChildLinkClass(
+                                "/utilitylayout/tabHideView"
+                              )}
+                            >
+                              <Eye className="w-4 h-4" />
+                              <span className="mx-auto">Tab Hide and Show</span>
+                            </Link>
+                          );
+                        }
+                        return null;
+                      })}
+                    </div>
+                  )}
+                </div>
               )}
-            </button>
-            {activeParentMenu === "hrm" && isOpen && (
-              <div className="ml-6 mt-1 space-y-1">
-                {getSortedTabs([
-                  "hrm_dashboard",
-                  "hrm_holidays",
-                  "hrm_leaves",
-                  "hrm_attendance",
-                  "hrm_payroll",
-                ]).map((tabId) => {
-                  const linkMap = {
-                    hrm_dashboard: "/hrmlayout/dashboard",
-                    hrm_holidays: "/hrmlayout/holidays",
-                    hrm_leaves: "/hrmlayout/leaves",
-                    hrm_attendance: "/hrmlayout/attendance",
-                    hrm_payroll: "/hrmlayout/payroll",
-                  };
+      
+              {/* HRM */}
+              {shouldShowTab("hrm") && (
+                <div>
+                  <button
+                    onClick={() => toggleMenu("hrm")}
+                    className={getDropdownButtonClass("hrm", hrmPaths)}
+                  >
+                    <span className="flex items-center gap-3">
+                      <UserCog className="w-5 h-5" />
+                    </span>
+                    <span>{isOpen && "HRM"}</span>
+                    {isOpen && (
+                      <ChevronDown
+                        className={`w-4 h-4 transform transition-transform ${
+                          activeParentMenu === "hrm" ? "rotate-180" : ""
+                        }`}
+                      />
+                    )}
+                  </button>
+                  {activeParentMenu === "hrm" && isOpen && (
+                    <div className="ml-6 mt-1 space-y-1">
+                      {getSortedTabs([
+                        "hrm_dashboard",
+                        "hrm_holidays",
+                        "hrm_leaves",
+                        "hrm_attendance",
+                        "hrm_payroll",
+                      ]).map((tabId) => {
+                        const linkMap = {
+                          hrm_dashboard: "/hrmlayout/dashboard",
+                          hrm_holidays: "/hrmlayout/holidays",
+                          hrm_leaves: "/hrmlayout/leaves",
+                          hrm_attendance: "/hrmlayout/attendance",
+                          hrm_payroll: "/hrmlayout/payroll",
+                        };
+      
+                        const iconMap = {
+                          hrm_dashboard: Home,
+                          hrm_holidays: Umbrella,
+                          hrm_leaves: Calendar,
+                          hrm_attendance: Calendar,
+                          hrm_payroll: DollarSign,
+                        };
+      
+                        const IconComponent = iconMap[tabId];
+                        const path = linkMap[tabId];
+      
+                        return (
+                          <Link
+                            key={tabId}
+                            to={path}
+                            className={getChildLinkClass(path)}
+                          >
+                            <IconComponent className="w-4 h-4" />
+                            <span className="mx-auto">
+                              {tabId.split("_")[1].charAt(0).toUpperCase() +
+                                tabId.split("_")[1].slice(1)}
+                            </span>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
 
-                  const iconMap = {
-                    hrm_dashboard: Home,
-                    hrm_holidays: Umbrella,
-                    hrm_leaves: Calendar,
-                    hrm_attendance: Calendar,
-                    hrm_payroll: DollarSign,
-                  };
-
-                  const IconComponent = iconMap[tabId];
-                  const path = linkMap[tabId];
-
-                  return (
-                    <Link
-                      key={tabId}
-                      to={path}
-                      className={getChildLinkClass(path)}
-                    >
-                      <IconComponent className="w-4 h-4" />
-                      <span className="mx-auto">
-                        {tabId.split("_")[1].charAt(0).toUpperCase() +
-                          tabId.split("_")[1].slice(1)}
-                      </span>
-                    </Link>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
       </nav>
     </div>
   );

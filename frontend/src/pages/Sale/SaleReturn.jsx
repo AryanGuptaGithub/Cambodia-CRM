@@ -316,7 +316,6 @@ const SaleReturn = () => {
   };
 
   const handleUpdateSales = async (e) => {
-    console.log("values of form", form);
     e.preventDefault();
     try {
       const response = await fetch(

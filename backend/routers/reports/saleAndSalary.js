@@ -57,8 +57,6 @@ router.get("/sales-salary-ratio", async (req, res) => {
       { $sort: { srDate: -1, mrName: 1 } },
     ]);
 
-    console.log("✅ Sales aggregation complete:", salesAggregate);
-
     // 👥 Step 3: Get unique MR names
     const mrNames = [...new Set(salesAggregate.map((r) => r.mrName))];
 
@@ -67,8 +65,6 @@ router.get("/sales-salary-ratio", async (req, res) => {
       staffMembers = await Staff.find({
         medicalRepName: { $in: mrNames },
       }).select("_id medicalRepName");
-
-      console.log("✅ Staff found:", staffMembers);
     }
 
     // 🗺️ Build a map for easy lookup
@@ -98,8 +94,6 @@ router.get("/sales-salary-ratio", async (req, res) => {
           },
         },
       ]);
-
-      console.log("✅ Payroll aggregation complete:", payrollAggregate);
     }
 
     // 📘 Convert payroll to map by MR name
@@ -145,11 +139,6 @@ router.get("/sales-salary-ratio", async (req, res) => {
         customerCount: record.customerCount || 0,
       };
     });
-
-    console.log(
-      "✅ Combined data sample:",
-      JSON.stringify(combinedData.slice(0, 2), null, 2)
-    );
 
     // 📄 Step 6: Pagination
     const totalRecords = combinedData.length;

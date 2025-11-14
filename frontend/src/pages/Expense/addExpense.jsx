@@ -83,31 +83,38 @@ const SelectField = ({
   required = false,
   placeholder = "Select an option",
   disabled = false,
-}) => (
-  <div className="flex flex-col">
-    <label htmlFor={name} className="text-sm font-medium text-gray-700 mb-1">
-      {label} {required && <span className="text-red-500">*</span>}
-    </label>
-    <select
-      id={name}
-      name={name}
-      value={value || ""}
-      onChange={onChange}
-      disabled={disabled}
-      className={`px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-        error ? "border-red-500" : "border-gray-300"
-      } ${disabled ? "bg-gray-100 cursor-not-allowed" : ""}`}
-    >
-      <option value="">{placeholder}</option>
-      {options.map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
-    {error && <span className="text-red-500 text-xs mt-1">{error}</span>}
-  </div>
-);
+}) => {
+  // Create a unique key for each option
+  const getOptionKey = (option, index) => {
+    return option.value || option._id || option.label || `option-${index}`;
+  };
+
+  return (
+    <div className="flex flex-col">
+      <label htmlFor={name} className="text-sm font-medium text-gray-700 mb-1">
+        {label} {required && <span className="text-red-500">*</span>}
+      </label>
+      <select
+        id={name}
+        name={name}
+        value={value || ""}
+        onChange={onChange}
+        disabled={disabled}
+        className={`px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+          error ? "border-red-500" : "border-gray-300"
+        } ${disabled ? "bg-gray-100 cursor-not-allowed" : ""}`}
+      >
+        <option value="">{placeholder}</option>
+        {options.map((option, index) => (
+          <option key={getOptionKey(option, index)} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      {error && <span className="text-red-500 text-xs mt-1">{error}</span>}
+    </div>
+  );
+};
 
 const AddExpense = ({
   onCancel,
@@ -226,23 +233,72 @@ const AddExpense = ({
       setError(null);
 
       const catResp = await axios.get(`${backendUrl}/api/expense-categary`);
-      if (catResp.data.success) {
-        setCategoryOptions(
-          catResp.data.data.map((c) => ({ value: c._id, label: c.category }))
-        );
+
+      let categories = [];
+
+      if (catResp.data && catResp.data.success) {
+        const responseData = catResp.data.data;
+
+        // Handle different possible response structures
+        if (Array.isArray(responseData)) {
+          // Case 1: It's already an array
+          categories = responseData
+            .filter((c) => c && (c.Category || c.category))
+            .map((c, index) => ({
+              value: c.Sr || c._id || c.id || `cat-${index}`,
+              label: c.Category || c.category,
+            }));
+        } else if (responseData && typeof responseData === "object") {
+          // Case 2: It's a single object with Category properties
+          if (responseData.Category || responseData.category) {
+            categories = [
+              {
+                value:
+                  responseData.Sr ||
+                  responseData._id ||
+                  responseData.id ||
+                  "cat-1",
+                label: responseData.Category || responseData.category,
+              },
+            ];
+          }
+          // Case 3: Look for nested array
+          else {
+            // Try to find any array property in the object
+            const arrayKeys = Object.keys(responseData).filter((key) =>
+              Array.isArray(responseData[key])
+            );
+
+            if (arrayKeys.length > 0) {
+              const firstArray = responseData[arrayKeys[0]];
+              categories = firstArray
+                .filter((c) => c && (c.Category || c.category))
+                .map((c, index) => ({
+                  value: c._id || c.id || `cat-${index}`,
+                  label: c.Category || c.category,
+                }));
+            }
+          }
+        }
+        setCategoryOptions(categories);
+      } else {
+        setCategoryOptions([]);
       }
 
       const destResp = await axios.get(
         `${backendUrl}/api/accounts/destinations`
       );
-      if (destResp.status === 200) {
-        setSourceAccountOptions(
-          destResp.data.map((d) => ({
+      if (destResp.status === 200 && Array.isArray(destResp.data)) {
+        const destinations = destResp.data
+          .filter((d) => d && d._id && d.name)
+          .map((d) => ({
             value: d._id,
             label: d.name,
             totalAmount: d.totalAmount || 0,
-          }))
-        );
+          }));
+        setSourceAccountOptions(destinations);
+      } else {
+        setSourceAccountOptions([]);
       }
     } catch (err) {
       console.error("Error loading dropdowns:", err);
@@ -474,7 +530,9 @@ const AddExpense = ({
                     label="Remarks"
                     name="remarks"
                     value={formData.remarks}
-                    onChange={(e) => handleInputChange("remarks", e.target.value)}
+                    onChange={(e) =>
+                      handleInputChange("remarks", e.target.value)
+                    }
                     error={errors.remarks}
                     placeholder="Enter expense remarks"
                     required

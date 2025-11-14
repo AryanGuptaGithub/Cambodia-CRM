@@ -11,9 +11,9 @@ import Province from "./models/master/Province.js";
 import HTab from "./models/settings/tabSetting.js";
 import Zone from "./models/master/zone.js";
 import BusinessType from "./models/master/businessTypes.js";
-import ProductType from "./models/projectManger/productType.js"; 
+import ProductType from "./models/projectManger/productType.js";
 import ProductPackingType from "./models/projectManger/ProductPackingType.js";
-import AllowanceType from "./models/Hrm/AllowanceType.js"; 
+import AllowanceType from "./models/Hrm/AllowanceType.js";
 
 dotenv.config();
 
@@ -22,7 +22,6 @@ const MONGO_URI = process.env.MONGODB_URI;
 async function connectDB() {
   try {
     await mongoose.connect(MONGO_URI);
-    console.log("✅ MongoDB connected successfully");
   } catch (err) {
     console.error("❌ MongoDB connection failed:", err);
     process.exit(1);
@@ -40,7 +39,6 @@ async function seedUsers() {
     const user = new User(u);
     await user.save();
   }
-  console.log("✅ Users seeded successfully");
 }
 
 async function seedDestinations() {
@@ -51,7 +49,6 @@ async function seedDestinations() {
     { name: "Company Account", code: "company_account", totalAmount: 0 },
   ];
   await Destination.insertMany(destinations);
-  console.log("✅ Destinations seeded successfully");
 }
 
 async function seedCategoryTypes() {
@@ -65,7 +62,6 @@ async function seedCategoryTypes() {
     { name: "Payment Inward", code: "payment_inward" },
   ];
   await CategoryType.insertMany(categoryTypes);
-  console.log("✅ Category Types seeded successfully");
 }
 
 async function seedTransactionTypes() {
@@ -77,7 +73,6 @@ async function seedTransactionTypes() {
     { name: "Adjustment", code: "adjustment" },
   ];
   await TransactionType.insertMany(transactionTypes);
-  console.log("✅ Transaction Types seeded successfully");
 }
 
 async function seedProvinces() {
@@ -112,7 +107,7 @@ async function seedProvinces() {
   ];
 
   await Province.insertMany(provinces);
-  console.log("✅ Provinces seeded successfully");
+  
 }
 
 async function seedZones() {
@@ -285,11 +280,11 @@ async function seedZones() {
       { name: "Tramkhna", code: "zone_tramkhna" },
       { name: "Troping Thloeng", code: "zone_troping_thloeng" },
       { name: "Veal Renh", code: "zone_veal_renh" },
-      { name: "Veng Sreng", code: "zone_veng_sreng" }
+      { name: "Veng Sreng", code: "zone_veng_sreng" },
     ];
 
     await Zone.insertMany(zones);
-    console.log("✅ Zones seeded successfully");
+    
   } catch (error) {
     console.error("❌ Error seeding zones:", error);
   }
@@ -304,7 +299,7 @@ async function seedSaleTypes() {
   ];
 
   await SaleType.insertMany(saleTypes);
-  console.log("✅ Sale Types seeded successfully");
+  
 }
 
 async function seedOrderStatuses() {
@@ -333,12 +328,12 @@ async function seedOrderStatuses() {
   ];
 
   await OrderStatus.insertMany(orderStatuses);
-  console.log("✅ Order Statuses seeded successfully");
+  
 }
 
 async function seedBusinessTypes() {
   await BusinessType.deleteMany({});
-  
+
   const businessTypes = [
     { name: "Pharmacy", code: "PHARMACY" },
     { name: "Cabinet", code: "CABINET" },
@@ -351,11 +346,11 @@ async function seedBusinessTypes() {
     { name: "Cutter", code: "CUTTER" },
     { name: "Agent", code: "AGENT" },
     { name: "Other", code: "OTHER" },
-    { name: "NGO", code: "NGO" }
+    { name: "NGO", code: "NGO" },
   ];
 
   await BusinessType.insertMany(businessTypes);
-  console.log(`✅ Seeded ${businessTypes.length} business types successfully`);
+  
 }
 
 async function seedProductTypes() {
@@ -371,7 +366,7 @@ async function seedProductTypes() {
     ];
 
     await ProductType.insertMany(productTypes);
-    console.log("✅ Product Types seeded successfully with new values");
+    
   } catch (error) {
     console.error("❌ Error seeding product types:", error);
   }
@@ -395,7 +390,7 @@ async function seedProductPackingTypes() {
     ];
 
     await ProductPackingType.insertMany(packingTypes);
-    console.log("✅ Product Packing Types seeded successfully with new values");
+    
   } catch (error) {
     console.error("❌ Error seeding product packing types:", error);
   }
@@ -1004,6 +999,19 @@ async function seedHTabs() {
       category: "reports",
       reportType: "Hide/Show Tabs",
     },
+    // NEW: Expiry Stock Report added here
+    {
+      tabId: "reports_expirystockreport",
+      name: "Expiry Stock Report",
+      description: "Expiry stock report and analytics",
+      path: "/reportlayout/expiry-stock-report",
+      icon: "Calendar",
+      parentTabId: "reports",
+      level: 1,
+      sequence: 22,
+      category: "reports",
+      reportType: "Hide/Show Tabs",
+    },
 
     // Nested Sub-tabs (Level 2) - Master Customer Reports
     {
@@ -1220,7 +1228,6 @@ async function seedHTabs() {
 
   await HTab.insertMany(sampleTabs);
   const count = await HTab.countDocuments();
-  console.log(`✅ Tabs seeded successfully. Total tabs: ${count}`);
 }
 
 // Run all seeders in order
@@ -1228,8 +1235,8 @@ async function runSeeders() {
   await connectDB();
 
   try {
-    console.log("🌱 Starting database seeding...");
     
+
     await seedUsers();
     await seedSaleTypes();
     await seedOrderStatuses();
@@ -1237,13 +1244,13 @@ async function runSeeders() {
     await seedCategoryTypes();
     await seedTransactionTypes();
     await seedProvinces();
-    await seedZones(); 
-    await seedBusinessTypes(); 
+    await seedZones();
+    await seedBusinessTypes();
     await seedProductTypes();
     await seedProductPackingTypes();
     await seedAllowanceTypes(); // Add allowance types seeding
     await seedHTabs();
-    
+
     console.log("✅ All seeders completed successfully!");
   } catch (error) {
     console.error("❌ Seeding error:", error);

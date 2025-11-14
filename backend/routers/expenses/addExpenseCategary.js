@@ -8,17 +8,17 @@ router.get("/expense-categary", async (req, res) => {
   try {
     const currentDate = new Date();
     const currentYear = currentDate.getFullYear();
-    const currentMonth = currentDate.getMonth(); 
-    const yearStart = new Date(currentYear, 0, 1); 
-    const monthStart = new Date(currentYear, currentMonth, 1); 
-    const monthEnd = new Date(currentYear, currentMonth + 1, 0); 
+    const currentMonth = currentDate.getMonth();
+    const yearStart = new Date(currentYear, 0, 1);
+    const monthStart = new Date(currentYear, currentMonth, 1);
+    const monthEnd = new Date(currentYear, currentMonth + 1, 0);
     const categories = await addExpenseCategary.find().sort({ category: 1 });
     const ytdExpenses = await Expense.aggregate([
       {
         $match: {
           date: {
             $gte: yearStart,
-            $lt: monthStart, 
+            $lt: monthStart,
           },
         },
       },
@@ -35,7 +35,7 @@ router.get("/expense-categary", async (req, res) => {
         $match: {
           date: {
             $gte: monthStart,
-            $lte: monthEnd, 
+            $lte: monthEnd,
           },
         },
       },
@@ -59,6 +59,7 @@ router.get("/expense-categary", async (req, res) => {
 
     const responseData = categories.map((category, index) => ({
       Sr: index + 1,
+      id: category._id,
       Category: category.category,
       Remarks: category.description,
       "Amount Until Year ($)": ytdMap.get(category._id.toString()) || 0,

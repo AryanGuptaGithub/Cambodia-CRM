@@ -13,9 +13,14 @@ const staffSchema = new mongoose.Schema(
     MRId: { type: Number, unique: true },
     medicalRepName: { type: String, required: true },
     teamName: { type: String, required: true },
-    contactNo: { type: String, required: false },
+    contactNo: { 
+      type: String, 
+      required: false, 
+      unique: true, // Add unique constraint
+      sparse: true  // Allows multiple null values but enforces uniqueness for non-null values
+    },
     email: { type: String, required: false },
-    date: { type: Date, required: true }, // ✅ Joining date added
+    date: { type: Date, required: true },
     enabled: { type: Boolean, default: true },
   },
   { timestamps: true }

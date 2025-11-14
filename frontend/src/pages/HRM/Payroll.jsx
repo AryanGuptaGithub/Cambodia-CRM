@@ -871,11 +871,7 @@ const Payroll = () => {
     dateRange,
     payrollsToFilter = allPayrolls
   ) => {
-    console.log("Input dateRange:", dateRange);
-    console.log("Input payrollsToFilter:", payrollsToFilter);
-
     if (!dateRange || !dateRange.start || !dateRange.end) {
-      console.log("Invalid or missing dateRange, returning all payrolls.");
       return payrollsToFilter;
     }
 
@@ -886,8 +882,6 @@ const Payroll = () => {
     startDate.setHours(0, 0, 0, 0);
     endDate.setHours(23, 59, 59, 999);
 
-    console.log("Filtering payrolls between dates:", startDate, "to", endDate);
-
     const filteredPayrolls = payrollsToFilter.filter((payroll) => {
       if (!payroll.period) return false;
 
@@ -897,18 +891,12 @@ const Payroll = () => {
       // Create date for the first day of the payroll period month
       const payrollDate = new Date(year, month - 1, 1); // month is 0-indexed in Date
 
-      console.log(
-        `Payroll period: ${payroll.period}, Payroll date: ${payrollDate}`
-      );
-
       // Check if payroll date falls within the selected date range
       const isInRange = payrollDate >= startDate && payrollDate <= endDate;
-      console.log(`Is payroll in range?`, isInRange);
 
       return isInRange;
     });
 
-    console.log("Filtered payrolls count:", filteredPayrolls.length);
     return filteredPayrolls;
   };
 
@@ -940,13 +928,12 @@ const Payroll = () => {
 
   // Handle date range selection - now filters on client side
   const handleDateRangeSelect = (dateRange) => {
-    console.log("Date range selected:", dateRange);
     setSelectedDateRange(dateRange);
     setCurrentPage(1);
 
     // Apply the filter to all payrolls
     const filtered = filterPayrollsByDateRange(dateRange, allPayrolls);
-    console.log("After filtering, payrolls count:", filtered.length);
+
     setPayrolls(filtered);
   };
 

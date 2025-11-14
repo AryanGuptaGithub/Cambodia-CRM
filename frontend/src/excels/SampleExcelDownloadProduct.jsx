@@ -36,10 +36,18 @@ const SampleExcelDownloadPriceListSimple = () => {
         { key: "sellingPrice", header: "Selling Price (USD)", width: 18 },
         { key: "lc", header: "LC (USD)", width: 12 },
         { key: "fob", header: "FOB (USD)", width: 12 },
-        { key: "taxSellingPrice", header: "Tax Selling Price (USD)", width: 22 },
+        {
+          key: "taxSellingPrice",
+          header: "Tax Selling Price (USD)",
+          width: 22,
+        },
         { key: "qtyPerBox", header: "Quantity per Box/Strip", width: 22 },
         { key: "supplierName", header: "Supplier Name", width: 25 },
-        { key: "drugLicense", header: "Drug Registration License #", width: 30 },
+        {
+          key: "drugLicense",
+          header: "Drug Registration License #",
+          width: 30,
+        },
         {
           key: "licenseValidityDate",
           header: "Drug Registration License Validity Date",
@@ -57,9 +65,6 @@ const SampleExcelDownloadPriceListSimple = () => {
 
       // Date column format
       worksheet.getColumn(11).numFmt = "dd-mmm-yyyy";
-
-      // Fetch dropdown data
-      console.log("🔄 Fetching dropdown data...");
       const [typesResult, suppliersResult, packingResult] = await Promise.all([
         fetchProductTypes(),
         fetchSuppliers(),
@@ -68,23 +73,25 @@ const SampleExcelDownloadPriceListSimple = () => {
 
       const typeOptions = typesResult?.success
         ? typesResult.data.map((item) =>
-            String(item.value).replace(/["',\n\r]/g, "").trim()
+            String(item.value)
+              .replace(/["',\n\r]/g, "")
+              .trim()
           )
         : [];
       const supplierOptions = suppliersResult?.success
         ? suppliersResult.data.map((item) =>
-            String(item.value).replace(/["',\n\r]/g, "").trim()
+            String(item.value)
+              .replace(/["',\n\r]/g, "")
+              .trim()
           )
         : [];
       const packingOptions = packingResult?.success
         ? packingResult.data.map((item) =>
-            String(item.value).replace(/["',\n\r]/g, "").trim()
+            String(item.value)
+              .replace(/["',\n\r]/g, "")
+              .trim()
           )
         : [];
-
-      console.log("✅ Type options:", typeOptions);
-      console.log("✅ Supplier options:", supplierOptions);
-      console.log("✅ Packing options:", packingOptions);
 
       // Helper to safely apply dropdown lists
       const applyDropdown = (range, options) => {
@@ -118,21 +125,15 @@ const SampleExcelDownloadPriceListSimple = () => {
       applyDropdown("B4:B1000", typeOptions);
       applyDropdown("C4:C1000", packingOptions);
       applyDropdown("I4:I1000", supplierOptions);
-
-      // Generate Excel file safely
-      console.log("💾 Generating Excel file...");
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], {
-        type:
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
       link.download = "product.xlsx";
       link.click();
       URL.revokeObjectURL(link.href);
-
-      console.log("✅ Excel download triggered successfully.");
     } catch (error) {
       console.error("❌ Error generating Excel:", error);
       alert(

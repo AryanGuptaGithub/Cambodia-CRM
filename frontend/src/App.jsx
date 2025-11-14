@@ -99,6 +99,7 @@ import ProvinceWiseSale from "./pages/Reports/ProvinceWiseSale";
 import ProvinceWiseCustomer from "./pages/Reports/ProvinceWiseCustomer";
 import ReportsInHand from "./pages/Reports/ReportsInHand";
 import ProductReport from "./pages/Reports/ProductReport";
+import ExpiryStockReport from "./pages/Reports/ExpiryStockReport";
 
 // Report form pages
 import AddDailReports from "./pages/Reports/AddDailyReports";
@@ -284,6 +285,9 @@ function App() {
             {/* Reports in Hand */}
             <Route path="reports-in-hand" element={<ReportsInHand />} />
 
+            {/* Expiry Stock Report - CORRECTED ROUTE */}
+            <Route path="expiry-stock-report" element={<ExpiryStockReport />} />
+
             <Route path="payment" element={<PaymentReports />} />
 
             {/* Financial Ratio Reports */}
@@ -336,9 +340,12 @@ function App() {
 
           {/* HRM routes */}
           <Route path="hrmlayout" element={<HrmLayout />}>
+            <Route path="dashboard">
+              <Route index element={<Dashboard />} />
+              <Route path="new" element={<AddStaffMember />} />
+            </Route>
             <Route index element={<Dashboard />} />
             <Route path="attendance" element={<Attendance />} />
-            <Route path="dashboard" element={<Dashboard />} />
             <Route path="holidays" element={<Holidays />} />
             <Route path="leaves" element={<Leaves />} />
             <Route path="payroll">

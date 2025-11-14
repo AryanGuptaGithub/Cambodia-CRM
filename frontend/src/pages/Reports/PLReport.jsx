@@ -5,10 +5,8 @@ import {
   DollarSign,
   TrendingUp,
   TrendingDown,
-  ChevronDown,
   Calendar,
   X,
-  Eye,
   Users,
   CreditCard,
 } from "lucide-react";
@@ -16,6 +14,7 @@ import axios from "axios";
 import { showToast } from "../../utils/toast";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
+import { formatDateToReadable } from "../../utils/dateUtil";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -32,24 +31,24 @@ const PLReport = () => {
   });
 
   const [tableData, setTableData] = useState([]);
+  const [salaryDetails, setSalaryDetails] = useState([]);
+  const [expenseDetails, setExpenseDetails] = useState([]);
   const [totals, setTotals] = useState({
     totalAmount: 0,
     totalProfit: 0,
     totalExpense: 0,
     totalSalaryExpense: 0,
     totalOtherExpense: 0,
+    totalLoss: 0,
   });
   const [loading, setLoading] = useState(false);
   const [tableLoading, setTableLoading] = useState(false);
-  const [sortDirection, setSortDirection] = useState("Newest");
   const [activeTab, setActiveTab] = useState("currentMonth");
   const [showCustomModal, setShowCustomModal] = useState(false);
   const [customStartDate, setCustomStartDate] = useState(null);
   const [customEndDate, setCustomEndDate] = useState(null);
-  const [showSalaryDetails, setShowSalaryDetails] = useState(false);
-  const [showExpenseDetails, setShowExpenseDetails] = useState(false);
-  const [salaryDetails, setSalaryDetails] = useState([]);
-  const [expenseDetails, setExpenseDetails] = useState([]);
+  const [showSalaryDetailsModal, setShowSalaryDetailsModal] = useState(false);
+  const [showExpenseDetailsModal, setShowExpenseDetailsModal] = useState(false);
 
   // Get current date information
   const getCurrentDateInfo = () => {
@@ -65,17 +64,14 @@ const PLReport = () => {
   const getDateRanges = () => {
     const { currentYear, currentMonth, currentMonthName } = getCurrentDateInfo();
 
-    // Current Month Range
     const currentMonthStart = new Date(currentYear, currentMonth, 1);
     const currentMonthEnd = new Date(currentYear, currentMonth + 1, 0);
 
-    // Jan to Previous Month Range
     const janToPreviousStart = new Date(currentYear, 0, 1);
     const janToPreviousEnd = new Date(currentYear, currentMonth, 0);
 
-    // Get month names for labels
     const monthNames = [
-      "Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
       "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
 
@@ -86,19 +82,17 @@ const PLReport = () => {
         start: currentMonthStart,
         end: currentMonthEnd,
         label: currentMonthName,
-        apiLabel: `${currentYear}-${String(currentMonth + 1).padStart(2, "0")}`,
       },
       janToPrevious: {
         start: janToPreviousStart,
         end: janToPreviousEnd,
         label: `Jan - ${previousMonthName}`,
-        apiLabel: `${currentYear}-01_to_${currentYear}-${String(currentMonth).padStart(2, "0")}`,
       },
       custom: {
         start: customStartDate,
         end: customEndDate,
         label: customStartDate && customEndDate
-          ? `${customStartDate.toLocaleDateString()} - ${customEndDate.toLocaleDateString()}`
+          ? `${formatDateToReadable(customStartDate)} - ${formatDateToReadable(customEndDate)}`
           : "Custom Date",
       },
     };
@@ -115,30 +109,14 @@ const PLReport = () => {
       if (endDate) params.endDate = endDate.toISOString().split("T")[0];
 
       const response = await axios.get(`${backendUrl}/api/pl-report/summary`, { params });
-
       setData({
         summary: response.data.data || {
-          revenue: 0,
-          cogs: 0,
-          grossProfit: 0,
-          expenses: 0,
-          netProfit: 0,
-          profitMargin: 0,
+          revenue: 0, cogs: 0, grossProfit: 0, expenses: 0, netProfit: 0, profitMargin: 0,
         },
       });
     } catch (error) {
       console.error("Error fetching P&L data:", error);
       showToast("error", "Failed to fetch P&L report data");
-      setData({
-        summary: {
-          revenue: 0,
-          cogs: 0,
-          grossProfit: 0,
-          expenses: 0,
-          netProfit: 0,
-          profitMargin: 0,
-        },
-      });
     } finally {
       setLoading(false);
     }
@@ -152,41 +130,38 @@ const PLReport = () => {
       if (endDate) params.endDate = endDate.toISOString().split("T")[0];
 
       const response = await axios.get(`${backendUrl}/api/pl-report`, { params });
-      const tableData = response.data.data || [];
-      setTableData(tableData);
+      const responseData = response.data.data || [];
+      const details = response.data.details || {};
+      const backendTotals = response.data.totals || {};
       
-      // Calculate totals from the data
-      const payrollRecords = tableData.filter(item => item.type === 'payroll');
-      const expenseRecords = tableData.filter(item => item.type === 'expense');
-      
-      const totalSalaryExpense = payrollRecords.reduce((sum, item) => sum + (item.expense || 0), 0);
-      const totalOtherExpense = expenseRecords.reduce((sum, item) => sum + (item.expense || 0), 0);
-      const totalExpense = totalSalaryExpense + totalOtherExpense;
-      
+      setTableData(responseData);
+      setSalaryDetails(details.salaryDetails || []);
+      setExpenseDetails(details.expenseDetails || []);
+
+      // Use the totals directly from backend response
       setTotals({
-        totalAmount: response.data.totals?.totalAmount || 0,
-        totalProfit: response.data.totals?.totalProfit || 0,
-        totalExpense: totalExpense,
-        totalSalaryExpense: totalSalaryExpense,
-        totalOtherExpense: totalOtherExpense,
+        totalAmount: backendTotals.totalRevenue || 0,
+        totalProfit: backendTotals.totalProfit || 0,
+        totalLoss: backendTotals.totalLoss || 0,
+        totalExpense: backendTotals.totalExpense || 0,
+        totalSalaryExpense: backendTotals.payrollExpense || 0,
+        totalOtherExpense: backendTotals.otherExpense || 0,
       });
     } catch (error) {
       console.error("Error fetching table data:", error);
       showToast("error", "Failed to fetch table data");
       setTableData([]);
+      setSalaryDetails([]);
+      setExpenseDetails([]);
       setTotals({
-        totalAmount: 0,
-        totalProfit: 0,
-        totalExpense: 0,
-        totalSalaryExpense: 0,
-        totalOtherExpense: 0,
+        totalAmount: 0, totalProfit: 0, totalExpense: 0,
+        totalSalaryExpense: 0, totalOtherExpense: 0, totalLoss: 0,
       });
     } finally {
       setTableLoading(false);
     }
   };
 
-  // Fetch all data for current date range
   const fetchAllData = (startDate = null, endDate = null) => {
     fetchPLData(startDate, endDate);
     fetchTableData(startDate, endDate);
@@ -196,23 +171,16 @@ const PLReport = () => {
     fetchAllData(dateRanges.currentMonth.start, dateRanges.currentMonth.end);
   }, []);
 
-  // Fetch data when tab changes
   useEffect(() => {
     if (activeTab === "custom" && (!customStartDate || !customEndDate)) {
       return;
     }
-
     const startDate = currentRange.start;
     const endDate = currentRange.end;
-
     if (startDate && endDate) {
       fetchAllData(startDate, endDate);
     }
   }, [activeTab, customStartDate, customEndDate]);
-
-  const handleSortToggle = () => {
-    setSortDirection((prev) => (prev === "Newest" ? "Oldest" : "Newest"));
-  };
 
   const handleTabClick = (tab) => {
     if (tab === "custom") {
@@ -227,28 +195,12 @@ const PLReport = () => {
       showToast("error", "Please select both start and end dates");
       return;
     }
-
     if (customStartDate > customEndDate) {
       showToast("error", "Start date cannot be after end date");
       return;
     }
-
     setActiveTab("custom");
     setShowCustomModal(false);
-  };
-
-  const handleViewSalaryDetails = () => {
-    // Filter payroll records from tableData
-    const payrollRecords = tableData.filter(item => item.type === 'payroll');
-    setSalaryDetails(payrollRecords);
-    setShowSalaryDetails(true);
-  };
-
-  const handleViewExpenseDetails = () => {
-    // Filter expense records (non-payroll)
-    const expenseRecords = tableData.filter(item => item.type === 'expense');
-    setExpenseDetails(expenseRecords);
-    setShowExpenseDetails(true);
   };
 
   const exportToExcel = () => {
@@ -257,274 +209,182 @@ const PLReport = () => {
 
   const renderSummaryCards = () => (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
-      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-green-500">
-        <div className="flex justify-between items-center">
-          <div>
-            <div className="text-sm text-gray-600">Total Revenue</div>
-            <div className="text-2xl font-bold text-gray-800">
-              {loading ? (
-                <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
-              ) : (
-                `$${data.summary.revenue?.toLocaleString() || 0}`
-              )}
+      {[
+        { label: "Total Revenue", value: data.summary.revenue, color: "green", icon: TrendingUp },
+        { label: "COGS", value: data.summary.cogs, color: "red", icon: TrendingDown },
+        { label: "Gross Profit", value: data.summary.grossProfit, color: "blue", icon: DollarSign },
+        { label: "Total Expenses", value: data.summary.expenses, color: "orange", icon: TrendingDown },
+        { 
+          label: "Net Profit/Loss", 
+          value: data.summary.netProfit, 
+          color: data.summary.netProfit >= 0 ? "green" : "red", 
+          icon: data.summary.netProfit >= 0 ? TrendingUp : TrendingDown 
+        },
+        { label: "Profit Margin", value: `${data.summary.profitMargin?.toFixed(2) || 0}%`, color: "indigo", icon: FileBarChart },
+      ].map((card, index) => (
+        <div key={index} className={`bg-white p-6 rounded-xl shadow-md border-l-4 ${
+          card.color === 'green' ? 'border-green-500' : 
+          card.color === 'red' ? 'border-red-500' : 
+          card.color === 'blue' ? 'border-blue-500' : 
+          card.color === 'orange' ? 'border-orange-500' : 
+          'border-indigo-500'
+        }`}>
+          <div className="flex justify-between items-center">
+            <div>
+              <div className="text-sm text-gray-600">{card.label}</div>
+              <div className={`text-2xl font-bold ${
+                card.label === "Net Profit/Loss" 
+                  ? (card.value >= 0 ? "text-green-700" : "text-red-700")
+                  : "text-gray-800"
+              }`}>
+                {loading ? (
+                  <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
+                ) : card.label.includes("Margin") ? (
+                  card.value
+                ) : card.label === "Net Profit/Loss" ? (
+                  `$${typeof card.value === 'number' ? Math.abs(card.value).toLocaleString() : '0'} ${card.value >= 0 ? '' : '(Loss)'}`
+                ) : (
+                  `$${typeof card.value === 'number' ? card.value.toLocaleString() : '0'}`
+                )}
+              </div>
             </div>
+            <card.icon className={`w-8 h-8 ${
+              card.color === 'green' ? 'text-green-500' : 
+              card.color === 'red' ? 'text-red-500' : 
+              card.color === 'blue' ? 'text-blue-500' : 
+              card.color === 'orange' ? 'text-orange-500' : 
+              'text-indigo-500'
+            }`} />
           </div>
-          <TrendingUp className="w-8 h-8 text-green-500" />
         </div>
-      </div>
-
-      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-red-500">
-        <div className="flex justify-between items-center">
-          <div>
-            <div className="text-sm text-gray-600">COGS</div>
-            <div className="text-2xl font-bold text-gray-800">
-              {loading ? (
-                <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
-              ) : (
-                `$${data.summary.cogs?.toLocaleString() || 0}`
-              )}
-            </div>
-          </div>
-          <TrendingDown className="w-8 h-8 text-red-500" />
-        </div>
-      </div>
-
-      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-blue-500">
-        <div className="flex justify-between items-center">
-          <div>
-            <div className="text-sm text-gray-600">Gross Profit</div>
-            <div className="text-2xl font-bold text-gray-800">
-              {loading ? (
-                <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
-              ) : (
-                `$${data.summary.grossProfit?.toLocaleString() || 0}`
-              )}
-            </div>
-          </div>
-          <DollarSign className="w-8 h-8 text-blue-500" />
-        </div>
-      </div>
-
-      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-orange-500">
-        <div className="flex justify-between items-center">
-          <div>
-            <div className="text-sm text-gray-600">Total Expenses</div>
-            <div className="text-2xl font-bold text-gray-800">
-              {loading ? (
-                <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
-              ) : (
-                `$${data.summary.expenses?.toLocaleString() || 0}`
-              )}
-            </div>
-          </div>
-          <TrendingDown className="w-8 h-8 text-orange-500" />
-        </div>
-      </div>
-
-      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-purple-500">
-        <div className="flex justify-between items-center">
-          <div>
-            <div className="text-sm text-gray-600">Net Profit</div>
-            <div className="text-2xl font-bold text-gray-800">
-              {loading ? (
-                <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
-              ) : (
-                `$${data.summary.netProfit?.toLocaleString() || 0}`
-              )}
-            </div>
-          </div>
-          <DollarSign className="w-8 h-8 text-purple-500" />
-        </div>
-      </div>
-
-      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-indigo-500">
-        <div className="flex justify-between items-center">
-          <div>
-            <div className="text-sm text-gray-600">Profit Margin</div>
-            <div className="text-2xl font-bold text-gray-800">
-              {loading ? (
-                <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
-              ) : (
-                `${data.summary.profitMargin?.toFixed(2) || 0}%`
-              )}
-            </div>
-          </div>
-          <FileBarChart className="w-8 h-8 text-indigo-500" />
-        </div>
-      </div>
+      ))}
     </div>
   );
 
-  const renderMainTable = () => (
-    <div className="overflow-x-auto">
-      <table className="w-full border-collapse bg-white rounded-xl overflow-hidden">
-        <thead className="bg-gray-100 text-gray-700 text-sm">
-          <tr>
-            <th className="p-3 text-left">Date</th>
-            <th className="p-3 text-center">Salary Expense</th>
-            <th className="p-3 text-center">Other Expenses</th>
-            <th className="p-3 text-center">Total Expense</th>
-            <th className="p-3 text-right">Profit</th>
-            <th className="p-3 text-right">Loss</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr className="border-b hover:bg-gray-50 text-sm">
-            <td className="p-3 text-gray-600 font-medium">
-              {currentRange.label}
-            </td>
-            <td className="p-3 text-center">
-              <div className="flex items-center justify-center gap-2">
-                <span className="text-gray-700">
-                  ${totals.totalSalaryExpense?.toLocaleString() || 0}
-                </span>
-                <button
-                  onClick={handleViewSalaryDetails}
-                  className="text-blue-600 hover:text-blue-800 transition-colors p-1 rounded hover:bg-blue-50"
-                  title="View Salary Details"
-                >
-                  <Users size={16} />
-                </button>
-              </div>
-            </td>
-            <td className="p-3 text-center">
-              <div className="flex items-center justify-center gap-2">
-                <span className="text-gray-700">
-                  ${totals.totalOtherExpense?.toLocaleString() || 0}
-                </span>
-                <button
-                  onClick={handleViewExpenseDetails}
-                  className="text-green-600 hover:text-green-800 transition-colors p-1 rounded hover:bg-green-50"
-                  title="View Expense Details"
-                >
-                  <CreditCard size={16} />
-                </button>
-              </div>
-            </td>
-            <td className="p-3 text-center">
-              <span className="text-gray-700 font-medium">
-                ${totals.totalExpense?.toLocaleString() || 0}
-              </span>
-            </td>
-            <td className="p-3 text-right">
-              <span className={`font-medium ${
-                totals.totalProfit > 0 ? "text-green-700" : "text-gray-700"
-              }`}>
-                ${totals.totalProfit?.toLocaleString() || 0}
-              </span>
-            </td>
-            <td className="p-3 text-right">
-              <span className={`font-medium ${
-                totals.totalLoss > 0 ? "text-red-700" : "text-gray-700"
-              }`}>
-                ${totals.totalLoss?.toLocaleString() || 0}
-              </span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  );
-
-  const renderSalaryDetailsModal = () => {
-    if (!showSalaryDetails) return null;
+  const renderMainTable = () => {
+    // Use the totals directly from backend
+    const displayProfit = totals.totalProfit;
+    const displayLoss = totals.totalLoss;
 
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-[100] p-4">
+      <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
+        <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
+          <thead className="bg-gray-100 text-gray-700">
+            <tr>
+              <th className="p-3 text-sm font-medium">Period</th>
+              <th className="p-3 text-sm font-medium">Salary Expense($)</th>
+              <th className="p-3 text-sm font-medium">Other Expenses($)</th>
+              <th className="p-3 text-sm font-medium">Total Expense($)</th>
+              <th className="p-3 text-sm font-medium">Profit($)</th>
+              <th className="p-3 text-sm font-medium">Loss($)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="hover:bg-gray-50 border-t">
+              <td className="p-3 text-gray-600 font-medium">{currentRange.label}</td>
+              <td className="p-3">
+                <div className="flex items-center justify-center gap-2">
+                  <span className="text-gray-700">{totals.totalSalaryExpense?.toLocaleString() || 0}</span>
+                  <button
+                    onClick={() => setShowSalaryDetailsModal(true)}
+                    className="text-blue-600 hover:text-blue-800 transition-colors p-1 rounded hover:bg-blue-50 cursor-pointer"
+                    title="View Salary Details"
+                  >
+                    <Users size={16} />
+                  </button>
+                </div>
+              </td>
+              <td className="p-3">
+                <div className="flex items-center justify-center gap-2">
+                  <span className="text-gray-700">{totals.totalOtherExpense?.toLocaleString() || 0}</span>
+                  <button
+                    onClick={() => setShowExpenseDetailsModal(true)}
+                    className="text-green-600 hover:text-green-800 transition-colors p-1 rounded hover:bg-green-50 cursor-pointer"
+                    title="View Expense Details"
+                  >
+                    <CreditCard size={16} />
+                  </button>
+                </div>
+              </td>
+              <td className="p-3">
+                <span className="text-gray-700 font-medium">{totals.totalExpense?.toLocaleString() || 0}</span>
+              </td>
+              <td className="p-3">
+                <span className={`font-medium ${displayProfit > 0 ? "text-green-700" : "text-gray-700"}`}>
+                  {displayProfit > 0 ? displayProfit.toLocaleString() : "0"}
+                </span>
+              </td>
+              <td className="p-3">
+                <span className={`font-medium ${displayLoss > 0 ? "text-red-700" : "text-gray-700"}`}>
+                  {displayLoss > 0 ? displayLoss.toLocaleString() : "0"}
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
+  const renderSalaryDetailsModal = () => {
+    if (!showSalaryDetailsModal) return null;
+
+    return (
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
         <div className="bg-white w-full max-w-6xl max-h-[90vh] rounded-xl shadow-lg relative flex flex-col">
           <div className="flex items-center justify-between p-6 border-b border-gray-200">
-            <h2 className="text-xl font-semibold text-gray-800">
-              Salary Details - {currentRange.label}
-            </h2>
-            <button
-              onClick={() => setShowSalaryDetails(false)}
-              className="text-gray-400 hover:text-gray-600 transition-colors"
-            >
-              <X size={24} />
+            <h2 className="text-xl font-semibold text-gray-800">Salary Details - {currentRange.label}</h2>
+            <button onClick={() => setShowSalaryDetailsModal(false)} className="text-gray-500 hover:text-gray-700 cursor-pointer">
+              <X size={20} />
             </button>
           </div>
 
           <div className="flex-1 overflow-y-auto p-6">
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse bg-white rounded-xl overflow-hidden">
-                <thead className="bg-gray-100 text-gray-700 text-sm">
+            <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
+              <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
+                <thead className="bg-gray-100 text-gray-700 border-b">
                   <tr>
-                    <th className="p-3 text-left">Date</th>
-                    <th className="p-3 text-left">Employee</th>
-                    <th className="p-3 text-left">Payroll Code</th>
-                    <th className="p-3 text-right">Basic Salary</th>
-                    <th className="p-3 text-right">Allowances</th>
-                    <th className="p-3 text-right">Deductions</th>
-                    <th className="p-3 text-right">Net Salary</th>
-                    <th className="p-3 text-center">Status</th>
+                    <th className="p-3 text-sm font-medium">Date</th>
+                    <th className="p-3 text-sm font-medium">Employee</th>
+                    <th className="p-3 text-sm font-medium">Basic Salary ($)</th>
+                    <th className="p-3 text-sm font-medium">Allowances ($)</th>
+                    <th className="p-3 text-sm font-medium">Deductions ($)</th>
+                    <th className="p-3 text-sm font-medium">Net Salary ($)</th>
+                    <th className="p-3 text-sm font-medium">Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {salaryDetails.length > 0 ? (
-                    salaryDetails.map((item) => (
-                      <tr
-                        key={item._id}
-                        className="border-b hover:bg-gray-50 text-sm"
-                      >
-                        <td className="p-3 text-gray-600">
-                          {new Date(item.date).toLocaleDateString()}
-                        </td>
-                        <td className="p-3 font-medium">
-                          {item.description?.replace('Salary for ', '') || 'N/A'}
-                        </td>
-                        <td className="p-3 text-gray-600">{item.title || 'N/A'}</td>
-                        <td className="p-3 text-right">
-                          ${item.details?.basicSalary?.toLocaleString() || 0}
-                        </td>
-                        <td className="p-3 text-right text-green-600">
-                          ${item.details?.allowances?.toLocaleString() || 0}
-                        </td>
-                        <td className="p-3 text-right text-red-600">
-                          ${item.details?.deductions?.toLocaleString() || 0}
-                        </td>
-                        <td className="p-3 text-right font-semibold">
-                          ${item.expense?.toLocaleString() || 0}
-                        </td>
-                        <td className="p-3 text-center">
-                          <span
-                            className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              item.status === "paid"
-                                ? "bg-green-100 text-green-800"
-                                : item.status === "pending"
-                                ? "bg-yellow-100 text-yellow-800"
-                                : "bg-gray-100 text-gray-800"
-                            }`}
-                          >
-                            {item.status || 'N/A'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan="8" className="text-center py-8 text-gray-500">
-                        No salary records found for the selected period
+                  {salaryDetails.length > 0 ? salaryDetails.map((item) => (
+                    <tr key={item._id} className="border-b hover:bg-gray-50">
+                      <td className="p-3 text-gray-600">{formatDateToReadable(item.date)}</td>
+                      <td className="p-3 font-medium">{item.description?.replace("Salary for ", "") || "N/A"}</td>
+                      <td className="p-3">{item.details?.basicSalary?.toLocaleString() || 0}</td>
+                      <td className="p-3 text-green-600">{item.details?.allowances?.toLocaleString() || 0}</td>
+                      <td className="p-3 text-red-600">{item.details?.deductions?.toLocaleString() || 0}</td>
+                      <td className="p-3 font-semibold">{item.expense?.toLocaleString() || 0}</td>
+                      <td className="p-3">
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          item.status === "paid" ? "bg-green-100 text-green-800" :
+                          item.status === "pending" ? "bg-yellow-100 text-yellow-800" :
+                          "bg-gray-100 text-gray-800"
+                        }`}>
+                          {item.status || "N/A"}
+                        </span>
                       </td>
                     </tr>
+                  )) : (
+                    <tr><td colSpan="7" className="text-center py-8 text-gray-500">No salary records found</td></tr>
                   )}
                 </tbody>
                 {salaryDetails.length > 0 && (
                   <tfoot>
                     <tr className="bg-gray-100 font-semibold text-sm">
-                      <td colSpan="3" className="p-3 text-right">Total:</td>
-                      <td className="p-3 text-right">
-                        ${salaryDetails.reduce((sum, item) => sum + (item.details?.basicSalary || 0), 0).toLocaleString()}
-                      </td>
-                      <td className="p-3 text-right text-green-600">
-                        ${salaryDetails.reduce((sum, item) => sum + (item.details?.allowances || 0), 0).toLocaleString()}
-                      </td>
-                      <td className="p-3 text-right text-red-600">
-                        ${salaryDetails.reduce((sum, item) => sum + (item.details?.deductions || 0), 0).toLocaleString()}
-                      </td>
-                      <td className="p-3 text-right">
-                        ${salaryDetails.reduce((sum, item) => sum + (item.expense || 0), 0).toLocaleString()}
-                      </td>
-                      <td className="p-3 text-center">-</td>
+                      <td colSpan="2" className="p-3 text-left">Total:</td>
+                      <td className="p-3">{salaryDetails.reduce((sum, item) => sum + (item.details?.basicSalary || 0), 0).toLocaleString()}</td>
+                      <td className="p-3 text-green-600">{salaryDetails.reduce((sum, item) => sum + (item.details?.allowances || 0), 0).toLocaleString()}</td>
+                      <td className="p-3 text-red-600">{salaryDetails.reduce((sum, item) => sum + (item.details?.deductions || 0), 0).toLocaleString()}</td>
+                      <td className="p-3">{salaryDetails.reduce((sum, item) => sum + (item.expense || 0), 0).toLocaleString()}</td>
+                      <td className="p-3">-</td>
                     </tr>
                   </tfoot>
                 )}
@@ -533,10 +393,7 @@ const PLReport = () => {
           </div>
 
           <div className="flex justify-end p-6 border-t border-gray-200 bg-gray-50">
-            <button
-              onClick={() => setShowSalaryDetails(false)}
-              className="px-6 py-2 text-gray-700 bg-gray-300 hover:bg-gray-400 rounded-lg transition-colors"
-            >
+            <button onClick={() => setShowSalaryDetailsModal(false)} className="px-6 py-2 text-gray-700 bg-gray-300 hover:bg-gray-400 rounded-lg transition-colors cursor-pointer">
               Close
             </button>
           </div>
@@ -546,97 +403,58 @@ const PLReport = () => {
   };
 
   const renderExpenseDetailsModal = () => {
-    if (!showExpenseDetails) return null;
+    if (!showExpenseDetailsModal) return null;
 
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-[100] p-4">
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
         <div className="bg-white w-full max-w-6xl max-h-[90vh] rounded-xl shadow-lg relative flex flex-col">
           <div className="flex items-center justify-between p-6 border-b border-gray-200">
-            <h2 className="text-xl font-semibold text-gray-800">
-              Expense Details - {currentRange.label}
-            </h2>
-            <button
-              onClick={() => setShowExpenseDetails(false)}
-              className="text-gray-400 hover:text-gray-600 transition-colors"
-            >
-              <X size={24} />
+            <h2 className="text-xl font-semibold text-gray-800">Expense Details - {currentRange.label}</h2>
+            <button onClick={() => setShowExpenseDetailsModal(false)} className="text-gray-500 hover:text-gray-700 cursor-pointer">
+              <X size={20} />
             </button>
           </div>
 
           <div className="flex-1 overflow-y-auto p-6">
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse bg-white rounded-xl overflow-hidden">
-                <thead className="bg-gray-100 text-gray-700 text-sm">
+            <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
+              <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
+                <thead className="bg-gray-100 text-gray-700 border-b">
                   <tr>
-                    <th className="p-3 text-left">Date</th>
-                    <th className="p-3 text-left">Expense Type</th>
-                    <th className="p-3 text-left">Description</th>
-                    <th className="p-3 text-left">Vendor/Supplier</th>
-                    <th className="p-3 text-right">Amount</th>
-                    <th className="p-3 text-center">Payment Method</th>
-                    <th className="p-3 text-center">Status</th>
+                    <th className="p-3 text-sm font-medium">Date</th>
+                    <th className="p-3 text-sm font-medium">Expense Type</th>
+                    <th className="p-3 text-sm font-medium">Description</th>
+                    <th className="p-3 text-sm font-medium">Amount ($)</th>
+                    <th className="p-3 text-sm font-medium">Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {expenseDetails.length > 0 ? (
-                    expenseDetails.map((item) => (
-                      <tr
-                        key={item._id}
-                        className="border-b hover:bg-gray-50 text-sm"
-                      >
-                        <td className="p-3 text-gray-600">
-                          {new Date(item.date).toLocaleDateString()}
-                        </td>
-                        <td className="p-3 font-medium text-gray-800">
-                          {item.expenseType || 'General Expense'}
-                        </td>
-                        <td className="p-3 text-gray-600">
-                          {item.description || item.title || 'N/A'}
-                        </td>
-                        <td className="p-3 text-gray-600">
-                          {item.vendor || 'N/A'}
-                        </td>
-                        <td className="p-3 text-right font-semibold">
-                          ${item.expense?.toLocaleString() || 0}
-                        </td>
-                        <td className="p-3 text-center">
-                          <span className="text-gray-700 capitalize">
-                            {item.paymentMethod || 'N/A'}
-                          </span>
-                        </td>
-                        <td className="p-3 text-center">
-                          <span
-                            className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              item.status === "paid"
-                                ? "bg-green-100 text-green-800"
-                                : item.status === "pending"
-                                ? "bg-yellow-100 text-yellow-800"
-                                : item.status === "approved"
-                                ? "bg-blue-100 text-blue-800"
-                                : "bg-gray-100 text-gray-800"
-                            }`}
-                          >
-                            {item.status || 'N/A'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan="7" className="text-center py-8 text-gray-500">
-                        No expense records found for the selected period
+                  {expenseDetails.length > 0 ? expenseDetails.map((item) => (
+                    <tr key={item._id} className="border-b hover:bg-gray-50">
+                      <td className="p-3 text-gray-600">{formatDateToReadable(item.date)}</td>
+                      <td className="p-3 font-medium text-gray-800">{item.title || "General Expense"}</td>
+                      <td className="p-3 text-gray-600">{item.description || item.title || "N/A"}</td>
+                      <td className="p-3 font-semibold">{item.expense?.toLocaleString() || 0}</td>
+                      <td className="p-3">
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          item.status === "paid" ? "bg-green-100 text-green-800" :
+                          item.status === "pending" ? "bg-yellow-100 text-yellow-800" :
+                          item.status === "approved" ? "bg-blue-100 text-blue-800" :
+                          "bg-gray-100 text-gray-800"
+                        }`}>
+                          {item.status || "N/A"}
+                        </span>
                       </td>
                     </tr>
+                  )) : (
+                    <tr><td colSpan="5" className="text-center py-8 text-gray-500">No expense records found</td></tr>
                   )}
                 </tbody>
                 {expenseDetails.length > 0 && (
                   <tfoot>
                     <tr className="bg-gray-100 font-semibold text-sm">
-                      <td colSpan="4" className="p-3 text-right">Total Expenses:</td>
-                      <td className="p-3 text-right">
-                        ${expenseDetails.reduce((sum, item) => sum + (item.expense || 0), 0).toLocaleString()}
-                      </td>
-                      <td colSpan="2" className="p-3 text-center">-</td>
+                      <td colSpan="3" className="p-3 text-left">Total Expenses:</td>
+                      <td className="p-3">{expenseDetails.reduce((sum, item) => sum + (item.expense || 0), 0).toLocaleString()}</td>
+                      <td className="p-3">-</td>
                     </tr>
                   </tfoot>
                 )}
@@ -645,10 +463,7 @@ const PLReport = () => {
           </div>
 
           <div className="flex justify-end p-6 border-t border-gray-200 bg-gray-50">
-            <button
-              onClick={() => setShowExpenseDetails(false)}
-              className="px-6 py-2 text-gray-700 bg-gray-300 hover:bg-gray-400 rounded-lg transition-colors"
-            >
+            <button onClick={() => setShowExpenseDetailsModal(false)} className="px-6 py-2 text-gray-700 bg-gray-300 hover:bg-gray-400 rounded-lg transition-colors cursor-pointer">
               Close
             </button>
           </div>
@@ -661,26 +476,19 @@ const PLReport = () => {
     if (!showCustomModal) return null;
 
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-[100] p-4">
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
         <div className="bg-white w-full max-w-md rounded-xl shadow-lg relative">
           <div className="flex items-center justify-between p-6 border-b border-gray-200">
-            <h2 className="text-lg font-semibold text-gray-800">
-              Select Custom Date Range
-            </h2>
-            <button
-              onClick={() => setShowCustomModal(false)}
-              className="text-gray-400 hover:text-gray-600 transition-colors"
-            >
-              <X size={24} />
+            <h2 className="text-lg font-semibold text-gray-800">Select Custom Date Range</h2>
+            <button onClick={() => setShowCustomModal(false)} className="text-gray-500 hover:text-gray-700 cursor-pointer">
+              <X size={20} />
             </button>
           </div>
 
           <div className="p-6">
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Start Date
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Start Date</label>
                 <DatePicker
                   selected={customStartDate}
                   onChange={setCustomStartDate}
@@ -694,9 +502,7 @@ const PLReport = () => {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  End Date
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">End Date</label>
                 <DatePicker
                   selected={customEndDate}
                   onChange={setCustomEndDate}
@@ -714,17 +520,10 @@ const PLReport = () => {
           </div>
 
           <div className="flex justify-end gap-3 p-6 border-t border-gray-200 bg-gray-50">
-            <button
-              onClick={() => setShowCustomModal(false)}
-              className="px-5 py-2 text-gray-700 bg-gray-300 hover:bg-gray-400 rounded-lg transition-colors"
-            >
+            <button onClick={() => setShowCustomModal(false)} className="px-5 py-2 text-gray-700 bg-gray-300 hover:bg-gray-400 rounded-lg transition-colors cursor-pointer">
               Cancel
             </button>
-            <button
-              onClick={handleCustomDateApply}
-              disabled={!customStartDate || !customEndDate}
-              className="px-5 py-2 text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
-            >
+            <button onClick={handleCustomDateApply} disabled={!customStartDate || !customEndDate} className="px-5 py-2 text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed cursor-pointer">
               Apply Date Range
             </button>
           </div>
@@ -737,53 +536,31 @@ const PLReport = () => {
     <div className="p-6">
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold text-gray-800">
-            Profit & Loss Report
-          </h1>
+          <h1 className="text-2xl font-bold text-gray-800">Profit & Loss Report</h1>
         </div>
-
         <div className="flex items-center gap-3">
-          <button
-            onClick={exportToExcel}
-            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-          >
-            <Download size={18} />
-            Export Excel
+          <button onClick={exportToExcel} className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer">
+            <Download size={18} /> Export Excel
           </button>
         </div>
       </div>
 
       {renderSummaryCards()}
 
-      {/* Tabs Section */}
       <div className="bg-white p-6 rounded-xl shadow-md">
-        {/* Tabs Header */}
         <div className="flex border-b border-gray-200 mb-6">
           {[
             { key: "currentMonth", label: dateRanges.currentMonth.label },
             { key: "janToPrevious", label: dateRanges.janToPrevious.label },
             { key: "custom", label: dateRanges.custom.label },
           ].map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => handleTabClick(tab.key)}
-              className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors flex items-center gap-2 ${
-                activeTab === tab.key
-                  ? "border-blue-500 text-blue-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700"
-              }`}
-            >
+            <button key={tab.key} onClick={() => handleTabClick(tab.key)} className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors flex items-center gap-2 ${
+              activeTab === tab.key ? "border-blue-500 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"
+            }`}>
               {tab.key === "custom" && <Calendar size={16} />}
               {tab.label}
             </button>
           ))}
-        </div>
-
-        {/* Date Range Info */}
-        <div className="mb-4 p-3 bg-blue-50 rounded-lg">
-          <p className="text-sm text-blue-700">
-            Showing data from <strong>{currentRange.start?.toLocaleDateString()}</strong> to <strong>{currentRange.end?.toLocaleDateString()}</strong>
-          </p>
         </div>
 
         {tableLoading ? (
@@ -796,13 +573,8 @@ const PLReport = () => {
         )}
       </div>
 
-      {/* Custom Date Modal */}
       {renderCustomDateModal()}
-
-      {/* Salary Details Modal */}
       {renderSalaryDetailsModal()}
-
-      {/* Expense Details Modal */}
       {renderExpenseDetailsModal()}
     </div>
   );

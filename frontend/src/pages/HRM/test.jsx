@@ -674,7 +674,6 @@ const Payroll = () => {
         `${backendUrl}/api/accounts/destinations`
       );
 
-      console.log("values of des", destinationResponse);
       if (destinationResponse.data && Array.isArray(destinationResponse.data)) {
         const options = destinationResponse.data
           .filter((destination) => destination.totalAmount > 0)

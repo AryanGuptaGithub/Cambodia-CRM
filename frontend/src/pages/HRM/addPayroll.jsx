@@ -104,7 +104,6 @@ const usePayrollForm = () => {
         `${backendUrl}/api/accounts/destinations`
       );
 
-      console.log("values of des", destinationResponse);
       if (destinationResponse.data && Array.isArray(destinationResponse.data)) {
         const options = destinationResponse.data
           .filter((destination) => destination.totalAmount > 0) // Filter where totalAmount > 0
@@ -242,8 +241,7 @@ const usePayrollForm = () => {
         ...form,
         totalAllowance: totalAllowance.toFixed(2),
       };
-      console.log("value of payload", payload);
-
+    
       const res = await fetch(`${backendUrl}/api/payrolls`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

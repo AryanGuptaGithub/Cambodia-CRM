@@ -9,7 +9,8 @@ dotenv.config();
 const router = express.Router();
 
 router.post("/login", async (req, res) => {
-  try { // <-- Check if body exists
+  try {
+    // <-- Check if body exists
     const { username, password } = req.body;
 
     if (!username || !password)
@@ -19,17 +20,21 @@ router.post("/login", async (req, res) => {
     if (!user) return res.status(401).json({ message: "Invalid credentials" });
 
     const isMatch = await user.comparePassword(password);
-    if (!isMatch) return res.status(401).json({ message: "Invalid credentials" });
+    if (!isMatch)
+      return res.status(401).json({ message: "Invalid credentials" });
 
-    const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
-      expiresIn: "1h",
-    });
+    const token = jwt.sign(
+      { id: user._id, role: user.role },
+      process.env.JWT_SECRET,
+      {
+        expiresIn: "1h",
+      }
+    );
 
-    res.json({ token, role: user.role });
+    res.json({ token, role: user.role, username: user.username });
   } catch (error) {
     res.status(500).json({ message: error.message || "Server error" });
   }
 });
 
-
-export default router;  // ✅ ESM export
+export default router; // ✅ ESM export

@@ -52,6 +52,7 @@ import productType from "./routers/projectManager/productType.js";
 import productPackingType from "./routers/projectManager/productPackingType.js";
 import saleAndSalary from "./routers/reports/saleAndSalary.js";
 import profitAndLoss from "./routers/reports/profitAndLoss.js";
+import expiryStockReport from "./routers/reports/expiryStockReport.js";
 
 dotenv.config();
 
@@ -131,6 +132,7 @@ app.use("/api", productType);
 app.use("/api", productPackingType);
 app.use("/api", saleAndSalary);
 app.use("/api", profitAndLoss);
+app.use("/api", expiryStockReport);
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);

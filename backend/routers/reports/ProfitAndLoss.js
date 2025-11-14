@@ -3,6 +3,8 @@ import express from "express";
 import SaleSummary from "../../models/sale/saleSummary.js";
 import SalesReturn from "../../models/sale/saleReturn.js";
 import Payroll from "../../models/Hrm/Payroll.js";
+import addExpense from "../../models/expenses/addExpense.js";
+import addExpenseCategary from "../../models/expenses/addExpenseCategary.js";
 const router = express.Router();
 
 // GET /api/pl-report - Get combined Profit & Loss report
@@ -21,6 +23,7 @@ router.get("/pl-report", async (req, res) => {
     let saleFilter = {};
     let returnFilter = {};
     let payrollFilter = {};
+    let expenseFilter = {};
 
     // Date range filter
     if (startDate || endDate) {
@@ -30,13 +33,18 @@ router.get("/pl-report", async (req, res) => {
       // For sales - use recordingDate
       saleFilter.recordingDate = {};
       returnFilter.recordingDate = {};
+      // For expenses - use date field
+      expenseFilter.date = {};
+
       if (start) {
         saleFilter.recordingDate.$gte = start;
         returnFilter.recordingDate.$gte = start;
+        expenseFilter.date.$gte = start;
       }
       if (end) {
         saleFilter.recordingDate.$lte = end;
         returnFilter.recordingDate.$lte = end;
+        expenseFilter.date.$lte = end;
       }
 
       // For payroll - use createdAt
@@ -49,35 +57,41 @@ router.get("/pl-report", async (req, res) => {
     const skip = (page - 1) * limit;
     const sortDirection = sortOrder === "desc" ? -1 : 1;
 
-    // Get sales data
+    // Get all data without pagination for details
     const sales = await SaleSummary.find(saleFilter)
       .select(
         "recordingDate invoiceNumber customerName totalAmount paidAmount dueAmount paymentStatus mrName"
       )
-      .sort({ recordingDate: sortDirection })
-      .skip(skip)
-      .limit(parseInt(limit));
+      .sort({ recordingDate: sortDirection });
 
-    // Get sales return data
     const salesReturns = await SalesReturn.find(returnFilter)
       .select(
         "recordingDate invoiceNumber customerName totalAmount paidAmount dueAmount paymentStatus mrName products"
       )
-      .sort({ recordingDate: sortDirection })
-      .skip(skip)
-      .limit(parseInt(limit));
+      .sort({ recordingDate: sortDirection });
 
-    // Get payroll data
     const payrolls = await Payroll.find(payrollFilter)
       .select(
         "period payrollCode employeeId basicSalary totalAllowance deductions netSalary status paymentDate createdAt"
       )
       .populate("employeeId", "medicalRepName employeeName")
-      .sort({ createdAt: sortDirection })
-      .skip(skip)
-      .limit(parseInt(limit));
+      .sort({ createdAt: sortDirection });
 
-    // Transform sales data to common format - FIXED: Proper profit calculation
+    const expenses = await addExpense
+      .find(expenseFilter)
+      .select(
+        "date category remarks amount sourceAccount paymentMethod createdBy"
+      )
+      .populate({
+        path: "category",
+        select: "category description",
+        model: addExpenseCategary,
+      })
+      .populate("sourceAccount", "name accountNumber")
+      .populate("createdBy", "name email")
+      .sort({ date: sortDirection });
+
+    // Transform data with detailed structure
     const salesData = sales.map((sale) => ({
       _id: sale._id,
       type: "sale",
@@ -85,39 +99,40 @@ router.get("/pl-report", async (req, res) => {
       title: sale.invoiceNumber,
       description: `Sale to ${sale.customerName}`,
       amount: sale.totalAmount,
-      profit: sale.totalAmount, // Sales contribute to profit
-      expense: 0, // Sales don't have direct expenses
+      profit: sale.totalAmount,
+      expense: 0,
       status: sale.paymentStatus,
       details: {
         paidAmount: sale.paidAmount,
         dueAmount: sale.dueAmount,
         mrName: sale.mrName,
+        customerName: sale.customerName,
       },
     }));
 
-    // Transform sales return data to common format - FIXED: Proper profit calculation
     const returnData = salesReturns.map((salesReturn) => ({
       _id: salesReturn._id,
       type: "return",
       date: salesReturn.recordingDate,
       title: `${salesReturn.invoiceNumber} (Return)`,
       description: `Return from ${salesReturn.customerName}`,
-      amount: -salesReturn.totalAmount, // Negative amount for returns
-      profit: -salesReturn.totalAmount, // Negative profit for returns
+      amount: -salesReturn.totalAmount,
+      profit: -salesReturn.totalAmount,
       expense: 0,
       status: salesReturn.paymentStatus,
       details: {
         paidAmount: salesReturn.paidAmount,
         dueAmount: salesReturn.dueAmount,
         mrName: salesReturn.mrName,
+        customerName: salesReturn.customerName,
         usedAmount: salesReturn.products.reduce(
           (total, product) => total + (product.usedAmount || 0),
           0
         ),
+        productCount: salesReturn.products.length,
       },
     }));
 
-    // Transform payroll data to common format - FIXED: Proper profit calculation
     const payrollData = payrolls.map((payroll) => ({
       _id: payroll._id,
       type: "payroll",
@@ -128,34 +143,92 @@ router.get("/pl-report", async (req, res) => {
         payroll.employeeId?.employeeName ||
         "Employee"
       }`,
-      amount: payroll.netSalary, // FIXED: Positive amount for payroll (it's an expense)
-      profit: -payroll.netSalary, // FIXED: Negative profit for payroll expenses
-      expense: payroll.netSalary, // Positive expense
+      amount: payroll.netSalary,
+      profit: -payroll.netSalary,
+      expense: payroll.netSalary,
       status: payroll.status,
       details: {
         basicSalary: payroll.basicSalary,
         allowances: payroll.totalAllowance,
         deductions: payroll.deductions,
         period: payroll.period,
+        employeeName:
+          payroll.employeeId?.medicalRepName ||
+          payroll.employeeId?.employeeName ||
+          "Unknown",
+        paymentDate: payroll.paymentDate,
       },
     }));
 
-    // Combine and sort data
-    const combinedData = [...salesData, ...returnData, ...payrollData].sort(
-      (a, b) => {
-        const aDate = new Date(a.date);
-        const bDate = new Date(b.date);
-        return sortDirection === -1 ? bDate - aDate : aDate - bDate;
-      }
-    );
+    const expenseData = expenses.map((expense) => {
+      const categoryData = expense.category;
+      const categoryName =
+        categoryData?.category || categoryData?.name || "Uncategorized";
+      const categoryDescription = categoryData?.description || "No description";
 
-    // Get total counts
+      return {
+        _id: expense._id,
+        type: "expense",
+        date: expense.date,
+        title: categoryName,
+        description: expense.remarks || `Expense: ${categoryName}`,
+        amount: -expense.amount,
+        profit: -expense.amount,
+        expense: expense.amount,
+        status: "paid",
+        details: {
+          category: {
+            name: categoryName,
+            description: categoryDescription,
+            categoryId: categoryData?._id || null,
+          },
+          sourceAccount: {
+            name: expense.sourceAccount?.name || "Unknown Account",
+            accountNumber: expense.sourceAccount?.accountNumber || "N/A",
+            accountId: expense.sourceAccount?._id,
+          },
+          staff: expense.createdBy
+            ? {
+                name: expense.createdBy.name || "Unknown Staff",
+                email: expense.createdBy.email || "N/A",
+                staffId: expense.createdBy._id,
+              }
+            : {
+                name: "Unknown Staff",
+                email: "N/A",
+                staffId: null,
+              },
+          paymentMethod: expense.paymentMethod,
+          remarks: expense.remarks,
+          expenseId: expense._id,
+          createdAt: expense.createdAt,
+        },
+      };
+    });
+
+    // Create combined data with pagination
+    const allCombinedData = [
+      ...salesData,
+      ...returnData,
+      ...payrollData,
+      ...expenseData,
+    ].sort((a, b) => {
+      const aDate = new Date(a.date);
+      const bDate = new Date(b.date);
+      return sortDirection === -1 ? bDate - aDate : aDate - bDate;
+    });
+
+    // Apply pagination to combined data
+    const combinedData = allCombinedData.slice(skip, skip + parseInt(limit));
+
+    // Get counts
     const totalSales = await SaleSummary.countDocuments(saleFilter);
     const totalReturns = await SalesReturn.countDocuments(returnFilter);
     const totalPayrolls = await Payroll.countDocuments(payrollFilter);
-    const total = totalSales + totalReturns + totalPayrolls;
+    const totalExpenses = await addExpense.countDocuments(expenseFilter);
+    const total = totalSales + totalReturns + totalPayrolls + totalExpenses;
 
-    // Calculate totals for sales
+    // Calculate totals
     const salesTotals = await SaleSummary.aggregate([
       { $match: saleFilter },
       {
@@ -164,11 +237,11 @@ router.get("/pl-report", async (req, res) => {
           totalSalesAmount: { $sum: "$totalAmount" },
           totalPaidAmount: { $sum: "$paidAmount" },
           totalDueAmount: { $sum: "$dueAmount" },
+          totalSalesCount: { $sum: 1 },
         },
       },
     ]);
 
-    // Calculate totals for sales returns
     const returnsTotals = await SalesReturn.aggregate([
       { $match: returnFilter },
       {
@@ -177,6 +250,7 @@ router.get("/pl-report", async (req, res) => {
           totalReturnsAmount: { $sum: "$totalAmount" },
           totalReturnsPaid: { $sum: "$paidAmount" },
           totalReturnsDue: { $sum: "$dueAmount" },
+          totalReturnsCount: { $sum: 1 },
           totalUsedAmount: {
             $sum: {
               $reduce: {
@@ -192,7 +266,6 @@ router.get("/pl-report", async (req, res) => {
       },
     ]);
 
-    // Calculate totals for payroll
     const payrollTotals = await Payroll.aggregate([
       { $match: payrollFilter },
       {
@@ -202,6 +275,67 @@ router.get("/pl-report", async (req, res) => {
           totalBasicSalary: { $sum: "$basicSalary" },
           totalAllowances: { $sum: "$totalAllowance" },
           totalDeductions: { $sum: "$deductions" },
+          totalPayrollCount: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const expenseTotals = await addExpense.aggregate([
+      { $match: expenseFilter },
+      {
+        $lookup: {
+          from: "addexpensecategaries",
+          localField: "category",
+          foreignField: "_id",
+          as: "categoryInfo",
+        },
+      },
+      {
+        $unwind: {
+          path: "$categoryInfo",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalExpenseAmount: { $sum: "$amount" },
+          expenseCount: { $sum: 1 },
+          byCategory: {
+            $push: {
+              categoryId: "$categoryInfo._id",
+              categoryName: "$categoryInfo.category",
+              categoryDescription: "$categoryInfo.description",
+              amount: "$amount",
+            },
+          },
+        },
+      },
+      {
+        $project: {
+          totalExpenseAmount: 1,
+          expenseCount: 1,
+          categoryBreakdown: {
+            $arrayToObject: {
+              $map: {
+                input: "$byCategory",
+                as: "cat",
+                in: {
+                  k: {
+                    $ifNull: [
+                      "$$cat.categoryName",
+                      { $ifNull: ["$$cat.category", "Uncategorized"] },
+                    ],
+                  },
+                  v: {
+                    amount: "$$cat.amount",
+                    description: "$$cat.categoryDescription",
+                    categoryId: "$$cat.categoryId",
+                  },
+                },
+              },
+            },
+          },
         },
       },
     ]);
@@ -210,12 +344,14 @@ router.get("/pl-report", async (req, res) => {
       totalSalesAmount: 0,
       totalPaidAmount: 0,
       totalDueAmount: 0,
+      totalSalesCount: 0,
     };
 
     const returnsTotal = returnsTotals[0] || {
       totalReturnsAmount: 0,
       totalReturnsPaid: 0,
       totalReturnsDue: 0,
+      totalReturnsCount: 0,
       totalUsedAmount: 0,
     };
 
@@ -224,42 +360,53 @@ router.get("/pl-report", async (req, res) => {
       totalBasicSalary: 0,
       totalAllowances: 0,
       totalDeductions: 0,
+      totalPayrollCount: 0,
     };
 
-    // Calculate NET revenue and profit/loss - FIXED: Proper calculation
+    const expenseTotal = expenseTotals[0] || {
+      totalExpenseAmount: 0,
+      expenseCount: 0,
+      categoryBreakdown: {},
+    };
+
     const grossRevenue = salesTotal.totalSalesAmount;
     const returnsDeduction = returnsTotal.totalReturnsAmount;
     const usedAmountAddition = returnsTotal.totalUsedAmount;
     const netRevenue = grossRevenue - returnsDeduction + usedAmountAddition;
-    const totalExpenses = payrollTotal.totalNetSalary;
-    
-    // FIXED: Net Profit = Revenue - Expenses
-    const netProfit = netRevenue - totalExpenses;
 
-    console.log("Calculation Details:", {
-      grossRevenue,
-      returnsDeduction,
-      usedAmountAddition,
-      netRevenue,
-      totalExpenses,
-      netProfit
-    });
+    const totalExpensesAmount =
+      payrollTotal.totalNetSalary + expenseTotal.totalExpenseAmount;
+
+    const netProfit = netRevenue - totalExpensesAmount;
 
     const totals = {
       totalSales: salesTotal.totalSalesAmount,
       totalReturns: returnsTotal.totalReturnsAmount,
       totalUsedAmount: returnsTotal.totalUsedAmount,
       totalRevenue: netRevenue,
-      totalExpense: totalExpenses,
-      // FIXED: Proper profit/loss calculation
+      totalExpense: totalExpensesAmount,
+      payrollExpense: payrollTotal.totalNetSalary,
+      otherExpense: expenseTotal.totalExpenseAmount,
       totalProfit: netProfit > 0 ? netProfit : 0,
       totalLoss: netProfit < 0 ? Math.abs(netProfit) : 0,
-      netProfit: netProfit // Include raw net profit for reference
+      netProfit: netProfit,
+      salesCount: salesTotal.totalSalesCount,
+      returnsCount: returnsTotal.totalReturnsCount,
+      payrollCount: payrollTotal.totalPayrollCount,
+      expenseCount: expenseTotal.expenseCount,
     };
 
-    res.json({
+    // Prepare detailed arrays for frontend
+    const salaryDetails = payrollData; // This contains all payroll records with detailed structure
+    const expenseDetails = expenseData; // This contains all expense records with detailed structure
+
+    const response = {
       success: true,
       data: combinedData,
+      details: {
+        salaryDetails: salaryDetails,
+        expenseDetails: expenseDetails,
+      },
       pagination: {
         currentPage: parseInt(page),
         totalPages: Math.ceil(total / limit),
@@ -271,8 +418,14 @@ router.get("/pl-report", async (req, res) => {
         sales: salesTotal,
         returns: returnsTotal,
         payroll: payrollTotal,
+        expenses: {
+          ...expenseTotal,
+          categoryBreakdown: expenseTotal.categoryBreakdown || {},
+        },
       },
-    });
+    };
+
+    res.json(response);
   } catch (error) {
     console.error("Profit Loss Report Error:", error);
     res.status(500).json({
@@ -283,6 +436,7 @@ router.get("/pl-report", async (req, res) => {
   }
 });
 
+// Keep the other endpoints (summary and orders) the same as in your original code
 // GET /api/pl-report/summary - Get summary statistics
 router.get("/pl-report/summary", async (req, res) => {
   try {
@@ -291,24 +445,27 @@ router.get("/pl-report/summary", async (req, res) => {
     let saleFilter = {};
     let returnFilter = {};
     let payrollFilter = {};
+    let expenseFilter = {};
 
     if (startDate || endDate) {
       const start = startDate ? new Date(startDate) : null;
       const end = endDate ? new Date(endDate) : null;
 
-      // For sales and returns
       saleFilter.recordingDate = {};
       returnFilter.recordingDate = {};
+      expenseFilter.date = {};
+
       if (start) {
         saleFilter.recordingDate.$gte = start;
         returnFilter.recordingDate.$gte = start;
+        expenseFilter.date.$gte = start;
       }
       if (end) {
         saleFilter.recordingDate.$lte = end;
         returnFilter.recordingDate.$lte = end;
+        expenseFilter.date.$lte = end;
       }
 
-      // For payroll
       payrollFilter.createdAt = {};
       if (start) payrollFilter.createdAt.$gte = start;
       if (end) payrollFilter.createdAt.$lte = end;
@@ -385,6 +542,39 @@ router.get("/pl-report/summary", async (req, res) => {
       },
     ]);
 
+    // Get expense summary with IMPROVED category breakdown
+    const expenseSummary = await addExpense.aggregate([
+      { $match: expenseFilter },
+      {
+        $lookup: {
+          from: "addexpensecategaries",
+          localField: "category",
+          foreignField: "_id",
+          as: "categoryInfo",
+        },
+      },
+      {
+        $unwind: {
+          path: "$categoryInfo",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalExpenseAmount: { $sum: "$amount" },
+          expenseCount: { $sum: 1 },
+          byCategory: {
+            $push: {
+              categoryName: "$categoryInfo.category",
+              categoryDescription: "$categoryInfo.description",
+              amount: "$amount",
+            },
+          },
+        },
+      },
+    ]);
+
     const salesData = salesSummary[0] || {
       totalRevenue: 0,
       totalPaid: 0,
@@ -413,40 +603,48 @@ router.get("/pl-report/summary", async (req, res) => {
       pendingPayrolls: 0,
     };
 
-    // Calculate NET revenue and profit/loss - FIXED: Proper calculation
+    const expenseData = expenseSummary[0] || {
+      totalExpenseAmount: 0,
+      expenseCount: 0,
+      byCategory: [],
+    };
+
+    // Calculate NET revenue and profit/loss
     const grossRevenue = salesData.totalRevenue;
     const returnsDeduction = returnsData.totalReturnsAmount;
     const usedAmountAddition = returnsData.totalUsedAmount;
     const netRevenue = grossRevenue - returnsDeduction + usedAmountAddition;
-    const expenses = payrollData.totalExpenses;
-    const netProfit = netRevenue - expenses;
-    const profitMargin = netRevenue > 0 ? (netProfit / netRevenue) * 100 : 0;
 
-    console.log("Summary Calculation:", {
-      grossRevenue,
-      returnsDeduction,
-      usedAmountAddition,
-      netRevenue,
-      expenses,
-      netProfit,
-      profitMargin
-    });
+    const totalExpensesAmount =
+      payrollData.totalExpenses + expenseData.totalExpenseAmount;
+
+    const netProfit = netRevenue - totalExpensesAmount;
+    const profitMargin = netRevenue > 0 ? (netProfit / netRevenue) * 100 : 0;
 
     // Format summary for frontend
     const formattedSummary = {
-      // Revenue breakdown
-      revenue: netRevenue, // FIXED: Use net revenue
+      revenue: netRevenue,
       cogs: 0,
       grossProfit: netRevenue,
-      expenses: expenses,
+      expenses: totalExpensesAmount,
+      payrollExpenses: payrollData.totalExpenses,
+      otherExpenses: expenseData.totalExpenseAmount,
       netProfit: netProfit,
       profitMargin: parseFloat(profitMargin.toFixed(2)),
 
-      // Additional metrics
       totalSales: salesData.totalTransactions,
       totalReturns: returnsData.totalReturns,
       totalPayrolls: payrollData.totalPayrolls,
-      collectionRate: grossRevenue > 0 ? (salesData.totalPaid / grossRevenue) * 100 : 0,
+      totalExpenses: expenseData.expenseCount,
+      collectionRate:
+        grossRevenue > 0 ? (salesData.totalPaid / grossRevenue) * 100 : 0,
+
+      expenseByCategory: expenseData.byCategory.reduce((acc, item) => {
+        const category = item.categoryName || "Uncategorized";
+        if (!acc[category]) acc[category] = 0;
+        acc[category] += item.amount;
+        return acc;
+      }, {}),
     };
 
     res.json({
@@ -456,6 +654,7 @@ router.get("/pl-report/summary", async (req, res) => {
         sales: salesData,
         returns: returnsData,
         payroll: payrollData,
+        expenses: expenseData,
       },
     });
   } catch (error) {
@@ -468,7 +667,6 @@ router.get("/pl-report/summary", async (req, res) => {
   }
 });
 
-// Other endpoints remain the same as in your original code...
 // GET /api/pl-report/orders - Get orders breakdown (sales and returns)
 router.get("/pl-report/orders", async (req, res) => {
   try {

@@ -50,7 +50,7 @@ const AddStaffMember = () => {
       if (!response.ok) throw new Error(data.message || "Failed to add staff member");
 
       showToast("success", data.message || "Staff member added successfully!");
-      navigate("/staffmemberLayout/staffmember");
+      navigate("/hrmlayout/dashboard");
     } catch (error) {
       showToast("error", error.message);
     }
@@ -100,7 +100,7 @@ const AddStaffMember = () => {
 
         <div className="md:col-span-2 flex justify-end gap-4 mt-8">
           <button type="submit" className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg shadow cursor-pointer">Add</button>
-          <button type="button" onClick={() => navigate("/staffmemberLayout/staffmember")} className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-6 py-2 rounded-lg cursor-pointer">Cancel</button>
+          <button type="button" onClick={() => navigate("/hrmlayout/dashboard")} className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-6 py-2 rounded-lg cursor-pointer">Cancel</button>
         </div>
       </form>
     </div>
