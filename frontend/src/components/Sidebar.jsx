@@ -79,7 +79,7 @@ const tabService = {
         return transformed;
       }
 
-      if (data.data && typeof data.data === "object") {
+      if (data.data && typeof data.data === 'object') {
         return data.data;
       }
 
@@ -194,13 +194,12 @@ const tabService = {
       utility_companyprofile: { visible: true, sequence: 1 },
       utility_tabhideview: { visible: true, sequence: 2 },
 
-      // HRM sub-tabs
+      // HRM sub-tabs - UPDATED: Changed from hrm_management to hrm_leaveattendance
       hrm_dashboard: { visible: true, sequence: 1 },
       hrm_holidays: { visible: true, sequence: 2 },
-      hrm_leaves: { visible: true, sequence: 3 },
-      hrm_attendance: { visible: true, sequence: 4 },
-      hrm_payroll: { visible: true, sequence: 5 },
-      hrm_settings: { visible: true, sequence: 6 },
+      hrm_leaveattendance: { visible: true, sequence: 3 }, 
+      hrm_payroll: { visible: true, sequence: 4 },
+      hrm_settings: { visible: true, sequence: 5 },
     };
   },
 };
@@ -221,11 +220,11 @@ const productPaths = [
   "/productmanagerlayout/printbarcode",
 ];
 
+// UPDATED: Changed from /hrmlayout/management to /hrmlayout/leaveattendance
 const hrmPaths = [
   "/hrmlayout/dashboard",
   "/hrmlayout/holidays",
-  "/hrmlayout/leaves",
-  "/hrmlayout/attendance",
+  "/hrmlayout/leaveattendance", // Changed from /hrmlayout/management
   "/hrmlayout/payroll",
 ];
 
@@ -346,8 +345,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
       try {
         const tabs = await tabService.getVisibleTabs();
         setVisibleTabs(tabs);
-        if (tabs.reports_expirystock) {
-        }
       } catch (error) {
         console.error("Error loading tabs:", error);
         setVisibleTabs(tabService.getDefaultVisibleTabs());
@@ -358,9 +355,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
 
     loadVisibleTabs();
   }, [lastUpdate]);
-
-  // Debug effect to check visible tabs
-  useEffect(() => {}, [visibleTabs, loading]);
 
   useEffect(() => {
     if (location.pathname.startsWith("/masterlayout")) {
@@ -1106,7 +1100,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                               ) {
                                 return (
                                   <Link
-                                    key={subTabId}
+                                    key={tabId}
                                     to="/reportlayout/zonewisecustomers"
                                     className={getChildLinkClass(
                                       "/reportlayout/zonewisecustomers"
@@ -1293,13 +1287,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
             )}
           </div>
         )}
-        {/* 
-        {shouldShowTab("staff") && (
-          <Link to="/staffmemberLayout/staffmember" className={getLinkClass("/staffmemberLayout")}>
-            <UserCog className="w-5 h-5" />
-            {isOpen && <span className="mx-auto">Staff Members</span>}
-          </Link>
-        )} */}
 
         {/* Utility */}
         {shouldShowTab("utility") && (
@@ -1360,7 +1347,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
           </div>
         )}
 
-        {/* HRM */}
+        {/* HRM - UPDATED: Changed from hrm_management to hrm_leaveattendance */}
         {shouldShowTab("hrm") && (
           <div>
             <button
@@ -1384,23 +1371,20 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                 {getSortedTabs([
                   "hrm_dashboard",
                   "hrm_holidays",
-                  "hrm_leaves",
-                  "hrm_attendance",
+                  "hrm_leaveattendance", // Changed from hrm_management
                   "hrm_payroll",
                 ]).map((tabId) => {
                   const linkMap = {
                     hrm_dashboard: "/hrmlayout/dashboard",
                     hrm_holidays: "/hrmlayout/holidays",
-                    hrm_leaves: "/hrmlayout/leaves",
-                    hrm_attendance: "/hrmlayout/attendance",
+                    hrm_leaveattendance: "/hrmlayout/leaveattendance", // Changed from /hrmlayout/management
                     hrm_payroll: "/hrmlayout/payroll",
                   };
 
                   const iconMap = {
                     hrm_dashboard: Home,
                     hrm_holidays: Umbrella,
-                    hrm_leaves: Calendar,
-                    hrm_attendance: Calendar,
+                    hrm_leaveattendance: Calendar, // Combined icon
                     hrm_payroll: DollarSign,
                   };
 
@@ -1415,8 +1399,10 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                     >
                       <IconComponent className="w-4 h-4" />
                       <span className="mx-auto">
-                        {tabId.split("_")[1].charAt(0).toUpperCase() +
-                          tabId.split("_")[1].slice(1)}
+                        {tabId === "hrm_leaveattendance" 
+                          ? "Leave & Attendance"  // Updated display name
+                          : tabId.split("_")[1].charAt(0).toUpperCase() +
+                            tabId.split("_")[1].slice(1)}
                       </span>
                     </Link>
                   );

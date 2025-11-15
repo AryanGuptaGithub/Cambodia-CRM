@@ -123,6 +123,7 @@ import CashAndBank from "./pages/Account/CashAndBank";
 // Other components
 import StockTransferForm from "./pages/StockTransferForm";
 import AddStaffMember from "./pages/AddStaffMember";
+import LeaveAndAttendance from "./pages/HRM/LeaveAttendance";
 
 function App() {
   return (
@@ -338,16 +339,16 @@ function App() {
             <Route path="tabhideview" element={<HTabsManipulation />} />
           </Route>
 
-          {/* HRM routes */}
+          {/* HRM routes - UPDATED: Removed individual leaves and attendance, added combined leaveattendance */}
           <Route path="hrmlayout" element={<HrmLayout />}>
+            <Route index element={<Dashboard />} />
             <Route path="dashboard">
               <Route index element={<Dashboard />} />
               <Route path="new" element={<AddStaffMember />} />
             </Route>
-            <Route index element={<Dashboard />} />
-            <Route path="attendance" element={<Attendance />} />
             <Route path="holidays" element={<Holidays />} />
-            <Route path="leaves" element={<Leaves />} />
+            {/* UPDATED: Combined leaves and attendance into leaveattendance */}
+            <Route path="leaveattendance" element={<LeaveAndAttendance />} />
             <Route path="payroll">
               <Route index element={<Payroll />} />
               <Route path="new" element={<AddPayroll />} />

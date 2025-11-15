@@ -121,25 +121,7 @@ router.get("/payrolls", async (req, res) => {
       .limit(limitNum)
       .lean();
 
-
-    console.log(
-      "📋 Raw payrolls data sample:",
-      JSON.stringify(payrolls.slice(0, 2), null, 2)
-    );
-
-    // Transform the data to include employee info at root level
-    console.log("🔄 Transforming payroll data...");
     const transformedPayrolls = payrolls.map((payroll) => {
-      console.log("📝 Processing payroll:", payroll._id);
-      console.log("👤 EmployeeId data:", payroll.employeeId);
-      console.log("👤 EmployeeId type:", typeof payroll.employeeId);
-      console.log("👤 Is employeeId null?", payroll.employeeId === null);
-      console.log(
-        "👤 Is employeeId object?",
-        typeof payroll.employeeId === "object"
-      );
-      console.log("👤 employeeId value:", payroll.employeeId);
-
       const payrollObj = { ...payroll };
 
       // FIXED: Better condition to check for valid populated employee data
@@ -150,14 +132,6 @@ router.get("/payrolls", async (req, res) => {
         payrollObj.employeeId._id &&
         payrollObj.employeeId.medicalRepName
       ) {
-        console.log("✅ Valid employee object found for payroll:", payroll._id);
-        console.log("👤 Employee details:", {
-          name: payrollObj.employeeId.medicalRepName,
-          team: payrollObj.employeeId.teamName,
-          contact: payrollObj.employeeId.contactNo,
-          email: payrollObj.employeeId.email,
-        });
-
         // Map all employee details to the payroll object
         payrollObj.employeeName = payrollObj.employeeId.medicalRepName;
         payrollObj.teamName = payrollObj.employeeId.teamName;
@@ -167,21 +141,6 @@ router.get("/payrolls", async (req, res) => {
         payrollObj.employeeEnabled = payrollObj.employeeId.enabled;
         payrollObj.MRId = payrollObj.employeeId.MRId;
       } else {
-        console.log(
-          "⚠️ No valid employee data found for payroll:",
-          payroll._id
-        );
-        console.log("🔍 EmployeeId analysis:", {
-          exists: !!payrollObj.employeeId,
-          type: typeof payrollObj.employeeId,
-          isNull: payrollObj.employeeId === null,
-          isObject: typeof payrollObj.employeeId === "object",
-          hasId: payrollObj.employeeId && payrollObj.employeeId._id,
-          hasName:
-            payrollObj.employeeId && payrollObj.employeeId.medicalRepName,
-          rawValue: payrollObj.employeeId,
-        });
-
         // Set default values when no employee data
         payrollObj.employeeName = "Unknown";
         payrollObj.teamName = "Unknown";
@@ -195,30 +154,12 @@ router.get("/payrolls", async (req, res) => {
       return payrollObj;
     });
 
-    console.log("✅ Payroll transformation complete");
-    console.log(
-      "📊 Transformed payrolls sample:",
-      JSON.stringify(transformedPayrolls.slice(0, 2), null, 2)
-    );
-
-    // Get total count for pagination
-    console.log("📊 Counting total documents...");
     const total = await Payroll.countDocuments(finalConditions);
-    console.log("✅ Total documents count:", total);
 
-    // Get next payroll code
-    console.log("🔄 Generating next payroll code...");
     const nextPayrollCode = await generateNextPayrollCode();
-    console.log("✅ Next payroll code:", nextPayrollCode);
 
-    // Calculate pagination info
     const totalPages = Math.ceil(total / limitNum);
-    console.log(
-      "📄 Total pages calculation:",
-      `${total} / ${limitNum} = ${totalPages}`
-    );
 
-    console.log("🚀 Sending successful response");
     res.status(200).json({
       success: true,
       data: transformedPayrolls,
@@ -230,7 +171,7 @@ router.get("/payrolls", async (req, res) => {
       },
       nextPayrollCode,
     });
-    console.log("✅ Response sent successfully");
+    
   } catch (error) {
     console.error("❌ Error in payrolls API:", error);
     console.error("📝 Error details:", {
@@ -244,7 +185,7 @@ router.get("/payrolls", async (req, res) => {
       message: "Failed to fetch payrolls",
       error: error.message,
     });
-    console.log("⚠️ Error response sent");
+    
   }
 });
 // ==================== GET SINGLE PAYROLL BY ID ====================

@@ -107,7 +107,6 @@ async function seedProvinces() {
   ];
 
   await Province.insertMany(provinces);
-  
 }
 
 async function seedZones() {
@@ -284,7 +283,6 @@ async function seedZones() {
     ];
 
     await Zone.insertMany(zones);
-    
   } catch (error) {
     console.error("❌ Error seeding zones:", error);
   }
@@ -299,7 +297,6 @@ async function seedSaleTypes() {
   ];
 
   await SaleType.insertMany(saleTypes);
-  
 }
 
 async function seedOrderStatuses() {
@@ -328,7 +325,6 @@ async function seedOrderStatuses() {
   ];
 
   await OrderStatus.insertMany(orderStatuses);
-  
 }
 
 async function seedBusinessTypes() {
@@ -350,7 +346,6 @@ async function seedBusinessTypes() {
   ];
 
   await BusinessType.insertMany(businessTypes);
-  
 }
 
 async function seedProductTypes() {
@@ -366,7 +361,6 @@ async function seedProductTypes() {
     ];
 
     await ProductType.insertMany(productTypes);
-    
   } catch (error) {
     console.error("❌ Error seeding product types:", error);
   }
@@ -390,7 +384,6 @@ async function seedProductPackingTypes() {
     ];
 
     await ProductPackingType.insertMany(packingTypes);
-    
   } catch (error) {
     console.error("❌ Error seeding product packing types:", error);
   }
@@ -442,6 +435,17 @@ async function seedHTabs() {
       level: 0,
       sequence: 2,
       category: "main",
+      reportType: "Hide/Show Tabs",
+    },
+    {
+      tabId: "settings",
+      name: "Settings",
+      description: "System settings",
+      path: "",
+      icon: "Settings",
+      level: 0,
+      sequence: 3,
+      category: "settings",
       reportType: "Hide/Show Tabs",
     },
     {
@@ -1151,7 +1155,7 @@ async function seedHTabs() {
       reportType: "Hide/Show Tabs",
     },
 
-    // HRM Sub-tabs (Level 1)
+    // HRM Sub-tabs (Level 1) - UPDATED: Combined Leaves and Attendance into LeaveAttendance
     {
       tabId: "hrm_dashboard",
       name: "Dashboard",
@@ -1177,26 +1181,14 @@ async function seedHTabs() {
       reportType: "Hide/Show Tabs",
     },
     {
-      tabId: "hrm_leaves",
-      name: "Leaves",
-      description: "Leave management",
-      path: "/hrmlayout/leaves",
+      tabId: "hrm_leaveattendance",
+      name: "Leave & Attendance",
+      description: "Leave and attendance management",
+      path: "/hrmlayout/leaveattendance",
       icon: "Calendar",
       parentTabId: "hrm",
       level: 1,
       sequence: 3,
-      category: "hrm",
-      reportType: "Hide/Show Tabs",
-    },
-    {
-      tabId: "hrm_attendance",
-      name: "Attendance",
-      description: "Attendance management",
-      path: "/hrmlayout/attendance",
-      icon: "Calendar",
-      parentTabId: "hrm",
-      level: 1,
-      sequence: 4,
       category: "hrm",
       reportType: "Hide/Show Tabs",
     },
@@ -1208,7 +1200,7 @@ async function seedHTabs() {
       icon: "DollarSign",
       parentTabId: "hrm",
       level: 1,
-      sequence: 5,
+      sequence: 4,
       category: "hrm",
       reportType: "Hide/Show Tabs",
     },
@@ -1220,7 +1212,7 @@ async function seedHTabs() {
       icon: "Settings",
       parentTabId: "hrm",
       level: 1,
-      sequence: 6,
+      sequence: 5,
       category: "hrm",
       reportType: "Hide/Show Tabs",
     },
@@ -1228,6 +1220,7 @@ async function seedHTabs() {
 
   await HTab.insertMany(sampleTabs);
   const count = await HTab.countDocuments();
+  
 }
 
 // Run all seeders in order
@@ -1235,8 +1228,6 @@ async function runSeeders() {
   await connectDB();
 
   try {
-    
-
     await seedUsers();
     await seedSaleTypes();
     await seedOrderStatuses();
@@ -1251,7 +1242,7 @@ async function runSeeders() {
     await seedAllowanceTypes(); // Add allowance types seeding
     await seedHTabs();
 
-    console.log("✅ All seeders completed successfully!");
+    
   } catch (error) {
     console.error("❌ Seeding error:", error);
   } finally {

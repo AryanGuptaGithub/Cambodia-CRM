@@ -10,8 +10,18 @@ const router = express.Router();
 function formatPeriod(periodString) {
   const [year, month] = periodString.split("-");
   const monthNames = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
   ];
   return `${monthNames[parseInt(month) - 1]} ${year}`;
 }
@@ -44,16 +54,8 @@ router.get("/export-mr-data", async (req, res) => {
     // Format period for display as "Oct 2025"
     const displayPeriod = formatPeriod(periodString);
 
-    console.log(
-      "Fetching payroll data for period:",
-      periodString,
-      "Display as:",
-      displayPeriod
-    );
-
     // Fetch payroll data for the specified period
     const payrollData = await getPayrollDataForPeriod(periodString);
-    console.log("Payroll data found:", payrollData);
 
     // If no data found
     if (!payrollData || payrollData.length === 0) {
@@ -201,10 +203,7 @@ router.get("/export-mr-data", async (req, res) => {
         worksheet.cell(row, 5).string("N/A").style(cellStyle);
       }
 
-      worksheet
-        .cell(row, 6)
-        .string(status)
-        .style(cellStyle);
+      worksheet.cell(row, 6).string(status).style(cellStyle);
       worksheet
         .cell(row, 7)
         .number(parseFloat(payroll.basicSalary) || 0)

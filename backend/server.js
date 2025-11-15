@@ -51,10 +51,11 @@ import businessTypes from "./routers/master/businessType.js";
 import productType from "./routers/projectManager/productType.js";
 import productPackingType from "./routers/projectManager/productPackingType.js";
 import saleAndSalary from "./routers/reports/saleAndSalary.js";
-import profitAndLoss from "./routers/reports/profitAndLoss.js";
+import profitAndLoss from "./routers/reports/ProfitAndLoss.js";
 import expiryStockReport from "./routers/reports/expiryStockReport.js";
 import hrmDashboard from "./routers/hrm/dashboard.js";
 import payrollExport from "./routers/hrm/payrollExport.js";
+import leaves from './routers/hrm/Leave.js';
 
 dotenv.config();
 
@@ -137,7 +138,7 @@ app.use("/api", profitAndLoss);
 app.use("/api", expiryStockReport);
 app.use("/api", hrmDashboard);
 app.use("/api", payrollExport);
-
+app.use("/api",leaves);
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
