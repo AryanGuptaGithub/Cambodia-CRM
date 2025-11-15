@@ -56,13 +56,11 @@ const Dashboard = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const staffPerPage = 5;
-  const [activeTab, setActiveTab] = useState("Total MRs");
+  const [selectedTab, setSelectedTab] = useState("All");
 
-  // Payroll State - Changed from number to array
-
+  // Payroll State
+  const [payrollData, setPayrollData] = useState(0);
   const [previousMonthLabel, setPreviousMonthLabel] = useState("");
-  const [payrollData, setPayrollData] = useState([]);
-  const [totalPayroll, setTotalPayroll] = useState(0);
 
   // User State
   const [user, setUser] = useState({
@@ -99,10 +97,10 @@ const Dashboard = () => {
         1
       );
       const year = previousMonth.getFullYear();
-      const month = previousMonth.getMonth() + 1;
+      const month = previousMonth.getMonth() + 1; // JavaScript months are 0-indexed
 
       const response = await fetch(
-        `${backendUrl}/api/export-mr-data?year=${year}&month=${month}`,
+        `${backendUrl}/api/export/mr-data?year=${year}&month=${month}`,
         {
           method: "GET",
           headers: {
@@ -112,39 +110,12 @@ const Dashboard = () => {
       );
 
       if (!response.ok) {
-        // Handle different error statuses
-        if (response.status === 404) {
-          throw new Error("No data found for the specified period");
-        } else if (response.status === 400) {
-          throw new Error("Invalid parameters");
-        } else {
-          throw new Error(`Export failed: ${response.statusText}`);
-        }
-      }
-
-      // Check if response is Excel file - FIXED CONTENT TYPE CHECK
-      const contentType = response.headers.get("content-type");
-      const isExcelFile =
-        contentType &&
-        (contentType.includes("spreadsheet") ||
-          contentType.includes("excel") ||
-          contentType.includes(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          ));
-
-      if (!isExcelFile) {
-        // If not Excel, try to read as JSON error
-        try {
-          const errorData = await response.json();
-          throw new Error(errorData.message || "Invalid response format");
-        } catch (jsonError) {
-          throw new Error("Server returned an invalid response");
-        }
+        throw new Error("Export failed");
       }
 
       // Get the filename from Content-Disposition header or use default
       const contentDisposition = response.headers.get("Content-Disposition");
-      let filename = `MR_Payroll_${year}_${month}.xlsx`;
+      let filename = `MR_Data_${year}_${month}.xlsx`;
 
       if (contentDisposition) {
         const filenameMatch = contentDisposition.match(/filename="(.+)"/);
@@ -159,7 +130,6 @@ const Dashboard = () => {
       const link = document.createElement("a");
       link.href = url;
       link.download = filename;
-      link.style.display = "none";
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -168,42 +138,11 @@ const Dashboard = () => {
       showToast("success", "MR data exported successfully!");
     } catch (error) {
       console.error("Export error:", error);
-      showToast(
-        "error",
-        error.message || "Failed to export data. Please try again."
-      );
+      showToast("error", "Failed to export data. Please try again.");
     }
   };
 
-  // Fetch payroll data function
-  const fetchPayrollData = async () => {
-    try {
-      const currentDate = new Date();
-      const previousMonth = new Date(
-        currentDate.getFullYear(),
-        currentDate.getMonth() - 1,
-        1
-      );
-      const year = previousMonth.getFullYear();
-      const month = String(previousMonth.getMonth() + 1).padStart(2, "0");
-      const period = `${year}-${month}`;
-
-      const response = await axios.get(`${backendUrl}/api/payrolls`, {
-        params: { period },
-      });
-
-      if (response.data && response.data.success) {
-        setPayrollData(response.data.data || []);
-      } else {
-        setPayrollData([]);
-      }
-    } catch (error) {
-      console.error("Error fetching payroll data:", error);
-      setPayrollData([]);
-      showToast("error", "Failed to fetch payroll data");
-    }
-  };
-
+  // Fetch user data, MR List data, and Payroll data
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -228,44 +167,11 @@ const Dashboard = () => {
         const salaryData = await fetchHRMSalary();
 
         if (salaryData && salaryData.success && salaryData.data) {
-          setTotalPayroll(salaryData.data.previousMonth);
+          setPayrollData(salaryData.data.previousMonth);
         } else {
           // Set default value if no data
-          setTotalPayroll(0);
+          setPayrollData(0);
         }
-
-        await fetchTeams();
-      } catch (err) {
-        showToast("error", err.message || "Failed to fetch data");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-  }, []);
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        // Fetch user data
-        await fetchUserData();
-        // Fetch MR List
-        const mrData = await fetchMRList();
-        setMrList(mrData.data);
-
-        // Calculate previous month label
-        const currentDate = new Date();
-        const previousMonthDate = new Date(
-          currentDate.getFullYear(),
-          currentDate.getMonth() - 1,
-          1
-        );
-        const formattedPreviousMonth = formatMonthYear(previousMonthDate);
-        setPreviousMonthLabel(formattedPreviousMonth);
-
-        // Fetch Payroll Data
-        await fetchPayrollData();
 
         await fetchTeams();
       } catch (err) {
@@ -328,7 +234,7 @@ const Dashboard = () => {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, activeTab]);
+  }, [searchTerm, selectedTab]);
 
   // Calculate dashboard stats
   const dashboardStats = useMemo(() => {
@@ -354,33 +260,28 @@ const Dashboard = () => {
       totalTeams,
       recentJoins,
     };
-  }, [mrList, payrollData]);
+  }, [mrList]);
 
-  console.log("valueso f ", payrollData);
-
-  // Filter MR data based on active tab
+  // Filter MR data
   const filteredMR = useMemo(() => {
     const lowerSearch = searchTerm.toLowerCase();
 
-    let filteredData = mrList;
+    return mrList.filter((mr) => {
+      const matchesTab =
+        selectedTab === "All" ||
+        (selectedTab === "Enabled" && mr.enabled === true) ||
+        (selectedTab === "Disabled" && mr.enabled === false);
 
-    // Apply tab filter
-    if (activeTab === "Active MRs") {
-      filteredData = filteredData.filter((mr) => mr.enabled === true);
-    } else if (activeTab === "Inactive MRs") {
-      filteredData = filteredData.filter((mr) => mr.enabled === false);
-    }
-
-    // Apply search filter
-    return filteredData.filter((mr) => {
       const repMatch = mr.medicalRepName?.toLowerCase().includes(lowerSearch);
       const teamMatch = mr.teamName?.toLowerCase().includes(lowerSearch);
       const contactMatch = mr.contactNo?.toLowerCase().includes(lowerSearch);
       const emailMatch = mr.email?.toLowerCase().includes(lowerSearch);
 
-      return repMatch || teamMatch || contactMatch || emailMatch;
+      return (
+        matchesTab && (repMatch || teamMatch || contactMatch || emailMatch)
+      );
     });
-  }, [mrList, activeTab, searchTerm]);
+  }, [mrList, selectedTab, searchTerm]);
 
   const teamSuggestions = useMemo(() => {
     if (!form.teamName) return [];
@@ -666,7 +567,7 @@ const Dashboard = () => {
       setIsUploading(false);
     }
   };
-  console.log("payrollData", payrollData);
+
   const updateMR = async (e) => {
     e.preventDefault();
     if (!form._id) return;
@@ -742,16 +643,11 @@ const Dashboard = () => {
     );
   };
 
-  // Dashboard Cards Component - Now clickable
+  // Dashboard Cards Component
   const DashboardCards = () => (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
       {/* Total MRs Card */}
-      <div
-        className={`rounded-xl shadow-md border border-gray-200 p-6 cursor-pointer transition-all ${
-          activeTab === "Total MRs" ? "bg-gray-200" : "bg-white"
-        }`}
-        onClick={() => setActiveTab("Total MRs")}
-      >
+      <div className="bg-white rounded-xl shadow-md border border-gray-200 p-6">
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm font-medium text-gray-600">Total MRs</p>
@@ -768,13 +664,8 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Active MRs Card */}
-      <div
-        className={`rounded-xl shadow-md border border-gray-200 p-6 cursor-pointer transition-all ${
-          activeTab === "Active MRs" ? "bg-gray-200" : "bg-white"
-        }`}
-        onClick={() => setActiveTab("Active MRs")}
-      >
+      {/* Enabled MRs Card */}
+      <div className="bg-white rounded-xl shadow-md border border-gray-200 p-6">
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm font-medium text-gray-600">Active MRs</p>
@@ -789,13 +680,8 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Inactive MRs Card */}
-      <div
-        className={`rounded-xl shadow-md border border-gray-200 p-6 cursor-pointer transition-all ${
-          activeTab === "Inactive MRs" ? "bg-gray-200" : "bg-white"
-        }`}
-        onClick={() => setActiveTab("Inactive MRs")}
-      >
+      {/* Disabled MRs Card */}
+      <div className="bg-white rounded-xl shadow-md border border-gray-200 p-6">
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm font-medium text-gray-600">Inactive MRs</p>
@@ -810,17 +696,12 @@ const Dashboard = () => {
         </div>
       </div>
 
-      <div
-        className={`rounded-xl shadow-md border border-gray-200 p-6 cursor-pointer transition-all ${
-          activeTab === "Total Payroll" ? "bg-gray-200" : "bg-white"
-        }`}
-        onClick={() => setActiveTab("Total Payroll")}
-      >
+      <div className="bg-white rounded-xl shadow-md border border-gray-200 p-6">
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm font-medium text-gray-600">Total Payroll</p>
             <p className="text-3xl font-bold text-purple-600 mt-2">
-              ${formatCurrency(totalPayroll)}
+              ${formatCurrency(payrollData)}
             </p>
             <p className="text-xs text-gray-500 mt-1">{previousMonthLabel}</p>
           </div>
@@ -888,101 +769,6 @@ const Dashboard = () => {
     );
   };
 
-  // Payroll Table Component - Updated to use actual payroll data
-
-  const PayrollTable = () => (
-    <div className="bg-white rounded-xl shadow-md border border-gray-200">
-      <div className="p-6 border-b border-gray-200">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <h3 className="text-xl font-semibold text-gray-800">
-            Payroll Details - {previousMonthLabel}
-          </h3>
-        </div>
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-center">
-          <thead className="bg-gray-50 border-b border-gray-200">
-            <tr>
-              <th className="p-4 text-sm font-semibold text-gray-700">
-                MR Name
-              </th>
-
-              <th className="p-4 text-sm font-semibold text-gray-700">
-                Contact No
-              </th>
-              <th className="p-4 text-sm font-semibold text-gray-700">Email</th>
-              <th className="p-4 text-sm font-semibold text-gray-700">
-                Basic Salary ($)
-              </th>
-              <th className="p-4 text-sm font-semibold text-gray-700">
-                Allowances ($)
-              </th>
-              <th className="p-4 text-sm font-semibold text-gray-700">
-                Deductions ($)
-              </th>
-              <th className="p-4 text-sm font-semibold text-gray-700">
-                Net Salary ($)
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200">
-            {payrollData.map((item, index) => (
-              <tr key={item._id} className="hover:bg-gray-50 transition-colors">
-                <td className="p-4 text-sm text-gray-600">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 text-sm font-semibold">
-                      {item.employeeId?.medicalRepName
-                        ? item.employeeId.medicalRepName
-                            .substring(0, 2)
-                            .toUpperCase()
-                        : "MR"}
-                    </div>
-                    <span className="capitalize">
-                      {item.employeeId?.medicalRepName}
-                    </span>
-                  </div>
-                </td>
-
-                <td className="p-4 text-sm text-gray-600">
-                  {item.employeeId?.contactNo}
-                </td>
-                <td className="p-4 text-sm text-gray-600">
-                  {item.employeeId?.email}
-                </td>
-                <td className="p-4 text-sm text-gray-600">
-                  <span className="font-semibold text-blue-700">
-                    {item.basicSalary || 0}
-                  </span>
-                </td>
-                <td className="p-4 text-sm text-gray-600">
-                  <span className="font-semibold text-green-700">
-                    {item.totalAllowance || 0}
-                  </span>
-                </td>
-                <td className="p-4 text-sm text-gray-600">
-                  <span className="font-semibold text-red-700">
-                    {item.deductions || 0}
-                  </span>
-                </td>
-                <td className="p-4 text-sm text-gray-600">
-                  <span className="font-semibold text-purple-700">
-                    {item.netSalary || 0}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        {payrollData.length === 0 && (
-          <div className="p-8 text-center text-gray-500">
-            {loading ? "Loading..." : "No payroll data found"}
-          </div>
-        )}
-      </div>
-    </div>
-  );
   const DataTable = ({
     data,
     columns,
@@ -991,52 +777,42 @@ const Dashboard = () => {
     onAdd,
     onExport,
     selectable = false,
-    showButtons = false,
-    buttonMode = "all", // "all" or "deleteOnly"
   }) => (
     <div className="bg-white rounded-xl shadow-md border border-gray-200">
       <div className="p-6 border-b border-gray-200">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <h3 className="text-xl font-semibold text-gray-800">MR Management</h3>
-          {showButtons && (
-            <div className="flex gap-3">
-              {/* Show Export, Add New, Import only in "all" mode (Total MRs tab) */}
-              {buttonMode === "all" && (
-                <>
-                  <button
-                    onClick={onExport}
-                    className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition-colors cursor-pointer"
-                  >
-                    <Download size={18} /> Export
-                  </button>
-                  {onAdd && (
-                    <button
-                      onClick={onAdd}
-                      className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition-colors cursor-pointer"
-                    >
-                      <UserPlus size={18} /> Add New
-                    </button>
-                  )}
-                  <button
-                    className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-                    onClick={() => setShowImportModal(true)}
-                  >
-                    <Upload size={18} /> Import MR
-                  </button>
-                </>
-              )}
+          <div className="flex gap-3">
+            <button
+              onClick={handleExport}
+              className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition-colors cursor-pointer"
+            >
+              <Download size={18} /> Export Previous Month Data
+            </button>
+            {onAdd && (
+              <button
+                onClick={onAdd}
+                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition-colors cursor-pointer"
+              >
+                <UserPlus size={18} /> Add New
+              </button>
+            )}
+            <button
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+              onClick={() => setShowImportModal(true)}
+            >
+              <Upload size={18} /> Import MR
+            </button>
 
-              {/* Show delete button when there are selected items - Available in all modes */}
-              {selected.length > 0 && (
-                <button
-                  onClick={deleteSelectedMR}
-                  className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-                >
-                  <Trash2 size={18} /> Delete
-                </button>
-              )}
-            </div>
-          )}
+            {selected.length > 0 && (
+              <button
+                onClick={deleteSelectedMR}
+                className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+              >
+                <Trash2 size={18} /> Delete
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1044,8 +820,7 @@ const Dashboard = () => {
         <table className="w-full border-collapse">
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
-              {/* Only show checkbox column header if there's data AND it's selectable */}
-              {selectable && data.length > 0 && (
+              {selectable && (
                 <th className="p-4 text-left">
                   <input
                     type="checkbox"
@@ -1081,8 +856,7 @@ const Dashboard = () => {
           <tbody className="divide-y divide-gray-200">
             {data.map((item, index) => (
               <tr key={item._id} className="hover:bg-gray-50 transition-colors">
-                {/* Only show checkbox cell if there's data AND it's selectable */}
-                {selectable && data.length > 0 && (
+                {selectable && (
                   <td className="p-4">
                     <input
                       type="checkbox"
@@ -1135,6 +909,8 @@ const Dashboard = () => {
       </div>
     </div>
   );
+
+  // MR List Component
   const MRManagement = () => {
     const columns = [
       {
@@ -1177,14 +953,6 @@ const Dashboard = () => {
       },
     ];
 
-    // Determine button mode based on active tab
-    const getButtonMode = () => {
-      if (activeTab === "Total MRs") return "all";
-      if (activeTab === "Active MRs" || activeTab === "Inactive MRs")
-        return "deleteOnly";
-      return "none";
-    };
-
     return (
       <div className="space-y-6">
         {/* Dashboard Cards */}
@@ -1199,27 +967,18 @@ const Dashboard = () => {
 
           {/* Main Content */}
           <div className="lg:col-span-2">
-            {/* Conditionally render MR Table or Payroll Table */}
-            {activeTab === "Total Payroll" ? (
-              <PayrollTable />
-            ) : (
-              <DataTable
-                data={currentMR}
-                columns={columns}
-                onEdit={handleMREdit}
-                onDelete={deleteMR}
-                onAdd={() => navigate("/hrmlayout/dashboard/new")}
-                onExport={handleExport}
-                selectable={true}
-                // Show buttons for all MR tabs (Total MRs, Active MRs, Inactive MRs)
-                showButtons={activeTab !== "Total Payroll"}
-                // Control which buttons to show based on tab
-                buttonMode={getButtonMode()}
-              />
-            )}
+            {/* MR Table */}
+            <DataTable
+              data={currentMR}
+              columns={columns}
+              onEdit={handleMREdit}
+              onDelete={deleteMR}
+              onAdd={() => navigate("/hrmlayout/dashboard/new")}
+              selectable={true}
+            />
 
-            {/* Pagination - Only show for MR tables, not payroll */}
-            {activeTab !== "Total Payroll" && filteredMR.length > 0 && (
+            {/* Pagination */}
+            {filteredMR.length > 0 && (
               <div className="mt-4 p-5 flex justify-start gap-2">
                 <button
                   onClick={() =>
@@ -1321,7 +1080,6 @@ const Dashboard = () => {
         </main>
       </div>
 
-      {/* Rest of your modals remain the same */}
       {isViewModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">

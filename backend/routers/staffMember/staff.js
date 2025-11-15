@@ -10,7 +10,10 @@ const handleServerError = (res, err, message = "Server error", code = 500) => {
 
 router.get("/staffs", async (_, res) => {
   try {
-    const staff = await staffSchema.find();
+    const staff = await staffSchema
+      .find()
+      .sort({ updatedAt: -1, createdAt: -1 }); // newest first
+
     res.json(staff);
   } catch (err) {
     handleServerError(res, err);
@@ -49,8 +52,8 @@ router.post("/staffs", async (req, res) => {
     // Check if staff member already exists
     const existingStaff = await staffSchema.findOne({ medicalRepName });
     if (existingStaff) {
-      return res.status(409).json({ 
-        message: `Staff member ${medicalRepName} already exists.` 
+      return res.status(409).json({
+        message: `Staff member ${medicalRepName} already exists.`,
       });
     }
 
@@ -58,8 +61,8 @@ router.post("/staffs", async (req, res) => {
     if (contactNo) {
       const existingContact = await staffSchema.findOne({ contactNo });
       if (existingContact) {
-        return res.status(409).json({ 
-          message: `Contact number ${contactNo} is already registered.` 
+        return res.status(409).json({
+          message: `Contact number ${contactNo} is already registered.`,
         });
       }
     }
@@ -90,7 +93,7 @@ router.post("/staffs", async (req, res) => {
         ok: false,
       });
     }
-    
+
     res.status(400).json({
       message: "Invalid data provided",
       error: err.message,
@@ -106,28 +109,28 @@ router.put("/staff/:id", async (req, res) => {
 
     // Check if contact number is being updated and if it's already registered by another staff
     if (contactNo) {
-      const existingContact = await staffSchema.findOne({ 
-        contactNo, 
-        _id: { $ne: req.params.id } // Exclude current staff member
+      const existingContact = await staffSchema.findOne({
+        contactNo,
+        _id: { $ne: req.params.id }, // Exclude current staff member
       });
-      
+
       if (existingContact) {
-        return res.status(409).json({ 
-          message: `Contact number ${contactNo} is already registered by another staff member.` 
+        return res.status(409).json({
+          message: `Contact number ${contactNo} is already registered by another staff member.`,
         });
       }
     }
 
     // Check if medicalRepName is being updated to an existing one
     if (medicalRepName) {
-      const existingStaff = await staffSchema.findOne({ 
-        medicalRepName, 
-        _id: { $ne: req.params.id } // Exclude current staff member
+      const existingStaff = await staffSchema.findOne({
+        medicalRepName,
+        _id: { $ne: req.params.id }, // Exclude current staff member
       });
-      
+
       if (existingStaff) {
-        return res.status(409).json({ 
-          message: `Staff member name ${medicalRepName} already exists.` 
+        return res.status(409).json({
+          message: `Staff member name ${medicalRepName} already exists.`,
         });
       }
     }
@@ -150,11 +153,12 @@ router.put("/staff/:id", async (req, res) => {
     // Handle duplicate key error for contactNo
     if (err.code === 11000 && err.keyPattern && err.keyPattern.contactNo) {
       return res.status(409).json({
-        message: "This contact number is already registered by another staff member.",
+        message:
+          "This contact number is already registered by another staff member.",
         error: "Duplicate contact number",
       });
     }
-    
+
     res.status(400).json({ message: "Invalid data", error: err.message });
   }
 });
@@ -223,8 +227,8 @@ router.post("/staffs/import", async (req, res) => {
 
       // Check for duplicate contact numbers in existing database
       if (staff.contactNo) {
-        const existingContact = await staffSchema.findOne({ 
-          contactNo: staff.contactNo 
+        const existingContact = await staffSchema.findOne({
+          contactNo: staff.contactNo,
         });
         if (existingContact) {
           duplicateContacts.push(staff.contactNo);
@@ -244,16 +248,18 @@ router.post("/staffs/import", async (req, res) => {
     if (duplicateContacts.length > 0 || duplicateNames.length > 0) {
       let errorMessage = "Import failed due to duplicates: ";
       const errors = [];
-      
+
       if (duplicateContacts.length > 0) {
-        errors.push(`Contact numbers already registered: ${duplicateContacts.join(', ')}`);
+        errors.push(
+          `Contact numbers already registered: ${duplicateContacts.join(", ")}`
+        );
       }
       if (duplicateNames.length > 0) {
-        errors.push(`Staff names already exist: ${duplicateNames.join(', ')}`);
+        errors.push(`Staff names already exist: ${duplicateNames.join(", ")}`);
       }
-      
+
       return res.status(409).json({
-        message: errorMessage + errors.join('; '),
+        message: errorMessage + errors.join("; "),
       });
     }
 
@@ -278,10 +284,11 @@ router.post("/staffs/import", async (req, res) => {
     // Handle duplicate key error
     if (err.code === 11000 && err.keyPattern && err.keyPattern.contactNo) {
       return res.status(409).json({
-        message: "One or more contact numbers in the import file are already registered.",
+        message:
+          "One or more contact numbers in the import file are already registered.",
       });
     }
-    
+
     console.error("❌ Error importing staff:", err);
     handleServerError(res, err, "Error importing staff");
   }

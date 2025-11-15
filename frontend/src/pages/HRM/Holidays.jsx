@@ -122,55 +122,7 @@ const Holidays = () => {
         r.startDate.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  // Get upcoming holidays for CURRENT MONTH only (excluding Sundays) - FOR CALENDAR
-  const currentMonthHolidays = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const startOfMonth = new Date(currentYear, currentMonth, 1);
-    const endOfMonth = new Date(currentYear, currentMonth + 1, 0);
-    endOfMonth.setHours(23, 59, 59, 999);
-
-    return allHolidaysForCalendar
-      .filter((holiday) => {
-        if (!holiday.startDate) return false;
-        const holidayDate = new Date(holiday.startDate);
-        holidayDate.setHours(0, 0, 0, 0);
-
-        return (
-          holidayDate >= today &&
-          holidayDate <= endOfMonth &&
-          holidayDate.getDay() !== 0
-        );
-      })
-      .sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
-  }, [allHolidaysForCalendar, currentMonth, currentYear]);
-
-  // Get holidays for calendar display (current displayed month) - FOR CALENDAR
-  const currentCalendarMonthHolidays = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const startOfMonth = new Date(currentYear, currentMonth, 1);
-    const endOfMonth = new Date(currentYear, currentMonth + 1, 0);
-    endOfMonth.setHours(23, 59, 59, 999);
-
-    return allHolidaysForCalendar
-      .filter((holiday) => {
-        if (!holiday.startDate) return false;
-        const holidayDate = new Date(holiday.startDate);
-        holidayDate.setHours(0, 0, 0, 0);
-
-        return (
-          holidayDate >= startOfMonth &&
-          holidayDate <= endOfMonth &&
-          holidayDate.getDay() !== 0
-        );
-      })
-      .sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
-  }, [allHolidaysForCalendar, currentMonth, currentYear]);
-
-  // Get holidays for the entire current year - FOR CALENDAR
+  // Get holidays for the entire current year - FOR CALENDAR (FIXED)
   const currentYearFilteredHolidays = useMemo(() => {
     const startOfYear = new Date(currentYear, 0, 1);
     const endOfYear = new Date(currentYear, 11, 31);
@@ -179,40 +131,19 @@ const Holidays = () => {
     return allHolidaysForCalendar
       .filter((holiday) => {
         if (!holiday.startDate) return false;
-        const holidayDate = new Date(holiday.startDate);
-        holidayDate.setHours(0, 0, 0, 0);
+        
+        const holidayStart = new Date(holiday.startDate);
+        const holidayEnd = new Date(holiday.endDate || holiday.startDate);
+        
+        holidayStart.setHours(0, 0, 0, 0);
+        holidayEnd.setHours(0, 0, 0, 0);
 
         return (
-          holidayDate >= startOfYear &&
-          holidayDate <= endOfYear &&
-          holidayDate.getDay() !== 0
+          (holidayStart <= endOfYear && holidayEnd >= startOfYear)
         );
       })
       .sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
   }, [allHolidaysForCalendar, currentYear]);
-
-  const nextMonthHolidays = useMemo(() => {
-    const nextMonth = currentMonth === 11 ? 0 : currentMonth + 1;
-    const nextMonthYear = currentMonth === 11 ? currentYear + 1 : currentYear;
-
-    const startOfNextMonth = new Date(nextMonthYear, nextMonth, 1);
-    const endOfNextMonth = new Date(nextMonthYear, nextMonth + 1, 0);
-    endOfNextMonth.setHours(23, 59, 59, 999);
-
-    return allHolidaysForCalendar
-      .filter((holiday) => {
-        if (!holiday.startDate) return false;
-        const holidayDate = new Date(holiday.startDate);
-        holidayDate.setHours(0, 0, 0, 0);
-
-        return (
-          holidayDate >= startOfNextMonth &&
-          holidayDate <= endOfNextMonth &&
-          holidayDate.getDay() !== 0
-        );
-      })
-      .sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
-  }, [allHolidaysForCalendar, currentMonth, currentYear]);
 
   // Calendar view functions
   const isSunday = (date) => {
@@ -231,6 +162,20 @@ const Holidays = () => {
 
       return dateString >= holidayStartString && dateString <= holidayEndString;
     });
+  };
+
+  const getHolidayName = (dateString) => {
+    const holiday = allHolidaysForCalendar.find((h) => {
+      if (!h.startDate) return false;
+      const holidayStart = new Date(h.startDate);
+      const holidayEnd = new Date(h.endDate || h.startDate);
+
+      const holidayStartString = holidayStart.toISOString().split("T")[0];
+      const holidayEndString = holidayEnd.toISOString().split("T")[0];
+
+      return dateString >= holidayStartString && dateString <= holidayEndString;
+    });
+    return holiday ? holiday.name : "";
   };
 
   const getDaysInMonth = (year = currentYear, month = currentMonth) => {
@@ -273,20 +218,6 @@ const Holidays = () => {
 
   const nextYear = () => {
     setCurrentYear(currentYear + 1);
-  };
-
-  const getHolidayName = (dateString) => {
-    const holiday = allHolidaysForCalendar.find((h) => {
-      if (!h.startDate) return false;
-      const holidayStart = new Date(h.startDate);
-      const holidayEnd = new Date(h.endDate || h.startDate);
-
-      const holidayStartString = holidayStart.toISOString().split("T")[0];
-      const holidayEndString = holidayEnd.toISOString().split("T")[0];
-
-      return dateString >= holidayStartString && dateString <= holidayEndString;
-    });
-    return holiday ? holiday.name : "";
   };
 
   // Calendar date click
@@ -570,6 +501,26 @@ const Holidays = () => {
     }
   };
 
+  // NEW: Get holidays for specific month in annual view
+  const getHolidaysForMonth = (monthIndex) => {
+    return currentYearFilteredHolidays.filter((holiday) => {
+      if (!holiday.startDate) return false;
+      
+      const holidayStart = new Date(holiday.startDate);
+      const holidayEnd = new Date(holiday.endDate || holiday.startDate);
+      
+      // Check if holiday overlaps with the specified month
+      const startOfMonth = new Date(currentYear, monthIndex, 1);
+      const endOfMonth = new Date(currentYear, monthIndex + 1, 0);
+      endOfMonth.setHours(23, 59, 59, 999);
+
+      return (
+        holidayStart <= endOfMonth && 
+        holidayEnd >= startOfMonth
+      );
+    });
+  };
+
   // Calendar rendering functions
   const renderMonthlyCalendar = () => {
     const days = getDaysInMonth();
@@ -670,11 +621,16 @@ const Holidays = () => {
     );
   };
 
+  // UPDATED: Annual calendar with grid layout similar to Attendance component
   const renderAnnualCalendar = () => {
     const monthNames = [
-      "January", "February", "March", "April", "May", "June",
-      "July", "August", "September", "October", "November", "December"
+      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
     ];
+
+    const today = new Date();
+    const currentYearToday = today.getFullYear();
+    const currentMonthToday = today.getMonth();
 
     return (
       <div className="bg-white rounded-2xl shadow border border-gray-200 p-6">
@@ -694,39 +650,143 @@ const Holidays = () => {
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {monthNames.map((month, monthIndex) => {
-            const monthHolidays = currentYearFilteredHolidays.filter(
-              (holiday) => new Date(holiday.startDate).getMonth() === monthIndex
-            );
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {monthNames.map((monthName, monthIndex) => {
+            const monthDays = getDaysInMonth(currentYear, monthIndex);
+            const isCurrentMonth = monthIndex === currentMonthToday && currentYear === currentYearToday;
+            const monthHolidays = getHolidaysForMonth(monthIndex);
 
             return (
-              <div key={month} className="border rounded-lg p-4">
-                <h3 className="font-semibold text-lg mb-3">{month}</h3>
-                {monthHolidays.length > 0 ? (
-                  <div className="space-y-2">
-                    {monthHolidays.map((holiday, index) => (
+              <div
+                key={monthName}
+                className={`border rounded-lg p-4 ${
+                  isCurrentMonth
+                    ? "border-blue-500 bg-blue-50 shadow-md"
+                    : "border-gray-200 bg-white"
+                }`}
+              >
+                <h3
+                  className={`text-lg font-semibold text-center mb-3 ${
+                    isCurrentMonth ? "text-blue-800" : "text-gray-800"
+                  }`}
+                >
+                  {monthName}
+                  {isCurrentMonth && (
+                    <span className="block text-xs font-normal text-blue-600 mt-1">
+                      (Current)
+                    </span>
+                  )}
+                  {monthHolidays.length > 0 && (
+                    <span className="block text-xs font-normal text-red-600 mt-1">
+                      {monthHolidays.length} holiday(s)
+                    </span>
+                  )}
+                </h3>
+
+                <div className="grid grid-cols-7 gap-1 mb-2">
+                  {["S", "M", "T", "W", "T", "F", "S"].map((day, index) => (
+                    <div
+                      key={day}
+                      className={`text-center text-xs font-medium ${
+                        index === 0 ? "text-red-600" : "text-gray-600"
+                      }`}
+                    >
+                      {day}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-7 gap-1">
+                  {monthDays.map((date, index) => {
+                    if (date === null) {
+                      return <div key={`empty-${index}`} className="h-6" />;
+                    }
+
+                    const isSundayDay = isSunday(date);
+                    const isHolidayDate = isHoliday(date);
+                    const isToday = date.toDateString() === today.toDateString();
+                    const dateString = date.toISOString().split("T")[0];
+                    const holidayName = getHolidayName(dateString);
+
+                    // Determine cell style based on conditions
+                    let cellStyle = "h-6 flex items-center justify-center rounded text-xs cursor-pointer ";
+
+                    if (isToday) {
+                      cellStyle += "bg-blue-500 text-white ";
+                    } else if (isHolidayDate) {
+                      cellStyle += "bg-red-500 text-white ";
+                    } else if (isSundayDay) {
+                      cellStyle += "bg-gray-400 text-white ";
+                    } else {
+                      cellStyle += "bg-gray-100 ";
+                    }
+
+                    return (
                       <div
-                        key={index}
-                        className="flex items-center justify-between p-2 bg-red-50 rounded border border-red-200"
+                        key={dateString}
+                        className={cellStyle.trim()}
+                        onClick={() => handleCalendarDateClick(date)}
+                        title={
+                          isHolidayDate
+                            ? `Holiday: ${holidayName}`
+                            : isSundayDay
+                            ? "Sunday"
+                            : "Normal day"
+                        }
                       >
-                        <span className="text-sm font-medium text-red-800">
-                          {formatDateToShort(holiday.startDate)}
-                        </span>
-                        <span className="text-sm text-red-700 capitalize">
-                          {holiday.name}
-                        </span>
+                        {date.getDate()}
                       </div>
-                    ))}
+                    );
+                  })}
+                </div>
+
+                {/* Holiday list for the month */}
+                {monthHolidays.length > 0 && (
+                  <div className="mt-3 border-t pt-2">
+                    <div className="space-y-1 max-h-20 overflow-y-auto">
+                      {monthHolidays.map((holiday, index) => (
+                        <div
+                          key={index}
+                          className="flex items-center justify-between p-1 bg-red-50 rounded text-xs cursor-pointer hover:bg-red-100"
+                          onClick={() => {
+                            setForm(holiday);
+                            setIsViewModalOpen(true);
+                          }}
+                        >
+                          <span className="text-red-800 font-medium truncate">
+                            {holiday.name}
+                          </span>
+                          <span className="text-red-600 text-xs">
+                            {formatDateToShort(holiday.startDate)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                ) : (
-                  <p className="text-gray-500 text-sm text-center py-4">
-                    No holidays
-                  </p>
                 )}
               </div>
             );
           })}
+        </div>
+
+        {/* Legend */}
+        <div className="mt-6 flex flex-wrap gap-4 items-center justify-center text-sm bg-gray-50 rounded-lg p-4">
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 bg-red-500 rounded"></div>
+            <span>Holiday</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 bg-gray-400 rounded"></div>
+            <span>Sunday</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 bg-blue-500 rounded"></div>
+            <span>Today</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 bg-gray-100 rounded border border-gray-300"></div>
+            <span>Working Day</span>
+          </div>
         </div>
       </div>
     );
@@ -871,10 +931,6 @@ const Holidays = () => {
               <div className="flex items-center gap-2">
                 <div className="w-4 h-4 bg-blue-50 rounded border-2 border-blue-500"></div>
                 <span>Today</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 bg-blue-100 rounded border-2 border-blue-300"></div>
-                <span>Current Month</span>
               </div>
             </div>
           </div>
@@ -1052,6 +1108,8 @@ const Holidays = () => {
           )}
         </div>
       )}
+
+      {/* Rest of the modals (Import, Add, Edit, View) remain the same */}
       {showImportModal &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">

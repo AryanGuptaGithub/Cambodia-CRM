@@ -116,6 +116,23 @@ export const fetchBusinessTypes = async () => {
   }
 };
 
+export const fetchHRMSalary = async () => {
+  try {
+    const response = await axios.get(`${backendUrl}/api/hrm/dashboard`);
+    if (response.data.success) {
+      return { success: true, data: response.data.payrollSummary || [] };
+    } else {
+      return { 
+        success: false, 
+        error: response.data.message || "Failed to fetch provinces" 
+      };
+    }
+  } catch (error) {
+    console.error("Error fetching provinces:", error);
+    return { success: false, error: "Failed to load provinces" };
+  }
+};
+
 // Excel generation constants and helpers
 export const EXCEL_CONFIG = {
   title: "HEALTHCARE SOUTH EAST ASIA",
