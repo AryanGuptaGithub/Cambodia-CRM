@@ -69,20 +69,25 @@ const getDateRanges = () => {
   const yearEnd = new Date(today);
   yearEnd.setHours(23, 59, 59, 999);
 
-  // Format labels
+  // Format labels - get actual values instead of generic names
+  const todayLabel = today.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
   const monthLabel = today.toLocaleString("en-US", {
     month: "short",
-    year: "numeric",
   });
-  const yearLabel = `1 Jan - ${today.getDate()} ${today.toLocaleString(
-    "en-US",
-    { month: "short" }
-  )}`;
+  const yearLabel = today.getFullYear().toString();
+
+  const yearRangeLabel = `1 Jan - ${today.toLocaleString("en-US", {
+    day: "numeric",
+    month: "short",
+  })}`;
 
   return {
     today: { start: todayStart, end: todayEnd, label: "Today" },
     month: { start: monthStart, end: monthEnd, label: monthLabel },
-    year: { start: yearStart, end: yearEnd, label: yearLabel },
+    year: { start: yearStart, end: yearEnd, label: yearLabel, rangeLabel: yearRangeLabel },
   };
 };
 
@@ -110,12 +115,8 @@ const getPreviousMonthRanges = () => {
   // Format labels
   const prevMonthLabel = previousMonth.toLocaleString("en-US", {
     month: "short",
-    year: "numeric",
   });
-  const prevMonthYearLabel = `1 Jan - ${prevMonthEnd.getDate()} ${previousMonth.toLocaleString(
-    "en-US",
-    { month: "short" }
-  )}`;
+  const prevMonthYearLabel = previousMonthYear.toString();
 
   return {
     prevMonth: {
@@ -149,6 +150,52 @@ const fetchCustomRangeSales = async (startDate, endDate) => {
   }
 };
 
+// NEW: Function to fetch previous period sales for comparison
+const fetchPreviousPeriodSales = async (currentPeriod, currentStart, currentEnd) => {
+  try {
+    let previousStart, previousEnd;
+
+    switch (currentPeriod) {
+      case "Today":
+        previousStart = new Date(currentStart);
+        previousStart.setDate(previousStart.getDate() - 1);
+        previousEnd = new Date(currentEnd);
+        previousEnd.setDate(previousEnd.getDate() - 1);
+        break;
+      case "Month":
+        previousStart = new Date(currentStart);
+        previousStart.setMonth(previousStart.getMonth() - 1);
+        previousEnd = new Date(currentEnd);
+        previousEnd.setMonth(previousEnd.getMonth() - 1);
+        // Adjust for months with different number of days
+        const lastDayOfPrevMonth = new Date(previousEnd.getFullYear(), previousEnd.getMonth() + 1, 0).getDate();
+        previousEnd.setDate(Math.min(previousEnd.getDate(), lastDayOfPrevMonth));
+        break;
+      case "Year":
+        previousStart = new Date(currentStart);
+        previousStart.setFullYear(previousStart.getFullYear() - 1);
+        previousEnd = new Date(currentEnd);
+        previousEnd.setFullYear(previousEnd.getFullYear() - 1);
+        break;
+      default:
+        return 0;
+    }
+
+    return await fetchCustomRangeSales(previousStart, previousEnd);
+  } catch (error) {
+    console.error("Error fetching previous period sales:", error);
+    return 0;
+  }
+};
+
+// NEW: Function to calculate growth percentage
+const calculateGrowth = (current, previous) => {
+  if (previous === 0) {
+    return current > 0 ? 100 : 0;
+  }
+  return ((current - previous) / previous) * 100;
+};
+
 const Dashboard = () => {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
@@ -172,7 +219,6 @@ const Dashboard = () => {
 
   // NEW: State for dynamic sales data
   const [salesTableData, setSalesTableData] = useState([]);
-  const [highestSales, setHighestSales] = useState([]);
   const [loadingSalesData, setLoadingSalesData] = useState(false);
 
   // Payroll State
@@ -185,9 +231,14 @@ const Dashboard = () => {
   const [salesData, setSalesData] = useState({
     totalSales: 0,
     monthlySales: 0,
-    growth: 0,
     todaySales: 0,
     yearSales: 0,
+    todayGrowth: 0,
+    monthlyGrowth: 0,
+    yearGrowth: 0,
+    todayPrevious: 0,
+    monthlyPrevious: 0,
+    yearPrevious: 0,
   });
 
   const [outstandingData, setOutstandingData] = useState({
@@ -239,58 +290,57 @@ const Dashboard = () => {
   const [showAllMRsModal, setShowAllMRsModal] = useState(false);
   const [allMRsWithSalary, setAllMRsWithSalary] = useState([]);
 
-  // Get date ranges for labels
+  // NEW: State for products modal
+  const [showProductsModal, setShowProductsModal] = useState(false);
+  const [selectedMRProducts, setSelectedMRProducts] = useState([]);
+  const [selectedMRName, setSelectedMRName] = useState("");
+
+  // NEW: State for side panel toggle
+  const [showAllMRsInSidePanel, setShowAllMRsInSidePanel] = useState(false);
+  const [sidePanelCurrentPage, setSidePanelCurrentPage] = useState(1);
+  const sidePanelPerPage = 10;
+
+  // Get date ranges for labels - UPDATED to include year range
   const dateRanges = useMemo(() => getDateRanges(), []);
   const prevMonthRanges = useMemo(() => getPreviousMonthRanges(), []);
+
+  // NEW: Function to get sales table title with actual values
+  const getSalesTableTitle = () => {
+    switch (activeSalesSubTab) {
+      case "Today":
+        return `Sales Details - ${dateRanges.today.label}`;
+      case "Month":
+        return `Sales Details - ${dateRanges.month.label}`;
+      case "Year":
+        return `Sales Details - ${dateRanges.year.rangeLabel}`;
+      default:
+        return `Sales Details - ${activeSalesSubTab}`;
+    }
+  };
 
   // NEW: Function to fetch dynamic sales table data
   const fetchSalesTableData = async (period) => {
     try {
       setLoadingSalesData(true);
       const response = await axios.get(`${backendUrl}/api/sales/table-data`, {
-        params: { period }
+        params: { period },
       });
-
       if (response.data.success) {
         setSalesTableData(response.data.data);
       } else {
-        console.error('Error fetching sales table data:', response.data.message);
+        console.error(
+          "Error fetching sales table data:",
+          response.data.message
+        );
         setSalesTableData([]);
       }
     } catch (error) {
-      console.error('Error fetching sales table data:', error);
+      console.error("Error fetching sales table data:", error);
       setSalesTableData([]);
     } finally {
       setLoadingSalesData(false);
     }
   };
-
-  // NEW: Function to fetch highest sales for Recent Sales panel
-  const fetchHighestSales = async (period) => {
-    try {
-      const response = await axios.get(`${backendUrl}/api/sales/highest-sales`, {
-        params: { period, limit: 5 }
-      });
-
-      if (response.data.success) {
-        setHighestSales(response.data.data);
-      } else {
-        console.error('Error fetching highest sales:', response.data.message);
-        setHighestSales([]);
-      }
-    } catch (error) {
-      console.error('Error fetching highest sales:', error);
-      setHighestSales([]);
-    }
-  };
-
-  // NEW: Effect to fetch sales data when sales sub-tab changes
-  useEffect(() => {
-    if (activeTab === "Sales") {
-      fetchSalesTableData(activeSalesSubTab);
-      fetchHighestSales(activeSalesSubTab);
-    }
-  }, [activeSalesSubTab, activeTab]);
 
   // NEW: Function to fetch highest salary MRs
   const fetchHighestSalaryMRs = async () => {
@@ -318,22 +368,38 @@ const Dashboard = () => {
     }
   };
 
-  // NEW: Function to handle panel icon click
+  // UPDATED: Function to handle panel icon click
   const handlePanelIconClick = () => {
-    if (activeTab === "Total Payroll") {
+    if (activeTab === "Sales") {
+      setShowAllMRsInSidePanel((prev) => !prev);
+      setSidePanelCurrentPage(1);
+    } else if (activeTab === "Total Payroll") {
       fetchAllMRsWithSalary();
       setShowAllMRsModal(true);
     }
   };
 
-  // UPDATED: Function to fetch sales data when sales sub-tab changes
+  // NEW: Function to handle view products
+  const handleViewProducts = (mrName, products) => {
+    setSelectedMRName(mrName);
+    setSelectedMRProducts(products);
+    setShowProductsModal(true);
+  };
+
+  // UPDATED: Function to fetch sales data with growth calculations
   const fetchSalesBySubTab = async (subTab) => {
     try {
       let salesAmount = 0;
+      let previousSales = 0;
 
       switch (subTab) {
         case "Today":
           salesAmount = await fetchCustomRangeSales(
+            dateRanges.today.start,
+            dateRanges.today.end
+          );
+          previousSales = await fetchPreviousPeriodSales(
+            "Today",
             dateRanges.today.start,
             dateRanges.today.end
           );
@@ -343,9 +409,19 @@ const Dashboard = () => {
             dateRanges.month.start,
             dateRanges.month.end
           );
+          previousSales = await fetchPreviousPeriodSales(
+            "Month",
+            dateRanges.month.start,
+            dateRanges.month.end
+          );
           break;
         case "Year":
           salesAmount = await fetchCustomRangeSales(
+            dateRanges.year.start,
+            dateRanges.year.end
+          );
+          previousSales = await fetchPreviousPeriodSales(
+            "Year",
             dateRanges.year.start,
             dateRanges.year.end
           );
@@ -357,35 +433,33 @@ const Dashboard = () => {
           );
       }
 
-      return salesAmount;
+      const growth = calculateGrowth(salesAmount, previousSales);
+
+      return { salesAmount, previousSales, growth };
     } catch (error) {
       console.error("Error fetching sales by sub-tab:", error);
-      return 0;
+      return { salesAmount: 0, previousSales: 0, growth: 0 };
     }
   };
 
-  // UPDATED: Fetch Sales Data with custom range function
+  // UPDATED: Fetch Sales Data with growth calculations
   const fetchSalesData = async () => {
     try {
-      const todaySales = await fetchCustomRangeSales(
-        dateRanges.today.start,
-        dateRanges.today.end
-      );
-      const monthlySales = await fetchCustomRangeSales(
-        dateRanges.month.start,
-        dateRanges.month.end
-      );
-      const yearSales = await fetchCustomRangeSales(
-        dateRanges.year.start,
-        dateRanges.year.end
-      );
+      const todayData = await fetchSalesBySubTab("Today");
+      const monthlyData = await fetchSalesBySubTab("Month");
+      const yearData = await fetchSalesBySubTab("Year");
 
       setSalesData({
-        totalSales: yearSales,
-        monthlySales: monthlySales,
-        todaySales: todaySales,
-        yearSales: yearSales,
-        growth: 12.5,
+        todaySales: todayData.salesAmount,
+        todayPrevious: todayData.previousSales,
+        todayGrowth: todayData.growth,
+        monthlySales: monthlyData.salesAmount,
+        monthlyPrevious: monthlyData.previousSales,
+        monthlyGrowth: monthlyData.growth,
+        yearSales: yearData.salesAmount,
+        yearPrevious: yearData.previousSales,
+        yearGrowth: yearData.growth,
+        totalSales: yearData.salesAmount,
       });
     } catch (error) {
       setSalesData({
@@ -393,7 +467,12 @@ const Dashboard = () => {
         monthlySales: 0,
         todaySales: 0,
         yearSales: 0,
-        growth: 0,
+        todayGrowth: 0,
+        monthlyGrowth: 0,
+        yearGrowth: 0,
+        todayPrevious: 0,
+        monthlyPrevious: 0,
+        yearPrevious: 0,
       });
     }
   };
@@ -402,16 +481,24 @@ const Dashboard = () => {
   useEffect(() => {
     if (activeTab === "Sales") {
       const updateSalesData = async () => {
-        const salesAmount = await fetchSalesBySubTab(activeSalesSubTab);
+        const data = await fetchSalesBySubTab(activeSalesSubTab);
 
         setSalesData((prev) => ({
           ...prev,
-          ...(activeSalesSubTab === "Today" && { todaySales: salesAmount }),
+          ...(activeSalesSubTab === "Today" && { 
+            todaySales: data.salesAmount,
+            todayPrevious: data.previousSales,
+            todayGrowth: data.growth
+          }),
           ...(activeSalesSubTab === "Month" && {
-            monthlySales: salesAmount,
+            monthlySales: data.salesAmount,
+            monthlyPrevious: data.previousSales,
+            monthlyGrowth: data.growth
           }),
           ...(activeSalesSubTab === "Year" && {
-            yearSales: salesAmount,
+            yearSales: data.salesAmount,
+            yearPrevious: data.previousSales,
+            yearGrowth: data.growth
           }),
         }));
       };
@@ -419,6 +506,27 @@ const Dashboard = () => {
       updateSalesData();
     }
   }, [activeSalesSubTab, activeTab]);
+
+  // NEW: Effect to fetch sales data when sales sub-tab changes
+  useEffect(() => {
+    if (activeTab === "Sales") {
+      fetchSalesTableData(activeSalesSubTab);
+    }
+  }, [activeSalesSubTab, activeTab]);
+
+  // NEW: Get current growth based on active sales sub-tab
+  const getCurrentGrowth = () => {
+    switch (activeSalesSubTab) {
+      case "Today":
+        return salesData.todayGrowth;
+      case "Month":
+        return salesData.monthlyGrowth;
+      case "Year":
+        return salesData.yearGrowth;
+      default:
+        return salesData.todayGrowth;
+    }
+  };
 
   // Export function
   const handleExport = async () => {
@@ -555,7 +663,9 @@ const Dashboard = () => {
       monthlySales: salesData.monthlySales,
       todaySales: salesData.todaySales,
       yearSales: salesData.yearSales,
-      salesGrowth: salesData.growth,
+      todayGrowth: salesData.todayGrowth,
+      monthlyGrowth: salesData.monthlyGrowth,
+      yearGrowth: salesData.yearGrowth,
       totalOutstanding: outstandingData.totalOutstanding,
       totalStock: stockData.totalStock,
       stockValue: stockData.stockValue,
@@ -797,6 +907,105 @@ const Dashboard = () => {
     );
   };
 
+  // NEW: Products Modal Component
+  const ProductsModal = () => {
+    if (!showProductsModal) return null;
+
+    return ReactDOM.createPortal(
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="bg-white rounded-xl shadow-lg w-full max-w-6xl max-h-[90vh] overflow-auto">
+          <div className="p-6 border-b border-gray-200">
+            <div className="flex justify-between items-center">
+              <h3 className="text-xl font-semibold text-gray-800">
+                All Products Sold by {selectedMRName}
+              </h3>
+              <button
+                onClick={() => setShowProductsModal(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
+              >
+                <X size={24} />
+              </button>
+            </div>
+          </div>
+          <div className="p-6">
+            <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow-2xl text-center">
+              <thead className="bg-gray-100 text-gray-700 border-b">
+                <tr>
+                  <th className="p-3 text-sm font-medium">Date</th>
+                  <th className="p-3 text-sm font-medium">Product Name</th>
+                  <th className="p-3 text-sm font-medium">Quantity</th>
+                  <th className="p-3 text-sm font-medium">Selling Price ($)</th>
+                  <th className="p-3 text-sm font-medium">Amount ($)</th>
+                  <th className="p-3 text-sm font-medium">Customer</th>
+                  <th className="p-3 text-sm font-medium">Bonus Qty</th>
+                  <th className="p-3 text-sm font-medium">Total Qty</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {selectedMRProducts.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="p-4 text-center text-gray-500">
+                      No products found.
+                    </td>
+                  </tr>
+                ) : (
+                  selectedMRProducts.map((product, index) => (
+                    <tr
+                      key={index}
+                      className={`hover:bg-gray-50 ${
+                        index < selectedMRProducts.length - 1 ? "border-b" : ""
+                      }`}
+                    >
+                      <td className="p-3 text-sm text-gray-700">
+                        {formatDateToReadable(product.date)}
+                      </td>
+
+                      <td className="p-3 text-sm text-gray-700">
+                        {product.productName}
+                      </td>
+
+                      <td className="p-3 text-sm text-gray-700">
+                        {product.quantity}
+                      </td>
+
+                      <td className="p-3 text-sm text-gray-700">
+                        ${formatCurrency(product.sellingPrice)}
+                      </td>
+
+                      <td className="p-3 text-sm text-green-600 font-medium">
+                        ${formatCurrency(product.amount)}
+                      </td>
+
+                      <td className="p-3 text-sm text-gray-700">
+                        {product.customer}
+                      </td>
+
+                      <td className="p-3 text-sm text-gray-700">
+                        {product.bonusQty || 0}
+                      </td>
+
+                      <td className="p-3 text-sm text-gray-700">
+                        {product.totalQty || product.quantity}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+
+            {selectedMRProducts.length === 0 && (
+              <p className="text-center text-gray-500 py-4">
+                No products found
+              </p>
+            )}
+          </div>
+        </div>
+      </div>,
+      document.body
+    );
+  };
+
   // NEW: All MRs Salary Modal Component
   const AllMRsSalaryModal = () => {
     if (!showAllMRsModal) return null;
@@ -908,7 +1117,9 @@ const Dashboard = () => {
             </p>
             <p className="text-xs text-gray-500 mt-1">
               {activeSalesSubTab} •{" "}
-              <span className="text-green-600">↗ {salesData.growth}%</span>
+              <span className={getCurrentGrowth() >= 0 ? "text-green-600" : "text-red-600"}>
+                {getCurrentGrowth() >= 0 ? "↗" : "↘"} {getCurrentGrowth().toFixed(1)}%
+              </span>
             </p>
           </div>
           <div className="p-3 bg-blue-100 rounded-full">
@@ -979,7 +1190,7 @@ const Dashboard = () => {
             <p className="text-xs text-gray-500 mt-1">
               {activeExpenseSubTab === "Month"
                 ? dateRanges.month.label
-                : "1 Jan - 17 Nov"}
+                : dateRanges.year.rangeLabel}
             </p>
           </div>
           <div className="p-3 bg-red-100 rounded-full">
@@ -1015,43 +1226,140 @@ const Dashboard = () => {
     </div>
   );
 
-  // UPDATED: Dynamic Side Panel Component based on active tab
   const SidePanel = () => {
-    // NEW: Dynamic Recent Sales with highest sales data
-    const RecentSales = () => (
-      <div className="space-y-3">
-        {highestSales.length > 0 ? (
-          highestSales.map((sale, index) => (
-            <div
-              key={index}
-              className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg"
-            >
-              <div className="flex items-center space-x-3">
-                <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 text-sm font-semibold">
-                  P{index + 1}
+    // UPDATED: Recent Sales component for Sales tab with toggle functionality
+    const RecentSales = () => {
+      // Group sales by MR to show MR-wise highest sales
+      const mrWiseSales = useMemo(() => {
+        const mrSales = {};
+
+        salesTableData.forEach((sale) => {
+          if (!mrSales[sale.salesPerson]) {
+            mrSales[sale.salesPerson] = {
+              mrName: sale.salesPerson,
+              totalAmount: 0,
+              productCount: 0,
+              products: [],
+            };
+          }
+          mrSales[sale.salesPerson].totalAmount += sale.amount;
+          mrSales[sale.salesPerson].productCount += 1;
+          mrSales[sale.salesPerson].products.push(sale);
+        });
+
+        // Sort by total amount
+        return Object.values(mrSales).sort(
+          (a, b) => b.totalAmount - a.totalAmount
+        );
+      }, [salesTableData]);
+
+      // Calculate pagination for side panel
+      const totalSidePanelPages = Math.ceil(
+        mrWiseSales.length / sidePanelPerPage
+      );
+      const currentSidePanelMRs = showAllMRsInSidePanel
+        ? mrWiseSales.slice(
+            (sidePanelCurrentPage - 1) * sidePanelPerPage,
+            sidePanelCurrentPage * sidePanelPerPage
+          )
+        : mrWiseSales.slice(0, 5);
+
+      const handleSidePanelPageChange = (newPage) => {
+        setSidePanelCurrentPage(newPage);
+      };
+
+      return (
+        <div className="space-y-3">
+          {currentSidePanelMRs.length > 0 ? (
+            currentSidePanelMRs.map((mrSale, index) => (
+              <div
+                key={index}
+                className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg"
+              >
+                <div className="flex items-center space-x-3">
+                  <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 text-sm font-semibold">
+                    {showAllMRsInSidePanel
+                      ? (sidePanelCurrentPage - 1) * sidePanelPerPage +
+                        index +
+                        1
+                      : index + 1}
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">
+                      {mrSale.mrName}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {mrSale.productCount} product
+                      {mrSale.productCount !== 1 ? "s" : ""}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-gray-800">
-                    {sale.productName}
+                <div className="text-right flex items-center gap-2">
+                  <p className="text-sm font-semibold text-green-600">
+                    ${formatCurrency(mrSale.totalAmount)}
                   </p>
-                  <p className="text-xs text-gray-500">{sale.customer}</p>
+                  <button
+                    onClick={() =>
+                      handleViewProducts(mrSale.mrName, mrSale.products)
+                    }
+                    className="text-gray-400 hover:text-blue-600 transition-colors cursor-pointer p-1"
+                    title="View Products"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="lucide lucide-shopping-cart"
+                    >
+                      <circle cx="8" cy="21" r="1"></circle>
+                      <circle cx="19" cy="21" r="1"></circle>
+                      <path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"></path>
+                    </svg>
+                  </button>
                 </div>
               </div>
-              <div className="text-right">
-                <p className="text-sm font-semibold text-green-600">
-                  ${formatCurrency(sale.amount)}
-                </p>
-                <p className="text-xs text-gray-500">{sale.timeAgo}</p>
-              </div>
+            ))
+          ) : (
+            <p className="text-gray-500 text-center py-4">
+              {loadingSalesData ? "Loading..." : "No sales data found"}
+            </p>
+          )}
+
+          {/* Pagination for side panel when showing all MRs */}
+          {showAllMRsInSidePanel && totalSidePanelPages > 1 && (
+            <div className="flex justify-between items-center mt-4 pt-4 border-t border-gray-200">
+              <button
+                onClick={() =>
+                  handleSidePanelPageChange(sidePanelCurrentPage - 1)
+                }
+                disabled={sidePanelCurrentPage === 1}
+                className="px-3 py-1 text-sm bg-gray-200 rounded disabled:opacity-50 cursor-pointer"
+              >
+                Previous
+              </button>
+              <span className="text-sm text-gray-600">
+                Page {sidePanelCurrentPage} of {totalSidePanelPages}
+              </span>
+              <button
+                onClick={() =>
+                  handleSidePanelPageChange(sidePanelCurrentPage + 1)
+                }
+                disabled={sidePanelCurrentPage === totalSidePanelPages}
+                className="px-3 py-1 text-sm bg-gray-200 rounded disabled:opacity-50 cursor-pointer"
+              >
+                Next
+              </button>
             </div>
-          ))
-        ) : (
-          <p className="text-gray-500 text-center py-4">
-            {loadingSalesData ? "Loading..." : "No sales data found"}
-          </p>
-        )}
-      </div>
-    );
+          )}
+        </div>
+      );
+    };
 
     // Recent Outstanding for Outstanding tab
     const RecentOutstanding = () => (
@@ -1234,7 +1542,9 @@ const Dashboard = () => {
     const getPanelTitle = () => {
       switch (activeTab) {
         case "Sales":
-          return "Highest Sales";
+          return showAllMRsInSidePanel
+            ? "All MRs Sales"
+            : "Highest Sales by MR";
         case "Outstanding":
           return "Recent Outstanding";
         case "Stock in Hands":
@@ -1251,7 +1561,7 @@ const Dashboard = () => {
     const getPanelIcon = () => {
       switch (activeTab) {
         case "Sales":
-          return ShoppingCart;
+          return Users;
         case "Outstanding":
           return TrendingUp;
         case "Stock in Hands":
@@ -1293,8 +1603,35 @@ const Dashboard = () => {
           <button
             onClick={handlePanelIconClick}
             className="text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
+            title={
+              activeTab === "Sales"
+                ? showAllMRsInSidePanel
+                  ? "Show Top 5"
+                  : "Show All MRs"
+                : "View Details"
+            }
           >
-            <PanelIcon className="w-5 h-5" />
+            {activeTab === "Sales" ? (
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="lucide lucide-users"
+              >
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+                <path d="M16 3.128a4 4 0 0 1 0 7.744"></path>
+                <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
+                <circle cx="9" cy="7" r="4"></circle>
+              </svg>
+            ) : (
+              <PanelIcon className="w-5 h-5" />
+            )}
           </button>
         </div>
         {renderPanelContent()}
@@ -1316,14 +1653,14 @@ const Dashboard = () => {
 
     if (activeTab === "Sales") {
       tabs = [
-        { key: "Today", label: "Today" },
+        { key: "Today", label: dateRanges.today.label },
         { key: "Month", label: dateRanges.month.label },
-        { key: "Year", label: dateRanges.year.label },
+        { key: "Year", label: dateRanges.year.rangeLabel },
       ];
     } else if (activeTab === "Expense") {
       tabs = [
         { key: "Month", label: dateRanges.month.label },
-        { key: "Year", label: dateRanges.year.label },
+        { key: "Year", label: dateRanges.year.rangeLabel },
       ];
     } else if (activeTab === "Total Payroll") {
       tabs = [
@@ -1365,85 +1702,159 @@ const Dashboard = () => {
     );
   };
 
-  // UPDATED: Sales Table Component with dynamic data
-  const SalesTable = () => (
-    <div className="bg-white rounded-xl shadow-md border border-gray-200">
-      <div className="p-6 border-b border-gray-200">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div>
-            <h3 className="text-xl font-semibold text-gray-800">
-              Sales Details - {activeSalesSubTab}
-            </h3>
-            <p className="text-sm text-gray-600 mt-1">
-              Showing sales data for {activeSalesSubTab.toLowerCase()} (Highest sales first)
-            </p>
-          </div>
-          <div className="flex gap-3">
-            <button
-              onClick={handleExport}
-              className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition-colors cursor-pointer"
-            >
-              <Download size={18} /> Export Sales
-            </button>
+  // UPDATED: Sales Table Component with Customer column
+  const SalesTable = () => {
+    // Group sales data by MR
+    const groupedSalesData = useMemo(() => {
+      const mrGroups = {};
+
+      salesTableData.forEach((sale) => {
+        if (!mrGroups[sale.salesPerson]) {
+          mrGroups[sale.salesPerson] = {
+            mrName: sale.salesPerson,
+            totalAmount: 0,
+            products: [],
+            productCount: 0,
+            customers: new Set(),
+          };
+        }
+        mrGroups[sale.salesPerson].totalAmount += sale.amount;
+        mrGroups[sale.salesPerson].products.push(sale);
+        mrGroups[sale.salesPerson].productCount += 1;
+        if (sale.customer && sale.customer !== "N/A") {
+          mrGroups[sale.salesPerson].customers.add(sale.customer);
+        }
+      });
+
+      // Convert Set to Array and count
+      Object.values(mrGroups).forEach((mr) => {
+        mr.customerCount = mr.customers.size;
+        mr.customers = Array.from(mr.customers);
+      });
+
+      return Object.values(mrGroups);
+    }, [salesTableData]);
+
+    return (
+      <div className="bg-white rounded-xl shadow-md border border-gray-200">
+        <div className="p-6 border-b border-gray-200">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div>
+              <h3 className="text-xl font-semibold text-gray-800">
+                {getSalesTableTitle()}
+              </h3>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={handleExport}
+                className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition-colors cursor-pointer"
+              >
+                <Download size={18} /> Export Sales
+              </button>
+            </div>
           </div>
         </div>
-      </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-center">
-          <thead className="bg-gray-50 border-b border-gray-200">
-            <tr>
-              <th className="p-4 text-sm font-semibold text-gray-700">Date</th>
-              <th className="p-4 text-sm font-semibold text-gray-700">
-                Product
-              </th>
-              <th className="p-4 text-sm font-semibold text-gray-700">
-                MR Name
-              </th>
-              <th className="p-4 text-sm font-semibold text-gray-700">
-                Quantity
-              </th>
-              <th className="p-4 text-sm font-semibold text-gray-700">
-                Amount ($)
-              </th>
-              <th className="p-4 text-sm font-semibold text-gray-700">
-                Customer
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200">
-            {loadingSalesData ? (
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-center">
+            <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <td colSpan="6" className="p-8 text-center text-gray-500">
-                  <div className="flex justify-center items-center">
-                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-                    <span className="ml-2">Loading sales data...</span>
-                  </div>
-                </td>
+                <th className="p-4 text-sm font-semibold text-gray-700">
+                  MR Name
+                </th>
+                <th className="p-4 text-sm font-semibold text-gray-700">
+                  Products
+                </th>
+                <th className="p-4 text-sm font-semibold text-gray-700">
+                  Customer
+                </th>
+                <th className="p-4 text-sm font-semibold text-gray-700">
+                  Total Amount ($)
+                </th>
+                <th className="p-4 text-sm font-semibold text-gray-700">
+                  Actions
+                </th>
               </tr>
-            ) : salesTableData.length > 0 ? (
-              salesTableData.map((sale, index) => (
-                <tr key={index} className="hover:bg-gray-50 transition-colors">
-                  <td className="p-4 text-sm text-gray-600">{sale.date}</td>
-                  <td className="p-4 text-sm text-gray-600">{sale.productName}</td>
-                  <td className="p-4 text-sm text-gray-600">{sale.salesPerson}</td>
-                  <td className="p-4 text-sm text-gray-600">{sale.quantity}</td>
-                  <td className="p-4 text-sm text-gray-600">${formatCurrency(sale.amount)}</td>
-                  <td className="p-4 text-sm text-gray-600">{sale.customer}</td>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {loadingSalesData ? (
+                <tr>
+                  <td colSpan="5" className="p-8 text-center text-gray-500">
+                    <div className="flex justify-center items-center">
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                      <span className="ml-2">Loading sales data...</span>
+                    </div>
+                  </td>
                 </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan="6" className="p-8 text-center text-gray-500">
-                  No sales data found for {activeSalesSubTab}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+              ) : groupedSalesData.length > 0 ? (
+                groupedSalesData.map((mrSale, index) => (
+                  <tr
+                    key={index}
+                    className="hover:bg-gray-50 transition-colors"
+                  >
+                    <td className="p-4 text-sm text-gray-600 capitalize">
+                      {mrSale.mrName}
+                    </td>
+                    <td className="p-4 text-sm text-gray-600">
+                      {mrSale.productCount === 1 ? (
+                        mrSale.products[0].productName
+                      ) : (
+                        <div className="flex items-center justify-center gap-2">
+                          <span>{mrSale.productCount} Products</span>
+                        </div>
+                      )}
+                    </td>
+                    <td className="p-4 text-sm text-gray-600">
+                      {mrSale.customerCount === 1 ? (
+                        mrSale.customers[0]
+                      ) : (
+                        <span>{mrSale.customerCount} customers</span>
+                      )}
+                    </td>
+                    <td className="p-4 text-sm text-green-600 font-semibold">
+                      ${formatCurrency(mrSale.totalAmount)}
+                    </td>
+                    <td className="p-4">
+                      <button
+                        onClick={() =>
+                          handleViewProducts(mrSale.mrName, mrSale.products)
+                        }
+                        className="text-gray-400 hover:text-blue-600 transition-colors cursor-pointer p-2"
+                        title="View All Products"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="20"
+                          height="20"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className="lucide lucide-shopping-cart"
+                        >
+                          <circle cx="8" cy="21" r="1"></circle>
+                          <circle cx="19" cy="21" r="1"></circle>
+                          <path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"></path>
+                        </svg>
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="5" className="p-8 text-center text-gray-500">
+                    No sales data found for {activeSalesSubTab}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   // Expense Table Component
   const ExpenseTable = () => (
@@ -1604,6 +2015,9 @@ const Dashboard = () => {
           <MRManagement />
         </main>
       </div>
+
+      {/* NEW: Products Modal */}
+      <ProductsModal />
 
       {/* NEW: All MRs Salary Modal */}
       <AllMRsSalaryModal />

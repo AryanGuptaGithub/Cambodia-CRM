@@ -214,9 +214,6 @@ router.get("/sales/analytics/custom-range", async (req, res) => {
 router.get("/sales/highest-sales", async (req, res) => {
   try {
     const { limit = 5, period } = req.query;
-
-    console.log(`🏆 Fetching top ${limit} highest sales for period: ${period}`);
-
     let dateFilter = {};
     const dateRange = getTableDateRanges(period);
 
@@ -271,8 +268,6 @@ router.get("/sales/highest-sales", async (req, res) => {
       },
     ]);
 
-    console.log(`✅ Found ${highestSales.length} highest sales records`);
-
     // Calculate time ago
     const now = new Date();
     const transformedData = highestSales.map((sale) => {
@@ -316,9 +311,6 @@ router.get("/sales/highest-sales", async (req, res) => {
 router.get("/sales/table-data", async (req, res) => {
   try {
     const { period, startDate, endDate } = req.query;
-
-    console.log(`📊 Fetching sales table data for period: ${period}`);
-
     let dateFilter = {};
 
     // Handle date filtering based on period
@@ -334,7 +326,6 @@ router.get("/sales/table-data", async (req, res) => {
           $lte: end,
         },
       };
-      console.log(`📅 Custom range: ${start} to ${end}`);
     } else {
       // Predefined periods (Today, Month, Year)
       const dateRange = getTableDateRanges(period);
@@ -345,13 +336,11 @@ router.get("/sales/table-data", async (req, res) => {
             $lte: dateRange.end,
           },
         };
-        console.log(
-          `📅 ${period} range: ${dateRange.start} to ${dateRange.end}`
-        );
+       
       }
     }
 
-    // Fetch sales data with customer information
+    // Fetch sales data - simplified since customerName is already in SaleSummary
     const salesData = await SaleSummary.aggregate([
       {
         $match: dateFilter,
@@ -360,27 +349,13 @@ router.get("/sales/table-data", async (req, res) => {
         $unwind: "$products",
       },
       {
-        $lookup: {
-          from: "customers",
-          localField: "customerCode",
-          foreignField: "customerCode",
-          as: "customerInfo",
-        },
-      },
-      {
-        $unwind: {
-          path: "$customerInfo",
-          preserveNullAndEmptyArrays: true,
-        },
-      },
-      {
         $project: {
           date: { $dateToString: { format: "%Y-%m-%d", date: "$invoiceDate" } },
           productName: "$products.productName",
           salesPerson: "$mrName",
           quantity: "$products.salesQty",
           amount: "$products.netSellingAmount",
-          customer: "$customerInfo.name",
+          customer: "$customerName", // Directly use customerName from SaleSummary
           invoiceNumber: 1,
           bonusQty: "$products.bonusQty",
           totalQty: "$products.totalQty",
@@ -388,14 +363,18 @@ router.get("/sales/table-data", async (req, res) => {
           discount: "$products.discount",
           paymentStatus: 1,
           remark: 1,
+          customerId: 1, // Include customerId if needed
+          recordingDate: 1,
+          dueDate: 1,
+          paidAmount: 1,
+          dueAmount: 1,
+          totalAmount: 1,
         },
       },
       {
         $sort: { date: -1 },
       },
     ]);
-
-    console.log(`✅ Found ${salesData.length} sales records`);
 
     // Transform data to match frontend structure
     const transformedData = salesData.map((sale) => ({
@@ -405,13 +384,20 @@ router.get("/sales/table-data", async (req, res) => {
       quantity: sale.quantity,
       amount: sale.amount,
       customer: sale.customer || "N/A",
-      // Include additional fields if needed
       invoiceNumber: sale.invoiceNumber,
       bonusQty: sale.bonusQty,
       totalQty: sale.totalQty,
       sellingPrice: sale.sellingPrice,
       discount: sale.discount,
       paymentStatus: sale.paymentStatus,
+      remark: sale.remark,
+      // Additional fields from your document structure
+      customerId: sale.customerId,
+      recordingDate: sale.recordingDate,
+      dueDate: sale.dueDate,
+      paidAmount: sale.paidAmount,
+      dueAmount: sale.dueAmount,
+      totalAmount: sale.totalAmount,
     }));
 
     res.json({
@@ -434,7 +420,6 @@ router.get("/sales/table-data", async (req, res) => {
 router.get("/sales/summary-cards", async (req, res) => {
   try {
     const { period } = req.query;
-    console.log(`📈 Fetching sales summary for period: ${period}`);
 
     let dateFilter = {};
     const dateRange = getTableDateRanges(period);
@@ -644,8 +629,6 @@ router.get("/custom-range", async (req, res) => {
     const end = new Date(endDate);
     end.setHours(23, 59, 59, 999); // Include the entire end date
 
-    console.log(`Fetching sales from ${start} to ${end}`);
-
     const sales = await SaleSummary.aggregate([
       {
         $match: {
@@ -684,38 +667,28 @@ router.get("/custom-range", async (req, res) => {
 // Get comprehensive sales dashboard data
 router.get("/analytics/dashboard", async (req, res) => {
   try {
-    console.log("🔍 Starting sales dashboard analytics...");
-
     const now = new Date();
-    console.log("📅 Current date/time (now):", now);
 
     const today = new Date(now);
     today.setHours(0, 0, 0, 0);
-    console.log("📅 Today start (00:00:00):", today);
 
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    console.log("📅 Month start (1st of current month):", monthStart);
 
     const yearStart = new Date(now.getFullYear(), 0, 1);
-    console.log("📅 Year start (Jan 1st):", yearStart);
 
     // Previous period for growth calculation
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
     yesterday.setHours(0, 0, 0, 0);
-    console.log("📅 Yesterday start (00:00:00):", yesterday);
 
     const prevDayEnd = new Date(yesterday);
     prevDayEnd.setHours(23, 59, 59, 999);
-    console.log("📅 Yesterday end (23:59:59):", prevDayEnd);
 
-    console.log("🔄 Executing all sales queries in parallel...");
     // Execute all queries in parallel
     const [todayResult, monthlyResult, yearlyResult, yesterdayResult] =
       await Promise.all([
         // Today's sales
         (async () => {
-          console.log("📊 Querying today's sales...");
           const result = await SaleSummary.aggregate([
             {
               $match: {
@@ -732,13 +705,12 @@ router.get("/analytics/dashboard", async (req, res) => {
               },
             },
           ]);
-          console.log("✅ Today's sales result:", result);
+
           return result;
         })(),
 
         // Monthly sales (current month 1st to current date)
         (async () => {
-          console.log("📊 Querying monthly sales...");
           const result = await SaleSummary.aggregate([
             {
               $match: {
@@ -755,13 +727,12 @@ router.get("/analytics/dashboard", async (req, res) => {
               },
             },
           ]);
-          console.log("✅ Monthly sales result:", result);
+
           return result;
         })(),
 
         // Yearly sales (Jan 1 to current date)
         (async () => {
-          console.log("📊 Querying yearly sales...");
           const result = await SaleSummary.aggregate([
             {
               $match: {
@@ -778,13 +749,12 @@ router.get("/analytics/dashboard", async (req, res) => {
               },
             },
           ]);
-          console.log("✅ Yearly sales result:", result);
+
           return result;
         })(),
 
         // Yesterday's sales for growth calculation
         (async () => {
-          console.log("📊 Querying yesterday's sales...");
           const result = await SaleSummary.aggregate([
             {
               $match: {
@@ -801,32 +771,25 @@ router.get("/analytics/dashboard", async (req, res) => {
               },
             },
           ]);
-          console.log("✅ Yesterday's sales result:", result);
+          
           return result;
         })(),
       ]);
 
-    console.log("📈 Extracting sales amounts from query results...");
     // Extract amounts or default to 0
     const todaySales = todayResult[0]?.amount || 0;
-    console.log("💰 Today sales amount:", todaySales);
 
     const monthlySales = monthlyResult[0]?.amount || 0;
-    console.log("💰 Monthly sales amount:", monthlySales);
 
     const yearlySales = yearlyResult[0]?.amount || 0;
-    console.log("💰 Yearly sales amount:", yearlySales);
 
     const yesterdaySales = yesterdayResult[0]?.amount || 0;
-    console.log("💰 Yesterday sales amount:", yesterdaySales);
 
-    console.log("📊 Calculating growth percentage...");
     // Calculate growth percentage (today vs yesterday)
     const growth =
       yesterdaySales > 0
         ? ((todaySales - yesterdaySales) / yesterdaySales) * 100
         : 0;
-    console.log("📈 Growth percentage:", growth, "%");
 
     const finalResult = {
       totalSales: yearlySales, // Using yearly sales as total sales
@@ -835,9 +798,6 @@ router.get("/analytics/dashboard", async (req, res) => {
       yearSales: yearlySales,
       growth: parseFloat(growth.toFixed(2)),
     };
-
-    console.log("✅ Final dashboard response:", finalResult);
-    console.log("🎯 Sending response to client...");
 
     res.json(finalResult);
   } catch (error) {
@@ -855,7 +815,6 @@ router.get("/analytics/dashboard", async (req, res) => {
       growth: 0,
     };
 
-    console.log("🔄 Sending fallback response:", fallbackResponse);
     res.status(500).json(fallbackResponse);
   }
 });
@@ -863,19 +822,13 @@ router.get("/analytics/dashboard", async (req, res) => {
 // Get date-wise sales breakdown
 router.get("/analytics/breakdown", async (req, res) => {
   try {
-    console.log("🔍 Starting sales breakdown analytics...");
-
     const { period } = req.query; // 'daily', 'monthly', 'yearly'
-    console.log("📊 Requested period:", period);
 
     let groupFormat;
     let match = {};
-    console.log("📋 Initial match conditions:", match);
 
-    console.log("🔄 Determining group format based on period...");
     switch (period) {
       case "daily":
-        console.log("📅 Setting group format for DAILY breakdown");
         groupFormat = {
           year: { $year: "$invoiceDate" },
           month: { $month: "$invoiceDate" },
@@ -883,22 +836,17 @@ router.get("/analytics/breakdown", async (req, res) => {
         };
         break;
       case "monthly":
-        console.log("📅 Setting group format for MONTHLY breakdown");
         groupFormat = {
           year: { $year: "$invoiceDate" },
           month: { $month: "$invoiceDate" },
         };
         break;
       case "yearly":
-        console.log("📅 Setting group format for YEARLY breakdown");
         groupFormat = {
           year: { $year: "$invoiceDate" },
         };
         break;
       default:
-        console.log(
-          "⚠️ No valid period specified, defaulting to DAILY breakdown"
-        );
         groupFormat = {
           year: { $year: "$invoiceDate" },
           month: { $month: "$invoiceDate" },
@@ -906,9 +854,6 @@ router.get("/analytics/breakdown", async (req, res) => {
         };
     }
 
-    console.log("📊 Final group format:", JSON.stringify(groupFormat, null, 2));
-
-    console.log("🔄 Building aggregation pipeline...");
     const aggregationPipeline = [
       { $match: match },
       {
@@ -922,26 +867,7 @@ router.get("/analytics/breakdown", async (req, res) => {
       { $sort: { "_id.year": 1, "_id.month": 1, "_id.day": 1 } },
     ];
 
-    console.log("📋 Aggregation pipeline stages:");
-    console.log(
-      "1. Match stage:",
-      JSON.stringify(aggregationPipeline[0], null, 2)
-    );
-    console.log(
-      "2. Group stage:",
-      JSON.stringify(aggregationPipeline[1], null, 2)
-    );
-    console.log(
-      "3. Sort stage:",
-      JSON.stringify(aggregationPipeline[2], null, 2)
-    );
-
-    console.log("🚀 Executing MongoDB aggregation...");
     const salesBreakdown = await SaleSummary.aggregate(aggregationPipeline);
-
-    console.log("✅ Aggregation completed successfully");
-    console.log("📈 Number of breakdown records:", salesBreakdown.length);
-    console.log("📊 Breakdown data sample:", salesBreakdown.slice(0, 3)); // Show first 3 records
 
     // Calculate summary statistics
     if (salesBreakdown.length > 0) {
@@ -953,17 +879,10 @@ router.get("/analytics/breakdown", async (req, res) => {
         (sum, item) => sum + item.count,
         0
       );
-      console.log("💰 Total sales across all periods:", totalSalesSum);
-      console.log("📦 Total count across all periods:", totalCountSum);
-      console.log(
-        "📊 Average sales per period:",
-        (totalSalesSum / salesBreakdown.length).toFixed(2)
-      );
-    } else {
-      console.log("ℹ️ No sales data found for the breakdown");
-    }
+ 
+    } 
 
-    console.log("🎯 Sending breakdown response to client...");
+    
     res.json(salesBreakdown);
   } catch (error) {
     console.error("❌ Error in sales breakdown analytics:", error);
