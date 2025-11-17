@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Eye,
   Edit,
@@ -8,7 +8,8 @@ import {
   ChevronRight,
   Calendar,
   Clock,
-  ChevronDown,ChevronUp
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
@@ -120,6 +121,7 @@ const LeaveAttendance = () => {
   const [showAddAttendanceModal, setShowAddAttendanceModal] = useState(false);
   const [selectedAttendanceMr, setSelectedAttendanceMr] = useState(null);
   const [attendanceLoading, setAttendanceLoading] = useState(false);
+  const inputRef = useRef(null);
 
   // Modal tab state
   const [modalActiveTab, setModalActiveTab] = useState("attendance");
@@ -141,6 +143,21 @@ const LeaveAttendance = () => {
   // Leave data
   const [mrLeaves, setMrLeaves] = useState({});
 
+  // Get today's date in YYYY-MM-DD format for max date attribute
+  const getTodayDate = () => {
+    const today = new Date();
+    return today.toISOString().split("T")[0];
+  };
+
+  // Check if a date is in the future
+  const isFutureDate = (dateString) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const inputDate = new Date(dateString);
+    inputDate.setHours(0, 0, 0, 0);
+    return inputDate > today;
+  };
+
   useEffect(() => {
     fetchMRList();
     fetchAttendanceRecords();
@@ -160,6 +177,12 @@ const LeaveAttendance = () => {
     }
   };
 
+  const handleIconClick = () => {
+    inputRef.current?.focus();
+    inputRef.current?.classList.add("highlight");
+    setTimeout(() => inputRef.current?.classList.remove("highlight"), 1000);
+  };
+
   const fetchAttendanceRecords = async () => {
     try {
       const response = await axios.get(`${backendUrl}/api/attendance`);
@@ -169,24 +192,33 @@ const LeaveAttendance = () => {
     }
   };
 
-  // CORRECTED: Fetch actual leave data and handle string userId
+  // CORRECTED: Fetch leaves with proper user ID matching
   const fetchLeaves = async () => {
     try {
       const response = await axios.get(`${backendUrl}/api/leaves`);
       const leavesData = response.data || [];
-      console.log('values of leaveData', leaveData);
-      // Group leaves by user ID (userId is string, not object)
+      console.log("Raw leaves data:", leavesData);
+
+      // Group leaves by user ID - handle both object and string userId
       const leavesByUser = {};
-      leavesData.forEach(leave => {
+      leavesData.forEach((leave) => {
         if (leave.status === "approved") {
-          const userId = leave.userId; // This is already a string ID
+          // Handle both cases: userId as object or string
+          let userId;
+          if (typeof leave.userId === "object" && leave.userId !== null) {
+            userId = leave.userId._id; // Extract _id from object
+          } else {
+            userId = leave.userId; // Use string directly
+          }
+
           if (!leavesByUser[userId]) {
             leavesByUser[userId] = [];
           }
           leavesByUser[userId].push(leave);
         }
       });
-      
+
+      console.log("Processed mrLeaves:", leavesByUser);
       setMrLeaves(leavesByUser);
     } catch (err) {
       console.error("Failed to fetch leaves:", err);
@@ -338,60 +370,117 @@ const LeaveAttendance = () => {
   const getAttendanceForDate = (date, mrId) => {
     if (!mrId) return null;
     const dateString = date.toISOString().split("T")[0];
-    
+
     // Handle both object and string userId
     const records = attendanceRecords.filter((record) => {
       const recordUserId = record.userId?._id || record.userId; // Handle both populated and string ID
       const recordDate = new Date(record.loginTime).toISOString().split("T")[0];
       return recordUserId === mrId && recordDate === dateString;
     });
-    
+
     return records.length > 0 ? records[0] : null;
   };
 
-  // CORRECTED: Check if date is leave using actual leave data
-  const isLeave = (date, mrId) => {
-    if (!mrId) return false;
-    
-    const leaves = mrLeaves[mrId] || [];
-    const dateString = date.toISOString().split("T")[0];
-    
-    return leaves.some(leave => {
-      const leaveDate = new Date(leave.leaveDate).toISOString().split("T")[0];
-      return leaveDate === dateString;
-    });
-  };
-
-  // Get leave count for a specific MR
+  // CORRECTED: Get leave count for a specific MR - count only approved leaves
   const getLeaveCountForMr = (mrId) => {
     if (!mrId) return 0;
     const leaves = mrLeaves[mrId] || [];
-    return leaves.length;
+
+    // Count only approved leaves
+    const approvedLeaves = leaves.filter(
+      (leave) => leave.status === "approved"
+    );
+
+    return approvedLeaves.length;
   };
 
-  // Get leave details for tooltip
-  const getLeaveDetails = (date, mrId) => {
-    if (!mrId) return null;
-    
+  // CORRECTED: Check if date is leave using actual leave data - only approved leaves
+  const isLeave = (date, mrId) => {
+    if (!mrId) return false;
+
     const leaves = mrLeaves[mrId] || [];
     const dateString = date.toISOString().split("T")[0];
-    
-    const leaveOnDate = leaves.find(leave => {
+
+    return leaves.some((leave) => {
       const leaveDate = new Date(leave.leaveDate).toISOString().split("T")[0];
-      return leaveDate === dateString;
+      return leaveDate === dateString && leave.status === "approved";
     });
-    
-    return leaveOnDate ? {
-      reason: leaveOnDate.reason,
-      type: leaveOnDate.leaveType,
-      status: leaveOnDate.status
-    } : null;
   };
 
-  const isFutureDate = (date) => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return date > today;
+  // CORRECTED: Get leave details for tooltip - only for approved leaves
+  const getLeaveDetails = (date, mrId) => {
+    if (!mrId) return null;
+
+    const leaves = mrLeaves[mrId] || [];
+    const dateString = date.toISOString().split("T")[0];
+
+    const leaveOnDate = leaves.find((leave) => {
+      const leaveDate = new Date(leave.leaveDate).toISOString().split("T")[0];
+      return leaveDate === dateString && leave.status === "approved";
+    });
+
+    return leaveOnDate
+      ? {
+          reason: leaveOnDate.reason,
+          type: leaveOnDate.leaveType,
+          status: leaveOnDate.status,
+        }
+      : null;
+  };
+
+  // CORRECTED: Get leave counts with proper user ID matching
+  const getLeaveCounts = (mrId, joinDate) => {
+    // Get leaves for this MR - mrId should match the userId in leaves data
+    const leaves = mrLeaves[mrId] || [];
+
+    // Filter only approved leaves
+    const approvedLeaves = leaves.filter(
+      (leave) => leave.status === "approved"
+    );
+
+    const currentDate = new Date();
+    currentDate.setHours(0, 0, 0, 0);
+
+    const currentMonthStart = new Date(currentYear, currentMonth, 1);
+    const currentMonthEnd = new Date(currentYear, currentMonth + 1, 0);
+    const yearStart = new Date(currentYear, 0, 1);
+    const yearEnd = new Date(currentYear, 11, 31);
+
+    // Filter leaves to include only past and current dates
+    const validLeaves = approvedLeaves.filter((leave) => {
+      const date = new Date(leave.leaveDate);
+      date.setHours(0, 0, 0, 0);
+      return date <= currentDate;
+    });
+
+    // Monthly leaves count
+    const monthlyLeaves = validLeaves.filter((leave) => {
+      const date = new Date(leave.leaveDate);
+      return date >= currentMonthStart && date <= currentMonthEnd;
+    }).length;
+
+    // Annual leaves count
+    const annualLeaves = validLeaves.filter((leave) => {
+      const date = new Date(leave.leaveDate);
+      return date >= yearStart && date <= yearEnd;
+    }).length;
+
+    // Calculate paid leaves based on months of service
+    const paidLeavesEntitlement = calculatePaidLeaves(joinDate);
+
+    return {
+      monthly: monthlyLeaves,
+      annual: annualLeaves,
+      paid: parseFloat(paidLeavesEntitlement),
+      total: validLeaves.length, // Total approved leaves
+    };
+  };
+
+  // CORRECTED: Calculate remaining paid leaves correctly
+  const getRemainingPaidLeaves = (mrId, joinDate) => {
+    const leaveCounts = getLeaveCounts(mrId, joinDate);
+    const remaining = leaveCounts.paid - leaveCounts.total; // Use total approved leaves
+    return Math.max(0, remaining).toFixed(2);
   };
 
   const getDaysInMonth = (year = currentYear, month = currentMonth) => {
@@ -529,53 +618,6 @@ const LeaveAttendance = () => {
     return workingDays;
   };
 
-  // CORRECTED: Fixed leave counts calculation using actual leave data
-  const getLeaveCounts = (mrId, joinDate) => {
-    const leaves = mrLeaves[mrId] || [];
-    const currentDate = new Date();
-    currentDate.setHours(0, 0, 0, 0);
-
-    const currentMonthStart = new Date(currentYear, currentMonth, 1);
-    const currentMonthEnd = new Date(currentYear, currentMonth + 1, 0);
-    const yearStart = new Date(currentYear, 0, 1);
-    const yearEnd = new Date(currentYear, 11, 31);
-
-    // Filter leaves to include only past and current dates
-    const validLeaves = leaves.filter((leave) => {
-      const date = new Date(leave.leaveDate);
-      date.setHours(0, 0, 0, 0);
-      return date <= currentDate;
-    });
-
-    // Monthly leaves count
-    const monthlyLeaves = validLeaves.filter((leave) => {
-      const date = new Date(leave.leaveDate);
-      return date >= currentMonthStart && date <= currentMonthEnd;
-    }).length;
-
-    // Annual leaves count
-    const annualLeaves = validLeaves.filter((leave) => {
-      const date = new Date(leave.leaveDate);
-      return date >= yearStart && date <= yearEnd;
-    }).length;
-
-    // Calculate paid leaves based on months of service
-    const paidLeavesEntitlement = calculatePaidLeaves(joinDate);
-
-    return {
-      monthly: monthlyLeaves,
-      annual: annualLeaves,
-      paid: parseFloat(paidLeavesEntitlement),
-    };
-  };
-
-  // Calculate remaining paid leaves correctly
-  const getRemainingPaidLeaves = (mrId, joinDate) => {
-    const leaveCounts = getLeaveCounts(mrId, joinDate);
-    const remaining = leaveCounts.paid - leaveCounts.annual;
-    return Math.max(0, remaining).toFixed(2);
-  };
-
   // Handle manual attendance record
   const handleRecordAttendance = async () => {
     if (!selectedAttendanceMr || !startDate || !startTime || !endTime) {
@@ -585,6 +627,12 @@ const LeaveAttendance = () => {
 
     if (startTime >= endTime) {
       alert("End time must be after start time");
+      return;
+    }
+
+    // Check if date is in the future
+    if (isFutureDate(startDate)) {
+      alert("Cannot record attendance for future dates");
       return;
     }
 
@@ -649,6 +697,12 @@ const LeaveAttendance = () => {
       return;
     }
 
+    // Check if date is in the future
+    if (isFutureDate(leaveDate)) {
+      alert("Cannot apply for leave for future dates");
+      return;
+    }
+
     if (isSunday(leaveDate)) {
       alert("Cannot apply for leave on Sunday");
       return;
@@ -673,13 +727,10 @@ const LeaveAttendance = () => {
         leaveDate: new Date(leaveDate).toISOString(),
         reason: leaveReason,
         leaveType: leaveType,
-        status: "approved"
+        status: "approved",
       };
 
-      const response = await axios.post(
-        `${backendUrl}/api/leaves`,
-        leaveData
-      );
+      const response = await axios.post(`${backendUrl}/api/leaves`, leaveData);
 
       if (response.data.success) {
         showToast("success", "Leave applied successfully!");
@@ -693,8 +744,7 @@ const LeaveAttendance = () => {
       }
     } catch (err) {
       alert(
-        "Failed to apply leave: " +
-          (err.response?.data?.message || err.message)
+        "Failed to apply leave: " + (err.response?.data?.message || err.message)
       );
     } finally {
       setLeaveLoading(false);
@@ -714,7 +764,7 @@ const LeaveAttendance = () => {
 
     setStartTime("09:00");
     setEndTime("17:00");
-    
+
     setLeaveReason("");
     setLeaveType("paid");
   };
@@ -744,7 +794,9 @@ const LeaveAttendance = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
             <h2 className="text-xl font-bold mb-4">
-              {modalActiveTab === "attendance" ? "Record Attendance" : "Apply Leave"}
+              {modalActiveTab === "attendance"
+                ? "Record Attendance"
+                : "Apply Leave"}
             </h2>
 
             {/* Tab Navigation */}
@@ -796,13 +848,20 @@ const LeaveAttendance = () => {
                     type="date"
                     value={startDate}
                     onChange={(e) => setStartDate(e.target.value)}
+                    max={getTodayDate()} // Prevent future date selection
                     className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
 
                 {startDate && (
                   <div className="mb-4">
-                    {isSunday(startDate) ? (
+                    {isFutureDate(startDate) ? (
+                      <div className="bg-red-50 border border-red-200 rounded-md p-3">
+                        <p className="text-red-700 text-sm font-medium">
+                          ⚠️ Cannot record attendance for future dates
+                        </p>
+                      </div>
+                    ) : isSunday(startDate) ? (
                       <div className="bg-red-50 border border-red-200 rounded-md p-3">
                         <p className="text-red-700 text-sm font-medium">
                           ⚠️ Cannot record attendance on Sunday
@@ -866,6 +925,7 @@ const LeaveAttendance = () => {
                       !startDate ||
                       !startTime ||
                       !endTime ||
+                      isFutureDate(startDate) || // Disable if future date
                       isSunday(startDate) ||
                       isHoliday(startDate) ||
                       isLeave(new Date(startDate), selectedAttendanceMr)
@@ -876,6 +936,7 @@ const LeaveAttendance = () => {
                       !startDate ||
                       !startTime ||
                       !endTime ||
+                      isFutureDate(startDate) ||
                       isSunday(startDate) ||
                       isHoliday(startDate) ||
                       isLeave(new Date(startDate), selectedAttendanceMr)
@@ -899,13 +960,20 @@ const LeaveAttendance = () => {
                     type="date"
                     value={leaveDate}
                     onChange={(e) => setLeaveDate(e.target.value)}
+                    max={getTodayDate()} // Prevent future date selection
                     className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
 
                 {leaveDate && (
                   <div className="mb-4">
-                    {isSunday(leaveDate) ? (
+                    {isFutureDate(leaveDate) ? (
+                      <div className="bg-red-50 border border-red-200 rounded-md p-3">
+                        <p className="text-red-700 text-sm font-medium">
+                          ⚠️ Cannot apply for leave for future dates
+                        </p>
+                      </div>
+                    ) : isSunday(leaveDate) ? (
                       <div className="bg-red-50 border border-red-200 rounded-md p-3">
                         <p className="text-red-700 text-sm font-medium">
                           ⚠️ Cannot apply for leave on Sunday
@@ -918,10 +986,14 @@ const LeaveAttendance = () => {
                           {getHolidayName(leaveDate)}
                         </p>
                       </div>
-                    ) : getAttendanceForDate(new Date(leaveDate), selectedAttendanceMr) ? (
+                    ) : getAttendanceForDate(
+                        new Date(leaveDate),
+                        selectedAttendanceMr
+                      ) ? (
                       <div className="bg-red-50 border border-red-200 rounded-md p-3">
                         <p className="text-red-700 text-sm font-medium">
-                          ⚠️ Cannot apply for leave on a day with existing attendance
+                          ⚠️ Cannot apply for leave on a day with existing
+                          attendance
                         </p>
                       </div>
                     ) : (
@@ -970,18 +1042,26 @@ const LeaveAttendance = () => {
                       !selectedAttendanceMr ||
                       !leaveDate ||
                       !leaveReason ||
+                      isFutureDate(leaveDate) || // Disable if future date
                       isSunday(leaveDate) ||
                       isHoliday(leaveDate) ||
-                      getAttendanceForDate(new Date(leaveDate), selectedAttendanceMr)
+                      getAttendanceForDate(
+                        new Date(leaveDate),
+                        selectedAttendanceMr
+                      )
                     }
                     className={`flex-1 py-2 px-4 rounded-lg flex items-center justify-center gap-2 ${
                       leaveLoading ||
                       !selectedAttendanceMr ||
                       !leaveDate ||
                       !leaveReason ||
+                      isFutureDate(leaveDate) ||
                       isSunday(leaveDate) ||
                       isHoliday(leaveDate) ||
-                      getAttendanceForDate(new Date(leaveDate), selectedAttendanceMr)
+                      getAttendanceForDate(
+                        new Date(leaveDate),
+                        selectedAttendanceMr
+                      )
                         ? "bg-gray-400 cursor-not-allowed"
                         : "bg-blue-600 hover:bg-blue-700"
                     } text-white`}
@@ -1005,6 +1085,7 @@ const LeaveAttendance = () => {
         </div>
       )}
 
+      {/* Rest of the component remains the same */}
       {!showCalendarView && (
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-bold text-gray-800">
@@ -1021,10 +1102,12 @@ const LeaveAttendance = () => {
 
               <div className="relative w-72">
                 <Search
-                  className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400"
+                  className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
                   size={16}
+                  onClick={handleIconClick}
                 />
                 <input
+                  ref={inputRef}
                   type="text"
                   placeholder="Search MRs..."
                   value={searchTerm}
@@ -1078,10 +1161,11 @@ const LeaveAttendance = () => {
             <div className="bg-white rounded-2xl shadow border border-gray-200 p-6">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-xl font-bold text-gray-800">
-                  {selectedMr?.medicalRepName} - Calendar View 
+                  {selectedMr?.medicalRepName} - Calendar View
                   {selectedMr && (
                     <span className="ml-2 text-lg font-normal text-red-600">
-                      (Leave Taken: {getLeaveCountForMr(selectedMr._id)})
+                      (Leave Taken:{" "}
+                      {getLeaveCounts(selectedMr._id, selectedMr.date).total})
                     </span>
                   )}
                 </h2>
@@ -1093,7 +1177,11 @@ const LeaveAttendance = () => {
                     <ChevronLeft size={20} />
                   </button>
                   <span className="text-lg font-semibold">
-                    {new Date(currentYear, currentMonth).toLocaleString('default', { month: 'long' })} {currentYear}
+                    {new Date(currentYear, currentMonth).toLocaleString(
+                      "default",
+                      { month: "long" }
+                    )}{" "}
+                    {currentYear}
                   </span>
                   <button
                     onClick={() => navigateMonth("next")}
@@ -1110,31 +1198,38 @@ const LeaveAttendance = () => {
               </div>
 
               <div className="grid grid-cols-7 gap-2 mb-6">
-                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
-                  <div
-                    key={day}
-                    className={`text-center font-semibold py-2 ${
-                      day === "Sun" ? "text-red-600" : "text-gray-700"
-                    }`}
-                  >
-                    {day}
-                  </div>
-                ))}
+                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(
+                  (day) => (
+                    <div
+                      key={day}
+                      className={`text-center font-semibold py-2 ${
+                        day === "Sun" ? "text-red-600" : "text-gray-700"
+                      }`}
+                    >
+                      {day}
+                    </div>
+                  )
+                )}
 
                 {getDaysInMonth().map((date, index) => {
                   if (date === null) {
                     return <div key={`empty-${index}`} className="h-12" />;
                   }
 
-                  const attendance = getAttendanceForDate(date, selectedMr?._id);
+                  const attendance = getAttendanceForDate(
+                    date,
+                    selectedMr?._id
+                  );
                   const isLeaveDay = isLeave(date, selectedMr?._id);
                   const leaveDetails = getLeaveDetails(date, selectedMr?._id);
                   const isSundayDay = isSunday(date);
                   const isHolidayDay = isHoliday(date);
                   const isCurrentMonth = date.getMonth() === currentMonth;
-                  const isToday = date.toDateString() === new Date().toDateString();
+                  const isToday =
+                    date.toDateString() === new Date().toDateString();
 
-                  let cellStyle = "h-12 flex items-center justify-center rounded-lg border-2 ";
+                  let cellStyle =
+                    "h-12 flex items-center justify-center rounded-lg border-2 ";
 
                   if (isLeaveDay) {
                     cellStyle += "bg-red-500 text-white border-red-600 ";
@@ -1162,7 +1257,9 @@ const LeaveAttendance = () => {
                         isHolidayDay
                           ? `Holiday: ${getHolidayName(date)}`
                           : isLeaveDay
-                          ? `Leave: ${leaveDetails?.reason || 'No reason provided'} (${leaveDetails?.type})`
+                          ? `Leave: ${
+                              leaveDetails?.reason || "No reason provided"
+                            } (${leaveDetails?.type})`
                           : attendance
                           ? "Present"
                           : isSundayDay
@@ -1206,7 +1303,8 @@ const LeaveAttendance = () => {
                   {selectedMr?.medicalRepName} - Annual Calendar
                   {selectedMr && (
                     <span className="ml-2 text-lg font-normal text-red-600">
-                      (Leave Taken: {getLeaveCountForMr(selectedMr._id)})
+                      (Leave Taken:{" "}
+                      {getLeaveCounts(selectedMr._id, selectedMr.date).total})
                     </span>
                   )}
                 </h2>
@@ -1234,38 +1332,52 @@ const LeaveAttendance = () => {
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                 {Array.from({ length: 12 }, (_, monthIndex) => {
-                  const monthName = new Date(currentYear, monthIndex).toLocaleString('default', { month: 'short' });
+                  const monthName = new Date(
+                    currentYear,
+                    monthIndex
+                  ).toLocaleString("default", { month: "short" });
                   const monthDays = getDaysInMonth(currentYear, monthIndex);
-                  
+
                   return (
-                    <div key={monthName} className="border border-gray-200 rounded-lg p-4 bg-white">
+                    <div
+                      key={monthName}
+                      className="border border-gray-200 rounded-lg p-4 bg-white"
+                    >
                       <h3 className="text-lg font-semibold text-center mb-3 text-gray-800">
                         {monthName}
                       </h3>
                       <div className="grid grid-cols-7 gap-1 mb-2">
-                        {["S", "M", "T", "W", "T", "F", "S"].map((day, index) => (
-                          <div
-                            key={day}
-                            className={`text-center text-xs font-medium ${
-                              index === 0 ? "text-red-600" : "text-gray-600"
-                            }`}
-                          >
-                            {day}
-                          </div>
-                        ))}
+                        {["S", "M", "T", "W", "T", "F", "S"].map(
+                          (day, index) => (
+                            <div
+                              key={day}
+                              className={`text-center text-xs font-medium ${
+                                index === 0 ? "text-red-600" : "text-gray-600"
+                              }`}
+                            >
+                              {day}
+                            </div>
+                          )
+                        )}
                       </div>
                       <div className="grid grid-cols-7 gap-1">
                         {monthDays.map((date, index) => {
                           if (date === null) {
-                            return <div key={`empty-${index}`} className="h-6" />;
+                            return (
+                              <div key={`empty-${index}`} className="h-6" />
+                            );
                           }
 
-                          const attendance = getAttendanceForDate(date, selectedMr?._id);
+                          const attendance = getAttendanceForDate(
+                            date,
+                            selectedMr?._id
+                          );
                           const isLeaveDay = isLeave(date, selectedMr?._id);
                           const isSundayDay = isSunday(date);
                           const isHolidayDay = isHoliday(date);
 
-                          let cellStyle = "h-6 flex items-center justify-center rounded text-xs ";
+                          let cellStyle =
+                            "h-6 flex items-center justify-center rounded text-xs ";
 
                           if (isLeaveDay) {
                             cellStyle += "bg-red-500 text-white ";
@@ -1339,7 +1451,7 @@ const LeaveAttendance = () => {
                 currentMRs.map((mr, index) => {
                   const leaveCounts = getLeaveCounts(mr._id, mr.date);
                   const remainingPaid = getRemainingPaidLeaves(mr._id, mr.date);
-                  const leaveTaken = getLeaveCountForMr(mr._id);
+                  const leaveTaken = leaveCounts.total; // Use total from leaveCounts
                   const attendanceStats = getAttendanceStats(mr._id);
 
                   return (

@@ -33,7 +33,952 @@ const formatDateToReadable = (isoString) => {
   }).format(date);
 };
 
-// Function to update ReportInHand inventory after sale - CORRECTED VERSION
+// ==================== SALES ANALYTICS ENDPOINTS ====================
+
+// Helper function to get date ranges
+const getDateRanges = () => {
+  const now = new Date();
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+
+  // For monthly sales: from 1st of current month to current date
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  // For yearly sales: from 1st January to current date
+  const yearStart = new Date(now.getFullYear(), 0, 1);
+
+  return { today, monthStart, yearStart, now };
+};
+
+const getTableDateRanges = (period) => {
+  const now = new Date();
+
+  switch (period) {
+    case "Today":
+      const todayStart = new Date(now);
+      todayStart.setHours(0, 0, 0, 0);
+      return { start: todayStart, end: now };
+
+    case "Month":
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      return { start: monthStart, end: now };
+
+    case "Year":
+      const yearStart = new Date(now.getFullYear(), 0, 1);
+      return { start: yearStart, end: now };
+
+    case "custom":
+      // For custom range, dates will be provided in query params
+      return null;
+
+    default:
+      const defaultStart = new Date(now);
+      defaultStart.setHours(0, 0, 0, 0);
+      return { start: defaultStart, end: now };
+  }
+};
+
+router.get("/analytics/today", async (req, res) => {
+  try {
+    const { today, now } = getDateRanges();
+
+    const todaySales = await SaleSummary.aggregate([
+      {
+        $match: {
+          invoiceDate: {
+            $gte: today,
+            $lte: now,
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalSales: { $sum: "$totalAmount" },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const result =
+      todaySales.length > 0 ? todaySales[0] : { totalSales: 0, count: 0 };
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get monthly sales (from 1st of current month to current date)
+router.get("/analytics/month", async (req, res) => {
+  try {
+    const { monthStart, now } = getDateRanges();
+
+    const monthlySales = await SaleSummary.aggregate([
+      {
+        $match: {
+          invoiceDate: {
+            $gte: monthStart,
+            $lte: now,
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalSales: { $sum: "$totalAmount" },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const result =
+      monthlySales.length > 0 ? monthlySales[0] : { totalSales: 0, count: 0 };
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get yearly sales (from 1st January to current date)
+router.get("/analytics/year", async (req, res) => {
+  try {
+    const { yearStart, now } = getDateRanges();
+
+    const yearlySales = await SaleSummary.aggregate([
+      {
+        $match: {
+          invoiceDate: {
+            $gte: yearStart,
+            $lte: now,
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalSales: { $sum: "$totalAmount" },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const result =
+      yearlySales.length > 0 ? yearlySales[0] : { totalSales: 0, count: 0 };
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// ... (Keep ALL your existing endpoints exactly as they are)
+// Get sales from specific date range (custom range) - ANALYTICS VERSION
+router.get("/sales/analytics/custom-range", async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+
+    if (!startDate || !endDate) {
+      return res
+        .status(400)
+        .json({ message: "Start date and end date are required" });
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999); // Include the entire end date
+
+    const sales = await SaleSummary.aggregate([
+      {
+        $match: {
+          invoiceDate: {
+            $gte: start,
+            $lte: end,
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalSales: { $sum: "$totalAmount" },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const result = sales.length > 0 ? sales[0] : { totalSales: 0, count: 0 };
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.get("/sales/highest-sales", async (req, res) => {
+  try {
+    const { limit = 5, period } = req.query;
+
+    console.log(`🏆 Fetching top ${limit} highest sales for period: ${period}`);
+
+    let dateFilter = {};
+    const dateRange = getTableDateRanges(period);
+
+    if (dateRange) {
+      dateFilter = {
+        invoiceDate: {
+          $gte: dateRange.start,
+          $lte: dateRange.end,
+        },
+      };
+    }
+
+    // Fetch highest sales sorted by amount
+    const highestSales = await SaleSummary.aggregate([
+      {
+        $match: dateFilter,
+      },
+      {
+        $unwind: "$products",
+      },
+      {
+        $lookup: {
+          from: "customers",
+          localField: "customerCode",
+          foreignField: "customerCode",
+          as: "customerInfo",
+        },
+      },
+      {
+        $unwind: {
+          path: "$customerInfo",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $project: {
+          date: { $dateToString: { format: "%Y-%m-%d", date: "$invoiceDate" } },
+          productName: "$products.productName",
+          salesPerson: "$mrName",
+          quantity: "$products.salesQty",
+          amount: "$products.netSellingAmount",
+          customer: "$customerInfo.name",
+          invoiceNumber: 1,
+          timeAgo: "$invoiceDate",
+        },
+      },
+      {
+        $sort: { amount: -1 }, // Sort by amount descending (highest first)
+      },
+      {
+        $limit: parseInt(limit),
+      },
+    ]);
+
+    console.log(`✅ Found ${highestSales.length} highest sales records`);
+
+    // Calculate time ago
+    const now = new Date();
+    const transformedData = highestSales.map((sale) => {
+      const saleDate = new Date(sale.timeAgo);
+      const diffMs = now - saleDate;
+      const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+      const diffDays = Math.floor(diffHours / 24);
+
+      let timeAgo = "";
+      if (diffDays > 0) {
+        timeAgo = `${diffDays} day${diffDays > 1 ? "s" : ""} ago`;
+      } else if (diffHours > 0) {
+        timeAgo = `${diffHours} hour${diffHours > 1 ? "s" : ""} ago`;
+      } else {
+        timeAgo = "Just now";
+      }
+
+      return {
+        ...sale,
+        timeAgo,
+      };
+    });
+
+    res.json({
+      success: true,
+      data: transformedData,
+      count: transformedData.length,
+      period: period,
+    });
+  } catch (error) {
+    console.error("❌ Error fetching highest sales:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+      data: [],
+      count: 0,
+    });
+  }
+});
+
+router.get("/sales/table-data", async (req, res) => {
+  try {
+    const { period, startDate, endDate } = req.query;
+
+    console.log(`📊 Fetching sales table data for period: ${period}`);
+
+    let dateFilter = {};
+
+    // Handle date filtering based on period
+    if (period === "custom" && startDate && endDate) {
+      // Custom date range
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+
+      dateFilter = {
+        invoiceDate: {
+          $gte: start,
+          $lte: end,
+        },
+      };
+      console.log(`📅 Custom range: ${start} to ${end}`);
+    } else {
+      // Predefined periods (Today, Month, Year)
+      const dateRange = getTableDateRanges(period);
+      if (dateRange) {
+        dateFilter = {
+          invoiceDate: {
+            $gte: dateRange.start,
+            $lte: dateRange.end,
+          },
+        };
+        console.log(
+          `📅 ${period} range: ${dateRange.start} to ${dateRange.end}`
+        );
+      }
+    }
+
+    // Fetch sales data with customer information
+    const salesData = await SaleSummary.aggregate([
+      {
+        $match: dateFilter,
+      },
+      {
+        $unwind: "$products",
+      },
+      {
+        $lookup: {
+          from: "customers",
+          localField: "customerCode",
+          foreignField: "customerCode",
+          as: "customerInfo",
+        },
+      },
+      {
+        $unwind: {
+          path: "$customerInfo",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $project: {
+          date: { $dateToString: { format: "%Y-%m-%d", date: "$invoiceDate" } },
+          productName: "$products.productName",
+          salesPerson: "$mrName",
+          quantity: "$products.salesQty",
+          amount: "$products.netSellingAmount",
+          customer: "$customerInfo.name",
+          invoiceNumber: 1,
+          bonusQty: "$products.bonusQty",
+          totalQty: "$products.totalQty",
+          sellingPrice: "$products.sellingPrice",
+          discount: "$products.discount",
+          paymentStatus: 1,
+          remark: 1,
+        },
+      },
+      {
+        $sort: { date: -1 },
+      },
+    ]);
+
+    console.log(`✅ Found ${salesData.length} sales records`);
+
+    // Transform data to match frontend structure
+    const transformedData = salesData.map((sale) => ({
+      date: sale.date,
+      productName: sale.productName,
+      salesPerson: sale.salesPerson,
+      quantity: sale.quantity,
+      amount: sale.amount,
+      customer: sale.customer || "N/A",
+      // Include additional fields if needed
+      invoiceNumber: sale.invoiceNumber,
+      bonusQty: sale.bonusQty,
+      totalQty: sale.totalQty,
+      sellingPrice: sale.sellingPrice,
+      discount: sale.discount,
+      paymentStatus: sale.paymentStatus,
+    }));
+
+    res.json({
+      success: true,
+      data: transformedData,
+      count: transformedData.length,
+      period: period,
+    });
+  } catch (error) {
+    console.error("❌ Error fetching sales table data:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+      data: [],
+      count: 0,
+    });
+  }
+});
+
+router.get("/sales/summary-cards", async (req, res) => {
+  try {
+    const { period } = req.query;
+    console.log(`📈 Fetching sales summary for period: ${period}`);
+
+    let dateFilter = {};
+    const dateRange = getTableDateRanges(period);
+
+    if (dateRange) {
+      dateFilter = {
+        invoiceDate: {
+          $gte: dateRange.start,
+          $lte: dateRange.end,
+        },
+      };
+    }
+
+    const summary = await SaleSummary.aggregate([
+      {
+        $match: dateFilter,
+      },
+      {
+        $unwind: "$products",
+      },
+      {
+        $group: {
+          _id: null,
+          totalSales: { $sum: "$products.netSellingAmount" },
+          totalQuantity: { $sum: "$products.salesQty" },
+          totalTransactions: { $sum: 1 },
+          averageOrderValue: { $avg: "$totalAmount" },
+        },
+      },
+    ]);
+
+    const result =
+      summary.length > 0
+        ? summary[0]
+        : {
+            totalSales: 0,
+            totalQuantity: 0,
+            totalTransactions: 0,
+            averageOrderValue: 0,
+          };
+
+    res.json({
+      success: true,
+      period: period,
+      summary: result,
+    });
+  } catch (error) {
+    console.error("❌ Error fetching sales summary:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+      summary: {
+        totalSales: 0,
+        totalQuantity: 0,
+        totalTransactions: 0,
+        averageOrderValue: 0,
+      },
+    });
+  }
+});
+
+// Get today's sales
+router.get("/analytics/today", async (req, res) => {
+  try {
+    const { today, now } = getDateRanges();
+
+    const todaySales = await SaleSummary.aggregate([
+      {
+        $match: {
+          invoiceDate: {
+            $gte: today,
+            $lte: now,
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalSales: { $sum: "$totalAmount" },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const result =
+      todaySales.length > 0 ? todaySales[0] : { totalSales: 0, count: 0 };
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get monthly sales (from 1st of current month to current date)
+router.get("/analytics/month", async (req, res) => {
+  try {
+    const { monthStart, now } = getDateRanges();
+
+    const monthlySales = await SaleSummary.aggregate([
+      {
+        $match: {
+          invoiceDate: {
+            $gte: monthStart,
+            $lte: now,
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalSales: { $sum: "$totalAmount" },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const result =
+      monthlySales.length > 0 ? monthlySales[0] : { totalSales: 0, count: 0 };
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get yearly sales (from 1st January to current date)
+router.get("/analytics/year", async (req, res) => {
+  try {
+    const { yearStart, now } = getDateRanges();
+
+    const yearlySales = await SaleSummary.aggregate([
+      {
+        $match: {
+          invoiceDate: {
+            $gte: yearStart,
+            $lte: now,
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalSales: { $sum: "$totalAmount" },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const result =
+      yearlySales.length > 0 ? yearlySales[0] : { totalSales: 0, count: 0 };
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get sales from specific date range (custom range) - ANALYTICS VERSION
+router.get("/sales/analytics/custom-range", async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+
+    if (!startDate || !endDate) {
+      return res
+        .status(400)
+        .json({ message: "Start date and end date are required" });
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999); // Include the entire end date
+
+    const sales = await SaleSummary.aggregate([
+      {
+        $match: {
+          invoiceDate: {
+            $gte: start,
+            $lte: end,
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalSales: { $sum: "$totalAmount" },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const result = sales.length > 0 ? sales[0] : { totalSales: 0, count: 0 };
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+router.get("/custom-range", async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        message: "Start date and end date are required",
+      });
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999); // Include the entire end date
+
+    console.log(`Fetching sales from ${start} to ${end}`);
+
+    const sales = await SaleSummary.aggregate([
+      {
+        $match: {
+          invoiceDate: {
+            $gte: start,
+            $lte: end,
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalSales: { $sum: "$totalAmount" },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const result = sales.length > 0 ? sales[0] : { totalSales: 0, count: 0 };
+
+    res.json({
+      success: true,
+      totalSales: result.totalSales,
+      count: result.count,
+    });
+  } catch (error) {
+    console.error("Error in custom-range endpoint:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+      totalSales: 0,
+    });
+  }
+});
+
+// Get comprehensive sales dashboard data
+router.get("/analytics/dashboard", async (req, res) => {
+  try {
+    console.log("🔍 Starting sales dashboard analytics...");
+
+    const now = new Date();
+    console.log("📅 Current date/time (now):", now);
+
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+    console.log("📅 Today start (00:00:00):", today);
+
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    console.log("📅 Month start (1st of current month):", monthStart);
+
+    const yearStart = new Date(now.getFullYear(), 0, 1);
+    console.log("📅 Year start (Jan 1st):", yearStart);
+
+    // Previous period for growth calculation
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    yesterday.setHours(0, 0, 0, 0);
+    console.log("📅 Yesterday start (00:00:00):", yesterday);
+
+    const prevDayEnd = new Date(yesterday);
+    prevDayEnd.setHours(23, 59, 59, 999);
+    console.log("📅 Yesterday end (23:59:59):", prevDayEnd);
+
+    console.log("🔄 Executing all sales queries in parallel...");
+    // Execute all queries in parallel
+    const [todayResult, monthlyResult, yearlyResult, yesterdayResult] =
+      await Promise.all([
+        // Today's sales
+        (async () => {
+          console.log("📊 Querying today's sales...");
+          const result = await SaleSummary.aggregate([
+            {
+              $match: {
+                invoiceDate: {
+                  $gte: today,
+                  $lte: now,
+                },
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                amount: { $sum: "$totalAmount" },
+              },
+            },
+          ]);
+          console.log("✅ Today's sales result:", result);
+          return result;
+        })(),
+
+        // Monthly sales (current month 1st to current date)
+        (async () => {
+          console.log("📊 Querying monthly sales...");
+          const result = await SaleSummary.aggregate([
+            {
+              $match: {
+                invoiceDate: {
+                  $gte: monthStart,
+                  $lte: now,
+                },
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                amount: { $sum: "$totalAmount" },
+              },
+            },
+          ]);
+          console.log("✅ Monthly sales result:", result);
+          return result;
+        })(),
+
+        // Yearly sales (Jan 1 to current date)
+        (async () => {
+          console.log("📊 Querying yearly sales...");
+          const result = await SaleSummary.aggregate([
+            {
+              $match: {
+                invoiceDate: {
+                  $gte: yearStart,
+                  $lte: now,
+                },
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                amount: { $sum: "$totalAmount" },
+              },
+            },
+          ]);
+          console.log("✅ Yearly sales result:", result);
+          return result;
+        })(),
+
+        // Yesterday's sales for growth calculation
+        (async () => {
+          console.log("📊 Querying yesterday's sales...");
+          const result = await SaleSummary.aggregate([
+            {
+              $match: {
+                invoiceDate: {
+                  $gte: yesterday,
+                  $lte: prevDayEnd,
+                },
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                amount: { $sum: "$totalAmount" },
+              },
+            },
+          ]);
+          console.log("✅ Yesterday's sales result:", result);
+          return result;
+        })(),
+      ]);
+
+    console.log("📈 Extracting sales amounts from query results...");
+    // Extract amounts or default to 0
+    const todaySales = todayResult[0]?.amount || 0;
+    console.log("💰 Today sales amount:", todaySales);
+
+    const monthlySales = monthlyResult[0]?.amount || 0;
+    console.log("💰 Monthly sales amount:", monthlySales);
+
+    const yearlySales = yearlyResult[0]?.amount || 0;
+    console.log("💰 Yearly sales amount:", yearlySales);
+
+    const yesterdaySales = yesterdayResult[0]?.amount || 0;
+    console.log("💰 Yesterday sales amount:", yesterdaySales);
+
+    console.log("📊 Calculating growth percentage...");
+    // Calculate growth percentage (today vs yesterday)
+    const growth =
+      yesterdaySales > 0
+        ? ((todaySales - yesterdaySales) / yesterdaySales) * 100
+        : 0;
+    console.log("📈 Growth percentage:", growth, "%");
+
+    const finalResult = {
+      totalSales: yearlySales, // Using yearly sales as total sales
+      monthlySales,
+      todaySales,
+      yearSales: yearlySales,
+      growth: parseFloat(growth.toFixed(2)),
+    };
+
+    console.log("✅ Final dashboard response:", finalResult);
+    console.log("🎯 Sending response to client...");
+
+    res.json(finalResult);
+  } catch (error) {
+    console.error("❌ Error in getSalesDashboard:", error);
+    console.error("🔍 Error details:", error.message);
+    console.error("📝 Error stack:", error.stack);
+
+    const fallbackResponse = {
+      message: error.message,
+      // Fallback data
+      totalSales: 0,
+      monthlySales: 0,
+      todaySales: 0,
+      yearSales: 0,
+      growth: 0,
+    };
+
+    console.log("🔄 Sending fallback response:", fallbackResponse);
+    res.status(500).json(fallbackResponse);
+  }
+});
+
+// Get date-wise sales breakdown
+router.get("/analytics/breakdown", async (req, res) => {
+  try {
+    console.log("🔍 Starting sales breakdown analytics...");
+
+    const { period } = req.query; // 'daily', 'monthly', 'yearly'
+    console.log("📊 Requested period:", period);
+
+    let groupFormat;
+    let match = {};
+    console.log("📋 Initial match conditions:", match);
+
+    console.log("🔄 Determining group format based on period...");
+    switch (period) {
+      case "daily":
+        console.log("📅 Setting group format for DAILY breakdown");
+        groupFormat = {
+          year: { $year: "$invoiceDate" },
+          month: { $month: "$invoiceDate" },
+          day: { $dayOfMonth: "$invoiceDate" },
+        };
+        break;
+      case "monthly":
+        console.log("📅 Setting group format for MONTHLY breakdown");
+        groupFormat = {
+          year: { $year: "$invoiceDate" },
+          month: { $month: "$invoiceDate" },
+        };
+        break;
+      case "yearly":
+        console.log("📅 Setting group format for YEARLY breakdown");
+        groupFormat = {
+          year: { $year: "$invoiceDate" },
+        };
+        break;
+      default:
+        console.log(
+          "⚠️ No valid period specified, defaulting to DAILY breakdown"
+        );
+        groupFormat = {
+          year: { $year: "$invoiceDate" },
+          month: { $month: "$invoiceDate" },
+          day: { $dayOfMonth: "$invoiceDate" },
+        };
+    }
+
+    console.log("📊 Final group format:", JSON.stringify(groupFormat, null, 2));
+
+    console.log("🔄 Building aggregation pipeline...");
+    const aggregationPipeline = [
+      { $match: match },
+      {
+        $group: {
+          _id: groupFormat,
+          totalSales: { $sum: "$totalAmount" },
+          count: { $sum: 1 },
+          date: { $first: "$invoiceDate" },
+        },
+      },
+      { $sort: { "_id.year": 1, "_id.month": 1, "_id.day": 1 } },
+    ];
+
+    console.log("📋 Aggregation pipeline stages:");
+    console.log(
+      "1. Match stage:",
+      JSON.stringify(aggregationPipeline[0], null, 2)
+    );
+    console.log(
+      "2. Group stage:",
+      JSON.stringify(aggregationPipeline[1], null, 2)
+    );
+    console.log(
+      "3. Sort stage:",
+      JSON.stringify(aggregationPipeline[2], null, 2)
+    );
+
+    console.log("🚀 Executing MongoDB aggregation...");
+    const salesBreakdown = await SaleSummary.aggregate(aggregationPipeline);
+
+    console.log("✅ Aggregation completed successfully");
+    console.log("📈 Number of breakdown records:", salesBreakdown.length);
+    console.log("📊 Breakdown data sample:", salesBreakdown.slice(0, 3)); // Show first 3 records
+
+    // Calculate summary statistics
+    if (salesBreakdown.length > 0) {
+      const totalSalesSum = salesBreakdown.reduce(
+        (sum, item) => sum + item.totalSales,
+        0
+      );
+      const totalCountSum = salesBreakdown.reduce(
+        (sum, item) => sum + item.count,
+        0
+      );
+      console.log("💰 Total sales across all periods:", totalSalesSum);
+      console.log("📦 Total count across all periods:", totalCountSum);
+      console.log(
+        "📊 Average sales per period:",
+        (totalSalesSum / salesBreakdown.length).toFixed(2)
+      );
+    } else {
+      console.log("ℹ️ No sales data found for the breakdown");
+    }
+
+    console.log("🎯 Sending breakdown response to client...");
+    res.json(salesBreakdown);
+  } catch (error) {
+    console.error("❌ Error in sales breakdown analytics:", error);
+    console.error("🔍 Error details:", error.message);
+    console.error("📝 Error stack:", error.stack);
+    console.error("📋 Request query that caused error:", req.query);
+
+    res.status(500).json({
+      message: error.message,
+      period: req.query.period,
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
 const updateReportInHandAfterSale = async (productName, salesQty, bonusQty) => {
   try {
     const totalQtyToDeduct = salesQty + bonusQty;

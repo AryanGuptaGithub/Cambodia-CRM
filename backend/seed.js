@@ -437,17 +437,7 @@ async function seedHTabs() {
       category: "main",
       reportType: "Hide/Show Tabs",
     },
-    {
-      tabId: "settings",
-      name: "Settings",
-      description: "System settings",
-      path: "",
-      icon: "Settings",
-      level: 0,
-      sequence: 3,
-      category: "settings",
-      reportType: "Hide/Show Tabs",
-    },
+
     {
       tabId: "products",
       name: "Product Manager",

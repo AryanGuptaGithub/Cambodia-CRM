@@ -1488,8 +1488,311 @@ const Sales = () => {
                 </h2>
 
                 <form className="grid grid-cols-1 md:grid-cols-3 gap-4 max-h-[70vh]">
-                  {/* Form fields remain the same */}
-                  {/* ... */}
+                  {/* Recording Date */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Recording Date
+                    </label>
+                    <DatePicker
+                      selected={
+                        form.recordingDate ? new Date(form.recordingDate) : null
+                      }
+                      onChange={(date) =>
+                        handleDateChange(date, "recordingDate")
+                      }
+                      dateFormat="yyyy-MM-dd"
+                      placeholderText="Select a date"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                    />
+                  </div>
+
+                  {/* Invoice Number */}
+                  <div>
+                    <label className="block text-sm font-medium">
+                      Invoice Number
+                    </label>
+                    <InputField
+                      type="text"
+                      name="invoiceNumber"
+                      value={form.invoiceNumber}
+                      onChange={(e) =>
+                        handleNumericInputChange(e, enhancedHandleChange)
+                      }
+                      className="w-full border px-3 py-2 rounded-lg capitalize border-gray-300"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  {/* Invoice Date */}
+                  <div>
+                    <label className="block text-sm font-medium">
+                      Invoice Date
+                    </label>
+                    <DatePicker
+                      selected={
+                        form.invoiceDate ? new Date(form.invoiceDate) : null
+                      }
+                      onChange={(date) => handleDateChange(date, "invoiceDate")}
+                      dateFormat="yyyy-MM-dd"
+                      placeholderText="Select a date"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                    />
+                  </div>
+
+                  {/* MR Name - Using SearchableDropdown */}
+                  <div>
+                    <label className="block text-sm font-medium">MR Name</label>
+                    <SearchableDropdown
+                      options={mrList.map((mr) => ({ value: mr, label: mr }))}
+                      value={form.mrName}
+                      onChange={(value) => updateFormField("mrName", value)}
+                      placeholder="Select MR"
+                      className="w-full"
+                    />
+                  </div>
+
+                  {/* Customer - Using SearchableDropdown */}
+                  <div>
+                    <label className="block text-sm font-medium">
+                      Customer
+                    </label>
+                    <SearchableDropdown
+                      options={customerList.map((customer) => ({
+                        value: customer.code,
+                        label: customer.name,
+                      }))}
+                      value={form.customerCode}
+                      onChange={(value) =>
+                        updateFormField("customerCode", value)
+                      }
+                      placeholder="Select Customer"
+                      className="w-full"
+                    />
+                  </div>
+
+                  {/* Products List */}
+                  <div className="md:col-span-3">
+                    <label className="block text-sm font-medium mb-2">
+                      Products ({form.products?.length || 0})
+                    </label>
+                    <div className="space-y-3 border rounded-lg p-4 bg-gray-50">
+                      {form.products && form.products.length > 0 ? (
+                        form.products.map((product, index) => (
+                          <div
+                            key={`edit-product-${index}`}
+                            className="flex items-center justify-between p-3 bg-white rounded border border-gray-300"
+                          >
+                            <div className="flex-1">
+                              <span className="font-medium text-gray-700">
+                                {product.productName || `Product ${index + 1}`}
+                              </span>
+                              <div className="text-sm text-gray-500 mt-1">
+                                Qty: {product.salesQty || 0} | Bonus:{" "}
+                                {product.bonusQty || 0} | Price: $
+                                {(product.sellingPrice || 0).toFixed(2)}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openProductEditModal(product, index)
+                              }
+                              className="ml-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm cursor-pointer"
+                            >
+                              Edit Details
+                            </button>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-center text-gray-500 py-4">
+                          No products added
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Financial Summary */}
+                  <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-4 gap-4 pt-4 border-t border-gray-300">
+                    <div>
+                      <label className="block text-sm font-medium">
+                        Total Amount
+                      </label>
+                      <InputField
+                        type="text"
+                        value={productTotals.totalAmount.toFixed(2)}
+                        className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700 border-gray-300"
+                        disabled
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium">
+                        Total Discount
+                      </label>
+                      <InputField
+                        type="text"
+                        value={productTotals.totalDiscount.toFixed(2)}
+                        className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700 border-gray-300"
+                        disabled
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium">
+                        Net Amount
+                      </label>
+                      <InputField
+                        type="text"
+                        value={productTotals.netAmount.toFixed(2)}
+                        className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700 border-gray-300"
+                        disabled
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium">
+                        Profit / Loss
+                      </label>
+                      <InputField
+                        type="text"
+                        value={productTotals.totalProfitLoss.toFixed(2)}
+                        disabled
+                        className={`w-full border px-3 py-2 rounded-lg bg-gray-200 border-gray-300 ${
+                          productTotals?.totalProfitLoss > 0
+                            ? "text-green-600"
+                            : productTotals?.totalProfitLoss < 0
+                            ? "text-red-600"
+                            : "text-gray-700"
+                        }`}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Payment Information */}
+                  <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium">
+                        Credit Days
+                      </label>
+                      <InputField
+                        type="text"
+                        name="creditDays"
+                        value={form.creditDays}
+                        onChange={(e) =>
+                          handleNumericInputChange(e, enhancedHandleChange)
+                        }
+                        className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                        autoComplete="off"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium">
+                        Due Date
+                      </label>
+                      <DatePicker
+                        selected={form.dueDate ? new Date(form.dueDate) : null}
+                        dateFormat="yyyy-MM-dd"
+                        placeholderText="Select a date"
+                        className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700 border-gray-300"
+                        disabled
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium">
+                        Paid Amount
+                      </label>
+                      <InputField
+                        type="text"
+                        name="paidAmount"
+                        value={form.paidAmount}
+                        onChange={(e) =>
+                          handleNumericInputChange(e, enhancedHandleChange)
+                        }
+                        className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                        autoComplete="off"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium">
+                        Due Amount
+                      </label>
+                      <InputField
+                        type="text"
+                        value={form.dueAmount}
+                        className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700 border-gray-300"
+                        disabled
+                      />
+                    </div>
+                  </div>
+
+                  {/* Payment Status */}
+                  <div>
+                    <label className="block text-sm font-medium">
+                      Payment Status
+                    </label>
+                    <SearchableDropdown
+                      options={statuses.map((status) => ({
+                        value: status.type,
+                        label: status.type,
+                      }))}
+                      value={form.paymentStatus}
+                      onChange={(value) =>
+                        updateFormField("paymentStatus", value)
+                      }
+                      placeholder="Select Status"
+                      className="w-full"
+                    />
+                  </div>
+
+                  {/* Delivery Date */}
+                  <div>
+                    <label className="block text-sm font-medium">
+                      Delivery Date
+                    </label>
+                    <DatePicker
+                      selected={
+                        form.deliveryDate ? new Date(form.deliveryDate) : null
+                      }
+                      dateFormat="yyyy-MM-dd"
+                      placeholderText="Select a date"
+                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700 border-gray-300"
+                      disabled
+                    />
+                  </div>
+
+                  {/* Remark - Changed to textarea with border */}
+                  <div className="md:col-span-3">
+                    <label className="block text-sm font-medium">Remark</label>
+                    <textarea
+                      name="remark"
+                      value={form.remark}
+                      onChange={enhancedHandleChange}
+                      className="w-full border border-gray-300 px-3 py-2 rounded-lg capitalize"
+                      rows={3}
+                      placeholder="Enter remarks..."
+                    />
+                  </div>
+
+                  {/* Footer buttons */}
+                  <div className="md:col-span-3 mt-4 flex justify-end gap-3 border-t border-gray-300 pt-4">
+                    <button
+                      type="button"
+                      onClick={() => setIsEditModalOpen(false)}
+                      className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+                      onClick={(e) => handleUpdateSales(e, form)}
+                    >
+                      Update
+                    </button>
+                  </div>
                 </form>
               </div>
             </div>,

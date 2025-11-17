@@ -9,22 +9,26 @@ import Destination from "../../models/accounts/Destination.js";
 
 // Helper function to convert Sr number to category ObjectId
 const convertSrToCategoryId = async (categoryValue) => {
-  if (typeof categoryValue === 'string' && /^\d+$/.test(categoryValue)) {
-    
-    
+  if (typeof categoryValue === "string" && /^\d+$/.test(categoryValue)) {
     // Get all categories sorted the same way as in the expense-categary route
     const categories = await addExpenseCategary.find().sort({ category: 1 });
-    
+
     const srNumber = parseInt(categoryValue);
     if (srNumber >= 1 && srNumber <= categories.length) {
       const categoryId = categories[srNumber - 1]._id;
-      
       return categoryId;
     } else {
-      throw new Error(`Invalid category Sr number: ${categoryValue}. Please select a valid category.`);
+      throw new Error(
+        `Invalid category Sr number: ${categoryValue}. Please select a valid category.`
+      );
     }
   }
   return categoryValue;
+};
+
+// Validate MongoDB ID
+const isValidObjectId = (id) => {
+  return mongoose.Types.ObjectId.isValid(id);
 };
 
 router.get("/expenses", async (req, res) => {
@@ -48,10 +52,18 @@ router.get("/expenses", async (req, res) => {
   }
 });
 
-// Get single expense by ID
+// Get single expense by ID - FIXED
 router.get("/expenses/:id", async (req, res) => {
   try {
     const { id } = req.params;
+
+    // Validate if the ID is a valid MongoDB ObjectId
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid expense ID format",
+      });
+    }
 
     const expense = await Expense.findById(id)
       .populate("category", "category description")
@@ -70,6 +82,15 @@ router.get("/expenses/:id", async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching expense:", error);
+
+    // Handle CastError specifically
+    if (error.name === "CastError") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid expense ID format",
+      });
+    }
+
     res.status(500).json({
       success: false,
       message: "Failed to fetch expense",
@@ -82,7 +103,7 @@ router.get("/expenses/:id", async (req, res) => {
 router.post("/expenses", async (req, res) => {
   try {
     const expenseData = req.body;
-    
+
     // Validate required fields
     if (
       !expenseData.date ||
@@ -92,7 +113,8 @@ router.post("/expenses", async (req, res) => {
     ) {
       return res.status(400).json({
         success: false,
-        message: "Date, category, amount, and source account are required fields",
+        message:
+          "Date, category, amount, and source account are required fields",
       });
     }
 
@@ -105,7 +127,7 @@ router.post("/expenses", async (req, res) => {
     const categoryId = await convertSrToCategoryId(expenseData.category);
 
     // Validate that categoryId is now a valid ObjectId
-    if (!mongoose.Types.ObjectId.isValid(categoryId)) {
+    if (!isValidObjectId(categoryId)) {
       return res.status(400).json({
         success: false,
         message: "Invalid category ID format",
@@ -121,19 +143,26 @@ router.post("/expenses", async (req, res) => {
       });
     }
 
+    // Validate source account ID
+    if (!isValidObjectId(expenseData.sourceAccount)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid source account ID format",
+      });
+    }
+
     // Create the expense with the proper category ID
     const newExpense = new Expense({
       ...expenseData,
-      category: categoryId
+      category: categoryId,
     });
 
     let savedExpense = await newExpense.save();
 
     // Deduct amount from source account
-    await Destination.findByIdAndUpdate(
-      expenseData.sourceAccount,
-      { $inc: { totalAmount: -parseFloat(expenseData.amount) } }
-    );
+    await Destination.findByIdAndUpdate(expenseData.sourceAccount, {
+      $inc: { totalAmount: -parseFloat(expenseData.amount) },
+    });
 
     savedExpense = await savedExpense.populate([
       { path: "category", select: "category" },
@@ -169,7 +198,7 @@ router.post("/expenses", async (req, res) => {
     if (error.name === "CastError") {
       return res.status(400).json({
         success: false,
-        message: `Invalid ID format for ${error.path}: ${error.value}`,
+        message: `Invalid ID format: ${error.value}`,
         error: error.message,
       });
     }
@@ -187,19 +216,19 @@ router.get("/expense-categary", async (req, res) => {
   try {
     const currentDate = new Date();
     const currentYear = currentDate.getFullYear();
-    const currentMonth = currentDate.getMonth(); 
-    const yearStart = new Date(currentYear, 0, 1); 
-    const monthStart = new Date(currentYear, currentMonth, 1); 
-    const monthEnd = new Date(currentYear, currentMonth + 1, 0); 
-    
+    const currentMonth = currentDate.getMonth();
+    const yearStart = new Date(currentYear, 0, 1);
+    const monthStart = new Date(currentYear, currentMonth, 1);
+    const monthEnd = new Date(currentYear, currentMonth + 1, 0);
+
     const categories = await addExpenseCategary.find().sort({ category: 1 });
-    
+
     const ytdExpenses = await Expense.aggregate([
       {
         $match: {
           date: {
             $gte: yearStart,
-            $lt: monthStart, 
+            $lt: monthStart,
           },
         },
       },
@@ -216,7 +245,7 @@ router.get("/expense-categary", async (req, res) => {
         $match: {
           date: {
             $gte: monthStart,
-            $lte: monthEnd, 
+            $lte: monthEnd,
           },
         },
       },
@@ -271,6 +300,16 @@ router.put("/expenses/:id", async (req, res) => {
     const { id } = req.params;
     const updateData = req.body;
 
+    // Validate expense ID
+    if (!isValidObjectId(id)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Invalid expense ID format",
+      });
+    }
+
     if (
       !updateData.date ||
       !updateData.category ||
@@ -299,7 +338,7 @@ router.put("/expenses/:id", async (req, res) => {
     const categoryId = await convertSrToCategoryId(updateData.category);
 
     // Validate that categoryId is now a valid ObjectId
-    if (!mongoose.Types.ObjectId.isValid(categoryId)) {
+    if (!isValidObjectId(categoryId)) {
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({
@@ -316,6 +355,16 @@ router.put("/expenses/:id", async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Selected category does not exist",
+      });
+    }
+
+    // Validate source account ID
+    if (!isValidObjectId(updateData.sourceAccount)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Invalid source account ID format",
       });
     }
 
@@ -343,7 +392,7 @@ router.put("/expenses/:id", async (req, res) => {
           { session }
         );
       }
-      
+
       // Deduct from new source account
       await Destination.findByIdAndUpdate(
         newSourceAccountId,
@@ -431,7 +480,7 @@ router.delete("/expenses/:id", async (req, res) => {
     const { id } = req.params;
 
     // Validate ID format
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!isValidObjectId(id)) {
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({
@@ -527,11 +576,11 @@ router.get("/expenses/statistics/summary", async (req, res) => {
           from: "addexpensecategaries", // Make sure this matches your collection name
           localField: "category",
           foreignField: "_id",
-          as: "categoryInfo"
-        }
+          as: "categoryInfo",
+        },
       },
       {
-        $unwind: "$categoryInfo"
+        $unwind: "$categoryInfo",
       },
       {
         $group: {
@@ -573,7 +622,7 @@ router.patch("/expenses/destinations/:id/balance", async (req, res) => {
     const { amount, operation } = req.body; // operation: "add" or "subtract"
 
     // Validate MongoDB ID
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!isValidObjectId(id)) {
       return res.status(400).json({
         success: false,
         message: "Invalid account ID format",

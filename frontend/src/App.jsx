@@ -10,19 +10,20 @@ import SettingsLayout from "./pages/SettingsLayout";
 import ProductManagerLayout from "./pages/ProductManagerLayout";
 import PurchaseLayout from "./pages/PurchaseLayout";
 import SaleLayout from "./pages/SaleLayout";
-import ExepenseLayout from "./pages/ExepenseLayout";
+import ExpenseLayout from "./pages/ExepenseLayout"; // Fixed typo in import
 import ReportsLayout from "./pages/ReportsLayout";
 import UtilityLayout from "./pages/UtilityLayout";
 import HrmLayout from "./pages/HrmLayout";
 import CashAndBankLayout from "./pages/CashAndBankLayout";
 import StaffMemberLayout from "./pages/Utility/StaffMemberLayout";
 
-// Page components
+// Dashboard and Main pages
+import Dashboard from "./pages/Dashbaord"; // Added Dashboard component
+import Login from "./pages/Login";
 import OnlineOrders from "./pages/OnlineOrders";
 import StaffMember from "./pages/StaffMember";
 import StockAdjustment from "./pages/StockAdjustment";
 import StockTransfer from "./pages/StockTransfer";
-import Login from "./pages/Login";
 import Graph from "./pages/graph";
 
 // Master pages
@@ -111,8 +112,8 @@ import FrontSettings from "./pages/Utility/FrontSettings";
 import ProductCard from "./pages/Utility/ProductCard";
 
 // HRM pages
-import Attendance from "./pages/HRM/Attendance";
-import Dashboard from "./pages/HRM/Dashboard";
+import Attendance from "./pages/Dashbaord";
+import HrmDashboard from "./pages/HRM/Dashboard"; // Renamed to avoid conflict
 import Holidays from "./pages/HRM/Holidays";
 import Leaves from "./pages/HRM/Leaves";
 import Payroll from "./pages/HRM/Payroll";
@@ -131,6 +132,8 @@ function App() {
       <Toaster position="bottom-right" reverseOrder={false} />
       <Routes>
         <Route path="/login" element={<Login />} />
+        
+        {/* Main Dashboard Route */}
         <Route
           path="/"
           element={
@@ -140,7 +143,8 @@ function App() {
           }
         >
           {/* Dashboard routes */}
-          <Route index element={<Graph />} />
+          <Route index element={<Dashboard />} /> {/* Main dashboard page */}
+          <Route path="dashboard" element={<Dashboard />} /> {/* Alternative dashboard route */}
           <Route path="graph" element={<Graph />} />
           <Route path="onlineorder" element={<OnlineOrders />} />
           <Route path="stockadjustment" element={<StockAdjustment />} />
@@ -167,7 +171,7 @@ function App() {
             <Route path="supplier/new" element={<AddSupplier />} />
           </Route>
 
-          {/* Settings routes - Moved inside DashboardLayout */}
+          {/* Settings routes */}
           <Route path="settingslayout" element={<SettingsLayout />}>
             <Route index element={<CompanyProfile />} />
             <Route path="company-profile" element={<CompanyProfile />} />
@@ -215,7 +219,7 @@ function App() {
           </Route>
 
           {/* Expense routes */}
-          <Route path="expenselayout" element={<ExepenseLayout />}>
+          <Route path="expenselayout" element={<ExpenseLayout />}>
             <Route index element={<Expenses />} />
             <Route path="expenses">
               <Route index element={<Expenses />} />
@@ -286,7 +290,7 @@ function App() {
             {/* Reports in Hand */}
             <Route path="reports-in-hand" element={<ReportsInHand />} />
 
-            {/* Expiry Stock Report - CORRECTED ROUTE */}
+            {/* Expiry Stock Report */}
             <Route path="expiry-stock-report" element={<ExpiryStockReport />} />
 
             <Route path="payment" element={<PaymentReports />} />
@@ -339,15 +343,15 @@ function App() {
             <Route path="tabhideview" element={<HTabsManipulation />} />
           </Route>
 
-          {/* HRM routes - UPDATED: Removed individual leaves and attendance, added combined leaveattendance */}
+          {/* HRM routes */}
           <Route path="hrmlayout" element={<HrmLayout />}>
-            <Route index element={<Dashboard />} />
+            <Route index element={<HrmDashboard />} />
             <Route path="dashboard">
-              <Route index element={<Dashboard />} />
+              <Route index element={<HrmDashboard />} />
               <Route path="new" element={<AddStaffMember />} />
             </Route>
             <Route path="holidays" element={<Holidays />} />
-            {/* UPDATED: Combined leaves and attendance into leaveattendance */}
+            {/* Combined leaves and attendance */}
             <Route path="leaveattendance" element={<LeaveAndAttendance />} />
             <Route path="payroll">
               <Route index element={<Payroll />} />
