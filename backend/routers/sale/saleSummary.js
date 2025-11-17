@@ -33,23 +33,6 @@ const formatDateToReadable = (isoString) => {
   }).format(date);
 };
 
-// ==================== SALES ANALYTICS ENDPOINTS ====================
-
-// Helper function to get date ranges
-const getDateRanges = () => {
-  const now = new Date();
-  const today = new Date(now);
-  today.setHours(0, 0, 0, 0);
-
-  // For monthly sales: from 1st of current month to current date
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-
-  // For yearly sales: from 1st January to current date
-  const yearStart = new Date(now.getFullYear(), 0, 1);
-
-  return { today, monthStart, yearStart, now };
-};
-
 const getTableDateRanges = (period) => {
   const now = new Date();
 
@@ -77,6 +60,83 @@ const getTableDateRanges = (period) => {
       return { start: defaultStart, end: now };
   }
 };
+
+router.get("/outstanding/custom-range", async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        message: "Start date and end date are required",
+      });
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999); // Include the entire end date
+
+    // Match invoices with outstanding amounts (dueAmount > 0)
+    const outstandingData = await SaleSummary.aggregate([
+      {
+        $match: {
+          invoiceDate: {
+            $gte: start,
+            $lte: end,
+          },
+          $or: [
+            { dueAmount: { $gt: 0 } },
+            { paymentStatus: { $in: ["Credit", "Partial Paid"] } },
+          ],
+        },
+      },
+      {
+        $project: {
+          recordingDate: 1,
+          invoiceNumber: 1,
+          invoiceDate: 1,
+          mrName: 1,
+          customerName: 1,
+          customerCode: 1,
+          customerId: 1,
+          creditDays: 1,
+          dueDate: 1,
+          deliveryDate: 1,
+          paidAmount: 1,
+          dueAmount: 1,
+          totalAmount: 1,
+          paymentStatus: 1,
+          remark: 1,
+          products: 1,
+        },
+      },
+      {
+        $sort: { recordingDate: -1 },
+      },
+    ]);
+
+    // Calculate total outstanding
+    const totalOutstanding = outstandingData.reduce(
+      (sum, invoice) => sum + (invoice.dueAmount || 0),
+      0
+    );
+
+    res.json({
+      success: true,
+      totalOutstanding,
+      outstandingData,
+      count: outstandingData.length,
+    });
+  } catch (error) {
+    console.error("Error fetching custom range outstanding:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+      totalOutstanding: 0,
+      outstandingData: [],
+    });
+  }
+});
 
 router.get("/analytics/today", async (req, res) => {
   try {
@@ -307,6 +367,554 @@ router.get("/sales/highest-sales", async (req, res) => {
     });
   }
 });
+router.get("/outstanding/table-data", async (req, res) => {
+  try {
+    const { period, startDate, endDate } = req.query;
+    let dateFilter = {};
+
+    // Handle date filtering based on period
+    if (period === "custom" && startDate && endDate) {
+      // Custom date range
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+
+      dateFilter = {
+        invoiceDate: {
+          $gte: start,
+          $lte: end,
+        },
+      };
+    } else {
+      // Predefined periods (Today, Month, Year)
+      const dateRange = getTableDateRanges(period);
+      if (dateRange) {
+        dateFilter = {
+          invoiceDate: {
+            $gte: dateRange.start,
+            $lte: dateRange.end,
+          },
+        };
+      }
+    }
+
+    // Add outstanding filter (dueAmount > 0 or Credit/Partial Paid status)
+    dateFilter = {
+      ...dateFilter,
+      $or: [
+        { dueAmount: { $gt: 0 } },
+        { paymentStatus: { $in: ["Credit", "Partial Paid"] } },
+      ],
+    };
+
+    // Fetch outstanding data
+    const outstandingData = await SaleSummary.aggregate([
+      {
+        $match: dateFilter,
+      },
+      {
+        $project: {
+          recordingDate: 1,
+          invoiceNumber: 1,
+          invoiceDate: 1,
+          mrName: 1,
+          customerName: 1,
+          customerCode: 1,
+          customerId: 1,
+          creditDays: 1,
+          dueDate: 1,
+          deliveryDate: 1,
+          paidAmount: 1,
+          dueAmount: 1,
+          totalAmount: 1,
+          paymentStatus: 1,
+          remark: 1,
+          products: 1,
+        },
+      },
+      {
+        $sort: { recordingDate: -1 },
+      },
+    ]);
+
+    res.json({
+      success: true,
+      data: outstandingData,
+      count: outstandingData.length,
+      period: period,
+    });
+  } catch (error) {
+    console.error("Error fetching outstanding table data:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+      data: [],
+      count: 0,
+    });
+  }
+});
+
+// NEW: Function to get outstanding analytics for dashboard
+router.get("/outstanding/analytics/dashboard", async (req, res) => {
+  try {
+    const now = new Date();
+
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const yearStart = new Date(now.getFullYear(), 0, 1);
+
+    // Previous period for growth calculation
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    yesterday.setHours(0, 0, 0, 0);
+
+    const prevDayEnd = new Date(yesterday);
+    prevDayEnd.setHours(23, 59, 59, 999);
+
+    // Outstanding filter (dueAmount > 0 or Credit/Partial Paid status)
+    const outstandingFilter = {
+      $or: [
+        { dueAmount: { $gt: 0 } },
+        { paymentStatus: { $in: ["Credit", "Partial Paid"] } },
+      ],
+    };
+
+    // Execute all queries in parallel
+    const [todayResult, monthlyResult, yearlyResult, yesterdayResult] =
+      await Promise.all([
+        // Today's outstanding
+        (async () => {
+          const result = await SaleSummary.aggregate([
+            {
+              $match: {
+                invoiceDate: {
+                  $gte: today,
+                  $lte: now,
+                },
+                ...outstandingFilter,
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                amount: { $sum: "$dueAmount" },
+              },
+            },
+          ]);
+
+          return result;
+        })(),
+
+        // Monthly outstanding (current month 1st to current date)
+        (async () => {
+          const result = await SaleSummary.aggregate([
+            {
+              $match: {
+                invoiceDate: {
+                  $gte: monthStart,
+                  $lte: now,
+                },
+                ...outstandingFilter,
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                amount: { $sum: "$dueAmount" },
+              },
+            },
+          ]);
+
+          return result;
+        })(),
+
+        // Yearly outstanding (Jan 1 to current date)
+        (async () => {
+          const result = await SaleSummary.aggregate([
+            {
+              $match: {
+                invoiceDate: {
+                  $gte: yearStart,
+                  $lte: now,
+                },
+                ...outstandingFilter,
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                amount: { $sum: "$dueAmount" },
+              },
+            },
+          ]);
+
+          return result;
+        })(),
+
+        // Yesterday's outstanding for growth calculation
+        (async () => {
+          const result = await SaleSummary.aggregate([
+            {
+              $match: {
+                invoiceDate: {
+                  $gte: yesterday,
+                  $lte: prevDayEnd,
+                },
+                ...outstandingFilter,
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                amount: { $sum: "$dueAmount" },
+              },
+            },
+          ]);
+
+          return result;
+        })(),
+      ]);
+
+    // Extract amounts or default to 0
+    const todayOutstanding = todayResult[0]?.amount || 0;
+    const monthlyOutstanding = monthlyResult[0]?.amount || 0;
+    const yearlyOutstanding = yearlyResult[0]?.amount || 0;
+    const yesterdayOutstanding = yesterdayResult[0]?.amount || 0;
+
+    // Calculate growth percentage (today vs yesterday)
+    const growth =
+      yesterdayOutstanding > 0
+        ? ((todayOutstanding - yesterdayOutstanding) / yesterdayOutstanding) *
+          100
+        : 0;
+
+    const finalResult = {
+      totalOutstanding: yearlyOutstanding, // Using yearly outstanding as total outstanding
+      monthlyOutstanding,
+      todayOutstanding,
+      yearOutstanding: yearlyOutstanding,
+      growth: parseFloat(growth.toFixed(2)),
+    };
+
+    res.json(finalResult);
+  } catch (error) {
+    console.error("❌ Error in getOutstandingDashboard:", error);
+    console.error("🔍 Error details:", error.message);
+    console.error("📝 Error stack:", error.stack);
+
+    const fallbackResponse = {
+      message: error.message,
+      // Fallback data
+      totalOutstanding: 0,
+      monthlyOutstanding: 0,
+      todayOutstanding: 0,
+      yearOutstanding: 0,
+      growth: 0,
+    };
+
+    res.status(500).json(fallbackResponse);
+  }
+});
+
+// NEW: Function to get MR-wise outstanding summary
+router.get("/outstanding/mr-wise", async (req, res) => {
+  try {
+    const { period, startDate, endDate } = req.query;
+    let dateFilter = {};
+
+    // Handle date filtering based on period
+    if (period === "custom" && startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+
+      dateFilter = {
+        invoiceDate: {
+          $gte: start,
+          $lte: end,
+        },
+      };
+    } else {
+      const dateRange = getTableDateRanges(period);
+      if (dateRange) {
+        dateFilter = {
+          invoiceDate: {
+            $gte: dateRange.start,
+            $lte: dateRange.end,
+          },
+        };
+      }
+    }
+
+    // Add outstanding filter
+    dateFilter = {
+      ...dateFilter,
+      $or: [
+        { dueAmount: { $gt: 0 } },
+        { paymentStatus: { $in: ["Credit", "Partial Paid"] } },
+      ],
+    };
+
+    const mrWiseOutstanding = await SaleSummary.aggregate([
+      {
+        $match: dateFilter,
+      },
+      {
+        $group: {
+          _id: "$mrName",
+          totalOutstanding: { $sum: "$dueAmount" },
+          invoiceCount: { $sum: 1 },
+          customerCount: { $addToSet: "$customerName" },
+          invoices: {
+            $push: {
+              invoiceNumber: "$invoiceNumber",
+              customerName: "$customerName",
+              dueAmount: "$dueAmount",
+              paymentStatus: "$paymentStatus",
+              dueDate: "$dueDate",
+              recordingDate: "$recordingDate",
+            },
+          },
+        },
+      },
+      {
+        $project: {
+          mrName: "$_id",
+          totalOutstanding: 1,
+          invoiceCount: 1,
+          customerCount: { $size: "$customerCount" },
+          invoices: 1,
+          _id: 0,
+        },
+      },
+      {
+        $sort: { totalOutstanding: -1 },
+      },
+    ]);
+
+    res.json({
+      success: true,
+      data: mrWiseOutstanding,
+      count: mrWiseOutstanding.length,
+      period: period,
+    });
+  } catch (error) {
+    console.error("Error fetching MR-wise outstanding:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+      data: [],
+      count: 0,
+    });
+  }
+});
+
+// NEW: Function to get customer-wise outstanding
+router.get("/outstanding/customer-wise", async (req, res) => {
+  try {
+    const { period, startDate, endDate } = req.query;
+    let dateFilter = {};
+
+    // Handle date filtering based on period
+    if (period === "custom" && startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+
+      dateFilter = {
+        invoiceDate: {
+          $gte: start,
+          $lte: end,
+        },
+      };
+    } else {
+      const dateRange = getTableDateRanges(period);
+      if (dateRange) {
+        dateFilter = {
+          invoiceDate: {
+            $gte: dateRange.start,
+            $lte: dateRange.end,
+          },
+        };
+      }
+    }
+
+    // Add outstanding filter
+    dateFilter = {
+      ...dateFilter,
+      $or: [
+        { dueAmount: { $gt: 0 } },
+        { paymentStatus: { $in: ["Credit", "Partial Paid"] } },
+      ],
+    };
+
+    const customerWiseOutstanding = await SaleSummary.aggregate([
+      {
+        $match: dateFilter,
+      },
+      {
+        $group: {
+          _id: "$customerName",
+          totalOutstanding: { $sum: "$dueAmount" },
+          invoiceCount: { $sum: 1 },
+          mrNames: { $addToSet: "$mrName" },
+          oldestDueDate: { $min: "$dueDate" },
+          invoices: {
+            $push: {
+              invoiceNumber: "$invoiceNumber",
+              mrName: "$mrName",
+              dueAmount: "$dueAmount",
+              paymentStatus: "$paymentStatus",
+              dueDate: "$dueDate",
+              recordingDate: "$recordingDate",
+            },
+          },
+        },
+      },
+      {
+        $project: {
+          customerName: "$_id",
+          totalOutstanding: 1,
+          invoiceCount: 1,
+          mrCount: { $size: "$mrNames" },
+          oldestDueDate: 1,
+          invoices: 1,
+          _id: 0,
+        },
+      },
+      {
+        $sort: { totalOutstanding: -1 },
+      },
+    ]);
+
+    res.json({
+      success: true,
+      data: customerWiseOutstanding,
+      count: customerWiseOutstanding.length,
+      period: period,
+    });
+  } catch (error) {
+    console.error("Error fetching customer-wise outstanding:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+      data: [],
+      count: 0,
+    });
+  }
+});
+
+const getDateRanges = () => {
+  const now = new Date();
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+
+  // For monthly sales: from 1st of current month to current date
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  // For yearly sales: from 1st January to current date
+  const yearStart = new Date(now.getFullYear(), 0, 1);
+
+  return { today, monthStart, yearStart, now };
+};
+
+// ... (keep all your existing sales endpoints as they are)
+
+// Get today's sales
+router.get("/analytics/today", async (req, res) => {
+  try {
+    const { today, now } = getDateRanges();
+
+    const todaySales = await SaleSummary.aggregate([
+      {
+        $match: {
+          invoiceDate: {
+            $gte: today,
+            $lte: now,
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalSales: { $sum: "$totalAmount" },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const result =
+      todaySales.length > 0 ? todaySales[0] : { totalSales: 0, count: 0 };
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get monthly sales (from 1st of current month to current date)
+router.get("/analytics/month", async (req, res) => {
+  try {
+    const { monthStart, now } = getDateRanges();
+
+    const monthlySales = await SaleSummary.aggregate([
+      {
+        $match: {
+          invoiceDate: {
+            $gte: monthStart,
+            $lte: now,
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalSales: { $sum: "$totalAmount" },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const result =
+      monthlySales.length > 0 ? monthlySales[0] : { totalSales: 0, count: 0 };
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get yearly sales (from 1st January to current date)
+router.get("/analytics/year", async (req, res) => {
+  try {
+    const { yearStart, now } = getDateRanges();
+
+    const yearlySales = await SaleSummary.aggregate([
+      {
+        $match: {
+          invoiceDate: {
+            $gte: yearStart,
+            $lte: now,
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalSales: { $sum: "$totalAmount" },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const result =
+      yearlySales.length > 0 ? yearlySales[0] : { totalSales: 0, count: 0 };
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
 
 router.get("/sales/table-data", async (req, res) => {
   try {
@@ -336,7 +944,6 @@ router.get("/sales/table-data", async (req, res) => {
             $lte: dateRange.end,
           },
         };
-       
       }
     }
 
@@ -771,7 +1378,7 @@ router.get("/analytics/dashboard", async (req, res) => {
               },
             },
           ]);
-          
+
           return result;
         })(),
       ]);
@@ -879,10 +1486,8 @@ router.get("/analytics/breakdown", async (req, res) => {
         (sum, item) => sum + item.count,
         0
       );
- 
-    } 
+    }
 
-    
     res.json(salesBreakdown);
   } catch (error) {
     console.error("❌ Error in sales breakdown analytics:", error);

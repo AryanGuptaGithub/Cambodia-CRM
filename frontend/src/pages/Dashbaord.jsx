@@ -1,30 +1,5 @@
-import React, {
-  useState,
-  useEffect,
-  useMemo,
-  useCallback,
-  useRef,
-} from "react";
-import {
-  Eye,
-  Edit,
-  Trash2,
-  UserPlus,
-  Search,
-  X,
-  Download,
-  Upload,
-  Users,
-  UserCheck,
-  UserX,
-  Building,
-  Calendar,
-  DollarSign,
-  ShoppingCart,
-  TrendingUp,
-  Package,
-  AlertTriangle,
-  Receipt,
+import React, {useState,useEffect,useMemo,useCallback,useRef,} from "react";
+import {Eye,Edit,Trash2,UserPlus,Search,X,Download,Upload,Users,UserCheck,UserX,Building,Calendar,DollarSign,ShoppingCart,TrendingUp,Package,AlertTriangle,Receipt,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { showToast } from "../utils/toast";
@@ -87,7 +62,12 @@ const getDateRanges = () => {
   return {
     today: { start: todayStart, end: todayEnd, label: "Today" },
     month: { start: monthStart, end: monthEnd, label: monthLabel },
-    year: { start: yearStart, end: yearEnd, label: yearLabel, rangeLabel: yearRangeLabel },
+    year: {
+      start: yearStart,
+      end: yearEnd,
+      label: yearLabel,
+      rangeLabel: yearRangeLabel,
+    },
   };
 };
 
@@ -150,8 +130,31 @@ const fetchCustomRangeSales = async (startDate, endDate) => {
   }
 };
 
+// NEW: Function to fetch outstanding data for custom range
+const fetchCustomRangeOutstanding = async (startDate, endDate) => {
+  try {
+    const response = await axios.get(
+      `${backendUrl}/api/outstanding/custom-range`,
+      {
+        params: {
+          startDate: startDate.toISOString().split("T")[0],
+          endDate: endDate.toISOString().split("T")[0],
+        },
+      }
+    );
+    return response.data;
+  } catch (error) {
+    console.error("Error fetching custom range outstanding:", error);
+    return { totalOutstanding: 0, outstandingData: [] };
+  }
+};
+
 // NEW: Function to fetch previous period sales for comparison
-const fetchPreviousPeriodSales = async (currentPeriod, currentStart, currentEnd) => {
+const fetchPreviousPeriodSales = async (
+  currentPeriod,
+  currentStart,
+  currentEnd
+) => {
   try {
     let previousStart, previousEnd;
 
@@ -168,8 +171,14 @@ const fetchPreviousPeriodSales = async (currentPeriod, currentStart, currentEnd)
         previousEnd = new Date(currentEnd);
         previousEnd.setMonth(previousEnd.getMonth() - 1);
         // Adjust for months with different number of days
-        const lastDayOfPrevMonth = new Date(previousEnd.getFullYear(), previousEnd.getMonth() + 1, 0).getDate();
-        previousEnd.setDate(Math.min(previousEnd.getDate(), lastDayOfPrevMonth));
+        const lastDayOfPrevMonth = new Date(
+          previousEnd.getFullYear(),
+          previousEnd.getMonth() + 1,
+          0
+        ).getDate();
+        previousEnd.setDate(
+          Math.min(previousEnd.getDate(), lastDayOfPrevMonth)
+        );
         break;
       case "Year":
         previousStart = new Date(currentStart);
@@ -185,6 +194,54 @@ const fetchPreviousPeriodSales = async (currentPeriod, currentStart, currentEnd)
   } catch (error) {
     console.error("Error fetching previous period sales:", error);
     return 0;
+  }
+};
+
+// NEW: Function to fetch previous period outstanding for comparison
+const fetchPreviousPeriodOutstanding = async (
+  currentPeriod,
+  currentStart,
+  currentEnd
+) => {
+  try {
+    let previousStart, previousEnd;
+
+    switch (currentPeriod) {
+      case "Today":
+        previousStart = new Date(currentStart);
+        previousStart.setDate(previousStart.getDate() - 1);
+        previousEnd = new Date(currentEnd);
+        previousEnd.setDate(previousEnd.getDate() - 1);
+        break;
+      case "Month":
+        previousStart = new Date(currentStart);
+        previousStart.setMonth(previousStart.getMonth() - 1);
+        previousEnd = new Date(currentEnd);
+        previousEnd.setMonth(previousEnd.getMonth() - 1);
+        // Adjust for months with different number of days
+        const lastDayOfPrevMonth = new Date(
+          previousEnd.getFullYear(),
+          previousEnd.getMonth() + 1,
+          0
+        ).getDate();
+        previousEnd.setDate(
+          Math.min(previousEnd.getDate(), lastDayOfPrevMonth)
+        );
+        break;
+      case "Year":
+        previousStart = new Date(currentStart);
+        previousStart.setFullYear(previousStart.getFullYear() - 1);
+        previousEnd = new Date(currentEnd);
+        previousEnd.setFullYear(previousEnd.getFullYear() - 1);
+        break;
+      default:
+        return { totalOutstanding: 0, outstandingData: [] };
+    }
+
+    return await fetchCustomRangeOutstanding(previousStart, previousEnd);
+  } catch (error) {
+    console.error("Error fetching previous period outstanding:", error);
+    return { totalOutstanding: 0, outstandingData: [] };
   }
 };
 
@@ -212,14 +269,17 @@ const Dashboard = () => {
   const staffPerPage = 5;
   const [activeTab, setActiveTab] = useState("Sales");
 
-  // Separate sub-tab states for Sales, Expense, and Payroll
+  // Separate sub-tab states for Sales, Expense, Payroll, and Outstanding
   const [activeSalesSubTab, setActiveSalesSubTab] = useState("Today");
   const [activeExpenseSubTab, setActiveExpenseSubTab] = useState("Month");
   const [activePayrollSubTab, setActivePayrollSubTab] = useState("Prev Month");
+  const [activeOutstandingSubTab, setActiveOutstandingSubTab] = useState("Today"); // NEW
 
-  // NEW: State for dynamic sales data
+  // State for dynamic data
   const [salesTableData, setSalesTableData] = useState([]);
   const [loadingSalesData, setLoadingSalesData] = useState(false);
+  const [outstandingTableData, setOutstandingTableData] = useState([]); // NEW
+  const [loadingOutstandingData, setLoadingOutstandingData] = useState(false); // NEW
 
   // Payroll State
   const [previousMonthLabel, setPreviousMonthLabel] = useState("");
@@ -243,6 +303,15 @@ const Dashboard = () => {
 
   const [outstandingData, setOutstandingData] = useState({
     totalOutstanding: 0,
+    todayOutstanding: 0,
+    monthlyOutstanding: 0,
+    yearOutstanding: 0,
+    todayGrowth: 0,
+    monthlyGrowth: 0,
+    yearGrowth: 0,
+    todayPrevious: 0,
+    monthlyPrevious: 0,
+    yearPrevious: 0,
     mrWiseOutstanding: [],
   });
 
@@ -318,6 +387,20 @@ const Dashboard = () => {
     }
   };
 
+  // NEW: Function to get outstanding table title with actual values
+  const getOutstandingTableTitle = () => {
+    switch (activeOutstandingSubTab) {
+      case "Today":
+        return `Outstanding Details - ${dateRanges.today.label}`;
+      case "Month":
+        return `Outstanding Details - ${dateRanges.month.label}`;
+      case "Year":
+        return `Outstanding Details - ${dateRanges.year.rangeLabel}`;
+      default:
+        return `Outstanding Details - ${activeOutstandingSubTab}`;
+    }
+  };
+
   // NEW: Function to fetch dynamic sales table data
   const fetchSalesTableData = async (period) => {
     try {
@@ -339,6 +422,27 @@ const Dashboard = () => {
       setSalesTableData([]);
     } finally {
       setLoadingSalesData(false);
+    }
+  };
+
+  // NEW: Function to fetch dynamic outstanding table data
+  const fetchOutstandingTableData = async (period) => {
+    try {
+      setLoadingOutstandingData(true);
+      const response = await axios.get(`${backendUrl}/api/outstanding/table-data`, {
+        params: { period },
+      });
+      if (response.data.success) {
+        setOutstandingTableData(response.data.data);
+      } else {
+        console.error("Error fetching outstanding table data:", response.data.message);
+        setOutstandingTableData([]);
+      }
+    } catch (error) {
+      console.error("Error fetching outstanding table data:", error);
+      setOutstandingTableData([]);
+    } finally {
+      setLoadingOutstandingData(false);
     }
   };
 
@@ -373,9 +477,12 @@ const Dashboard = () => {
     if (activeTab === "Sales") {
       setShowAllMRsInSidePanel((prev) => !prev);
       setSidePanelCurrentPage(1);
+    } else if (activeTab === "Outstanding") {
+      setShowAllMRsInSidePanel((prev) => !prev);
+      setSidePanelCurrentPage(1);
     } else if (activeTab === "Total Payroll") {
-      fetchAllMRsWithSalary();
-      setShowAllMRsModal(true);
+      // For Payroll tab, show info message instead of opening salary modal
+      showToast("info", "Showing recent joins for Payroll");
     }
   };
 
@@ -383,6 +490,13 @@ const Dashboard = () => {
   const handleViewProducts = (mrName, products) => {
     setSelectedMRName(mrName);
     setSelectedMRProducts(products);
+    setShowProductsModal(true);
+  };
+
+  // NEW: Function to handle view outstanding invoices
+  const handleViewOutstandingInvoices = (mrName, invoices) => {
+    setSelectedMRName(mrName);
+    setSelectedMRProducts(invoices);
     setShowProductsModal(true);
   };
 
@@ -442,6 +556,77 @@ const Dashboard = () => {
     }
   };
 
+  // NEW: Function to fetch outstanding by sub-tab
+  const fetchOutstandingBySubTab = async (subTab) => {
+    try {
+      let outstandingAmount = 0;
+      let previousOutstanding = 0;
+      let outstandingInvoices = [];
+
+      switch (subTab) {
+        case "Today":
+          const todayData = await fetchCustomRangeOutstanding(
+            dateRanges.today.start,
+            dateRanges.today.end
+          );
+          outstandingAmount = todayData.totalOutstanding;
+          outstandingInvoices = todayData.outstandingData || [];
+          
+          const todayPreviousData = await fetchPreviousPeriodOutstanding(
+            "Today",
+            dateRanges.today.start,
+            dateRanges.today.end
+          );
+          previousOutstanding = todayPreviousData.totalOutstanding;
+          break;
+        case "Month":
+          const monthData = await fetchCustomRangeOutstanding(
+            dateRanges.month.start,
+            dateRanges.month.end
+          );
+          outstandingAmount = monthData.totalOutstanding;
+          outstandingInvoices = monthData.outstandingData || [];
+          
+          const monthPreviousData = await fetchPreviousPeriodOutstanding(
+            "Month",
+            dateRanges.month.start,
+            dateRanges.month.end
+          );
+          previousOutstanding = monthPreviousData.totalOutstanding;
+          break;
+        case "Year":
+          const yearData = await fetchCustomRangeOutstanding(
+            dateRanges.year.start,
+            dateRanges.year.end
+          );
+          outstandingAmount = yearData.totalOutstanding;
+          outstandingInvoices = yearData.outstandingData || [];
+          
+          const yearPreviousData = await fetchPreviousPeriodOutstanding(
+            "Year",
+            dateRanges.year.start,
+            dateRanges.year.end
+          );
+          previousOutstanding = yearPreviousData.totalOutstanding;
+          break;
+        default:
+          const defaultData = await fetchCustomRangeOutstanding(
+            dateRanges.today.start,
+            dateRanges.today.end
+          );
+          outstandingAmount = defaultData.totalOutstanding;
+          outstandingInvoices = defaultData.outstandingData || [];
+      }
+
+      const growth = calculateGrowth(outstandingAmount, previousOutstanding);
+
+      return { outstandingAmount, previousOutstanding, growth, outstandingInvoices };
+    } catch (error) {
+      console.error("Error fetching outstanding by sub-tab:", error);
+      return { outstandingAmount: 0, previousOutstanding: 0, growth: 0, outstandingInvoices: [] };
+    }
+  };
+
   // UPDATED: Fetch Sales Data with growth calculations
   const fetchSalesData = async () => {
     try {
@@ -477,6 +662,44 @@ const Dashboard = () => {
     }
   };
 
+  // UPDATED: Fetch Outstanding Data function
+  const fetchOutstandingData = async () => {
+    try {
+      const todayData = await fetchOutstandingBySubTab("Today");
+      const monthlyData = await fetchOutstandingBySubTab("Month");
+      const yearData = await fetchOutstandingBySubTab("Year");
+
+      setOutstandingData({
+        todayOutstanding: todayData.outstandingAmount,
+        todayPrevious: todayData.previousOutstanding,
+        todayGrowth: todayData.growth,
+        monthlyOutstanding: monthlyData.outstandingAmount,
+        monthlyPrevious: monthlyData.previousOutstanding,
+        monthlyGrowth: monthlyData.growth,
+        yearOutstanding: yearData.outstandingAmount,
+        yearPrevious: yearData.previousOutstanding,
+        yearGrowth: yearData.growth,
+        totalOutstanding: yearData.outstandingAmount,
+        mrWiseOutstanding: yearData.outstandingInvoices,
+      });
+    } catch (error) {
+      console.error("Error fetching outstanding data:", error);
+      setOutstandingData({
+        totalOutstanding: 0,
+        todayOutstanding: 0,
+        monthlyOutstanding: 0,
+        yearOutstanding: 0,
+        todayGrowth: 0,
+        monthlyGrowth: 0,
+        yearGrowth: 0,
+        todayPrevious: 0,
+        monthlyPrevious: 0,
+        yearPrevious: 0,
+        mrWiseOutstanding: [],
+      });
+    }
+  };
+
   // NEW: Effect to update sales data when sales sub-tab changes
   useEffect(() => {
     if (activeTab === "Sales") {
@@ -485,20 +708,20 @@ const Dashboard = () => {
 
         setSalesData((prev) => ({
           ...prev,
-          ...(activeSalesSubTab === "Today" && { 
+          ...(activeSalesSubTab === "Today" && {
             todaySales: data.salesAmount,
             todayPrevious: data.previousSales,
-            todayGrowth: data.growth
+            todayGrowth: data.growth,
           }),
           ...(activeSalesSubTab === "Month" && {
             monthlySales: data.salesAmount,
             monthlyPrevious: data.previousSales,
-            monthlyGrowth: data.growth
+            monthlyGrowth: data.growth,
           }),
           ...(activeSalesSubTab === "Year" && {
             yearSales: data.salesAmount,
             yearPrevious: data.previousSales,
-            yearGrowth: data.growth
+            yearGrowth: data.growth,
           }),
         }));
       };
@@ -507,12 +730,52 @@ const Dashboard = () => {
     }
   }, [activeSalesSubTab, activeTab]);
 
+  // NEW: Effect to update outstanding data when outstanding sub-tab changes
+  useEffect(() => {
+    if (activeTab === "Outstanding") {
+      const updateOutstandingData = async () => {
+        const data = await fetchOutstandingBySubTab(activeOutstandingSubTab);
+
+        setOutstandingData((prev) => ({
+          ...prev,
+          ...(activeOutstandingSubTab === "Today" && {
+            todayOutstanding: data.outstandingAmount,
+            todayPrevious: data.previousOutstanding,
+            todayGrowth: data.growth,
+            mrWiseOutstanding: data.outstandingInvoices,
+          }),
+          ...(activeOutstandingSubTab === "Month" && {
+            monthlyOutstanding: data.outstandingAmount,
+            monthlyPrevious: data.previousOutstanding,
+            monthlyGrowth: data.growth,
+            mrWiseOutstanding: data.outstandingInvoices,
+          }),
+          ...(activeOutstandingSubTab === "Year" && {
+            yearOutstanding: data.outstandingAmount,
+            yearPrevious: data.previousOutstanding,
+            yearGrowth: data.growth,
+            mrWiseOutstanding: data.outstandingInvoices,
+          }),
+        }));
+      };
+
+      updateOutstandingData();
+    }
+  }, [activeOutstandingSubTab, activeTab]);
+
   // NEW: Effect to fetch sales data when sales sub-tab changes
   useEffect(() => {
     if (activeTab === "Sales") {
       fetchSalesTableData(activeSalesSubTab);
     }
   }, [activeSalesSubTab, activeTab]);
+
+  // NEW: Effect to fetch outstanding data when outstanding sub-tab changes
+  useEffect(() => {
+    if (activeTab === "Outstanding") {
+      fetchOutstandingTableData(activeOutstandingSubTab);
+    }
+  }, [activeOutstandingSubTab, activeTab]);
 
   // NEW: Get current growth based on active sales sub-tab
   const getCurrentGrowth = () => {
@@ -525,6 +788,20 @@ const Dashboard = () => {
         return salesData.yearGrowth;
       default:
         return salesData.todayGrowth;
+    }
+  };
+
+  // NEW: Get current outstanding growth based on active outstanding sub-tab
+  const getCurrentOutstandingGrowth = () => {
+    switch (activeOutstandingSubTab) {
+      case "Today":
+        return outstandingData.todayGrowth;
+      case "Month":
+        return outstandingData.monthlyGrowth;
+      case "Year":
+        return outstandingData.yearGrowth;
+      default:
+        return outstandingData.todayGrowth;
     }
   };
 
@@ -544,7 +821,43 @@ const Dashboard = () => {
   // Fetch payroll data function
   const fetchPayrollData = async () => {
     try {
-      // Your existing payroll logic
+      const currentDate = new Date();
+      const previousMonth = new Date(
+        currentDate.getFullYear(),
+        currentDate.getMonth() - 1,
+        1
+      );
+      const year = previousMonth.getFullYear();
+      const month = String(previousMonth.getMonth() + 1).padStart(2, "0");
+      const period = `${year}-${month}`;
+
+      // Fetch payroll for previous month
+      const response = await axios.get(`${backendUrl}/api/payrolls`, {
+        params: { period },
+      });
+
+      if (response.data && response.data.success) {
+        const payrolls = response.data.data || [];
+        setPayrollData(payrolls);
+        // Calculate total payroll for previous month
+        const total = payrolls.reduce(
+          (sum, item) => sum + (item.netSalary || 0),
+          0
+        );
+        setTotalPayroll(total);
+
+        // Mock YTD payroll data (you would fetch this from your API)
+        // For demonstration, let's assume YTD is 2.5 times the monthly payroll
+        setPayrollYTDTotal(total * 2.5);
+
+        // Fetch highest salary MRs after payroll data is loaded
+        await fetchHighestSalaryMRs();
+      } else {
+        setPayrollData([]);
+        setTotalPayroll(0);
+        setPayrollYTDTotal(0);
+        setHighestSalaryMRs([]);
+      }
     } catch (error) {
       console.error("Error fetching payroll data:", error);
       setPayrollData([]);
@@ -552,16 +865,6 @@ const Dashboard = () => {
       setPayrollYTDTotal(0);
       setHighestSalaryMRs([]);
       showToast("error", "Failed to fetch payroll data");
-    }
-  };
-
-  // Fetch Outstanding Data
-  const fetchOutstandingData = async () => {
-    try {
-      // Your existing outstanding logic
-    } catch (error) {
-      console.error("Error fetching outstanding data:", error);
-      // Mock data as fallback
     }
   };
 
@@ -604,7 +907,7 @@ const Dashboard = () => {
 
         await fetchPayrollData();
         await fetchSalesData();
-        await fetchOutstandingData();
+        await fetchOutstandingData(); // UPDATED
         await fetchStockData();
         await fetchExpenseData();
         await fetchTeams();
@@ -667,6 +970,12 @@ const Dashboard = () => {
       monthlyGrowth: salesData.monthlyGrowth,
       yearGrowth: salesData.yearGrowth,
       totalOutstanding: outstandingData.totalOutstanding,
+      todayOutstanding: outstandingData.todayOutstanding,
+      monthlyOutstanding: outstandingData.monthlyOutstanding,
+      yearOutstanding: outstandingData.yearOutstanding,
+      todayOutstandingGrowth: outstandingData.todayGrowth,
+      monthlyOutstandingGrowth: outstandingData.monthlyGrowth,
+      yearOutstandingGrowth: outstandingData.yearGrowth,
       totalStock: stockData.totalStock,
       stockValue: stockData.stockValue,
       lowStockItems: stockData.lowStockItems?.length || 0,
@@ -745,6 +1054,20 @@ const Dashboard = () => {
         return salesData.yearSales;
       default:
         return salesData.todaySales;
+    }
+  };
+
+  // NEW: Get current outstanding amount based on outstanding sub-tab
+  const getCurrentOutstandingAmount = () => {
+    switch (activeOutstandingSubTab) {
+      case "Today":
+        return outstandingData.todayOutstanding;
+      case "Month":
+        return outstandingData.monthlyOutstanding;
+      case "Year":
+        return outstandingData.yearOutstanding;
+      default:
+        return outstandingData.todayOutstanding;
     }
   };
 
@@ -907,9 +1230,11 @@ const Dashboard = () => {
     );
   };
 
-  // NEW: Products Modal Component
+  // UPDATED: Products Modal Component to handle both products and outstanding
   const ProductsModal = () => {
     if (!showProductsModal) return null;
+
+    const isOutstandingData = selectedMRProducts.length > 0 && selectedMRProducts[0].dueAmount !== undefined;
 
     return ReactDOM.createPortal(
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -917,7 +1242,10 @@ const Dashboard = () => {
           <div className="p-6 border-b border-gray-200">
             <div className="flex justify-between items-center">
               <h3 className="text-xl font-semibold text-gray-800">
-                All Products Sold by {selectedMRName}
+                {isOutstandingData 
+                  ? `Outstanding Invoices for ${selectedMRName}`
+                  : `All Products Sold by ${selectedMRName}`
+                }
               </h3>
               <button
                 onClick={() => setShowProductsModal(false)}
@@ -931,63 +1259,110 @@ const Dashboard = () => {
             <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow-2xl text-center">
               <thead className="bg-gray-100 text-gray-700 border-b">
                 <tr>
-                  <th className="p-3 text-sm font-medium">Date</th>
-                  <th className="p-3 text-sm font-medium">Product Name</th>
-                  <th className="p-3 text-sm font-medium">Quantity</th>
-                  <th className="p-3 text-sm font-medium">Selling Price ($)</th>
-                  <th className="p-3 text-sm font-medium">Amount ($)</th>
-                  <th className="p-3 text-sm font-medium">Customer</th>
-                  <th className="p-3 text-sm font-medium">Bonus Qty</th>
-                  <th className="p-3 text-sm font-medium">Total Qty</th>
+                  {isOutstandingData ? (
+                    <>
+                      <th className="p-3 text-sm font-medium">Date</th>
+                      <th className="p-3 text-sm font-medium">Invoice Number</th>
+                      <th className="p-3 text-sm font-medium">Customer</th>
+                      <th className="p-3 text-sm font-medium">Total Amount ($)</th>
+                      <th className="p-3 text-sm font-medium">Paid Amount ($)</th>
+                      <th className="p-3 text-sm font-medium">Due Amount ($)</th>
+                      <th className="p-3 text-sm font-medium">Payment Status</th>
+                      <th className="p-3 text-sm font-medium">Due Date</th>
+                    </>
+                  ) : (
+                    <>
+                      <th className="p-3 text-sm font-medium">Date</th>
+                      <th className="p-3 text-sm font-medium">Product Name</th>
+                      <th className="p-3 text-sm font-medium">Quantity</th>
+                      <th className="p-3 text-sm font-medium">Selling Price ($)</th>
+                      <th className="p-3 text-sm font-medium">Amount ($)</th>
+                      <th className="p-3 text-sm font-medium">Customer</th>
+                      <th className="p-3 text-sm font-medium">Bonus Qty</th>
+                      <th className="p-3 text-sm font-medium">Total Qty</th>
+                    </>
+                  )}
                 </tr>
               </thead>
 
               <tbody>
                 {selectedMRProducts.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="p-4 text-center text-gray-500">
-                      No products found.
+                    <td colSpan={isOutstandingData ? 8 : 8} className="p-4 text-center text-gray-500">
+                      No data found.
                     </td>
                   </tr>
                 ) : (
-                  selectedMRProducts.map((product, index) => (
+                  selectedMRProducts.map((item, index) => (
                     <tr
                       key={index}
                       className={`hover:bg-gray-50 ${
                         index < selectedMRProducts.length - 1 ? "border-b" : ""
                       }`}
                     >
-                      <td className="p-3 text-sm text-gray-700">
-                        {formatDateToReadable(product.date)}
-                      </td>
-
-                      <td className="p-3 text-sm text-gray-700">
-                        {product.productName}
-                      </td>
-
-                      <td className="p-3 text-sm text-gray-700">
-                        {product.quantity}
-                      </td>
-
-                      <td className="p-3 text-sm text-gray-700">
-                        ${formatCurrency(product.sellingPrice)}
-                      </td>
-
-                      <td className="p-3 text-sm text-green-600 font-medium">
-                        ${formatCurrency(product.amount)}
-                      </td>
-
-                      <td className="p-3 text-sm text-gray-700">
-                        {product.customer}
-                      </td>
-
-                      <td className="p-3 text-sm text-gray-700">
-                        {product.bonusQty || 0}
-                      </td>
-
-                      <td className="p-3 text-sm text-gray-700">
-                        {product.totalQty || product.quantity}
-                      </td>
+                      {isOutstandingData ? (
+                        <>
+                          <td className="p-3 text-sm text-gray-700">
+                            {formatDateToReadable(item.recordingDate || item.invoiceDate)}
+                          </td>
+                          <td className="p-3 text-sm text-gray-700">
+                            {item.invoiceNumber}
+                          </td>
+                          <td className="p-3 text-sm text-gray-700">
+                            {item.customerName}
+                          </td>
+                          <td className="p-3 text-sm text-gray-700">
+                            ${formatCurrency(item.totalAmount)}
+                          </td>
+                          <td className="p-3 text-sm text-green-600 font-medium">
+                            ${formatCurrency(item.paidAmount)}
+                          </td>
+                          <td className="p-3 text-sm text-orange-600 font-medium">
+                            ${formatCurrency(item.dueAmount)}
+                          </td>
+                          <td className="p-3 text-sm text-gray-700">
+                            <span className={`px-2 py-1 rounded-full text-xs ${
+                              item.paymentStatus === "Cash" 
+                                ? "bg-green-100 text-green-800"
+                                : item.paymentStatus === "Partial Paid"
+                                ? "bg-yellow-100 text-yellow-800"
+                                : "bg-red-100 text-red-800"
+                            }`}>
+                              {item.paymentStatus}
+                            </span>
+                          </td>
+                          <td className="p-3 text-sm text-gray-700">
+                            {formatDateToReadable(item.dueDate)}
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="p-3 text-sm text-gray-700">
+                            {formatDateToReadable(item.date)}
+                          </td>
+                          <td className="p-3 text-sm text-gray-700">
+                            {item.productName}
+                          </td>
+                          <td className="p-3 text-sm text-gray-700">
+                            {item.quantity}
+                          </td>
+                          <td className="p-3 text-sm text-gray-700">
+                            ${formatCurrency(item.sellingPrice)}
+                          </td>
+                          <td className="p-3 text-sm text-green-600 font-medium">
+                            ${formatCurrency(item.amount)}
+                          </td>
+                          <td className="p-3 text-sm text-gray-700">
+                            {item.customer}
+                          </td>
+                          <td className="p-3 text-sm text-gray-700">
+                            {item.bonusQty || 0}
+                          </td>
+                          <td className="p-3 text-sm text-gray-700">
+                            {item.totalQty || item.quantity}
+                          </td>
+                        </>
+                      )}
                     </tr>
                   ))
                 )}
@@ -996,7 +1371,7 @@ const Dashboard = () => {
 
             {selectedMRProducts.length === 0 && (
               <p className="text-center text-gray-500 py-4">
-                No products found
+                No data found
               </p>
             )}
           </div>
@@ -1117,8 +1492,13 @@ const Dashboard = () => {
             </p>
             <p className="text-xs text-gray-500 mt-1">
               {activeSalesSubTab} •{" "}
-              <span className={getCurrentGrowth() >= 0 ? "text-green-600" : "text-red-600"}>
-                {getCurrentGrowth() >= 0 ? "↗" : "↘"} {getCurrentGrowth().toFixed(1)}%
+              <span
+                className={
+                  getCurrentGrowth() >= 0 ? "text-green-600" : "text-red-600"
+                }
+              >
+                {getCurrentGrowth() >= 0 ? "↗" : "↘"}{" "}
+                {getCurrentGrowth().toFixed(1)}%
               </span>
             </p>
           </div>
@@ -1128,7 +1508,7 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Outstanding Card */}
+      {/* Outstanding Card - UPDATED */}
       <div
         className={`rounded-xl shadow-md border border-gray-200 p-6 cursor-pointer transition-all ${
           activeTab === "Outstanding" ? "bg-gray-200" : "bg-white"
@@ -1139,9 +1519,19 @@ const Dashboard = () => {
           <div>
             <p className="text-sm font-medium text-gray-600">Outstanding</p>
             <p className="text-2xl font-bold text-orange-600 mt-2">
-              ${formatCurrency(dashboardStats.totalOutstanding)}
+              ${formatCurrency(getCurrentOutstandingAmount())}
             </p>
-            <p className="text-xs text-gray-500 mt-1">MR-wise outstanding</p>
+            <p className="text-xs text-gray-500 mt-1">
+              {activeOutstandingSubTab} •{" "}
+              <span
+                className={
+                  getCurrentOutstandingGrowth() >= 0 ? "text-green-600" : "text-red-600"
+                }
+              >
+                {getCurrentOutstandingGrowth() >= 0 ? "↗" : "↘"}{" "}
+                {getCurrentOutstandingGrowth().toFixed(1)}%
+              </span>
+            </p>
           </div>
           <div className="p-3 bg-orange-100 rounded-full">
             <TrendingUp className="w-6 h-6 text-orange-600" />
@@ -1361,35 +1751,124 @@ const Dashboard = () => {
       );
     };
 
-    // Recent Outstanding for Outstanding tab
-    const RecentOutstanding = () => (
-      <div className="space-y-3">
-        {outstandingData.mrWiseOutstanding.slice(0, 5).map((item, index) => (
-          <div
-            key={index}
-            className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg"
-          >
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 text-sm font-semibold">
-                {item.mrName.substring(0, 2).toUpperCase()}
+    // UPDATED: Recent Outstanding for Outstanding tab with toggle functionality
+    const RecentOutstanding = () => {
+      // Group outstanding by MR to show MR-wise highest outstanding
+      const mrWiseOutstanding = useMemo(() => {
+        const mrOutstanding = {};
+
+        outstandingTableData.forEach((outstanding) => {
+          if (!mrOutstanding[outstanding.mrName]) {
+            mrOutstanding[outstanding.mrName] = {
+              mrName: outstanding.mrName,
+              totalOutstanding: 0,
+              invoices: [],
+              customerCount: 0,
+            };
+          }
+          mrOutstanding[outstanding.mrName].totalOutstanding += outstanding.dueAmount;
+          mrOutstanding[outstanding.mrName].invoices.push(outstanding);
+          mrOutstanding[outstanding.mrName].customerCount += 1;
+        });
+
+        // Sort by total outstanding
+        return Object.values(mrOutstanding).sort(
+          (a, b) => b.totalOutstanding - a.totalOutstanding
+        );
+      }, [outstandingTableData]);
+
+      // Calculate pagination for side panel
+      const totalSidePanelPages = Math.ceil(
+        mrWiseOutstanding.length / sidePanelPerPage
+      );
+      const currentSidePanelOutstanding = showAllMRsInSidePanel
+        ? mrWiseOutstanding.slice(
+            (sidePanelCurrentPage - 1) * sidePanelPerPage,
+            sidePanelCurrentPage * sidePanelPerPage
+          )
+        : mrWiseOutstanding.slice(0, 5);
+
+      const handleSidePanelPageChange = (newPage) => {
+        setSidePanelCurrentPage(newPage);
+      };
+
+      return (
+        <div className="space-y-3">
+          {currentSidePanelOutstanding.length > 0 ? (
+            currentSidePanelOutstanding.map((mrOutstanding, index) => (
+              <div
+                key={index}
+                className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg"
+              >
+                <div className="flex items-center space-x-3">
+                  <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 text-sm font-semibold">
+                    {showAllMRsInSidePanel
+                      ? (sidePanelCurrentPage - 1) * sidePanelPerPage +
+                        index +
+                        1
+                      : index + 1}
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-800 capitalize">
+                      {mrOutstanding.mrName}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {mrOutstanding.customerCount} customer
+                      {mrOutstanding.customerCount !== 1 ? "s" : ""}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right flex items-center gap-2">
+                  <p className="text-sm font-semibold text-orange-600">
+                    ${formatCurrency(mrOutstanding.totalOutstanding)}
+                  </p>
+                  <button
+                    onClick={() =>
+                      handleViewOutstandingInvoices(mrOutstanding.mrName, mrOutstanding.invoices)
+                    }
+                    className="text-gray-400 hover:text-orange-600 transition-colors cursor-pointer p-1"
+                    title="View Invoices"
+                  >
+                    <Eye size={16} />
+                  </button>
+                </div>
               </div>
-              <div>
-                <p className="text-sm font-medium text-gray-800 capitalize">
-                  {item.mrName}
-                </p>
-                <p className="text-xs text-gray-500">{item.date}</p>
-              </div>
+            ))
+          ) : (
+            <p className="text-gray-500 text-center py-4">
+              {loadingOutstandingData ? "Loading..." : "No outstanding data found"}
+            </p>
+          )}
+
+          {/* Pagination for side panel when showing all MRs */}
+          {showAllMRsInSidePanel && totalSidePanelPages > 1 && (
+            <div className="flex justify-between items-center mt-4 pt-4 border-t border-gray-200">
+              <button
+                onClick={() =>
+                  handleSidePanelPageChange(sidePanelCurrentPage - 1)
+                }
+                disabled={sidePanelCurrentPage === 1}
+                className="px-3 py-1 text-sm bg-gray-200 rounded disabled:opacity-50 cursor-pointer"
+              >
+                Previous
+              </button>
+              <span className="text-sm text-gray-600">
+                Page {sidePanelCurrentPage} of {totalSidePanelPages}
+              </span>
+              <button
+                onClick={() =>
+                  handleSidePanelPageChange(sidePanelCurrentPage + 1)
+                }
+                disabled={sidePanelCurrentPage === totalSidePanelPages}
+                className="px-3 py-1 text-sm bg-gray-200 rounded disabled:opacity-50 cursor-pointer"
+              >
+                Next
+              </button>
             </div>
-            <div className="text-right">
-              <p className="text-sm font-semibold text-orange-700">
-                ${formatCurrency(item.amount)}
-              </p>
-              <p className="text-xs text-gray-500">Outstanding</p>
-            </div>
-          </div>
-        ))}
-      </div>
-    );
+          )}
+        </div>
+      );
+    };
 
     // Low Stock for Stock in Hands tab
     const LowStock = () => (
@@ -1451,45 +1930,7 @@ const Dashboard = () => {
       </div>
     );
 
-    // Highest Salary MRs for Payroll tab
-    const HighestSalaryMRs = () => (
-      <div className="space-y-3">
-        {highestSalaryMRs.length > 0 ? (
-          highestSalaryMRs.map((item, index) => (
-            <div
-              key={item._id}
-              className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg"
-            >
-              <div className="flex items-center space-x-3">
-                <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 text-sm font-semibold">
-                  {item.employeeId?.medicalRepName
-                    ?.substring(0, 2)
-                    .toUpperCase() || "MR"}
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-gray-800 capitalize">
-                    {item.employeeId?.medicalRepName}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    {item.employeeId?.teamName}
-                  </p>
-                </div>
-              </div>
-              <div className="text-right">
-                <p className="text-sm font-semibold text-purple-700">
-                  ${formatCurrency(item.netSalary || 0)}
-                </p>
-                <p className="text-xs text-gray-500">Net Salary</p>
-              </div>
-            </div>
-          ))
-        ) : (
-          <p className="text-gray-500 text-center py-4">No payroll data</p>
-        )}
-      </div>
-    );
-
-    // Recent Joins component (for default tab)
+    // Recent Joins component
     const RecentJoins = () => {
       const recentMRs = useMemo(() => {
         return mrList
@@ -1546,13 +1987,15 @@ const Dashboard = () => {
             ? "All MRs Sales"
             : "Highest Sales by MR";
         case "Outstanding":
-          return "Recent Outstanding";
+          return showAllMRsInSidePanel
+            ? "All Outstanding"
+            : "Highest Outstanding by MR";
         case "Stock in Hands":
           return "Low Stock Items";
         case "Expense":
           return "Latest Expenses";
         case "Total Payroll":
-          return "Highest Salaries";
+          return "Recent Joins";
         default:
           return "Recent Activity";
       }
@@ -1569,7 +2012,7 @@ const Dashboard = () => {
         case "Expense":
           return Receipt;
         case "Total Payroll":
-          return DollarSign;
+          return Calendar;
         default:
           return Calendar;
       }
@@ -1586,7 +2029,7 @@ const Dashboard = () => {
         case "Expense":
           return <RecentExpenses />;
         case "Total Payroll":
-          return <HighestSalaryMRs />;
+          return <RecentJoins />;
         default:
           return <RecentJoins />;
       }
@@ -1604,14 +2047,16 @@ const Dashboard = () => {
             onClick={handlePanelIconClick}
             className="text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
             title={
-              activeTab === "Sales"
+              activeTab === "Sales" || activeTab === "Outstanding"
                 ? showAllMRsInSidePanel
                   ? "Show Top 5"
-                  : "Show All MRs"
+                  : "Show All"
+                : activeTab === "Total Payroll"
+                ? "View All MRs"
                 : "View Details"
             }
           >
-            {activeTab === "Sales" ? (
+            {(activeTab === "Sales" || activeTab === "Outstanding") ? (
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 width="20"
@@ -1639,12 +2084,13 @@ const Dashboard = () => {
     );
   };
 
-  // Sub Tabs Component for Sales, Expense, and Payroll
+  // UPDATED: Sub Tabs Component to include Outstanding
   const SubTabs = () => {
     if (
       activeTab !== "Sales" &&
       activeTab !== "Expense" &&
-      activeTab !== "Total Payroll"
+      activeTab !== "Total Payroll" &&
+      activeTab !== "Outstanding" // NEW
     )
       return null;
 
@@ -1667,6 +2113,12 @@ const Dashboard = () => {
         { key: "Prev Month", label: prevMonthRanges.prevMonth.label },
         { key: "YTD", label: prevMonthRanges.prevMonthYear.label },
       ];
+    } else if (activeTab === "Outstanding") { // NEW
+      tabs = [
+        { key: "Today", label: dateRanges.today.label },
+        { key: "Month", label: dateRanges.month.label },
+        { key: "Year", label: dateRanges.year.rangeLabel },
+      ];
     }
 
     // Use the appropriate state based on active tab
@@ -1681,6 +2133,9 @@ const Dashboard = () => {
     } else if (activeTab === "Total Payroll") {
       currentSubTab = activePayrollSubTab;
       setCurrentSubTab = setActivePayrollSubTab;
+    } else if (activeTab === "Outstanding") { // NEW
+      currentSubTab = activeOutstandingSubTab;
+      setCurrentSubTab = setActiveOutstandingSubTab;
     }
 
     return (
@@ -1856,6 +2311,141 @@ const Dashboard = () => {
     );
   };
 
+  // NEW: Outstanding Table Component
+  const OutstandingTable = () => {
+    // Group outstanding data by MR
+    const groupedOutstandingData = useMemo(() => {
+      const mrGroups = {};
+
+      outstandingTableData.forEach((outstanding) => {
+        if (!mrGroups[outstanding.mrName]) {
+          mrGroups[outstanding.mrName] = {
+            mrName: outstanding.mrName,
+            totalOutstanding: 0,
+            invoices: [],
+            customerCount: 0,
+            customers: new Set(),
+          };
+        }
+        mrGroups[outstanding.mrName].totalOutstanding += outstanding.dueAmount;
+        mrGroups[outstanding.mrName].invoices.push(outstanding);
+        mrGroups[outstanding.mrName].customerCount += 1;
+        if (outstanding.customerName) {
+          mrGroups[outstanding.mrName].customers.add(outstanding.customerName);
+        }
+      });
+
+      // Convert Set to Array and count
+      Object.values(mrGroups).forEach((mr) => {
+        mr.customerCount = mr.customers.size;
+        mr.customers = Array.from(mr.customers);
+      });
+
+      return Object.values(mrGroups);
+    }, [outstandingTableData]);
+
+    return (
+      <div className="bg-white rounded-xl shadow-md border border-gray-200">
+        <div className="p-6 border-b border-gray-200">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div>
+              <h3 className="text-xl font-semibold text-gray-800">
+                {getOutstandingTableTitle()}
+              </h3>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={handleExport}
+                className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition-colors cursor-pointer"
+              >
+                <Download size={18} /> Export Outstanding
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-center">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th className="p-4 text-sm font-semibold text-gray-700">
+                  MR Name
+                </th>
+                <th className="p-4 text-sm font-semibold text-gray-700">
+                  Customers
+                </th>
+                <th className="p-4 text-sm font-semibold text-gray-700">
+                  Invoices
+                </th>
+                <th className="p-4 text-sm font-semibold text-gray-700">
+                  Total Outstanding ($)
+                </th>
+                <th className="p-4 text-sm font-semibold text-gray-700">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {loadingOutstandingData ? (
+                <tr>
+                  <td colSpan="5" className="p-8 text-center text-gray-500">
+                    <div className="flex justify-center items-center">
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-orange-600"></div>
+                      <span className="ml-2">Loading outstanding data...</span>
+                    </div>
+                  </td>
+                </tr>
+              ) : groupedOutstandingData.length > 0 ? (
+                groupedOutstandingData.map((mrOutstanding, index) => (
+                  <tr
+                    key={index}
+                    className="hover:bg-gray-50 transition-colors"
+                  >
+                    <td className="p-4 text-sm text-gray-600 capitalize">
+                      {mrOutstanding.mrName}
+                    </td>
+                    <td className="p-4 text-sm text-gray-600">
+                      {mrOutstanding.customerCount === 1 ? (
+                        mrOutstanding.customers[0]
+                      ) : (
+                        <span>{mrOutstanding.customerCount} customers</span>
+                      )}
+                    </td>
+                    <td className="p-4 text-sm text-gray-600">
+                      {mrOutstanding.invoices.length === 1 ? (
+                        mrOutstanding.invoices[0].invoiceNumber
+                      ) : (
+                        <span>{mrOutstanding.invoices.length} invoices</span>
+                      )}
+                    </td>
+                    <td className="p-4 text-sm text-orange-600 font-semibold">
+                      ${formatCurrency(mrOutstanding.totalOutstanding)}
+                    </td>
+                    <td className="p-4">
+                      <button
+                        onClick={() => handleViewOutstandingInvoices(mrOutstanding.mrName, mrOutstanding.invoices)}
+                        className="text-gray-400 hover:text-orange-600 transition-colors cursor-pointer p-2"
+                        title="View All Invoices"
+                      >
+                        <Eye className="w-5 h-5" />
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="5" className="p-8 text-center text-gray-500">
+                    No outstanding data found for {activeOutstandingSubTab}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
   // Expense Table Component
   const ExpenseTable = () => (
     <div className="bg-white rounded-xl shadow-md border border-gray-200">
@@ -1866,14 +2456,98 @@ const Dashboard = () => {
   // Payroll Table Component
   const PayrollTable = () => (
     <div className="bg-white rounded-xl shadow-md border border-gray-200">
-      {/* Your existing payroll table */}
-    </div>
-  );
+      <div className="p-6 border-b border-gray-200">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div>
+            <h3 className="text-xl font-semibold text-gray-800">
+              Payroll Details -{" "}
+              {activePayrollSubTab === "Prev Month"
+                ? prevMonthRanges.prevMonth.label
+                : prevMonthRanges.prevMonthYear.label}
+            </h3>
+          </div>
+        </div>
+      </div>
 
-  // Outstanding Table Component
-  const OutstandingTable = () => (
-    <div className="bg-white rounded-xl shadow-md border border-gray-200">
-      {/* Your existing outstanding table */}
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-center">
+          <thead className="bg-gray-50 border-b border-gray-200">
+            <tr>
+              <th className="p-4 text-sm font-semibold text-gray-700">
+                MR Name
+              </th>
+              <th className="p-4 text-sm font-semibold text-gray-700">
+                Contact No
+              </th>
+              <th className="p-4 text-sm font-semibold text-gray-700">Email</th>
+              <th className="p-4 text-sm font-semibold text-gray-700">
+                Basic Salary ($)
+              </th>
+              <th className="p-4 text-sm font-semibold text-gray-700">
+                Allowances ($)
+              </th>
+              <th className="p-4 text-sm font-semibold text-gray-700">
+                Deductions ($)
+              </th>
+              <th className="p-4 text-sm font-semibold text-gray-700">
+                Net Salary ($)
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200">
+            {payrollData.map((item, index) => (
+              <tr key={item._id} className="hover:bg-gray-50 transition-colors">
+                <td className="p-4 text-sm text-gray-600">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 text-sm font-semibold">
+                      {item.employeeId?.medicalRepName
+                        ? item.employeeId.medicalRepName
+                            .substring(0, 2)
+                            .toUpperCase()
+                        : "MR"}
+                    </div>
+                    <span className="capitalize">
+                      {item.employeeId?.medicalRepName}
+                    </span>
+                  </div>
+                </td>
+                <td className="p-4 text-sm text-gray-600">
+                  {item.employeeId?.contactNo}
+                </td>
+                <td className="p-4 text-sm text-gray-600">
+                  {item.employeeId?.email}
+                </td>
+                <td className="p-4 text-sm text-gray-600">
+                  <span className="font-semibold text-blue-700">
+                    {item.basicSalary || 0}
+                  </span>
+                </td>
+                <td className="p-4 text-sm text-gray-600">
+                  <span className="font-semibold text-green-700">
+                    {item.totalAllowance || 0}
+                  </span>
+                </td>
+                <td className="p-4 text-sm text-gray-600">
+                  <span className="font-semibold text-red-700">
+                    {item.deductions || 0}
+                  </span>
+                </td>
+                <td className="p-4 text-sm text-gray-600">
+                  <span className="font-semibold text-purple-700">
+                    {item.netSalary || 0}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        {payrollData.length === 0 && (
+          <div className="p-8 text-center text-gray-500">
+            {loading ? "Loading..." : "No payroll data found"}
+          </div>
+        )}
+      </div>
     </div>
   );
 
@@ -1911,7 +2585,7 @@ const Dashboard = () => {
         case "Sales":
           return <SalesTable />;
         case "Outstanding":
-          return <OutstandingTable />;
+          return <OutstandingTable />; // NEW
         case "Stock in Hands":
           return <StockTable />;
         case "Expense":
@@ -1940,7 +2614,7 @@ const Dashboard = () => {
         {/* Dashboard Cards */}
         <DashboardCards />
 
-        {/* Sub Tabs for Sales, Expense and Payroll */}
+        {/* Sub Tabs for Sales, Expense, Payroll, and Outstanding */}
         <SubTabs />
 
         {/* Recent Activity and Stats Side by Side */}
@@ -2016,10 +2690,10 @@ const Dashboard = () => {
         </main>
       </div>
 
-      {/* NEW: Products Modal */}
+      {/* Products Modal (now handles both products and outstanding) */}
       <ProductsModal />
 
-      {/* NEW: All MRs Salary Modal */}
+      {/* All MRs Salary Modal */}
       <AllMRsSalaryModal />
     </div>
   );
