@@ -18,7 +18,8 @@ import CashAndBankLayout from "./pages/CashAndBankLayout";
 import StaffMemberLayout from "./pages/Utility/StaffMemberLayout";
 
 // Dashboard and Main pages
-import Dashboard from "./pages/Dashbaord"; // Added Dashboard component
+import Dashboard1 from "./pages/Dashbaord"; // Added Dashboard component
+import Dashboard from  "./pages/Dashboard/Dashbaord"
 import Login from "./pages/Login";
 import OnlineOrders from "./pages/OnlineOrders";
 import StaffMember from "./pages/StaffMember";

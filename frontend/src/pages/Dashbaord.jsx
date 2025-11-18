@@ -1,5 +1,30 @@
-import React, {useState,useEffect,useMemo,useCallback,useRef,} from "react";
-import {Eye,Edit,Trash2,UserPlus,Search,X,Download,Upload,Users,UserCheck,UserX,Building,Calendar,DollarSign,ShoppingCart,TrendingUp,Package,AlertTriangle,Receipt,
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from "react";
+import {
+  Eye,
+  Edit,
+  Trash2,
+  UserPlus,
+  Search,
+  X,
+  Download,
+  Upload,
+  Users,
+  UserCheck,
+  UserX,
+  Building,
+  Calendar,
+  DollarSign,
+  ShoppingCart,
+  TrendingUp,
+  Package,
+  AlertTriangle,
+  Receipt,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { showToast } from "../utils/toast";
@@ -112,18 +137,20 @@ const getPreviousMonthRanges = () => {
   };
 };
 
+// UPDATED: Fixed date handling in fetchCustomRangeSales
 const fetchCustomRangeSales = async (startDate, endDate) => {
   try {
     const response = await axios.get(
       `${backendUrl}/api/sales/analytics/custom-range`,
       {
         params: {
-          startDate: startDate.toISOString().split("T")[0],
-          endDate: endDate.toISOString().split("T")[0],
+          startDate: startDate.toISOString(),
+          endDate: endDate.toISOString(),
         },
       }
     );
-    return response.data.totalSales;
+
+    return response.data.totalSales || 0;
   } catch (error) {
     console.error("Error fetching custom range sales:", error);
     return 0;
@@ -137,8 +164,8 @@ const fetchCustomRangeOutstanding = async (startDate, endDate) => {
       `${backendUrl}/api/outstanding/custom-range`,
       {
         params: {
-          startDate: startDate.toISOString().split("T")[0],
-          endDate: endDate.toISOString().split("T")[0],
+          startDate: startDate.toISOString(),
+          endDate: endDate.toISOString(),
         },
       }
     );
@@ -149,7 +176,7 @@ const fetchCustomRangeOutstanding = async (startDate, endDate) => {
   }
 };
 
-// NEW: Function to fetch previous period sales for comparison
+// UPDATED: Fixed previous period calculation
 const fetchPreviousPeriodSales = async (
   currentPeriod,
   currentStart,
@@ -168,23 +195,14 @@ const fetchPreviousPeriodSales = async (
       case "Month":
         previousStart = new Date(currentStart);
         previousStart.setMonth(previousStart.getMonth() - 1);
-        previousEnd = new Date(currentEnd);
-        previousEnd.setMonth(previousEnd.getMonth() - 1);
-        // Adjust for months with different number of days
-        const lastDayOfPrevMonth = new Date(
-          previousEnd.getFullYear(),
-          previousEnd.getMonth() + 1,
-          0
-        ).getDate();
-        previousEnd.setDate(
-          Math.min(previousEnd.getDate(), lastDayOfPrevMonth)
-        );
+        previousEnd = new Date(currentStart);
+        previousEnd.setDate(0); // Last day of previous month
+        previousEnd.setHours(23, 59, 59, 999);
         break;
       case "Year":
-        previousStart = new Date(currentStart);
-        previousStart.setFullYear(previousStart.getFullYear() - 1);
-        previousEnd = new Date(currentEnd);
-        previousEnd.setFullYear(previousEnd.getFullYear() - 1);
+        previousStart = new Date(currentStart.getFullYear() - 1, 0, 1);
+        previousEnd = new Date(currentStart.getFullYear() - 1, 11, 31);
+        previousEnd.setHours(23, 59, 59, 999);
         break;
       default:
         return 0;
@@ -273,13 +291,14 @@ const Dashboard = () => {
   const [activeSalesSubTab, setActiveSalesSubTab] = useState("Today");
   const [activeExpenseSubTab, setActiveExpenseSubTab] = useState("Month");
   const [activePayrollSubTab, setActivePayrollSubTab] = useState("Prev Month");
-  const [activeOutstandingSubTab, setActiveOutstandingSubTab] = useState("Today"); // NEW
+  const [activeOutstandingSubTab, setActiveOutstandingSubTab] =
+    useState("Today");
 
   // State for dynamic data
   const [salesTableData, setSalesTableData] = useState([]);
   const [loadingSalesData, setLoadingSalesData] = useState(false);
-  const [outstandingTableData, setOutstandingTableData] = useState([]); // NEW
-  const [loadingOutstandingData, setLoadingOutstandingData] = useState(false); // NEW
+  const [outstandingTableData, setOutstandingTableData] = useState([]);
+  const [loadingOutstandingData, setLoadingOutstandingData] = useState(false);
 
   // Payroll State
   const [previousMonthLabel, setPreviousMonthLabel] = useState("");
@@ -369,9 +388,11 @@ const Dashboard = () => {
   const [sidePanelCurrentPage, setSidePanelCurrentPage] = useState(1);
   const sidePanelPerPage = 10;
 
-  // Get date ranges for labels - UPDATED to include year range
+  // Get date ranges for labels
   const dateRanges = useMemo(() => getDateRanges(), []);
   const prevMonthRanges = useMemo(() => getPreviousMonthRanges(), []);
+
+  // UPDATED: Fixed date formatting to handle UTC dates properly
 
   // NEW: Function to get sales table title with actual values
   const getSalesTableTitle = () => {
@@ -429,13 +450,19 @@ const Dashboard = () => {
   const fetchOutstandingTableData = async (period) => {
     try {
       setLoadingOutstandingData(true);
-      const response = await axios.get(`${backendUrl}/api/outstanding/table-data`, {
-        params: { period },
-      });
+      const response = await axios.get(
+        `${backendUrl}/api/outstanding/table-data`,
+        {
+          params: { period },
+        }
+      );
       if (response.data.success) {
         setOutstandingTableData(response.data.data);
       } else {
-        console.error("Error fetching outstanding table data:", response.data.message);
+        console.error(
+          "Error fetching outstanding table data:",
+          response.data.message
+        );
         setOutstandingTableData([]);
       }
     } catch (error) {
@@ -481,7 +508,6 @@ const Dashboard = () => {
       setShowAllMRsInSidePanel((prev) => !prev);
       setSidePanelCurrentPage(1);
     } else if (activeTab === "Total Payroll") {
-      // For Payroll tab, show info message instead of opening salary modal
       showToast("info", "Showing recent joins for Payroll");
     }
   };
@@ -489,64 +515,77 @@ const Dashboard = () => {
   // NEW: Function to handle view products
   const handleViewProducts = (mrName, products) => {
     setSelectedMRName(mrName);
+    console.log('value sof pro', products);
     setSelectedMRProducts(products);
     setShowProductsModal(true);
   };
 
-  // NEW: Function to handle view outstanding invoices
   const handleViewOutstandingInvoices = (mrName, invoices) => {
     setSelectedMRName(mrName);
     setSelectedMRProducts(invoices);
     setShowProductsModal(true);
   };
 
-  // UPDATED: Function to fetch sales data with growth calculations
+  // UPDATED: Fixed sales data fetching with proper date handling
   const fetchSalesBySubTab = async (subTab) => {
     try {
-      let salesAmount = 0;
-      let previousSales = 0;
+      let startDate, endDate;
+      const today = new Date();
 
       switch (subTab) {
         case "Today":
-          salesAmount = await fetchCustomRangeSales(
-            dateRanges.today.start,
-            dateRanges.today.end
-          );
-          previousSales = await fetchPreviousPeriodSales(
-            "Today",
-            dateRanges.today.start,
-            dateRanges.today.end
-          );
+          startDate = new Date(today);
+          startDate.setHours(0, 0, 0, 0);
+          endDate = new Date(today);
+          endDate.setHours(23, 59, 59, 999);
           break;
         case "Month":
-          salesAmount = await fetchCustomRangeSales(
-            dateRanges.month.start,
-            dateRanges.month.end
-          );
-          previousSales = await fetchPreviousPeriodSales(
-            "Month",
-            dateRanges.month.start,
-            dateRanges.month.end
-          );
+          startDate = new Date(today.getFullYear(), today.getMonth(), 1);
+          endDate = new Date(today);
+          endDate.setHours(23, 59, 59, 999);
           break;
         case "Year":
-          salesAmount = await fetchCustomRangeSales(
-            dateRanges.year.start,
-            dateRanges.year.end
-          );
-          previousSales = await fetchPreviousPeriodSales(
-            "Year",
-            dateRanges.year.start,
-            dateRanges.year.end
-          );
+          startDate = new Date(today.getFullYear(), 0, 1);
+          endDate = new Date(today);
+          endDate.setHours(23, 59, 59, 999);
           break;
         default:
-          salesAmount = await fetchCustomRangeSales(
-            dateRanges.today.start,
-            dateRanges.today.end
-          );
+          startDate = new Date(today);
+          startDate.setHours(0, 0, 0, 0);
+          endDate = new Date(today);
+          endDate.setHours(23, 59, 59, 999);
       }
 
+      const salesAmount = await fetchCustomRangeSales(startDate, endDate);
+
+      // Calculate previous period for comparison
+      let previousStart, previousEnd;
+
+      switch (subTab) {
+        case "Today":
+          previousStart = new Date(startDate);
+          previousStart.setDate(previousStart.getDate() - 1);
+          previousEnd = new Date(endDate);
+          previousEnd.setDate(previousEnd.getDate() - 1);
+          break;
+        case "Month":
+          previousStart = new Date(startDate);
+          previousStart.setMonth(previousStart.getMonth() - 1);
+          previousEnd = new Date(startDate);
+          previousEnd.setDate(0); // Last day of previous month
+          previousEnd.setHours(23, 59, 59, 999);
+          break;
+        case "Year":
+          previousStart = new Date(startDate.getFullYear() - 1, 0, 1);
+          previousEnd = new Date(startDate.getFullYear() - 1, 11, 31);
+          previousEnd.setHours(23, 59, 59, 999);
+          break;
+      }
+
+      const previousSales = await fetchCustomRangeSales(
+        previousStart,
+        previousEnd
+      );
       const growth = calculateGrowth(salesAmount, previousSales);
 
       return { salesAmount, previousSales, growth };
@@ -571,7 +610,7 @@ const Dashboard = () => {
           );
           outstandingAmount = todayData.totalOutstanding;
           outstandingInvoices = todayData.outstandingData || [];
-          
+
           const todayPreviousData = await fetchPreviousPeriodOutstanding(
             "Today",
             dateRanges.today.start,
@@ -586,7 +625,7 @@ const Dashboard = () => {
           );
           outstandingAmount = monthData.totalOutstanding;
           outstandingInvoices = monthData.outstandingData || [];
-          
+
           const monthPreviousData = await fetchPreviousPeriodOutstanding(
             "Month",
             dateRanges.month.start,
@@ -601,7 +640,7 @@ const Dashboard = () => {
           );
           outstandingAmount = yearData.totalOutstanding;
           outstandingInvoices = yearData.outstandingData || [];
-          
+
           const yearPreviousData = await fetchPreviousPeriodOutstanding(
             "Year",
             dateRanges.year.start,
@@ -620,10 +659,20 @@ const Dashboard = () => {
 
       const growth = calculateGrowth(outstandingAmount, previousOutstanding);
 
-      return { outstandingAmount, previousOutstanding, growth, outstandingInvoices };
+      return {
+        outstandingAmount,
+        previousOutstanding,
+        growth,
+        outstandingInvoices,
+      };
     } catch (error) {
       console.error("Error fetching outstanding by sub-tab:", error);
-      return { outstandingAmount: 0, previousOutstanding: 0, growth: 0, outstandingInvoices: [] };
+      return {
+        outstandingAmount: 0,
+        previousOutstanding: 0,
+        growth: 0,
+        outstandingInvoices: [],
+      };
     }
   };
 
@@ -647,6 +696,7 @@ const Dashboard = () => {
         totalSales: yearData.salesAmount,
       });
     } catch (error) {
+      console.error("Error fetching sales data:", error);
       setSalesData({
         totalSales: 0,
         monthlySales: 0,
@@ -846,8 +896,7 @@ const Dashboard = () => {
         );
         setTotalPayroll(total);
 
-        // Mock YTD payroll data (you would fetch this from your API)
-        // For demonstration, let's assume YTD is 2.5 times the monthly payroll
+        // Mock YTD payroll data
         setPayrollYTDTotal(total * 2.5);
 
         // Fetch highest salary MRs after payroll data is loaded
@@ -907,7 +956,7 @@ const Dashboard = () => {
 
         await fetchPayrollData();
         await fetchSalesData();
-        await fetchOutstandingData(); // UPDATED
+        await fetchOutstandingData();
         await fetchStockData();
         await fetchExpenseData();
         await fetchTeams();
@@ -1043,18 +1092,29 @@ const Dashboard = () => {
     }).format(amount);
   };
 
-  // Get current sales amount based on sales sub-tab
+  // UPDATED: Get current sales amount with proper debugging
   const getCurrentSalesAmount = () => {
+    let amount = 0;
+
     switch (activeSalesSubTab) {
       case "Today":
-        return salesData.todaySales;
+        amount = salesData.todaySales;
+
+        break;
       case "Month":
-        return salesData.monthlySales;
+        amount = salesData.monthlySales;
+
+        break;
       case "Year":
-        return salesData.yearSales;
+        amount = salesData.yearSales;
+
+        break;
       default:
-        return salesData.todaySales;
+        amount = salesData.todaySales;
     }
+
+    
+    return amount;
   };
 
   // NEW: Get current outstanding amount based on outstanding sub-tab
@@ -1095,7 +1155,7 @@ const Dashboard = () => {
     }
   };
 
-  // MR Functions (keep existing MR functions as they are)
+  // MR Functions
   const toggleMRSelect = useCallback((mr) => {
     setSelected((prev) =>
       prev.some((c) => c.id === mr._id)
@@ -1230,11 +1290,13 @@ const Dashboard = () => {
     );
   };
 
-  // UPDATED: Products Modal Component to handle both products and outstanding
+  // UPDATED: Products Modal Component with fixed date formatting
   const ProductsModal = () => {
     if (!showProductsModal) return null;
 
-    const isOutstandingData = selectedMRProducts.length > 0 && selectedMRProducts[0].dueAmount !== undefined;
+    const isOutstandingData =
+      selectedMRProducts.length > 0 &&
+      selectedMRProducts[0].dueAmount !== undefined;
 
     return ReactDOM.createPortal(
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -1242,10 +1304,9 @@ const Dashboard = () => {
           <div className="p-6 border-b border-gray-200">
             <div className="flex justify-between items-center">
               <h3 className="text-xl font-semibold text-gray-800">
-                {isOutstandingData 
+                {isOutstandingData
                   ? `Outstanding Invoices for ${selectedMRName}`
-                  : `All Products Sold by ${selectedMRName}`
-                }
+                  : `All Products Sold by ${selectedMRName}`}
               </h3>
               <button
                 onClick={() => setShowProductsModal(false)}
@@ -1262,12 +1323,22 @@ const Dashboard = () => {
                   {isOutstandingData ? (
                     <>
                       <th className="p-3 text-sm font-medium">Date</th>
-                      <th className="p-3 text-sm font-medium">Invoice Number</th>
+                      <th className="p-3 text-sm font-medium">
+                        Invoice Number
+                      </th>
                       <th className="p-3 text-sm font-medium">Customer</th>
-                      <th className="p-3 text-sm font-medium">Total Amount ($)</th>
-                      <th className="p-3 text-sm font-medium">Paid Amount ($)</th>
-                      <th className="p-3 text-sm font-medium">Due Amount ($)</th>
-                      <th className="p-3 text-sm font-medium">Payment Status</th>
+                      <th className="p-3 text-sm font-medium">
+                        Total Amount ($)
+                      </th>
+                      <th className="p-3 text-sm font-medium">
+                        Paid Amount ($)
+                      </th>
+                      <th className="p-3 text-sm font-medium">
+                        Due Amount ($)
+                      </th>
+                      <th className="p-3 text-sm font-medium">
+                        Payment Status
+                      </th>
                       <th className="p-3 text-sm font-medium">Due Date</th>
                     </>
                   ) : (
@@ -1275,7 +1346,9 @@ const Dashboard = () => {
                       <th className="p-3 text-sm font-medium">Date</th>
                       <th className="p-3 text-sm font-medium">Product Name</th>
                       <th className="p-3 text-sm font-medium">Quantity</th>
-                      <th className="p-3 text-sm font-medium">Selling Price ($)</th>
+                      <th className="p-3 text-sm font-medium">
+                        Selling Price ($)
+                      </th>
                       <th className="p-3 text-sm font-medium">Amount ($)</th>
                       <th className="p-3 text-sm font-medium">Customer</th>
                       <th className="p-3 text-sm font-medium">Bonus Qty</th>
@@ -1288,7 +1361,10 @@ const Dashboard = () => {
               <tbody>
                 {selectedMRProducts.length === 0 ? (
                   <tr>
-                    <td colSpan={isOutstandingData ? 8 : 8} className="p-4 text-center text-gray-500">
+                    <td
+                      colSpan={isOutstandingData ? 8 : 8}
+                      className="p-4 text-center text-gray-500"
+                    >
                       No data found.
                     </td>
                   </tr>
@@ -1303,7 +1379,9 @@ const Dashboard = () => {
                       {isOutstandingData ? (
                         <>
                           <td className="p-3 text-sm text-gray-700">
-                            {formatDateToReadable(item.recordingDate || item.invoiceDate)}
+                            {formatDateToReadable(
+                              item.recordingDate || item.invoiceDate
+                            )}
                           </td>
                           <td className="p-3 text-sm text-gray-700">
                             {item.invoiceNumber}
@@ -1321,13 +1399,15 @@ const Dashboard = () => {
                             ${formatCurrency(item.dueAmount)}
                           </td>
                           <td className="p-3 text-sm text-gray-700">
-                            <span className={`px-2 py-1 rounded-full text-xs ${
-                              item.paymentStatus === "Cash" 
-                                ? "bg-green-100 text-green-800"
-                                : item.paymentStatus === "Partial Paid"
-                                ? "bg-yellow-100 text-yellow-800"
-                                : "bg-red-100 text-red-800"
-                            }`}>
+                            <span
+                              className={`px-2 py-1 rounded-full text-xs ${
+                                item.paymentStatus === "Cash"
+                                  ? "bg-green-100 text-green-800"
+                                  : item.paymentStatus === "Partial Paid"
+                                  ? "bg-yellow-100 text-yellow-800"
+                                  : "bg-red-100 text-red-800"
+                              }`}
+                            >
                               {item.paymentStatus}
                             </span>
                           </td>
@@ -1370,9 +1450,7 @@ const Dashboard = () => {
             </table>
 
             {selectedMRProducts.length === 0 && (
-              <p className="text-center text-gray-500 py-4">
-                No data found
-              </p>
+              <p className="text-center text-gray-500 py-4">No data found</p>
             )}
           </div>
         </div>
@@ -1525,7 +1603,9 @@ const Dashboard = () => {
               {activeOutstandingSubTab} •{" "}
               <span
                 className={
-                  getCurrentOutstandingGrowth() >= 0 ? "text-green-600" : "text-red-600"
+                  getCurrentOutstandingGrowth() >= 0
+                    ? "text-green-600"
+                    : "text-red-600"
                 }
               >
                 {getCurrentOutstandingGrowth() >= 0 ? "↗" : "↘"}{" "}
@@ -1766,7 +1846,8 @@ const Dashboard = () => {
               customerCount: 0,
             };
           }
-          mrOutstanding[outstanding.mrName].totalOutstanding += outstanding.dueAmount;
+          mrOutstanding[outstanding.mrName].totalOutstanding +=
+            outstanding.dueAmount;
           mrOutstanding[outstanding.mrName].invoices.push(outstanding);
           mrOutstanding[outstanding.mrName].customerCount += 1;
         });
@@ -1824,7 +1905,10 @@ const Dashboard = () => {
                   </p>
                   <button
                     onClick={() =>
-                      handleViewOutstandingInvoices(mrOutstanding.mrName, mrOutstanding.invoices)
+                      handleViewOutstandingInvoices(
+                        mrOutstanding.mrName,
+                        mrOutstanding.invoices
+                      )
                     }
                     className="text-gray-400 hover:text-orange-600 transition-colors cursor-pointer p-1"
                     title="View Invoices"
@@ -1836,7 +1920,9 @@ const Dashboard = () => {
             ))
           ) : (
             <p className="text-gray-500 text-center py-4">
-              {loadingOutstandingData ? "Loading..." : "No outstanding data found"}
+              {loadingOutstandingData
+                ? "Loading..."
+                : "No outstanding data found"}
             </p>
           )}
 
@@ -2056,7 +2142,7 @@ const Dashboard = () => {
                 : "View Details"
             }
           >
-            {(activeTab === "Sales" || activeTab === "Outstanding") ? (
+            {activeTab === "Sales" || activeTab === "Outstanding" ? (
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 width="20"
@@ -2090,7 +2176,7 @@ const Dashboard = () => {
       activeTab !== "Sales" &&
       activeTab !== "Expense" &&
       activeTab !== "Total Payroll" &&
-      activeTab !== "Outstanding" // NEW
+      activeTab !== "Outstanding"
     )
       return null;
 
@@ -2113,7 +2199,7 @@ const Dashboard = () => {
         { key: "Prev Month", label: prevMonthRanges.prevMonth.label },
         { key: "YTD", label: prevMonthRanges.prevMonthYear.label },
       ];
-    } else if (activeTab === "Outstanding") { // NEW
+    } else if (activeTab === "Outstanding") {
       tabs = [
         { key: "Today", label: dateRanges.today.label },
         { key: "Month", label: dateRanges.month.label },
@@ -2133,7 +2219,7 @@ const Dashboard = () => {
     } else if (activeTab === "Total Payroll") {
       currentSubTab = activePayrollSubTab;
       setCurrentSubTab = setActivePayrollSubTab;
-    } else if (activeTab === "Outstanding") { // NEW
+    } else if (activeTab === "Outstanding") {
       currentSubTab = activeOutstandingSubTab;
       setCurrentSubTab = setActiveOutstandingSubTab;
     }
@@ -2423,7 +2509,12 @@ const Dashboard = () => {
                     </td>
                     <td className="p-4">
                       <button
-                        onClick={() => handleViewOutstandingInvoices(mrOutstanding.mrName, mrOutstanding.invoices)}
+                        onClick={() =>
+                          handleViewOutstandingInvoices(
+                            mrOutstanding.mrName,
+                            mrOutstanding.invoices
+                          )
+                        }
                         className="text-gray-400 hover:text-orange-600 transition-colors cursor-pointer p-2"
                         title="View All Invoices"
                       >
@@ -2585,7 +2676,7 @@ const Dashboard = () => {
         case "Sales":
           return <SalesTable />;
         case "Outstanding":
-          return <OutstandingTable />; // NEW
+          return <OutstandingTable />;
         case "Stock in Hands":
           return <StockTable />;
         case "Expense":
@@ -2639,6 +2730,9 @@ const Dashboard = () => {
       </div>
     );
   };
+
+  // UPDATED: Add debug logging to track sales data
+  useEffect(() => {}, [activeSalesSubTab, salesData]);
 
   return (
     <div className="p-6">

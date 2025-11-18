@@ -230,8 +230,6 @@ router.get("/analytics/year", async (req, res) => {
   }
 });
 
-// ... (Keep ALL your existing endpoints exactly as they are)
-// Get sales from specific date range (custom range) - ANALYTICS VERSION
 router.get("/sales/analytics/custom-range", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
