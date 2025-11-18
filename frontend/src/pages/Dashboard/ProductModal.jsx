@@ -12,7 +12,6 @@ const ProductsModal = ({
   activeTab,
 }) => {
   if (!showModal) return null;
-  
   const isOutstandingData = activeTab === "Outstanding";
 
   const modalContent = ReactDOM.createPortal(
