@@ -18,7 +18,6 @@ import CashAndBankLayout from "./pages/CashAndBankLayout";
 import StaffMemberLayout from "./pages/Utility/StaffMemberLayout";
 
 // Dashboard and Main pages
-import Dashboard1 from "./pages/Dashbaord"; // Added Dashboard component
 import Dashboard from  "./pages/Dashboard/Dashbaord"
 import Login from "./pages/Login";
 import OnlineOrders from "./pages/OnlineOrders";
@@ -112,8 +111,7 @@ import AddDailySummaryReports from "./pages/Reports/AddNewSaleSummaryReports";
 import FrontSettings from "./pages/Utility/FrontSettings";
 import ProductCard from "./pages/Utility/ProductCard";
 
-// HRM pages
-import Attendance from "./pages/Dashbaord";
+
 import HrmDashboard from "./pages/HRM/Dashboard"; // Renamed to avoid conflict
 import Holidays from "./pages/HRM/Holidays";
 import Leaves from "./pages/HRM/Leaves";

@@ -356,8 +356,6 @@ const Dashboard = () => {
     };
   }, [mrList, payrollData]);
 
-  console.log("valueso f ", payrollData);
-
   // Filter MR data based on active tab
   const filteredMR = useMemo(() => {
     const lowerSearch = searchTerm.toLowerCase();
@@ -666,7 +664,7 @@ const Dashboard = () => {
       setIsUploading(false);
     }
   };
-  console.log("payrollData", payrollData);
+
   const updateMR = async (e) => {
     e.preventDefault();
     if (!form._id) return;

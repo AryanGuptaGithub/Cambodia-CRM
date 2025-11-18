@@ -197,7 +197,6 @@ const LeaveAttendance = () => {
     try {
       const response = await axios.get(`${backendUrl}/api/leaves`);
       const leavesData = response.data || [];
-      console.log("Raw leaves data:", leavesData);
 
       // Group leaves by user ID - handle both object and string userId
       const leavesByUser = {};

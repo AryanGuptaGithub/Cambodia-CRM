@@ -3,9 +3,6 @@ import { Users, TrendingUp, AlertTriangle, Receipt, Calendar, Eye, ShoppingCart 
 import { formatCurrency } from "./DashboardUtil";
 import { formatDateToReadable } from "../../utils/dateUtil";
 
-/* --------------------------------------------
-   Reusable PanelContent Component (FIXED KEYS)
---------------------------------------------- */
 const PanelContent = ({ data, loading, loadingText, emptyText, renderItem, pagination }) => {
   if (loading) {
     return <p className="text-gray-500 text-center py-4">{loadingText}</p>;
@@ -26,7 +23,7 @@ const PanelContent = ({ data, loading, loadingText, emptyText, renderItem, pagin
             item.category ||
             `${index}-${Math.random()}`
           }
-        >
+        > {console.log('values of item', item)}
           {renderItem(item, index)}
         </React.Fragment>
       ))}
@@ -280,7 +277,7 @@ const RecentExpenses = ({ expenseData }) => (
       <div className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg">
         <div className="flex items-center space-x-3">
           <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center text-red-600 text-sm font-semibold">
-            {item.category?.substring(0, 2).toUpperCase() || "EX"}
+            {item.category?.category?.substring(0, 2).toUpperCase() || "EX"}
           </div>
 
           <div>

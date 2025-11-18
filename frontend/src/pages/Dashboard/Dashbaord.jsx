@@ -49,7 +49,8 @@ const Dashboard = () => {
   const [activeSalesSubTab, setActiveSalesSubTab] = useState("Today");
   const [activeExpenseSubTab, setActiveExpenseSubTab] = useState("Month");
   const [activePayrollSubTab, setActivePayrollSubTab] = useState("Prev Month");
-  const [activeOutstandingSubTab, setActiveOutstandingSubTab] = useState("Today");
+  const [activeOutstandingSubTab, setActiveOutstandingSubTab] =
+    useState("Today");
 
   // TABLE DATA
   const [salesTableData, setSalesTableData] = useState([]);
@@ -80,12 +81,10 @@ const Dashboard = () => {
   const handleParentTabChange = (newTab) => {
     // Set previous tab before updating current tab
     setPreviousActiveTab(activeTab);
-    
+
     // Update current tab
     setActiveTab(newTab);
-    
-    console.log('Previous tab:', previousActiveTab, 'New tab:', newTab);
-    
+
     // Reset sub-tabs based on the new tab
     if (newTab === "Sales") {
       setActiveSalesSubTab("Today");
@@ -335,9 +334,7 @@ const Dashboard = () => {
                 />
               </div>
 
-              <div className="lg:col-span-2">
-                {renderMainTable()}
-              </div>
+              <div className="lg:col-span-2">{renderMainTable()}</div>
             </div>
           </div>
         </main>

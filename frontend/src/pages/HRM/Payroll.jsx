@@ -852,9 +852,9 @@ const Payroll = () => {
       const data = await response.json();
 
       const payrollData = data.data || [];
-      console.log('values of pary', payrollData);
-      setAllPayrolls(payrollData); 
-      setPayrolls(payrollData); 
+
+      setAllPayrolls(payrollData);
+      setPayrolls(payrollData);
 
       if (data.nextPayrollCode) {
         setNextPayrollCode(data.nextPayrollCode);
@@ -1595,8 +1595,7 @@ const Payroll = () => {
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, []);
- 
-  console.log('currentPayrolls', currentPayrolls);
+
   if (loading)
     return (
       <div className="p-6 flex justify-center items-center h-64">
