@@ -260,8 +260,8 @@ export const useDashboardData = () => {
   const fetchStockData = async () => {
     try {
       const response = await axios.get(`${backendUrl}/api/reports-in-hand`);
-      let stockItems = response.data?.data || response.data || [];
 
+      let stockItems = response.data.success ? response.data.reports : [];
       const totalStockValue = calculateStockValue(stockItems);
       const lowStockItems = getLowStockItems(stockItems);
       setStockData({
@@ -271,49 +271,6 @@ export const useDashboardData = () => {
       });
     } catch (error) {
       console.error("Error fetching stock data:", error);
-
-      // Fallback to calculated mock data
-      const mockStockItems = [
-        {
-          _id: "691d88528da10ce6c418b30a",
-          supplierName: "MedTech Pharma Ltd.",
-          productName: "Aspirin 81mg",
-          quantity: { boxes: 22000 },
-          status: "In Stock",
-          category: "Uncategorized",
-          minStockLevel: 10,
-          lc: 9.336363636363636,
-        },
-        {
-          _id: "691d88528da10ce6c418b30d",
-          supplierName: "MedTech Pharma Ltd.",
-          productName: "Amoxicillin 500mg",
-          quantity: { boxes: 19000 },
-          status: "In Stock",
-          category: "Uncategorized",
-          minStockLevel: 10,
-          lc: 11.48421052631579,
-        },
-        {
-          _id: "691d9cb0af90db6da571e170",
-          supplierName: "Impulse",
-          productName: "Metformin 500mg ER",
-          quantity: { boxes: 1000 },
-          status: "In Stock",
-          category: "Uncategorized",
-          minStockLevel: 10,
-          lc: 18.5,
-        },
-      ];
-
-      const totalStockValue = calculateStockValue(mockStockItems);
-      const lowStockItems = getLowStockItems(mockStockItems);
-
-      setStockData({
-        totalStock: totalStockValue,
-        stockValue: totalStockValue,
-        lowStockItems: lowStockItems,
-      });
     }
   };
 

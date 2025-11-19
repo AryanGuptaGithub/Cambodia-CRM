@@ -205,7 +205,6 @@ export const calculateStockValue = (stockItems) => {
   }, 0);
 };
 
-// Get low stock items
 export const getLowStockItems = (stockItems) => {
   if (!stockItems || !Array.isArray(stockItems)) return [];
   

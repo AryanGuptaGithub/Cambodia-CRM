@@ -119,11 +119,10 @@ const Dashboard = () => {
   const fetchStockTableData = async (period) => {
     try {
       setLoadingStockData(true);
-      const response = await axios.get(`${backendUrl}/api/stock/table-data`, {
-        params: { period },
-      });
-
-      let stockData = response.data.success ? response.data.data : []; 
+      const response = await axios.get(`${backendUrl}/api/reports-in-hand`
+      );
+      console.log('values of responst', response);
+      let stockData = response.data.success ? response.data.reports : []; 
       setStockTableData(stockData);
 
       // Update stock data for cards and side panel - REMOVED DUPLICATE CALL
@@ -139,45 +138,7 @@ const Dashboard = () => {
     } catch (error) {
       console.error("Error fetching stock table data:", error);
 
-      // Fallback to mock data
-      const mockStockData = [
-        {
-          _id: "691d88528da10ce6c418b30a",
-          supplierName: "MedTech Pharma Ltd.",
-          productName: "Aspirin 81mg",
-          quantity: { boxes: 22000 },
-          status: "In Stock",
-          category: "Uncategorized",
-          minStockLevel: 10,
-          lc: 9.336363636363636,
-          fob: 8.954545454545455,
-          cif: 10.963636363636363,
-        },
-        {
-          _id: "691d88528da10ce6c418b30d",
-          supplierName: "MedTech Pharma Ltd.",
-          productName: "Amoxicillin 500mg",
-          quantity: { boxes: 19000 },
-          status: "In Stock",
-          category: "Uncategorized",
-          minStockLevel: 10,
-          lc: 11.48421052631579,
-          fob: 10.989473684210527,
-          cif: 12.242105263157892,
-        },
-        {
-          _id: "691d9cb0af90db6da571e170",
-          supplierName: "Impulse",
-          productName: "Metformin 500mg ER",
-          quantity: { boxes: 1000 },
-          status: "In Stock",
-          category: "Uncategorized",
-          minStockLevel: 10,
-          lc: 18.5,
-          fob: 17.9,
-          cif: 18.5,
-        },
-      ];
+
 
       setStockTableData(mockStockData);
 

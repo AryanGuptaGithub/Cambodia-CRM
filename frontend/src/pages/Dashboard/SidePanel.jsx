@@ -342,14 +342,13 @@ const LowStock = ({ stockData }) => (
             <AlertTriangle size={14} />
           </div>
           <div>
-            <p className="text-sm font-medium text-gray-800">{item.product}</p>
-            <p className="text-xs text-gray-500">{item.category}</p>
+            <p className="text-sm font-medium text-gray-800">{item.productName}</p>
           </div>
         </div>
 
         <div className="text-right">
-          <p className="text-sm font-semibold text-red-700">{item.currentStock}</p>
-          <p className="text-xs text-gray-500">Min: {item.minLevel}</p>
+          <p className="text-sm font-semibold text-red-700">{item.quantity?.boxes}</p>
+          <p className="text-xs text-gray-500">Min: {item.minStockLevel}</p>
         </div>
       </div>
     )}
