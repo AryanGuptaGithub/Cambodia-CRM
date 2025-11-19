@@ -217,7 +217,7 @@ const LeaveAttendance = () => {
         }
       });
 
-      console.log("Processed mrLeaves:", leavesByUser);
+      
       setMrLeaves(leavesByUser);
     } catch (err) {
       console.error("Failed to fetch leaves:", err);

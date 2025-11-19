@@ -1,171 +1,165 @@
-// routes/purchasing/purchaseInventory.js
 import express from "express";
 import purchaseInventory from "../../models/purcharsing/purchaseInventory.js";
-import product from "../../models/projectManger/product.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
+import Product from "../../models/projectManger/product.js"
 
 const router = express.Router();
 
+/* ------------------------------------------------------ */
+/* UTILITIES */
+/* ------------------------------------------------------ */
+
 const calculateStockStatus = (boxes) => {
-  if (boxes === 0) return "Out of Stock";
+  if (boxes <= 0) return "Out of Stock";
   if (boxes < 10) return "Critical";
   if (boxes < 25) return "Low Stock";
   return "In Stock";
 };
 
-// CORRECTED: updateReportInHand function to handle boxes field
 const updateReportInHand = async (productData, operation = "add") => {
   try {
-    const {
-      productName,
-      supplierName,
-      quantityPerBoxStrip,
-      qtyBox, // Add qtyBox for compatibility
-      category,
-      pricePerPiece,
-      pricePerBox,
-      minStockLevel,
-      lc,
-      fob,
-      cif,
-    } = productData;
+    const { productName, supplierName, quantityPerBoxStrip, lc, fob, cif } =
+      productData;
 
-    // FIX 1: Ensure supplierName is not empty
-    const validSupplierName = supplierName?.trim() || "Unknown Supplier";
+    const validSupplier = supplierName?.trim() || "Unknown Supplier";
+    const qty = Number(quantityPerBoxStrip || 0);
 
-    // CORRECTED: Use boxes instead of totalPieces
-    const boxesToUpdate = quantityPerBoxStrip || qtyBox || 0;
-    const existing = await ReportInHand.findOne({ productName });
+    let existing = await ReportInHand.findOne({ productName });
 
     if (existing) {
       const multiplier = operation === "add" ? 1 : -1;
-
-      // CORRECTED: Update boxes field instead of totalPieces
-      const newBoxes = existing.quantity.boxes + boxesToUpdate * multiplier;
-      const finalBoxes = Math.max(0, newBoxes);
-      const newStatus = calculateStockStatus(finalBoxes);
+      const newQty = Math.max(existing.quantity.boxes + qty * multiplier, 0);
 
       let newLc = existing.lc;
       let newFob = existing.fob;
       let newCif = existing.cif;
 
-      if (operation === "add" && boxesToUpdate > 0) {
-        const oldBoxes = existing.quantity.boxes;
-        const total = oldBoxes + boxesToUpdate;
+      if (operation === "add" && qty > 0) {
+        const oldQty = existing.quantity.boxes;
+        const total = oldQty + qty;
+
         if (total > 0) {
-          newLc = (existing.lc * oldBoxes + (lc || 0) * boxesToUpdate) / total;
-          newFob =
-            (existing.fob * oldBoxes + (fob || 0) * boxesToUpdate) / total;
-          newCif =
-            (existing.cif * oldBoxes + (cif || 0) * boxesToUpdate) / total;
+          newLc = (existing.lc * oldQty + lc * qty) / total;
+          newFob = (existing.fob * oldQty + fob * qty) / total;
+          newCif = (existing.cif * oldQty + cif * qty) / total;
         }
       }
 
       await ReportInHand.findByIdAndUpdate(existing._id, {
         $set: {
-          "quantity.boxes": finalBoxes, // CORRECTED: Update boxes field
-          status: newStatus,
-          supplierName: validSupplierName,
-          category: category || existing.category,
-          pricePerPiece: pricePerPiece || existing.pricePerPiece,
-          pricePerBox: pricePerBox || existing.pricePerBox,
-          minStockLevel: minStockLevel || existing.minStockLevel,
+          "quantity.boxes": newQty,
+          status: calculateStockStatus(newQty),
+          supplierName: validSupplier,
           lc: newLc,
           fob: newFob,
           cif: newCif,
         },
       });
     } else if (operation === "add") {
-      const status = calculateStockStatus(boxesToUpdate);
       await ReportInHand.create({
         productName,
-        supplierName: validSupplierName,
-        quantity: {
-          boxes: boxesToUpdate, // CORRECTED: Set boxes field
-        },
-        status,
-        category: category || "",
-        pricePerPiece: pricePerPiece || 0,
-        pricePerBox: pricePerBox || 0,
-        minStockLevel: minStockLevel || 0,
+        supplierName: validSupplier,
+        quantity: { boxes: qty },
+        status: calculateStockStatus(qty),
         lc: lc || 0,
         fob: fob || 0,
         cif: cif || 0,
       });
     }
-  } catch (error) {
-    console.error("Error in updateReportInHand:", error);
-    throw error;
+  } catch (err) {
+    console.error("updateReportInHand ERROR:", err);
   }
 };
 
-/* ------------------------------------------------------ */
-/* ROUTES */
-/* ------------------------------------------------------ */
-
-// 🧾 Get all purchase invoices
 router.get("/purchase-invoice", async (req, res) => {
   try {
     const invoices = await purchaseInventory
       .find()
       .sort({ invoiceDate: -1 })
-      .select("invoiceNumber invoiceDate supplierName amount");
-    res.status(200).json(invoices);
-  } catch (error) {
-    console.error("Error fetching invoices:", error);
+      .select("invoiceNumber invoiceDate supplierName totalAmount");
+
+    res.json(invoices);
+  } catch (err) {
     res.status(500).json({ message: "Failed to fetch invoices" });
   }
 });
 
-// 📦 Get all purchases
 router.get("/purchase", async (req, res) => {
   try {
     const purchases = await purchaseInventory.find().sort({ createdAt: -1 });
-    const products = await product.find({}, "productName type packing");
 
-    const productMap = new Map();
-    products.forEach((p) =>
-      productMap.set(p.productName, { type: p.type, packing: p.packing })
+    // Fetch all products once
+    const productList = await Product.find(
+      {},
+      "productName type packing qtyPerBoxStrip sellingPrice"
     );
 
-    const enhanced = purchases.map((p) => {
-      const info = productMap.get(p.productName);
+    // Convert to Map for fast lookup
+    const productMap = new Map();
+    productList.forEach((p) => {
+      productMap.set(p.productName, p);
+    });
+
+    // Enhance each purchase invoice
+    const enhancedPurchases = purchases.map((invoice) => {
+      const enhancedProducts = invoice.products.map((p) => {
+        const productInfo = productMap.get(p.productName);
+
+        return {
+          ...p.toObject(),
+          productType: productInfo?.type || "Unknown",
+          productPacking: productInfo?.packing || "",
+          productQtyPerBoxStrip: productInfo?.qtyPerBoxStrip || 0,
+          sellingPrice: productInfo?.sellingPrice || 0,
+        };
+      });
+
       return {
-        ...p.toObject(),
-        productType: info?.type || "Unknown",
-        productPacking: info?.packing || "",
+        ...invoice.toObject(),
+        products: enhancedProducts,
       };
     });
 
-    res.status(200).json({
+    res.json({
       success: true,
-      count: enhanced.length,
-      reports: enhanced,
+      count: enhancedPurchases.length,
+      purchases: enhancedPurchases,
     });
-  } catch (error) {
-    console.error("Error fetching purchases:", error);
-    res.status(500).json({ success: false, message: "Server error" });
+  } catch (err) {
+    console.error("Error fetching purchases:", err);
+    res.status(500).json({ message: "Server error" });
   }
 });
 
-// ✏️ Update purchase
+
 router.put("/purchase/:id", async (req, res) => {
   try {
-    const { id } = req.params;
-    const updateData = req.body;
+    const id = req.params.id;
 
-    const original = await purchaseInventory.findById(id);
-    if (!original)
-      return res.status(404).json({ message: "Purchase not found" });
+    const oldInvoice = await purchaseInventory.findById(id);
+    if (!oldInvoice) return res.status(404).json({ message: "Not found" });
 
-    const updated = await purchaseInventory.findByIdAndUpdate(id, updateData, {
+    // Remove old stock
+    for (const p of oldInvoice.products) {
+      await updateReportInHand(
+        { ...p, supplierName: oldInvoice.supplierName },
+        "subtract"
+      );
+    }
+
+    // Update invoice
+    const updated = await purchaseInventory.findByIdAndUpdate(id, req.body, {
       new: true,
       runValidators: true,
     });
 
-    // Update report: subtract old, add new
-    await updateReportInHand(original, "subtract");
-    await updateReportInHand(updated, "add");
+    // Add new stock
+    for (const p of updated.products) {
+      await updateReportInHand(
+        { ...p, supplierName: updated.supplierName },
+        "add"
+      );
+    }
 
     res.json(updated);
   } catch (err) {
@@ -174,190 +168,228 @@ router.put("/purchase/:id", async (req, res) => {
   }
 });
 
-// ❌ Delete purchase
 router.delete("/purchase/:id", async (req, res) => {
   try {
-    const purchase = await purchaseInventory.findById(req.params.id);
-    if (!purchase) return res.status(404).json({ error: "Purchase not found" });
+    const invoice = await purchaseInventory.findById(req.params.id);
+    if (!invoice) return res.status(404).json({ error: "Not found" });
 
-    await updateReportInHand(purchase, "subtract");
-    await purchaseInventory.findByIdAndDelete(req.params.id);
+    for (const p of invoice.products) {
+      await updateReportInHand(
+        { ...p, supplierName: invoice.supplierName },
+        "subtract"
+      );
+    }
 
-    res.status(200).json({ message: "Purchase deleted successfully" });
-  } catch (error) {
-    console.error("Delete error:", error);
+    await purchaseInventory.findByIdAndDelete(invoice._id);
+    res.json({ message: "Deleted successfully" });
+  } catch (err) {
     res.status(500).json({ error: "Server error" });
   }
 });
 
-// 🧹 Bulk delete - FIXED
 router.delete("/purchase", async (req, res) => {
   try {
     const { ids } = req.body;
-    if (!Array.isArray(ids) || ids.length === 0)
-      return res.status(400).json({ error: "No IDs provided" });
 
-    // FIX 2: Extract just the ID strings from the objects
-    const idStrings = ids.map((item) =>
-      typeof item === "object" && item.id ? item.id : item
-    );
+    const invoices = await purchaseInventory.find({ _id: { $in: ids } });
 
-    const purchases = await purchaseInventory.find({ _id: { $in: idStrings } });
-
-    for (const p of purchases) {
-      await updateReportInHand(p, "subtract");
+    for (const inv of invoices) {
+      for (const p of inv.products) {
+        await updateReportInHand(
+          { ...p, supplierName: inv.supplierName },
+          "subtract"
+        );
+      }
     }
 
-    const result = await purchaseInventory.deleteMany({
-      _id: { $in: idStrings },
-    });
+    const result = await purchaseInventory.deleteMany({ _id: { $in: ids } });
 
     res.json({
-      message: `Deleted ${result.deletedCount} purchases successfully`,
+      message: `Deleted ${result.deletedCount} invoices`,
       deletedCount: result.deletedCount,
     });
   } catch (err) {
-    console.error("Bulk delete error:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
 
-// 📥 Import Excel data
+/* IMPORT EXCEL WITH DUPLICATE CHECK */
 router.post("/purchase/import", async (req, res) => {
   try {
-    const data = req.body;
+    const rows = req.body;
+    if (!Array.isArray(rows))
+      return res.status(400).json({ message: "Invalid data" });
 
-    if (!Array.isArray(data) || data.length === 0)
-      return res.status(400).json({ message: "No data received" });
+    const invoices = new Map();
+    const skipped = [];
 
-    const converted = data.map((item) => {
-      // Use qtyBox or quantityPerBoxStrip, whichever is available
-      const qtyValue = parseFloat(item.qtyBox || item.quantityPerBoxStrip) || 0;
-      const lc = parseFloat(item.lc) || 0;
-      const fob = parseFloat(item.fob) || 0;
-      const cif = parseFloat(item.cif) || 0;
+    for (const row of rows) {
+      if (!row.invoiceNumber) continue;
 
-      const amount = lc * qtyValue;
+      // 🔥 CHECK IF INVOICE ALREADY EXISTS
+      const exists = await purchaseInventory.findOne({
+        invoiceNumber: row.invoiceNumber,
+      });
 
-      // FIX 1: Ensure supplierName is not empty
-      const validSupplierName = item.supplierName?.trim() || "Unknown Supplier";
+      if (exists) {
+        skipped.push(row.invoiceNumber);
+        continue;
+      }
 
-      return {
-        ...item,
-        invoiceDate: item.invoiceDate ? new Date(item.invoiceDate) : null,
-        receivedDate: item.receivedDate ? new Date(item.receivedDate) : null,
-        expiryDate: item.expiryDate ? new Date(item.expiryDate) : null,
-        supplierName: validSupplierName,
+      const key = row.invoiceNumber;
+      if (!invoices.has(key)) {
+        invoices.set(key, {
+          invoiceNumber: key,
+          invoiceDate: row.invoiceDate ? new Date(row.invoiceDate) : null,
+          deliveryNumber: row.deliveryNumber || "",
+          receivedDate: row.receivedDate ? new Date(row.receivedDate) : null,
+          supplierName: row.supplierName?.trim() || "Unknown Supplier",
+          products: [],
+          totalAmount: 0,
+        });
+      }
+
+      const inv = invoices.get(key);
+
+      const qty = Number(row.quantityPerBoxStrip || 0);
+      const lc = Number(row.lc || 0);
+      const fob = Number(row.fob || 0);
+      const cif = Number(row.cif || 0);
+
+      const amount = lc * qty;
+
+      inv.products.push({
+        productName: row.productName,
+        expiryDate: row.expiryDate ? new Date(row.expiryDate) : null,
+        quantityPerBoxStrip: qty,
+        lc,
         fob,
         cif,
-        lcNumber: item.lc?.toString() || "",
-        quantityPerBoxStrip: qtyValue,
         amount,
-      };
-    });
+      });
 
-    const inserted = await purchaseInventory.insertMany(converted);
-    for (const i of converted) await updateReportInHand(i, "add");
+      inv.totalAmount += amount;
+    }
 
-    res.status(200).json({
-      message: `Imported ${inserted.length} purchase records successfully.`,
-      count: inserted.length,
+    const finalInvoices = Array.from(invoices.values());
+
+    await purchaseInventory.insertMany(finalInvoices);
+
+    for (const inv of finalInvoices) {
+      for (const p of inv.products) {
+        await updateReportInHand(
+          {
+            productName: p.productName,
+            quantityPerBoxStrip: p.quantityPerBoxStrip,
+            supplierName: inv.supplierName,
+            lc: p.lc,
+            fob: p.fob,
+            cif: p.cif,
+          },
+          "add"
+        );
+      }
+    }
+
+    res.json({
+      message: `Imported ${finalInvoices.length} invoices`,
+      importedCount: finalInvoices.length,
+      skippedInvoices: skipped, // 🔥 return skipped duplicates
     });
-  } catch (error) {
-    console.error("Import error:", error);
+  } catch (err) {
+    console.error("Import error:", err);
     res.status(500).json({ message: "Internal server error" });
   }
 });
 
-// ➕ Add new purchase manually - FIXED
+
+/* ADD NEW PURCHASE MANUALLY */
 router.post("/purchase", async (req, res) => {
   try {
     const data = req.body;
-
+    console.log('values of data', data);
     if (
       !data.invoiceNumber ||
       !data.supplierName ||
-      !Array.isArray(data.products) ||
-      data.products.length === 0
+      !Array.isArray(data.products)
     ) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    const existing = await purchaseInventory.findOne({
+      invoiceNumber: data.invoiceNumber,
+    });
+
+    if (existing) {
       return res.status(400).json({
-        message: "Invoice number, supplier, and at least one product required.",
+        success: false,
+        message: `Invoice '${data.invoiceNumber}' already exists.`,
       });
     }
 
-    // FIX 1: Ensure supplierName is not empty
-    const validSupplierName = data.supplierName?.trim();
-    if (!validSupplierName) {
-      return res.status(400).json({
-        message: "Supplier name is required and cannot be empty.",
-      });
-    }
+    let totalAmount = 0;
 
-    const saved = [];
-    for (const p of data.products) {
-      const qty = parseFloat(p.qtyBox || p.quantityPerBoxStrip) || 0;
-      const lc = parseFloat(p.lc) || 0;
-      const fob = parseFloat(p.fob) || 0;
-      const cif = parseFloat(p.cif) || 0;
+    const products = data.products.map((p) => {
+      const qty = Number(p.qtyBox || 0);
+      const lc = Number(p.lc || 0);
+      const fob = Number(p.fob || 0);
+      const cif = Number(p.cif || 0);
+      const amount = lc * qty;
 
-      // Use the amount from frontend as-is
-      const amount = parseFloat(p.amount) || lc * qty;
+      totalAmount += amount;
 
-      const doc = new purchaseInventory({
-        invoiceNumber: data.invoiceNumber,
-        invoiceDate: data.invoiceDate || null,
-        deliveryNumber: data.deliveryNumber,
-        receivedDate: data.receivedDate || null,
-        expiryDate: p.expiredDate || null,
+      return {
         productName: p.productName,
-        supplierName: validSupplierName,
+        expiryDate: p.expiredDate ? new Date(p.expiredDate) : null,
         quantityPerBoxStrip: qty,
+        lc,
         fob,
         cif,
-        lc,
-        lcNumber: p.lc ? p.lc.toString() : "",
-        remarks: data.remarks || "",
         amount,
-      });
+      };
+    });
 
-      await doc.save();
-      saved.push(doc);
+    const invoice = await purchaseInventory.create({
+      ...data,
+      supplierName: data.supplierName.trim(),
+      products,
+      totalAmount,
+    });
 
-      // CORRECTED: Pass both quantityPerBoxStrip and qtyBox for compatibility
+    // Update stock
+    for (const p of products) {
       await updateReportInHand(
-        {
-          ...p,
-          supplierName: validSupplierName,
-          quantityPerBoxStrip: qty,
-          qtyBox: qty, // Add qtyBox for compatibility
-          lc,
-          fob,
-          cif,
-        },
+        { ...p, supplierName: data.supplierName },
         "add"
       );
     }
 
     res.status(201).json({
-      message: `Purchase ${data.invoiceNumber} added successfully.`,
-      purchases: saved,
+      success: true,
+      message: "Purchase added",
+      purchase: invoice,
     });
   } catch (err) {
-    console.error("Add purchase error:", err);
+    console.error("Add error:", err);
+
+    // Handle duplicate key error
+    if (err.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: "This invoice number already exists.",
+      });
+    }
+
     res.status(500).json({ message: "Server error" });
   }
 });
 
-// 📊 Reports In Hand
 router.get("/reports-in-hand", async (req, res) => {
   try {
     const reports = await ReportInHand.find().sort({ createdAt: -1 });
-    res.status(200).json({ success: true, count: reports.length, reports });
+    res.json({ success: true, count: reports.length, reports });
   } catch (err) {
-    console.error("Fetch reports error:", err);
-    res
-      .status(500)
-      .json({ success: false, message: "Failed to fetch reports" });
+    res.status(500).json({ message: "Failed to fetch reports" });
   }
 });
 

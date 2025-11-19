@@ -61,8 +61,6 @@ const Dashboard = () => {
   const [expenseTableData, setExpenseTableData] = useState([]);
   const [loadingExpenseData, setLoadingExpenseData] = useState(false);
 
-  console.log("values of expenseTableData", expenseTableData);
-  
   // MODALS
   const [showProductsModal, setShowProductsModal] = useState(false);
   const [selectedMRProducts, setSelectedMRProducts] = useState([]);
@@ -135,17 +133,13 @@ const Dashboard = () => {
   const fetchExpenseTableData = async (period) => {
     try {
       setLoadingExpenseData(true);
-      const response = await axios.get(
-        `${backendUrl}/api/expenses`,
-        {
-          params: { period },
-        }
-      );
-      console.log("API Response:", response);
-      
+      const response = await axios.get(`${backendUrl}/api/expenses`, {
+        params: { period },
+      });
+
       // Handle the API response structure properly
       let expenses = [];
-      
+
       if (response.data && response.data.success) {
         // If response has success and data properties
         expenses = response.data.data || [];
@@ -156,23 +150,36 @@ const Dashboard = () => {
         // If response has expenses property
         expenses = response.data.expenses;
       }
-      
-      console.log("Processed expenses:", expenses);
-      
+
       // Ensure we have an array and format the data properly
-      const formattedExpenses = Array.isArray(expenses) ? expenses.map(expense => ({
-        id: expense._id || expense.id,
-        category: typeof expense.category === 'string' ? expense.category : 
-                 (expense.category?.name || expense.category?.category || 'Uncategorized'),
-        amount: expense.amount || 0,
-        date: expense.date || expense.createdAt || new Date().toISOString().split('T')[0],
-        description: expense.description || expense.remarks || 'No description',
-        details: expense.details || [`Amount: ₹${expense.amount || 0}`, `Date: ${expense.date || 'N/A'}`]
-      })) : [];
-      
+      const formattedExpenses = Array.isArray(expenses)
+        ? expenses.map((expense) => ({
+            id: expense._id || expense.id,
+            category:
+              typeof expense.category === "string"
+                ? expense.category
+                : expense.category?.name ||
+                  expense.category?.category ||
+                  "Uncategorized",
+            amount: expense.amount || 0,
+            date:
+              expense.date ||
+              expense.createdAt ||
+              new Date().toISOString().split("T")[0],
+            description:
+              expense.description || expense.remarks || "No description",
+            details: expense.details || [
+              `Amount: ₹${expense.amount || 0}`,
+              `Date: ${expense.date || "N/A"}`,
+            ],
+          }))
+        : [];
+
       // Sort by amount descending to show highest expenses first
-      const sortedExpenses = formattedExpenses.sort((a, b) => b.amount - a.amount);
-      
+      const sortedExpenses = formattedExpenses.sort(
+        (a, b) => b.amount - a.amount
+      );
+
       setExpenseTableData(sortedExpenses);
     } catch (error) {
       console.error("Error fetching expense table data:", error);
@@ -184,7 +191,7 @@ const Dashboard = () => {
           amount: 1500,
           date: "2024-01-15",
           description: "Printer paper and stationery",
-          details: ["Printer paper: ₹800", "Pens: ₹300", "Notebooks: ₹400"]
+          details: ["Printer paper: ₹800", "Pens: ₹300", "Notebooks: ₹400"],
         },
         {
           id: 2,
@@ -192,7 +199,7 @@ const Dashboard = () => {
           amount: 2500,
           date: "2024-01-14",
           description: "Electricity and water bill",
-          details: ["Electricity: ₹1800", "Water: ₹700"]
+          details: ["Electricity: ₹1800", "Water: ₹700"],
         },
         {
           id: 3,
@@ -200,7 +207,7 @@ const Dashboard = () => {
           amount: 3200,
           date: "2024-01-13",
           description: "Client meeting travel expenses",
-          details: ["Flight: ₹2200", "Hotel: ₹800", "Transport: ₹200"]
+          details: ["Flight: ₹2200", "Hotel: ₹800", "Transport: ₹200"],
         },
         {
           id: 4,
@@ -208,7 +215,7 @@ const Dashboard = () => {
           amount: 1800,
           date: "2024-01-12",
           description: "Digital marketing campaign",
-          details: ["Google Ads: ₹1200", "Social Media: ₹600"]
+          details: ["Google Ads: ₹1200", "Social Media: ₹600"],
         },
         {
           id: 5,
@@ -216,10 +223,10 @@ const Dashboard = () => {
           amount: 2800,
           date: "2024-01-11",
           description: "New office equipment",
-          details: ["Laptop: ₹2000", "Monitor: ₹800"]
-        }
+          details: ["Laptop: ₹2000", "Monitor: ₹800"],
+        },
       ].sort((a, b) => b.amount - a.amount);
-      
+
       setExpenseTableData(mockExpenses);
     } finally {
       setLoadingExpenseData(false);
@@ -326,7 +333,7 @@ const Dashboard = () => {
 
   useEffect(() => {
     if (activeTab === "Expenses") {
-      console.log("Fetching expense data for period:", activeExpenseSubTab);
+      
       fetchExpenseTableData(activeExpenseSubTab);
     }
   }, [activeExpenseSubTab, activeTab]);

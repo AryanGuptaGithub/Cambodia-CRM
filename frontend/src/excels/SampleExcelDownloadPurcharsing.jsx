@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import ExcelJS from "exceljs";
+import { Download } from "lucide-react"; // ✅ Download icon
 import { useInitialSaleData } from "../pages/Sale/IntialLoading";
 import { showToast } from "../utils/toast";
 import {
@@ -13,6 +14,9 @@ const PurchaseInventoryExcelDownload = ({ data = [] }) => {
   const [supplierLoading, setSupplierLoading] = useState(false);
   const [products, setProducts] = useState([]);
 
+  /* -------------------------------------------------------------------------- */
+  /*                           🔹 Fetch Suppliers                               */
+  /* -------------------------------------------------------------------------- */
   const fetchSuppliers = useCallback(async () => {
     setSupplierLoading(true);
     try {
@@ -31,7 +35,7 @@ const PurchaseInventoryExcelDownload = ({ data = [] }) => {
   }, []);
 
   /* -------------------------------------------------------------------------- */
-  /*                              🔹 Fetch Products                             */
+  /*                           🔹 Fetch Products                                */
   /* -------------------------------------------------------------------------- */
   const fetchProducts = useCallback(async () => {
     try {
@@ -53,7 +57,7 @@ const PurchaseInventoryExcelDownload = ({ data = [] }) => {
   }, [fetchProducts, fetchSuppliers]);
 
   /* -------------------------------------------------------------------------- */
-  /*                          🔹 Excel Generation Logic                         */
+  /*                       🔹 Excel Generation Logic                            */
   /* -------------------------------------------------------------------------- */
   const generateExcel = async () => {
     try {
@@ -76,7 +80,7 @@ const PurchaseInventoryExcelDownload = ({ data = [] }) => {
 
       worksheet.addRow([]);
 
-      // === Header Row (Removed NO & Qty per Carton) ===
+      // === Header Row ===
       const headerRow = worksheet.addRow([
         "Invoice Number",
         "Invoice Date",
@@ -85,14 +89,13 @@ const PurchaseInventoryExcelDownload = ({ data = [] }) => {
         "Product Name",
         "Supplier Name",
         "Expiry Date",
-        "Quantity per Box/Strip", // ✅ Updated name
+        "Quantity per Box/Strip",
         "FOB (USD)",
         "CIF (USD)",
         "LC (USD)",
         "Remarks",
       ]);
 
-      // === Header Styling ===
       headerRow.eachCell((cell) => {
         cell.font = { bold: true };
         cell.alignment = { vertical: "middle", horizontal: "center" };
@@ -106,26 +109,26 @@ const PurchaseInventoryExcelDownload = ({ data = [] }) => {
 
       // === Column Widths ===
       worksheet.columns = [
-        { width: 25 }, // Invoice Number
-        { width: 20 }, // Invoice Date
-        { width: 20 }, // Delivery No
-        { width: 20 }, // Received Date
-        { width: 30 }, // Product Name
-        { width: 25 }, // Supplier Name
-        { width: 20 }, // Expiry Date
-        { width: 25 }, // Quantity per Box/Strip
-        { width: 15 }, // FOB
-        { width: 15 }, // CIF
-        { width: 20 }, // LC Number
-        { width: 30 }, // Remarks
+        { width: 25 },
+        { width: 20 },
+        { width: 20 },
+        { width: 20 },
+        { width: 30 },
+        { width: 25 },
+        { width: 20 },
+        { width: 25 },
+        { width: 15 },
+        { width: 15 },
+        { width: 20 },
+        { width: 30 },
       ];
 
-      // === Date Columns ===
+      // === Date Format Columns ===
       ["B", "D", "G"].forEach((col) => {
         worksheet.getColumn(col).numFmt = "dd/mm/yyyy";
       });
 
-      // === Numeric Columns ===
+      // === Numeric Format Columns ===
       ["H", "I", "J"].forEach((col) => {
         worksheet.getColumn(col).numFmt = "#,##0.00";
       });
@@ -134,19 +137,18 @@ const PurchaseInventoryExcelDownload = ({ data = [] }) => {
       const endRow = 1000;
 
       /* -------------------------------------------------------------------------- */
-      /*                     🔹 Prepare Dropdown Data (Products & Suppliers)         */
+      /*                      🔹 Prepare Dropdown Data                              */
       /* -------------------------------------------------------------------------- */
       const uniqueProductNames = [
         ...new Set(
           [
-            ...productNames.map(
-              (p) =>
-                (typeof p === "object"
-                  ? p.name || p.productName || p.label || p.value
-                  : p) || ""
+            ...productNames.map((p) =>
+              typeof p === "object"
+                ? p.name || p.productName || p.label || p.value
+                : p
             ),
             ...products.map((p) => p.label || p.productName || ""),
-          ].filter((name) => name && name.trim() !== "")
+          ].filter(Boolean)
         ),
       ];
 
@@ -158,63 +160,45 @@ const PurchaseInventoryExcelDownload = ({ data = [] }) => {
                 ? s.name || s.supplierName || s.label || s.value
                 : s
             )
-            .filter((name) => name && name.trim() !== "")
+            .filter(Boolean)
         ),
       ];
 
       /* -------------------------------------------------------------------------- */
-      /*                     🔹 Add Hidden Dropdown Sheet                           */
+      /*                    🔹 Hidden Dropdown Sheet                                */
       /* -------------------------------------------------------------------------- */
-      if (uniqueProductNames.length > 0 || uniqueSupplierNames.length > 0) {
+      if (uniqueProductNames.length || uniqueSupplierNames.length) {
         const dropdownSheet = workbook.addWorksheet("DropdownData");
         dropdownSheet.state = "veryHidden";
 
-        uniqueProductNames.forEach((product, index) => {
-          dropdownSheet.getCell(`A${index + 1}`).value = product;
+        uniqueProductNames.forEach((name, idx) => {
+          dropdownSheet.getCell(`A${idx + 1}`).value = name;
         });
 
-        uniqueSupplierNames.forEach((supplier, index) => {
-          dropdownSheet.getCell(`B${index + 1}`).value = supplier;
+        uniqueSupplierNames.forEach((name, idx) => {
+          dropdownSheet.getCell(`B${idx + 1}`).value = name;
         });
 
-        // === Product Name Dropdown (Column E) ===
-        if (uniqueProductNames.length > 0) {
-          for (let rowNum = startRow; rowNum <= endRow; rowNum++) {
-            const cell = worksheet.getCell(`E${rowNum}`);
-            cell.dataValidation = {
-              type: "list",
-              allowBlank: true,
-              formulae: [`=DropdownData!$A$1:$A$${uniqueProductNames.length}`],
-              showErrorMessage: true,
-              errorTitle: "Invalid Input",
-              error: "Please select a valid product",
-              promptTitle: "Select Product",
-              prompt: "Choose a product from the dropdown list",
-              showInputMessage: true,
-            };
-          }
+        // Product dropdown (column E)
+        for (let rowNum = startRow; rowNum <= endRow; rowNum++) {
+          worksheet.getCell(`E${rowNum}`).dataValidation = {
+            type: "list",
+            allowBlank: true,
+            formulae: [`=DropdownData!$A$1:$A$${uniqueProductNames.length}`],
+          };
         }
 
-        // === Supplier Name Dropdown (Column F) ===
-        if (uniqueSupplierNames.length > 0) {
-          for (let rowNum = startRow; rowNum <= endRow; rowNum++) {
-            const cell = worksheet.getCell(`F${rowNum}`);
-            cell.dataValidation = {
-              type: "list",
-              allowBlank: true,
-              formulae: [`=DropdownData!$B$1:$B$${uniqueSupplierNames.length}`],
-              showErrorMessage: true,
-              errorTitle: "Invalid Input",
-              error: "Please select a valid supplier",
-              promptTitle: "Select Supplier",
-              prompt: "Choose a supplier from the dropdown list",
-              showInputMessage: true,
-            };
-          }
+        // Supplier dropdown (column F)
+        for (let rowNum = startRow; rowNum <= endRow; rowNum++) {
+          worksheet.getCell(`F${rowNum}`).dataValidation = {
+            type: "list",
+            allowBlank: true,
+            formulae: [`=DropdownData!$B$1:$B$${uniqueSupplierNames.length}`],
+          };
         }
       }
 
-      // === Borders for Data Area ===
+      // === Borders for data ===
       for (let i = 4; i <= worksheet.rowCount; i++) {
         const row = worksheet.getRow(i);
         row.eachCell((cell) => {
@@ -234,6 +218,7 @@ const PurchaseInventoryExcelDownload = ({ data = [] }) => {
       });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
+
       a.href = url;
       a.download = "PurchaseInventory.xlsx";
       document.body.appendChild(a);
@@ -245,31 +230,35 @@ const PurchaseInventoryExcelDownload = ({ data = [] }) => {
       }, 100);
     } catch (error) {
       console.error("Error generating Excel:", error);
-      showToast("error", "Error generating Excel file. Please try again.");
+      showToast("error", "Error generating Excel file.");
     }
   };
 
+  /* -------------------------------------------------------------------------- */
+  /*                               🔹 Loading UI                                 */
+  /* -------------------------------------------------------------------------- */
   const isLoading = productLoading || supplierLoading;
 
   if (isLoading) {
     return (
       <button
         disabled
-        className="text-gray-400 text-sm mb-4 block cursor-not-allowed"
+        className="bg-gray-300 text-gray-600 px-4 py-2 rounded-xl cursor-not-allowed"
       >
-        {productLoading
-          ? "Loading product data..."
-          : "Loading supplier data..."}
+        Loading...
       </button>
     );
   }
 
+  /* -------------------------------------------------------------------------- */
+  /*                               🔹 FINAL BUTTON                               */
+  /* -------------------------------------------------------------------------- */
   return (
     <button
       onClick={generateExcel}
-      className="text-blue-600 hover:underline text-sm mb-4 block cursor-pointer"
+      className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
     >
-      Download Purchase Inventory Excel
+      <Download size={18} /> Download Excel
     </button>
   );
 };

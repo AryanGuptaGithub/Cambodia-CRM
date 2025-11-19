@@ -41,6 +41,7 @@ const INITIAL_FORM_STATE = {
       fob: "",
       amount: "",
       expiredDate: "",
+      remainingStock: 0, // Add remaining stock to track for display
     },
   ],
 };
@@ -98,6 +99,16 @@ const usePurchaseForm = () => {
     form.products.map((p) => p.lcNumber + p.fob + p.qtyBox).join(","),
     parseNumber,
   ]);
+
+  // Calculate future stock after purchase
+  const calculateFutureStock = useCallback(
+    (currentStock, purchaseQty) => {
+      const current = parseNumber(currentStock);
+      const purchase = parseNumber(purchaseQty);
+      return current + purchase;
+    },
+    [parseNumber]
+  );
 
   const updateFormField = useCallback((name, value) => {
     setForm((prev) => ({ ...prev, [name]: value }));
@@ -197,14 +208,13 @@ const usePurchaseForm = () => {
     [updateProductField]
   );
 
-  // Handle product selection from dropdown - UPDATED to handle FOB like LC
+  // Handle product selection from dropdown - UPDATED to store remaining stock
   const handleProductSelection = useCallback(
     (productIndex, productId) => {
       const selectedProduct = products.find(
         (product) => product.value === productId
       );
       if (selectedProduct) {
-        
         setForm((prev) => ({
           ...prev,
           products: prev.products.map((product, index) =>
@@ -216,6 +226,7 @@ const usePurchaseForm = () => {
                   lcNumber: selectedProduct.lc || selectedProduct.lcNumber || 0,
                   fob: selectedProduct.fob || 0,
                   cif: selectedProduct.cif || 0,
+                  remainingStock: selectedProduct.remainingStock || 0, // Store remaining stock
                 }
               : product
           ),
@@ -225,7 +236,7 @@ const usePurchaseForm = () => {
     [products]
   );
 
-  // Handle FOB update separately - NEW FUNCTION
+  // Handle FOB update separately
   const handleFobUpdate = useCallback((productIndex, fobValue) => {
     setForm((prev) => ({
       ...prev,
@@ -240,7 +251,7 @@ const usePurchaseForm = () => {
     }));
   }, []);
 
-  // FIXED: Handle supplier selection - ensure we get both ID and name
+  // Handle supplier selection
   const handleSupplierChange = useCallback(
     (supplierId) => {
       const selectedSupplier = suppliers.find(
@@ -249,8 +260,8 @@ const usePurchaseForm = () => {
       if (selectedSupplier) {
         setForm((prev) => ({
           ...prev,
-          supplierId: selectedSupplier.value, // This should be the ID
-          supplierName: selectedSupplier.label, // This should be the name
+          supplierId: selectedSupplier.value,
+          supplierName: selectedSupplier.label,
         }));
       }
     },
@@ -264,7 +275,7 @@ const usePurchaseForm = () => {
       return (
         product.productId &&
         product.qtyBox > 0 &&
-        (product.lcNumber || product.fob) && // Updated to accept either LC or FOB
+        (product.lcNumber || product.fob) &&
         product.expiredDate
       );
     },
@@ -294,6 +305,7 @@ const usePurchaseForm = () => {
           fob: 0,
           amount: 0,
           expiredDate: "",
+          remainingStock: 0,
         },
       ],
     }));
@@ -357,7 +369,7 @@ const usePurchaseForm = () => {
       newErrors.receivedDate = "Received date cannot be in the future";
     }
 
-    // Validate products - UPDATED to require either LC or FOB
+    // Validate products
     form.products.forEach((product, index) => {
       if (!product.productId)
         newErrors[`productId_${index}`] = "Product selection is required";
@@ -369,10 +381,16 @@ const usePurchaseForm = () => {
 
       if (qtyBoxNum <= 0)
         newErrors[`qtyBox_${index}`] = "Box quantity must be greater than 0";
+
+      // Add validation for very large quantities
+      if (qtyBoxNum > 100000)
+        newErrors[`qtyBox_${index}`] =
+          "Box quantity seems too large, please verify";
+
       if (fobNum < 0) newErrors[`fob_${index}`] = "FOB cannot be negative";
       if (cifNum < 0) newErrors[`cif_${index}`] = "CIF cannot be negative";
 
-      // Updated: Require either LC or FOB, not necessarily both
+      // Require either LC or FOB
       if (!lcNumberStr.trim() && fobNum <= 0)
         newErrors[`lcNumber_${index}`] = "Either LC or FOB is required";
 
@@ -384,31 +402,31 @@ const usePurchaseForm = () => {
     return Object.keys(newErrors).length === 0;
   }, [form, parseNumber]);
 
-  // Fetch products - UPDATED to include FOB data
+  // Fetch products - UPDATED to store remaining stock but not show in dropdown
   const fetchProducts = useCallback(async () => {
     try {
       setLoading((prev) => ({ ...prev, products: true }));
       const result = await fetchProductsAPI();
 
       if (result.success) {
-        // Transform product data to ensure proper format with FOB
-        const transformedProducts = result.data.map((product) => ({
-          value: product._id || product.id,
-          label: product.productName || product.name,
-          lc: product.lc || product.lcNumber || 0,
-          fob: product.fob || 0, // Ensure FOB is included
-          cif: product.cif || 0,
-        }));
+        // Transform product data - only show product name in dropdown
+        const transformedProducts = result.data.map((product) => {
+          const remainingStock = product.quantity?.boxes || 0;
+          return {
+            value: product._id || product.id,
+            label: product.productName || product.name, // Only product name in dropdown
+            lc: product.lc || product.lcNumber || 0,
+            fob: product.fob || 0,
+            cif: product.cif || 0,
+            remainingStock: remainingStock, // Store remaining stock for display in tab
+          };
+        });
         setProducts(transformedProducts);
 
         if (transformedProducts.length === 0) {
           if (!isProductsEmptyRef.current) {
             setIsProductsEmpty(true);
             isProductsEmptyRef.current = true;
-            // showToast(
-            //   "error",
-            //   "No products found. Please add at least one product first."
-            // );
           }
         } else {
           setIsProductsEmpty(false);
@@ -436,7 +454,7 @@ const usePurchaseForm = () => {
     try {
       setLoading((prev) => ({ ...prev, suppliers: true }));
       const result = await fetchSuppliersAPI();
-      
+
       if (result.success) {
         const transformedSuppliers = result.data.map((supplier) => ({
           value: supplier.id,
@@ -448,10 +466,6 @@ const usePurchaseForm = () => {
           if (!isSuppliersEmptyRef.current) {
             setIsSuppliersEmpty(true);
             isSuppliersEmptyRef.current = true;
-            // showToast(
-            //   "error",
-            //   "No suppliers found. Please add at least one supplier first."
-            // );
           }
         } else {
           setIsSuppliersEmpty(false);
@@ -491,7 +505,7 @@ const usePurchaseForm = () => {
     handleProductDateChange,
     handleProductSelection,
     handleSupplierChange,
-    handleFobUpdate, // NEW: Export the FOB update handler
+    handleFobUpdate,
     addProduct,
     removeProduct,
     toggleProductView,
@@ -500,6 +514,8 @@ const usePurchaseForm = () => {
     fetchProducts,
     fetchSuppliers,
     setErrors,
+    calculateFutureStock,
+    parseNumber,
   };
 };
 
@@ -577,7 +593,9 @@ const DatePickerField = React.memo(
           maxDate={maxDate || today}
           className={`w-full border px-3 py-2 rounded-lg ${
             error ? "border-red-500" : "border-gray-300"
-          } ${readOnly || disabled ? "bg-gray-100 cursor-not-allowed" : ""} ${className}`}
+          } ${
+            readOnly || disabled ? "bg-gray-100 cursor-not-allowed" : ""
+          } ${className}`}
           autoComplete="off"
         />
         {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
@@ -586,7 +604,6 @@ const DatePickerField = React.memo(
   }
 );
 
-// Product DatePicker Field Component (for expired date - can be future)
 const ProductDatePickerField = React.memo(
   ({
     label,
@@ -599,27 +616,48 @@ const ProductDatePickerField = React.memo(
     disabled = false,
     placeholder = "Select a date",
     className = "",
-  }) => (
-    <div className="flex flex-col">
-      <label className="text-sm font-medium text-gray-700 mb-1">
-        {label}
-        {required && <span className="text-red-500 ml-1">*</span>}
-      </label>
-      <DatePicker
-        selected={value ? new Date(value) : null}
-        onChange={(date) => onChange(name, date)}
-        dateFormat="yyyy-MM-dd"
-        placeholderText={placeholder}
-        readOnly={readOnly}
-        disabled={disabled}
-        className={`w-full border px-3 py-2 rounded-lg ${
-          error ? "border-red-500" : "border-gray-300"
-        } ${readOnly || disabled ? "bg-gray-100 cursor-not-allowed" : ""} ${className}`}
-        autoComplete="off"
-      />
-      {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
-    </div>
-  )
+    showYearDropdown = true,
+    showMonthDropdown = true,
+  }) => {
+    const today = new Date(); // Min allowed date
+    const maxYearDate = new Date(2040, 11, 31); // Max allowed year = 2040
+
+    return (
+      <div className="flex flex-col">
+        <label className="text-sm font-medium text-gray-700 mb-1">
+          {label}
+          {required && <span className="text-red-500 ml-1">*</span>}
+        </label>
+
+        <DatePicker
+          selected={value ? new Date(value) : null}
+          onChange={(date) => onChange(name, date)}
+          dateFormat="yyyy-MM-dd"
+          placeholderText={placeholder}
+          readOnly={readOnly}
+          disabled={disabled}
+          className={`w-full border px-3 py-2 rounded-lg ${
+            error ? "border-red-500" : "border-gray-300"
+          } ${
+            readOnly || disabled ? "bg-gray-100 cursor-not-allowed" : ""
+          } ${className}`}
+          showYearDropdown={showYearDropdown}
+          showMonthDropdown={showMonthDropdown}
+          dropdownMode="select"
+          // 🔥 Only current + future dates allowed
+          minDate={today}
+          // 🔥 Max year = 2040
+          maxDate={maxYearDate}
+          // remove past dates completely
+          filterDate={(date) => date >= today && date <= maxYearDate}
+          // Adjust dropdown to show only needed years
+          yearDropdownItemNumber={2040 - today.getFullYear() + 1}
+        />
+
+        {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
+      </div>
+    );
+  }
 );
 
 // Numeric Input Component
@@ -690,7 +728,7 @@ const AddNewPurchase = () => {
     handleProductDateChange,
     handleProductSelection,
     handleSupplierChange,
-    handleFobUpdate, // NEW: Get the FOB update handler
+    handleFobUpdate,
     addProduct,
     removeProduct,
     toggleProductView,
@@ -698,12 +736,14 @@ const AddNewPurchase = () => {
     isCurrentProductValid,
     fetchProducts,
     fetchSuppliers,
+    calculateFutureStock,
+    parseNumber,
   } = usePurchaseForm();
 
   // Check if form should be disabled
   const isFormDisabled = isSuppliersEmpty || isProductsEmpty;
 
-  // Memoized product options for dropdown
+  // Memoized product options for dropdown - Only show product names
   const productOptions = useMemo(() => {
     if (isProductsEmpty) {
       return [
@@ -752,7 +792,7 @@ const AddNewPurchase = () => {
     [handleChange]
   );
 
-  // Numeric input handler for product fields - UPDATED to handle FOB specifically
+  // Numeric input handler for product fields
   const handleProductNumericInputChange = useCallback(
     (productIndex, e) => {
       const { name, value } = e.target;
@@ -775,7 +815,7 @@ const AddNewPurchase = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     if (isFormDisabled) {
       showToast(
         "error",
@@ -831,7 +871,7 @@ const AddNewPurchase = () => {
     }
   };
 
-  // Check if form is valid for submission - UPDATED for FOB
+  // Check if form is valid for submission
   const isFormValid = useMemo(() => {
     if (isFormDisabled) return false;
 
@@ -846,7 +886,7 @@ const AddNewPurchase = () => {
       form.invoiceDate &&
       form.receivedDate;
 
-    // Check all products - UPDATED to require either LC or FOB
+    // Check all products
     const productsValid = form.products.every((product) => {
       const qtyBoxNum = parseFloat(product.qtyBox) || 0;
       const fobNum = parseFloat(product.fob) || 0;
@@ -858,7 +898,7 @@ const AddNewPurchase = () => {
         qtyBoxNum > 0 &&
         fobNum >= 0 &&
         cifNum >= 0 &&
-        (lcNumberStr.trim() || fobNum > 0) && // Either LC or FOB is required
+        (lcNumberStr.trim() || fobNum > 0) &&
         product.expiredDate
       );
     });
@@ -950,7 +990,9 @@ const AddNewPurchase = () => {
               value={form.supplierId}
               onChange={handleSupplierChange}
               options={supplierOptions}
-              placeholder={isSuppliersEmpty ? "No Suppliers Available" : "Select Supplier"}
+              placeholder={
+                isSuppliersEmpty ? "No Suppliers Available" : "Select Supplier"
+              }
               required={true}
               error={errors.supplierId}
               loading={loading.suppliers}
@@ -981,7 +1023,6 @@ const AddNewPurchase = () => {
           </div>
         </div>
 
-        {/* Products Section */}
         <div className="mb-8">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold text-gray-700">
@@ -1001,164 +1042,187 @@ const AddNewPurchase = () => {
             </button>
           </div>
 
-          {form.products.map((product, productIndex) => (
-            <div
-              key={productIndex}
-              className="mb-4 border border-gray-200 rounded-lg"
-            >
-              {/* Product Header - Always Visible */}
-              <div className="p-4 bg-gray-50 rounded-t-lg">
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center gap-3">
-                    <h4 className="text-md font-medium text-gray-700">
-                      {product.productName || `Product ${productIndex + 1}`}
-                    </h4>
-                    {!product.productName && (
-                      <span className="text-xs text-red-500">
-                        (Product not selected)
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => toggleProductView(productIndex)}
-                      className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-sm"
-                      disabled={isFormDisabled}
-                    >
-                      {isProductExpanded(productIndex) ? (
-                        <>
-                          <EyeOff size={16} />
-                          Hide
-                        </>
-                      ) : (
-                        <>
-                          <Eye size={16} />
-                          View
-                        </>
+          {form.products.map((product, productIndex) => {
+            const currentStock = product.remainingStock || 0;
+            const purchaseQty = parseNumber(product.qtyBox) || 0;
+            const futureStock = calculateFutureStock(currentStock, purchaseQty);
+
+            return (
+              <div
+                key={productIndex}
+                className="mb-4 border border-gray-200 rounded-lg"
+              >
+                {/* Product Header - Always Visible */}
+                <div className="p-4 bg-gray-50 rounded-t-lg">
+                  <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-3">
+                      <h4 className="text-md font-medium text-gray-700">
+                        {product.productName || `Product ${productIndex + 1}`}
+                      </h4>
+                      {!product.productName && (
+                        <span className="text-xs text-red-500">
+                          (Product not selected)
+                        </span>
                       )}
-                    </button>
-                    {form.products.length > 1 && (
+                      {/* Show stock information in the header */}
+                      {product.productName && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm px-2 py-1 bg-blue-100 text-blue-800 rounded border border-blue-300">
+                            Current: {currentStock} boxes
+                          </span>
+                          <span className="text-sm px-2 py-1 bg-green-100 text-green-800 rounded border border-green-300">
+                            After Purchase: {futureStock} boxes
+                          </span>
+                          {purchaseQty > 0 && (
+                            <span className="text-sm px-2 py-1 bg-purple-100 text-purple-800 rounded border border-purple-300">
+                              +{purchaseQty} boxes
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => removeProduct(productIndex)}
-                        className="text-red-600 hover:text-red-800 text-sm ml-2"
+                        onClick={() => toggleProductView(productIndex)}
+                        className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-sm"
                         disabled={isFormDisabled}
                       >
-                        Remove
+                        {isProductExpanded(productIndex) ? (
+                          <>
+                            <EyeOff size={16} />
+                            Hide
+                          </>
+                        ) : (
+                          <>
+                            <Eye size={16} />
+                            View
+                          </>
+                        )}
                       </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Product Details - Expandable */}
-              {isProductExpanded(productIndex) && (
-                <div className="p-6 border-t">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <SearchableDropdown
-                      label="Product"
-                      value={product.productId}
-                      onChange={(productId) =>
-                        handleProductSelection(productIndex, productId)
-                      }
-                      options={productOptions}
-                      placeholder={isProductsEmpty ? "No Products Available" : "Select Product"}
-                      required={true}
-                      error={errors[`productId_${productIndex}`]}
-                      loading={loading.products}
-                      disabled={isProductsEmpty}
-                    />
-
-                    <NumericInputField
-                      label="Box Quantity"
-                      name="qtyBox"
-                      value={product.qtyBox}
-                      onChange={(e) =>
-                        handleProductNumericInputChange(productIndex, e)
-                      }
-                      error={errors[`qtyBox_${productIndex}`]}
-                      placeholder="0"
-                      required
-                      allowDecimal={false}
-                      disabled={isFormDisabled}
-                    />
-
-                    <NumericInputField
-                      label="LC (USD)"
-                      name="lcNumber"
-                      value={product.lcNumber}
-                      onChange={(e) =>
-                        handleProductNumericInputChange(productIndex, e)
-                      }
-                      error={errors[`lcNumber_${productIndex}`]}
-                      placeholder="0.00"
-                      allowDecimal={true}
-                      disabled={isFormDisabled}
-                    />
-
-                    <NumericInputField
-                      label="FOB (USD)"
-                      name="fob"
-                      value={product.fob}
-                      onChange={(e) =>
-                        handleProductNumericInputChange(productIndex, e)
-                      }
-                      error={errors[`fob_${productIndex}`]}
-                      placeholder="0.00"
-                      allowDecimal={true}
-                      disabled={isFormDisabled}
-                    />
-
-                    <NumericInputField
-                      label="CIF (USD)"
-                      name="cif"
-                      value={product.cif}
-                      onChange={(e) =>
-                        handleProductNumericInputChange(productIndex, e)
-                      }
-                      error={errors[`cif_${productIndex}`]}
-                      placeholder="0.00"
-                      allowDecimal={true}
-                      disabled={isFormDisabled}
-                    />
-
-                    <ProductDatePickerField
-                      label="Expired Date"
-                      name="expiredDate"
-                      value={product.expiredDate}
-                      onChange={(name, date) =>
-                        handleProductDateChange(productIndex, name, date)
-                      }
-                      error={errors[`expiredDate_${productIndex}`]}
-                      required
-                      disabled={isFormDisabled}
-                    />
-
-                    <div className="flex flex-col">
-                      <label className="text-sm font-medium text-gray-700 mb-1">
-                        Amount (USD)
-                      </label>
-                      <input
-                        type="text"
-                        name="amount"
-                        value={
-                          product.amount
-                            ? parseFloat(product.amount).toFixed(2)
-                            : "0.00"
-                        }
-                        className="w-full border px-3 py-2 rounded-lg bg-gray-100 border-gray-300"
-                        readOnly
-                      />
-                      <p className="text-xs text-gray-500 mt-1">
-                        Calculated: (FOB or LC) × Box Quantity
-                      </p>
+                      {form.products.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeProduct(productIndex)}
+                          className="text-red-600 hover:text-red-800 text-sm ml-2"
+                          disabled={isFormDisabled}
+                        >
+                          Remove
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
-              )}
-            </div>
-          ))}
+
+                {/* Product Details - Expandable */}
+                {isProductExpanded(productIndex) && (
+                  <div className="p-6 border-t">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      <SearchableDropdown
+                        label="Product"
+                        value={product.productId}
+                        onChange={(productId) =>
+                          handleProductSelection(productIndex, productId)
+                        }
+                        options={productOptions}
+                        placeholder={
+                          isProductsEmpty
+                            ? "No Products Available"
+                            : "Select Product"
+                        }
+                        required={true}
+                        error={errors[`productId_${productIndex}`]}
+                        loading={loading.products}
+                        disabled={isProductsEmpty}
+                      />
+                      <NumericInputField
+                        label="Box Quantity"
+                        name="qtyBox"
+                        value={product.qtyBox}
+                        onChange={(e) =>
+                          handleProductNumericInputChange(productIndex, e)
+                        }
+                        error={errors[`qtyBox_${productIndex}`]}
+                        placeholder="0"
+                        required
+                        allowDecimal={false}
+                        disabled={isFormDisabled}
+                      />
+                      <NumericInputField
+                        label="LC (USD)"
+                        name="lcNumber"
+                        value={product.lcNumber}
+                        onChange={(e) =>
+                          handleProductNumericInputChange(productIndex, e)
+                        }
+                        error={errors[`lcNumber_${productIndex}`]}
+                        placeholder="0.00"
+                        allowDecimal={true}
+                        disabled={isFormDisabled}
+                      />
+                      <NumericInputField
+                        label="FOB (USD)"
+                        name="fob"
+                        value={product.fob}
+                        onChange={(e) =>
+                          handleProductNumericInputChange(productIndex, e)
+                        }
+                        error={errors[`fob_${productIndex}`]}
+                        placeholder="0.00"
+                        allowDecimal={true}
+                        disabled={isFormDisabled}
+                      />
+                      <NumericInputField
+                        label="CIF (USD)"
+                        name="cif"
+                        value={product.cif}
+                        onChange={(e) =>
+                          handleProductNumericInputChange(productIndex, e)
+                        }
+                        error={errors[`cif_${productIndex}`]}
+                        placeholder="0.00"
+                        allowDecimal={true}
+                        disabled={isFormDisabled}
+                      />
+                      <ProductDatePickerField
+                        label="Expired Date"
+                        name="expiredDate"
+                        value={product.expiredDate}
+                        onChange={(name, date) =>
+                          handleProductDateChange(productIndex, name, date)
+                        }
+                        error={errors[`expiredDate_${productIndex}`]}
+                        required
+                        disabled={isFormDisabled}
+                        showYearDropdown
+                        showMonthDropdown
+                      />
+
+                      <div className="flex flex-col">
+                        <label className="text-sm font-medium text-gray-700 mb-1">
+                          Amount (USD)
+                        </label>
+                        <input
+                          type="text"
+                          name="amount"
+                          value={
+                            product.amount
+                              ? parseFloat(product.amount).toFixed(2)
+                              : "0.00"
+                          }
+                          className="w-full border px-3 py-2 rounded-lg bg-gray-100 border-gray-300"
+                          readOnly
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          Calculated: (FOB or LC) × Box Quantity
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {/* Remarks Section */}

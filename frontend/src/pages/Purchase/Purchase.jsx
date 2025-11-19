@@ -13,7 +13,7 @@ import {
   X,
   Eye,
   Search,
-  Settings,
+  Package,
 } from "lucide-react";
 import ReactDOM from "react-dom";
 import PurchaseInventoryExcelDownload from "../../excels/SampleExcelDownloadPurcharsing";
@@ -32,11 +32,11 @@ import {
   fetchSuppliers as fetchSuppliersAPI,
 } from "../../pages/ProductManager/common/fetchDropdown";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
+import LoadingOverlay from "../../components/Loading";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
-// CORRECTED: Added productId field to store the actual product ID
 const initialFormState = {
   _id: "",
   invoiceNumber: "",
@@ -44,8 +44,8 @@ const initialFormState = {
   deliveryNumber: "",
   receivedDate: "",
   expiryDate: "",
-  productId: "", // NEW: Store product ID separately
-  productName: "", // Store product name for display
+  productId: "",
+  productName: "",
   supplierName: "",
   quantityPerBoxStrip: 0,
   fob: 0,
@@ -54,25 +54,6 @@ const initialFormState = {
   remarks: "",
   amount: 0,
 };
-
-const requiredHeaders = [
-  "invoice #",
-  "invoice date",
-  "delivery #",
-  "received date",
-  "expiry date",
-  "product name",
-  "supplier name",
-  "qty box",
-  "fob",
-  "cif",
-  "lc number",
-  "remarks",
-];
-
-// Define which fields should be treated as numbers
-const numericFields = ["quantityPerBoxStrip", "fob", "cif", "amount"];
-const integerFields = ["quantityPerBoxStrip"];
 
 function Purchase() {
   const navigate = useNavigate();
@@ -90,33 +71,73 @@ function Purchase() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedItems, setSelectedItems] = useState([]);
-  const [activeTab, setActiveTab] = useState("add");
-  const [allSelected, setAllSelected] = useState(false);
+  const [isProductModalOpen, setIsProductModalOpen] = useState(false);
+  const [selectedPurchaseProduct, setSelectedPurchaseProduct] = useState(null);
   const inputRef = useRef(null);
 
-  // New states for dropdowns
   const [productOptions, setProductOptions] = useState([]);
   const [supplierOptions, setSupplierOptions] = useState([]);
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [loadingSuppliers, setLoadingSuppliers] = useState(false);
 
-  const purchasesPerPage = 10;
+  const PURCHASES_PER_PAGE = 9;
 
-  // Column configuration
-  const [tableColumns, setTableColumns] = useState([
-    "invoiceNumber",
-    "deliveryNumber",
-    "productName",
-    "supplierName",
-    "quantityPerBoxStrip",
-    "lcNumber",
-    "amount",
-    "actions",
-  ]);
+  // Updated column configuration to include supplierName
+  const tableColumns = useMemo(
+    () => [
+      "invoiceNumber",
+      "invoiceDate",
+      "deliveryNumber",
+      "supplierName",
+      "amount",
+      "productCount",
+      "actions",
+    ],
+    []
+  );
 
-  // ADDED: Validation function for suppliers and products
+  const allFields = useMemo(
+    () => [
+      {
+        id: "invoiceNumber",
+        name: "Invoice No",
+        dbName: "invoiceNumber",
+      },
+      {
+        id: "invoiceDate",
+        name: "Invoice Date",
+        dbName: "invoiceDate",
+      },
+      {
+        id: "deliveryNumber",
+        name: "Delivery No",
+        dbName: "deliveryNumber",
+      },
+      {
+        id: "supplierName",
+        name: "Supplier Name",
+        dbName: "supplierName",
+      },
+      {
+        id: "productCount",
+        name: "Product",
+        dbName: "productCount",
+      },
+      {
+        id: "amount",
+        name: "Total Amount ($)",
+        dbName: "totalAmount",
+      },
+      {
+        id: "actions",
+        name: "Actions",
+        dbName: "actions",
+      },
+    ],
+    []
+  );
+
+  // Validation function
   const validateSuppliersAndProducts = () => {
     if (!supplierOptions.length && !productOptions.length) {
       showToast(
@@ -140,7 +161,6 @@ function Purchase() {
     return true;
   };
 
-  // ADDED: Enhanced import click handler with validation
   const handleImportClick = () => {
     if (!validateSuppliersAndProducts()) {
       return;
@@ -148,190 +168,67 @@ function Purchase() {
     setShowImportModal(true);
   };
 
-  // ADDED: Enhanced add new purchase handler with validation
   const handleAddNewPurchase = () => {
+    if (!validateSuppliersAndProducts()) {
+      return;
+    }
     navigate("/purchaselayout/purchase/new");
   };
 
-  const allFields = useMemo(
-    () => [
-      {
-        id: "invoiceNumber",
-        name: "Invoice Number",
-        dbName: "invoiceNumber",
-      },
-      {
-        id: "deliveryNumber",
-        name: "Delivery Number",
-        dbName: "deliveryNumber",
-      },
-      {
-        id: "invoiceDate",
-        name: "Invoice Date",
-        dbName: "invoiceDate",
-      },
-      {
-        id: "receivedDate",
-        name: "Received Date",
-        dbName: "receivedDate",
-      },
-      {
-        id: "expiryDate",
-        name: "Expiry Date",
-        dbName: "expiryDate",
-      },
-      {
-        id: "productName",
-        name: "Product Name",
-        dbName: "productName",
-      },
-      {
-        id: "supplierName",
-        name: "Supplier Name",
-        dbName: "supplierName",
-      },
-      {
-        id: "quantityPerBoxStrip",
-        name: "Box Qty",
-        dbName: "quantityPerBoxStrip",
-      },
-      {
-        id: "lcNumber",
-        name: "LC (USD)",
-        dbName: "lcNumber",
-      },
-      {
-        id: "fob",
-        name: "FOB (USD)",
-        dbName: "fob",
-      },
-      {
-        id: "cif",
-        name: "CIF (USD)",
-        dbName: "cif",
-      },
-      {
-        id: "amount",
-        name: "Amount ($)",
-        dbName: "amount",
-      },
-      {
-        id: "remarks",
-        name: "Remarks",
-        dbName: "remarks",
-      },
-      {
-        id: "actions",
-        name: "Actions",
-        dbName: "actions",
-      },
-    ],
-    []
-  );
-
-  const requiredColumns = ["invoiceNumber", "productName", "actions"];
-
-  // Get available columns for Add tab (columns not currently in table)
-  const availableColumns = useMemo(() => {
-    return allFields.filter((item) => !tableColumns.includes(item.id));
-  }, [allFields, tableColumns]);
-
-  const removableColumns = useMemo(() => {
-    return allFields.filter(
-      (item) =>
-        tableColumns.includes(item.id) && !requiredColumns.includes(item.id)
-    );
-  }, [allFields, tableColumns]);
-
-  const chunkedItems = useMemo(() => {
-    const items = activeTab === "add" ? availableColumns : removableColumns;
-    const chunks = [];
-    for (let i = 0; i < items.length; i += 2) {
-      chunks.push(items.slice(i, i + 2));
-    }
-    return chunks;
-  }, [activeTab, availableColumns, removableColumns]);
-
-  // Toggle item selection
-  const toggleItem = (id) => {
-    if (id === "all") {
-      if (allSelected) {
-        setSelectedItems([]);
-        setAllSelected(false);
-      } else {
-        const allIds = chunkedItems.flat().map((item) => item.id);
-        setSelectedItems(allIds);
-        setAllSelected(true);
-      }
-    } else {
-      let updatedItems;
-      if (selectedItems.includes(id)) {
-        updatedItems = selectedItems.filter((itemId) => itemId !== id);
-      } else {
-        updatedItems = [...selectedItems, id];
-      }
-
-      setSelectedItems(updatedItems);
-      setAllSelected(updatedItems.length === chunkedItems.flat().length);
-    }
+  // Helper function to capitalize first letter
+  const capitalizeFirstLetter = (string) => {
+    if (!string) return "--";
+    return string.charAt(0).toUpperCase() + string.slice(1);
   };
 
-  // Handle save for column configuration
-  const handleSave = () => {
-    if (activeTab === "add") {
-      // Add selected columns to table
-      const newColumns = [...tableColumns, ...selectedItems];
-      setTableColumns(newColumns);
-    } else {
-      const newColumns = tableColumns.filter(
-        (id) => !selectedItems.includes(id) || requiredColumns.includes(id)
-      );
-      setTableColumns(newColumns);
+  // Get field value from purchase object
+  const getFieldValue = (purchase, dbName) => {
+    if (!purchase || typeof purchase !== "object") return "--";
+
+    // Date fields
+    if (["receivedDate", "expiryDate", "invoiceDate"].includes(dbName)) {
+      return formatDateToReadable(purchase[dbName]) || "--";
     }
-    setSelectedItems([]);
-    setAllSelected(false);
-    setIsModalOpen(false);
-  };
 
-  const handleReset = () => {
-    setSelectedItems([]);
-    setAllSelected(false);
-    // Reset to default columns
-    setTableColumns([
-      "invoiceNumber",
-      "deliveryNumber",
-      "invoiceDate",
-      "receivedDate",
-      "productName",
-      "supplierName",
-      "quantityPerBoxStrip",
-      "lcNumber",
-      "fob",
-      "amount",
-      "actions",
-    ]);
-  };
-
-  const handleCancelEvent = () => {
-    setSelectedItems([]);
-    setAllSelected(false);
-    setIsModalOpen(false);
-  };
-
-  // Fetch products and suppliers for dropdowns
-  useEffect(() => {
-    if (isEditModalOpen) {
-      fetchProducts();
-      fetchSuppliers();
+    // Supplier Name field
+    if (dbName === "supplierName") {
+      return purchase.supplierName || "--";
     }
-  }, [isEditModalOpen]);
 
-  // ADDED: Fetch products and suppliers on component mount for validation
-  useEffect(() => {
-    fetchProducts();
-    fetchSuppliers();
-  }, []);
+    // Numeric fields
+    if (dbName === "amount") {
+      const amount = Number(purchase.amount) || 0;
+      return formatNumber(amount);
+    }
 
+    if (dbName === "quantityPerBoxStrip") {
+      const qty = Number(purchase.quantityPerBoxStrip) || 0;
+      return qty;
+    }
+
+    if (dbName === "lcNumber") {
+      const lc = parseFloat(purchase.lcNumber) || 0;
+      return formatNumber(lc);
+    }
+
+    if (dbName === "fob" || dbName === "cif") {
+      const val = parseFloat(purchase[dbName]) || 0;
+      return formatNumber(val);
+    }
+
+    // Default fallback
+    const value = purchase[dbName];
+    if (value === null || value === undefined || value === "") return "--";
+
+    return value;
+  };
+
+  const handleProductCountClick = (purchase) => {
+    setSelectedPurchaseProduct(purchase);
+    setIsProductModalOpen(true);
+  };
+
+  // Fetch products and suppliers
   const fetchProducts = async () => {
     setLoadingProducts(true);
     try {
@@ -366,107 +263,42 @@ function Purchase() {
     }
   };
 
-  // Get field value from purchase object
-  const getFieldValue = (purchase, dbName) => {
-    if (!purchase || typeof purchase !== "object") return "--";
-
-    // ✅ Date fields
-    if (["receivedDate", "expiryDate", "invoiceDate"].includes(dbName)) {
-      return formatDateToReadable(purchase[dbName]) || "--";
-    }
-
-    // ✅ Amount: ensure number & round properly
-    if (dbName === "amount") {
-      const amount = Number(purchase.amount) || 0;
-      return formatNumber(amount);
-    }
-
-    // ✅ Quantity fields - use consistent field names
-    if (dbName === "quantityPerBoxStrip") {
-      const qty = Number(purchase.quantityPerBoxStrip) || 0;
-      return qty;
-    }
-
-    // ✅ LC Number — numeric but stored as string sometimes
-    if (dbName === "lcNumber") {
-      const lc = parseFloat(purchase.lcNumber) || 0;
-      return formatNumber(lc);
-    }
-
-    // ✅ FOB / CIF
-    if (dbName === "fob" || dbName === "cif") {
-      const val = parseFloat(purchase[dbName]) || 0;
-      return formatNumber(val);
-    }
-
-    // ✅ Default fallback
-    const value = purchase[dbName];
-    if (value === null || value === undefined || value === "") return "--";
-
-    return value;
-  };
-
-  // Update allSelected state when individual selections change
-  useEffect(() => {
-    const currentItems = chunkedItems.flat();
-    if (
-      currentItems.length > 0 &&
-      selectedItems.length === currentItems.length
-    ) {
-      setAllSelected(true);
-    } else {
-      setAllSelected(false);
-    }
-  }, [selectedItems, chunkedItems]);
-
-  // Filter purchases based on tab + search
-  const filteredPurchases = purchases.filter((p) => {
-    const matchesType =
-      selectedTab.toLowerCase() === "all" ||
-      p.productType?.toLowerCase() === selectedTab.toLowerCase();
-
-    if (!matchesType) return false;
-
-    if (searchTerm.trim() === "") return true;
-    const lowerSearch = searchTerm.toLowerCase();
-
-    return (
-      matchesType &&
-      (p.invoiceNumber?.toLowerCase().includes(lowerSearch) ||
-        formatDateToReadable(p.receivedDate)
-          .toLowerCase()
-          .includes(lowerSearch) ||
-        p.productName?.toLowerCase().includes(lowerSearch) ||
-        p.deliveryNumber?.toLowerCase().includes(lowerSearch) ||
-        p.lcNumber?.toLowerCase().includes(lowerSearch) ||
-        p.supplierName?.toLowerCase().includes(lowerSearch))
-    );
-  });
-
+  // Fixed fetchPurchaseDetails function
   const fetchPurchaseDetails = async () => {
     try {
       setLoading(true);
-
       const purchaseRes = await fetch(`${backendUrl}/api/purchase`);
+
       if (!purchaseRes.ok) throw new Error("Failed to fetch purchase details");
       const purchaseData = await purchaseRes.json();
 
-      // Extract unique types from both productType and type fields
+      // Handle different response structures safely
+      const purchaseArray =
+        purchaseData.purchases || purchaseData.data || purchaseData || [];
+
       const typeSet = new Set();
-      purchaseData.reports.forEach((item) => {
-        const type = item.productType || item.type;
-        if (type && type.trim() && type.toLowerCase() !== "unknown") {
-          typeSet.add(type.trim());
-        }
-      });
+      if (Array.isArray(purchaseArray) && purchaseArray.length > 0) {
+        purchaseArray.forEach((purchase) => {
+          // Check if purchase has products array
+          if (purchase.products && Array.isArray(purchase.products)) {
+            purchase.products.forEach((product) => {
+              const type = product.productType || product.type;
+              if (type && type.trim() && type.toLowerCase() !== "unknown") {
+                typeSet.add(type.trim());
+              }
+            });
+          }
+        });
+      }
 
-      const uniqueTypes = Array.from(typeSet).sort();
-
-      setTypes(["All", ...uniqueTypes]);
-      setPurchases(purchaseData.reports || []);
+      setPurchases(purchaseArray);
+      setTypes(["All", ...Array.from(typeSet).sort()]);
     } catch (error) {
       console.error("❌ Fetch error:", error);
-      alert(error.message || "Error fetching purchase details");
+      showToast("error", error.message || "Error fetching purchase details");
+      // Set empty arrays to prevent further errors
+      setTypes(["All"]);
+      setPurchases([]);
     } finally {
       setLoading(false);
     }
@@ -474,6 +306,8 @@ function Purchase() {
 
   useEffect(() => {
     fetchPurchaseDetails();
+    fetchProducts();
+    fetchSuppliers();
   }, []);
 
   const handleClick = (tab) => {
@@ -481,218 +315,103 @@ function Purchase() {
     setCurrentPage(1);
   };
 
-  const parseNumber = (val) => {
-    if (typeof val === "number") return val;
-    if (typeof val === "string") {
-      const cleaned = val.replace(/,/g, "").trim();
-      const num = parseFloat(cleaned);
-      return isNaN(num) ? 0 : num;
-    }
-    return 0;
-  };
+  // Filter purchases based on tab + search - FIXED VERSION
+  const filteredPurchases = useMemo(() => {
+    return purchases.filter((purchase) => {
+      // Check if purchase matches the selected tab
+      const matchesType =
+        selectedTab.toLowerCase() === "all" ||
+        (purchase.products &&
+          Array.isArray(purchase.products) &&
+          purchase.products.some((product) => {
+            const productType = product.productType || product.type;
+            return productType?.toLowerCase() === selectedTab.toLowerCase();
+          }));
 
-  const parseDate = (val) => {
-    if (!val) return null;
+      if (!matchesType) return false;
 
-    // If it's already a Date
-    if (val instanceof Date && !isNaN(val)) return val;
+      if (searchTerm.trim() === "") return true;
+      const lowerSearch = searchTerm.toLowerCase();
 
-    // Handle Excel serial numbers (e.g. 45567)
-    if (typeof val === "number") {
-      const excelEpoch = new Date(Math.round((val - 25569) * 86400 * 1000));
-      if (!isNaN(excelEpoch)) return excelEpoch;
-      return null;
-    }
-
-    // Handle strings
-    if (typeof val === "string") {
-      const trimmed = val.trim();
-      if (!trimmed || trimmed.toUpperCase() === "N/A") return null;
-
-      // Try built-in Date parsing
-      let parsed = new Date(trimmed);
-      if (!isNaN(parsed)) return parsed;
-
-      // Try known formats manually (like DD/MM/YYYY, DD-MM-YYYY, etc.)
-      const patterns = [
-        /^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/, // 05/11/2025 or 5-11-25
-        /^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/, // 2025-11-05
-        /^(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{2,4})$/, // 05 Nov 2025
-      ];
-
-      for (const p of patterns) {
-        const m = trimmed.match(p);
-        if (m) {
-          let day, month, year;
-          if (p === patterns[0]) {
-            [, day, month, year] = m;
-          } else if (p === patterns[1]) {
-            [, year, month, day] = m;
-          } else {
-            [, day, month, year] = m;
-            const monthIndex = new Date(`${month} 1, 2000`).getMonth(); // convert "Nov" → 10
-            if (!isNaN(monthIndex)) month = monthIndex + 1;
-          }
-
-          day = parseInt(day);
-          month = parseInt(month) - 1; // JS months are 0-based
-          year = parseInt(year);
-          if (year < 100) year += 2000; // handle 2-digit years
-
-          const d = new Date(year, month, day);
-          if (!isNaN(d)) return d;
-        }
-      }
-    }
-
-    return null;
-  };
-
-  const handleFileUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-
-    reader.onload = (evt) => {
-      try {
-        const data = new Uint8Array(evt.target.result);
-        const workbook = XLSX.read(data, { type: "array" });
-        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(worksheet, {
-          header: 1,
-          defval: "",
-        });
-
-        if (rows.length === 0) {
-          showToast("warning", "Excel file is empty");
-          return;
-        }
-
-        const requiredHeaders = [
-          "invoice number",
-          "invoice date",
-          "delivery no.",
-          "received date",
-          "product name",
-          "supplier name",
-          "expiry date",
-          "quantity per box/strip",
-          "fob (usd)",
-          "cif (usd)",
-          "lc (usd)",
-          "remarks",
-        ];
-
-        // Step 1: Find header row
-        let headerRowIndex = -1;
-        for (let i = 0; i < Math.min(rows.length, 10); i++) {
-          const row = rows[i].map((cell) =>
-            (cell || "").toString().trim().toLowerCase()
-          );
-          const matched = requiredHeaders.filter((hdr) => row.includes(hdr));
-          if (matched.length >= 8) {
-            headerRowIndex = i;
-            break;
-          }
-        }
-
-        if (headerRowIndex === -1) {
-          showToast("error", "Header row not found or missing columns");
-          return;
-        }
-
-        // Step 2: Map columns to headers
-        const rawHeaders = rows[headerRowIndex];
-        const headersMap = {};
-        rawHeaders.forEach((headerText, colIndex) => {
-          const cleaned = headerText?.toString().trim().toLowerCase();
-          if (requiredHeaders.includes(cleaned)) {
-            headersMap[colIndex] = cleaned;
-          }
-        });
-
-        // Step 3: Map rows to structured data
-        const dataRows = rows.slice(headerRowIndex + 1);
-        const mappedData = dataRows
-          .map((row) => {
-            const item = {};
-            Object.entries(headersMap).forEach(([colIndex, key]) => {
-              let cellVal = row[colIndex] || "";
-              if (typeof cellVal === "string") {
-                if (cellVal.toUpperCase() === "N/A" || cellVal.trim() === "") {
-                  cellVal = "";
-                }
-              }
-              item[key] = cellVal;
-            });
-
-            return {
-              invoiceNumber: item["invoice number"] || "",
-              invoiceDate: parseDate(item["invoice date"]),
-              deliveryNumber: item["delivery no."] || "",
-              receivedDate: parseDate(item["received date"]),
-              productName: item["product name"] || "",
-              supplierName: item["supplier name"] || "",
-              expiryDate: parseDate(item["expiry date"]),
-              quantityPerBoxStrip: parseNumber(item["quantity per box/strip"]),
-              fob: parseNumber(item["fob (usd)"]),
-              cif: parseNumber(item["cif (usd)"]),
-              lc: parseNumber(item["lc (usd)"]),
-              remarks: item["remarks"] || "",
-            };
-          })
-          .filter(
-            (entry) =>
-              entry.invoiceNumber !== "" ||
-              entry.productName !== "" ||
-              entry.deliveryNumber !== ""
-          );
-        setParsedData(mappedData);
-      } catch (error) {
-        console.error("Error reading Excel file:", error);
-        showToast("error", "Failed to process the file.");
-      }
-    };
-
-    reader.readAsArrayBuffer(file);
-  };
-
-  const handlePurchaseImport = async () => {
-    if (parsedData.length === 0) {
-      showToast("warning", "Please upload a valid file first");
-      return;
-    }
-
-    // ADDED: Validation before import
-    if (!validateSuppliersAndProducts()) {
-      return;
-    }
-
-    setIsUploading(true);
-
-    try {
-      const res = await axios.post(
-        `${backendUrl}/api/purchase/import`,
-        parsedData
+      return (
+        purchase.invoiceNumber?.toLowerCase().includes(lowerSearch) ||
+        formatDateToReadable(purchase.receivedDate)
+          .toLowerCase()
+          .includes(lowerSearch) ||
+        purchase.deliveryNumber?.toLowerCase().includes(lowerSearch) ||
+        purchase.lcNumber?.toLowerCase().includes(lowerSearch) ||
+        purchase.supplierName?.toLowerCase().includes(lowerSearch) ||
+        // Also search in product names
+        (purchase.products &&
+          Array.isArray(purchase.products) &&
+          purchase.products.some((product) =>
+            product.productName?.toLowerCase().includes(lowerSearch)
+          ))
       );
+    });
+  }, [purchases, searchTerm, selectedTab]);
 
-      if (res.status === 200) {
-        showToast(
-          "success",
-          res.data.message || "Purchase Inventory imported successfully!"
-        );
-        setShowImportModal(false);
-        fetchPurchaseDetails();
-      }
-    } catch (err) {
-      handleAxiosError(err, showToast);
-    } finally {
-      setIsUploading(false);
-    }
+  // Current page purchases
+  const currentPurchases = useMemo(() => {
+    const start = (currentPage - 1) * PURCHASES_PER_PAGE;
+    return filteredPurchases.slice(start, start + PURCHASES_PER_PAGE);
+  }, [filteredPurchases, currentPage]);
+
+  // Total pages calculation
+  const totalPages = useMemo(() => {
+    return Math.ceil(filteredPurchases.length / PURCHASES_PER_PAGE);
+  }, [filteredPurchases.length]);
+
+  // Visible pages for pagination
+  const visiblePages = useMemo(() => {
+    return getVisiblePages(currentPage, totalPages);
+  }, [currentPage, totalPages]);
+
+  // Reset to first page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, selectedTab]);
+
+  const formatNumber = (num) => {
+    if (num === null || num === undefined || num === "") return "--";
+    const numberValue = typeof num === "string" ? parseFloat(num) : num;
+    if (isNaN(numberValue)) return "--";
+    return numberValue.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
   };
 
-  // CORRECTED: Enhanced editPurchase function with proper product ID handling
+  const toggleSelect = (purchase) => {
+    setSelected((prev) => {
+      const exists = prev.some((c) => c.id === purchase._id);
+      if (exists) {
+        return prev.filter((c) => c.id !== purchase._id);
+      } else {
+        return [...prev, { id: purchase._id }];
+      }
+    });
+  };
+
+  const toggleSelectAll = useCallback(
+    (checked) => {
+      setSelected(
+        checked
+          ? currentPurchases.map((purchase) => ({
+              id: purchase._id,
+            }))
+          : []
+      );
+    },
+    [currentPurchases]
+  );
+
+  const handleView = (purchase) => {
+    setForm({ ...purchase });
+    setIsOpen(true);
+    setIsViewModalOpen(true);
+  };
+
   const editPurchase = (purchase) => {
     setForm({
       _id: purchase._id || "",
@@ -702,7 +421,7 @@ function Purchase() {
       receivedDate: purchase.receivedDate || "",
       expiryDate: purchase.expiryDate || "",
       productId: purchase?._id || purchase.productName || "",
-      productName: purchase?.productName || purchase.productName || "", // Store product name
+      productName: purchase?.productName || purchase.productName || "",
       supplierName: purchase.supplierName || "",
       quantityPerBoxStrip: purchase.quantityPerBoxStrip || 0,
       fob: purchase.fob || 0,
@@ -713,12 +432,6 @@ function Purchase() {
     });
     setIsOpen(true);
     setIsEditModalOpen(true);
-  };
-
-  const handleView = (purchases) => {
-    setForm({ ...purchases });
-    setIsOpen(true);
-    setIsViewModalOpen(true);
   };
 
   const deletePurchase = async (purchase) => {
@@ -751,11 +464,10 @@ function Purchase() {
 
   const handleDeleteSelected = async () => {
     const confirm = await confirmDialog({
-      text: `Are you sure you want to delete <b>${selected.length}</b> purchase`,
+      text: `Are you sure you want to delete <b>${selected.length}</b> purchase(s)?`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
-      selected,
     });
 
     if (confirm.isConfirmed) {
@@ -767,80 +479,123 @@ function Purchase() {
         if (res.status === 200) {
           showToast(
             "success",
-            `Selected <b>${selected.length}</b> purchase deleted successfully`
+            `Selected <b>${selected.length}</b> purchase(s) deleted successfully`
           );
           fetchPurchaseDetails();
           setSelected([]);
         }
       } catch (error) {
-        showToast("error", "Failed to delete selected .");
+        showToast("error", "Failed to delete selected purchases.");
       }
     } else {
       setSelected([]);
     }
   };
 
-  const toggleSelect = (sale) => {
-    setSelected((prev) => {
-      const exists = prev.some((c) => c.id === sale._id);
+  // Form handlers
+  const enhancedHandleChange = useCallback((e) => {
+    const { name, value } = e.target;
+    setForm((prev) => {
+      let processedValue = value;
 
-      if (exists) {
-        return prev.filter((c) => c.id !== sale._id);
-      } else {
-        return [...prev, { id: sale._id }];
+      // Handle numeric fields
+      const numericFields = ["quantityPerBoxStrip", "fob", "cif", "amount"];
+      const integerFields = ["quantityPerBoxStrip"];
+
+      if (numericFields.includes(name)) {
+        if (value === "" || value === "-") {
+          processedValue = value;
+        } else if (integerFields.includes(name)) {
+          const intValue = parseInt(value);
+          processedValue = isNaN(intValue) ? 0 : intValue;
+        } else {
+          if (!value.endsWith(".")) {
+            const numValue = parseFloat(value);
+            processedValue = isNaN(numValue)
+              ? 0
+              : Math.round(numValue * 100) / 100;
+          }
+        }
       }
+
+      const updatedForm = {
+        ...prev,
+        [name]: processedValue,
+      };
+
+      // Auto-calculate amount
+      if (name === "lcNumber" || name === "quantityPerBoxStrip") {
+        const lcValue = parseFloat(updatedForm.lcNumber) || 0;
+        const quantityValue = parseFloat(updatedForm.quantityPerBoxStrip) || 0;
+        updatedForm.amount = Math.round(lcValue * quantityValue * 100) / 100;
+      }
+
+      return updatedForm;
     });
-  };
+  }, []);
 
-  const formatNumber = (num) => {
-    if (num === null || num === undefined || num === "") return "--";
+  const handleNumericInputChange = (e, updateFunc) => {
+    const { name, value } = e.target;
+    const numericFields = ["quantityPerBoxStrip", "fob", "cif", "amount"];
+    const integerFields = ["quantityPerBoxStrip"];
 
-    const numberValue = typeof num === "string" ? parseFloat(num) : num;
-
-    if (isNaN(numberValue)) return "--";
-
-    return numberValue.toLocaleString(undefined, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
-  };
-
-  const totalPages = Math.ceil(filteredPurchases.length / purchasesPerPage);
-  const visiblePages = getVisiblePages(currentPage, totalPages);
-  const currentPurchases = filteredPurchases.slice(
-    (currentPage - 1) * purchasesPerPage,
-    currentPage * purchasesPerPage
-  );
-
-  function capitalizeFirstLetter(str) {
-    if (!str) return "";
-    str = str.toString(); // ensure it's a string
-    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
-  }
-
-  const handleIconClick = () => {
-    if (inputRef.current) {
-      inputRef.current.focus();
-      inputRef.current.classList.add("highlight");
-      setTimeout(() => {
-        inputRef.current.classList.remove("highlight");
-      }, 1000);
+    if (numericFields.includes(name)) {
+      if (integerFields.includes(name)) {
+        if (value === "" || /^\d*$/.test(value)) {
+          const validatedEvent = {
+            target: {
+              name: name,
+              value: value === "" ? "" : parseInt(value) || 0,
+            },
+          };
+          updateFunc(validatedEvent);
+        }
+      } else {
+        if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+          const validatedEvent = {
+            target: {
+              name: name,
+              value: value,
+            },
+          };
+          updateFunc(validatedEvent);
+        }
+      }
+    } else {
+      updateFunc(e);
     }
   };
 
-  // CORRECTED: Enhanced handlePurchaseUpdate function with proper product handling
+  const handleProductChange = (selectedProductId) => {
+    const selectedProduct = productOptions.find(
+      (product) => product._id === selectedProductId
+    );
+    if (selectedProduct) {
+      setForm((prev) => ({
+        ...prev,
+        productId: selectedProduct.value,
+        productName: selectedProduct.label,
+      }));
+    }
+  };
+
+  const handleSupplierChange = useCallback((selectedValue) => {
+    setForm((prev) => ({
+      ...prev,
+      supplierName: selectedValue,
+    }));
+  }, []);
+
   const handlePurchaseUpdate = async (e) => {
     e.preventDefault();
-
     try {
-      // ✅ Prepare data with correct field names matching backend
       const updateData = {
         invoiceNumber: form.invoiceNumber,
         invoiceDate: form.invoiceDate,
         deliveryNumber: form.deliveryNumber,
         receivedDate: form.receivedDate,
         expiryDate: form.expiryDate,
-        productName: form.productName, // Send the actual product name, not ID
+        productName: form.productName,
         supplierName: form.supplierName,
         quantityPerBoxStrip: Number(form.quantityPerBoxStrip) || 0,
         fob: Number(form.fob) || 0,
@@ -871,118 +626,13 @@ function Purchase() {
     }
   };
 
-  const toggleSelectAll = useCallback(
-    (checked) => {
-      setSelected(
-        checked
-          ? currentPurchases.map((purchase) => ({
-              id: purchase._id,
-            }))
-          : []
-      );
-    },
-    [currentPurchases]
-  );
-
-  // CORRECTED: Enhanced amount calculation effect
-  useEffect(() => {
-    if (isEditModalOpen) {
-      const lcValue = parseFloat(form.lcNumber) || 0;
-      const quantityPerBoxStripValue =
-        parseFloat(form.quantityPerBoxStrip) || 0;
-
-      // ✅ CORRECT CALCULATION: LC × Box Qty
-      const calculatedAmount = lcValue * quantityPerBoxStripValue;
-
-      // Round to 2 decimal places
-      const roundedAmount = Math.round(calculatedAmount * 100) / 100;
-
-      // Only update if the calculated value is different from current
-      if (Math.abs(roundedAmount - (parseFloat(form.amount) || 0)) > 0.01) {
-        setForm((prev) => ({
-          ...prev,
-          amount: roundedAmount,
-        }));
-      }
-    }
-  }, [form.lcNumber, form.quantityPerBoxStrip, isEditModalOpen]);
-
-  // CORRECTED: Numeric input handler for integer and decimal fields
-  const handleNumericInputChange = (e, updateFunc) => {
-    const { name, value } = e.target;
-
-    if (numericFields.includes(name)) {
-      // For integer fields, allow only whole numbers
-      if (integerFields.includes(name)) {
-        if (value === "" || /^\d*$/.test(value)) {
-          const validatedEvent = {
-            target: {
-              name: name,
-              value: value === "" ? "" : parseInt(value) || 0,
-            },
-          };
-          updateFunc(validatedEvent);
-        }
-      } else {
-        // For decimal fields, allow numbers and decimal point
-        if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
-          const validatedEvent = {
-            target: {
-              name: name,
-              value: value,
-            },
-          };
-          updateFunc(validatedEvent);
-        }
-      }
-    } else {
-      // For non-numeric fields, pass through directly
-      updateFunc(e);
-    }
-  };
-
-  // CORRECTED: Enhanced handle change with proper number conversion
-  const enhancedHandleChange = useCallback((e) => {
-    const { name, value } = e.target;
-
-    setForm((prev) => {
-      let processedValue = value;
-
-      // Convert numeric fields to proper types
-      if (numericFields.includes(name)) {
-        if (value === "" || value === "-") {
-          processedValue = value;
-        } else if (integerFields.includes(name)) {
-          // For integer fields, convert to whole number
-          const intValue = parseInt(value);
-          processedValue = isNaN(intValue) ? 0 : intValue;
-        } else {
-          // For decimal fields, convert to float with 2 decimal places
-          if (!value.endsWith(".")) {
-            const numValue = parseFloat(value);
-            processedValue = isNaN(numValue)
-              ? 0
-              : Math.round(numValue * 100) / 100;
-          }
-        }
-      }
-
-      const updatedForm = {
-        ...prev,
-        [name]: processedValue,
-      };
-
-      return updatedForm;
-    });
-  }, []);
-
-  // CORRECTED: Format numeric values for display in edit modal
   const getDisplayValue = (fieldName, value) => {
-    if (!numericFields.includes(fieldName)) return value || "";
+    const numericFields = ["quantityPerBoxStrip", "fob", "cif", "amount"];
+    const integerFields = ["quantityPerBoxStrip"];
 
+    if (!numericFields.includes(fieldName)) return value || "";
     if (value === null || value === undefined) return "";
 
-    // For integer fields, don't show decimal places
     if (integerFields.includes(fieldName)) {
       if (typeof value === "number") {
         return value.toString();
@@ -990,56 +640,50 @@ function Purchase() {
       return value || "";
     }
 
-    // If it's a number and we're not in the middle of typing a decimal
     if (typeof value === "number") {
       return value.toString();
     }
 
-    // If it's a string (like during input), return as is
     return value;
   };
 
-  // CORRECTED: Handle product selection - store both ID and name
-  const handleProductChange = (selectedProductId) => {
-    const selectedProduct = productOptions.find(
-      (product) => product._id === selectedProductId
-    );
-    if (selectedProduct) {
-      setForm((prev) => ({
-        ...prev,
-        productId: selectedProduct.value, // Store the actual product ID
-        productName: selectedProduct.label, // Store the product name
-      }));
+  // Add this useMemo hook for filtered products in modal
+  const filteredProductsInModal = useMemo(() => {
+    if (!selectedPurchaseProduct || !selectedPurchaseProduct.products) {
+      return [];
     }
-  };
 
-  const handleSupplierChange = useCallback((selectedValue) => {
-    setForm((prev) => ({
-      ...prev,
-      supplierName: selectedValue,
-    }));
-  }, []);
+    const invoiceProducts = selectedPurchaseProduct.products || [];
 
-  // CORRECTED: Initialize form with proper product data when products are loaded
-  useEffect(() => {
-    if (isEditModalOpen && productOptions.length > 0 && form.productId) {
-      // If we have productId but productName might be missing, find the product
-      const product = productOptions.find((p) => p.value === form.productId);
-      if (product && form.productName !== product.label) {
-        setForm((prev) => ({
-          ...prev,
-          productName: product.label,
-        }));
-      }
+    // Apply type filter
+    let filtered = invoiceProducts;
+    if (selectedTab !== "All") {
+      filtered = invoiceProducts.filter((p) => p.productType === selectedTab);
     }
-  }, [isEditModalOpen, productOptions, form.productId]);
+
+    // Apply search filter
+    if (searchTerm.trim() !== "") {
+      const lowerSearch = searchTerm.toLowerCase();
+      filtered = filtered.filter(
+        (p) =>
+          p.productName?.toLowerCase().includes(lowerSearch) ||
+          selectedPurchaseProduct.supplierName
+            ?.toLowerCase()
+            .includes(lowerSearch) ||
+          p.productType?.toLowerCase().includes(lowerSearch)
+      );
+    }
+
+    return filtered;
+  }, [selectedPurchaseProduct, selectedTab, searchTerm]);
+
+  if (loading) return <LoadingOverlay text="Please wait..." />;
 
   return (
     <div className="p-6">
       <div className="container">
-        <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 w-full">
           <div className="flex gap-3 items-center">
-            {/* CHANGED: Added handleAddNewPurchase with validation */}
             <button
               className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
               onClick={handleAddNewPurchase}
@@ -1047,7 +691,6 @@ function Purchase() {
               <UserPlus size={18} /> Add New Purchase
             </button>
 
-            {/* CHANGED: Added handleImportClick with validation */}
             <button
               onClick={handleImportClick}
               className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
@@ -1064,55 +707,38 @@ function Purchase() {
               </button>
             )}
           </div>
-        </div>
-        <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
-          {purchases.length > 0 ? (
-            <div className="flex items-center gap-6">
-              <div className="flex gap-4">
-                {types.map((tab) => (
-                  <button
-                    key={tab}
-                    onClick={() => handleClick(tab)}
-                    className={`px-4 py-2 rounded-lg cursor-pointer ${
-                      selectedTab === tab
-                        ? "bg-indigo-600 text-white"
-                        : "bg-gray-200 text-gray-700"
-                    }`}
-                  >
-                    {capitalizeFirstLetter(tab)}
-                  </button>
-                ))}
-              </div>
 
-              <button
-                className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-                onClick={() => setIsModalOpen(true)}
-              >
-                <Settings size={18} /> Add /Remove Column
-              </button>
-            </div>
-          ) : (
-            <div></div>
-          )}
-
-          {purchases.length > 0 && (
-            <div className="flex items-center gap-8">
-              <p className="text-lg font-semibold text-gray-700">
+          {/* RIGHT SIDE: TOTAL + DOWNLOAD + SEARCH */}
+          {purchases && purchases.length > 0 && (
+            <div className="flex items-center gap-6 flex-wrap justify-end">
+              {/* Total Count */}
+              <p className="text-lg font-semibold text-gray-700 whitespace-nowrap">
                 Total Count:{" "}
                 <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
                   {filteredPurchases.length}
                 </span>
+                {filteredPurchases.length > PURCHASES_PER_PAGE && (
+                  <span className="ml-2 text-sm text-gray-600">
+                    (Showing{" "}
+                    {Math.min(PURCHASES_PER_PAGE, currentPurchases.length)} of{" "}
+                    {filteredPurchases.length} on page {currentPage})
+                  </span>
+                )}
               </p>
+
+              {purchases.length > 0 && <PurchaseInventoryExcelDownload />}
+
+              {/* SEARCH BOX */}
               <div className="relative w-full md:w-72">
                 <Search
                   className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
                   size={16}
-                  onClick={handleIconClick}
+                  onClick={() => inputRef.current?.focus()}
                 />
                 <input
                   ref={inputRef}
                   type="text"
-                  placeholder="Search invoice,Product Name , Received Date..."
+                  placeholder="Search invoice, product, supplier..."
                   value={searchTerm}
                   onChange={(e) => {
                     setSearchTerm(e.target.value);
@@ -1126,7 +752,7 @@ function Purchase() {
         </div>
 
         {/* Table */}
-        <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
+        <div className="overflow-x-auto shadow rounded-2xl border border-gray-200 mt-5">
           <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
             <thead className="bg-gray-100 text-gray-700 border-b">
               <tr>
@@ -1176,10 +802,7 @@ function Purchase() {
                   <tr
                     key={purchase._id}
                     className={`hover:bg-gray-50 ${
-                      (index + 1) % purchasesPerPage === 0 ||
-                      index + 1 === currentPurchases.length
-                        ? ""
-                        : "border-b"
+                      index < currentPurchases.length - 1 ? "border-b" : ""
                     }`}
                   >
                     {allFields
@@ -1200,6 +823,19 @@ function Purchase() {
                               />
                               <span>{purchase.invoiceNumber || "--"}</span>
                             </div>
+                          ) : item.id === "productCount" ? (
+                            <button
+                              onClick={() => handleProductCountClick(purchase)}
+                              className="flex items-center justify-center gap-2 bg-blue-100 text-blue-700 px-3 py-1 rounded-full hover:bg-blue-200 transition-colors cursor-pointer mx-auto"
+                              title="View Product Details"
+                            >
+                              <Package size={14} />
+                              <span className="font-medium">View Product</span>
+                            </button>
+                          ) : item.id === "supplierName" ? (
+                            <span className="capitalize">
+                              {purchase.supplierName || "--"}
+                            </span>
                           ) : item.id === "actions" ? (
                             <div className="flex items-center justify-center gap-3 min-w-[150px]">
                               <button className="text-blue-600 hover:text-blue-800 cursor-pointer">
@@ -1234,688 +870,298 @@ function Purchase() {
             </tbody>
           </table>
 
-          {currentPurchases.length > 0 && (
-            <div className="mt-4 p-5 flex justify-start gap-2">
-              <button
-                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-                disabled={currentPage === 1}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-              >
-                Prev
-              </button>
-              {visiblePages.map((page, idx) =>
-                page === "..." ? (
-                  <span
-                    key={`ellipsis-${idx}`}
-                    className="px-3 py-1 text-gray-500 select-none cursor-pointer"
-                  >
-                    ...
-                  </span>
-                ) : (
-                  <button
-                    key={page}
-                    onClick={() => setCurrentPage(page)}
-                    className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
-                      currentPage === page
-                        ? "bg-indigo-600 text-white"
-                        : "bg-gray-200 hover:bg-gray-300"
-                    }`}
-                  >
-                    {page}
-                  </button>
-                )
-              )}
-              <button
-                onClick={() => {
-                  setCurrentPage((prev) => Math.min(prev + 1, totalPages));
-                  window.scrollTo({ top: 0, behavior: "smooth" });
-                }}
-                disabled={currentPage === totalPages}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-              >
-                Next
-              </button>
+          {/* Enhanced Pagination Controls */}
+          {filteredPurchases.length > PURCHASES_PER_PAGE && (
+            <div className="mt-4 p-5 flex flex-col sm:flex-row justify-between items-center gap-4 bg-gray-50 border-t">
+              <div className="text-sm text-gray-600">
+                Showing {(currentPage - 1) * PURCHASES_PER_PAGE + 1} to{" "}
+                {Math.min(
+                  currentPage * PURCHASES_PER_PAGE,
+                  filteredPurchases.length
+                )}{" "}
+                of {filteredPurchases.length} entries
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setCurrentPage((prev) => {
+                      const prevPage = Math.max(prev - 1, 1);
+                      window.scrollTo({ top: 0, behavior: "smooth" });
+                      return prevPage;
+                    });
+                  }}
+                  disabled={currentPage === 1}
+                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer flex items-center gap-1"
+                >
+                  ← Prev
+                </button>
+
+                {visiblePages.map((page, idx) =>
+                  page === "..." ? (
+                    <span
+                      key={`ellipsis-${idx}`}
+                      className="px-3 py-1 text-gray-500 select-none"
+                    >
+                      ...
+                    </span>
+                  ) : (
+                    <button
+                      key={page}
+                      onClick={() => {
+                        setCurrentPage(page);
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }}
+                      className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
+                        currentPage === page
+                          ? "bg-indigo-600 text-white"
+                          : "bg-gray-200 hover:bg-gray-300"
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  )
+                )}
+
+                <button
+                  onClick={() => {
+                    setCurrentPage((prev) => {
+                      const nextPage = Math.min(prev + 1, totalPages);
+                      window.scrollTo({ top: 0, behavior: "smooth" });
+                      return nextPage;
+                    });
+                  }}
+                  disabled={currentPage === totalPages}
+                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer flex items-center gap-1"
+                >
+                  Next →
+                </button>
+              </div>
             </div>
           )}
         </div>
 
-        {/* Add/Remove Column Modal */}
-        {isModalOpen &&
+        {/* PRODUCT MODAL */}
+        {isProductModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
               <div
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setIsModalOpen(false)}
+                onClick={() => setIsOpen(false)}
               />
-              <div
-                className="relative bg-white p-6 rounded shadow-lg max-w-4xl w-full z-10 max-h-[90vh] overflow-hidden flex flex-col"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <h2 className="text-xl font-semibold mb-4">
-                  {activeTab === "add" ? "Add Columns" : "Remove Columns"}
-                </h2>
-
-                <div className="flex w-full gap-2 mb-4">
-                  <div className="w-1/2">
-                    <button
-                      onClick={() => {
-                        setActiveTab("add");
-                        setSelectedItems([]);
-                        setAllSelected(false);
-                      }}
-                      className={`w-full px-4 py-2 font-medium text-center rounded-lg ${
-                        activeTab === "add"
-                          ? "bg-green-600 text-white"
-                          : "bg-gray-200 text-gray-700"
-                      }`}
-                    >
-                      Add Columns ({availableColumns.length})
-                    </button>
-                  </div>
-                  <div className="w-1/2">
-                    <button
-                      onClick={() => {
-                        setActiveTab("remove");
-                        setSelectedItems([]);
-                        setAllSelected(false);
-                      }}
-                      className={`w-full px-4 py-2 font-medium text-center rounded-lg ${
-                        activeTab === "remove"
-                          ? "bg-red-600 text-white"
-                          : "bg-gray-200 text-gray-700"
-                      }`}
-                    >
-                      Remove Columns ({removableColumns.length})
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex-1 overflow-y-auto">
-                  {chunkedItems.length > 0 ? (
-                    <div className="grid grid-cols-1 gap-3">
-                      {/* Select All option (only when not in required tab) */}
-                      {chunkedItems.flat().length > 0 && (
-                        <div className="flex gap-4 border-b pb-2 mb-2 sticky top-0 bg-white">
-                          <label className="flex items-center gap-2 flex-1 cursor-pointer select-none font-semibold">
-                            <input
-                              type="checkbox"
-                              checked={allSelected}
-                              onChange={() => toggleItem("all")}
-                            />
-                            Select All
-                          </label>
-                          <div className="flex-1"></div>
-                        </div>
-                      )}
-
-                      {chunkedItems.map((pair, index) => (
-                        <div key={index} className="flex gap-4">
-                          {pair.map(({ id, name }) => (
-                            <label
-                              key={id}
-                              className="flex items-center gap-1 flex-1 cursor-pointer select-none hover:bg-gray-50 rounded"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={selectedItems.includes(id)}
-                                onChange={() => toggleItem(id)}
-                              />
-                              <span className="flex-1">{name}</span>
-                            </label>
-                          ))}
-                          {pair.length === 1 && <div className="flex-1"></div>}
-                        </div>
-                      ))}
-
-                      {/* REQUIRED COLUMNS shown on Remove tab */}
-                      {activeTab === "remove" && (
-                        <div className="mt-6 border-t pt-4">
-                          <h3 className="text-sm font-semibold text-gray-600 mb-2">
-                            Compulsory Fields
-                          </h3>
-                          <div className="grid grid-cols-2 gap-3 text-gray-400 text-sm">
-                            {allFields
-                              .filter((field) =>
-                                requiredColumns.includes(field.id)
-                              )
-                              .map((field) => (
-                                <div
-                                  key={field.id}
-                                  className="flex items-center gap-2 bg-gray-100 rounded px-2 py-1 cursor-not-allowed"
-                                >
-                                  <input type="checkbox" checked disabled />
-                                  <div className="flex flex-col">
-                                    <span>{field.name}</span>
-                                    <span className="text-xs text-red-500">
-                                      This field is compulsory
-                                    </span>
-                                  </div>
-                                </div>
-                              ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-gray-500">
-                      {activeTab === "add"
-                        ? "All available columns are already in the table."
-                        : "No columns available to remove."}
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-4 pt-4 border-t flex justify-between items-center">
-                  <button
-                    onClick={handleReset}
-                    className="px-4 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200 cursor-pointer"
-                  >
-                    Reset to Default
-                  </button>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleCancelEvent}
-                      className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 cursor-pointer"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleSave}
-                      disabled={selectedItems.length === 0}
-                      className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 cursor-pointer disabled:bg-gray-400 disabled:cursor-not-allowed"
-                    >
-                      Save Changes
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>,
-            document.body
-          )}
-
-        {/* Import Modal */}
-        {showImportModal &&
-          ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-              {/* Background Overlay */}
-              <div
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setShowImportModal(false)}
-              />
-              <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
-                {/* Close */}
+              <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
                 <button
-                  onClick={() => setShowImportModal(false)}
-                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-                  disabled={isUploading}
-                >
-                  <X size={20} />
-                </button>
-
-                <h2 className="text-lg font-semibold text-gray-800 mb-4">
-                  Import Purchase
-                </h2>
-                {isSampleFile && <PurchaseInventoryExcelDownload />}
-                <div className="mb-6">
-                  <label className="block text-gray-700 mb-2">File</label>
-                  <input
-                    type="file"
-                    accept=".csv, .xlsx"
-                    onChange={handleFileUpload}
-                    className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
-                  />
-                </div>
-
-                <div className="flex justify-end gap-3">
-                  <button
-                    onClick={() => setShowImportModal(false)}
-                    disabled={isUploading}
-                    className={`px-5 py-2 rounded-lg cursor-pointer ${
-                      isUploading
-                        ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                        : "bg-gray-300 hover:bg-gray-400 text-gray-700"
-                    }`}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handlePurchaseImport}
-                    disabled={isUploading}
-                    className={`px-5 py-2 rounded-lg cursor-pointer ${
-                      isUploading
-                        ? "bg-blue-400 text-white cursor-not-allowed"
-                        : "bg-blue-600 hover:bg-blue-700 text-white"
-                    }`}
-                  >
-                    {isUploading ? "Uploading…" : "Upload"}
-                  </button>
-                </div>
-              </div>
-            </div>,
-            document.body
-          )}
-
-        {/* VIEW MODAL */}
-        {isViewModalOpen &&
-          ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-              <div
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setIsViewModalOpen(false)}
-              />
-
-              <div className="bg-white w-full max-w-3xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
-                <button
-                  onClick={() => setIsViewModalOpen(false)}
-                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-                >
-                  <X size={20} />
-                </button>
-
-                <h2 className="text-xl font-semibold text-gray-800 mb-6">
-                  View Purchase Details
-                </h2>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                  <div>
-                    <label className="block font-medium text-gray-600">
-                      Invoice Number
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                      {form.invoiceNumber || "--"}
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block font-medium text-gray-600">
-                      Delivery Number
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                      {form.deliveryNumber || "--"}
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block font-medium text-gray-600">
-                      Invoice Date
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                      {formatDateToReadable(form.invoiceDate) || "--"}
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block font-medium text-gray-600">
-                      Received Date
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                      {formatDateToReadable(form.receivedDate) || "--"}
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block font-medium text-gray-600">
-                      Expiry Date
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                      {formatDateToReadable(form.expiryDate) || "--"}
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block font-medium text-gray-600">
-                      Product Name
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                      {form.productName || "--"}
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block font-medium text-gray-600">
-                      Supplier Name
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                      {form.supplierName || "--"}
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block font-medium text-gray-600">
-                      Box Quantity
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                      {form.quantityPerBoxStrip || 0}
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block font-medium text-gray-600">
-                      FOB (USD)
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                      {formatNumber(form.fob)}
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block font-medium text-gray-600">
-                      CIF (USD)
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                      {formatNumber(form.cif)}
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block font-medium text-gray-600">
-                      LC Number
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                      {formatNumber(Number(form.lcNumber)) || "--"}
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block font-medium text-gray-600">
-                      Amount (USD)
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                      {formatNumber(form.amount)}
-                    </p>
-                  </div>
-
-                  {/* Remarks - Full width */}
-                  <div className="md:col-span-3">
-                    <label className="block font-medium text-gray-600">
-                      Remarks
-                    </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                      {form.remarks || "—"}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mt-6 flex justify-end">
-                  <button
-                    onClick={() => setIsViewModalOpen(false)}
-                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            </div>,
-            document.body
-          )}
-
-        {/* EDIT MODAL - CORRECTED */}
-        {isEditModalOpen &&
-          ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-              <div
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => {
-                  setIsEditModalOpen(false);
-                  setForm(initialFormState);
-                }}
-              />
-              <div className="bg-white w-full max-w-3xl p-6 rounded-xl shadow-lg relative max-h-screen overflow-y-auto">
-                <button
-                  onClick={() => {
-                    setIsEditModalOpen(false);
-                    setForm(initialFormState);
-                  }}
+                  onClick={() => setIsProductModalOpen(false)}
                   className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
                 >
                   <X size={20} />
                 </button>
 
                 <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                  Edit Purchase
+                  Product Details -{" "}
+                  {selectedPurchaseProduct?.invoiceNumber || "Purchase"}
                 </h2>
 
-                <form
-                  className="grid grid-cols-1 md:grid-cols-3 gap-4"
-                  onSubmit={handlePurchaseUpdate}
-                >
-                  {/* Invoice Number */}
-                  <div>
-                    <label className="block font-medium text-gray-600">
-                      Invoice Number
-                    </label>
-                    <input
-                      type="text"
-                      name="invoiceNumber"
-                      value={form.invoiceNumber || ""}
-                      onChange={enhancedHandleChange}
-                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                    />
-                  </div>
+                {/* Filter Capsules Section - Only show types present in this invoice */}
+                {selectedPurchaseProduct &&
+                  selectedPurchaseProduct.products &&
+                  selectedPurchaseProduct.products.length > 0 && (
+                    <div className="flex flex-wrap justify-between items-center gap-4 mb-6">
+                      <div className="flex items-center gap-4">
+                        <div className="flex flex-wrap gap-2">
+                          {/* Get unique product types from this specific invoice */}
+                          {(() => {
+                            const invoiceProducts =
+                              selectedPurchaseProduct.products || [];
 
-                  {/* Delivery Number */}
-                  <div>
-                    <label className="block font-medium text-gray-600">
-                      Delivery Number
-                    </label>
-                    <input
-                      type="text"
-                      name="deliveryNumber"
-                      value={form.deliveryNumber || ""}
-                      onChange={enhancedHandleChange}
-                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                    />
-                  </div>
+                            // Safety check for empty array
+                            if (
+                              !invoiceProducts ||
+                              invoiceProducts.length === 0
+                            ) {
+                              return (
+                                <button className="px-4 py-2 rounded-full bg-indigo-600 text-white shadow-md text-sm font-medium">
+                                  All
+                                </button>
+                              );
+                            }
 
-                  {/* Invoice Date */}
-                  <div>
-                    <label className="block font-medium text-gray-600">
-                      Invoice Date
-                    </label>
-                    <DatePicker
-                      selected={
-                        form.invoiceDate ? new Date(form.invoiceDate) : null
-                      }
-                      onChange={(date) =>
-                        setForm({
-                          ...form,
-                          invoiceDate: date ? date.toISOString() : "",
-                        })
-                      }
-                      dateFormat="yyyy-MM-dd"
-                      placeholderText="Select date"
-                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                    />
-                  </div>
+                            const uniqueTypes = [
+                              ...new Set(
+                                invoiceProducts
+                                  .map((p) => p?.productType)
+                                  .filter(Boolean)
+                              ),
+                            ];
 
-                  {/* Received Date */}
-                  <div>
-                    <label className="block font-medium text-gray-600">
-                      Received Date
-                    </label>
-                    <DatePicker
-                      selected={
-                        form.receivedDate ? new Date(form.receivedDate) : null
-                      }
-                      onChange={(date) =>
-                        setForm({
-                          ...form,
-                          receivedDate: date ? date.toISOString() : "",
-                        })
-                      }
-                      dateFormat="yyyy-MM-dd"
-                      placeholderText="Select date"
-                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                    />
-                  </div>
+                            return ["All", ...uniqueTypes].map((type) => (
+                              <button
+                                key={type}
+                                onClick={() => handleClick(type)}
+                                className={`px-4 py-2 rounded-lg cursor-pointer transition-colors text-sm font-medium ${
+                                  selectedTab === type
+                                    ? "bg-indigo-600 text-white shadow-md"
+                                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                                }`}
+                              >
+                                {capitalizeFirstLetter(type)}
+                              </button>
+                            ));
+                          })()}
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
-                  {/* Expiry Date */}
-                  <div>
-                    <label className="block font-medium text-gray-600">
-                      Expiry Date
-                    </label>
-                    <DatePicker
-                      selected={
-                        form.expiryDate ? new Date(form.expiryDate) : null
-                      }
-                      onChange={(date) =>
-                        setForm({
-                          ...form,
-                          expiryDate: date ? date.toISOString() : "",
-                        })
-                      }
-                      dateFormat="yyyy-MM-dd"
-                      placeholderText="Select date"
-                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                    />
-                  </div>
+                {/* Products Table */}
+                {selectedPurchaseProduct && selectedPurchaseProduct.products ? (
+                  <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
+                    <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
+                      <thead className="bg-gray-100 text-gray-700 border-b">
+                        <tr>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            Product Name
+                          </th>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            Product Type
+                          </th>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            Box Qty
+                          </th>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            LC (USD)
+                          </th>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            Amount ($)
+                          </th>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            FOB (USD)
+                          </th>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            CIF (USD)
+                          </th>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            Supplier
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredProductsInModal.length > 0 ? (
+                          filteredProductsInModal.map((product, index) => (
+                            <tr
+                              key={product._id || index}
+                              className={`hover:bg-gray-50 ${
+                                index < filteredProductsInModal.length - 1
+                                  ? "border-b"
+                                  : ""
+                              }`}
+                            >
+                              <td className="p-3 whitespace-nowrap min-w-[120px] capitalize">
+                                {product.productName || "--"}
+                              </td>
+                              <td className="p-3 whitespace-nowrap min-w-[120px]">
+                                <span
+                                  className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                    product.productType === "physical"
+                                      ? "bg-blue-100 text-blue-800"
+                                      : product.productType === "digital"
+                                      ? "bg-purple-100 text-purple-800"
+                                      : "bg-green-100 text-green-800"
+                                  }`}
+                                >
+                                  {capitalizeFirstLetter(
+                                    product.productType || "unknown"
+                                  )}
+                                </span>
+                              </td>
+                              <td className="p-3 whitespace-nowrap min-w-[120px]">
+                                {product.quantityPerBoxStrip ||
+                                  product.productQtyPerBoxStrip ||
+                                  0}
+                              </td>
+                              <td className="p-3 whitespace-nowrap min-w-[120px]">
+                                {formatNumber(product.lcNumber || product.lc)}
+                              </td>
+                              <td className="p-3 whitespace-nowrap min-w-[120px] font-semibold">
+                                {formatNumber(product.amount)}
+                              </td>
+                              <td className="p-3 whitespace-nowrap min-w-[120px]">
+                                {formatNumber(product.fob)}
+                              </td>
+                              <td className="p-3 whitespace-nowrap min-w-[120px]">
+                                {formatNumber(product.cif)}
+                              </td>
+                              <td className="p-3 whitespace-nowrap min-w-[120px] capitalize">
+                                {selectedPurchaseProduct.supplierName || "--"}
+                              </td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td
+                              colSpan={8}
+                              className="p-4 text-center text-gray-500"
+                            >
+                              No products found for the selected filters.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
 
-                  {/* ---------- PRODUCT NAME (searchable dropdown) ---------- */}
-                  <div>
-                    <label className="block font-medium text-gray-600">
-                      Product Name
-                    </label>
-                    <SearchableDropdown
-                      value={form.productId} // <-- uses the stored productId
-                      onChange={handleProductChange} // sets both productId & productName
-                      options={productOptions}
-                      placeholder="Select Product"
-                      loading={loadingProducts}
-                      label=""
-                    />
-                    {form.productName && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        Selected: {form.productName}
-                      </p>
-                    )}
+                    {/* Summary Section - FIXED: Now uses filteredProductsInModal */}
+                    <div className="bg-gray-50 p-4 border-t">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                        <div className="text-center">
+                          <p className="text-gray-600 font-medium">
+                            Total Products
+                          </p>
+                          <p className="text-lg font-bold text-indigo-600">
+                            {filteredProductsInModal.length}
+                          </p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-gray-600 font-medium">
+                            Total Amount
+                          </p>
+                          <p className="text-lg font-bold text-green-600">
+                            $
+                            {filteredProductsInModal
+                              .reduce(
+                                (sum, p) => sum + (Number(p.amount) || 0),
+                                0
+                              )
+                              .toLocaleString(undefined, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
+                          </p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-gray-600 font-medium">
+                            Invoice Date
+                          </p>
+                          <p className="text-lg font-bold text-blue-600">
+                            {formatDateToReadable(
+                              selectedPurchaseProduct.invoiceDate
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-
-                  {/* ---------- SUPPLIER NAME (searchable dropdown – FIXED) ---------- */}
-                  <div>
-                    <label className="block font-medium text-gray-600">
-                      Supplier Name
-                    </label>
-                    <SearchableDropdown
-                      value={form.supplierName} // <-- plain string (supplier name)
-                      onChange={handleSupplierChange} // updates supplierName only
-                      options={supplierOptions}
-                      placeholder="Select Supplier"
-                      loading={loadingSuppliers}
-                      label=""
-                    />
-                  </div>
-
-                  {/* Box Quantity */}
-                  <div>
-                    <label className="block font-medium text-gray-600">
-                      Box Quantity
-                    </label>
-                    <input
-                      type="text"
-                      name="quantityPerBoxStrip"
-                      value={getDisplayValue(
-                        "quantityPerBoxStrip",
-                        form.quantityPerBoxStrip
-                      )}
-                      onChange={(e) =>
-                        handleNumericInputChange(e, enhancedHandleChange)
-                      }
-                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                    />
-                  </div>
-
-                  {/* FOB */}
-                  <div>
-                    <label className="block font-medium text-gray-600">
-                      FOB (USD)
-                    </label>
-                    <input
-                      type="text"
-                      name="fob"
-                      value={getDisplayValue("fob", form.fob)}
-                      onChange={(e) =>
-                        handleNumericInputChange(e, enhancedHandleChange)
-                      }
-                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                    />
-                  </div>
-
-                  {/* CIF */}
-                  <div>
-                    <label className="block font-medium text-gray-600">
-                      CIF (USD)
-                    </label>
-                    <input
-                      type="text"
-                      name="cif"
-                      value={getDisplayValue("cif", form.cif)}
-                      onChange={(e) =>
-                        handleNumericInputChange(e, enhancedHandleChange)
-                      }
-                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                    />
-                  </div>
-
-                  {/* LC Number */}
-                  <div>
-                    <label className="block font-medium text-gray-600">
-                      LC (USD)
-                    </label>
-                    <input
-                      type="text"
-                      name="lcNumber"
-                      value={form.lcNumber || ""}
-                      onChange={enhancedHandleChange}
-                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                    />
-                  </div>
-
-                  {/* Amount – read-only calculated */}
-                  <div>
-                    <label className="block font-medium text-gray-600">
-                      Amount (USD)
-                    </label>
-                    <input
-                      type="text"
-                      name="amount"
-                      value={formatNumber(form.amount)}
-                      className="w-full border px-3 py-2 rounded-lg border-gray-300 bg-gray-100 cursor-not-allowed"
-                      readOnly
-                      disabled
-                    />
-                  </div>
-
-                  {/* Remarks – full width */}
-                  <div className="md:col-span-3">
-                    <label className="block font-medium text-gray-600">
-                      Remarks
-                    </label>
-                    <textarea
-                      name="remarks"
-                      value={form.remarks || ""}
-                      onChange={enhancedHandleChange}
-                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                      rows={3}
-                    />
-                  </div>
-                </form>
+                ) : (
+                  <p className="text-gray-500 text-center py-8">
+                    No product details found.
+                  </p>
+                )}
 
                 <div className="mt-6 flex justify-end gap-3">
                   <button
-                    onClick={() => {
-                      setIsEditModalOpen(false);
-                      setForm(initialFormState);
-                    }}
-                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                    onClick={() => setIsProductModalOpen(false)}
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer transition-colors"
                   >
-                    Cancel
-                  </button>
-
-                  <button
-                    onClick={handlePurchaseUpdate}
-                    className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
-                  >
-                    Update
+                    Close
                   </button>
                 </div>
               </div>

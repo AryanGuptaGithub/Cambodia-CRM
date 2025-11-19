@@ -221,16 +221,63 @@ router.post("/product/import", async (req, res) => {
     });
   }
 });
-
 router.get("/products", async (req, res) => {
   try {
+    // Get all product master data
     const products = await Product.find();
-    res.status(200).json(products);
+
+    // Get all stock data from ReportInHand
+    const stockList = await ReportInHand.find();
+
+    // Convert to map for fast lookup
+    const stockMap = new Map();
+    stockList.forEach((item) => {
+      stockMap.set(item.productName.toLowerCase(), item);
+    });
+
+    // Merge product + stock
+    const finalList = products.map((product) => {
+      const stock = stockMap.get(product.productName.toLowerCase());
+
+      return {
+        ...product.toObject(),
+
+        // Always return quantity object
+        quantity: {
+          boxes: stock?.quantity?.boxes ?? 0,   // If no stock → 0
+        },
+
+        inStock: stock?.quantity?.boxes ?? 0,
+
+        status: stock?.status || "Out of Stock",
+        category: stock?.category || "Uncategorized",
+        minStockLevel: stock?.minStockLevel || 0,
+
+        lc: stock?.lc || 0,
+        fob: stock?.fob || 0,
+        cif: stock?.cif || 0,
+
+        stockLastUpdated: stock?.updatedAt || null,
+      };
+    });
+
+    res.status(200).json(finalList);
   } catch (err) {
-    console.error("Error fetching products:", err);
+    console.error("Error fetching products with stock:", err);
     res.status(500).json({ message: "Failed to fetch products." });
   }
 });
+
+
+// router.get("/products", async (req, res) => {
+//   try {
+//     const products = await Product.find();
+//     res.status(200).json(products);
+//   } catch (err) {
+//     console.error("Error fetching products:", err);
+//     res.status(500).json({ message: "Failed to fetch products." });
+//   }
+// });
 
 router.get("/products-with-in-stock", async (req, res) => {
   try {

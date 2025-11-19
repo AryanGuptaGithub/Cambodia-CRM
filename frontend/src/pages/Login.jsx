@@ -25,7 +25,7 @@ const Login = () => {
       });
 
       const data = await res.json();
-      console.log("values of data", data);
+
       if (!res.ok) {
         setError(data.message || "Login failed");
         return;
