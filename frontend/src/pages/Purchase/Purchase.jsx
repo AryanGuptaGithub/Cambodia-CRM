@@ -33,6 +33,7 @@ import {
 } from "../../pages/ProductManager/common/fetchDropdown";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import LoadingOverlay from "../../components/Loading";
+import InputField from "../../components/common/InputField";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
@@ -70,10 +71,10 @@ function Purchase() {
   const [types, setTypes] = useState([]);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  const [isOpen, setIsOpen] = useState(false);
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [selectedPurchaseProduct, setSelectedPurchaseProduct] = useState(null);
   const inputRef = useRef(null);
+  const [expandedProductIndex, setExpandedProductIndex] = useState(-1);
 
   const [productOptions, setProductOptions] = useState([]);
   const [supplierOptions, setSupplierOptions] = useState([]);
@@ -408,7 +409,6 @@ function Purchase() {
 
   const handleView = (purchase) => {
     setForm({ ...purchase });
-    setIsOpen(true);
     setIsViewModalOpen(true);
   };
 
@@ -420,7 +420,7 @@ function Purchase() {
       deliveryNumber: purchase.deliveryNumber || "",
       receivedDate: purchase.receivedDate || "",
       expiryDate: purchase.expiryDate || "",
-      productId: purchase?._id || purchase.productName || "",
+      productId: purchase?.productId || purchase.productName || "",
       productName: purchase?.productName || purchase.productName || "",
       supplierName: purchase.supplierName || "",
       quantityPerBoxStrip: purchase.quantityPerBoxStrip || 0,
@@ -430,7 +430,6 @@ function Purchase() {
       remarks: purchase.remarks || "",
       amount: purchase.amount || 0,
     });
-    setIsOpen(true);
     setIsEditModalOpen(true);
   };
 
@@ -626,25 +625,19 @@ function Purchase() {
     }
   };
 
-  const getDisplayValue = (fieldName, value) => {
-    const numericFields = ["quantityPerBoxStrip", "fob", "cif", "amount"];
-    const integerFields = ["quantityPerBoxStrip"];
+  const handleDateChange = (date, fieldName) => {
+    setForm((prev) => ({
+      ...prev,
+      [fieldName]: date ? date.toISOString().split("T")[0] : "",
+    }));
+  };
 
-    if (!numericFields.includes(fieldName)) return value || "";
-    if (value === null || value === undefined) return "";
+  const updateFormField = useCallback((name, value) => {
+    setForm((prev) => ({ ...prev, [name]: value }));
+  }, []);
 
-    if (integerFields.includes(fieldName)) {
-      if (typeof value === "number") {
-        return value.toString();
-      }
-      return value || "";
-    }
-
-    if (typeof value === "number") {
-      return value.toString();
-    }
-
-    return value;
+  const toggleProductView = (index) => {
+    setExpandedProductIndex(expandedProductIndex === index ? -1 : index);
   };
 
   // Add this useMemo hook for filtered products in modal
@@ -941,13 +934,466 @@ function Purchase() {
           )}
         </div>
 
+        {/* VIEW MODAL - Updated to match Sales layout */}
+        {isViewModalOpen &&
+          ReactDOM.createPortal(
+            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+              <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                onClick={() => setIsViewModalOpen(false)}
+              />
+
+              <div className="bg-white w-full max-w-4xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+                <button
+                  onClick={() => setIsViewModalOpen(false)}
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                >
+                  <X size={20} />
+                </button>
+
+                <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                  View Purchase Record
+                </h2>
+
+                {/* Record Information Section */}
+                <div className="mb-6">
+                  <h3 className="text-lg font-medium text-gray-700 mb-3">
+                    Record Information
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Invoice Number
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                        {form.invoiceNumber || "-"}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Invoice Date
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                        {form.invoiceDate
+                          ? formatDateToReadable(form.invoiceDate)
+                          : "-"}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Delivery Number
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                        {form.deliveryNumber || "-"}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Received Date
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                        {form.receivedDate
+                          ? formatDateToReadable(form.receivedDate)
+                          : "-"}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Supplier Name
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                        {form.supplierName || "-"}
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        Total Amount ($)
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                        {form.totalAmount}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Product Information Section */}
+                <div className="mb-6">
+                  <h3 className="text-lg font-medium text-gray-700 mb-3">
+                    Product Information
+                  </h3>
+
+                  {form.products && form.products.length > 0 ? (
+                    <div className="space-y-4">
+                      {form.products.map((product, index) => (
+                        <div
+                          key={index}
+                          className="border rounded-lg p-4 bg-gray-50"
+                        >
+                          {/* Product Header with Name and View Button */}
+                          <div className="flex justify-between items-center mb-2">
+                            {/* Product Name on Left */}
+                            <div className="flex-1">
+                              <h4 className="text-lg font-semibold text-gray-800 capitalize">
+                                {product.productName || `Product ${index + 1}`}
+                              </h4>
+                            </div>
+
+                            {/* View/Hide Button on Right */}
+                            <button
+                              className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg cursor-pointer text-sm"
+                              onClick={() => toggleProductView(index)}
+                            >
+                              {expandedProductIndex === index
+                                ? "Hide Details"
+                                : "View Details"}
+                            </button>
+                          </div>
+
+                          {/* Product Details - Conditionally Rendered */}
+                          {expandedProductIndex === index && (
+                            <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                              {[
+                                ["Product Name", "productName"],
+                                ["Product Type", "productType"],
+                                [
+                                  "Quantity Per Box/Strip",
+                                  "quantityPerBoxStrip",
+                                ],
+                                ["LC (USD)", "lc"],
+                                ["FOB (USD)", "fob"],
+                                ["CIF (USD)", "cif"],
+                                ["Amount ($)", "amount"],
+                                ["Expiry Date", "expiryDate"], // <-- Added here
+                              ].map(([label, key]) => (
+                                <div key={key}>
+                                  <label className="block text-sm font-medium text-gray-600">
+                                    {label}
+                                  </label>
+                                  <p className="border px-3 py-2 rounded-lg bg-white">
+                                    {key === "productType"
+                                      ? capitalizeFirstLetter(
+                                          product[key] || "unknown"
+                                        )
+                                      : ["fob", "cif", "amount"].includes(key)
+                                      ? formatNumber(product[key])
+                                      : key === "expiryDate"
+                                      ? product[key]
+                                        ? formatDateToReadable(product[key])
+                                        : "--"
+                                      : product[key] ?? "--"}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="border rounded-lg p-4 bg-gray-50 text-center text-gray-500">
+                      No products found
+                    </div>
+                  )}
+                </div>
+
+                {/* Remarks Section */}
+                <div className="mb-6">
+                  <label className="block text-sm font-medium text-gray-600 mb-2">
+                    Remarks
+                  </label>
+                  <textarea
+                    value={form.remarks || "-"}
+                    className="w-full border border-gray-300 px-3 py-2 rounded-lg bg-gray-100 capitalize"
+                    rows={3}
+                    disabled
+                  />
+                </div>
+
+                <div className="mt-6 flex justify-end border-t border-gray-300 pt-4">
+                  <button
+                    onClick={() => setIsViewModalOpen(false)}
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+        {/* EDIT MODAL */}
+        {isEditModalOpen &&
+          ReactDOM.createPortal(
+            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+              <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                onClick={() => setIsEditModalOpen(false)}
+              />
+              <div className="bg-white w-full max-w-4xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+                <button
+                  onClick={() => setIsEditModalOpen(false)}
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                >
+                  <X size={20} />
+                </button>
+
+                <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                  Edit Purchase Record
+                </h2>
+
+                <form className="grid grid-cols-1 md:grid-cols-3 gap-4 max-h-[70vh] overflow-y-auto">
+                  {/* Invoice Number */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Invoice Number
+                    </label>
+                    <InputField
+                      type="text"
+                      name="invoiceNumber"
+                      value={form.invoiceNumber}
+                      onChange={(e) =>
+                        handleNumericInputChange(e, enhancedHandleChange)
+                      }
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  {/* Invoice Date */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Invoice Date
+                    </label>
+                    <DatePicker
+                      selected={
+                        form.invoiceDate ? new Date(form.invoiceDate) : null
+                      }
+                      onChange={(date) => handleDateChange(date, "invoiceDate")}
+                      dateFormat="yyyy-MM-dd"
+                      placeholderText="Select a date"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                    />
+                  </div>
+
+                  {/* Delivery Number */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Delivery Number
+                    </label>
+                    <InputField
+                      type="text"
+                      name="deliveryNumber"
+                      value={form.deliveryNumber}
+                      onChange={(e) =>
+                        handleNumericInputChange(e, enhancedHandleChange)
+                      }
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  {/* Received Date */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Received Date
+                    </label>
+                    <DatePicker
+                      selected={
+                        form.receivedDate ? new Date(form.receivedDate) : null
+                      }
+                      onChange={(date) =>
+                        handleDateChange(date, "receivedDate")
+                      }
+                      dateFormat="yyyy-MM-dd"
+                      placeholderText="Select a date"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                    />
+                  </div>
+
+                  {/* Expiry Date */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Expiry Date
+                    </label>
+                    <DatePicker
+                      selected={
+                        form.expiryDate ? new Date(form.expiryDate) : null
+                      }
+                      onChange={(date) => handleDateChange(date, "expiryDate")}
+                      dateFormat="yyyy-MM-dd"
+                      placeholderText="Select a date"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                    />
+                  </div>
+
+                  {/* Supplier Name - Using SearchableDropdown */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Supplier Name
+                    </label>
+                    <SearchableDropdown
+                      options={supplierOptions.map((supplier) => ({
+                        value: supplier.label,
+                        label: supplier.label,
+                      }))}
+                      value={form.supplierName}
+                      onChange={(value) =>
+                        updateFormField("supplierName", value)
+                      }
+                      placeholder="Select Supplier"
+                      className="w-full"
+                    />
+                  </div>
+
+                  {/* Product Name - Using SearchableDropdown */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Product Name
+                    </label>
+                    <SearchableDropdown
+                      options={productOptions}
+                      value={form.productId}
+                      onChange={handleProductChange}
+                      placeholder="Select Product"
+                      className="w-full"
+                    />
+                  </div>
+
+                  {/* Quantity Per Box/Strip */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Quantity Per Box/Strip
+                    </label>
+                    <InputField
+                      type="text"
+                      name="quantityPerBoxStrip"
+                      value={form.quantityPerBoxStrip}
+                      onChange={(e) =>
+                        handleNumericInputChange(e, enhancedHandleChange)
+                      }
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  {/* FOB */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      FOB (USD)
+                    </label>
+                    <InputField
+                      type="text"
+                      name="fob"
+                      value={form.fob}
+                      onChange={(e) =>
+                        handleNumericInputChange(e, enhancedHandleChange)
+                      }
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  {/* CIF */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      CIF (USD)
+                    </label>
+                    <InputField
+                      type="text"
+                      name="cif"
+                      value={form.cif}
+                      onChange={(e) =>
+                        handleNumericInputChange(e, enhancedHandleChange)
+                      }
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  {/* LC Number */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      LC Number
+                    </label>
+                    <InputField
+                      type="text"
+                      name="lcNumber"
+                      value={form.lcNumber}
+                      onChange={(e) =>
+                        handleNumericInputChange(e, enhancedHandleChange)
+                      }
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  {/* Total Amount */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Total Amount ($)
+                    </label>
+                    <InputField
+                      type="text"
+                      name="amount"
+                      value={form.amount}
+                      onChange={(e) =>
+                        handleNumericInputChange(e, enhancedHandleChange)
+                      }
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  {/* Remarks */}
+                  <div className="md:col-span-3">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Remarks
+                    </label>
+                    <textarea
+                      name="remarks"
+                      value={form.remarks}
+                      onChange={enhancedHandleChange}
+                      className="w-full border border-gray-300 px-3 py-2 rounded-lg capitalize"
+                      rows={3}
+                      placeholder="Enter remarks..."
+                    />
+                  </div>
+
+                  {/* Footer buttons */}
+                  <div className="md:col-span-3 mt-4 flex justify-end gap-3 border-t border-gray-300 pt-4">
+                    <button
+                      type="button"
+                      onClick={() => setIsEditModalOpen(false)}
+                      className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+                      onClick={handlePurchaseUpdate}
+                    >
+                      Update
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>,
+            document.body
+          )}
+
         {/* PRODUCT MODAL */}
         {isProductModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
               <div
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setIsOpen(false)}
+                onClick={() => setIsProductModalOpen(false)}
               />
               <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
                 <button
