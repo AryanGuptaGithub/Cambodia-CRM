@@ -36,7 +36,7 @@ router.get("/expenses", async (req, res) => {
     const expenses = await Expense.find()
       .populate("category", "category description")
       .populate("sourceAccount", "name")
-      .sort({ date: -1, createdAt: -1 });
+      .sort({ createdAt: 1, date: 1 });
 
     res.json({
       success: true,

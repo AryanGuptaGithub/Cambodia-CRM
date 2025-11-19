@@ -1237,7 +1237,6 @@ async function runSeeders() {
     console.error("❌ Seeding error:", error);
   } finally {
     await mongoose.disconnect();
-    console.log("🔌 MongoDB disconnected");
     process.exit(0);
   }
 }

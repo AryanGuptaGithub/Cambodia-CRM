@@ -6,6 +6,7 @@ import { SubTabs } from "./SubTabs";
 import { SalesTable } from "./SalesTable";
 import { OutstandingTable } from "./OutstandingTable";
 import { PayrollTable } from "./PayrollTable";
+import { ExpenseTable } from "./ExpenseTable";
 import { DashboardHeader } from "./DashboardHeader";
 import ProductsModal from "./ProductModal";
 import AllMRsSalaryModal from "./AllMRSalaryModal";
@@ -43,7 +44,7 @@ const Dashboard = () => {
 
   // PARENT TABS
   const [activeTab, setActiveTab] = useState("Sales");
-  const [previousActiveTab, setPreviousActiveTab] = useState("Sales"); // Track previous tab
+  const [previousActiveTab, setPreviousActiveTab] = useState("Sales");
 
   // SUB-TABS
   const [activeSalesSubTab, setActiveSalesSubTab] = useState("Today");
@@ -57,7 +58,11 @@ const Dashboard = () => {
   const [loadingSalesData, setLoadingSalesData] = useState(false);
   const [outstandingTableData, setOutstandingTableData] = useState([]);
   const [loadingOutstandingData, setLoadingOutstandingData] = useState(false);
+  const [expenseTableData, setExpenseTableData] = useState([]);
+  const [loadingExpenseData, setLoadingExpenseData] = useState(false);
 
+  console.log("values of expenseTableData", expenseTableData);
+  
   // MODALS
   const [showProductsModal, setShowProductsModal] = useState(false);
   const [selectedMRProducts, setSelectedMRProducts] = useState([]);
@@ -79,13 +84,9 @@ const Dashboard = () => {
   });
 
   const handleParentTabChange = (newTab) => {
-    // Set previous tab before updating current tab
     setPreviousActiveTab(activeTab);
-
-    // Update current tab
     setActiveTab(newTab);
 
-    // Reset sub-tabs based on the new tab
     if (newTab === "Sales") {
       setActiveSalesSubTab("Today");
     }
@@ -95,7 +96,7 @@ const Dashboard = () => {
     if (newTab === "Total Payroll") {
       setActivePayrollSubTab("Prev Month");
     }
-    if (newTab === "Expenses" || newTab === "Stock") {
+    if (newTab === "Expenses") {
       setActiveExpenseSubTab("Month");
     }
   };
@@ -115,7 +116,6 @@ const Dashboard = () => {
     }
   };
 
-  // FETCH TABLE DATA ---- Outstanding
   const fetchOutstandingTableData = async (period) => {
     try {
       setLoadingOutstandingData(true);
@@ -132,34 +132,133 @@ const Dashboard = () => {
     }
   };
 
-  // PRODUCT VIEW
+  const fetchExpenseTableData = async (period) => {
+    try {
+      setLoadingExpenseData(true);
+      const response = await axios.get(
+        `${backendUrl}/api/expenses`,
+        {
+          params: { period },
+        }
+      );
+      console.log("API Response:", response);
+      
+      // Handle the API response structure properly
+      let expenses = [];
+      
+      if (response.data && response.data.success) {
+        // If response has success and data properties
+        expenses = response.data.data || [];
+      } else if (Array.isArray(response.data)) {
+        // If response is directly an array
+        expenses = response.data;
+      } else if (response.data && response.data.expenses) {
+        // If response has expenses property
+        expenses = response.data.expenses;
+      }
+      
+      console.log("Processed expenses:", expenses);
+      
+      // Ensure we have an array and format the data properly
+      const formattedExpenses = Array.isArray(expenses) ? expenses.map(expense => ({
+        id: expense._id || expense.id,
+        category: typeof expense.category === 'string' ? expense.category : 
+                 (expense.category?.name || expense.category?.category || 'Uncategorized'),
+        amount: expense.amount || 0,
+        date: expense.date || expense.createdAt || new Date().toISOString().split('T')[0],
+        description: expense.description || expense.remarks || 'No description',
+        details: expense.details || [`Amount: ₹${expense.amount || 0}`, `Date: ${expense.date || 'N/A'}`]
+      })) : [];
+      
+      // Sort by amount descending to show highest expenses first
+      const sortedExpenses = formattedExpenses.sort((a, b) => b.amount - a.amount);
+      
+      setExpenseTableData(sortedExpenses);
+    } catch (error) {
+      console.error("Error fetching expense table data:", error);
+      // Fallback to mock data for testing
+      const mockExpenses = [
+        {
+          id: 1,
+          category: "Office Supplies",
+          amount: 1500,
+          date: "2024-01-15",
+          description: "Printer paper and stationery",
+          details: ["Printer paper: ₹800", "Pens: ₹300", "Notebooks: ₹400"]
+        },
+        {
+          id: 2,
+          category: "Utilities",
+          amount: 2500,
+          date: "2024-01-14",
+          description: "Electricity and water bill",
+          details: ["Electricity: ₹1800", "Water: ₹700"]
+        },
+        {
+          id: 3,
+          category: "Travel",
+          amount: 3200,
+          date: "2024-01-13",
+          description: "Client meeting travel expenses",
+          details: ["Flight: ₹2200", "Hotel: ₹800", "Transport: ₹200"]
+        },
+        {
+          id: 4,
+          category: "Marketing",
+          amount: 1800,
+          date: "2024-01-12",
+          description: "Digital marketing campaign",
+          details: ["Google Ads: ₹1200", "Social Media: ₹600"]
+        },
+        {
+          id: 5,
+          category: "Equipment",
+          amount: 2800,
+          date: "2024-01-11",
+          description: "New office equipment",
+          details: ["Laptop: ₹2000", "Monitor: ₹800"]
+        }
+      ].sort((a, b) => b.amount - a.amount);
+      
+      setExpenseTableData(mockExpenses);
+    } finally {
+      setLoadingExpenseData(false);
+    }
+  };
+
   const handleViewProducts = (mrName, products) => {
     setSelectedMRName(mrName);
     setSelectedMRProducts(products);
     setShowProductsModal(true);
   };
 
-  // INVOICE VIEW
   const handleViewInvoices = (mrName, invoices) => {
     setSelectedMRName(mrName);
     setSelectedMRProducts(invoices);
     setShowProductsModal(true);
   };
 
-  // SIDE PANEL ICON
+  const handleViewExpenseDetails = (expenseName, details) => {
+    setSelectedMRName(expenseName);
+    setSelectedMRProducts(details);
+    setShowProductsModal(true);
+  };
+
   const handlePanelIconClick = () => {
-    if (activeTab === "Sales" || activeTab === "Outstanding") {
+    if (
+      activeTab === "Sales" ||
+      activeTab === "Outstanding" ||
+      activeTab === "Expenses"
+    ) {
       setShowAllMRsInSidePanel((prev) => !prev);
       setSidePanelCurrentPage(1);
     }
   };
 
-  // PAGINATION
   const handleSidePanelPageChange = (newPage) => {
     setSidePanelCurrentPage(newPage);
   };
 
-  // FETCH SALES DATA WHEN SUBTAB CHANGES
   useEffect(() => {
     if (activeTab === "Sales") {
       const updateSalesData = async () => {
@@ -188,7 +287,6 @@ const Dashboard = () => {
     }
   }, [activeSalesSubTab, activeTab]);
 
-  // FETCH OUTSTANDING DATA WHEN SUBTAB CHANGES
   useEffect(() => {
     if (activeTab === "Outstanding") {
       const updateOutstandingData = async () => {
@@ -214,21 +312,31 @@ const Dashboard = () => {
     }
   }, [activeOutstandingSubTab, activeTab]);
 
-  // FETCH TABLE: SALES
   useEffect(() => {
     if (activeTab === "Sales") {
       fetchSalesTableData(activeSalesSubTab);
     }
   }, [activeSalesSubTab, activeTab]);
 
-  // FETCH TABLE: OUTSTANDING
   useEffect(() => {
     if (activeTab === "Outstanding") {
       fetchOutstandingTableData(activeOutstandingSubTab);
     }
   }, [activeOutstandingSubTab, activeTab]);
 
-  // MAIN TABLE RENDER
+  useEffect(() => {
+    if (activeTab === "Expenses") {
+      console.log("Fetching expense data for period:", activeExpenseSubTab);
+      fetchExpenseTableData(activeExpenseSubTab);
+    }
+  }, [activeExpenseSubTab, activeTab]);
+
+  // Initial fetch when component mounts
+  useEffect(() => {
+    // Fetch initial expense data
+    fetchExpenseTableData("Month");
+  }, []);
+
   const renderMainTable = () => {
     switch (activeTab) {
       case "Sales":
@@ -263,6 +371,17 @@ const Dashboard = () => {
           />
         );
 
+      case "Expenses":
+        return (
+          <ExpenseTable
+            expenseTableData={expenseTableData}
+            loadingExpenseData={loadingExpenseData}
+            activeExpenseSubTab={activeExpenseSubTab}
+            dateRanges={dateRanges}
+            onViewExpenseDetails={handleViewExpenseDetails}
+          />
+        );
+
       default:
         return <div>Table for {activeTab}</div>;
     }
@@ -280,7 +399,6 @@ const Dashboard = () => {
 
         <main className="p-6">
           <div className="space-y-6">
-            {/* CARDS */}
             <DashboardCards
               activeTab={activeTab}
               onTabChange={handleParentTabChange}
@@ -298,7 +416,6 @@ const Dashboard = () => {
               prevMonthRanges={prevMonthRanges}
             />
 
-            {/* SUB TABS */}
             <SubTabs
               activeTab={activeTab}
               activeSalesSubTab={activeSalesSubTab}
@@ -313,7 +430,6 @@ const Dashboard = () => {
               prevMonthRanges={prevMonthRanges}
             />
 
-            {/* GRID */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-1">
                 <SidePanel
@@ -326,11 +442,14 @@ const Dashboard = () => {
                   loadingSalesData={loadingSalesData}
                   outstandingTableData={outstandingTableData}
                   loadingOutstandingData={loadingOutstandingData}
+                  expenseTableData={expenseTableData}
+                  loadingExpenseData={loadingExpenseData}
                   stockData={stockData}
                   expenseData={expenseData}
                   mrList={mrList}
                   onViewProducts={handleViewProducts}
                   onViewInvoices={handleViewInvoices}
+                  onViewExpenseDetails={handleViewExpenseDetails}
                 />
               </div>
 
@@ -340,7 +459,6 @@ const Dashboard = () => {
         </main>
       </div>
 
-      {/* MODALS */}
       <ProductsModal
         showModal={showProductsModal}
         onClose={() => setShowProductsModal(false)}

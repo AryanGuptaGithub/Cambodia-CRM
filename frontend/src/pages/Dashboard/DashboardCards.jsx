@@ -154,7 +154,7 @@ export const DashboardCards = ({
       subtitle: `${stockData.lowStockItems?.length || 0} low stock`,
     },
     {
-      id: "Expense",
+      id: "Expenses",
       title: "Total Expense",
       amount: getCurrentExpenseAmount(),
       icon: Receipt,

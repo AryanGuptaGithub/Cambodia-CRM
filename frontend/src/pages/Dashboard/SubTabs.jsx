@@ -1,3 +1,6 @@
+// SubTabs.jsx
+import React from "react";
+
 const TabButton = ({ isActive, onClick, children }) => (
   <button
     onClick={onClick}
@@ -26,7 +29,7 @@ export const SubTabs = ({
 }) => {
   if (
     activeTab !== "Sales" &&
-    activeTab !== "Expense" &&
+    activeTab !== "Expenses" && // Fixed: Changed from "Expense" to "Expenses"
     activeTab !== "Total Payroll" &&
     activeTab !== "Outstanding"
   ) {
@@ -50,7 +53,7 @@ export const SubTabs = ({
           </TabButton>
         ));
 
-      case "Expense":
+      case "Expenses": // Fixed: Changed from "Expense" to "Expenses"
         return [
           { key: "Month", label: dateRanges.month.label },
           { key: "Year", label: dateRanges.year.rangeLabel },

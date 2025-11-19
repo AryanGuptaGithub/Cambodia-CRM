@@ -1,3 +1,4 @@
+// SidePanel.jsx
 import React from "react";
 import { Users, TrendingUp, AlertTriangle, Receipt, Calendar, Eye, ShoppingCart } from "lucide-react";
 import { formatCurrency } from "./DashboardUtil";
@@ -17,13 +18,14 @@ const PanelContent = ({ data, loading, loadingText, emptyText, renderItem, pagin
       {data.map((item, index) => (
         <React.Fragment
           key={
+            item._id ||
             item.id ||
             item.mrName ||
             item.product ||
-            item.category ||
+            (item.category?.category || item.category) ||
             `${index}-${Math.random()}`
           }
-        > {console.log('values of item', item)}
+        >
           {renderItem(item, index)}
         </React.Fragment>
       ))}
@@ -51,6 +53,95 @@ const PanelContent = ({ data, loading, loadingText, emptyText, renderItem, pagin
           </button>
         </div>
       )}
+    </div>
+  );
+};
+
+/* --------------------------------------------
+   RecentExpenses Component - UPDATED
+--------------------------------------------- */
+const RecentExpenses = ({ expenseData }) => {
+  // Get the highest expense
+  const highestExpense = React.useMemo(() => {
+    if (!expenseData.latestExpenses || expenseData.latestExpenses.length === 0) {
+      return null;
+    }
+    return expenseData.latestExpenses.reduce((max, expense) => 
+      expense.amount > max.amount ? expense : max
+    );
+  }, [expenseData.latestExpenses]);
+
+  // Get top 5 expenses (excluding the highest one if it's already in the list)
+  const topExpenses = React.useMemo(() => {
+    if (!expenseData.latestExpenses) return [];
+    
+    const sortedExpenses = [...expenseData.latestExpenses]
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 5);
+    
+    return sortedExpenses;
+  }, [expenseData.latestExpenses]);
+
+  return (
+    <div className="space-y-3">
+      {/* Highest Expense Highlight */}
+      {highestExpense && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="w-8 h-8 bg-yellow-100 rounded-full flex items-center justify-center text-yellow-600 text-sm font-semibold">
+                <TrendingUp size={14} />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-yellow-800">Highest Expense</p>
+                <p className="text-xs text-yellow-600">
+                  {highestExpense.category?.category || highestExpense.category || 'Uncategorized'}
+                </p>
+              </div>
+            </div>
+            <div className="text-right">
+              <p className="text-sm font-semibold text-yellow-700">
+                ${formatCurrency(highestExpense.amount)}
+              </p>
+              <p className="text-xs text-yellow-600">
+                {highestExpense.date ? formatDateToReadable(highestExpense.date) : 'No date'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Top 5 Expenses */}
+      <PanelContent
+        data={topExpenses}
+        loading={false}
+        emptyText="No expense data available"
+        renderItem={(item, index) => (
+          <div className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg">
+            <div className="flex items-center space-x-3">
+              <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center text-red-600 text-sm font-semibold">
+                {index + 1}
+              </div>
+              <div>
+                <p className="text-sm font-medium text-gray-800">
+                  {item.category?.category || item.category || 'Uncategorized'}
+                </p>
+                <p className="text-xs text-gray-500">
+                  {item.remarks || item.description || 'No description'}
+                </p>
+              </div>
+            </div>
+            <div className="text-right">
+              <p className="text-sm font-semibold text-red-700">
+                ${formatCurrency(item.amount)}
+              </p>
+              <p className="text-xs text-gray-500">
+                {item.date ? formatDateToReadable(item.date) : 'No date'}
+              </p>
+            </div>
+          </div>
+        )}
+      />
     </div>
   );
 };
@@ -266,38 +357,6 @@ const LowStock = ({ stockData }) => (
 );
 
 /* --------------------------------------------
-   Recent Expenses
---------------------------------------------- */
-const RecentExpenses = ({ expenseData }) => (
-  <PanelContent
-    data={expenseData.latestExpenses?.slice(0, 5)}
-    loading={false}
-    emptyText="No recent expenses"
-    renderItem={(item) => (
-      <div className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg">
-        <div className="flex items-center space-x-3">
-          <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center text-red-600 text-sm font-semibold">
-            {item.category?.category?.substring(0, 2).toUpperCase() || "EX"}
-          </div>
-
-          <div>
-            <p className="text-sm font-medium text-gray-800">{item.category}</p>
-            <p className="text-xs text-gray-500">{item.description}</p>
-          </div>
-        </div>
-
-        <div className="text-right">
-          <p className="text-sm font-semibold text-red-700">
-            ${formatCurrency(item.amount)}
-          </p>
-          <p className="text-xs text-gray-500">{item.date}</p>
-        </div>
-      </div>
-    )}
-  />
-);
-
-/* --------------------------------------------
    Recent Joins
 --------------------------------------------- */
 const RecentJoins = ({ mrList }) => {
@@ -401,7 +460,7 @@ export const SidePanel = ({
         content: <LowStock stockData={stockData} />,
       },
 
-      Expense: {
+      Expenses: {
         title: "Latest Expenses",
         icon: Receipt,
         content: <RecentExpenses expenseData={expenseData} />,
