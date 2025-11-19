@@ -1,37 +1,41 @@
-// SubTabs.jsx
-import React from "react";
+// Add the TabButton component definition or import it
+const TabButton = ({ isActive, onClick, children }) => {
+  return (
+    <button
+      className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${
+        isActive
+          ? "bg-white text-gray-800 shadow-sm"
+          : "text-gray-600 hover:text-gray-800"
+      }`}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+};
 
-const TabButton = ({ isActive, onClick, children }) => (
-  <button
-    onClick={onClick}
-    className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-      isActive
-        ? "bg-white text-gray-900 shadow-sm"
-        : "text-gray-600 hover:text-gray-900"
-    }`}
-  >
-    {children}
-  </button>
-);
-
+// In SubTabs.jsx, update the component to handle Stock in Hands
 export const SubTabs = ({
   activeTab,
   activeSalesSubTab,
   activeExpenseSubTab,
   activePayrollSubTab,
   activeOutstandingSubTab,
+  activeStockSubTab, // Add this
   onSalesSubTabChange,
   onExpenseSubTabChange,
   onPayrollSubTabChange,
   onOutstandingSubTabChange,
+  onStockSubTabChange, // Add this
   dateRanges,
-  prevMonthRanges
+  prevMonthRanges,
 }) => {
   if (
     activeTab !== "Sales" &&
-    activeTab !== "Expenses" && // Fixed: Changed from "Expense" to "Expenses"
+    activeTab !== "Expenses" &&
     activeTab !== "Total Payroll" &&
-    activeTab !== "Outstanding"
+    activeTab !== "Outstanding" &&
+    activeTab !== "Stock in Hands" // Add this
   ) {
     return null;
   }
@@ -53,7 +57,7 @@ export const SubTabs = ({
           </TabButton>
         ));
 
-      case "Expenses": // Fixed: Changed from "Expense" to "Expenses"
+      case "Expenses":
         return [
           { key: "Month", label: dateRanges.month.label },
           { key: "Year", label: dateRanges.year.rangeLabel },
@@ -91,6 +95,17 @@ export const SubTabs = ({
             key={tab.key}
             isActive={activeOutstandingSubTab === tab.key}
             onClick={() => onOutstandingSubTabChange(tab.key)}
+          >
+            {tab.label}
+          </TabButton>
+        ));
+
+      case "Stock in Hands":
+        return [{ key: "Today", label: "Today" }].map((tab) => (
+          <TabButton
+            key={tab.key}
+            isActive={activeStockSubTab === tab.key}
+            onClick={() => onStockSubTabChange(tab.key)}
           >
             {tab.label}
           </TabButton>

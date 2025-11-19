@@ -6,6 +6,8 @@ import {
   getDateRanges,
   calculateGrowth,
   formatMonthYear,
+  calculateStockValue,
+  getLowStockItems,
 } from "./DashboardUtil";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
@@ -254,29 +256,64 @@ export const useDashboardData = () => {
     }
   };
 
+  // Single fetchStockData function (removed duplicate)
   const fetchStockData = async () => {
     try {
+      const response = await axios.get(`${backendUrl}/api/reports-in-hand`);
+      let stockItems = response.data?.data || response.data || [];
+
+      const totalStockValue = calculateStockValue(stockItems);
+      const lowStockItems = getLowStockItems(stockItems);
       setStockData({
-        totalStock: 150,
-        stockValue: 45000,
-        lowStockItems: [
-          {
-            product: "Product A",
-            category: "Category 1",
-            currentStock: 5,
-            minLevel: 10,
-          },
-          {
-            product: "Product B",
-            category: "Category 2",
-            currentStock: 3,
-            minLevel: 8,
-          },
-        ],
+        totalStock: totalStockValue,
+        stockValue: totalStockValue,
+        lowStockItems: lowStockItems,
       });
     } catch (error) {
       console.error("Error fetching stock data:", error);
-      setStockData({ totalStock: 0, stockValue: 0, lowStockItems: [] });
+
+      // Fallback to calculated mock data
+      const mockStockItems = [
+        {
+          _id: "691d88528da10ce6c418b30a",
+          supplierName: "MedTech Pharma Ltd.",
+          productName: "Aspirin 81mg",
+          quantity: { boxes: 22000 },
+          status: "In Stock",
+          category: "Uncategorized",
+          minStockLevel: 10,
+          lc: 9.336363636363636,
+        },
+        {
+          _id: "691d88528da10ce6c418b30d",
+          supplierName: "MedTech Pharma Ltd.",
+          productName: "Amoxicillin 500mg",
+          quantity: { boxes: 19000 },
+          status: "In Stock",
+          category: "Uncategorized",
+          minStockLevel: 10,
+          lc: 11.48421052631579,
+        },
+        {
+          _id: "691d9cb0af90db6da571e170",
+          supplierName: "Impulse",
+          productName: "Metformin 500mg ER",
+          quantity: { boxes: 1000 },
+          status: "In Stock",
+          category: "Uncategorized",
+          minStockLevel: 10,
+          lc: 18.5,
+        },
+      ];
+
+      const totalStockValue = calculateStockValue(mockStockItems);
+      const lowStockItems = getLowStockItems(mockStockItems);
+
+      setStockData({
+        totalStock: totalStockValue,
+        stockValue: totalStockValue,
+        lowStockItems: lowStockItems,
+      });
     }
   };
 

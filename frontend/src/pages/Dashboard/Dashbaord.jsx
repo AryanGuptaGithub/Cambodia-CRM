@@ -11,8 +11,15 @@ import { DashboardHeader } from "./DashboardHeader";
 import ProductsModal from "./ProductModal";
 import AllMRsSalaryModal from "./AllMRSalaryModal";
 import { useDashboardData } from "./useDataboardData";
-import { getDateRanges, getPreviousMonthRanges } from "./DashboardUtil";
+import {
+  getDateRanges,
+  getPreviousMonthRanges,
+  getStockDateRanges,
+  calculateStockValue,
+  getLowStockItems,
+} from "./DashboardUtil";
 import axios from "axios";
+import { StockTable } from "./StockTable";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -37,6 +44,7 @@ const Dashboard = () => {
     setSalesData,
     setOutstandingData,
     setMrList,
+    setStockData, // Make sure this is included from useDashboardData
   } = useDashboardData();
 
   // SEARCH
@@ -52,8 +60,11 @@ const Dashboard = () => {
   const [activePayrollSubTab, setActivePayrollSubTab] = useState("Prev Month");
   const [activeOutstandingSubTab, setActiveOutstandingSubTab] =
     useState("Today");
+  const [activeStockSubTab, setActiveStockSubTab] = useState("Today");
 
   // TABLE DATA
+  const [stockTableData, setStockTableData] = useState([]);
+  const [loadingStockData, setLoadingStockData] = useState(false);
   const [salesTableData, setSalesTableData] = useState([]);
   const [loadingSalesData, setLoadingSalesData] = useState(false);
   const [outstandingTableData, setOutstandingTableData] = useState([]);
@@ -81,9 +92,15 @@ const Dashboard = () => {
     initials: "U",
   });
 
+  const stockDateRanges = getStockDateRanges();
+
   const handleParentTabChange = (newTab) => {
     setPreviousActiveTab(activeTab);
     setActiveTab(newTab);
+
+    if (newTab === "Stock in Hands") {
+      setActiveStockSubTab("Today");
+    }
 
     if (newTab === "Sales") {
       setActiveSalesSubTab("Today");
@@ -98,6 +115,92 @@ const Dashboard = () => {
       setActiveExpenseSubTab("Month");
     }
   };
+
+  const fetchStockTableData = async (period) => {
+    try {
+      setLoadingStockData(true);
+      const response = await axios.get(`${backendUrl}/api/stock/table-data`, {
+        params: { period },
+      });
+
+      let stockData = response.data.success ? response.data.data : []; 
+      setStockTableData(stockData);
+
+      // Update stock data for cards and side panel - REMOVED DUPLICATE CALL
+      const totalStockValue = calculateStockValue(stockData);
+      const lowStockItems = getLowStockItems(stockData);
+
+      setStockData((prev) => ({
+        ...prev,
+        totalStock: totalStockValue,
+        stockValue: totalStockValue,
+        lowStockItems: lowStockItems,
+      }));
+    } catch (error) {
+      console.error("Error fetching stock table data:", error);
+
+      // Fallback to mock data
+      const mockStockData = [
+        {
+          _id: "691d88528da10ce6c418b30a",
+          supplierName: "MedTech Pharma Ltd.",
+          productName: "Aspirin 81mg",
+          quantity: { boxes: 22000 },
+          status: "In Stock",
+          category: "Uncategorized",
+          minStockLevel: 10,
+          lc: 9.336363636363636,
+          fob: 8.954545454545455,
+          cif: 10.963636363636363,
+        },
+        {
+          _id: "691d88528da10ce6c418b30d",
+          supplierName: "MedTech Pharma Ltd.",
+          productName: "Amoxicillin 500mg",
+          quantity: { boxes: 19000 },
+          status: "In Stock",
+          category: "Uncategorized",
+          minStockLevel: 10,
+          lc: 11.48421052631579,
+          fob: 10.989473684210527,
+          cif: 12.242105263157892,
+        },
+        {
+          _id: "691d9cb0af90db6da571e170",
+          supplierName: "Impulse",
+          productName: "Metformin 500mg ER",
+          quantity: { boxes: 1000 },
+          status: "In Stock",
+          category: "Uncategorized",
+          minStockLevel: 10,
+          lc: 18.5,
+          fob: 17.9,
+          cif: 18.5,
+        },
+      ];
+
+      setStockTableData(mockStockData);
+
+      const totalStockValue = calculateStockValue(mockStockData);
+      const lowStockItems = getLowStockItems(mockStockData);
+
+      setStockData((prev) => ({
+        ...prev,
+        totalStock: totalStockValue,
+        stockValue: totalStockValue,
+        lowStockItems: lowStockItems,
+      }));
+    } finally {
+      setLoadingStockData(false);
+    }
+  };
+
+  // Add useEffect for stock data:
+  useEffect(() => {
+    if (activeTab === "Stock in Hands") {
+      fetchStockTableData(activeStockSubTab);
+    }
+  }, [activeStockSubTab, activeTab]);
 
   const fetchSalesTableData = async (period) => {
     try {
@@ -333,7 +436,6 @@ const Dashboard = () => {
 
   useEffect(() => {
     if (activeTab === "Expenses") {
-      
       fetchExpenseTableData(activeExpenseSubTab);
     }
   }, [activeExpenseSubTab, activeTab]);
@@ -388,6 +490,15 @@ const Dashboard = () => {
             onViewExpenseDetails={handleViewExpenseDetails}
           />
         );
+      case "Stock in Hands":
+        return (
+          <StockTable
+            stockTableData={stockTableData}
+            loadingStockData={loadingStockData}
+            activeStockSubTab={activeStockSubTab}
+            dateRanges={stockDateRanges}
+          />
+        );
 
       default:
         return <div>Table for {activeTab}</div>;
@@ -429,10 +540,12 @@ const Dashboard = () => {
               activeExpenseSubTab={activeExpenseSubTab}
               activePayrollSubTab={activePayrollSubTab}
               activeOutstandingSubTab={activeOutstandingSubTab}
+              activeStockSubTab={activeStockSubTab}
               onSalesSubTabChange={setActiveSalesSubTab}
               onExpenseSubTabChange={setActiveExpenseSubTab}
               onPayrollSubTabChange={setActivePayrollSubTab}
               onOutstandingSubTabChange={setActiveOutstandingSubTab}
+              onStockSubTabChange={setActiveStockSubTab}
               dateRanges={dateRanges}
               prevMonthRanges={prevMonthRanges}
             />

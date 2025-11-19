@@ -17,35 +17,48 @@ const DashboardCard = ({
   growth, 
   isActive, 
   onClick 
-}) => (
-  <div
-    className={`rounded-xl shadow-md border border-gray-200 p-6 cursor-pointer transition-all ${
-      isActive ? "bg-gray-200" : "bg-white"
-    }`}
-    onClick={onClick}
-  >
-    <div className="flex items-center justify-between">
-      <div>
-        <p className="text-sm font-medium text-gray-600">{title}</p>
-        <p className={`text-2xl font-bold text-${color}-600 mt-2`}>
-          ${formatCurrency(amount)}
-        </p>
-        {growth !== undefined && (
-          <p className="text-xs text-gray-500 mt-1">
-            {subtitle} •{" "}
-            <span className={growth >= 0 ? "text-green-600" : "text-red-600"}>
-              {growth >= 0 ? "↗" : "↘"} {growth.toFixed(1)}%
-            </span>
+}) => {
+  // Color mapping for dynamic classes
+  const colorClasses = {
+    blue: { text: "text-blue-600", bg: "bg-blue-100" },
+    orange: { text: "text-orange-600", bg: "bg-orange-100" },
+    green: { text: "text-green-600", bg: "bg-green-100" },
+    red: { text: "text-red-600", bg: "bg-red-100" },
+    purple: { text: "text-purple-600", bg: "bg-purple-100" }
+  };
+
+  const colors = colorClasses[color] || colorClasses.blue;
+
+  return (
+    <div
+      className={`rounded-xl shadow-md border border-gray-200 p-6 cursor-pointer transition-all ${
+        isActive ? "bg-gray-200" : "bg-white"
+      }`}
+      onClick={onClick}
+    >
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium text-gray-600">{title}</p>
+          <p className={`text-2xl font-bold ${colors.text} mt-2`}>
+            ${formatCurrency(amount)}
           </p>
-        )}
-        {growth === undefined && <p className="text-xs text-gray-500 mt-1">{subtitle}</p>}
-      </div>
-      <div className={`p-3 bg-${color}-100 rounded-full`}>
-        <Icon className={`w-6 h-6 text-${color}-600`} />
+          {growth !== undefined && (
+            <p className="text-xs text-gray-500 mt-1">
+              {subtitle} •{" "}
+              <span className={growth >= 0 ? "text-green-600" : "text-red-600"}>
+                {growth >= 0 ? "↗" : "↘"} {growth.toFixed(1)}%
+              </span>
+            </p>
+          )}
+          {growth === undefined && <p className="text-xs text-gray-500 mt-1">{subtitle}</p>}
+        </div>
+        <div className={`p-3 ${colors.bg} rounded-full`}>
+          <Icon className={`w-6 h-6 ${colors.text}`} />
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 export const DashboardCards = ({ 
   activeTab, 
@@ -126,6 +139,11 @@ export const DashboardCards = ({
     }
   };
 
+  // STOCK CARD AMOUNT
+  const getCurrentStockAmount = () => {
+    return stockData.totalStock || 0;
+  };
+
   const cards = [
     {
       id: "Sales",
@@ -148,7 +166,7 @@ export const DashboardCards = ({
     {
       id: "Stock in Hands",
       title: "Stock in Hands",
-      amount: stockData.totalStock || 0,
+      amount: getCurrentStockAmount(),
       icon: Package,
       color: "green",
       subtitle: `${stockData.lowStockItems?.length || 0} low stock`,

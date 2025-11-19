@@ -154,3 +154,64 @@ export const formatDateToReadableFixed = (dateString) => {
     return "Invalid Date";
   }
 };
+
+// Add these functions to your existing DashboardUtil.js
+
+// Get stock date ranges
+export const getStockDateRanges = () => {
+  const today = new Date();
+  
+  // Today
+  const todayStart = new Date(today);
+  todayStart.setHours(0, 0, 0, 0);
+  const todayEnd = new Date(today);
+  todayEnd.setHours(23, 59, 59, 999);
+
+  // Current Month (1st to today)
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const monthEnd = new Date(today);
+  monthEnd.setHours(23, 59, 59, 999);
+
+  // Current Year (Jan 1st to today)
+  const yearStart = new Date(today.getFullYear(), 0, 1);
+  const yearEnd = new Date(today);
+  yearEnd.setHours(23, 59, 59, 999);
+
+  // Format labels
+  const todayLabel = today.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+  const monthLabel = today.toLocaleString("en-US", {
+    month: "short",
+  });
+  const yearLabel = today.getFullYear().toString();
+
+  return {
+    today: { start: todayStart, end: todayEnd, label: todayLabel },
+    month: { start: monthStart, end: monthEnd, label: monthLabel },
+    year: { start: yearStart, end: yearEnd, label: yearLabel },
+  };
+};
+
+// Calculate stock value
+export const calculateStockValue = (stockItems) => {
+  if (!stockItems || !Array.isArray(stockItems)) return 0;
+  
+  return stockItems.reduce((total, item) => {
+    const quantity = item.quantity?.boxes || 0;
+    const lc = item.lc || 0;
+    return total + (quantity * lc);
+  }, 0);
+};
+
+// Get low stock items
+export const getLowStockItems = (stockItems) => {
+  if (!stockItems || !Array.isArray(stockItems)) return [];
+  
+  return stockItems.filter(item => {
+    const currentStock = item.quantity?.boxes || 0;
+    const minStockLevel = item.minStockLevel || 0;
+    return currentStock < minStockLevel;
+  });
+};
