@@ -6,7 +6,7 @@ export const fetchMRList = async () => {
   try {
     const response = await axios.get(`${backendUrl}/api/staffs`);
     const mrList = response.data || [];
-    
+
     return {
       success: true,
       data: mrList,
@@ -22,7 +22,7 @@ export const fetchCustomerList = async () => {
   try {
     const response = await axios.get(`${backendUrl}/api/customers`);
     const customers = response.data.customers || [];
-    
+
     return {
       success: true,
       data: customers,
@@ -59,7 +59,7 @@ export const fetchSuppliers = async () => {
   try {
     const response = await axios.get(`${backendUrl}/api/suppliers`);
     const suppliers = response.data?.data || response.data;
-    
+
     if (Array.isArray(suppliers)) {
       return {
         success: true,
@@ -102,7 +102,7 @@ export const fetchProducts = async () => {
     return {
       success: true,
       data: uniqueProducts.map((product) => ({
-        value: product._id,
+        id: product._id,
         label: product.productName,
         ...product,
       })),
@@ -119,7 +119,10 @@ export const fetchProductPackingType = async () => {
     const packingTypes = response.data?.data || response.data;
 
     if (!Array.isArray(packingTypes)) {
-      return { success: false, error: "Invalid product packing types data format" };
+      return {
+        success: false,
+        error: "Invalid product packing types data format",
+      };
     }
 
     return {

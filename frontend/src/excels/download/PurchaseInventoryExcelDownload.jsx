@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from "react";
 import ExcelJS from "exceljs";
-import { Download } from "lucide-react"; // ✅ Download icon
-import { useInitialSaleData } from "../pages/Sale/IntialLoading";
-import { showToast } from "../utils/toast";
+
+import { Download } from "lucide-react";
+import { useInitialSaleData } from "../../pages/Sale/IntialLoading";
+import { showToast } from "../../utils/toast";
 import {
   fetchProducts as fetchProductsAPI,
   fetchSuppliers as fetchSuppliersAPI,
-} from "../pages/ProductManager/common/fetchDropdown";
+} from "../../pages/ProductManager/common/fetchDropdown";
 
 const PurchaseInventoryExcelDownload = ({ data = [] }) => {
   const { productNames = [], loading: productLoading } = useInitialSaleData();
@@ -14,9 +15,6 @@ const PurchaseInventoryExcelDownload = ({ data = [] }) => {
   const [supplierLoading, setSupplierLoading] = useState(false);
   const [products, setProducts] = useState([]);
 
-  /* -------------------------------------------------------------------------- */
-  /*                           🔹 Fetch Suppliers                               */
-  /* -------------------------------------------------------------------------- */
   const fetchSuppliers = useCallback(async () => {
     setSupplierLoading(true);
     try {
@@ -34,9 +32,6 @@ const PurchaseInventoryExcelDownload = ({ data = [] }) => {
     }
   }, []);
 
-  /* -------------------------------------------------------------------------- */
-  /*                           🔹 Fetch Products                                */
-  /* -------------------------------------------------------------------------- */
   const fetchProducts = useCallback(async () => {
     try {
       const result = await fetchProductsAPI();
@@ -56,31 +51,29 @@ const PurchaseInventoryExcelDownload = ({ data = [] }) => {
     fetchSuppliers();
   }, [fetchProducts, fetchSuppliers]);
 
-  /* -------------------------------------------------------------------------- */
-  /*                       🔹 Excel Generation Logic                            */
-  /* -------------------------------------------------------------------------- */
   const generateExcel = async () => {
     try {
       const workbook = new ExcelJS.Workbook();
       const worksheet = workbook.addWorksheet("Purchase Inventory");
 
-      // === Title Row ===
       worksheet.mergeCells("A1:L1");
-      const titleCell = worksheet.getCell("A1");
-      titleCell.value = "HEALTHCARE SOUTH EAST ASIA";
-      titleCell.font = { size: 16, bold: true };
-      titleCell.alignment = { horizontal: "center", vertical: "middle" };
+      worksheet.getCell("A1").value = "HEALTHCARE SOUTH EAST ASIA";
+      worksheet.getCell("A1").font = { size: 16, bold: true };
+      worksheet.getCell("A1").alignment = {
+        horizontal: "center",
+        vertical: "middle",
+      };
 
-      // === Subtitle Row ===
       worksheet.mergeCells("A2:L2");
-      const subtitleCell = worksheet.getCell("A2");
-      subtitleCell.value = "Purchase Inventory Summary";
-      subtitleCell.font = { size: 14, bold: true };
-      subtitleCell.alignment = { horizontal: "center", vertical: "middle" };
+      worksheet.getCell("A2").value = "Purchase Inventory Summary";
+      worksheet.getCell("A2").font = { size: 14, bold: true };
+      worksheet.getCell("A2").alignment = {
+        horizontal: "center",
+        vertical: "middle",
+      };
 
       worksheet.addRow([]);
 
-      // === Header Row ===
       const headerRow = worksheet.addRow([
         "Invoice Number",
         "Invoice Date",
@@ -107,7 +100,6 @@ const PurchaseInventoryExcelDownload = ({ data = [] }) => {
         };
       });
 
-      // === Column Widths ===
       worksheet.columns = [
         { width: 25 },
         { width: 20 },
@@ -123,29 +115,21 @@ const PurchaseInventoryExcelDownload = ({ data = [] }) => {
         { width: 30 },
       ];
 
-      // === Date Format Columns ===
-      ["B", "D", "G"].forEach((col) => {
-        worksheet.getColumn(col).numFmt = "dd/mm/yyyy";
-      });
-
-      // === Numeric Format Columns ===
-      ["H", "I", "J"].forEach((col) => {
-        worksheet.getColumn(col).numFmt = "#,##0.00";
-      });
+      ["B", "D", "G"].forEach(
+        (col) => (worksheet.getColumn(col).numFmt = "dd/mm/yyyy")
+      );
+      ["H", "I", "J"].forEach(
+        (col) => (worksheet.getColumn(col).numFmt = "#,##0.00")
+      );
 
       const startRow = 4;
       const endRow = 1000;
 
-      /* -------------------------------------------------------------------------- */
-      /*                      🔹 Prepare Dropdown Data                              */
-      /* -------------------------------------------------------------------------- */
       const uniqueProductNames = [
         ...new Set(
           [
             ...productNames.map((p) =>
-              typeof p === "object"
-                ? p.name || p.productName || p.label || p.value
-                : p
+              typeof p === "object" ? p.name || p.productName || "" : p
             ),
             ...products.map((p) => p.label || p.productName || ""),
           ].filter(Boolean)
@@ -156,109 +140,83 @@ const PurchaseInventoryExcelDownload = ({ data = [] }) => {
         ...new Set(
           suppliers
             .map((s) =>
-              typeof s === "object"
-                ? s.name || s.supplierName || s.label || s.value
-                : s
+              typeof s === "object" ? s.name || s.supplierName || "" : s
             )
             .filter(Boolean)
         ),
       ];
 
-      /* -------------------------------------------------------------------------- */
-      /*                    🔹 Hidden Dropdown Sheet                                */
-      /* -------------------------------------------------------------------------- */
       if (uniqueProductNames.length || uniqueSupplierNames.length) {
         const dropdownSheet = workbook.addWorksheet("DropdownData");
         dropdownSheet.state = "veryHidden";
+        uniqueProductNames.forEach(
+          (p, idx) => (dropdownSheet.getCell(`A${idx + 1}`).value = p)
+        );
+        uniqueSupplierNames.forEach(
+          (s, idx) => (dropdownSheet.getCell(`B${idx + 1}`).value = s)
+        );
 
-        uniqueProductNames.forEach((name, idx) => {
-          dropdownSheet.getCell(`A${idx + 1}`).value = name;
-        });
-
-        uniqueSupplierNames.forEach((name, idx) => {
-          dropdownSheet.getCell(`B${idx + 1}`).value = name;
-        });
-
-        // Product dropdown (column E)
-        for (let rowNum = startRow; rowNum <= endRow; rowNum++) {
-          worksheet.getCell(`E${rowNum}`).dataValidation = {
+        for (let i = startRow; i <= endRow; i++) {
+          worksheet.getCell(`E${i}`).dataValidation = {
             type: "list",
             allowBlank: true,
             formulae: [`=DropdownData!$A$1:$A$${uniqueProductNames.length}`],
+            showErrorMessage: true,
+            errorTitle: "Invalid Input",
+            error: "Please select a valid product",
           };
-        }
-
-        // Supplier dropdown (column F)
-        for (let rowNum = startRow; rowNum <= endRow; rowNum++) {
-          worksheet.getCell(`F${rowNum}`).dataValidation = {
+          worksheet.getCell(`F${i}`).dataValidation = {
             type: "list",
             allowBlank: true,
             formulae: [`=DropdownData!$B$1:$B$${uniqueSupplierNames.length}`],
+            showErrorMessage: true,
+            errorTitle: "Invalid Input",
+            error: "Please select a valid supplier",
           };
         }
       }
 
-      // === Borders for data ===
-      for (let i = 4; i <= worksheet.rowCount; i++) {
-        const row = worksheet.getRow(i);
-        row.eachCell((cell) => {
+      for (let i = startRow; i <= worksheet.rowCount; i++) {
+        worksheet.getRow(i).eachCell((cell) => {
           cell.border = {
             top: { style: "thin" },
-            left: { style: "thin" },
             bottom: { style: "thin" },
+            left: { style: "thin" },
             right: { style: "thin" },
           };
         });
       }
 
-      // === Export File ===
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-
       a.href = url;
       a.download = "PurchaseInventory.xlsx";
       document.body.appendChild(a);
       a.click();
-
-      setTimeout(() => {
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }, 100);
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     } catch (error) {
       console.error("Error generating Excel:", error);
-      showToast("error", "Error generating Excel file.");
+      showToast("error", "Error generating Excel file. Please try again.");
     }
   };
 
-  /* -------------------------------------------------------------------------- */
-  /*                               🔹 Loading UI                                 */
-  /* -------------------------------------------------------------------------- */
   const isLoading = productLoading || supplierLoading;
 
-  if (isLoading) {
-    return (
-      <button
-        disabled
-        className="bg-gray-300 text-gray-600 px-4 py-2 rounded-xl cursor-not-allowed"
-      >
-        Loading...
-      </button>
-    );
-  }
-
-  /* -------------------------------------------------------------------------- */
-  /*                               🔹 FINAL BUTTON                               */
-  /* -------------------------------------------------------------------------- */
   return (
     <button
       onClick={generateExcel}
-      className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+      disabled={isLoading}
+      className={`flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer ${
+        isLoading ? "opacity-50 cursor-not-allowed" : ""
+      }`}
     >
-      <Download size={18} /> Download Excel
+      <Download size={16} />
+      {isLoading ? "Loading..." : "Download Purchase Inventory"}
     </button>
   );
 };

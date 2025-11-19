@@ -7,7 +7,13 @@ import "./saleExcelDownload.css";
 import { showToast } from "../../utils/toast";
 import { formatDateToReadable } from "../../utils/dateUtil";
 
-const SaleExcelDownload = ({ type = "sales" }) => {
+const SaleExcelDownload = ({ 
+  type = "sales", 
+  modalTitle = "Download Report",
+  buttonText = "Download Excel",
+  successMessage = "Excel downloaded successfully!",
+  filePrefix = "summary"
+}) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [startDate, setStartDate] = useState(null);
   const [endDate, setEndDate] = useState(null);
@@ -38,10 +44,8 @@ const SaleExcelDownload = ({ type = "sales" }) => {
         return;
       }
 
-      const apiEndpoint =
-        type === "salesreturn"
-          ? `${backendUrl}/api/salesreturn/download-excel`
-          : `${backendUrl}/api/sales/download-excel`;
+      // Dynamic API endpoint based on type
+      const apiEndpoint = `${backendUrl}/api/${type}/download-excel`;
 
       const response = await fetch(apiEndpoint, {
         method: "POST",
@@ -60,9 +64,7 @@ const SaleExcelDownload = ({ type = "sales" }) => {
       a.style.display = "none";
       a.href = url;
 
-      const filePrefix =
-        type === "salesreturn" ? "sales_return_summary" : "sale_summary";
-
+      // Dynamic file name
       a.download = `${filePrefix}_${formatDateToReadable(
         startDate
       )}_to_${formatDateToReadable(endDate)}.xlsx`;
@@ -72,10 +74,7 @@ const SaleExcelDownload = ({ type = "sales" }) => {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
 
-      showToast(
-        "success",
-        `${type === "salesreturn" ? "Sales Return" : "Sales"} Excel downloaded successfully!`
-      );
+      showToast("success", successMessage);
       closeModal();
     } catch (error) {
       console.error("Error generating Excel:", error);
@@ -92,7 +91,7 @@ const SaleExcelDownload = ({ type = "sales" }) => {
         className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer transition-colors disabled:opacity-50"
       >
         <Download size={18} />
-        {type === "salesreturn" ? "Download Return Excel" : "Download Sales Excel"}
+        {buttonText}
       </button>
 
       {isModalOpen &&
@@ -108,9 +107,7 @@ const SaleExcelDownload = ({ type = "sales" }) => {
               </button>
 
               <h2 className="text-lg font-semibold mb-4">
-                {type === "salesreturn"
-                  ? "Download Sales Return Report"
-                  : "Download Sales Report"}
+                {modalTitle}
               </h2>
 
               <div className="space-y-4">
@@ -123,7 +120,7 @@ const SaleExcelDownload = ({ type = "sales" }) => {
                     selected={startDate}
                     onChange={(date) => setStartDate(date)}
                     dateFormat="yyyy-MM-dd"
-                    maxDate={new Date()} // ✅ Prevent future dates
+                    maxDate={new Date()}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
                     disabled={loading}
                     placeholderText="Select start date"
@@ -139,8 +136,8 @@ const SaleExcelDownload = ({ type = "sales" }) => {
                     selected={endDate}
                     onChange={(date) => setEndDate(date)}
                     dateFormat="yyyy-MM-dd"
-                    minDate={startDate} // ✅ Ensures end date is not before start date
-                    maxDate={new Date()} // ✅ Prevent future dates
+                    minDate={startDate}
+                    maxDate={new Date()}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
                     disabled={loading}
                     placeholderText="Select end date"

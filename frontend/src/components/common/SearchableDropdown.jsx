@@ -15,7 +15,7 @@ const SearchableDropdown = React.memo(
     const [isOpen, setIsOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
     const dropdownRef = React.useRef(null);
-
+    
     useEffect(() => {
       const handleClickOutside = (event) => {
         if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -109,11 +109,10 @@ const SearchableDropdown = React.memo(
                 />
               </div>
 
-              {/* Options List */}
               <div className="max-h-48 overflow-y-auto">
                 {filteredOptions.map((option) => (
                   <div
-                    key={option.value}
+                    key={option.value || option._id || option.label}
                     className={`w-full px-3 py-2 text-left transition-colors duration-150 cursor-pointer
                       ${option.disabled
                         ? "text-gray-400 cursor-not-allowed bg-gray-50"

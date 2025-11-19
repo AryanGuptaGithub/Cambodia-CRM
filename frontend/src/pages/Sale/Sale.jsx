@@ -27,7 +27,7 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { confirmDialog } from "../../utils/confirmationDialog";
 import { useNavigate } from "react-router-dom";
-import SaleExcelDownload from "../../excels/download/SaleExcelDownload";
+import SaleExcelDownload from "../../excels/download/ExcelDownload";
 import { useInitialSaleData } from "./IntialLoading.jsx";
 import {
   fetchMRList,
@@ -1013,7 +1013,15 @@ const Sales = () => {
               </button>
             )}
           </div>
-          {sales.length > 0 && <SaleExcelDownload type="sales" />}
+          {sales.length > 0 && (
+            <SaleExcelDownload
+              type="sales"
+              modalTitle="Download Sales Report"
+              buttonText="Download Sales Excel"
+              successMessage="Sales Excel downloaded successfully!"
+              filePrefix="sale_summary"
+            />
+          )}
         </div>
         <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
           {sales.length > 0 ? (

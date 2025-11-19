@@ -1,7 +1,9 @@
 import express from "express";
 import purchaseInventory from "../../models/purcharsing/purchaseInventory.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
-import Product from "../../models/projectManger/product.js"
+import Product from "../../models/projectManger/product.js";
+import ExcelJS from "exceljs";
+import dayjs from "dayjs";
 
 const router = express.Router();
 
@@ -131,7 +133,6 @@ router.get("/purchase", async (req, res) => {
   }
 });
 
-
 router.put("/purchase/:id", async (req, res) => {
   try {
     const id = req.params.id;
@@ -217,6 +218,8 @@ router.delete("/purchase", async (req, res) => {
 router.post("/purchase/import", async (req, res) => {
   try {
     const rows = req.body;
+    console.log(rows);
+
     if (!Array.isArray(rows))
       return res.status(400).json({ message: "Invalid data" });
 
@@ -226,22 +229,21 @@ router.post("/purchase/import", async (req, res) => {
     for (const row of rows) {
       if (!row.invoiceNumber) continue;
 
-      // 🔥 CHECK IF INVOICE ALREADY EXISTS
-      const exists = await purchaseInventory.findOne({
-        invoiceNumber: row.invoiceNumber,
-      });
+      const invoiceNumber = row.invoiceNumber.trim(); // 🔥 trim spaces
+
+      // Check if invoice already exists in DB
+      const exists = await purchaseInventory.findOne({ invoiceNumber });
 
       if (exists) {
-        skipped.push(row.invoiceNumber);
+        skipped.push(invoiceNumber);
         continue;
       }
 
-      const key = row.invoiceNumber;
-      if (!invoices.has(key)) {
-        invoices.set(key, {
-          invoiceNumber: key,
+      if (!invoices.has(invoiceNumber)) {
+        invoices.set(invoiceNumber, {
+          invoiceNumber,
           invoiceDate: row.invoiceDate ? new Date(row.invoiceDate) : null,
-          deliveryNumber: row.deliveryNumber || "",
+          deliveryNumber: row.deliveryNumber?.trim() || "",
           receivedDate: row.receivedDate ? new Date(row.receivedDate) : null,
           supplierName: row.supplierName?.trim() || "Unknown Supplier",
           products: [],
@@ -249,7 +251,7 @@ router.post("/purchase/import", async (req, res) => {
         });
       }
 
-      const inv = invoices.get(key);
+      const inv = invoices.get(invoiceNumber);
 
       const qty = Number(row.quantityPerBoxStrip || 0);
       const lc = Number(row.lc || 0);
@@ -259,7 +261,7 @@ router.post("/purchase/import", async (req, res) => {
       const amount = lc * qty;
 
       inv.products.push({
-        productName: row.productName,
+        productName: row.productName?.trim() || "Unknown Product",
         expiryDate: row.expiryDate ? new Date(row.expiryDate) : null,
         quantityPerBoxStrip: qty,
         lc,
@@ -273,28 +275,31 @@ router.post("/purchase/import", async (req, res) => {
 
     const finalInvoices = Array.from(invoices.values());
 
-    await purchaseInventory.insertMany(finalInvoices);
+    if (finalInvoices.length > 0) {
+      await purchaseInventory.insertMany(finalInvoices);
 
-    for (const inv of finalInvoices) {
-      for (const p of inv.products) {
-        await updateReportInHand(
-          {
-            productName: p.productName,
-            quantityPerBoxStrip: p.quantityPerBoxStrip,
-            supplierName: inv.supplierName,
-            lc: p.lc,
-            fob: p.fob,
-            cif: p.cif,
-          },
-          "add"
-        );
+      // Update report in-hand
+      for (const inv of finalInvoices) {
+        for (const p of inv.products) {
+          await updateReportInHand(
+            {
+              productName: p.productName,
+              quantityPerBoxStrip: p.quantityPerBoxStrip,
+              supplierName: inv.supplierName,
+              lc: p.lc,
+              fob: p.fob,
+              cif: p.cif,
+            },
+            "add"
+          );
+        }
       }
     }
 
     res.json({
       message: `Imported ${finalInvoices.length} invoices`,
       importedCount: finalInvoices.length,
-      skippedInvoices: skipped, // 🔥 return skipped duplicates
+      skippedInvoices: skipped,
     });
   } catch (err) {
     console.error("Import error:", err);
@@ -302,12 +307,11 @@ router.post("/purchase/import", async (req, res) => {
   }
 });
 
-
 /* ADD NEW PURCHASE MANUALLY */
 router.post("/purchase", async (req, res) => {
   try {
     const data = req.body;
-    console.log('values of data', data);
+    console.log("values of data", data);
     if (
       !data.invoiceNumber ||
       !data.supplierName ||
@@ -390,6 +394,142 @@ router.get("/reports-in-hand", async (req, res) => {
     res.json({ success: true, count: reports.length, reports });
   } catch (err) {
     res.status(500).json({ message: "Failed to fetch reports" });
+  }
+});
+
+router.post("/purchases/download-excel", async (req, res) => {
+  try {
+    const { startDate, endDate } = req.body;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        message: "Start date and end date are required",
+      });
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    const purchases = await purchaseInventory
+      .find({
+        invoiceDate: { $gte: start, $lte: end },
+      })
+      .lean();
+
+    if (purchases.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No purchases found for selected date range",
+      });
+    }
+
+    // ------------------------------
+    // Create Workbook
+    // ------------------------------
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Purchases");
+
+    // ------------------------------
+    // Header Row
+    // ------------------------------
+    const header = [
+      "Invoice Number",
+      "Invoice Date",
+      "Delivery No.",
+      "Received Date",
+      "Product Name",
+      "Supplier Name",
+      "Expiry Date",
+      "Quantity Per Box/Strip",
+      "FOB (USD)",
+      "CIF (USD)",
+      "LC (USD)",
+      "Amount",
+      "Remarks",
+    ];
+
+    const headerRow = worksheet.addRow(header);
+    headerRow.font = { bold: true };
+
+    // ------------------------------
+    // Column Widths
+    // ------------------------------
+    worksheet.columns = [
+      { width: 18 },
+      { width: 15 },
+      { width: 15 },
+      { width: 15 },
+      { width: 22 },
+      { width: 25 },
+      { width: 15 },
+      { width: 20 },
+      { width: 12 },
+      { width: 12 },
+      { width: 12 },
+      { width: 15 },
+      { width: 20 },
+    ];
+
+    // ------------------------------
+    // Add Data
+    // ------------------------------
+    purchases.forEach((purchase) => {
+      purchase.products.forEach((p) => {
+        worksheet.addRow([
+          purchase.invoiceNumber,
+          dayjs(purchase.invoiceDate).format("DD/MM/YYYY"),
+          purchase.deliveryNumber,
+          dayjs(purchase.receivedDate).format("DD/MM/YYYY"),
+          p.productName,
+          purchase.supplierName,
+          dayjs(p.expiryDate).format("DD/MM/YYYY"),
+          p.quantityPerBoxStrip,
+          p.fob,
+          p.cif,
+          p.lc,
+          p.amount ?? Number(p.quantityPerBoxStrip) * Number(p.lc || 0),
+          purchase.remarks || "",
+        ]);
+      });
+    });
+
+    // ------------------------------
+    // Add borders
+    // ------------------------------
+    worksheet.eachRow((row) => {
+      row.eachCell((cell) => {
+        cell.border = {
+          top: { style: "thin" },
+          left: { style: "thin" },
+          right: { style: "thin" },
+          bottom: { style: "thin" },
+        };
+      });
+    });
+
+    // ------------------------------
+    // Download Excel File
+    // ------------------------------
+    const fileName = `purchase_summary_${dayjs(startDate).format(
+      "DD-MM-YYYY"
+    )}_to_${dayjs(endDate).format("DD-MM-YYYY")}.xlsx`;
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error("Error generating purchase Excel:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to generate purchase excel file",
+      error: error.message,
+    });
   }
 });
 

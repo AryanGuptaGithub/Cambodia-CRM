@@ -33,7 +33,7 @@ import {
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import InputField from "../../components/common/InputField";
 import LoadingOverlay from "../../components/Loading";
-import SaleExcelDownload from "../../excels/download/SaleExcelDownload";
+import SaleExcelDownload from "../../excels/download/ExcelDownload";
 
 const INITIAL_FORM_STATE = {
   _id: null,
@@ -567,7 +567,15 @@ const SaleReturn = () => {
                 <Trash2 size={18} /> Delete
               </button>
             )}
-            {saleReturns.length > 0 && <SaleExcelDownload type="salesreturn" />}
+            {saleReturns.length > 0 && (
+              <SaleExcelDownload
+                type="salesreturn"
+                modalTitle="Download Sales Return Report"
+                buttonText="Download Sales Return Excel"
+                successMessage="Sales Return Excel downloaded successfully!"
+                filePrefix="sales_return_summary"
+              />
+            )}
           </div>
           {saleReturns.length > 0 && (
             <div className="flex items-center gap-8">
