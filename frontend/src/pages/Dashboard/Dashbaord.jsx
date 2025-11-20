@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { DashboardCards } from "./DashboardCards";
 import { SidePanel } from "./SidePanel";
@@ -56,7 +56,7 @@ const Dashboard = () => {
   // SUB-TABS
   const [activeSalesSubTab, setActiveSalesSubTab] = useState("Today");
   const [activeExpenseSubTab, setActiveExpenseSubTab] = useState("Month");
-  const [activePayrollSubTab, setActivePayrollSubTab] = useState("Prev Month"); // Changed back to "Prev Month"
+  const [activePayrollSubTab, setActivePayrollSubTab] = useState("Prev Month");
   const [activeOutstandingSubTab, setActiveOutstandingSubTab] =
     useState("Today");
   const [activeStockSubTab, setActiveStockSubTab] = useState("Today");
@@ -72,6 +72,10 @@ const Dashboard = () => {
   const [loadingExpenseData, setLoadingExpenseData] = useState(false);
   const [payrollTableData, setPayrollTableData] = useState([]);
   const [loadingPayrollData, setLoadingPayrollData] = useState(false);
+
+  // ADD THESE STATES FOR DYNAMIC PAYROLL TOTALS
+  const [currentPayrollTotal, setCurrentPayrollTotal] = useState(0);
+  const [currentYTDTotal, setCurrentYTDTotal] = useState(0);
 
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [selectedProductName, setSelectedProductName] = useState("");
@@ -95,9 +99,10 @@ const Dashboard = () => {
   const [showAllMRsInSidePanel, setShowAllMRsInSidePanel] = useState(false);
   const [sidePanelCurrentPage, setSidePanelCurrentPage] = useState(1);
 
-  const dateRanges = getDateRanges();
-  const prevMonthRanges = getPreviousMonthRanges(); // This now returns prevMonth and ytd
-  const stockDateRanges = getStockDateRanges();
+  // Use useMemo to recalculate ranges when dependencies change
+  const dateRanges = useMemo(() => getDateRanges(), []);
+  const prevMonthRanges = useMemo(() => getPreviousMonthRanges(), []);
+  const stockDateRanges = useMemo(() => getStockDateRanges(), []);
 
   const [user] = useState({
     name: "User",
@@ -259,10 +264,10 @@ const Dashboard = () => {
     }
   };
 
+  // Fetch payroll table data based on period
   const fetchPayrollTableData = async (period) => {
     try {
       setLoadingPayrollData(true);
-
       const currentDate = new Date();
 
       let payrollPeriod;
@@ -275,10 +280,13 @@ const Dashboard = () => {
           prevMonth = 11;
           year = year - 1;
         }
+
         const month = String(prevMonth + 1).padStart(2, "0");
+
         payrollPeriod = `${year}-${month}`;
       } else if (period === "YTD") {
         const year = currentDate.getFullYear();
+
         payrollPeriod = `${year}-YTD`;
       }
 
@@ -296,14 +304,22 @@ const Dashboard = () => {
       }, 0);
 
       setPayrollTableData(payrolls);
+
+      // UPDATE THE TOTALS BASED ON THE CURRENT PERIOD
+      if (period === "Prev Month") {
+        setCurrentPayrollTotal(totalNetSalary);
+      } else if (period === "YTD") {
+        setCurrentYTDTotal(totalNetSalary);
+      }
     } catch (error) {
-      console.error("28. Error in fetchPayrollTableData:", error);
+      console.error("30. Error in fetchPayrollTableData:", error);
 
       setPayrollTableData([]);
     } finally {
       setLoadingPayrollData(false);
     }
   };
+
   // ------------------ HANDLERS ------------------
   const handleViewProducts = (mrName, products) => {
     setSelectedMRName(mrName);
@@ -383,6 +399,10 @@ const Dashboard = () => {
     fetchOutstandingTableData("Today");
     fetchExpenseTableData("Month");
     fetchStockTableData("Today");
+
+    // Initialize payroll totals with data from useDashboardData hook
+    setCurrentPayrollTotal(totalPayroll);
+    setCurrentYTDTotal(payrollYTDTotal);
   }, []);
 
   useEffect(() => {
@@ -407,9 +427,16 @@ const Dashboard = () => {
   // Effect for payroll sub-tab changes
   useEffect(() => {
     if (activeTab === "Total Payroll") {
+      console.log("397", activePayrollSubTab);
       fetchPayrollTableData(activePayrollSubTab);
     }
   }, [activePayrollSubTab, activeTab]);
+
+  // Update local totals when hook data changes
+  useEffect(() => {
+    setCurrentPayrollTotal(totalPayroll);
+    setCurrentYTDTotal(payrollYTDTotal);
+  }, [totalPayroll, payrollYTDTotal]);
 
   // ------------------ RENDER MAIN TABLE ------------------
   const renderMainTable = () => {
@@ -440,7 +467,7 @@ const Dashboard = () => {
             payrollData={payrollTableData}
             loading={loadingPayrollData}
             activePayrollSubTab={activePayrollSubTab}
-            prevMonthRanges={prevMonthRanges} // Pass prevMonthRanges instead of dateRanges
+            prevMonthRanges={prevMonthRanges}
           />
         );
       case "Expenses":
@@ -484,8 +511,8 @@ const Dashboard = () => {
         outstandingData={outstandingData}
         stockData={stockData}
         expenseData={expenseData}
-        totalPayroll={totalPayroll}
-        payrollYTDTotal={payrollYTDTotal}
+        totalPayroll={currentPayrollTotal} // Use dynamic currentPayrollTotal
+        payrollYTDTotal={currentYTDTotal} // Use dynamic currentYTDTotal
         activeSalesSubTab={activeSalesSubTab}
         activeOutstandingSubTab={activeOutstandingSubTab}
         activeExpenseSubTab={activeExpenseSubTab}

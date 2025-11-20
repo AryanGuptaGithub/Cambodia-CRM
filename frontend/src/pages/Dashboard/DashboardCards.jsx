@@ -76,7 +76,6 @@ export const DashboardCards = ({
   dateRanges,
   prevMonthRanges,
 }) => {
-  console.log('payrollYTDTotal ', payrollYTDTotal );
   const getCurrentSalesAmount = () => {
     switch (activeSalesSubTab) {
       case "Today":

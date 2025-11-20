@@ -59,6 +59,7 @@ export const useDashboardData = () => {
     monthlyExpense: 0,
     todayExpense: 0,
     yearExpense: 0,
+    previousMonthExpense: 0,
     latestExpenses: [],
   });
 
@@ -96,6 +97,27 @@ export const useDashboardData = () => {
     } catch (error) {
       console.error("Error fetching custom range outstanding:", error);
       return { totalOutstanding: 0, outstandingData: [] };
+    }
+  };
+
+  const fetchCustomRangeExpenses = async (startDate, endDate) => {
+    try {
+      const response = await axios.get(`${backendUrl}/api/expenses`);
+      if (response.data) {
+        const expenses = response.data.data;
+        const filteredExpenses = expenses.filter((exp) => {
+          const expDate = new Date(exp.date);
+          return expDate >= startDate && expDate <= endDate;
+        });
+        return filteredExpenses.reduce(
+          (sum, exp) => sum + (exp.amount || 0),
+          0
+        );
+      }
+      return 0;
+    } catch (error) {
+      console.error("Error fetching custom range expenses:", error);
+      return 0;
     }
   };
 
@@ -231,13 +253,14 @@ export const useDashboardData = () => {
       const response = await axios.get(`${backendUrl}/api/payrolls`, {
         params: { period },
       });
-      
+
       const payrolls = response.data?.data || [];
       setPayrollData(payrolls);
       const total = payrolls.reduce(
         (sum, item) => sum + (item.netSalary || 0),
         0
       );
+      
       setTotalPayroll(total);
       setPayrollYTDTotal(total);
     } catch (error) {
@@ -257,12 +280,10 @@ export const useDashboardData = () => {
     }
   };
 
-  // Single fetchStockData function (removed duplicate)
   const fetchStockData = async () => {
     try {
       const response = await axios.get(`${backendUrl}/api/reports-in-hand`);
 
-      // FIX: Backend returns { count, reports }
       const stockItems = Array.isArray(response.data.reports)
         ? response.data.reports
         : [];
@@ -286,7 +307,6 @@ export const useDashboardData = () => {
 
       if (response.data) {
         const expenses = response.data.data;
-
         const today = new Date();
 
         // Calculate totals
@@ -311,37 +331,42 @@ export const useDashboardData = () => {
           .filter((exp) => new Date(exp.date).getFullYear() === currentYear)
           .reduce((sum, exp) => sum + (exp.amount || 0), 0);
 
+        // Calculate previous month expense (similar to payroll)
+        const previousMonth = new Date(
+          today.getFullYear(),
+          today.getMonth() - 1,
+          1
+        );
+        const previousMonthExpense = expenses
+          .filter((exp) => {
+            const expDate = new Date(exp.date);
+            return (
+              expDate.getFullYear() === previousMonth.getFullYear() &&
+              expDate.getMonth() === previousMonth.getMonth()
+            );
+          })
+          .reduce((sum, exp) => sum + (exp.amount || 0), 0);
+
         setExpenseData({
           totalExpense,
           monthlyExpense,
           todayExpense,
           yearExpense,
+          previousMonthExpense,
           latestExpenses: expenses.slice(-5).reverse(), // last 5 expenses
         });
       }
     } catch (err) {
       console.error("Error fetching expenses:", err);
       showToast("error", "Failed to fetch expenses");
-      // Fallback to dummy data if API fails
+      // Set default values on error
       setExpenseData({
-        totalExpense: 5000,
-        monthlyExpense: 2000,
-        todayExpense: 150,
-        yearExpense: 48000,
-        latestExpenses: [
-          {
-            category: "Office Supplies",
-            description: "Printer paper",
-            amount: 45.5,
-            date: "2024-01-15",
-          },
-          {
-            category: "Utilities",
-            description: "Electricity bill",
-            amount: 120.75,
-            date: "2024-01-14",
-          },
-        ],
+        totalExpense: 0,
+        monthlyExpense: 0,
+        todayExpense: 0,
+        yearExpense: 0,
+        previousMonthExpense: 0,
+        latestExpenses: [],
       });
     }
   };

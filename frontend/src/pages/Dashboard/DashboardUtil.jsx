@@ -55,7 +55,7 @@ export const getDateRanges = () => {
   };
 };
 
-// Get previous month date ranges for Payroll
+// Get previous month date ranges for Payroll - FIXED
 export const getPreviousMonthRanges = () => {
   const today = new Date();
   const previousMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
@@ -72,7 +72,7 @@ export const getPreviousMonthRanges = () => {
   const ytdEnd = new Date(previousMonthYear, previousMonthNumber + 1, 0);
   ytdEnd.setHours(23, 59, 59, 999);
 
-  // Format labels
+  // Format labels - FIXED: Use previous month name
   const prevMonthLabel = previousMonth.toLocaleString("en-US", {
     month: "short",
   });

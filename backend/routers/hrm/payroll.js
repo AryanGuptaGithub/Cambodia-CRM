@@ -70,7 +70,7 @@ router.get("/payrolls", async (req, res) => {
     const skip = (pageNum - 1) * limitNum;
 
     const matchConditions = { enabled: true };
-    console.log('req', req.query);
+
     // -----------------------------
     // STATUS FILTER
     // -----------------------------
