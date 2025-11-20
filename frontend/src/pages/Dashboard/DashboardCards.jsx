@@ -8,22 +8,22 @@ import {
 } from "lucide-react";
 import { formatCurrency } from "./DashboardUtil";
 
-const DashboardCard = ({ 
-  title, 
-  amount, 
-  icon: Icon, 
-  color, 
-  subtitle, 
-  growth, 
-  isActive, 
-  onClick 
+const DashboardCard = ({
+  title,
+  amount,
+  icon: Icon,
+  color,
+  subtitle,
+  growth,
+  isActive,
+  onClick,
 }) => {
   const colorClasses = {
     blue: { text: "text-blue-600", bg: "bg-blue-100" },
     orange: { text: "text-orange-600", bg: "bg-orange-100" },
     green: { text: "text-green-600", bg: "bg-green-100" },
     red: { text: "text-red-600", bg: "bg-red-100" },
-    purple: { text: "text-purple-600", bg: "bg-purple-100" }
+    purple: { text: "text-purple-600", bg: "bg-purple-100" },
   };
 
   const colors = colorClasses[color] || colorClasses.blue;
@@ -60,8 +60,8 @@ const DashboardCard = ({
   );
 };
 
-export const DashboardCards = ({ 
-  activeTab, 
+export const DashboardCards = ({
+  activeTab,
   onTabChange,
   salesData,
   outstandingData,
@@ -74,58 +74,148 @@ export const DashboardCards = ({
   activeExpenseSubTab,
   activePayrollSubTab,
   dateRanges,
-  prevMonthRanges
+  prevMonthRanges,
 }) => {
-
   const getCurrentSalesAmount = () => {
     switch (activeSalesSubTab) {
-      case "Today": return salesData.todaySales || 0;
-      case "Month": return salesData.monthlySales || 0;
-      case "Year": return salesData.yearSales || 0;
-      default: return salesData.todaySales || 0;
+      case "Today":
+        return salesData.todaySales || 0;
+      case "Month":
+        return salesData.monthlySales || 0;
+      case "Year":
+        return salesData.yearSales || 0;
+      default:
+        return salesData.todaySales || 0;
     }
   };
 
   const getCurrentGrowth = () => {
     switch (activeSalesSubTab) {
-      case "Today": return salesData.todayGrowth || 0;
-      case "Month": return salesData.monthlyGrowth || 0;
-      case "Year": return salesData.yearGrowth || 0;
-      default: return salesData.todayGrowth || 0;
+      case "Today":
+        return salesData.todayGrowth || 0;
+      case "Month":
+        return salesData.monthlyGrowth || 0;
+      case "Year":
+        return salesData.yearGrowth || 0;
+      default:
+        return salesData.todayGrowth || 0;
     }
   };
 
   const getCurrentOutstandingAmount = () => {
     switch (activeOutstandingSubTab) {
-      case "Today": return outstandingData.todayOutstanding || 0;
-      case "Month": return outstandingData.monthlyOutstanding || 0;
-      case "Year": return outstandingData.yearOutstanding || 0;
-      default: return outstandingData.todayOutstanding || 0;
+      case "Today":
+        return outstandingData.todayOutstanding || 0;
+      case "Month":
+        return outstandingData.monthlyOutstanding || 0;
+      case "Year":
+        return outstandingData.yearOutstanding || 0;
+      default:
+        return outstandingData.todayOutstanding || 0;
     }
   };
 
   const getCurrentOutstandingGrowth = () => {
     switch (activeOutstandingSubTab) {
-      case "Today": return outstandingData.todayGrowth || 0;
-      case "Month": return outstandingData.monthlyGrowth || 0;
-      case "Year": return outstandingData.yearGrowth || 0;
-      default: return outstandingData.todayGrowth || 0;
+      case "Today":
+        return outstandingData.todayGrowth || 0;
+      case "Month":
+        return outstandingData.monthlyGrowth || 0;
+      case "Year":
+        return outstandingData.yearGrowth || 0;
+      default:
+        return outstandingData.todayGrowth || 0;
     }
   };
 
   const getCurrentExpenseAmount = () => {
-    switch (activeExpenseSubTab) {
-      case "Month": return expenseData.monthlyExpense || 0;
-      case "Year": return expenseData.yearExpense || 0;
-      default: return expenseData.monthlyExpense || 0;
+    console.log(
+      "getCurrentExpenseAmount called with activeExpenseSubTab:",
+      activeExpenseSubTab
+    );
+    console.log("expenseData:", expenseData);
+
+    if (!expenseData || !expenseData.latestExpenses) {
+      console.log("No expenseData or latestExpenses found, returning 0");
+      return 0;
     }
+
+    const currentDate = new Date();
+    let filteredExpenses = [];
+    let totalAmount = 0;
+
+    switch (activeExpenseSubTab) {
+      case "Month":
+        // Filter expenses for current month
+        filteredExpenses = expenseData.latestExpenses.filter((expense) => {
+          const expenseDate = new Date(expense.date);
+          return (
+            expenseDate.getMonth() === currentDate.getMonth() &&
+            expenseDate.getFullYear() === currentDate.getFullYear()
+          );
+        });
+        totalAmount = filteredExpenses.reduce(
+          (sum, expense) => sum + (expense.amount || 0),
+          0
+        );
+        console.log(
+          "Month filter - Count:",
+          filteredExpenses.length,
+          "Total:",
+          totalAmount
+        );
+        break;
+
+      case "Year":
+        // Filter expenses for current year
+        filteredExpenses = expenseData.latestExpenses.filter((expense) => {
+          const expenseDate = new Date(expense.date);
+          return expenseDate.getFullYear() === currentDate.getFullYear();
+        });
+        totalAmount = filteredExpenses.reduce(
+          (sum, expense) => sum + (expense.amount || 0),
+          0
+        );
+        console.log(
+          "Year filter - Count:",
+          filteredExpenses.length,
+          "Total:",
+          totalAmount
+        );
+        break;
+
+      default:
+        // Default to month
+        filteredExpenses = expenseData.latestExpenses.filter((expense) => {
+          const expenseDate = new Date(expense.date);
+          return (
+            expenseDate.getMonth() === currentDate.getMonth() &&
+            expenseDate.getFullYear() === currentDate.getFullYear()
+          );
+        });
+        totalAmount = filteredExpenses.reduce(
+          (sum, expense) => sum + (expense.amount || 0),
+          0
+        );
+        console.log(
+          "Default filter - Count:",
+          filteredExpenses.length,
+          "Total:",
+          totalAmount
+        );
+    }
+
+    return totalAmount;
   };
 
   const getCurrentPayrollAmount = () => {
     switch (activePayrollSubTab) {
-      case "Prev Month": return totalPayroll || 0;
-      case "YTD": return payrollYTDTotal || 0;
-      default: return totalPayroll || 0;
+      case "Prev Month":
+        return totalPayroll || 0;
+      case "YTD":
+        return payrollYTDTotal || 0;
+      default:
+        return totalPayroll || 0;
     }
   };
 

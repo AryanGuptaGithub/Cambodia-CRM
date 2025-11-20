@@ -31,16 +31,101 @@ const isValidObjectId = (id) => {
   return mongoose.Types.ObjectId.isValid(id);
 };
 
+// Helper function to get date ranges for period filtering
+const getDateRangeForPeriod = (period) => {
+  const currentDate = new Date();
+  let startDate, endDate;
+
+  switch (period) {
+    case "Today":
+      startDate = new Date(currentDate);
+      startDate.setHours(0, 0, 0, 0);
+      endDate = new Date(currentDate);
+      endDate.setHours(23, 59, 59, 999);
+      break;
+
+    case "Month":
+      startDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+      endDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+      endDate.setHours(23, 59, 59, 999);
+      break;
+
+    case "Year":
+      startDate = new Date(currentDate.getFullYear(), 0, 1);
+      endDate = new Date(currentDate.getFullYear(), 11, 31);
+      endDate.setHours(23, 59, 59, 999);
+      break;
+
+    default:
+      // Return all data if no period specified
+      return {};
+  }
+
+  return {
+    date: {
+      $gte: startDate,
+      $lte: endDate
+    }
+  };
+};
+
+// Get expenses with period filtering
 router.get("/expenses", async (req, res) => {
   try {
-    const expenses = await Expense.find()
+    const { period } = req.query;
+    console.log("Fetching expenses with period:", period);
+
+    // Build query based on period
+    let query = {};
+    if (period) {
+      query = getDateRangeForPeriod(period);
+    }
+
+    const expenses = await Expense.find(query)
       .populate("category", "category description")
       .populate("sourceAccount", "name")
-      .sort({ createdAt: 1, date: 1 });
+      .sort({ date: -1, createdAt: -1 });
+
+    console.log(`Found ${expenses.length} expenses for period: ${period || 'All'}`);
+
+    // Calculate totals for the dashboard
+    const currentDate = new Date();
+    const currentMonthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+    const currentYearStart = new Date(currentDate.getFullYear(), 0, 1);
+    
+    // Get monthly total
+    const monthlyExpenses = await Expense.find({
+      date: {
+        $gte: currentMonthStart,
+        $lte: currentDate
+      }
+    });
+    const monthlyTotal = monthlyExpenses.reduce((sum, expense) => sum + (expense.amount || 0), 0);
+
+    // Get yearly total
+    const yearlyExpenses = await Expense.find({
+      date: {
+        $gte: currentYearStart,
+        $lte: currentDate
+      }
+    });
+    const yearlyTotal = yearlyExpenses.reduce((sum, expense) => sum + (expense.amount || 0), 0);
+
+    // Get latest 10 expenses for the dashboard cards
+    const latestExpenses = await Expense.find()
+      .populate("category", "category description")
+      .populate("sourceAccount", "name")
+      .sort({ date: -1, createdAt: -1 })
+      .limit(10);
 
     res.json({
       success: true,
       data: expenses,
+      summary: {
+        monthlyExpense: monthlyTotal,
+        yearExpense: yearlyTotal,
+        latestExpenses: latestExpenses
+      }
     });
   } catch (error) {
     console.error("Error fetching expenses:", error);
@@ -544,13 +629,19 @@ router.delete("/expenses/:id", async (req, res) => {
 // Get expense statistics
 router.get("/expenses/statistics/summary", async (req, res) => {
   try {
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, period } = req.query;
 
     let matchStage = {};
 
-    // Date range filtering
+    // Handle period-based filtering
+    if (period) {
+      const dateRange = getDateRangeForPeriod(period);
+      matchStage = { ...matchStage, ...dateRange };
+    }
+
+    // Date range filtering (for custom dates)
     if (startDate || endDate) {
-      matchStage.date = {};
+      matchStage.date = matchStage.date || {};
       if (startDate) matchStage.date.$gte = new Date(startDate);
       if (endDate) matchStage.date.$lte = new Date(endDate);
     }

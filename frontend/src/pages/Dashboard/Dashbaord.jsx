@@ -104,11 +104,14 @@ const Dashboard = () => {
   });
 
   // ------------------ FETCH FUNCTIONS ------------------
-  const fetchStockTableData = async () => {
+  const fetchStockTableData = async (period = "Today") => {
     try {
       setLoadingStockData(true);
+      console.log("Fetching stock data for period:", period);
 
-      const response = await axios.get(`${backendUrl}/api/reports-in-hand`);
+      const response = await axios.get(`${backendUrl}/api/reports-in-hand`, {
+        params: { period }
+      });
 
       const stockDataFromAPI = Array.isArray(response.data.reports)
         ? response.data.reports
@@ -132,15 +135,11 @@ const Dashboard = () => {
     }
   };
 
-  const handleViewStockDetails = (productName, batches) => {
-    setSelectedProductName(productName);
-    setSelectedBatches(batches);
-    setShowBatchModal(true);
-  };
-
   const fetchSalesTableData = async (period) => {
     try {
       setLoadingSalesData(true);
+      console.log("Fetching sales data for period:", period);
+      
       const response = await axios.get(`${backendUrl}/api/sales/table-data`, {
         params: { period },
       });
@@ -156,6 +155,8 @@ const Dashboard = () => {
   const fetchOutstandingTableData = async (period) => {
     try {
       setLoadingOutstandingData(true);
+      console.log("Fetching outstanding data for period:", period);
+      
       const response = await axios.get(
         `${backendUrl}/api/outstanding/table-data`,
         { params: { period } }
@@ -172,9 +173,13 @@ const Dashboard = () => {
   const fetchExpenseTableData = async (period) => {
     try {
       setLoadingExpenseData(true);
+      console.log("Fetching expense data for period:", period);
+
       const response = await axios.get(`${backendUrl}/api/expenses`, {
         params: { period },
       });
+
+      console.log("Expense API response:", response.data);
 
       let expenses = [];
       if (response.data?.success) {
@@ -183,30 +188,74 @@ const Dashboard = () => {
         expenses = response.data;
       } else if (response.data?.expenses) {
         expenses = response.data.expenses;
+      } else if (response.data?.latestExpenses) {
+        expenses = response.data.latestExpenses;
       }
 
-      const formattedExpenses = Array.isArray(expenses)
-        ? expenses.map((expense) => ({
+      console.log("Raw expenses data:", expenses);
+
+      // Filter expenses based on period
+      const currentDate = new Date();
+      let filteredExpenses = [];
+
+      switch (period) {
+        case "Month":
+          filteredExpenses = expenses.filter((expense) => {
+            const expenseDate = new Date(expense.date);
+            return (
+              expenseDate.getMonth() === currentDate.getMonth() &&
+              expenseDate.getFullYear() === currentDate.getFullYear()
+            );
+          });
+          break;
+
+        case "Year":
+          filteredExpenses = expenses.filter((expense) => {
+            const expenseDate = new Date(expense.date);
+            return expenseDate.getFullYear() === currentDate.getFullYear();
+          });
+          break;
+
+        default:
+          filteredExpenses = expenses;
+      }
+
+      console.log("Filtered expenses for", period, ":", filteredExpenses);
+
+      const formattedExpenses = Array.isArray(filteredExpenses)
+        ? filteredExpenses.map((expense) => ({
             id: expense._id || expense.id,
             category:
-              typeof expense.category === "string"
+              expense.category?.category ||
+              (typeof expense.category === "string"
                 ? expense.category
-                : expense.category?.name ||
-                  expense.category?.category ||
-                  "Uncategorized",
+                : "Uncategorized"),
             amount: expense.amount || 0,
-            date:
-              expense.date ||
-              expense.createdAt ||
-              new Date().toISOString().split("T")[0],
+            date: expense.date
+              ? new Date(expense.date).toLocaleDateString()
+              : expense.createdAt
+              ? new Date(expense.createdAt).toLocaleDateString()
+              : new Date().toLocaleDateString(),
             description:
               expense.description || expense.remarks || "No description",
-            details: expense.details || [
+            paymentMethod: expense.paymentMethod || "N/A",
+            sourceAccount: expense.sourceAccount?.name || "N/A",
+            details: [
               `Amount: ₹${expense.amount || 0}`,
-              `Date: ${expense.date || "N/A"}`,
+              `Date: ${
+                expense.date
+                  ? new Date(expense.date).toLocaleDateString()
+                  : "N/A"
+              }`,
+              `Category: ${expense.category?.category || "Uncategorized"}`,
+              `Payment Method: ${expense.paymentMethod || "N/A"}`,
+              `Source: ${expense.sourceAccount?.name || "N/A"}`,
+              `Remarks: ${expense.remarks || "No remarks"}`,
             ],
           }))
         : [];
+
+      console.log("Formatted expenses:", formattedExpenses);
 
       setExpenseTableData(
         formattedExpenses.sort((a, b) => b.amount - a.amount)
@@ -233,28 +282,80 @@ const Dashboard = () => {
   };
 
   const handleViewExpenseDetails = (expenseName, details) => {
+    console.log("View expense details:", expenseName, details);
     setSelectedMRName(expenseName);
     setSelectedMRProducts(details);
     setShowProductsModal(true);
   };
 
+  const handleViewStockDetails = (productName, batches) => {
+    setSelectedProductName(productName);
+    setSelectedBatches(batches);
+    setShowBatchModal(true);
+  };
+
+  // SUB-TAB CHANGE HANDLERS
+  const handleSalesSubTabChange = (subTab) => {
+    console.log("Sales sub-tab changed to:", subTab);
+    setActiveSalesSubTab(subTab);
+    // Data will be fetched by the useEffect
+  };
+
+  const handleOutstandingSubTabChange = (subTab) => {
+    console.log("Outstanding sub-tab changed to:", subTab);
+    setActiveOutstandingSubTab(subTab);
+    // Data will be fetched by the useEffect
+  };
+
+  const handleStockSubTabChange = (subTab) => {
+    console.log("Stock sub-tab changed to:", subTab);
+    setActiveStockSubTab(subTab);
+    // Data will be fetched by the useEffect
+  };
+
+  const handleExpenseSubTabChange = (subTab) => {
+    console.log("Expense sub-tab changed to:", subTab);
+    setActiveExpenseSubTab(subTab);
+    // Data will be fetched by the useEffect
+  };
+
   const handleParentTabChange = (newTab) => {
     setPreviousActiveTab(activeTab);
     setActiveTab(newTab);
+
     if (newTab === "Stock in Hands") {
       setActiveStockSubTab("Today");
-      fetchStockTableData(); // Fetch stock data when tab is clicked
+      fetchStockTableData("Today");
     }
-    if (newTab === "Sales") setActiveSalesSubTab("Today");
-    if (newTab === "Outstanding") setActiveOutstandingSubTab("Today");
-    if (newTab === "Total Payroll") setActivePayrollSubTab("Prev Month");
-    if (newTab === "Expenses") setActiveExpenseSubTab("Month");
+    if (newTab === "Sales") {
+      setActiveSalesSubTab("Today");
+      fetchSalesTableData("Today");
+    }
+    if (newTab === "Outstanding") {
+      setActiveOutstandingSubTab("Today");
+      fetchOutstandingTableData("Today");
+    }
+    if (newTab === "Total Payroll") {
+      setActivePayrollSubTab("Prev Month");
+    }
+    if (newTab === "Expenses") {
+      setActiveExpenseSubTab("Month");
+      fetchExpenseTableData("Month");
+    }
   };
 
   // ------------------ EFFECTS ------------------
+  // Initial data fetch
+  useEffect(() => {
+    fetchSalesTableData("Today");
+    fetchOutstandingTableData("Today");
+    fetchExpenseTableData("Month");
+    fetchStockTableData("Today");
+  }, []);
+
   useEffect(() => {
     if (activeTab === "Stock in Hands") {
-      fetchStockTableData();
+      fetchStockTableData(activeStockSubTab);
     }
   }, [activeTab, activeStockSubTab]);
 
@@ -263,8 +364,7 @@ const Dashboard = () => {
   }, [activeSalesSubTab, activeTab]);
 
   useEffect(() => {
-    if (activeTab === "Outstanding")
-      fetchOutstandingTableData(activeOutstandingSubTab);
+    if (activeTab === "Outstanding") fetchOutstandingTableData(activeOutstandingSubTab);
   }, [activeOutstandingSubTab, activeTab]);
 
   useEffect(() => {
@@ -320,7 +420,7 @@ const Dashboard = () => {
             loadingStockData={loadingStockData}
             activeStockSubTab={activeStockSubTab}
             dateRanges={stockDateRanges}
-            onViewStockDetails={handleViewStockDetails} // Corrected this line
+            onViewStockDetails={handleViewStockDetails}
           />
         );
       default:
@@ -361,11 +461,11 @@ const Dashboard = () => {
         activePayrollSubTab={activePayrollSubTab}
         activeOutstandingSubTab={activeOutstandingSubTab}
         activeStockSubTab={activeStockSubTab}
-        onSalesSubTabChange={setActiveSalesSubTab}
-        onExpenseSubTabChange={setActiveExpenseSubTab}
+        onSalesSubTabChange={handleSalesSubTabChange}
+        onExpenseSubTabChange={handleExpenseSubTabChange}
         onPayrollSubTabChange={setActivePayrollSubTab}
-        onOutstandingSubTabChange={setActiveOutstandingSubTab}
-        onStockSubTabChange={setActiveStockSubTab}
+        onOutstandingSubTabChange={handleOutstandingSubTabChange}
+        onStockSubTabChange={handleStockSubTabChange}
         dateRanges={dateRanges}
         prevMonthRanges={prevMonthRanges}
       />
@@ -408,7 +508,7 @@ const Dashboard = () => {
         previousMonthLabel={previousMonthLabel}
         allMRsWithSalary={allMRsWithSalary}
       />
-      
+
       <BatchDetailsModal
         showModal={showBatchModal}
         onClose={() => setShowBatchModal(false)}
