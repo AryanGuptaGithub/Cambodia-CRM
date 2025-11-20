@@ -5,7 +5,7 @@ import React, {
   useCallback,
   useRef,
 } from "react";
-import { UserPlus, Trash2, Edit, X, Eye, Search, Settings } from "lucide-react";
+import { UserPlus, Trash2, Edit, X, Eye, Search } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { formatDateToReadable } from "../../utils/dateUtil";
 import ReactDOM from "react-dom";
@@ -151,7 +151,7 @@ const PurchaseReturn = () => {
   const navigate = useNavigate();
   const inputRef = useRef(null);
 
-  // NEW: States for dropdown data
+  // States for dropdown data
   const [productOptions, setProductOptions] = useState([]);
   const [supplierOptions, setSupplierOptions] = useState([]);
   const [purchaseOptions, setPurchaseOptions] = useState([]);
@@ -159,22 +159,26 @@ const PurchaseReturn = () => {
   const [loadingSuppliers, setLoadingSuppliers] = useState(false);
   const [loadingPurchases, setLoadingPurchases] = useState(false);
 
-  // Column configuration state
-  const [isColumnModalOpen, setIsColumnModalOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState("add");
-  const [selectedItems, setSelectedItems] = useState([]);
-  const [allSelected, setAllSelected] = useState(false);
-
   const returnsPerPage = 10;
 
-  // ADDED: Validation function for products, suppliers, and purchases
+  // Fixed table columns like SaleReturn
+  const tableColumns = useMemo(
+    () => [
+      "invoiceNumber",
+      "deliveryNumber",
+      "productName",
+      "purchaseQty",
+      "returnQuantity",
+      "fob",
+      "amount",
+      "returnAmount",
+      "returnReason",
+      "actions",
+    ],
+    []
+  );
 
-  // ADDED: Enhanced add new purchase return handler with validation
-  const handleAddNewPurchaseReturn = () => {
-    navigate("/purchaselayout/purchasereturn/new");
-  };
-
-  // Define all available table columns
+  // Define all available table columns for reference
   const allFields = useMemo(
     () => [
       {
@@ -247,7 +251,6 @@ const PurchaseReturn = () => {
         name: "Return Amount ($)",
         dbName: "returnAmount",
       },
-
       {
         id: "remarks",
         name: "Remarks",
@@ -281,49 +284,12 @@ const PurchaseReturn = () => {
     form.returnReason
   );
 
-  const requiredColumns = [
-    "invoiceNumber",
-    "deliveryNumber",
-    "productName",
-    "actions",
-  ];
+  // Enhanced add new purchase return handler with validation
+  const handleAddNewPurchaseReturn = () => {
+    navigate("/purchaselayout/purchasereturn/new");
+  };
 
-  // Default table columns
-  const [tableColumns, setTableColumns] = useState([
-    "invoiceNumber",
-    "deliveryNumber",
-    "productName",
-    "purchaseQty",
-    "returnQuantity",
-    "fob",
-    "amount",
-    "returnAmount",
-    "returnReason",
-    "actions",
-  ]);
-
-  // Get available columns for Add tab (columns not currently in table)
-  const availableColumns = useMemo(() => {
-    return allFields.filter((item) => !tableColumns.includes(item.id));
-  }, [allFields, tableColumns]);
-
-  const removableColumns = useMemo(() => {
-    return allFields.filter(
-      (item) =>
-        tableColumns.includes(item.id) && !requiredColumns.includes(item.id)
-    );
-  }, [allFields, tableColumns]);
-
-  const chunkedItems = useMemo(() => {
-    const items = activeTab === "add" ? availableColumns : removableColumns;
-    const chunks = [];
-    for (let i = 0; i < items.length; i += 2) {
-      chunks.push(items.slice(i, i + 2));
-    }
-    return chunks;
-  }, [activeTab, availableColumns, removableColumns]);
-
-  // NEW: Fetch products, suppliers, and purchases for dropdowns and validation
+  // Fetch products, suppliers, and purchases for dropdowns and validation
   const fetchProducts = async () => {
     setLoadingProducts(true);
     try {
@@ -379,14 +345,14 @@ const PurchaseReturn = () => {
     }
   };
 
-  // NEW: Load dropdown data when component mounts for validation
+  // Load dropdown data when component mounts for validation
   useEffect(() => {
     fetchProducts();
     fetchSuppliers();
     fetchPurchases();
   }, []);
 
-  // NEW: Load dropdown data when edit modal opens
+  // Load dropdown data when edit modal opens
   useEffect(() => {
     if (isEditModalOpen) {
       fetchProducts();
@@ -394,71 +360,6 @@ const PurchaseReturn = () => {
       fetchPurchases();
     }
   }, [isEditModalOpen]);
-
-  // Toggle item selection
-  const toggleItem = (id) => {
-    if (id === "all") {
-      if (allSelected) {
-        setSelectedItems([]);
-        setAllSelected(false);
-      } else {
-        const allIds = chunkedItems.flat().map((item) => item.id);
-        setSelectedItems(allIds);
-        setAllSelected(true);
-      }
-    } else {
-      let updatedItems;
-      if (selectedItems.includes(id)) {
-        updatedItems = selectedItems.filter((itemId) => itemId !== id);
-      } else {
-        updatedItems = [...selectedItems, id];
-      }
-
-      setSelectedItems(updatedItems);
-      setAllSelected(updatedItems.length === chunkedItems.flat().length);
-    }
-  };
-
-  // Handle save for column configuration
-  const handleSaveFields = () => {
-    if (activeTab === "add") {
-      // Add selected columns to table
-      const newColumns = [...tableColumns, ...selectedItems];
-      setTableColumns(newColumns);
-    } else {
-      const newColumns = tableColumns.filter(
-        (id) => !selectedItems.includes(id) || requiredColumns.includes(id)
-      );
-      setTableColumns(newColumns);
-    }
-    setSelectedItems([]);
-    setAllSelected(false);
-    setIsColumnModalOpen(false);
-  };
-
-  const handleResetFields = () => {
-    setSelectedItems([]);
-    setAllSelected(false);
-    // Reset to default columns
-    setTableColumns([
-      "invoiceNumber",
-      "deliveryNumber",
-      "productName",
-      "purchaseQty",
-      "returnQuantity",
-      "fob",
-      "amount",
-      "returnAmount",
-      "returnReason",
-      "actions",
-    ]);
-  };
-
-  const handleCancelEvent = () => {
-    setSelectedItems([]);
-    setAllSelected(false);
-    setIsColumnModalOpen(false);
-  };
 
   // CORRECTED: Handle product selection from dropdown
   const handleProductChange = useCallback(
@@ -756,7 +657,6 @@ const PurchaseReturn = () => {
       <div className="container">
         <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
           <div className="flex gap-3 items-center">
-            {/* CHANGED: Added handleAddNewPurchaseReturn with validation */}
             <button
               className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
               onClick={handleAddNewPurchaseReturn}
@@ -772,14 +672,6 @@ const PurchaseReturn = () => {
                 <Trash2 size={18} /> Delete
               </button>
             )}
-
-            {/* Column Configuration Button */}
-            <button
-              className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-              onClick={() => setIsColumnModalOpen(true)}
-            >
-              <Settings size={18} /> Add /Remove Column
-            </button>
           </div>
 
           {purchaseReturns.length > 0 && (
@@ -958,160 +850,6 @@ const PurchaseReturn = () => {
             </div>
           )}
         </div>
-
-        {/* Column Configuration Modal */}
-        {isColumnModalOpen &&
-          ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-              <div
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setIsColumnModalOpen(false)}
-              />
-              <div
-                className="relative bg-white p-6 rounded shadow-lg max-w-4xl w-full z-10 max-h-[90vh] overflow-hidden flex flex-col"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <h2 className="text-xl font-semibold mb-4">
-                  {activeTab === "add" ? "Add Columns" : "Remove Columns"}
-                </h2>
-
-                <div className="flex w-full gap-2 mb-4">
-                  <div className="w-1/2">
-                    <button
-                      onClick={() => {
-                        setActiveTab("add");
-                        setSelectedItems([]);
-                        setAllSelected(false);
-                      }}
-                      className={`w-full px-4 py-2 font-medium text-center rounded-lg cursor-pointer ${
-                        activeTab === "add"
-                          ? "bg-green-600 text-white"
-                          : "bg-gray-200 text-gray-700"
-                      }`}
-                    >
-                      Add Columns ({availableColumns.length})
-                    </button>
-                  </div>
-                  <div className="w-1/2">
-                    <button
-                      onClick={() => {
-                        setActiveTab("remove");
-                        setSelectedItems([]);
-                        setAllSelected(false);
-                      }}
-                      className={`w-full px-4 py-2 font-medium text-center rounded-lg cursor-pointer ${
-                        activeTab === "remove"
-                          ? "bg-red-600 text-white"
-                          : "bg-gray-200 text-gray-700"
-                      }`}
-                    >
-                      Remove Columns ({removableColumns.length})
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex-1 overflow-y-auto">
-                  {chunkedItems.length > 0 ? (
-                    <div className="grid grid-cols-1 gap-3">
-                      {/* Select All option */}
-                      {chunkedItems.flat().length > 0 && (
-                        <div className="flex gap-4 border-b pb-2 mb-2 sticky top-0 bg-white">
-                          <label className="flex items-center gap-2 flex-1 cursor-pointer select-none font-semibold">
-                            <input
-                              type="checkbox"
-                              checked={allSelected}
-                              onChange={() => toggleItem("all")}
-                            />
-                            Select All
-                          </label>
-                          <div className="flex-1"></div>
-                        </div>
-                      )}
-
-                      {chunkedItems.map((pair, index) => (
-                        <div key={index} className="flex gap-4">
-                          {pair.map(({ id, name }) => (
-                            <label
-                              key={id}
-                              className="flex items-center gap-1 flex-1 cursor-pointer select-none hover:bg-gray-50 rounded"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={selectedItems.includes(id)}
-                                onChange={() => toggleItem(id)}
-                              />
-                              <span className="flex-1">{name}</span>
-                            </label>
-                          ))}
-                          {pair.length === 1 && <div className="flex-1"></div>}
-                        </div>
-                      ))}
-
-                      {/* REQUIRED COLUMNS shown on Remove tab */}
-                      {activeTab === "remove" && (
-                        <div className="mt-6 pt-4">
-                          <h3 className="text-sm font-semibold text-gray-600 mb-2">
-                            Compulsory Fields
-                          </h3>
-                          <div className="grid grid-cols-2 gap-3 text-gray-400 text-sm">
-                            {allFields
-                              .filter((field) =>
-                                requiredColumns.includes(field.id)
-                              )
-                              .map((field) => (
-                                <div
-                                  key={field.id}
-                                  className="flex items-center gap-2 bg-gray-100 rounded px-2 py-1 cursor-not-allowed"
-                                >
-                                  <input type="checkbox" checked disabled />
-                                  <div className="flex flex-col">
-                                    <span>{field.name}</span>
-                                    <span className="text-xs text-red-500">
-                                      This field is compulsory
-                                    </span>
-                                  </div>
-                                </div>
-                              ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-gray-500">
-                      {activeTab === "add"
-                        ? "All available columns are already in the table."
-                        : "No columns available to remove."}
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-4 pt-4 flex justify-between items-center">
-                  <button
-                    onClick={handleResetFields}
-                    className="px-4 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200 cursor-pointer"
-                  >
-                    Reset to Default
-                  </button>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleCancelEvent}
-                      className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 cursor-pointer"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleSaveFields}
-                      disabled={selectedItems.length === 0}
-                      className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 cursor-pointer disabled:bg-gray-400 disabled:cursor-not-allowed"
-                    >
-                      Save Changes
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>,
-            document.body
-          )}
 
         {/* View Modal */}
         {isViewModalOpen &&

@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import DatePicker from "react-datepicker";
@@ -57,6 +63,7 @@ const useReturnForm = () => {
     suppliers: false,
     purchases: false,
   });
+  console.log("filteredPurchases", filteredPurchases);
   const [isPurchasesEmpty, setIsPurchasesEmpty] = useState(false);
   const [isProductsEmpty, setIsProductsEmpty] = useState(false);
   const [isSuppliersEmpty, setIsSuppliersEmpty] = useState(false);
@@ -92,14 +99,18 @@ const useReturnForm = () => {
     }));
   }, [form.returnQuantity, form.purchaseQty, form.amount, parseNumber]);
 
+  console.log('setFilteredPurchases', purchases);
   // Filter purchases based on invoice number input
   const filterPurchases = (searchValue) => {
+    // Extract the purchases array from the response object
+    const purchasesArray = purchases.purchases || purchases || [];
+    
     if (!searchValue.trim()) {
-      setFilteredPurchases(purchases);
+      setFilteredPurchases(purchasesArray);
       return;
     }
 
-    const filtered = purchases.filter(
+    const filtered = purchasesArray.filter(
       (purchase) =>
         purchase.invoiceNumber
           ?.toLowerCase()
@@ -109,6 +120,7 @@ const useReturnForm = () => {
           .includes(searchValue.toLowerCase()) ||
         purchase.supplierName?.toLowerCase().includes(searchValue.toLowerCase())
     );
+    console.log("filtered", filtered);
     setFilteredPurchases(filtered);
   };
 
@@ -162,8 +174,11 @@ const useReturnForm = () => {
       setShowInvoiceSuggestions(true);
       filterPurchases(value);
 
+      // Extract purchases array from response object
+      const purchasesArray = purchases.purchases || purchases || [];
+      
       // Find exact match for auto-fill
-      const purchase = purchases.find(
+      const purchase = purchasesArray.find(
         (p) => p.invoiceNumber?.toLowerCase() === value.toLowerCase()
       );
 
@@ -177,12 +192,12 @@ const useReturnForm = () => {
           productName: purchase.productName || "",
           supplierId: purchase.supplierId || "",
           supplierName: purchase.supplierName || "",
-          purchaseQty: purchase.quantityPerBoxStrip || 0,
+          purchaseQty: purchase.quantityPerBoxStrip || purchase.qtyBox || 0,
           fob: purchase.fob || 0,
           cif: purchase.cif || 0,
           lcNumber: purchase.lcNumber || "",
           amount: purchase.amount || 0,
-          expiredDate: purchase.expiryDate || "",
+          expiredDate: purchase.expiredDate || purchase.expiryDate || "",
         }));
       }
 
@@ -206,12 +221,12 @@ const useReturnForm = () => {
       productName: purchase.productName || "",
       supplierId: purchase.supplierId || "",
       supplierName: purchase.supplierName || "",
-      purchaseQty: purchase.quantityPerBoxStrip || 0,
+      purchaseQty: purchase.quantityPerBoxStrip || purchase.qtyBox || 0,
       fob: purchase.fob || 0,
       cif: purchase.cif || 0,
       lcNumber: purchase.lcNumber || "",
       amount: purchase.amount || 0,
-      expiredDate: purchase.expiryDate || "",
+      expiredDate: purchase.expiredDate || purchase.expiryDate || "",
     }));
     setShowInvoiceSuggestions(false);
   };
@@ -321,10 +336,6 @@ const useReturnForm = () => {
         if (!isProductsEmptyRef.current) {
           setIsProductsEmpty(true);
           isProductsEmptyRef.current = true;
-          // showToast(
-          //   "error",
-          //   "No products found. Please add at least one product first."
-          // );
         }
       } else {
         setIsProductsEmpty(false);
@@ -360,10 +371,6 @@ const useReturnForm = () => {
         if (!isSuppliersEmptyRef.current) {
           setIsSuppliersEmpty(true);
           isSuppliersEmptyRef.current = true;
-          // showToast(
-          //   "error",
-          //   "No suppliers found. Please add at least one supplier first."
-          // );
         }
       } else {
         setIsSuppliersEmpty(false);
@@ -385,8 +392,17 @@ const useReturnForm = () => {
     try {
       setLoading((prev) => ({ ...prev, purchases: true }));
       const response = await axios.get(`${backendUrl}/api/purchase`);
-      const purchaseData = response.data.reports || response.data || [];
       
+      // Handle different response formats
+      let purchaseData = [];
+      if (response.data && response.data.purchases) {
+        purchaseData = response.data.purchases;
+      } else if (response.data && Array.isArray(response.data)) {
+        purchaseData = response.data;
+      } else if (response.data && response.data.reports) {
+        purchaseData = response.data.reports;
+      }
+
       setPurchases(purchaseData);
       setFilteredPurchases(purchaseData);
 
@@ -394,10 +410,6 @@ const useReturnForm = () => {
         if (!isPurchasesEmptyRef.current) {
           setIsPurchasesEmpty(true);
           isPurchasesEmptyRef.current = true;
-          // showToast(
-          //   "error",
-          //   "No purchases found. Please add at least one purchase first."
-          // );
         }
       } else {
         setIsPurchasesEmpty(false);
@@ -512,7 +524,9 @@ const DatePickerField = React.memo(
         disabled={disabled}
         className={`w-full border px-3 py-2 rounded-lg ${
           error ? "border-red-500" : "border-gray-300"
-        } ${readOnly || disabled ? "bg-gray-100 cursor-not-allowed" : ""} ${className}`}
+        } ${
+          readOnly || disabled ? "bg-gray-100 cursor-not-allowed" : ""
+        } ${className}`}
         autoComplete="off"
       />
       {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
@@ -665,7 +679,7 @@ const AddReturnPurchase = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     // Check if any required data is empty
     if (isPurchasesEmpty || isProductsEmpty || isSuppliersEmpty) {
       showToast(
@@ -791,7 +805,13 @@ const AddReturnPurchase = () => {
   };
 
   // Check if form should be disabled
-  const isFormDisabled = isPurchasesEmpty || isProductsEmpty || isSuppliersEmpty;
+  const isFormDisabled =
+    isPurchasesEmpty || isProductsEmpty || isSuppliersEmpty;
+
+  // Ensure filteredPurchases is always an array for mapping
+  const purchasesToDisplay = Array.isArray(filteredPurchases) 
+    ? filteredPurchases 
+    : filteredPurchases.purchases || [];
 
   return (
     <div className="max-w-4xl mx-auto p-8 bg-white rounded-2xl shadow">
@@ -823,13 +843,21 @@ const AddReturnPurchase = () => {
               <div className="mt-2 text-sm text-red-700">
                 <ul className="list-disc list-inside space-y-1">
                   {isPurchasesEmpty && (
-                    <li>No purchases found. Please add at least one purchase first.</li>
+                    <li>
+                      No purchases found. Please add at least one purchase
+                      first.
+                    </li>
                   )}
                   {isProductsEmpty && (
-                    <li>No products found. Please add at least one product first.</li>
+                    <li>
+                      No products found. Please add at least one product first.
+                    </li>
                   )}
                   {isSuppliersEmpty && (
-                    <li>No suppliers found. Please add at least one supplier first.</li>
+                    <li>
+                      No suppliers found. Please add at least one supplier
+                      first.
+                    </li>
                   )}
                 </ul>
               </div>
@@ -856,7 +884,11 @@ const AddReturnPurchase = () => {
                 className={`w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-600 ${
                   isFormDisabled ? "bg-gray-100 cursor-not-allowed" : ""
                 }`}
-                placeholder={isPurchasesEmpty ? "No purchases available" : "Enter invoice number"}
+                placeholder={
+                  isPurchasesEmpty
+                    ? "No purchases available"
+                    : "Enter invoice number"
+                }
                 required
                 autoComplete="off"
                 disabled={isFormDisabled}
@@ -884,12 +916,12 @@ const AddReturnPurchase = () => {
                   <div className="px-3 py-2 text-gray-500 text-center">
                     Loading purchases...
                   </div>
-                ) : filteredPurchases.length === 0 ? (
+                ) : purchasesToDisplay.length === 0 ? (
                   <div className="px-3 py-2 text-gray-500 text-center">
                     No matching purchases found
                   </div>
                 ) : (
-                  filteredPurchases.map((purchase) => (
+                  purchasesToDisplay.map((purchase) => (
                     <div
                       key={purchase._id || purchase.id}
                       className="px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b border-gray-100 last:border-b-0"
@@ -945,7 +977,9 @@ const AddReturnPurchase = () => {
             value={form.productId}
             onChange={handleProductChange}
             options={productOptions}
-            placeholder={isProductsEmpty ? "No Products Available" : "Select Product"}
+            placeholder={
+              isProductsEmpty ? "No Products Available" : "Select Product"
+            }
             required={true}
             error={errors.productId}
             loading={loading.products}
@@ -958,7 +992,9 @@ const AddReturnPurchase = () => {
             value={form.supplierId}
             onChange={handleSupplierChange}
             options={supplierOptions}
-            placeholder={isSuppliersEmpty ? "No Suppliers Available" : "Select Supplier"}
+            placeholder={
+              isSuppliersEmpty ? "No Suppliers Available" : "Select Supplier"
+            }
             required={true}
             error={errors.supplierId}
             loading={loading.suppliers}
