@@ -39,7 +39,7 @@ const DashboardCard = ({
         <div>
           <p className="text-sm font-medium text-gray-600">{title}</p>
           <p className={`text-2xl font-bold ${colors.text} mt-2`}>
-            ${formatCurrency(amount)}
+            {formatCurrency(amount)}
           </p>
           {growth !== undefined ? (
             <p className="text-xs text-gray-500 mt-1">
@@ -63,12 +63,12 @@ const DashboardCard = ({
 export const DashboardCards = ({ 
   activeTab, 
   onTabChange,
-  salesData,
-  outstandingData,
-  stockData,
-  expenseData,
-  totalPayroll,
-  payrollYTDTotal,
+  salesData = {},
+  outstandingData = {},
+  stockData = {},
+  expenseData = {},
+  totalPayroll = 0,
+  payrollYTDTotal = 0,
   activeSalesSubTab,
   activeOutstandingSubTab,
   activeExpenseSubTab,
@@ -79,58 +79,58 @@ export const DashboardCards = ({
 
   const getCurrentSalesAmount = () => {
     switch (activeSalesSubTab) {
-      case "Today": return salesData.todaySales || 0;
-      case "Month": return salesData.monthlySales || 0;
-      case "Year": return salesData.yearSales || 0;
-      default: return salesData.todaySales || 0;
+      case "Today": return salesData.todaySales ?? 0;
+      case "Month": return salesData.monthlySales ?? 0;
+      case "Year": return salesData.yearSales ?? 0;
+      default: return salesData.todaySales ?? 0;
     }
   };
 
   const getCurrentGrowth = () => {
     switch (activeSalesSubTab) {
-      case "Today": return salesData.todayGrowth || 0;
-      case "Month": return salesData.monthlyGrowth || 0;
-      case "Year": return salesData.yearGrowth || 0;
-      default: return salesData.todayGrowth || 0;
+      case "Today": return salesData.todayGrowth ?? 0;
+      case "Month": return salesData.monthlyGrowth ?? 0;
+      case "Year": return salesData.yearGrowth ?? 0;
+      default: return salesData.todayGrowth ?? 0;
     }
   };
 
   const getCurrentOutstandingAmount = () => {
     switch (activeOutstandingSubTab) {
-      case "Today": return outstandingData.todayOutstanding || 0;
-      case "Month": return outstandingData.monthlyOutstanding || 0;
-      case "Year": return outstandingData.yearOutstanding || 0;
-      default: return outstandingData.todayOutstanding || 0;
+      case "Today": return outstandingData.todayOutstanding ?? 0;
+      case "Month": return outstandingData.monthlyOutstanding ?? 0;
+      case "Year": return outstandingData.yearOutstanding ?? 0;
+      default: return outstandingData.todayOutstanding ?? 0;
     }
   };
 
   const getCurrentOutstandingGrowth = () => {
     switch (activeOutstandingSubTab) {
-      case "Today": return outstandingData.todayGrowth || 0;
-      case "Month": return outstandingData.monthlyGrowth || 0;
-      case "Year": return outstandingData.yearGrowth || 0;
-      default: return outstandingData.todayGrowth || 0;
+      case "Today": return outstandingData.todayGrowth ?? 0;
+      case "Month": return outstandingData.monthlyGrowth ?? 0;
+      case "Year": return outstandingData.yearGrowth ?? 0;
+      default: return outstandingData.todayGrowth ?? 0;
     }
   };
 
   const getCurrentExpenseAmount = () => {
     switch (activeExpenseSubTab) {
-      case "Month": return expenseData.monthlyExpense || 0;
-      case "Year": return expenseData.yearExpense || 0;
-      default: return expenseData.monthlyExpense || 0;
+      case "Month": return expenseData.monthlyExpense ?? 0;
+      case "Year": return expenseData.yearExpense ?? 0;
+      default: return expenseData.monthlyExpense ?? 0;
     }
   };
 
   const getCurrentPayrollAmount = () => {
     switch (activePayrollSubTab) {
-      case "Prev Month": return totalPayroll || 0;
-      case "YTD": return payrollYTDTotal || 0;
-      default: return totalPayroll || 0;
+      case "Prev Month": return totalPayroll ?? 0;
+      case "YTD": return payrollYTDTotal ?? 0;
+      default: return totalPayroll ?? 0;
     }
   };
 
   const getCurrentStockAmount = () => {
-    return stockData.stockValue || 0;
+    return stockData.stockValue ?? 0;
   };
 
   const cards = [
@@ -158,7 +158,7 @@ export const DashboardCards = ({
       amount: getCurrentStockAmount(),
       icon: Package,
       color: "green",
-      subtitle: `${stockData.lowStockItems?.length || 0} low stock`,
+      subtitle: `${stockData.lowStockItems?.length ?? 0} low stock`,
     },
     {
       id: "Expenses",
