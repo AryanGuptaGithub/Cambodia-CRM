@@ -49,7 +49,6 @@ const Login = () => {
   //     });
 
   //     const { token, role } = response.data;
-  //     console.log('values of responst', response);
 
   //     // Store token and username in localStorage
   //     localStorage.setItem("token", token);

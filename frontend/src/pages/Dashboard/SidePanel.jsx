@@ -1,4 +1,3 @@
-// SidePanel.jsx
 import React from "react";
 import { Users, TrendingUp, AlertTriangle, Receipt, Calendar, Eye, ShoppingCart } from "lucide-react";
 import { formatCurrency } from "./DashboardUtil";
@@ -58,29 +57,30 @@ const PanelContent = ({ data, loading, loadingText, emptyText, renderItem, pagin
 };
 
 /* --------------------------------------------
-   RecentExpenses Component - UPDATED
+   RecentExpenses Component - UPDATED to use expenseTableData
 --------------------------------------------- */
-const RecentExpenses = ({ expenseData }) => {
-  // Get the highest expense
+const RecentExpenses = ({ expenseTableData, loadingExpenseData }) => {
+  // Use the filtered expenseTableData instead of expenseData.latestExpenses
   const highestExpense = React.useMemo(() => {
-    if (!expenseData.latestExpenses || expenseData.latestExpenses.length === 0) {
+    if (!expenseTableData || expenseTableData.length === 0) {
       return null;
     }
-    return expenseData.latestExpenses.reduce((max, expense) => 
-      expense.amount > max.amount ? expense : max
+    return expenseTableData.reduce((max, expense) => 
+      expense.amount > max.amount ? expense : max, expenseTableData[0]
     );
-  }, [expenseData.latestExpenses]);
+  }, [expenseTableData]);
 
-  // Get top 5 expenses (excluding the highest one if it's already in the list)
+  // Get top 5 expenses from the filtered data
   const topExpenses = React.useMemo(() => {
-    if (!expenseData.latestExpenses) return [];
+    if (!expenseTableData) return [];
     
-    const sortedExpenses = [...expenseData.latestExpenses]
-      .sort((a, b) => b.amount - a.amount)
-      .slice(0, 5);
-    
-    return sortedExpenses;
-  }, [expenseData.latestExpenses]);
+    // expenseTableData is already sorted by amount in descending order
+    return expenseTableData.slice(0, 5);
+  }, [expenseTableData]);
+
+  if (loadingExpenseData) {
+    return <p className="text-gray-500 text-center py-4">Loading expenses...</p>;
+  }
 
   return (
     <div className="space-y-3">
@@ -95,7 +95,7 @@ const RecentExpenses = ({ expenseData }) => {
               <div>
                 <p className="text-sm font-medium text-yellow-800">Highest Expense</p>
                 <p className="text-xs text-yellow-600">
-                  {highestExpense.category?.category || highestExpense.category || 'Uncategorized'}
+                  {highestExpense.category || 'Uncategorized'}
                 </p>
               </div>
             </div>
@@ -104,7 +104,7 @@ const RecentExpenses = ({ expenseData }) => {
                 ${formatCurrency(highestExpense.amount)}
               </p>
               <p className="text-xs text-yellow-600">
-                {highestExpense.date ? formatDateToReadable(highestExpense.date) : 'No date'}
+                {highestExpense.date || 'No date'}
               </p>
             </div>
           </div>
@@ -115,7 +115,7 @@ const RecentExpenses = ({ expenseData }) => {
       <PanelContent
         data={topExpenses}
         loading={false}
-        emptyText="No expense data available"
+        emptyText="No expense data available for current period"
         renderItem={(item, index) => (
           <div className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg">
             <div className="flex items-center space-x-3">
@@ -124,10 +124,10 @@ const RecentExpenses = ({ expenseData }) => {
               </div>
               <div>
                 <p className="text-sm font-medium text-gray-800">
-                  {item.category?.category || item.category || 'Uncategorized'}
+                  {item.category || 'Uncategorized'}
                 </p>
                 <p className="text-xs text-gray-500">
-                  {item.remarks || item.description || 'No description'}
+                  {item.description || 'No description'}
                 </p>
               </div>
             </div>
@@ -136,7 +136,7 @@ const RecentExpenses = ({ expenseData }) => {
                 ${formatCurrency(item.amount)}
               </p>
               <p className="text-xs text-gray-500">
-                {item.date ? formatDateToReadable(item.date) : 'No date'}
+                {item.date || 'No date'}
               </p>
             </div>
           </div>
@@ -413,11 +413,14 @@ export const SidePanel = ({
   loadingSalesData,
   outstandingTableData,
   loadingOutstandingData,
+  expenseTableData,
+  loadingExpenseData,
   stockData,
   expenseData,
   mrList,
   onViewProducts,
   onViewInvoices,
+  onViewExpenseDetails,
 }) => {
   const getPanelConfig = () => {
     const configs = {
@@ -462,7 +465,12 @@ export const SidePanel = ({
       Expenses: {
         title: "Latest Expenses",
         icon: Receipt,
-        content: <RecentExpenses expenseData={expenseData} />,
+        content: (
+          <RecentExpenses 
+            expenseTableData={expenseTableData}
+            loadingExpenseData={loadingExpenseData}
+          />
+        ),
       },
 
       "Total Payroll": {

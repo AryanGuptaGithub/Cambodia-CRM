@@ -14,19 +14,18 @@ const TabButton = ({ isActive, onClick, children }) => {
   );
 };
 
-// In SubTabs.jsx, update the component to handle Stock in Hands
 export const SubTabs = ({
   activeTab,
   activeSalesSubTab,
   activeExpenseSubTab,
   activePayrollSubTab,
   activeOutstandingSubTab,
-  activeStockSubTab, // Add this
+  activeStockSubTab,
   onSalesSubTabChange,
   onExpenseSubTabChange,
   onPayrollSubTabChange,
   onOutstandingSubTabChange,
-  onStockSubTabChange, // Add this
+  onStockSubTabChange,
   dateRanges,
   prevMonthRanges,
 }) => {
@@ -35,7 +34,7 @@ export const SubTabs = ({
     activeTab !== "Expenses" &&
     activeTab !== "Total Payroll" &&
     activeTab !== "Outstanding" &&
-    activeTab !== "Stock in Hands" // Add this
+    activeTab !== "Stock in Hands"
   ) {
     return null;
   }
@@ -73,8 +72,8 @@ export const SubTabs = ({
 
       case "Total Payroll":
         return [
-          { key: "Prev Month", label: prevMonthRanges.prevMonth.label },
-          { key: "YTD", label: prevMonthRanges.prevMonthYear.label },
+          { key: "Prev Month", label: prevMonthRanges.prevMonth.label }, // e.g., "Oct"
+          { key: "YTD", label: prevMonthRanges.ytd.rangeLabel }, // e.g., "1 Jan - 31 Oct"
         ].map((tab) => (
           <TabButton
             key={tab.key}

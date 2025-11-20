@@ -402,7 +402,7 @@ const usePurchaseForm = () => {
     return Object.keys(newErrors).length === 0;
   }, [form, parseNumber]);
 
-  // Fetch products - UPDATED to store remaining stock but not show in dropdown
+  // Fetch products - CORRECTED to use totalBoxes from batches
   const fetchProducts = useCallback(async () => {
     try {
       setLoading((prev) => ({ ...prev, products: true }));
@@ -411,16 +411,32 @@ const usePurchaseForm = () => {
       if (result.success) {
         // Transform product data - only show product name in dropdown
         const transformedProducts = result.data.map((product) => {
-          const remainingStock = product.quantity?.boxes || 0;
+          // Calculate total boxes from batches or use totalBoxes field
+          let totalBoxes = 0;
+
+          if (product.batches && Array.isArray(product.batches)) {
+            // Sum boxes from all batches
+            totalBoxes = product.batches.reduce((sum, batch) => {
+              return sum + (batch.boxes || 0);
+            }, 0);
+          } else if (product.totalBoxes !== undefined) {
+            // Use totalBoxes field if available
+            totalBoxes = product.totalBoxes;
+          } else {
+            // Fallback to 0
+            totalBoxes = 0;
+          }
+
           return {
             value: product._id || product.id,
             label: product.productName || product.name, // Only product name in dropdown
             lc: product.lc || product.lcNumber || 0,
             fob: product.fob || 0,
             cif: product.cif || 0,
-            remainingStock: remainingStock, // Store remaining stock for display in tab
+            remainingStock: totalBoxes, // Use calculated total boxes
           };
         });
+
         setProducts(transformedProducts);
 
         if (transformedProducts.length === 0) {
@@ -1043,7 +1059,7 @@ const AddNewPurchase = () => {
           </div>
 
           {form.products.map((product, productIndex) => {
-        
+            // Get current stock from remainingStock (which now contains total boxes)
             const currentStock = product.remainingStock || 0;
             const purchaseQty = parseNumber(product.qtyBox) || 0;
             const futureStock = calculateFutureStock(currentStock, purchaseQty);

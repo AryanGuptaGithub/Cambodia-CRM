@@ -31,9 +31,10 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import ReactDOM from "react-dom";
 import { fetchMRList, fetchHRMSalary } from "../../utils/customerUtil";
+import SampleExcelDownloadStaff from "../../excels/SampleExcelDownloadStaff";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
-
+const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 // Function to format date as "MMM YYYY" (e.g., "Oct 2025")
 const formatMonthYear = (date) => {
   return date.toLocaleString("en-US", {
@@ -63,7 +64,7 @@ const Dashboard = () => {
   const [previousMonthLabel, setPreviousMonthLabel] = useState("");
   const [payrollData, setPayrollData] = useState([]);
   const [totalPayroll, setTotalPayroll] = useState(0);
-
+  
   // User State
   const [user, setUser] = useState({
     name: "",
@@ -191,7 +192,6 @@ const Dashboard = () => {
       const response = await axios.get(`${backendUrl}/api/payrolls`, {
         params: { period },
       });
-
       if (response.data && response.data.success) {
         setPayrollData(response.data.data || []);
       } else {
@@ -1577,6 +1577,7 @@ const Dashboard = () => {
               <h2 className="text-lg font-semibold text-gray-800 mb-4">
                 Import MR
               </h2>
+              {isSampleFile && <SampleExcelDownloadStaff />}
 
               <div className="mb-6">
                 <label className="block text-gray-700 mb-2">File</label>

@@ -16,7 +16,7 @@ import SearchableDropdown from "../../components/common/SearchableDropdown";
 import InputField from "../../components/common/InputField";
 import {
   fetchMRList,
-  fetchCustomerList,
+  fetchCustomerList,fetchProducts
 } from "../../pages/ProductManager/common/fetchDropdown.jsx";
 
 const INITIAL_PRODUCT_STATE = {
@@ -305,6 +305,28 @@ const useProductSuggestions = (products, productNames) => {
     selectSuggestion,
     getInputRef,
   };
+};
+
+// Helper function to calculate available stock from batches
+const calculateAvailableStock = (productData) => {
+  if (!productData) return 0;
+  
+  // If product has totalBoxes field, use that
+  if (productData.totalBoxes !== undefined && productData.totalBoxes !== null) {
+    return productData.totalBoxes;
+  }
+  
+  // If product has batches array, sum the boxes
+  if (productData.batches && Array.isArray(productData.batches)) {
+    return productData.batches.reduce((sum, batch) => sum + (batch.boxes || 0), 0);
+  }
+  
+  // Fallback to inStock.boxes if available
+  if (productData.inStock?.boxes !== undefined) {
+    return productData.inStock.boxes;
+  }
+  
+  return 0;
 };
 
 // Custom hook for form state management
@@ -728,9 +750,9 @@ const useSaleForm = (initialCustomerCode = "") => {
     const productData = productsData.find(
       (p) => p.productName === product.productName
     );
-    if (!productData || !productData.inStock) return null;
+    if (!productData) return null;
 
-    const availableStock = productData.inStock.boxes || 0;
+    const availableStock = calculateAvailableStock(productData);
     const salesQty = parseInt(product.salesQty) || 0;
     const bonusQty = parseInt(product.bonusQty) || 0;
     const totalQty = salesQty + bonusQty;
@@ -749,9 +771,9 @@ const useSaleForm = (initialCustomerCode = "") => {
     const productData = productsData.find(
       (p) => p.productName === product.productName
     );
-    if (!productData || !productData.inStock) return false;
+    if (!productData) return false;
 
-    const availableStock = productData.inStock.boxes || 0;
+    const availableStock = calculateAvailableStock(productData);
     const salesQty = parseInt(product.salesQty) || 0;
     const bonusQty = parseInt(product.bonusQty) || 0;
     const totalQty = salesQty + bonusQty;
@@ -766,9 +788,9 @@ const useSaleForm = (initialCustomerCode = "") => {
     const productData = productsData.find(
       (p) => p.productName === product.productName
     );
-    if (!productData || !productData.inStock) return null;
+    if (!productData) return null;
 
-    const availableStock = productData.inStock.boxes || 0;
+    const availableStock = calculateAvailableStock(productData);
     const salesQty = parseInt(product.salesQty) || 0;
     const bonusQty = parseInt(product.bonusQty) || 0;
     const totalQty = salesQty + bonusQty;
@@ -1304,7 +1326,6 @@ const AddSale = () => {
     return {
       lc: product ? product.lc : "",
       sellingPrice: product ? product.sellingPrice : "",
-      inStock: product ? product.inStock : { boxes: 0 },
     };
   };
 
@@ -1456,8 +1477,8 @@ const AddSale = () => {
         const productData = products.find(
           (p) => p.productName === product.productName
         );
-        if (productData && productData.inStock) {
-          const availableStock = productData.inStock.boxes || 0;
+        if (productData) {
+          const availableStock = calculateAvailableStock(productData);
           const salesQty = parseInt(product.salesQty) || 0;
           const bonusQty = parseInt(product.bonusQty) || 0;
           const totalQty = salesQty + bonusQty;
@@ -1624,8 +1645,7 @@ const AddSale = () => {
           const productData = products.find(
             (p) => p.productName === product.productName
           );
-          const stockInfo = productData?.inStock;
-          const availableStock = stockInfo?.boxes || 0;
+          const availableStock = calculateAvailableStock(productData);
           const salesQty = parseInt(product.salesQty) || 0;
           const bonusQty = parseInt(product.bonusQty) || 0;
           const totalQty = salesQty + bonusQty;
@@ -1640,7 +1660,7 @@ const AddSale = () => {
                     {product.productName || `Product ${index + 1}`}
                   </h3>
 
-                  {product.productName && stockInfo && (
+                  {product.productName && productData && (
                     <div className="flex items-center gap-2">
                       <span
                         className={`text-sm px-3 py-2 rounded ${
@@ -1652,6 +1672,9 @@ const AddSale = () => {
                         }`}
                       >
                         Remaining: {remainingStock} boxes
+                      </span>
+                      <span className="text-sm px-2 py-1 bg-blue-100 text-blue-800 rounded border border-blue-300">
+                        Available: {availableStock} boxes
                       </span>
                       {/* Stock validation warning - now checks total quantity */}
                       {hasStockProblem && (

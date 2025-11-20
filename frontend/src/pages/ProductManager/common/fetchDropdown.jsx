@@ -82,7 +82,6 @@ export const fetchSuppliers = async () => {
 export const fetchProducts = async () => {
   try {
     const response = await axios.get(`${backendUrl}/api/dropdown-products`);
-    console.log("Response from /products:", response);
 
     // Get data from API
     const products = response.data?.data || [];

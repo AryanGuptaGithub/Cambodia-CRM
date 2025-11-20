@@ -56,7 +56,7 @@ const Dashboard = () => {
   // SUB-TABS
   const [activeSalesSubTab, setActiveSalesSubTab] = useState("Today");
   const [activeExpenseSubTab, setActiveExpenseSubTab] = useState("Month");
-  const [activePayrollSubTab, setActivePayrollSubTab] = useState("Prev Month");
+  const [activePayrollSubTab, setActivePayrollSubTab] = useState("Prev Month"); // Changed back to "Prev Month"
   const [activeOutstandingSubTab, setActiveOutstandingSubTab] =
     useState("Today");
   const [activeStockSubTab, setActiveStockSubTab] = useState("Today");
@@ -70,6 +70,8 @@ const Dashboard = () => {
   const [loadingOutstandingData, setLoadingOutstandingData] = useState(false);
   const [expenseTableData, setExpenseTableData] = useState([]);
   const [loadingExpenseData, setLoadingExpenseData] = useState(false);
+  const [payrollTableData, setPayrollTableData] = useState([]);
+  const [loadingPayrollData, setLoadingPayrollData] = useState(false);
 
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [selectedProductName, setSelectedProductName] = useState("");
@@ -94,7 +96,7 @@ const Dashboard = () => {
   const [sidePanelCurrentPage, setSidePanelCurrentPage] = useState(1);
 
   const dateRanges = getDateRanges();
-  const prevMonthRanges = getPreviousMonthRanges();
+  const prevMonthRanges = getPreviousMonthRanges(); // This now returns prevMonth and ytd
   const stockDateRanges = getStockDateRanges();
 
   const [user] = useState({
@@ -107,10 +109,9 @@ const Dashboard = () => {
   const fetchStockTableData = async (period = "Today") => {
     try {
       setLoadingStockData(true);
-      console.log("Fetching stock data for period:", period);
 
       const response = await axios.get(`${backendUrl}/api/reports-in-hand`, {
-        params: { period }
+        params: { period },
       });
 
       const stockDataFromAPI = Array.isArray(response.data.reports)
@@ -138,11 +139,11 @@ const Dashboard = () => {
   const fetchSalesTableData = async (period) => {
     try {
       setLoadingSalesData(true);
-      console.log("Fetching sales data for period:", period);
-      
+
       const response = await axios.get(`${backendUrl}/api/sales/table-data`, {
         params: { period },
       });
+
       setSalesTableData(response.data.success ? response.data.data : []);
     } catch (error) {
       console.error("Error fetching sales table data:", error);
@@ -155,8 +156,7 @@ const Dashboard = () => {
   const fetchOutstandingTableData = async (period) => {
     try {
       setLoadingOutstandingData(true);
-      console.log("Fetching outstanding data for period:", period);
-      
+
       const response = await axios.get(
         `${backendUrl}/api/outstanding/table-data`,
         { params: { period } }
@@ -173,13 +173,10 @@ const Dashboard = () => {
   const fetchExpenseTableData = async (period) => {
     try {
       setLoadingExpenseData(true);
-      console.log("Fetching expense data for period:", period);
 
       const response = await axios.get(`${backendUrl}/api/expenses`, {
         params: { period },
       });
-
-      console.log("Expense API response:", response.data);
 
       let expenses = [];
       if (response.data?.success) {
@@ -191,8 +188,6 @@ const Dashboard = () => {
       } else if (response.data?.latestExpenses) {
         expenses = response.data.latestExpenses;
       }
-
-      console.log("Raw expenses data:", expenses);
 
       // Filter expenses based on period
       const currentDate = new Date();
@@ -219,8 +214,6 @@ const Dashboard = () => {
         default:
           filteredExpenses = expenses;
       }
-
-      console.log("Filtered expenses for", period, ":", filteredExpenses);
 
       const formattedExpenses = Array.isArray(filteredExpenses)
         ? filteredExpenses.map((expense) => ({
@@ -255,8 +248,6 @@ const Dashboard = () => {
           }))
         : [];
 
-      console.log("Formatted expenses:", formattedExpenses);
-
       setExpenseTableData(
         formattedExpenses.sort((a, b) => b.amount - a.amount)
       );
@@ -268,6 +259,51 @@ const Dashboard = () => {
     }
   };
 
+  const fetchPayrollTableData = async (period) => {
+    try {
+      setLoadingPayrollData(true);
+
+      const currentDate = new Date();
+
+      let payrollPeriod;
+
+      if (period === "Prev Month") {
+        let prevMonth = currentDate.getMonth() - 1;
+        let year = currentDate.getFullYear();
+
+        if (prevMonth < 0) {
+          prevMonth = 11;
+          year = year - 1;
+        }
+        const month = String(prevMonth + 1).padStart(2, "0");
+        payrollPeriod = `${year}-${month}`;
+      } else if (period === "YTD") {
+        const year = currentDate.getFullYear();
+        payrollPeriod = `${year}-YTD`;
+      }
+
+      const response = await axios.get(`${backendUrl}/api/payrolls`, {
+        params: { period: payrollPeriod },
+      });
+
+      const payrolls = response.data?.data || [];
+
+      // Calculate and log the total
+      const totalNetSalary = payrolls.reduce((sum, item) => {
+        const netSalary = item.netSalary || 0;
+
+        return sum + netSalary;
+      }, 0);
+
+      setPayrollTableData(payrolls);
+    } catch (error) {
+      console.error("28. Error in fetchPayrollTableData:", error);
+
+      setPayrollTableData([]);
+    } finally {
+      setLoadingPayrollData(false);
+    }
+  };
   // ------------------ HANDLERS ------------------
   const handleViewProducts = (mrName, products) => {
     setSelectedMRName(mrName);
@@ -282,7 +318,6 @@ const Dashboard = () => {
   };
 
   const handleViewExpenseDetails = (expenseName, details) => {
-    console.log("View expense details:", expenseName, details);
     setSelectedMRName(expenseName);
     setSelectedMRProducts(details);
     setShowProductsModal(true);
@@ -296,27 +331,23 @@ const Dashboard = () => {
 
   // SUB-TAB CHANGE HANDLERS
   const handleSalesSubTabChange = (subTab) => {
-    console.log("Sales sub-tab changed to:", subTab);
     setActiveSalesSubTab(subTab);
-    // Data will be fetched by the useEffect
   };
 
   const handleOutstandingSubTabChange = (subTab) => {
-    console.log("Outstanding sub-tab changed to:", subTab);
     setActiveOutstandingSubTab(subTab);
-    // Data will be fetched by the useEffect
   };
 
   const handleStockSubTabChange = (subTab) => {
-    console.log("Stock sub-tab changed to:", subTab);
     setActiveStockSubTab(subTab);
-    // Data will be fetched by the useEffect
   };
 
   const handleExpenseSubTabChange = (subTab) => {
-    console.log("Expense sub-tab changed to:", subTab);
     setActiveExpenseSubTab(subTab);
-    // Data will be fetched by the useEffect
+  };
+
+  const handlePayrollSubTabChange = (subTab) => {
+    setActivePayrollSubTab(subTab);
   };
 
   const handleParentTabChange = (newTab) => {
@@ -337,6 +368,7 @@ const Dashboard = () => {
     }
     if (newTab === "Total Payroll") {
       setActivePayrollSubTab("Prev Month");
+      fetchPayrollTableData("Prev Month");
     }
     if (newTab === "Expenses") {
       setActiveExpenseSubTab("Month");
@@ -364,12 +396,20 @@ const Dashboard = () => {
   }, [activeSalesSubTab, activeTab]);
 
   useEffect(() => {
-    if (activeTab === "Outstanding") fetchOutstandingTableData(activeOutstandingSubTab);
+    if (activeTab === "Outstanding")
+      fetchOutstandingTableData(activeOutstandingSubTab);
   }, [activeOutstandingSubTab, activeTab]);
 
   useEffect(() => {
     if (activeTab === "Expenses") fetchExpenseTableData(activeExpenseSubTab);
   }, [activeExpenseSubTab, activeTab]);
+
+  // Effect for payroll sub-tab changes
+  useEffect(() => {
+    if (activeTab === "Total Payroll") {
+      fetchPayrollTableData(activePayrollSubTab);
+    }
+  }, [activePayrollSubTab, activeTab]);
 
   // ------------------ RENDER MAIN TABLE ------------------
   const renderMainTable = () => {
@@ -397,10 +437,10 @@ const Dashboard = () => {
       case "Total Payroll":
         return (
           <PayrollTable
-            payrollData={payrollData}
-            loading={loading}
+            payrollData={payrollTableData}
+            loading={loadingPayrollData}
             activePayrollSubTab={activePayrollSubTab}
-            prevMonthRanges={prevMonthRanges}
+            prevMonthRanges={prevMonthRanges} // Pass prevMonthRanges instead of dateRanges
           />
         );
       case "Expenses":
@@ -463,7 +503,7 @@ const Dashboard = () => {
         activeStockSubTab={activeStockSubTab}
         onSalesSubTabChange={handleSalesSubTabChange}
         onExpenseSubTabChange={handleExpenseSubTabChange}
-        onPayrollSubTabChange={setActivePayrollSubTab}
+        onPayrollSubTabChange={handlePayrollSubTabChange}
         onOutstandingSubTabChange={handleOutstandingSubTabChange}
         onStockSubTabChange={handleStockSubTabChange}
         dateRanges={dateRanges}

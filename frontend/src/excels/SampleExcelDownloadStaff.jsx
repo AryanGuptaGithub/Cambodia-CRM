@@ -79,7 +79,7 @@ const SampleExcelDownloadStaff = () => {
       onClick={generateExcel}
       className="text-blue-600 hover:text-blue-800 text-sm mb-4 block cursor-pointer"
     >
-      Click here to download Medical Representative Excel file
+      download Medical Representative Sample
     </button>
   );
 };

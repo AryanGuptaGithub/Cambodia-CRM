@@ -287,7 +287,7 @@ router.get("/dropdown-products", async (req, res) => {
         updatedAt: product.updatedAt,
       };
     });
-    console.log("fial", finalList);
+  
     res.status(200).json({ success: true, data: finalList });
   } catch (err) {
     console.error("❌ Error fetching products with stock:", err);

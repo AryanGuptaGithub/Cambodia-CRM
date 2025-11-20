@@ -73,8 +73,6 @@ const getDateRangeForPeriod = (period) => {
 router.get("/expenses", async (req, res) => {
   try {
     const { period } = req.query;
-    console.log("Fetching expenses with period:", period);
-
     // Build query based on period
     let query = {};
     if (period) {
@@ -85,8 +83,6 @@ router.get("/expenses", async (req, res) => {
       .populate("category", "category description")
       .populate("sourceAccount", "name")
       .sort({ date: -1, createdAt: -1 });
-
-    console.log(`Found ${expenses.length} expenses for period: ${period || 'All'}`);
 
     // Calculate totals for the dashboard
     const currentDate = new Date();

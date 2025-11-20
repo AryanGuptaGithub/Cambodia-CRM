@@ -67,21 +67,19 @@ export const getPreviousMonthRanges = () => {
   const prevMonthEnd = new Date(previousMonthYear, previousMonthNumber + 1, 0);
   prevMonthEnd.setHours(23, 59, 59, 999);
 
-  // Previous Month Year to Date (Jan 1st to end of previous month)
-  const prevMonthYearStart = new Date(previousMonthYear, 0, 1);
-  const prevMonthYearEnd = new Date(
-    previousMonthYear,
-    previousMonthNumber + 1,
-    0
-  );
-  prevMonthYearEnd.setHours(23, 59, 59, 999);
+  // Year to Date from Jan 1st to end of previous month
+  const ytdStart = new Date(previousMonthYear, 0, 1);
+  const ytdEnd = new Date(previousMonthYear, previousMonthNumber + 1, 0);
+  ytdEnd.setHours(23, 59, 59, 999);
 
   // Format labels
   const prevMonthLabel = previousMonth.toLocaleString("en-US", {
     month: "short",
-    year: "numeric",
   });
-  const prevMonthYearLabel = previousMonthYear.toString();
+  
+  const ytdRangeLabel = `1 Jan - ${ytdEnd.getDate()} ${ytdEnd.toLocaleString("en-US", {
+    month: "short",
+  })}`;
 
   return {
     prevMonth: {
@@ -89,10 +87,10 @@ export const getPreviousMonthRanges = () => {
       end: prevMonthEnd,
       label: prevMonthLabel,
     },
-    prevMonthYear: {
-      start: prevMonthYearStart,
-      end: prevMonthYearEnd,
-      label: prevMonthYearLabel,
+    ytd: {
+      start: ytdStart,
+      end: ytdEnd,
+      rangeLabel: ytdRangeLabel,
     },
   };
 };
@@ -154,8 +152,6 @@ export const formatDateToReadableFixed = (dateString) => {
     return "Invalid Date";
   }
 };
-
-// Add these functions to your existing DashboardUtil.js
 
 // Get stock date ranges
 export const getStockDateRanges = () => {

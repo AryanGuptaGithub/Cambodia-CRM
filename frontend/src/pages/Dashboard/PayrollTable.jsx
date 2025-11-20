@@ -1,4 +1,5 @@
-import {DataTable} from "./DataTable";
+import { DataTable } from "./DataTable";
+import { formatCurrency } from "./DashboardUtil";
 
 export const PayrollTable = ({
   payrollData,
@@ -32,41 +33,45 @@ export const PayrollTable = ({
       header: "Basic Salary ($)", 
       render: (item) => 
         <span className="font-semibold text-blue-700">
-          {item.basicSalary || 0}
+          {formatCurrency(item.basicSalary || 0)}
         </span>
     },
     { 
       header: "Allowances ($)", 
       render: (item) => 
         <span className="font-semibold text-green-700">
-          {item.totalAllowance || 0}
+          {formatCurrency(item.totalAllowance || 0)}
         </span>
     },
     { 
       header: "Deductions ($)", 
       render: (item) => 
         <span className="font-semibold text-red-700">
-          {item.deductions || 0}
+          {formatCurrency(item.deductions || 0)}
         </span>
     },
     { 
       header: "Net Salary ($)", 
       render: (item) => 
         <span className="font-semibold text-purple-700">
-          {item.netSalary || 0}
+          {formatCurrency(item.netSalary || 0)}
         </span>
     }
   ];
 
+  const getTableTitle = () => {
+    return `Payroll Details - ${
+      activePayrollSubTab === "Prev Month"
+        ? prevMonthRanges.prevMonth.label // e.g., "Oct"
+        : prevMonthRanges.ytd.rangeLabel // e.g., "1 Jan - 31 Oct"
+    }`;
+  };
+
   return (
     <DataTable
-      title={`Payroll Details - ${
-        activePayrollSubTab === "Prev Month"
-          ? prevMonthRanges.prevMonth.label
-          : prevMonthRanges.prevMonthYear.label
-      }`}
+      title={getTableTitle()}
       loading={loading}
-      loadingText="Loading..."
+      loadingText="Loading payroll data..."
       emptyText="No payroll data found"
       columns={columns}
       data={payrollData}

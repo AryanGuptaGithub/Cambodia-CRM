@@ -76,6 +76,7 @@ export const DashboardCards = ({
   dateRanges,
   prevMonthRanges,
 }) => {
+  console.log('payrollYTDTotal ', payrollYTDTotal );
   const getCurrentSalesAmount = () => {
     switch (activeSalesSubTab) {
       case "Today":
@@ -129,14 +130,7 @@ export const DashboardCards = ({
   };
 
   const getCurrentExpenseAmount = () => {
-    console.log(
-      "getCurrentExpenseAmount called with activeExpenseSubTab:",
-      activeExpenseSubTab
-    );
-    console.log("expenseData:", expenseData);
-
     if (!expenseData || !expenseData.latestExpenses) {
-      console.log("No expenseData or latestExpenses found, returning 0");
       return 0;
     }
 
@@ -146,7 +140,6 @@ export const DashboardCards = ({
 
     switch (activeExpenseSubTab) {
       case "Month":
-        // Filter expenses for current month
         filteredExpenses = expenseData.latestExpenses.filter((expense) => {
           const expenseDate = new Date(expense.date);
           return (
@@ -158,16 +151,10 @@ export const DashboardCards = ({
           (sum, expense) => sum + (expense.amount || 0),
           0
         );
-        console.log(
-          "Month filter - Count:",
-          filteredExpenses.length,
-          "Total:",
-          totalAmount
-        );
+
         break;
 
       case "Year":
-        // Filter expenses for current year
         filteredExpenses = expenseData.latestExpenses.filter((expense) => {
           const expenseDate = new Date(expense.date);
           return expenseDate.getFullYear() === currentDate.getFullYear();
@@ -176,16 +163,10 @@ export const DashboardCards = ({
           (sum, expense) => sum + (expense.amount || 0),
           0
         );
-        console.log(
-          "Year filter - Count:",
-          filteredExpenses.length,
-          "Total:",
-          totalAmount
-        );
+
         break;
 
       default:
-        // Default to month
         filteredExpenses = expenseData.latestExpenses.filter((expense) => {
           const expenseDate = new Date(expense.date);
           return (
@@ -197,26 +178,26 @@ export const DashboardCards = ({
           (sum, expense) => sum + (expense.amount || 0),
           0
         );
-        console.log(
-          "Default filter - Count:",
-          filteredExpenses.length,
-          "Total:",
-          totalAmount
-        );
     }
 
     return totalAmount;
   };
 
   const getCurrentPayrollAmount = () => {
+    let amount = 0;
+
     switch (activePayrollSubTab) {
       case "Prev Month":
-        return totalPayroll || 0;
+        amount = totalPayroll || 0;
+        break;
       case "YTD":
-        return payrollYTDTotal || 0;
+        amount = payrollYTDTotal || 0;
+        break;
       default:
-        return totalPayroll || 0;
+        amount = totalPayroll || 0;
     }
+
+    return amount;
   };
 
   const getCurrentStockAmount = () => {
@@ -269,8 +250,8 @@ export const DashboardCards = ({
       color: "purple",
       subtitle:
         activePayrollSubTab === "Prev Month"
-          ? prevMonthRanges.prevMonth.label
-          : prevMonthRanges.prevMonthYear.label,
+          ? prevMonthRanges.prevMonth.label // e.g., "Oct"
+          : prevMonthRanges.ytd.rangeLabel, // e.g., "1 Jan - 31 Oct"
     },
   ];
 

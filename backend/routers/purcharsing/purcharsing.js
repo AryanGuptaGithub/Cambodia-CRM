@@ -366,7 +366,7 @@ router.post("/purchase/import", async (req, res) => {
         invoices.set(invoiceNumber, {
           invoiceNumber,
           invoiceDate: row.invoiceDate ? new Date(row.invoiceDate) : null,
-          deliveryNumber: row.deliveryNumber?.trim() || "",
+          deliveryNumber: row.deliveryNumber?.toString().trim() || "",
           receivedDate: row.receivedDate ? new Date(row.receivedDate) : null,
           supplierName: row.supplierName?.trim() || "Unknown Supplier",
           products: [],

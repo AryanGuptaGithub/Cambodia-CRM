@@ -231,6 +231,7 @@ export const useDashboardData = () => {
       const response = await axios.get(`${backendUrl}/api/payrolls`, {
         params: { period },
       });
+      
       const payrolls = response.data?.data || [];
       setPayrollData(payrolls);
       const total = payrolls.reduce(
@@ -238,7 +239,7 @@ export const useDashboardData = () => {
         0
       );
       setTotalPayroll(total);
-      setPayrollYTDTotal(total * 2.5);
+      setPayrollYTDTotal(total);
     } catch (error) {
       console.error("Error fetching payroll data:", error);
       setPayrollData([]);

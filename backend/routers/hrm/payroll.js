@@ -68,19 +68,38 @@ router.get("/payrolls", async (req, res) => {
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
-    const matchConditions = { enabled: true };
 
+    const matchConditions = { enabled: true };
+    console.log('req', req.query);
+    // -----------------------------
+    // STATUS FILTER
+    // -----------------------------
     if (status && status !== "all") {
       matchConditions.status = status;
     }
 
+    // -----------------------------
+    // PERIOD FILTER (FIXED HERE)
+    // -----------------------------
     if (period) {
-      matchConditions.period = period;
+      // Example: 2025-YTD → match all like "2025-*"
+      if (period.endsWith("-YTD")) {
+        const year = period.split("-")[0];
+        matchConditions.period = { $regex: `^${year}-`, $options: "i" };
+      }
+      // Specific period like "2025-10"
+      else if (period !== "all") {
+        matchConditions.period = period;
+      }
     }
 
+    // -----------------------------
+    // SEARCH FILTER
+    // -----------------------------
     let searchConditions = {};
-    if (search && search.trim() !== "") {
+    if (search && search.trim()) {
       const searchRegex = new RegExp(search.trim(), "i");
+
       const matchingStaff = await Staff.find({
         $or: [
           { medicalRepName: searchRegex },
@@ -90,7 +109,7 @@ router.get("/payrolls", async (req, res) => {
         ],
       }).select("_id");
 
-      const staffIds = matchingStaff.map((staff) => staff._id);
+      const staffIds = matchingStaff.map((s) => s._id);
 
       searchConditions = {
         $or: [
@@ -101,38 +120,43 @@ router.get("/payrolls", async (req, res) => {
       };
     }
 
-    // Combine all conditions
+    // -----------------------------
+    // FINAL QUERY CONDITIONS
+    // -----------------------------
     const finalConditions = {
       ...matchConditions,
       ...(Object.keys(searchConditions).length > 0 ? searchConditions : {}),
     };
 
-    // Sort configuration
+    // Sorting
     const sort = {};
     sort[sortBy] = sortOrder === "desc" ? -1 : 1;
+
+    // -----------------------------
+    // FETCH PAYROLLS
+    // -----------------------------
     const payrolls = await Payroll.find(finalConditions)
       .populate(
         "employeeId",
         "medicalRepName teamName contactNo email date enabled MRId"
-      ) // Added all staff fields
+      )
       .populate("source", "name code totalAmount")
       .sort(sort)
       .skip(skip)
       .limit(limitNum)
       .lean();
 
+    // -----------------------------
+    // TRANSFORM PAYROLL DATA
+    // -----------------------------
     const transformedPayrolls = payrolls.map((payroll) => {
       const payrollObj = { ...payroll };
 
-      // FIXED: Better condition to check for valid populated employee data
-      // Check if employeeId exists, is an object, and has the expected properties
       if (
         payrollObj.employeeId &&
         typeof payrollObj.employeeId === "object" &&
-        payrollObj.employeeId._id &&
-        payrollObj.employeeId.medicalRepName
+        payrollObj.employeeId._id
       ) {
-        // Map all employee details to the payroll object
         payrollObj.employeeName = payrollObj.employeeId.medicalRepName;
         payrollObj.teamName = payrollObj.employeeId.teamName;
         payrollObj.contactNo = payrollObj.employeeId.contactNo;
@@ -141,7 +165,6 @@ router.get("/payrolls", async (req, res) => {
         payrollObj.employeeEnabled = payrollObj.employeeId.enabled;
         payrollObj.MRId = payrollObj.employeeId.MRId;
       } else {
-        // Set default values when no employee data
         payrollObj.employeeName = "Unknown";
         payrollObj.teamName = "Unknown";
         payrollObj.contactNo = "N/A";
@@ -154,40 +177,33 @@ router.get("/payrolls", async (req, res) => {
       return payrollObj;
     });
 
+    // Count
     const total = await Payroll.countDocuments(finalConditions);
-
-    const nextPayrollCode = await generateNextPayrollCode();
-
     const totalPages = Math.ceil(total / limitNum);
+    const nextPayrollCode = await generateNextPayrollCode();
 
     res.status(200).json({
       success: true,
       data: transformedPayrolls,
       pagination: {
         currentPage: pageNum,
-        totalPages: totalPages,
+        totalPages,
         totalItems: total,
         itemsPerPage: limitNum,
       },
       nextPayrollCode,
     });
-    
   } catch (error) {
     console.error("❌ Error in payrolls API:", error);
-    console.error("📝 Error details:", {
-      message: error.message,
-      stack: error.stack,
-      name: error.name,
-    });
 
     res.status(500).json({
       success: false,
       message: "Failed to fetch payrolls",
       error: error.message,
     });
-    
   }
 });
+
 // ==================== GET SINGLE PAYROLL BY ID ====================
 router.get("/payrolls/:id", async (req, res) => {
   try {
