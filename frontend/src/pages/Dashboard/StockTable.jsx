@@ -1,4 +1,3 @@
-// StockTable.jsx
 import React from "react";
 import { DataTable } from "./DataTable";
 import { formatCurrency } from "./DashboardUtil";
@@ -8,44 +7,62 @@ export const StockTable = ({
   loadingStockData,
   activeStockSubTab,
   dateRanges,
-  onViewStockDetails,
+  onViewStockDetails, // function to show batch-wise LC in modal
 }) => {
+  // Columns for main stock table (shows average LC)
   const columns = [
     {
       header: "Product Name",
       accessor: "productName",
+      render: (item) => (
+        <span className="text-gray-800 font-medium">{item.productName}</span>
+      ),
     },
     {
       header: "Supplier",
       accessor: "supplierName",
     },
-
     {
       header: "Quantity (Boxes)",
-      render: (item) => item.quantity?.boxes || 0,
+      render: (item) =>
+        item.batches?.reduce((sum, batch) => sum + (batch.boxes || 0), 0) || 0,
     },
     {
-      header: "LC Price ($)",
-      render: (item) => formatCurrency(item.lc || 0),
+      header: "LC Price ($)", // Average LC per product
+      render: (item) => {
+        const totalBoxes = item.batches?.reduce(
+          (sum, batch) => sum + (batch.boxes || 0),
+          0
+        );
+        const totalLC = item.batches?.reduce(
+          (sum, batch) => sum + (batch.lc * (batch.boxes || 0)),
+          0
+        );
+        const avgLC = totalBoxes ? totalLC / totalBoxes : 0;
+        return formatCurrency(avgLC);
+      },
     },
     {
       header: "Stock Value ($)",
       render: (item) => {
-        const quantity = item.quantity?.boxes || 0;
-        const lc = item.lc || 0;
-        const value = quantity * lc;
+        const value = item.batches?.reduce(
+          (sum, batch) => sum + (batch.lc * (batch.boxes || 0)),
+          0
+        );
         return (
           <span className="text-green-600 font-semibold">
-            ${formatCurrency(value)}
+            ${formatCurrency(value || 0)}
           </span>
         );
       },
-      
     },
     {
       header: "Status",
       render: (item) => {
-        const currentStock = item.quantity?.boxes || 0;
+        const currentStock = item.batches?.reduce(
+          (sum, batch) => sum + (batch.boxes || 0),
+          0
+        );
         const minStockLevel = item.minStockLevel || 0;
         const isLowStock = currentStock < minStockLevel;
 
@@ -61,6 +78,18 @@ export const StockTable = ({
           </span>
         );
       },
+      className: "text-center",
+    },
+    {
+      header: "Action",
+      render: (item) => (
+        <button
+          className="bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700"
+          onClick={() => onViewStockDetails(item.productName, item.batches)}
+        >
+          View
+        </button>
+      ),
       className: "text-center",
     },
   ];

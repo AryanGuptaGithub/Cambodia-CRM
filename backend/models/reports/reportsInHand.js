@@ -1,5 +1,15 @@
 import mongoose from "mongoose";
 
+const batchSchema = new mongoose.Schema({
+  boxes: { type: Number, required: true, min: 0 },
+  lc: { type: Number, required: true, min: 0 },
+  fob: { type: Number, required: true, min: 0 },
+  cif: { type: Number, required: true, min: 0 },
+  amount: { type: Number, required: true, min: 0 },
+  expiryDate: { type: Date },
+  date: { type: Date, default: Date.now },
+});
+
 const reportInHandSchema = new mongoose.Schema(
   {
     supplierName: {
@@ -7,27 +17,37 @@ const reportInHandSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+
     productName: {
       type: String,
       required: true,
       trim: true,
+      unique: true, // One document per product
     },
-    quantity: {
-      boxes: {
-        type: Number,
-        default: 0,
-        min: 0,
-      },
+
+    // multiple purchase batches
+    batches: {
+      type: [batchSchema],
+      default: [],
     },
+
+    // total stock from all batches
+    totalBoxes: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    totalAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
     status: {
       type: String,
       enum: ["In Stock", "Low Stock", "Critical", "Out of Stock"],
       default: "In Stock",
-    },
-    category: {
-      type: String,
-      trim: true,
-      default: "Uncategorized",
     },
 
     minStockLevel: {
@@ -35,31 +55,13 @@ const reportInHandSchema = new mongoose.Schema(
       default: 10,
       min: 0,
     },
-    // New fields for LC and FOB
-    lc: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
-    fob: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
-    cif: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
-// Auto-calculate status based on boxes quantity
+// Auto-update status before saving
 reportInHandSchema.pre("save", function (next) {
-  const boxes = this.quantity.boxes || 0;
+  const boxes = this.totalBoxes || 0;
 
   if (boxes === 0) {
     this.status = "Out of Stock";

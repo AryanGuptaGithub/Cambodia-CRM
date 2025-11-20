@@ -20,54 +20,90 @@ const calculateStockStatus = (boxes) => {
 
 const updateReportInHand = async (productData, operation = "add") => {
   try {
-    const { productName, supplierName, quantityPerBoxStrip, lc, fob, cif } =
-      productData;
+    const {
+      productName,
+      supplierName,
+      quantityPerBoxStrip,
+      lc,
+      fob,
+      cif,
+      expiryDate,
+    } = productData;
 
-    const validSupplier = supplierName?.trim() || "Unknown Supplier";
     const qty = Number(quantityPerBoxStrip || 0);
+    const validSupplier = supplierName?.trim() || "Unknown Supplier";
 
-    let existing = await ReportInHand.findOne({ productName });
+    let item = await ReportInHand.findOne({ productName });
 
-    if (existing) {
-      const multiplier = operation === "add" ? 1 : -1;
-      const newQty = Math.max(existing.quantity.boxes + qty * multiplier, 0);
+    // --------------------------------------------------------------
+    // CREATE NEW PRODUCT ENTRY IF NOT EXISTS
+    // --------------------------------------------------------------
+    if (!item) {
+      item = new ReportInHand({
+        productName,
+        supplierName: validSupplier,
+        batches: [],
+        totalBoxes: 0,
+        totalAmount: 0,
+      });
+    }
 
-      let newLc = existing.lc;
-      let newFob = existing.fob;
-      let newCif = existing.cif;
+    // --------------------------------------------------------------
+    // ADD NEW BATCH
+    // --------------------------------------------------------------
+    if (operation === "add") {
+      const amount = qty * lc;
 
-      if (operation === "add" && qty > 0) {
-        const oldQty = existing.quantity.boxes;
-        const total = oldQty + qty;
+      item.batches.push({
+        boxes: qty,
+        lc,
+        fob,
+        cif,
+        amount,
+        expiryDate,
+        date: new Date(),
+      });
+    }
 
-        if (total > 0) {
-          newLc = (existing.lc * oldQty + lc * qty) / total;
-          newFob = (existing.fob * oldQty + fob * qty) / total;
-          newCif = (existing.cif * oldQty + cif * qty) / total;
+    // --------------------------------------------------------------
+    // SUBTRACT USING FIFO
+    // --------------------------------------------------------------
+    if (operation === "subtract") {
+      let qtyToRemove = qty;
+
+      for (const batch of item.batches) {
+        if (qtyToRemove <= 0) break;
+
+        if (batch.boxes > qtyToRemove) {
+          batch.boxes -= qtyToRemove;
+          batch.amount = batch.boxes * batch.lc;
+          qtyToRemove = 0;
+        } else {
+          qtyToRemove -= batch.boxes;
+          batch.boxes = 0;
+          batch.amount = 0;
         }
       }
 
-      await ReportInHand.findByIdAndUpdate(existing._id, {
-        $set: {
-          "quantity.boxes": newQty,
-          status: calculateStockStatus(newQty),
-          supplierName: validSupplier,
-          lc: newLc,
-          fob: newFob,
-          cif: newCif,
-        },
-      });
-    } else if (operation === "add") {
-      await ReportInHand.create({
-        productName,
-        supplierName: validSupplier,
-        quantity: { boxes: qty },
-        status: calculateStockStatus(qty),
-        lc: lc || 0,
-        fob: fob || 0,
-        cif: cif || 0,
-      });
+      // Remove empty batches
+      item.batches = item.batches.filter((b) => b.boxes > 0);
     }
+
+    // --------------------------------------------------------------
+    // UPDATE TOTALS
+    // --------------------------------------------------------------
+    item.totalBoxes = item.batches.reduce((sum, b) => sum + b.boxes, 0);
+    item.totalAmount = item.batches.reduce((sum, b) => sum + b.amount, 0);
+
+    // --------------------------------------------------------------
+    // UPDATE STATUS
+    // --------------------------------------------------------------
+    if (item.totalBoxes <= 0) item.status = "Out of Stock";
+    else if (item.totalBoxes < 10) item.status = "Critical";
+    else if (item.totalBoxes < 25) item.status = "Low Stock";
+    else item.status = "In Stock";
+
+    await item.save();
   } catch (err) {
     console.error("updateReportInHand ERROR:", err);
   }
@@ -215,103 +251,10 @@ router.delete("/purchase", async (req, res) => {
 });
 
 /* IMPORT EXCEL WITH DUPLICATE CHECK */
-router.post("/purchase/import", async (req, res) => {
-  try {
-    const rows = req.body;
-    console.log(rows);
-
-    if (!Array.isArray(rows))
-      return res.status(400).json({ message: "Invalid data" });
-
-    const invoices = new Map();
-    const skipped = [];
-
-    for (const row of rows) {
-      if (!row.invoiceNumber) continue;
-
-      const invoiceNumber = row.invoiceNumber.trim(); // 🔥 trim spaces
-
-      // Check if invoice already exists in DB
-      const exists = await purchaseInventory.findOne({ invoiceNumber });
-
-      if (exists) {
-        skipped.push(invoiceNumber);
-        continue;
-      }
-
-      if (!invoices.has(invoiceNumber)) {
-        invoices.set(invoiceNumber, {
-          invoiceNumber,
-          invoiceDate: row.invoiceDate ? new Date(row.invoiceDate) : null,
-          deliveryNumber: row.deliveryNumber?.trim() || "",
-          receivedDate: row.receivedDate ? new Date(row.receivedDate) : null,
-          supplierName: row.supplierName?.trim() || "Unknown Supplier",
-          products: [],
-          totalAmount: 0,
-        });
-      }
-
-      const inv = invoices.get(invoiceNumber);
-
-      const qty = Number(row.quantityPerBoxStrip || 0);
-      const lc = Number(row.lc || 0);
-      const fob = Number(row.fob || 0);
-      const cif = Number(row.cif || 0);
-
-      const amount = lc * qty;
-
-      inv.products.push({
-        productName: row.productName?.trim() || "Unknown Product",
-        expiryDate: row.expiryDate ? new Date(row.expiryDate) : null,
-        quantityPerBoxStrip: qty,
-        lc,
-        fob,
-        cif,
-        amount,
-      });
-
-      inv.totalAmount += amount;
-    }
-
-    const finalInvoices = Array.from(invoices.values());
-
-    if (finalInvoices.length > 0) {
-      await purchaseInventory.insertMany(finalInvoices);
-
-      // Update report in-hand
-      for (const inv of finalInvoices) {
-        for (const p of inv.products) {
-          await updateReportInHand(
-            {
-              productName: p.productName,
-              quantityPerBoxStrip: p.quantityPerBoxStrip,
-              supplierName: inv.supplierName,
-              lc: p.lc,
-              fob: p.fob,
-              cif: p.cif,
-            },
-            "add"
-          );
-        }
-      }
-    }
-
-    res.json({
-      message: `Imported ${finalInvoices.length} invoices`,
-      importedCount: finalInvoices.length,
-      skippedInvoices: skipped,
-    });
-  } catch (err) {
-    console.error("Import error:", err);
-    res.status(500).json({ message: "Internal server error" });
-  }
-});
-
-/* ADD NEW PURCHASE MANUALLY */
 router.post("/purchase", async (req, res) => {
   try {
     const data = req.body;
-    console.log("values of data", data);
+
     if (
       !data.invoiceNumber ||
       !data.supplierName ||
@@ -320,6 +263,7 @@ router.post("/purchase", async (req, res) => {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
+    // Prevent duplicates
     const existing = await purchaseInventory.findOne({
       invoiceNumber: data.invoiceNumber,
     });
@@ -338,7 +282,7 @@ router.post("/purchase", async (req, res) => {
       const lc = Number(p.lc || 0);
       const fob = Number(p.fob || 0);
       const cif = Number(p.cif || 0);
-      const amount = lc * qty;
+      const amount = qty * lc;
 
       totalAmount += amount;
 
@@ -353,6 +297,7 @@ router.post("/purchase", async (req, res) => {
       };
     });
 
+    // Save purchase
     const invoice = await purchaseInventory.create({
       ...data,
       supplierName: data.supplierName.trim(),
@@ -360,10 +305,18 @@ router.post("/purchase", async (req, res) => {
       totalAmount,
     });
 
-    // Update stock
+    // Update batches in inventory
     for (const p of products) {
       await updateReportInHand(
-        { ...p, supplierName: data.supplierName },
+        {
+          productName: p.productName,
+          supplierName: data.supplierName,
+          quantityPerBoxStrip: p.quantityPerBoxStrip,
+          lc: p.lc,
+          fob: p.fob,
+          cif: p.cif,
+          expiryDate: p.expiryDate,
+        },
         "add"
       );
     }
@@ -376,7 +329,6 @@ router.post("/purchase", async (req, res) => {
   } catch (err) {
     console.error("Add error:", err);
 
-    // Handle duplicate key error
     if (err.code === 11000) {
       return res.status(400).json({
         success: false,
@@ -385,6 +337,98 @@ router.post("/purchase", async (req, res) => {
     }
 
     res.status(500).json({ message: "Server error" });
+  }
+});
+router.post("/purchase/import", async (req, res) => {
+  try {
+    const rows = req.body;
+
+    if (!Array.isArray(rows))
+      return res.status(400).json({ message: "Invalid data" });
+
+    const invoices = new Map();
+    const skipped = [];
+
+    for (const row of rows) {
+      if (!row.invoiceNumber) continue;
+
+      const invoiceNumber = row.invoiceNumber.trim();
+
+      // Check duplicate invoice
+      const exists = await purchaseInventory.findOne({ invoiceNumber });
+      if (exists) {
+        skipped.push(invoiceNumber);
+        continue;
+      }
+
+      // Create invoice container if first time
+      if (!invoices.has(invoiceNumber)) {
+        invoices.set(invoiceNumber, {
+          invoiceNumber,
+          invoiceDate: row.invoiceDate ? new Date(row.invoiceDate) : null,
+          deliveryNumber: row.deliveryNumber?.trim() || "",
+          receivedDate: row.receivedDate ? new Date(row.receivedDate) : null,
+          supplierName: row.supplierName?.trim() || "Unknown Supplier",
+          products: [],
+          totalAmount: 0,
+        });
+      }
+
+      const inv = invoices.get(invoiceNumber);
+
+      const qty = Number(row.quantityPerBoxStrip || 0);
+      const lc = Number(row.lc || 0);
+      const fob = Number(row.fob || 0);
+      const cif = Number(row.cif || 0);
+      const amount = qty * lc;
+
+      // push product purchase line
+      inv.products.push({
+        productName: row.productName?.trim() || "Unknown Product",
+        expiryDate: row.expiryDate ? new Date(row.expiryDate) : null,
+        quantityPerBoxStrip: qty,
+        lc,
+        fob,
+        cif,
+        amount,
+      });
+
+      inv.totalAmount += amount;
+    }
+
+    const finalInvoices = Array.from(invoices.values());
+
+    // Store invoices
+    if (finalInvoices.length > 0) {
+      await purchaseInventory.insertMany(finalInvoices);
+
+      // Update inventory batches
+      for (const inv of finalInvoices) {
+        for (const p of inv.products) {
+          await updateReportInHand(
+            {
+              productName: p.productName,
+              supplierName: inv.supplierName,
+              quantityPerBoxStrip: p.quantityPerBoxStrip,
+              lc: p.lc,
+              fob: p.fob,
+              cif: p.cif,
+              expiryDate: p.expiryDate,
+            },
+            "add"
+          );
+        }
+      }
+    }
+
+    res.json({
+      message: `Imported ${finalInvoices.length} invoices`,
+      importedCount: finalInvoices.length,
+      skippedInvoices: skipped,
+    });
+  } catch (err) {
+    console.error("Import error:", err);
+    res.status(500).json({ message: "Internal server error" });
   }
 });
 

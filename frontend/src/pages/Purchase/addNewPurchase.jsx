@@ -1043,6 +1043,7 @@ const AddNewPurchase = () => {
           </div>
 
           {form.products.map((product, productIndex) => {
+        
             const currentStock = product.remainingStock || 0;
             const purchaseQty = parseNumber(product.qtyBox) || 0;
             const futureStock = calculateFutureStock(currentStock, purchaseQty);

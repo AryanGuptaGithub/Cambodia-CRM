@@ -81,8 +81,11 @@ export const fetchSuppliers = async () => {
 
 export const fetchProducts = async () => {
   try {
-    const response = await axios.get(`${backendUrl}/api/products`);
-    const products = response.data?.data || response.data;
+    const response = await axios.get(`${backendUrl}/api/dropdown-products`);
+    console.log("Response from /products:", response);
+
+    // Get data from API
+    const products = response.data?.data || [];
 
     if (!Array.isArray(products)) {
       return { success: false, error: "Invalid products data format" };
@@ -99,20 +102,32 @@ export const fetchProducts = async () => {
 
     const uniqueProducts = Array.from(uniqueProductsMap.values());
 
-    return {
-      success: true,
-      data: uniqueProducts.map((product) => ({
-        id: product._id,
-        label: product.productName,
-        ...product,
-      })),
-    };
+    // Map final structure for frontend usage
+    const formattedProducts = uniqueProducts.map((product) => ({
+      id: product._id,
+      label: product.productName,
+      productName: product.productName,
+      supplierName: product.supplierName,
+      batches: product.batches || [],
+      totalBoxes: product.totalBoxes || 0,
+      totalAmount: product.totalAmount || 0,
+      status: product.status || "Out of Stock",
+      minStockLevel: product.minStockLevel || 0,
+      category: product.category || "Uncategorized",
+      lc: product.lc || 0,
+      fob: product.fob || 0,
+      cif: product.cif || 0,
+      stockLastUpdated: product.stockLastUpdated || null,
+      createdAt: product.createdAt,
+      updatedAt: product.updatedAt,
+    }));
+
+    return { success: true, data: formattedProducts };
   } catch (error) {
     console.error("❌ Error fetching products:", error);
     return { success: false, error: "Failed to load products" };
   }
 };
-
 export const fetchProductPackingType = async () => {
   try {
     const response = await axios.get(`${backendUrl}/api/product-packing-types`);

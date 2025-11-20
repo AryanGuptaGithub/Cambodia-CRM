@@ -18,7 +18,6 @@ const DashboardCard = ({
   isActive, 
   onClick 
 }) => {
-  // Color mapping for dynamic classes
   const colorClasses = {
     blue: { text: "text-blue-600", bg: "bg-blue-100" },
     orange: { text: "text-orange-600", bg: "bg-orange-100" },
@@ -42,15 +41,16 @@ const DashboardCard = ({
           <p className={`text-2xl font-bold ${colors.text} mt-2`}>
             ${formatCurrency(amount)}
           </p>
-          {growth !== undefined && (
+          {growth !== undefined ? (
             <p className="text-xs text-gray-500 mt-1">
               {subtitle} •{" "}
               <span className={growth >= 0 ? "text-green-600" : "text-red-600"}>
                 {growth >= 0 ? "↗" : "↘"} {growth.toFixed(1)}%
               </span>
             </p>
+          ) : (
+            <p className="text-xs text-gray-500 mt-1">{subtitle}</p>
           )}
-          {growth === undefined && <p className="text-xs text-gray-500 mt-1">{subtitle}</p>}
         </div>
         <div className={`p-3 ${colors.bg} rounded-full`}>
           <Icon className={`w-6 h-6 ${colors.text}`} />
@@ -77,10 +77,8 @@ export const DashboardCards = ({
   prevMonthRanges
 }) => {
 
-  // SALES CARD AMOUNT
   const getCurrentSalesAmount = () => {
-    const subTab = activeTab === "Sales" ? activeSalesSubTab : "Today";
-    switch (subTab) {
+    switch (activeSalesSubTab) {
       case "Today": return salesData.todaySales || 0;
       case "Month": return salesData.monthlySales || 0;
       case "Year": return salesData.yearSales || 0;
@@ -89,8 +87,7 @@ export const DashboardCards = ({
   };
 
   const getCurrentGrowth = () => {
-    const subTab = activeTab === "Sales" ? activeSalesSubTab : "Today";
-    switch (subTab) {
+    switch (activeSalesSubTab) {
       case "Today": return salesData.todayGrowth || 0;
       case "Month": return salesData.monthlyGrowth || 0;
       case "Year": return salesData.yearGrowth || 0;
@@ -98,10 +95,8 @@ export const DashboardCards = ({
     }
   };
 
-  // OUTSTANDING CARD AMOUNT
   const getCurrentOutstandingAmount = () => {
-    const subTab = activeTab === "Outstanding" ? activeOutstandingSubTab : "Today";
-    switch (subTab) {
+    switch (activeOutstandingSubTab) {
       case "Today": return outstandingData.todayOutstanding || 0;
       case "Month": return outstandingData.monthlyOutstanding || 0;
       case "Year": return outstandingData.yearOutstanding || 0;
@@ -110,8 +105,7 @@ export const DashboardCards = ({
   };
 
   const getCurrentOutstandingGrowth = () => {
-    const subTab = activeTab === "Outstanding" ? activeOutstandingSubTab : "Today";
-    switch (subTab) {
+    switch (activeOutstandingSubTab) {
       case "Today": return outstandingData.todayGrowth || 0;
       case "Month": return outstandingData.monthlyGrowth || 0;
       case "Year": return outstandingData.yearGrowth || 0;
@@ -119,29 +113,24 @@ export const DashboardCards = ({
     }
   };
 
-  // EXPENSE CARD AMOUNT
   const getCurrentExpenseAmount = () => {
-    const subTab = activeTab === "Expenses" ? activeExpenseSubTab : "Month";
-    switch (subTab) {
+    switch (activeExpenseSubTab) {
       case "Month": return expenseData.monthlyExpense || 0;
       case "Year": return expenseData.yearExpense || 0;
       default: return expenseData.monthlyExpense || 0;
     }
   };
 
-  // PAYROLL CARD AMOUNT
   const getCurrentPayrollAmount = () => {
-    const subTab = activeTab === "Total Payroll" ? activePayrollSubTab : "Prev Month";
-    switch (subTab) {
+    switch (activePayrollSubTab) {
       case "Prev Month": return totalPayroll || 0;
       case "YTD": return payrollYTDTotal || 0;
       default: return totalPayroll || 0;
     }
   };
 
-  // STOCK CARD AMOUNT
   const getCurrentStockAmount = () => {
-    return stockData.totalStock || 0;
+    return stockData.stockValue || 0;
   };
 
   const cards = [
@@ -151,7 +140,7 @@ export const DashboardCards = ({
       amount: getCurrentSalesAmount(),
       icon: ShoppingCart,
       color: "blue",
-      subtitle: activeTab === "Sales" ? activeSalesSubTab : "Today",
+      subtitle: activeSalesSubTab,
       growth: getCurrentGrowth(),
     },
     {
@@ -160,7 +149,7 @@ export const DashboardCards = ({
       amount: getCurrentOutstandingAmount(),
       icon: TrendingUp,
       color: "orange",
-      subtitle: activeTab === "Outstanding" ? activeOutstandingSubTab : "Today",
+      subtitle: activeOutstandingSubTab,
       growth: getCurrentOutstandingGrowth(),
     },
     {
@@ -178,11 +167,9 @@ export const DashboardCards = ({
       icon: Receipt,
       color: "red",
       subtitle:
-        activeTab === "Expenses"
-          ? activeExpenseSubTab === "Month"
-            ? dateRanges.month.label
-            : dateRanges.year.rangeLabel
-          : dateRanges.month.label,
+        activeExpenseSubTab === "Month"
+          ? dateRanges.month.label
+          : dateRanges.year.rangeLabel,
     },
     {
       id: "Total Payroll",
@@ -191,11 +178,9 @@ export const DashboardCards = ({
       icon: DollarSign,
       color: "purple",
       subtitle:
-        activeTab === "Total Payroll"
-          ? activePayrollSubTab === "Prev Month"
-            ? prevMonthRanges.prevMonth.label
-            : prevMonthRanges.prevMonthYear.label
-          : prevMonthRanges.prevMonth.label,
+        activePayrollSubTab === "Prev Month"
+          ? prevMonthRanges.prevMonth.label
+          : prevMonthRanges.prevMonthYear.label,
     },
   ];
 

@@ -141,7 +141,7 @@ export const getModalDataType = (data) => {
 // Format date to readable (fixed version)
 export const formatDateToReadableFixed = (dateString) => {
   if (!dateString) return "N/A";
-  
+
   try {
     const date = new Date(dateString);
     return date.toLocaleDateString("en-US", {
@@ -160,7 +160,7 @@ export const formatDateToReadableFixed = (dateString) => {
 // Get stock date ranges
 export const getStockDateRanges = () => {
   const today = new Date();
-  
+
   // Today
   const todayStart = new Date(today);
   todayStart.setHours(0, 0, 0, 0);
@@ -196,21 +196,24 @@ export const getStockDateRanges = () => {
 
 // Calculate stock value
 export const calculateStockValue = (stockItems) => {
-  if (!stockItems || !Array.isArray(stockItems)) return 0;
-  
+  if (!Array.isArray(stockItems)) return 0;
+
   return stockItems.reduce((total, item) => {
-    const quantity = item.quantity?.boxes || 0;
-    const lc = item.lc || 0;
-    return total + (quantity * lc);
+    const batchAmount =
+      item.batches?.reduce((sum, b) => {
+        return sum + Number(b.amount || 0);
+      }, 0) || 0;
+
+    return total + batchAmount;
   }, 0);
 };
 
 export const getLowStockItems = (stockItems) => {
-  if (!stockItems || !Array.isArray(stockItems)) return [];
-  
-  return stockItems.filter(item => {
-    const currentStock = item.quantity?.boxes || 0;
-    const minStockLevel = item.minStockLevel || 0;
+  if (!Array.isArray(stockItems)) return [];
+
+  return stockItems.filter((item) => {
+    const currentStock = Number(item.totalBoxes) || 0;
+    const minStockLevel = Number(item.minStockLevel) || 0;
     return currentStock < minStockLevel;
   });
 };

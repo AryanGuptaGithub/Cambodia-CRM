@@ -20,6 +20,7 @@ import {
 } from "./DashboardUtil";
 import axios from "axios";
 import { StockTable } from "./StockTable";
+import BatchDetailsModal from "./BatchDetailsModal";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -37,14 +38,12 @@ const Dashboard = () => {
     payrollYTDTotal,
     salesData,
     outstandingData,
-    stockData,
     expenseData,
     fetchSalesBySubTab,
     fetchOutstandingBySubTab,
     setSalesData,
     setOutstandingData,
     setMrList,
-    setStockData, // Make sure this is included from useDashboardData
   } = useDashboardData();
 
   // SEARCH
@@ -72,6 +71,17 @@ const Dashboard = () => {
   const [expenseTableData, setExpenseTableData] = useState([]);
   const [loadingExpenseData, setLoadingExpenseData] = useState(false);
 
+  const [showBatchModal, setShowBatchModal] = useState(false);
+  const [selectedProductName, setSelectedProductName] = useState("");
+  const [selectedBatches, setSelectedBatches] = useState([]);
+
+  // STOCK DATA CARDS
+  const [stockData, setStockData] = useState({
+    totalStock: 0,
+    stockValue: 0,
+    lowStockItems: [],
+  });
+
   // MODALS
   const [showProductsModal, setShowProductsModal] = useState(false);
   const [selectedMRProducts, setSelectedMRProducts] = useState([]);
@@ -85,6 +95,7 @@ const Dashboard = () => {
 
   const dateRanges = getDateRanges();
   const prevMonthRanges = getPreviousMonthRanges();
+  const stockDateRanges = getStockDateRanges();
 
   const [user] = useState({
     name: "User",
@@ -92,76 +103,40 @@ const Dashboard = () => {
     initials: "U",
   });
 
-  const stockDateRanges = getStockDateRanges();
-
-  const handleParentTabChange = (newTab) => {
-    setPreviousActiveTab(activeTab);
-    setActiveTab(newTab);
-
-    if (newTab === "Stock in Hands") {
-      setActiveStockSubTab("Today");
-    }
-
-    if (newTab === "Sales") {
-      setActiveSalesSubTab("Today");
-    }
-    if (newTab === "Outstanding") {
-      setActiveOutstandingSubTab("Today");
-    }
-    if (newTab === "Total Payroll") {
-      setActivePayrollSubTab("Prev Month");
-    }
-    if (newTab === "Expenses") {
-      setActiveExpenseSubTab("Month");
-    }
-  };
-
-  const fetchStockTableData = async (period) => {
+  // ------------------ FETCH FUNCTIONS ------------------
+  const fetchStockTableData = async () => {
     try {
       setLoadingStockData(true);
-      const response = await axios.get(`${backendUrl}/api/reports-in-hand`
-      );
-      console.log('values of responst', response);
-      let stockData = response.data.success ? response.data.reports : []; 
-      setStockTableData(stockData);
 
-      // Update stock data for cards and side panel - REMOVED DUPLICATE CALL
-      const totalStockValue = calculateStockValue(stockData);
-      const lowStockItems = getLowStockItems(stockData);
+      const response = await axios.get(`${backendUrl}/api/reports-in-hand`);
 
-      setStockData((prev) => ({
-        ...prev,
+      const stockDataFromAPI = Array.isArray(response.data.reports)
+        ? response.data.reports
+        : [];
+
+      setStockTableData(stockDataFromAPI);
+
+      // Update stock cards locally
+      const totalStockValue = calculateStockValue(stockDataFromAPI);
+      const lowStockItems = getLowStockItems(stockDataFromAPI);
+
+      setStockData({
         totalStock: totalStockValue,
         stockValue: totalStockValue,
         lowStockItems: lowStockItems,
-      }));
+      });
     } catch (error) {
       console.error("Error fetching stock table data:", error);
-
-
-
-      setStockTableData(mockStockData);
-
-      const totalStockValue = calculateStockValue(mockStockData);
-      const lowStockItems = getLowStockItems(mockStockData);
-
-      setStockData((prev) => ({
-        ...prev,
-        totalStock: totalStockValue,
-        stockValue: totalStockValue,
-        lowStockItems: lowStockItems,
-      }));
     } finally {
       setLoadingStockData(false);
     }
   };
 
-  // Add useEffect for stock data:
-  useEffect(() => {
-    if (activeTab === "Stock in Hands") {
-      fetchStockTableData(activeStockSubTab);
-    }
-  }, [activeStockSubTab, activeTab]);
+  const handleViewStockDetails = (productName, batches) => {
+    setSelectedProductName(productName);
+    setSelectedBatches(batches);
+    setShowBatchModal(true);
+  };
 
   const fetchSalesTableData = async (period) => {
     try {
@@ -201,21 +176,15 @@ const Dashboard = () => {
         params: { period },
       });
 
-      // Handle the API response structure properly
       let expenses = [];
-
-      if (response.data && response.data.success) {
-        // If response has success and data properties
+      if (response.data?.success) {
         expenses = response.data.data || [];
       } else if (Array.isArray(response.data)) {
-        // If response is directly an array
         expenses = response.data;
-      } else if (response.data && response.data.expenses) {
-        // If response has expenses property
+      } else if (response.data?.expenses) {
         expenses = response.data.expenses;
       }
 
-      // Ensure we have an array and format the data properly
       const formattedExpenses = Array.isArray(expenses)
         ? expenses.map((expense) => ({
             id: expense._id || expense.id,
@@ -239,64 +208,18 @@ const Dashboard = () => {
           }))
         : [];
 
-      // Sort by amount descending to show highest expenses first
-      const sortedExpenses = formattedExpenses.sort(
-        (a, b) => b.amount - a.amount
+      setExpenseTableData(
+        formattedExpenses.sort((a, b) => b.amount - a.amount)
       );
-
-      setExpenseTableData(sortedExpenses);
     } catch (error) {
       console.error("Error fetching expense table data:", error);
-      // Fallback to mock data for testing
-      const mockExpenses = [
-        {
-          id: 1,
-          category: "Office Supplies",
-          amount: 1500,
-          date: "2024-01-15",
-          description: "Printer paper and stationery",
-          details: ["Printer paper: ₹800", "Pens: ₹300", "Notebooks: ₹400"],
-        },
-        {
-          id: 2,
-          category: "Utilities",
-          amount: 2500,
-          date: "2024-01-14",
-          description: "Electricity and water bill",
-          details: ["Electricity: ₹1800", "Water: ₹700"],
-        },
-        {
-          id: 3,
-          category: "Travel",
-          amount: 3200,
-          date: "2024-01-13",
-          description: "Client meeting travel expenses",
-          details: ["Flight: ₹2200", "Hotel: ₹800", "Transport: ₹200"],
-        },
-        {
-          id: 4,
-          category: "Marketing",
-          amount: 1800,
-          date: "2024-01-12",
-          description: "Digital marketing campaign",
-          details: ["Google Ads: ₹1200", "Social Media: ₹600"],
-        },
-        {
-          id: 5,
-          category: "Equipment",
-          amount: 2800,
-          date: "2024-01-11",
-          description: "New office equipment",
-          details: ["Laptop: ₹2000", "Monitor: ₹800"],
-        },
-      ].sort((a, b) => b.amount - a.amount);
-
-      setExpenseTableData(mockExpenses);
+      setExpenseTableData([]);
     } finally {
       setLoadingExpenseData(false);
     }
   };
 
+  // ------------------ HANDLERS ------------------
   const handleViewProducts = (mrName, products) => {
     setSelectedMRName(mrName);
     setSelectedMRProducts(products);
@@ -315,98 +238,40 @@ const Dashboard = () => {
     setShowProductsModal(true);
   };
 
-  const handlePanelIconClick = () => {
-    if (
-      activeTab === "Sales" ||
-      activeTab === "Outstanding" ||
-      activeTab === "Expenses"
-    ) {
-      setShowAllMRsInSidePanel((prev) => !prev);
-      setSidePanelCurrentPage(1);
+  const handleParentTabChange = (newTab) => {
+    setPreviousActiveTab(activeTab);
+    setActiveTab(newTab);
+    if (newTab === "Stock in Hands") {
+      setActiveStockSubTab("Today");
+      fetchStockTableData(); // Fetch stock data when tab is clicked
     }
+    if (newTab === "Sales") setActiveSalesSubTab("Today");
+    if (newTab === "Outstanding") setActiveOutstandingSubTab("Today");
+    if (newTab === "Total Payroll") setActivePayrollSubTab("Prev Month");
+    if (newTab === "Expenses") setActiveExpenseSubTab("Month");
   };
 
-  const handleSidePanelPageChange = (newPage) => {
-    setSidePanelCurrentPage(newPage);
-  };
+  // ------------------ EFFECTS ------------------
+  useEffect(() => {
+    if (activeTab === "Stock in Hands") {
+      fetchStockTableData();
+    }
+  }, [activeTab, activeStockSubTab]);
 
   useEffect(() => {
-    if (activeTab === "Sales") {
-      const updateSalesData = async () => {
-        const data = await fetchSalesBySubTab(activeSalesSubTab);
-
-        setSalesData((prev) => ({
-          ...prev,
-          ...(activeSalesSubTab === "Today" && {
-            todaySales: data.salesAmount,
-            todayPrevious: data.previousSales,
-            todayGrowth: data.growth,
-          }),
-          ...(activeSalesSubTab === "Month" && {
-            monthlySales: data.salesAmount,
-            monthlyPrevious: data.previousSales,
-            monthlyGrowth: data.growth,
-          }),
-          ...(activeSalesSubTab === "Year" && {
-            yearSales: data.salesAmount,
-            yearPrevious: data.previousSales,
-            yearGrowth: data.growth,
-          }),
-        }));
-      };
-      updateSalesData();
-    }
+    if (activeTab === "Sales") fetchSalesTableData(activeSalesSubTab);
   }, [activeSalesSubTab, activeTab]);
 
   useEffect(() => {
-    if (activeTab === "Outstanding") {
-      const updateOutstandingData = async () => {
-        const data = await fetchOutstandingBySubTab(activeOutstandingSubTab);
-
-        setOutstandingData((prev) => ({
-          ...prev,
-          ...(activeOutstandingSubTab === "Today" && {
-            todayOutstanding: data.outstandingAmount,
-            mrWiseOutstanding: data.outstandingInvoices,
-          }),
-          ...(activeOutstandingSubTab === "Month" && {
-            monthlyOutstanding: data.outstandingAmount,
-            mrWiseOutstanding: data.outstandingInvoices,
-          }),
-          ...(activeOutstandingSubTab === "Year" && {
-            yearOutstanding: data.outstandingAmount,
-            mrWiseOutstanding: data.outstandingInvoices,
-          }),
-        }));
-      };
-      updateOutstandingData();
-    }
-  }, [activeOutstandingSubTab, activeTab]);
-
-  useEffect(() => {
-    if (activeTab === "Sales") {
-      fetchSalesTableData(activeSalesSubTab);
-    }
-  }, [activeSalesSubTab, activeTab]);
-
-  useEffect(() => {
-    if (activeTab === "Outstanding") {
+    if (activeTab === "Outstanding")
       fetchOutstandingTableData(activeOutstandingSubTab);
-    }
   }, [activeOutstandingSubTab, activeTab]);
 
   useEffect(() => {
-    if (activeTab === "Expenses") {
-      fetchExpenseTableData(activeExpenseSubTab);
-    }
+    if (activeTab === "Expenses") fetchExpenseTableData(activeExpenseSubTab);
   }, [activeExpenseSubTab, activeTab]);
 
-  // Initial fetch when component mounts
-  useEffect(() => {
-    // Fetch initial expense data
-    fetchExpenseTableData("Month");
-  }, []);
-
+  // ------------------ RENDER MAIN TABLE ------------------
   const renderMainTable = () => {
     switch (activeTab) {
       case "Sales":
@@ -419,7 +284,6 @@ const Dashboard = () => {
             onViewProducts={handleViewProducts}
           />
         );
-
       case "Outstanding":
         return (
           <OutstandingTable
@@ -430,7 +294,6 @@ const Dashboard = () => {
             onViewInvoices={handleViewInvoices}
           />
         );
-
       case "Total Payroll":
         return (
           <PayrollTable
@@ -440,7 +303,6 @@ const Dashboard = () => {
             prevMonthRanges={prevMonthRanges}
           />
         );
-
       case "Expenses":
         return (
           <ExpenseTable
@@ -458,9 +320,9 @@ const Dashboard = () => {
             loadingStockData={loadingStockData}
             activeStockSubTab={activeStockSubTab}
             dateRanges={stockDateRanges}
+            onViewStockDetails={handleViewStockDetails} // Corrected this line
           />
         );
-
       default:
         return <div>Table for {activeTab}</div>;
     }
@@ -468,76 +330,68 @@ const Dashboard = () => {
 
   return (
     <div className="p-6">
-      <div className="container">
-        <DashboardHeader
-          searchTerm={searchTerm}
-          onSearchChange={setSearchTerm}
-          searchInputRef={searchInputRef}
-          user={user}
+      <DashboardHeader
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
+        searchInputRef={searchInputRef}
+        user={user}
+      />
+
+      <DashboardCards
+        activeTab={activeTab}
+        onTabChange={handleParentTabChange}
+        salesData={salesData}
+        outstandingData={outstandingData}
+        stockData={stockData}
+        expenseData={expenseData}
+        totalPayroll={totalPayroll}
+        payrollYTDTotal={payrollYTDTotal}
+        activeSalesSubTab={activeSalesSubTab}
+        activeOutstandingSubTab={activeOutstandingSubTab}
+        activeExpenseSubTab={activeExpenseSubTab}
+        activePayrollSubTab={activePayrollSubTab}
+        dateRanges={dateRanges}
+        prevMonthRanges={prevMonthRanges}
+      />
+
+      <SubTabs
+        activeTab={activeTab}
+        activeSalesSubTab={activeSalesSubTab}
+        activeExpenseSubTab={activeExpenseSubTab}
+        activePayrollSubTab={activePayrollSubTab}
+        activeOutstandingSubTab={activeOutstandingSubTab}
+        activeStockSubTab={activeStockSubTab}
+        onSalesSubTabChange={setActiveSalesSubTab}
+        onExpenseSubTabChange={setActiveExpenseSubTab}
+        onPayrollSubTabChange={setActivePayrollSubTab}
+        onOutstandingSubTabChange={setActiveOutstandingSubTab}
+        onStockSubTabChange={setActiveStockSubTab}
+        dateRanges={dateRanges}
+        prevMonthRanges={prevMonthRanges}
+      />
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <SidePanel
+          activeTab={activeTab}
+          showAllMRsInSidePanel={showAllMRsInSidePanel}
+          onPanelIconClick={() => {}}
+          sidePanelCurrentPage={sidePanelCurrentPage}
+          onSidePanelPageChange={(page) => setSidePanelCurrentPage(page)}
+          salesTableData={salesTableData}
+          loadingSalesData={loadingSalesData}
+          outstandingTableData={outstandingTableData}
+          loadingOutstandingData={loadingOutstandingData}
+          expenseTableData={expenseTableData}
+          loadingExpenseData={loadingExpenseData}
+          stockData={stockData}
+          expenseData={expenseData}
+          mrList={mrList}
+          onViewProducts={handleViewProducts}
+          onViewInvoices={handleViewInvoices}
+          onViewExpenseDetails={handleViewExpenseDetails}
         />
 
-        <main className="p-6">
-          <div className="space-y-6">
-            <DashboardCards
-              activeTab={activeTab}
-              onTabChange={handleParentTabChange}
-              salesData={salesData}
-              outstandingData={outstandingData}
-              stockData={stockData}
-              expenseData={expenseData}
-              totalPayroll={totalPayroll}
-              payrollYTDTotal={payrollYTDTotal}
-              activeSalesSubTab={activeSalesSubTab}
-              activeOutstandingSubTab={activeOutstandingSubTab}
-              activeExpenseSubTab={activeExpenseSubTab}
-              activePayrollSubTab={activePayrollSubTab}
-              dateRanges={dateRanges}
-              prevMonthRanges={prevMonthRanges}
-            />
-
-            <SubTabs
-              activeTab={activeTab}
-              activeSalesSubTab={activeSalesSubTab}
-              activeExpenseSubTab={activeExpenseSubTab}
-              activePayrollSubTab={activePayrollSubTab}
-              activeOutstandingSubTab={activeOutstandingSubTab}
-              activeStockSubTab={activeStockSubTab}
-              onSalesSubTabChange={setActiveSalesSubTab}
-              onExpenseSubTabChange={setActiveExpenseSubTab}
-              onPayrollSubTabChange={setActivePayrollSubTab}
-              onOutstandingSubTabChange={setActiveOutstandingSubTab}
-              onStockSubTabChange={setActiveStockSubTab}
-              dateRanges={dateRanges}
-              prevMonthRanges={prevMonthRanges}
-            />
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-1">
-                <SidePanel
-                  activeTab={activeTab}
-                  showAllMRsInSidePanel={showAllMRsInSidePanel}
-                  onPanelIconClick={handlePanelIconClick}
-                  sidePanelCurrentPage={sidePanelCurrentPage}
-                  onSidePanelPageChange={handleSidePanelPageChange}
-                  salesTableData={salesTableData}
-                  loadingSalesData={loadingSalesData}
-                  outstandingTableData={outstandingTableData}
-                  loadingOutstandingData={loadingOutstandingData}
-                  expenseTableData={expenseTableData}
-                  loadingExpenseData={loadingExpenseData}
-                  stockData={stockData}
-                  expenseData={expenseData}
-                  mrList={mrList}
-                  onViewProducts={handleViewProducts}
-                  onViewInvoices={handleViewInvoices}
-                  onViewExpenseDetails={handleViewExpenseDetails}
-                />
-              </div>
-
-              <div className="lg:col-span-2">{renderMainTable()}</div>
-            </div>
-          </div>
-        </main>
+        <div className="lg:col-span-2">{renderMainTable()}</div>
       </div>
 
       <ProductsModal
@@ -553,6 +407,13 @@ const Dashboard = () => {
         onClose={() => setShowAllMRsModal(false)}
         previousMonthLabel={previousMonthLabel}
         allMRsWithSalary={allMRsWithSalary}
+      />
+      
+      <BatchDetailsModal
+        showModal={showBatchModal}
+        onClose={() => setShowBatchModal(false)}
+        productName={selectedProductName}
+        batches={selectedBatches}
       />
     </div>
   );

@@ -95,16 +95,20 @@ router.post("/product/import", async (req, res) => {
 
         // Enhanced qtyPerBoxStrip validation
         let parsedQtyPerBoxStrip;
-        
-        if (qtyPerBoxStrip === undefined || qtyPerBoxStrip === null || qtyPerBoxStrip === '') {
+
+        if (
+          qtyPerBoxStrip === undefined ||
+          qtyPerBoxStrip === null ||
+          qtyPerBoxStrip === ""
+        ) {
           errors.push(`Row ${index + 1}: Quantity per box/strip is required`);
           continue;
         }
 
         const qtyString = qtyPerBoxStrip.toString().trim();
-        
+
         // Check if it's already a valid number
-        if (!isNaN(qtyString) && qtyString !== '') {
+        if (!isNaN(qtyString) && qtyString !== "") {
           parsedQtyPerBoxStrip = parseInt(qtyString, 10);
         } else {
           // Extract numbers from string (e.g., "100 tablets", "50 capsules", "25 ml")
@@ -112,33 +116,52 @@ router.post("/product/import", async (req, res) => {
           if (numericMatch) {
             parsedQtyPerBoxStrip = parseInt(numericMatch[0], 10);
           } else {
-            errors.push(`Row ${index + 1}: Quantity must be a number. Examples: "100", "50 tablets", "25ml". Received: "${qtyString}"`);
+            errors.push(
+              `Row ${
+                index + 1
+              }: Quantity must be a number. Examples: "100", "50 tablets", "25ml". Received: "${qtyString}"`
+            );
             continue;
           }
         }
 
         // Final validation
         if (isNaN(parsedQtyPerBoxStrip) || parsedQtyPerBoxStrip <= 0) {
-          errors.push(`Row ${index + 1}: Quantity must be a positive number. Received: "${qtyString}"`);
+          errors.push(
+            `Row ${
+              index + 1
+            }: Quantity must be a positive number. Received: "${qtyString}"`
+          );
           continue;
         }
 
         // Parse other numeric fields
         const parseNumericField = (value, fieldName, defaultValue = 0) => {
-          if (value === undefined || value === null || value === '') return defaultValue;
-          
+          if (value === undefined || value === null || value === "")
+            return defaultValue;
+
           const num = parseFloat(value);
           if (isNaN(num)) {
-            errors.push(`Row ${index + 1}: ${fieldName} must be a number. Using default value: ${defaultValue}`);
+            errors.push(
+              `Row ${
+                index + 1
+              }: ${fieldName} must be a number. Using default value: ${defaultValue}`
+            );
             return defaultValue;
           }
           return num;
         };
 
-        const parsedSellingPrice = parseNumericField(sellingPriceUSD, 'Selling Price');
-        const parsedLc = parseNumericField(lcUSD, 'LC Price');
-        const parsedFob = parseNumericField(fobUSD, 'FOB Price');
-        const parsedTaxSellingPrice = parseNumericField(taxSellingPriceUSD, 'Tax Selling Price');
+        const parsedSellingPrice = parseNumericField(
+          sellingPriceUSD,
+          "Selling Price"
+        );
+        const parsedLc = parseNumericField(lcUSD, "LC Price");
+        const parsedFob = parseNumericField(fobUSD, "FOB Price");
+        const parsedTaxSellingPrice = parseNumericField(
+          taxSellingPriceUSD,
+          "Tax Selling Price"
+        );
 
         const parsedDate = parseDate(licenseValidityDate);
 
@@ -161,25 +184,29 @@ router.post("/product/import", async (req, res) => {
         await product.save();
         successfulImports.push({
           name: productName,
-          row: index + 1
+          row: index + 1,
         });
-
       } catch (productError) {
-        console.error(`Error importing product at row ${index + 1}:`, productError);
-        
+        console.error(
+          `Error importing product at row ${index + 1}:`,
+          productError
+        );
+
         let errorMessage = `Row ${index + 1}: Failed to import product`;
-        
-        if (productError.name === 'ValidationError') {
-          const validationErrors = Object.values(productError.errors).map(err => 
-            `${err.path}: ${err.message}`
+
+        if (productError.name === "ValidationError") {
+          const validationErrors = Object.values(productError.errors).map(
+            (err) => `${err.path}: ${err.message}`
           );
-          errorMessage = `Row ${index + 1}: ${validationErrors.join(', ')}`;
+          errorMessage = `Row ${index + 1}: ${validationErrors.join(", ")}`;
         } else if (productError.code === 11000) {
-          errorMessage = `Row ${index + 1}: Product "${productData.productName}" already exists`;
+          errorMessage = `Row ${index + 1}: Product "${
+            productData.productName
+          }" already exists`;
         } else {
           errorMessage = `Row ${index + 1}: ${productError.message}`;
         }
-        
+
         errors.push(errorMessage);
       }
     }
@@ -191,7 +218,7 @@ router.post("/product/import", async (req, res) => {
         message: "All products failed to import",
         errors: errors,
         importedCount: 0,
-        failedCount: errors.length
+        failedCount: errors.length,
       });
     } else if (errors.length > 0) {
       return res.status(207).json({
@@ -200,28 +227,27 @@ router.post("/product/import", async (req, res) => {
         importedCount: successfulImports.length,
         failedCount: errors.length,
         importedProducts: successfulImports,
-        errors: errors
+        errors: errors,
       });
     } else {
       return res.status(200).json({
         success: true,
         message: `All ${successfulImports.length} products imported successfully!`,
         importedCount: successfulImports.length,
-        importedProducts: successfulImports
+        importedProducts: successfulImports,
       });
     }
-
   } catch (err) {
     console.error("Error importing products:", err);
-    
+
     res.status(500).json({
       success: false,
       message: "Failed to import products due to server error",
-      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+      error: process.env.NODE_ENV === "development" ? err.message : undefined,
     });
   }
 });
-router.get("/products", async (req, res) => {
+router.get("/dropdown-products", async (req, res) => {
   try {
     // Get all product master data
     const products = await Product.find();
@@ -229,7 +255,7 @@ router.get("/products", async (req, res) => {
     // Get all stock data from ReportInHand
     const stockList = await ReportInHand.find();
 
-    // Convert to map for fast lookup
+    // Convert stockList to map for fast lookup by productName (case-insensitive)
     const stockMap = new Map();
     stockList.forEach((item) => {
       stockMap.set(item.productName.toLowerCase(), item);
@@ -242,32 +268,34 @@ router.get("/products", async (req, res) => {
       return {
         ...product.toObject(),
 
-        // Always return quantity object
-        quantity: {
-          boxes: stock?.quantity?.boxes ?? 0,   // If no stock → 0
-        },
+        // Include batches from stock if available
+        batches: stock?.batches || [],
 
-        inStock: stock?.quantity?.boxes ?? 0,
+        totalBoxes: stock?.totalBoxes || 0,
+        totalAmount: stock?.totalAmount || 0,
 
         status: stock?.status || "Out of Stock",
-        category: stock?.category || "Uncategorized",
         minStockLevel: stock?.minStockLevel || 0,
+        category: stock?.category || "Uncategorized",
 
         lc: stock?.lc || 0,
         fob: stock?.fob || 0,
         cif: stock?.cif || 0,
 
         stockLastUpdated: stock?.updatedAt || null,
+        createdAt: product.createdAt,
+        updatedAt: product.updatedAt,
       };
     });
-
-    res.status(200).json(finalList);
+    console.log("fial", finalList);
+    res.status(200).json({ success: true, data: finalList });
   } catch (err) {
-    console.error("Error fetching products with stock:", err);
-    res.status(500).json({ message: "Failed to fetch products." });
+    console.error("❌ Error fetching products with stock:", err);
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch products." });
   }
 });
-
 
 // router.get("/products", async (req, res) => {
 //   try {
@@ -278,6 +306,16 @@ router.get("/products", async (req, res) => {
 //     res.status(500).json({ message: "Failed to fetch products." });
 //   }
 // });
+
+router.get("/products", async (req, res) => {
+  try {
+    const products = await Product.find();
+    res.status(200).json(products);
+  } catch (err) {
+    console.error("Error fetching products:", err);
+    res.status(500).json({ message: "Failed to fetch products." });
+  }
+});
 
 router.get("/products-with-in-stock", async (req, res) => {
   try {

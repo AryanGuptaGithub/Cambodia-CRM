@@ -261,9 +261,14 @@ export const useDashboardData = () => {
     try {
       const response = await axios.get(`${backendUrl}/api/reports-in-hand`);
 
-      let stockItems = response.data.success ? response.data.reports : [];
+      // FIX: Backend returns { count, reports }
+      const stockItems = Array.isArray(response.data.reports)
+        ? response.data.reports
+        : [];
+
       const totalStockValue = calculateStockValue(stockItems);
       const lowStockItems = getLowStockItems(stockItems);
+
       setStockData({
         totalStock: totalStockValue,
         stockValue: totalStockValue,
