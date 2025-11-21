@@ -14,81 +14,252 @@ const calculateStockStatus = (boxes) => {
   return "In Stock";
 };
 
-/** ✅ Core helper: updates ReportInHand when purchase returns are created/updated/deleted */
-const updateReportInHandForReturn = async (purchaseReturnData, operation = "subtract") => {
+/** ✅ Core helper: updates ReportInHand for a single product */
+const updateReportInHandForProduct = async (
+  productData,
+  supplierName,
+  operation = "subtract"
+) => {
   try {
     const {
       productName,
       returnQuantity = 0,
-      supplierName,
-      lcNumber,
+      returnAmount = 0,
+      lc = 0,
       fob = 0,
       cif = 0,
-      amount = 0,
-      returnAmount = 0,
-    } = purchaseReturnData;
-
+    } = productData;
 
     const validSupplierName = supplierName?.trim() || "Unknown Supplier";
-
-    // Get product info for conversion
-    const productDoc = await product.findOne({ productName });
-    const piecesPerBox =
-      Number(productDoc?.qtyPerBoxStrip) ||
-      Number(productDoc?.packing) ||
-      1; // fallback if missing
-
     const boxesToUpdate = returnQuantity;
-    
+    const amountToUpdate = returnAmount;
 
     const existing = await ReportInHand.findOne({ productName });
 
     if (existing) {
+      // Get current values with proper null checking
+      const currentBoxes = existing.totalBoxes || 0;
+      const currentAmount = existing.totalAmount || 0;
+
       let finalBoxes =
         operation === "subtract"
-          ? existing.quantity.boxes - boxesToUpdate
-          : existing.quantity.boxes + boxesToUpdate;
+          ? currentBoxes - boxesToUpdate
+          : currentBoxes + boxesToUpdate;
+
+      let finalAmount =
+        operation === "subtract"
+          ? currentAmount - amountToUpdate
+          : currentAmount + amountToUpdate;
 
       if (finalBoxes < 0) finalBoxes = 0;
+      if (finalAmount < 0) finalAmount = 0;
+
       const newStatus = calculateStockStatus(finalBoxes);
-
-
 
       await ReportInHand.findByIdAndUpdate(existing._id, {
         $set: {
-          "quantity.boxes": finalBoxes,
+          totalBoxes: finalBoxes,
+          totalAmount: finalAmount,
           status: newStatus,
           supplierName: validSupplierName,
           updatedAt: new Date(),
         },
       });
-
-      
     } else if (operation === "add") {
-      // Recreate if deleted record needs stock re-added
       const status = calculateStockStatus(boxesToUpdate);
       await ReportInHand.create({
         productName,
         supplierName: validSupplierName,
-        quantity: { boxes: boxesToUpdate, pieces: 0 },
+        totalBoxes: boxesToUpdate,
+        totalAmount: amountToUpdate,
         status,
-        lc: lcNumber || "",
-        fob,
-        cif,
+        lc: lc || 0,
+        fob: fob || 0,
+        cif: cif || 0,
+        minStockLevel: 10,
+        batches: [],
       });
-      
     }
   } catch (error) {
-    console.error("❌ Error in updateReportInHandForReturn:", error);
+    console.error("❌ Error in updateReportInHandForProduct:", error);
+    console.error("Product Data:", productData);
     throw error;
   }
 };
 
-/* ==========================================================
-   🔹 ROUTES BELOW
-   ========================================================== */
+/** ✅ Core helper: updates Product batches for a single product with FEFO logic */
+const updateProductBatchesForProduct = async (
+  productData,
+  operation = "subtract"
+) => {
+  try {
+    const { productName, returnQuantity = 0, expiredDate } = productData;
 
-/** ✅ GET all purchase returns */
+    const productDoc = await product.findOne({ productName });
+    if (!productDoc) {
+      throw new Error(`Product ${productName} not found`);
+    }
+
+    // Ensure batches array exists
+    if (!productDoc.batches || !Array.isArray(productDoc.batches)) {
+      productDoc.batches = [];
+    }
+
+    const boxesToUpdate = returnQuantity;
+    let remainingBoxes = boxesToUpdate;
+
+    if (operation === "subtract") {
+      const sortedBatches = [...productDoc.batches]
+        .filter((batch) => batch.boxes > 0)
+        .sort((a, b) => {
+          const expiryA = a.expiryDate ? new Date(a.expiryDate) : new Date(0);
+          const expiryB = b.expiryDate ? new Date(b.expiryDate) : new Date(0);
+          return expiryA - expiryB;
+        });
+
+      // Subtract from batches in FEFO order
+      for (let i = 0; i < sortedBatches.length && remainingBoxes > 0; i++) {
+        const batch = sortedBatches[i];
+        const batchIndex = productDoc.batches.findIndex(
+          (b) => b._id.toString() === batch._id.toString()
+        );
+
+        if (batchIndex === -1) continue;
+
+        const subtractQty = Math.min(remainingBoxes, batch.boxes);
+
+        productDoc.batches[batchIndex].boxes -= subtractQty;
+        remainingBoxes -= subtractQty;
+
+        // Update batch amount if lc field exists
+        if (productDoc.batches[batchIndex].lc !== undefined) {
+          productDoc.batches[batchIndex].amount =
+            productDoc.batches[batchIndex].lc *
+            productDoc.batches[batchIndex].boxes;
+        }
+      }
+    } else {
+      if (expiredDate) {
+        const targetExpiry = new Date(expiredDate);
+
+        // Try to find batch with matching expiry date
+        const batchIndex = productDoc.batches.findIndex((batch) => {
+          if (!batch.expiryDate) return false;
+          const batchExpiry = new Date(batch.expiryDate);
+          return batchExpiry.getTime() === targetExpiry.getTime();
+        });
+
+        if (batchIndex !== -1) {
+          // Add to existing batch with matching expiry
+          productDoc.batches[batchIndex].boxes += boxesToUpdate;
+
+          // Update batch amount if lc field exists
+          if (productDoc.batches[batchIndex].lc !== undefined) {
+            productDoc.batches[batchIndex].amount =
+              productDoc.batches[batchIndex].lc *
+              productDoc.batches[batchIndex].boxes;
+          }
+        } else {
+          const newBatch = {
+            boxes: boxesToUpdate,
+            lc: productData.lc || 0,
+            fob: productData.fob || 0,
+            cif: productData.cif || 0,
+            amount: (productData.lc || 0) * boxesToUpdate,
+            expiryDate: expiredDate,
+            date: productData.date || new Date(),
+          };
+          productDoc.batches.push(newBatch);
+        }
+      } else {
+        if (productDoc.batches.length > 0) {
+          productDoc.batches[0].boxes += boxesToUpdate;
+          if (productDoc.batches[0].lc !== undefined) {
+            productDoc.batches[0].amount =
+              productDoc.batches[0].lc * productDoc.batches[0].boxes;
+          }
+        } else {
+          // Create new batch without specific expiry
+          const newBatch = {
+            boxes: boxesToUpdate,
+            lc: productData.lc || 0,
+            fob: productData.fob || 0,
+            cif: productData.cif || 0,
+            amount: (productData.lc || 0) * boxesToUpdate,
+            date: productData.date || new Date(),
+          };
+          productDoc.batches.push(newBatch);
+        }
+      }
+    }
+
+    // Recalculate totals
+    productDoc.totalBoxes = productDoc.batches.reduce(
+      (sum, batch) => sum + (batch.boxes || 0),
+      0
+    );
+    productDoc.totalAmount = productDoc.batches.reduce(
+      (sum, batch) => sum + (batch.amount || 0),
+      0
+    );
+    productDoc.status = calculateStockStatus(productDoc.totalBoxes);
+
+    // Remove batches with zero boxes
+    productDoc.batches = productDoc.batches.filter((batch) => batch.boxes > 0);
+
+    await productDoc.save();
+  } catch (error) {
+    console.error("❌ Error in updateProductBatchesForProduct:", error);
+    console.error("Product Data:", productData);
+    throw error;
+  }
+};
+
+/** ✅ Process multiple products in purchase return */
+const processPurchaseReturnProducts = async (
+  purchaseReturnDoc,
+  operation = "subtract"
+) => {
+  try {
+    // Ensure we're working with a Mongoose document that has the products array
+    const purchaseReturn = purchaseReturnDoc.toObject
+      ? purchaseReturnDoc.toObject()
+      : purchaseReturnDoc;
+
+    const { products, supplierName } = purchaseReturn;
+
+    if (!products || !Array.isArray(products) || products.length === 0) {
+      throw new Error("Products array is required and cannot be empty");
+    }
+
+    for (const productData of products) {
+      if (!productData.productName) {
+        throw new Error("Product name is required for all products");
+      }
+
+      try {
+        // Update ReportInHand for this product
+        await updateReportInHandForProduct(
+          productData,
+          supplierName,
+          operation
+        );
+
+        await updateProductBatchesForProduct(productData, operation);
+      } catch (productError) {
+        console.error(
+          `❌ Failed to process product ${productData.productName}:`,
+          productError
+        );
+        throw productError;
+      }
+    }
+  } catch (error) {
+    console.error("❌ Error in processPurchaseReturnProducts:", error);
+    throw error;
+  }
+};
+
 router.get("/purchase-return", async (req, res) => {
   try {
     const {
@@ -107,9 +278,9 @@ router.get("/purchase-return", async (req, res) => {
     if (search) {
       filter.$or = [
         { invoiceNumber: { $regex: search, $options: "i" } },
-        { productName: { $regex: search, $options: "i" } },
-        { lcNumber: { $regex: search, $options: "i" } },
+        { "products.productName": { $regex: search, $options: "i" } },
         { returnReason: { $regex: search, $options: "i" } },
+        { supplierName: { $regex: search, $options: "i" } },
       ];
     }
 
@@ -156,56 +327,88 @@ router.get("/purchase-return", async (req, res) => {
 router.post("/purchase-return", async (req, res) => {
   try {
     const data = req.body;
-    
 
-    const {
-      invoiceNumber,
-      productName,
-      purchaseQty,
-      returnQuantity,
-      usedQty,
-    } = data;
+    const { invoiceNumber, products } = data;
 
-    const existingReturn = await PurchaseReturn.findOne({
-      invoiceNumber,
-      productName,
-    });
+    // Validate required fields
+    if (!invoiceNumber || !products || !Array.isArray(products)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invoice number and products array are required",
+      });
+    }
+
+    // Check if purchase return already exists for this invoice
+    const existingReturn = await PurchaseReturn.findOne({ invoiceNumber });
     if (existingReturn) {
       return res.status(400).json({
         success: false,
-        message: "Purchase return for this invoice and product already exists",
+        message: "Purchase return for this invoice already exists",
       });
     }
 
-    if (returnQuantity > purchaseQty) {
-      return res.status(400).json({
-        success: false,
-        message: "Return quantity cannot exceed purchase quantity",
-      });
+    // Validate each product
+    for (const productData of products) {
+      const { productName, purchaseQty, returnQuantity, usedQty } = productData;
+
+      if (!productName) {
+        return res.status(400).json({
+          success: false,
+          message: "Product name is required for all products",
+        });
+      }
+
+      if (returnQuantity > purchaseQty) {
+        return res.status(400).json({
+          success: false,
+          message: `Return quantity cannot exceed purchase quantity for ${productName}`,
+        });
+      }
+
+      if (usedQty > purchaseQty) {
+        return res.status(400).json({
+          success: false,
+          message: `Used quantity cannot exceed purchase quantity for ${productName}`,
+        });
+      }
+
+      // Check if product exists and has enough stock in ReportInHand
+      const reportInHandDoc = await ReportInHand.findOne({ productName });
+      if (!reportInHandDoc) {
+        return res.status(400).json({
+          success: false,
+          message: `Product ${productName} not found in ReportInHand`,
+        });
+      }
+
+      if (returnQuantity > reportInHandDoc.totalBoxes) {
+        return res.status(400).json({
+          success: false,
+          message: `Return quantity cannot exceed available stock for ${productName}. Available: ${reportInHandDoc.totalBoxes}, Requested: ${returnQuantity}`,
+        });
+      }
     }
 
-    if (usedQty > purchaseQty) {
-      return res.status(400).json({
-        success: false,
-        message: "Used quantity cannot exceed purchase quantity",
-      });
-    }
+    // Process products data
+    const processedProducts = products.map((productData) => ({
+      ...productData,
+      purchaseQty: parseFloat(productData.purchaseQty),
+      returnQuantity: parseFloat(productData.returnQuantity),
+      usedQty: parseFloat(productData.usedQty) || 0,
+      fob: parseFloat(productData.fob) || 0,
+      cif: parseFloat(productData.cif) || 0,
+      lc: parseFloat(productData.lc) || 0,
+      amount: parseFloat(productData.amount),
+      returnAmount: parseFloat(productData.returnAmount),
+    }));
 
     const newPurchaseReturn = new PurchaseReturn({
       ...data,
-      purchaseQty: parseFloat(purchaseQty),
-      returnQuantity: parseFloat(returnQuantity),
-      usedQty: parseFloat(usedQty) || 0,
-      fob: parseFloat(data.fob) || 0,
-      cif: parseFloat(data.cif) || 0,
-      amount: parseFloat(data.amount),
-      returnAmount: parseFloat(data.returnAmount),
+      products: processedProducts,
     });
 
     const saved = await newPurchaseReturn.save();
-
-    
-    await updateReportInHandForReturn(saved, "subtract");
+    await processPurchaseReturnProducts(saved, "subtract");
 
     res.status(201).json({
       success: true,
@@ -214,6 +417,18 @@ router.post("/purchase-return", async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Error creating purchase return:", error);
+
+    // If there's an error during stock update, delete the purchase return to maintain data consistency
+    if (req.body.invoiceNumber) {
+      try {
+        await PurchaseReturn.findOneAndDelete({
+          invoiceNumber: req.body.invoiceNumber,
+        });
+      } catch (deleteError) {
+        console.error("❌ Error rolling back purchase return:", deleteError);
+      }
+    }
+
     res.status(500).json({
       success: false,
       message: "Server error",
@@ -230,20 +445,21 @@ router.put("/purchase-return/:id", async (req, res) => {
 
     const originalReturn = await PurchaseReturn.findById(id);
     if (!originalReturn) {
-      return res.status(404).json({ success: false, message: "Purchase return not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Purchase return not found" });
     }
 
-    // Add back original stock first
-    await updateReportInHandForReturn(originalReturn, "add");
+    // Add back original stock first to both systems
+    await processPurchaseReturnProducts(originalReturn, "add");
 
-    const updated = await PurchaseReturn.findByIdAndUpdate(
-      id,
-      updatedData,
-      { new: true, runValidators: true }
-    );
+    const updated = await PurchaseReturn.findByIdAndUpdate(id, updatedData, {
+      new: true,
+      runValidators: true,
+    });
 
-    // Subtract new return quantity
-    await updateReportInHandForReturn(updated, "subtract");
+    // Subtract new return quantity from both systems
+    await processPurchaseReturnProducts(updated, "subtract");
 
     res.json({
       success: true,
@@ -252,7 +468,9 @@ router.put("/purchase-return/:id", async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating purchase return:", error);
-    res.status(500).json({ success: false, message: "Server error", error: error.message });
+    res
+      .status(500)
+      .json({ success: false, message: "Server error", error: error.message });
   }
 });
 
@@ -262,16 +480,25 @@ router.delete("/purchase-return/:id", async (req, res) => {
     const { id } = req.params;
     const purchaseReturn = await PurchaseReturn.findById(id);
 
-    if (!purchaseReturn)
-      return res.status(404).json({ success: false, message: "Purchase return not found" });
+    if (!purchaseReturn) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Purchase return not found" });
+    }
 
-    await updateReportInHandForReturn(purchaseReturn, "add");
+    await processPurchaseReturnProducts(purchaseReturn, "add");
 
     const deleted = await PurchaseReturn.findByIdAndDelete(id);
-    res.json({ success: true, message: "Purchase return deleted successfully", data: deleted });
+    res.json({
+      success: true,
+      message: "Purchase return deleted successfully",
+      data: deleted,
+    });
   } catch (error) {
     console.error("Error deleting purchase return:", error);
-    res.status(500).json({ success: false, message: "Server error", error: error.message });
+    res
+      .status(500)
+      .json({ success: false, message: "Server error", error: error.message });
   }
 });
 
@@ -279,12 +506,16 @@ router.delete("/purchase-return/:id", async (req, res) => {
 router.delete("/purchase-return", async (req, res) => {
   try {
     const { ids } = req.body;
-    if (!Array.isArray(ids) || ids.length === 0)
-      return res.status(400).json({ success: false, message: "No IDs provided" });
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "No IDs provided" });
+    }
 
     const purchaseReturns = await PurchaseReturn.find({ _id: { $in: ids } });
+
     for (const p of purchaseReturns) {
-      await updateReportInHandForReturn(p, "add");
+      await processPurchaseReturnProducts(p, "add");
     }
 
     const result = await PurchaseReturn.deleteMany({ _id: { $in: ids } });
@@ -294,7 +525,9 @@ router.delete("/purchase-return", async (req, res) => {
     });
   } catch (error) {
     console.error("Error deleting purchase returns:", error);
-    res.status(500).json({ success: false, message: "Server error", error: error.message });
+    res
+      .status(500)
+      .json({ success: false, message: "Server error", error: error.message });
   }
 });
 
@@ -308,7 +541,9 @@ router.get("/purchase-return/invoice/:invoiceNumber", async (req, res) => {
     res.json({ success: true, data: results });
   } catch (error) {
     console.error("Error fetching purchase returns by invoice:", error);
-    res.status(500).json({ success: false, message: "Server error", error: error.message });
+    res
+      .status(500)
+      .json({ success: false, message: "Server error", error: error.message });
   }
 });
 
@@ -316,13 +551,26 @@ router.get("/purchase-return/invoice/:invoiceNumber", async (req, res) => {
 router.get("/purchase-return/stats/summary", async (req, res) => {
   try {
     const totalReturns = await PurchaseReturn.countDocuments();
-    const pendingReturns = await PurchaseReturn.countDocuments({ status: "pending" });
-    const approvedReturns = await PurchaseReturn.countDocuments({ status: "approved" });
-    const completedReturns = await PurchaseReturn.countDocuments({ status: "completed" });
+    const pendingReturns = await PurchaseReturn.countDocuments({
+      status: "pending",
+    });
+    const approvedReturns = await PurchaseReturn.countDocuments({
+      status: "approved",
+    });
+    const completedReturns = await PurchaseReturn.countDocuments({
+      status: "completed",
+    });
 
+    // Aggregate amounts and quantities from products array
     const [amountAgg, qtyAgg] = await Promise.all([
-      PurchaseReturn.aggregate([{ $group: { _id: null, total: { $sum: "$returnAmount" } } }]),
-      PurchaseReturn.aggregate([{ $group: { _id: null, total: { $sum: "$returnQuantity" } } }]),
+      PurchaseReturn.aggregate([
+        { $unwind: "$products" },
+        { $group: { _id: null, total: { $sum: "$products.returnAmount" } } },
+      ]),
+      PurchaseReturn.aggregate([
+        { $unwind: "$products" },
+        { $group: { _id: null, total: { $sum: "$products.returnQuantity" } } },
+      ]),
     ]);
 
     res.json({
@@ -338,7 +586,9 @@ router.get("/purchase-return/stats/summary", async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching stats:", error);
-    res.status(500).json({ success: false, message: "Server error", error: error.message });
+    res
+      .status(500)
+      .json({ success: false, message: "Server error", error: error.message });
   }
 });
 
@@ -347,7 +597,9 @@ router.patch("/purchase-return/:id/status", async (req, res) => {
   try {
     const { status } = req.body;
     if (!["pending", "approved", "rejected", "completed"].includes(status)) {
-      return res.status(400).json({ success: false, message: "Invalid status" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid status" });
     }
 
     const updated = await PurchaseReturn.findByIdAndUpdate(
@@ -356,13 +608,22 @@ router.patch("/purchase-return/:id/status", async (req, res) => {
       { new: true }
     );
 
-    if (!updated)
-      return res.status(404).json({ success: false, message: "Purchase return not found" });
+    if (!updated) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Purchase return not found" });
+    }
 
-    res.json({ success: true, message: `Status updated to ${status}`, data: updated });
+    res.json({
+      success: true,
+      message: `Status updated to ${status}`,
+      data: updated,
+    });
   } catch (error) {
     console.error("Error updating status:", error);
-    res.status(500).json({ success: false, message: "Server error", error: error.message });
+    res
+      .status(500)
+      .json({ success: false, message: "Server error", error: error.message });
   }
 });
 

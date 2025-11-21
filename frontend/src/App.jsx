@@ -131,7 +131,7 @@ function App() {
       <Toaster position="bottom-right" reverseOrder={false} />
       <Routes>
         <Route path="/login" element={<Login />} />
-        
+
         {/* Main Dashboard Route */}
         <Route
           path="/"
@@ -143,24 +143,22 @@ function App() {
         >
           {/* Dashboard routes */}
           <Route index element={<Dashboard />} /> {/* Main dashboard page */}
-          <Route path="dashboard" element={<Dashboard />} /> {/* Alternative dashboard route */}
+          <Route path="dashboard" element={<Dashboard />} />{" "}
+          {/* Alternative dashboard route */}
           <Route path="graph" element={<Graph />} />
           <Route path="onlineorder" element={<OnlineOrders />} />
           <Route path="stockadjustment" element={<StockAdjustment />} />
           <Route path="stocktransfer" element={<StockTransfer />} />
           <Route path="stocktransferform" element={<StockTransferForm />} />
-
           {/* Account routes */}
           <Route path="accountlayout" element={<CashAndBankLayout />}>
             <Route index element={<CashAndBank />} />
           </Route>
-
           {/* Staff Member routes */}
           <Route path="staffmemberLayout" element={<StaffMemberLayout />}>
             <Route path="staffmember" element={<StaffMember />} />
             <Route path="staffmember/add" element={<AddStaffMember />} />
           </Route>
-
           {/* Master routes */}
           <Route path="masterlayout" element={<MasterLayout />}>
             <Route index element={<Customer />} />
@@ -169,14 +167,12 @@ function App() {
             <Route path="supplier" element={<Supplier />} />
             <Route path="supplier/new" element={<AddSupplier />} />
           </Route>
-
           {/* Settings routes */}
           <Route path="settingslayout" element={<SettingsLayout />}>
             <Route index element={<CompanyProfile />} />
             <Route path="company-profile" element={<CompanyProfile />} />
             <Route path="tab-manipulation" element={<HTabsManipulation />} />
           </Route>
-
           {/* Product Manager routes */}
           <Route path="productmanagerlayout" element={<ProductManagerLayout />}>
             <Route index element={<Product />} />
@@ -187,8 +183,19 @@ function App() {
             <Route path="addproduct" element={<AddProductForm />} />
             <Route path="printbarcode" element={<PrintBarCode />} />
           </Route>
-
           {/* Purchase routes */}
+          {/* <Route path="purchaselayout" element={<PurchaseLayout />}>
+            <Route index element={<Purchase />} />
+            <Route path="purchase">
+              <Route index element={<Purchase />} />
+              <Route path="new" element={<AddNewPurchase />} />
+            </Route>
+            <Route path="purchasereturn">
+              <Route index element={<PurchaseReturn />} />
+              <Route path="new" element={<AddReturnPurchase />} />
+            </Route>
+            <Route path="purchaseout" element={<PurchaseOut />} />
+          </Route> */}
           <Route path="purchaselayout" element={<PurchaseLayout />}>
             <Route index element={<Purchase />} />
             <Route path="purchase">
@@ -201,7 +208,6 @@ function App() {
             </Route>
             <Route path="purchaseout" element={<PurchaseOut />} />
           </Route>
-
           {/* Sale routes */}
           <Route path="salelayout" element={<SaleLayout />}>
             <Route index element={<Sale />} />
@@ -216,7 +222,6 @@ function App() {
             <Route path="payment" element={<PaymentSale />} />
             <Route path="quotation" element={<Quotation />} />
           </Route>
-
           {/* Expense routes */}
           <Route path="expenselayout" element={<ExpenseLayout />}>
             <Route index element={<Expenses />} />
@@ -229,7 +234,6 @@ function App() {
               <Route path="new" element={<AddExpenseCategory />} />
             </Route>
           </Route>
-
           {/* Report routes */}
           <Route path="reportlayout" element={<ReportsLayout />}>
             <Route index element={<AddDailReports />} />
@@ -334,14 +338,12 @@ function App() {
 
             <Route path="userreport" element={<UserReport />} />
           </Route>
-
           {/* Utility routes */}
           <Route path="utilitylayout" element={<UtilityLayout />}>
             <Route index element={<ProductCard />} />
             <Route path="companyprofile" element={<CompanyProfile />} />
             <Route path="tabhideview" element={<HTabsManipulation />} />
           </Route>
-
           {/* HRM routes */}
           <Route path="hrmlayout" element={<HrmLayout />}>
             <Route index element={<HrmDashboard />} />

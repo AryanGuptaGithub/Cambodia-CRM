@@ -4,7 +4,7 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { showToast } from "../../utils/toast";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, PlusSquare, MinusSquare } from "lucide-react";
 import { handleNumericInputChange } from "../../utils/inputValidators.jsx";
 
 // Import reusable API functions
@@ -36,7 +36,7 @@ const INITIAL_FORM_STATE = {
   invoiceDate: "",
   receivedDate: "",
   remarks: "",
-  product: { ...INITIAL_PRODUCT_STATE }, // Single product instead of array
+  products: [{ ...INITIAL_PRODUCT_STATE }], // Changed to array of products
 };
 
 /* ────────────────────── Utility ────────────────────── */
@@ -52,7 +52,7 @@ const usePurchaseForm = () => {
   const [errors, setErrors] = useState({});
   const [products, setProducts] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
-  const [isProductExpanded, setIsProductExpanded] = useState(true); // Always show product details
+  const [expandedProductIndex, setExpandedProductIndex] = useState(0);
   const [loading, setLoading] = useState({
     products: false,
     suppliers: false,
@@ -65,17 +65,46 @@ const usePurchaseForm = () => {
     setForm((prev) => ({ ...prev, [name]: value }));
   }, []);
 
-  const updateProduct = useCallback((field, value) => {
+  const updateProduct = useCallback((index, field, value) => {
     setForm((prev) => ({
       ...prev,
-      product: { ...prev.product, [field]: value },
+      products: prev.products.map((product, i) =>
+        i === index ? { ...product, [field]: value } : product
+      ),
     }));
   }, []);
 
   /* ───── Product View Management ───── */
-  const toggleProductView = useCallback(() => {
-    setIsProductExpanded((prev) => !prev);
+  const toggleProductView = useCallback((index) => {
+    setExpandedProductIndex((prevIndex) => (prevIndex === index ? -1 : index));
   }, []);
+
+  const isProductExpanded = useCallback((index) => {
+    return expandedProductIndex === index;
+  }, [expandedProductIndex]);
+
+  /* ───── Add/Remove Products ───── */
+  const addProduct = useCallback(() => {
+    setForm((prev) => ({
+      ...prev,
+      products: [...prev.products, { ...INITIAL_PRODUCT_STATE }],
+    }));
+    setExpandedProductIndex(form.products.length);
+  }, [form.products.length]);
+
+  const removeProduct = useCallback((index) => {
+    if (form.products.length > 1) {
+      setForm((prev) => ({
+        ...prev,
+        products: prev.products.filter((_, i) => i !== index),
+      }));
+      setExpandedProductIndex((prevIndex) => {
+        if (prevIndex === index) return 0;
+        else if (prevIndex > index) return prevIndex - 1;
+        return prevIndex;
+      });
+    }
+  }, [form.products.length]);
 
   /* ───── Field Validation ───── */
   const areCommonFieldsFilled = useCallback((formData) => {
@@ -85,6 +114,14 @@ const usePurchaseForm = () => {
 
   const isProductValid = useCallback((product) => {
     return product.productId && parseNumber(product.qtyBox) > 0 && product.expiredDate;
+  }, []);
+
+  const isProductFilled = useCallback((product) => {
+    return product.productId && product.productName.trim() !== "";
+  }, []);
+
+  const hasAtLeastOneProduct = useCallback((products) => {
+    return products.some((product) => product.productId && product.productName.trim() !== "");
   }, []);
 
   /* ───── Amount Calculation ───── */
@@ -105,9 +142,8 @@ const usePurchaseForm = () => {
   }, [updateFormField]);
 
   const handleProductChange = useCallback(
-    (e) => {
-      const { name, value } = e.target;
-      updateProduct(name, value);
+    (index, field, value) => {
+      updateProduct(index, field, value);
     },
     [updateProduct]
   );
@@ -117,30 +153,35 @@ const usePurchaseForm = () => {
   }, [updateFormField]);
 
   const handleProductDateChange = useCallback(
-    (name, date) => {
-      updateProduct(name, date ? new Date(date).toISOString() : "");
+    (index, name, date) => {
+      updateProduct(index, name, date ? new Date(date).toISOString() : "");
     },
     [updateProduct]
   );
 
   /* ───── Dropdown Handlers ───── */
   const handleProductSelection = useCallback(
-    (productId) => {
+    (index, productId) => {
       const selectedProduct = products.find((product) => product.value === productId);
       if (selectedProduct) {
         setForm((prev) => ({
           ...prev,
-          product: {
-            productId: selectedProduct.value,
-            productName: selectedProduct.label,
-            lcNumber: selectedProduct.lc || selectedProduct.lcNumber || 0,
-            fob: selectedProduct.fob || 0,
-            cif: selectedProduct.cif || 0,
-            remainingStock: selectedProduct.remainingStock || 0,
-            qtyBox: prev.product.qtyBox, // Keep existing quantity
-            expiredDate: prev.product.expiredDate, // Keep existing expiry date
-            amount: prev.product.amount, // Keep existing amount
-          },
+          products: prev.products.map((product, i) =>
+            i === index
+              ? {
+                  ...product,
+                  productId: selectedProduct.value,
+                  productName: selectedProduct.label,
+                  lcNumber: selectedProduct.lc || selectedProduct.lcNumber || 0,
+                  fob: selectedProduct.fob || 0,
+                  cif: selectedProduct.cif || 0,
+                  remainingStock: selectedProduct.remainingStock || 0,
+                  qtyBox: product.qtyBox, // Keep existing quantity
+                  expiredDate: product.expiredDate, // Keep existing expiry date
+                  amount: product.amount, // Keep existing amount
+                }
+              : product
+          ),
         }));
       }
     },
@@ -158,8 +199,8 @@ const usePurchaseForm = () => {
     [suppliers, updateFormField]
   );
 
-  const handleFobUpdate = useCallback((fobValue) => {
-    updateProduct("fob", fobValue);
+  const handleFobUpdate = useCallback((index, fobValue) => {
+    updateProduct(index, "fob", fobValue);
   }, [updateProduct]);
 
   /* ───── Validation ───── */
@@ -187,29 +228,37 @@ const usePurchaseForm = () => {
       newErrors.receivedDate = "Received date cannot be in the future";
     }
 
-    // Product validation
-    const product = form.product;
-    if (!product.productId) newErrors.productId = "Product selection is required";
+    // Products validation
+    form.products.forEach((product, index) => {
+      if (product.productId) {
+        if (!product.productId) newErrors[`productId_${index}`] = "Product selection is required";
 
-    const qtyBoxNum = parseNumber(product.qtyBox);
-    const fobNum = parseNumber(product.fob);
-    const cifNum = parseNumber(product.cif);
-    const lcNumberStr = String(product.lcNumber || "");
+        const qtyBoxNum = parseNumber(product.qtyBox);
+        const fobNum = parseNumber(product.fob);
+        const cifNum = parseNumber(product.cif);
+        const lcNumberStr = String(product.lcNumber || "");
 
-    if (qtyBoxNum <= 0) newErrors.qtyBox = "Box quantity must be greater than 0";
-    if (qtyBoxNum > 100000) newErrors.qtyBox = "Box quantity seems too large, please verify";
-    if (fobNum < 0) newErrors.fob = "FOB cannot be negative";
-    if (cifNum < 0) newErrors.cif = "CIF cannot be negative";
+        if (qtyBoxNum <= 0) newErrors[`qtyBox_${index}`] = "Box quantity must be greater than 0";
+        if (qtyBoxNum > 100000) newErrors[`qtyBox_${index}`] = "Box quantity seems too large, please verify";
+        if (fobNum < 0) newErrors[`fob_${index}`] = "FOB cannot be negative";
+        if (cifNum < 0) newErrors[`cif_${index}`] = "CIF cannot be negative";
 
-    if (!lcNumberStr.trim() && fobNum <= 0) {
-      newErrors.lcNumber = "Either LC or FOB is required";
+        if (!lcNumberStr.trim() && fobNum <= 0) {
+          newErrors[`lcNumber_${index}`] = "Either LC or FOB is required";
+        }
+
+        if (!product.expiredDate) newErrors[`expiredDate_${index}`] = "Expired date is required";
+      }
+    });
+
+    // Check if at least one product is filled
+    if (!hasAtLeastOneProduct(form.products)) {
+      newErrors.products = "At least one product is required";
     }
-
-    if (!product.expiredDate) newErrors.expiredDate = "Expired date is required";
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
-  }, [form]);
+  }, [form, hasAtLeastOneProduct]);
 
   /* ───── Data Fetching ───── */
   const fetchProducts = useCallback(async () => {
@@ -247,7 +296,7 @@ const usePurchaseForm = () => {
       console.error("Error fetching products:", err);
       showToast("error", "Failed to fetch products");
       setProducts([]);
-      setIsProductsEmpty(true);
+        setIsProductsEmpty(true);
     } finally {
       setLoading((prev) => ({ ...prev, products: false }));
     }
@@ -274,7 +323,7 @@ const usePurchaseForm = () => {
       console.error("Error fetching suppliers:", err);
       showToast("error", "Failed to fetch suppliers");
       setSuppliers([]);
-      setIsSuppliersEmpty(true);
+        setIsSuppliersEmpty(true);
     } finally {
       setLoading((prev) => ({ ...prev, suppliers: false }));
     }
@@ -287,16 +336,16 @@ const usePurchaseForm = () => {
     return current + purchase;
   }, []);
 
-  // Auto-calculate amount when relevant fields change
+  // Auto-calculate amount when relevant fields change for each product
   useEffect(() => {
     setForm((prev) => ({
       ...prev,
-      product: {
-        ...prev.product,
-        amount: calculateProductAmount(prev.product),
-      },
+      products: prev.products.map((product) => ({
+        ...product,
+        amount: calculateProductAmount(product),
+      })),
     }));
-  }, [form.product.lcNumber, form.product.fob, form.product.qtyBox, calculateProductAmount]);
+  }, [form.products.map(p => `${p.lcNumber}-${p.fob}-${p.qtyBox}`).join(), calculateProductAmount]);
 
   return {
     form,
@@ -306,7 +355,7 @@ const usePurchaseForm = () => {
     loading,
     isSuppliersEmpty,
     isProductsEmpty,
-    isProductExpanded,
+    expandedProductIndex,
     handleChange,
     handleProductChange,
     validate,
@@ -318,8 +367,13 @@ const usePurchaseForm = () => {
     handleSupplierChange,
     handleFobUpdate,
     toggleProductView,
+    isProductExpanded,
     isProductValid,
+    isProductFilled,
     areCommonFieldsFilled,
+    hasAtLeastOneProduct,
+    addProduct,
+    removeProduct,
     setErrors,
     calculateFutureStock,
     fetchProducts,
@@ -523,7 +577,7 @@ const AddNewPurchase = () => {
     loading,
     isSuppliersEmpty,
     isProductsEmpty,
-    isProductExpanded,
+    expandedProductIndex,
     handleChange,
     handleProductChange,
     validate,
@@ -533,8 +587,12 @@ const AddNewPurchase = () => {
     handleSupplierChange,
     handleFobUpdate,
     toggleProductView,
-    isProductValid,
+    isProductExpanded,
+    isProductFilled,
     areCommonFieldsFilled,
+    hasAtLeastOneProduct,
+    addProduct,
+    removeProduct,
     calculateFutureStock,
     fetchProducts,
     fetchSuppliers,
@@ -568,13 +626,11 @@ const AddNewPurchase = () => {
   );
 
   const enhancedProductChange = useCallback(
-    (e) => {
-      const { name, value } = e.target;
-
-      if (name === "fob") {
-        handleFobUpdate(value);
+    (index, field, value) => {
+      if (field === "fob") {
+        handleFobUpdate(index, value);
       } else {
-        handleProductChange(e);
+        handleProductChange(index, field, value);
       }
     },
     [handleProductChange, handleFobUpdate]
@@ -600,16 +656,18 @@ const AddNewPurchase = () => {
         invoiceDate: form.invoiceDate,
         receivedDate: form.receivedDate,
         remarks: form.remarks,
-        products: [{
-          productId: form.product.productId,
-          productName: form.product.productName,
-          qtyBox: parseFloat(form.product.qtyBox) || 0,
-          lc: form.product.lcNumber,
-          cif: parseFloat(form.product.cif) || 0,
-          fob: parseFloat(form.product.fob) || 0,
-          amount: parseFloat(form.product.amount) || 0,
-          expiredDate: form.product.expiredDate,
-        }],
+        products: form.products
+          .filter(product => product.productId) // Only include products with productId
+          .map(product => ({
+            productId: product.productId,
+            productName: product.productName,
+            qtyBox: parseFloat(product.qtyBox) || 0,
+            lc: product.lcNumber,
+            cif: parseFloat(product.cif) || 0,
+            fob: parseFloat(product.fob) || 0,
+            amount: parseFloat(product.amount) || 0,
+            expiredDate: product.expiredDate,
+          })),
       };
 
       const response = await fetch(`${backendUrl}/api/purchase`, {
@@ -637,17 +695,35 @@ const AddNewPurchase = () => {
 
   const isFormValid = useMemo(() => {
     if (isFormDisabled) return false;
-    return areCommonFieldsFilled(form) && isProductValid(form.product);
-  }, [form, isFormDisabled, areCommonFieldsFilled, isProductValid]);
+    return areCommonFieldsFilled(form) && hasAtLeastOneProduct(form.products);
+  }, [form, isFormDisabled, areCommonFieldsFilled, hasAtLeastOneProduct]);
 
-  // Calculate stock information
-  const currentStock = form.product.remainingStock || 0;
-  const purchaseQty = parseNumber(form.product.qtyBox) || 0;
-  const futureStock = calculateFutureStock(currentStock, purchaseQty);
+  // Check if current product is valid for enabling "Add Product" button
+  const isCurrentProductValid = useCallback(() => {
+    if (isFormDisabled) return false;
+    
+    const currentProduct = form.products[form.products.length - 1];
+    return isProductFilled(currentProduct);
+  }, [form.products, isFormDisabled, isProductFilled]);
 
   return (
-    <div className="max-w-3xl mx-auto p-8 bg-white rounded-2xl shadow">
-      <h2 className="text-2xl font-bold mb-6 text-gray-800">Add New Purchase</h2>
+    <div className="max-w-4xl mx-auto p-8 bg-white rounded-2xl shadow">
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-2xl font-bold text-gray-800">Add New Purchase</h2>
+        <button
+          type="button"
+          disabled={!isCurrentProductValid() || isFormDisabled}
+          onClick={addProduct}
+          className={`flex items-center gap-2 px-3 py-2 rounded-lg ${
+            isCurrentProductValid() && !isFormDisabled
+              ? "bg-green-600 text-white hover:bg-green-700"
+              : "bg-gray-400 text-white opacity-50 cursor-not-allowed"
+          }`}
+        >
+          <PlusSquare className="w-5 h-5" />
+          Add Product
+        </button>
+      </div>
 
       {/* Warning message if suppliers or products are empty */}
       {(isSuppliersEmpty || isProductsEmpty) && (
@@ -683,7 +759,7 @@ const AddNewPurchase = () => {
         <div className="mb-8 p-6 border border-gray-200 rounded-lg">
           <h3 className="text-lg font-semibold mb-4 text-gray-700">Common Information</h3>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             <InputField
               label="Invoice Number"
               name="invoiceNumber"
@@ -742,147 +818,171 @@ const AddNewPurchase = () => {
           </div>
         </div>
 
-        {/* Product Section */}
+        {/* Products Section */}
         <div className="mb-8">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold text-gray-700">Product Information</h3>
-            <button
-              type="button"
-              onClick={toggleProductView}
-              className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-sm"
-              disabled={isFormDisabled}
-            >
-              {isProductExpanded ? (
-                <>
-                  <EyeOff size={16} />
-                  Hide Details
-                </>
-              ) : (
-                <>
-                  <Eye size={16} />
-                  Show Details
-                </>
-              )}
-            </button>
-          </div>
+          <h3 className="text-lg font-semibold mb-4 text-gray-700">Products Information</h3>
 
-          <div className="border border-gray-200 rounded-lg">
-            {/* Product Header */}
-            <div className="p-4 bg-gray-50 rounded-t-lg">
-              <div className="flex justify-between items-center">
-                <div className="flex items-center gap-3">
-                  <h4 className="text-md font-medium text-gray-700">
-                    {form.product.productName || "Product"}
-                  </h4>
-                  {!form.product.productName && (
-                    <span className="text-xs text-red-500">(Product not selected)</span>
-                  )}
-                  {form.product.productName && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm px-2 py-1 bg-blue-100 text-blue-800 rounded border border-blue-300">
-                        Current: {currentStock} boxes
-                      </span>
-                      <span className="text-sm px-2 py-1 bg-green-100 text-green-800 rounded border border-green-300">
-                        After Purchase: {futureStock} boxes
-                      </span>
-                      {purchaseQty > 0 && (
-                        <span className="text-sm px-2 py-1 bg-purple-100 text-purple-800 rounded border border-purple-300">
-                          +{purchaseQty} boxes
-                        </span>
+          {form.products.map((product, index) => {
+            const currentStock = product.remainingStock || 0;
+            const purchaseQty = parseNumber(product.qtyBox) || 0;
+            const futureStock = calculateFutureStock(currentStock, purchaseQty);
+
+            return (
+              <div key={index} className="border border-gray-200 rounded-lg mb-4">
+                {/* Product Header */}
+                <div className="p-4 bg-gray-50 rounded-t-lg">
+                  <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-3">
+                      <h4 className="text-md font-medium text-gray-700">
+                        {product.productName || `Product ${index + 1}`}
+                      </h4>
+                      {!product.productName && (
+                        <span className="text-xs text-red-500">(Product not selected)</span>
+                      )}
+                      {product.productName && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm px-2 py-1 bg-blue-100 text-blue-800 rounded border border-blue-300">
+                            Current: {currentStock} boxes
+                          </span>
+                          <span className="text-sm px-2 py-1 bg-green-100 text-green-800 rounded border border-green-300">
+                            After Purchase: {futureStock} boxes
+                          </span>
+                          {purchaseQty > 0 && (
+                            <span className="text-sm px-2 py-1 bg-purple-100 text-purple-800 rounded border border-purple-300">
+                              +{purchaseQty} boxes
+                            </span>
+                          )}
+                        </div>
                       )}
                     </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Product Details - Always expanded by default, but can be toggled */}
-            {isProductExpanded && (
-              <div className="p-6 border-t">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <SearchableDropdown
-                    label="Product"
-                    value={form.product.productId}
-                    onChange={handleProductSelection}
-                    options={productOptions}
-                    placeholder={isProductsEmpty ? "No Products Available" : "Select Product"}
-                    required={true}
-                    error={errors.productId}
-                    loading={loading.products}
-                    disabled={isProductsEmpty}
-                  />
-                  <NumericInputField
-                    label="Box Quantity"
-                    name="qtyBox"
-                    value={form.product.qtyBox}
-                    onChange={enhancedProductChange}
-                    error={errors.qtyBox}
-                    placeholder="0"
-                    required
-                    allowDecimal={false}
-                    disabled={isFormDisabled}
-                  />
-                  <NumericInputField
-                    label="LC (USD)"
-                    name="lcNumber"
-                    value={form.product.lcNumber}
-                    onChange={enhancedProductChange}
-                    error={errors.lcNumber}
-                    placeholder="0.00"
-                    allowDecimal={true}
-                    disabled={isFormDisabled}
-                  />
-                  <NumericInputField
-                    label="FOB (USD)"
-                    name="fob"
-                    value={form.product.fob}
-                    onChange={enhancedProductChange}
-                    error={errors.fob}
-                    placeholder="0.00"
-                    allowDecimal={true}
-                    disabled={isFormDisabled}
-                  />
-                  <NumericInputField
-                    label="CIF (USD)"
-                    name="cif"
-                    value={form.product.cif}
-                    onChange={enhancedProductChange}
-                    error={errors.cif}
-                    placeholder="0.00"
-                    allowDecimal={true}
-                    disabled={isFormDisabled}
-                  />
-                  <ProductDatePickerField
-                    label="Expired Date"
-                    name="expiredDate"
-                    value={form.product.expiredDate}
-                    onChange={(name, date) => handleProductDateChange(name, date)}
-                    error={errors.expiredDate}
-                    required
-                    disabled={isFormDisabled}
-                    showYearDropdown
-                    showMonthDropdown
-                  />
-
-                  <div className="flex flex-col">
-                    <label className="text-sm font-medium text-gray-700 mb-1">
-                      Amount (USD)
-                    </label>
-                    <input
-                      type="text"
-                      name="amount"
-                      value={form.product.amount ? parseFloat(form.product.amount).toFixed(2) : "0.00"}
-                      className="w-full border px-3 py-2 rounded-lg bg-gray-100 border-gray-300"
-                      readOnly
-                    />
-                    <p className="text-xs text-gray-500 mt-1">
-                      Calculated: (FOB or LC) × Box Quantity
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => toggleProductView(index)}
+                        className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-sm"
+                        disabled={isFormDisabled}
+                      >
+                        {isProductExpanded(index) ? (
+                          <>
+                            <EyeOff size={16} />
+                            Hide Details
+                          </>
+                        ) : (
+                          <>
+                            <Eye size={16} />
+                            Show Details
+                          </>
+                        )}
+                      </button>
+                      {form.products.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeProduct(index)}
+                          disabled={isFormDisabled}
+                          className="text-red-600 hover:text-red-800"
+                        >
+                          <MinusSquare size={16} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
+
+                {/* Product Details */}
+                {isProductExpanded(index) && (
+                  <div className="p-6 border-t">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      <SearchableDropdown
+                        label="Product"
+                        value={product.productId}
+                        onChange={(productId) => handleProductSelection(index, productId)}
+                        options={productOptions}
+                        placeholder={isProductsEmpty ? "No Products Available" : "Select Product"}
+                        required={true}
+                        error={errors[`productId_${index}`]}
+                        loading={loading.products}
+                        disabled={isProductsEmpty}
+                      />
+                      <NumericInputField
+                        label="Box Quantity"
+                        name={`qtyBox_${index}`}
+                        value={product.qtyBox}
+                        onChange={(e) => enhancedProductChange(index, "qtyBox", e.target.value)}
+                        error={errors[`qtyBox_${index}`]}
+                        placeholder="0"
+                        required
+                        allowDecimal={false}
+                        disabled={isFormDisabled}
+                      />
+                      <NumericInputField
+                        label="LC (USD)"
+                        name={`lcNumber_${index}`}
+                        value={product.lcNumber}
+                        onChange={(e) => enhancedProductChange(index, "lcNumber", e.target.value)}
+                        error={errors[`lcNumber_${index}`]}
+                        placeholder="0.00"
+                        allowDecimal={true}
+                        disabled={isFormDisabled}
+                      />
+                      <NumericInputField
+                        label="FOB (USD)"
+                        name={`fob_${index}`}
+                        value={product.fob}
+                        onChange={(e) => enhancedProductChange(index, "fob", e.target.value)}
+                        error={errors[`fob_${index}`]}
+                        placeholder="0.00"
+                        allowDecimal={true}
+                        disabled={isFormDisabled}
+                      />
+                      <NumericInputField
+                        label="CIF (USD)"
+                        name={`cif_${index}`}
+                        value={product.cif}
+                        onChange={(e) => enhancedProductChange(index, "cif", e.target.value)}
+                        error={errors[`cif_${index}`]}
+                        placeholder="0.00"
+                        allowDecimal={true}
+                        disabled={isFormDisabled}
+                      />
+                      <ProductDatePickerField
+                        label="Expired Date"
+                        name={`expiredDate_${index}`}
+                        value={product.expiredDate}
+                        onChange={(name, date) => handleProductDateChange(index, "expiredDate", date)}
+                        error={errors[`expiredDate_${index}`]}
+                        required
+                        disabled={isFormDisabled}
+                        showYearDropdown
+                        showMonthDropdown
+                      />
+
+                      <div className="flex flex-col">
+                        <label className="text-sm font-medium text-gray-700 mb-1">
+                          Amount (USD)
+                        </label>
+                        <input
+                          type="text"
+                          name={`amount_${index}`}
+                          value={product.amount ? parseFloat(product.amount).toFixed(2) : "0.00"}
+                          className="w-full border px-3 py-2 rounded-lg bg-gray-100 border-gray-300"
+                          readOnly
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          Calculated: (FOB or LC) × Box Quantity
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            );
+          })}
+
+          {errors.products && (
+            <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded">
+              <p className="text-red-700 text-sm">{errors.products}</p>
+            </div>
+          )}
         </div>
 
         {/* Remarks Section */}

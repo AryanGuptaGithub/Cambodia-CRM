@@ -5,7 +5,16 @@ import React, {
   useCallback,
   useRef,
 } from "react";
-import { UserPlus, Trash2, Edit, X, Eye, Search } from "lucide-react";
+import {
+  UserPlus,
+  Trash2,
+  Edit,
+  X,
+  Eye,
+  Search,
+  Package,
+  MessageSquare,
+} from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { formatDateToReadable } from "../../utils/dateUtil";
 import ReactDOM from "react-dom";
@@ -14,6 +23,7 @@ import "react-datepicker/dist/react-datepicker.css";
 import { confirmDialog } from "../../utils/confirmationDialog";
 import { showToast } from "../../utils/toast";
 import axios from "axios";
+import { getVisiblePages } from "../../utils/useVisiblePages";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
@@ -25,117 +35,28 @@ const INITIAL_FORM_STATE = {
   invoiceDate: "",
   deliveryNumber: "",
   receivedDate: "",
-  productId: "",
-  productName: "",
   supplierId: "",
   supplierName: "",
-  purchaseQty: 0,
-  returnQuantity: 0,
-  usedQty: 0,
-  fob: 0,
-  cif: 0,
   lcNumber: "",
   amount: 0,
-  returnAmount: 0,
-  remarks: "",
   returnReason: "",
-  expiredDate: "",
-};
-
-// Define numeric fields for proper handling
-const NUMERIC_FIELDS = [
-  "purchaseQty",
-  "returnQuantity",
-  "usedQty",
-  "fob",
-  "cif",
-  "amount",
-  "returnAmount",
-];
-
-// Custom hook for suggestions
-const useSuggestions = (items = [], inputValue = "") => {
-  const [isOpen, setIsOpen] = useState(false);
-  const [highlightedIndex, setHighlightedIndex] = useState(-1);
-  const inputRef = useRef(null);
-  const [dropdownTop, setDropdownTop] = useState(0);
-
-  const filteredItems = useMemo(() => {
-    if (!items || items.length === 0) return [];
-
-    return items
-      .filter((item) => {
-        if (!item) return false;
-        return item.toLowerCase().includes(inputValue.toLowerCase());
-      })
-      .sort((a, b) => a.localeCompare(b));
-  }, [items, inputValue]);
-
-  const calculatePosition = useCallback(() => {
-    if (isOpen && inputRef.current) {
-      const height = inputRef.current.offsetHeight;
-      setDropdownTop(2 * height - 8);
-    }
-  }, [isOpen]);
-
-  useEffect(() => {
-    calculatePosition();
-  }, [calculatePosition]);
-
-  const handleKeyDown = useCallback(
-    (e, onSelect) => {
-      if (!isOpen || filteredItems.length === 0) return;
-
-      switch (e.key) {
-        case "ArrowDown":
-          e.preventDefault();
-          setHighlightedIndex((prev) =>
-            prev < filteredItems.length - 1 ? prev + 1 : 0
-          );
-          break;
-        case "ArrowUp":
-          e.preventDefault();
-          setHighlightedIndex((prev) =>
-            prev > 0 ? prev - 1 : filteredItems.length - 1
-          );
-          break;
-        case "Enter":
-          e.preventDefault();
-          if (highlightedIndex >= 0) {
-            const selected = filteredItems[highlightedIndex];
-            onSelect(selected);
-            setIsOpen(false);
-            setHighlightedIndex(-1);
-          }
-          break;
-        case "Escape":
-          setIsOpen(false);
-          setHighlightedIndex(-1);
-          break;
-        default:
-          break;
-      }
+  remarks: "",
+  status: "pending",
+  products: [
+    {
+      productId: "",
+      productName: "",
+      purchaseQty: 0,
+      returnQuantity: 0,
+      usedQty: 0,
+      fob: 0,
+      cif: 0,
+      lc: 0,
+      amount: 0,
+      returnAmount: 0,
+      expiredDate: "",
     },
-    [isOpen, filteredItems, highlightedIndex]
-  );
-
-  const selectSuggestion = useCallback((value, onSelect) => {
-    onSelect(value);
-    setIsOpen(false);
-    setHighlightedIndex(-1);
-  }, []);
-
-  return {
-    isOpen,
-    setIsOpen,
-    highlightedIndex,
-    setHighlightedIndex,
-    inputRef,
-    dropdownTop,
-    filteredItems,
-    handleKeyDown,
-    selectSuggestion,
-  };
+  ],
 };
 
 const PurchaseReturn = () => {
@@ -144,10 +65,13 @@ const PurchaseReturn = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState("");
   const [loadingData, setLoadingData] = useState(true);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+
+  // Single modal state to ensure only one modal is open at a time
+  const [activeModal, setActiveModal] = useState(null); // null, 'view', 'edit', 'products', 'returnReason'
+
+  const [selectedPurchaseReturn, setSelectedPurchaseReturn] = useState(null);
+  const [selectedReturnReason, setSelectedReturnReason] = useState("");
   const [form, setForm] = useState(INITIAL_FORM_STATE);
-  const [isOpen, setIsOpen] = useState(false);
   const navigate = useNavigate();
   const inputRef = useRef(null);
 
@@ -159,26 +83,38 @@ const PurchaseReturn = () => {
   const [loadingSuppliers, setLoadingSuppliers] = useState(false);
   const [loadingPurchases, setLoadingPurchases] = useState(false);
 
+  // New states for filtered options based on selected invoice
+  const [filteredProductOptions, setFilteredProductOptions] = useState([]);
+  const [filteredSupplierOptions, setFilteredSupplierOptions] = useState([]);
+  const [originalPurchaseData, setOriginalPurchaseData] = useState(null);
+
+  // State for expanded product details in view modal
+  const [expandedProductIndex, setExpandedProductIndex] = useState(-1);
+
+  // Product edit modal states (like in Purchase component)
+  const [currentProduct, setCurrentProduct] = useState(null);
+  const [currentProductIndex, setCurrentProductIndex] = useState(null);
+  const [isProductEditModalOpen, setIsProductEditModalOpen] = useState(false);
+
   const returnsPerPage = 10;
 
-  // Fixed table columns like SaleReturn
+  // Fixed table columns
   const tableColumns = useMemo(
     () => [
-      "invoiceNumber",
+      "recordingDate",
+      "invoiceDate",
       "deliveryNumber",
-      "productName",
-      "purchaseQty",
-      "returnQuantity",
-      "fob",
-      "amount",
-      "returnAmount",
+      "invoiceNumber",
+      "supplierName",
+      "totalReturnAmount",
+      "productCount",
       "returnReason",
       "actions",
     ],
     []
   );
 
-  // Define all available table columns for reference
+  // Define all available table columns
   const allFields = useMemo(
     () => [
       {
@@ -187,9 +123,9 @@ const PurchaseReturn = () => {
         dbName: "recordingDate",
       },
       {
-        id: "invoiceNumber",
-        name: "Invoice Number",
-        dbName: "invoiceNumber",
+        id: "invoiceDate",
+        name: "Invoice Date",
+        dbName: "invoiceDate",
       },
       {
         id: "deliveryNumber",
@@ -197,64 +133,29 @@ const PurchaseReturn = () => {
         dbName: "deliveryNumber",
       },
       {
-        id: "invoiceDate",
-        name: "Invoice Date",
-        dbName: "invoiceDate",
+        id: "invoiceNumber",
+        name: "Invoice Number",
+        dbName: "invoiceNumber",
       },
       {
-        id: "receivedDate",
-        name: "Received Date",
-        dbName: "receivedDate",
+        id: "supplierName",
+        name: "Supplier Name",
+        dbName: "supplierName",
       },
       {
-        id: "productName",
-        name: "Product Name",
-        dbName: "productName",
+        id: "totalReturnAmount",
+        name: "Total Return Amount ($)",
+        dbName: "totalReturnAmount",
       },
       {
-        id: "purchaseQty",
-        name: "Purchase Quantity",
-        dbName: "purchaseQty",
+        id: "productCount",
+        name: "Products",
+        dbName: "productCount",
       },
       {
-        id: "returnQuantity",
-        name: "Return Quantity",
-        dbName: "returnQuantity",
-      },
-      {
-        id: "usedQty",
-        name: "Used Quantity",
-        dbName: "usedQty",
-      },
-      {
-        id: "fob",
-        name: "FOB",
-        dbName: "fob",
-      },
-      {
-        id: "cif",
-        name: "CIF",
-        dbName: "cif",
-      },
-      {
-        id: "lcNumber",
-        name: "LC Number",
-        dbName: "lcNumber",
-      },
-      {
-        id: "amount",
-        name: "Amount ($)",
-        dbName: "amount",
-      },
-      {
-        id: "returnAmount",
-        name: "Return Amount ($)",
-        dbName: "returnAmount",
-      },
-      {
-        id: "remarks",
-        name: "Remarks",
-        dbName: "remarks",
+        id: "returnReason",
+        name: "Return Reason",
+        dbName: "returnReason",
       },
       {
         id: "actions",
@@ -265,31 +166,78 @@ const PurchaseReturn = () => {
     []
   );
 
-  // Sample data for suggestions
-  const returnReasonStrings = useMemo(
-    () => [
-      "Damaged Goods",
-      "Wrong Product",
-      "Expired Product",
-      "Quality Issues",
-      "Overstock",
-      "Customer Return",
-    ],
-    []
-  );
-
-  // Use the custom hook for suggestions
-  const returnReasonSuggestions = useSuggestions(
-    returnReasonStrings,
-    form.returnReason
-  );
-
-  // Enhanced add new purchase return handler with validation
-  const handleAddNewPurchaseReturn = () => {
-    navigate("/purchaselayout/purchasereturn/new");
+  // Close all modals
+  const closeAllModals = () => {
+    setActiveModal(null);
+    setForm(INITIAL_FORM_STATE);
+    setExpandedProductIndex(-1);
+    setIsProductEditModalOpen(false);
+    setCurrentProduct(null);
+    setCurrentProductIndex(null);
   };
 
-  // Fetch products, suppliers, and purchases for dropdowns and validation
+  // Fetch original purchase data by invoice number
+  const fetchOriginalPurchaseData = async (invoiceNumber) => {
+    if (!invoiceNumber) return null;
+
+    try {
+      const response = await axios.get(`${backendUrl}/api/purchase`);
+      const purchases = response.data.reports || [];
+      const originalPurchase = purchases.find(
+        (purchase) => purchase.invoiceNumber === invoiceNumber
+      );
+
+      return originalPurchase;
+    } catch (error) {
+      console.error("Error fetching original purchase data:", error);
+      return null;
+    }
+  };
+
+  // Filter products and suppliers based on original purchase data
+  const filterOptionsByOriginalPurchase = useCallback(
+    (originalPurchase) => {
+      if (!originalPurchase) {
+        setFilteredProductOptions(productOptions);
+        setFilteredSupplierOptions(supplierOptions);
+        return;
+      }
+
+      const originalSupplier = supplierOptions.find(
+        (supplier) => supplier.label === originalPurchase.supplierName
+      );
+
+      if (originalSupplier) {
+        setFilteredSupplierOptions([originalSupplier]);
+      } else {
+        setFilteredSupplierOptions([]);
+      }
+
+      const originalProductNames = [];
+
+      if (
+        originalPurchase.products &&
+        Array.isArray(originalPurchase.products)
+      ) {
+        originalPurchase.products.forEach((product) => {
+          if (product.productName) {
+            originalProductNames.push(product.productName);
+          }
+        });
+      } else if (originalPurchase.productName) {
+        originalProductNames.push(originalPurchase.productName);
+      }
+
+      const filteredProducts = productOptions.filter((product) =>
+        originalProductNames.includes(product.label)
+      );
+
+      setFilteredProductOptions(filteredProducts);
+    },
+    [productOptions, supplierOptions]
+  );
+
+  // Fetch products, suppliers, and purchases for dropdowns
   const fetchProducts = async () => {
     setLoadingProducts(true);
     try {
@@ -299,10 +247,12 @@ const PurchaseReturn = () => {
         label: product.productName,
       }));
       setProductOptions(transformedProducts);
+      setFilteredProductOptions(transformedProducts);
     } catch (err) {
       console.error("Error fetching products:", err);
       showToast("error", "Failed to fetch products");
       setProductOptions([]);
+      setFilteredProductOptions([]);
     } finally {
       setLoadingProducts(false);
     }
@@ -317,10 +267,12 @@ const PurchaseReturn = () => {
         label: supplier.supplierName || supplier.name,
       }));
       setSupplierOptions(transformedSuppliers);
+      setFilteredSupplierOptions(transformedSuppliers);
     } catch (err) {
       console.error("Error fetching suppliers:", err);
       showToast("error", "Failed to fetch suppliers");
       setSupplierOptions([]);
+      setFilteredSupplierOptions([]);
     } finally {
       setLoadingSuppliers(false);
     }
@@ -345,43 +297,40 @@ const PurchaseReturn = () => {
     }
   };
 
-  // Load dropdown data when component mounts for validation
+  // Load dropdown data when component mounts
   useEffect(() => {
     fetchProducts();
     fetchSuppliers();
     fetchPurchases();
   }, []);
 
-  // Load dropdown data when edit modal opens
+  // Load dropdown data and filter options when edit modal opens
   useEffect(() => {
-    if (isEditModalOpen) {
+    if (activeModal === "edit" && form.invoiceNumber) {
       fetchProducts();
       fetchSuppliers();
       fetchPurchases();
+
+      fetchOriginalPurchaseData(form.invoiceNumber).then((originalPurchase) => {
+        setOriginalPurchaseData(originalPurchase);
+        filterOptionsByOriginalPurchase(originalPurchase);
+      });
+    } else if (activeModal === "edit") {
+      setFilteredProductOptions(productOptions);
+      setFilteredSupplierOptions(supplierOptions);
     }
-  }, [isEditModalOpen]);
+  }, [
+    activeModal,
+    form.invoiceNumber,
+    filterOptionsByOriginalPurchase,
+    productOptions,
+    supplierOptions,
+  ]);
 
-  // CORRECTED: Handle product selection from dropdown
-  const handleProductChange = useCallback(
-    (productId) => {
-      const selectedProduct = productOptions.find(
-        (product) => product.value === productId
-      );
-      if (selectedProduct) {
-        setForm((prev) => ({
-          ...prev,
-          productId: selectedProduct.value,
-          productName: selectedProduct.label,
-        }));
-      }
-    },
-    [productOptions]
-  );
-
-  // CORRECTED: Handle supplier selection from dropdown
+  // Handle supplier selection from dropdown
   const handleSupplierChange = useCallback(
     (supplierId) => {
-      const selectedSupplier = supplierOptions.find(
+      const selectedSupplier = filteredSupplierOptions.find(
         (supplier) => supplier.value === supplierId
       );
       if (selectedSupplier) {
@@ -392,17 +341,40 @@ const PurchaseReturn = () => {
         }));
       }
     },
-    [supplierOptions]
+    [filteredSupplierOptions]
   );
 
-  // Select return reason from suggestions
-  const selectReturnReason = (reason) => {
+  // Handle product selection for a specific product in the array
+  const handleProductChange = useCallback(
+    (productIndex, productId) => {
+      const selectedProduct = filteredProductOptions.find(
+        (product) => product.value === productId
+      );
+      if (selectedProduct) {
+        setForm((prev) => {
+          const updatedProducts = [...prev.products];
+          updatedProducts[productIndex] = {
+            ...updatedProducts[productIndex],
+            productId: selectedProduct.value,
+            productName: selectedProduct.label,
+          };
+          return {
+            ...prev,
+            products: updatedProducts,
+          };
+        });
+      }
+    },
+    [filteredProductOptions]
+  );
+
+  // Remove product from the form
+  const removeProduct = useCallback((index) => {
     setForm((prev) => ({
       ...prev,
-      returnReason: reason,
+      products: prev.products.filter((_, i) => i !== index),
     }));
-    returnReasonSuggestions.setIsOpen(false);
-  };
+  }, []);
 
   // Fetch purchase returns
   const fetchPurchaseReturn = async () => {
@@ -426,40 +398,71 @@ const PurchaseReturn = () => {
   // Enhanced handle change for form fields
   const enhancedHandleChange = (e) => {
     const { name, value } = e.target;
+    setForm((prevForm) => ({
+      ...prevForm,
+      [name]: value,
+    }));
+  };
 
+  // Handle numeric input changes
+  const handleNumericInputChange = (e, updateFunc) => {
+    const { name, value } = e.target;
+    const numericFields = [
+      "amount",
+      "purchaseQty",
+      "returnQuantity",
+      "fob",
+      "cif",
+      "lc",
+    ];
+
+    if (numericFields.includes(name)) {
+      if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+        const validatedEvent = {
+          target: {
+            name: name,
+            value: value,
+          },
+        };
+        updateFunc(validatedEvent);
+      }
+    } else {
+      updateFunc(e);
+    }
+  };
+
+  // Handle product field changes
+  const handleProductFieldChange = (productIndex, fieldName, value) => {
     setForm((prevForm) => {
-      const updatedForm = {
-        ...prevForm,
-        [name]: value,
-      };
+      const updatedProducts = [...prevForm.products];
+      const currentProduct = { ...updatedProducts[productIndex] };
 
-      // Extract relevant numeric values
-      const purchaseQty =
-        parseFloat(name === "purchaseQty" ? value : prevForm.purchaseQty) || 0;
-      const returnQuantity =
-        parseFloat(
-          name === "returnQuantity" ? value : prevForm.returnQuantity
-        ) || 0;
-      const fob = parseFloat(name === "fob" ? value : prevForm.fob) || 0;
-      const amount =
-        parseFloat(name === "amount" ? value : prevForm.amount) || 0;
+      // Update the field
+      currentProduct[fieldName] = value;
 
-      // Calculated fields
-      const usedQty = Math.max(0, purchaseQty - returnQuantity);
-      const returnAmount = (returnQuantity * fob).toFixed(2);
+      // Calculate dependent fields
+      if (fieldName === "purchaseQty" || fieldName === "returnQuantity") {
+        const purchaseQty = parseFloat(currentProduct.purchaseQty) || 0;
+        const returnQuantity = parseFloat(currentProduct.returnQuantity) || 0;
+        currentProduct.usedQty = Math.max(
+          0,
+          purchaseQty - returnQuantity
+        ).toFixed(2);
+      }
+
+      if (fieldName === "returnQuantity" || fieldName === "fob") {
+        const returnQuantity = parseFloat(currentProduct.returnQuantity) || 0;
+        const fob = parseFloat(currentProduct.fob) || 0;
+        currentProduct.returnAmount = (returnQuantity * fob).toFixed(2);
+      }
+
+      updatedProducts[productIndex] = currentProduct;
 
       return {
-        ...updatedForm,
-        usedQty: usedQty.toFixed(2),
-        returnAmount: returnAmount,
+        ...prevForm,
+        products: updatedProducts,
       };
     });
-
-    // Autocomplete trigger
-    if (name === "returnReason") {
-      returnReasonSuggestions.setIsOpen(true);
-      returnReasonSuggestions.setHighlightedIndex(-1);
-    }
   };
 
   const handleDateChange = (date, fieldName) => {
@@ -467,6 +470,20 @@ const PurchaseReturn = () => {
       ...prevForm,
       [fieldName]: date ? date.toISOString() : "",
     }));
+  };
+
+  const handleProductDateChange = (productIndex, date, fieldName) => {
+    setForm((prevForm) => {
+      const updatedProducts = [...prevForm.products];
+      updatedProducts[productIndex] = {
+        ...updatedProducts[productIndex],
+        [fieldName]: date ? date.toISOString() : "",
+      };
+      return {
+        ...prevForm,
+        products: updatedProducts,
+      };
+    });
   };
 
   const handleUpdatePurchaseReturn = async (e, formData) => {
@@ -487,13 +504,17 @@ const PurchaseReturn = () => {
 
       const result = await response.json();
       showToast("success", "Purchase return updated successfully");
-      setIsEditModalOpen(false);
-      setForm(INITIAL_FORM_STATE);
-      fetchPurchaseReturn(); // Refresh the data
+      closeAllModals();
+      fetchPurchaseReturn();
     } catch (error) {
       console.error("Update error:", error);
       showToast("error", error.message || "Error updating purchase return");
     }
+  };
+
+  // Enhanced add new purchase return handler
+  const handleAddNewPurchaseReturn = () => {
+    navigate("/purchaselayout/purchasereturn/new");
   };
 
   // Filtering logic
@@ -503,16 +524,32 @@ const PurchaseReturn = () => {
     return (
       r.invoiceNumber?.toLowerCase().includes(lower) ||
       r.deliveryNumber?.toLowerCase().includes(lower) ||
-      r.productName?.toLowerCase().includes(lower) ||
-      r.returnReason?.toLowerCase().includes(lower)
+      r.returnReason?.toLowerCase().includes(lower) ||
+      r.supplierName?.toLowerCase().includes(lower) ||
+      r.products?.some((product) =>
+        product.productName?.toLowerCase().includes(lower)
+      )
     );
   });
+
+  // Calculate total return amount for an invoice
+  const calculateTotalReturnAmount = (purchaseReturn) => {
+    if (!purchaseReturn.products || !Array.isArray(purchaseReturn.products))
+      return "0.00";
+    return purchaseReturn.products
+      .reduce(
+        (total, product) => total + (parseFloat(product.returnAmount) || 0),
+        0
+      )
+      .toFixed(2);
+  };
 
   // Pagination
   const indexOfLast = currentPage * returnsPerPage;
   const indexOfFirst = indexOfLast - returnsPerPage;
   const currentReturns = filteredReturns.slice(indexOfFirst, indexOfLast);
   const totalPages = Math.ceil(filteredReturns.length / returnsPerPage);
+  const visiblePages = getVisiblePages(currentPage, totalPages);
 
   const toggleSelect = (ret) => {
     setSelected((prev) => {
@@ -593,54 +630,184 @@ const PurchaseReturn = () => {
     setCurrentPage(1);
   };
 
-  const editPurchaseReturn = (purchaseReturn) => {
+  const editPurchaseReturn = async (purchaseReturn) => {
     setForm(purchaseReturn);
-    setIsOpen(true);
-    setIsEditModalOpen(true);
+    setActiveModal("edit");
+
+    if (purchaseReturn.invoiceNumber) {
+      const originalPurchase = await fetchOriginalPurchaseData(
+        purchaseReturn.invoiceNumber
+      );
+      setOriginalPurchaseData(originalPurchase);
+      filterOptionsByOriginalPurchase(originalPurchase);
+    }
   };
 
   const viewPurchaseReturn = (purchaseReturn) => {
+    console.log(purchaseReturn);
     setForm(purchaseReturn);
-    setIsOpen(true);
-    setIsViewModalOpen(true);
+    setActiveModal("view");
+  };
+
+  // Handle product count click
+  const handleProductCountClick = (purchaseReturn) => {
+    setSelectedPurchaseReturn(purchaseReturn);
+    //  closeAllModals();
+    setActiveModal("products");
+  };
+
+  // Handle return reason click
+  const handleReturnReasonClick = (purchaseReturn) => {
+    setSelectedReturnReason(
+      purchaseReturn.returnReason || "No reason provided"
+    );
+    // closeAllModals();
+    setActiveModal("returnReason");
+  };
+
+  // Toggle product details in view modal
+  const toggleProductDetails = (index) => {
+    setExpandedProductIndex(expandedProductIndex === index ? -1 : index);
+  };
+
+  // Product edit modal functions (like in Purchase component)
+  const openProductEditModal = (product, index) => {
+    setCurrentProduct({ ...product });
+    setCurrentProductIndex(index);
+    setIsProductEditModalOpen(true);
+  };
+
+  const handleProductEditChange = (e) => {
+    const { name, value } = e.target;
+    setCurrentProduct((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  };
+
+  const handleProductNumericChange = (e) => {
+    const { name, value } = e.target;
+    if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+      const processedValue = value === "" ? "" : parseFloat(value) || 0;
+      setCurrentProduct((prev) => {
+        const updatedProduct = {
+          ...prev,
+          [name]: processedValue,
+        };
+
+        // Auto-calculate return amount when returnQuantity or fob changes
+        if (name === "returnQuantity" || name === "fob") {
+          const returnQuantity = parseFloat(updatedProduct.returnQuantity) || 0;
+          const fob = parseFloat(updatedProduct.fob) || 0;
+          updatedProduct.returnAmount = (returnQuantity * fob).toFixed(2);
+        }
+
+        // Auto-calculate used quantity when purchaseQty or returnQuantity changes
+        if (name === "purchaseQty" || name === "returnQuantity") {
+          const purchaseQty = parseFloat(updatedProduct.purchaseQty) || 0;
+          const returnQuantity = parseFloat(updatedProduct.returnQuantity) || 0;
+          updatedProduct.usedQty = Math.max(
+            0,
+            purchaseQty - returnQuantity
+          ).toFixed(2);
+        }
+
+        return updatedProduct;
+      });
+    }
+  };
+
+  const updateProductInForm = () => {
+    setForm((prev) => {
+      const updatedProducts = [...prev.products];
+      updatedProducts[currentProductIndex] = currentProduct;
+
+      return {
+        ...prev,
+        products: updatedProducts,
+      };
+    });
+    setIsProductEditModalOpen(false);
+    setCurrentProduct(null);
+    setCurrentProductIndex(null);
   };
 
   // Get field value from purchase return object
   const getFieldValue = (purchaseReturn, dbName) => {
+    if (!purchaseReturn || typeof purchaseReturn !== "object") return "--";
+
+    // Date fields
     if (["recordingDate", "invoiceDate", "receivedDate"].includes(dbName)) {
       return formatDateToReadable(purchaseReturn[dbName]) || "--";
     }
 
-    if (dbName === "amount") {
-      return purchaseReturn.amount
-        ? parseFloat(purchaseReturn.amount).toFixed(2)
-        : "0.00";
+    // Total return amount
+    if (dbName === "totalReturnAmount") {
+      return `$${calculateTotalReturnAmount(purchaseReturn)}`;
     }
 
-    if (dbName === "returnAmount") {
-      return purchaseReturn.returnAmount
-        ? parseFloat(purchaseReturn.returnAmount).toFixed(2)
-        : "0.00";
+    // Product count
+    if (dbName === "productCount") {
+      const productCount = purchaseReturn.products?.length || 0;
+      return (
+        <button
+          onClick={() => handleProductCountClick(purchaseReturn)}
+          className="flex items-center justify-center gap-2 bg-blue-100 text-blue-700 px-3 py-1 rounded-full hover:bg-blue-200 transition-colors cursor-pointer mx-auto"
+          title="View Products"
+        >
+          <Package size={14} />
+          <span className="font-medium">{productCount} Products</span>
+        </button>
+      );
     }
 
-    if (
-      ["purchaseQty", "returnQuantity", "usedQty", "fob", "cif"].includes(
-        dbName
-      )
-    ) {
-      return purchaseReturn[dbName]
-        ? parseFloat(purchaseReturn[dbName]).toFixed(2)
-        : "0.00";
+    // Return Reason with click to view
+    if (dbName === "returnReason") {
+      const returnReason = purchaseReturn.returnReason || "--";
+      const displayReason =
+        returnReason.length > 50
+          ? `${returnReason.substring(0, 50)}...`
+          : returnReason;
+
+      return (
+        <button
+          onClick={() => handleReturnReasonClick(purchaseReturn)}
+          className="flex items-center justify-center gap-2 bg-purple-100 text-purple-700 px-3 py-1 rounded-full hover:bg-purple-200 transition-colors cursor-pointer mx-auto"
+          title="View Return Reason"
+        >
+          <MessageSquare size={14} />
+          <span className="font-medium">View Reason</span>
+        </button>
+      );
     }
 
-    return purchaseReturn[dbName] ?? "--";
+    // Default fallback
+    const value = purchaseReturn[dbName];
+    if (value === null || value === undefined || value === "") return "--";
+
+    return value;
   };
 
-  // Helper function to handle numeric input
-  const handleNumericInputChange = (e, onChangeHandler) => {
-    const { name, value } = e.target;
-    if (value === "" || /^\d*\.?\d*$/.test(value)) {
-      onChangeHandler(e);
+  const formatNumber = (num) => {
+    if (num === null || num === undefined || num === "") return "--";
+
+    const numberValue = typeof num === "string" ? parseFloat(num) : num;
+
+    if (isNaN(numberValue)) return "--";
+
+    return numberValue.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  };
+
+  const handleIconClick = () => {
+    if (inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.classList.add("highlight");
+      setTimeout(() => {
+        inputRef.current.classList.remove("highlight");
+      }, 1000);
     }
   };
 
@@ -655,10 +822,10 @@ const PurchaseReturn = () => {
   return (
     <div className="p-6">
       <div className="container">
-        <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
+        <div className="flex justify-between items-center mb-6 flex-wrap gap-4">
           <div className="flex gap-3 items-center">
             <button
-              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg shadow cursor-pointer transition-colors"
               onClick={handleAddNewPurchaseReturn}
             >
               <UserPlus size={18} /> Add New Purchase Return
@@ -667,26 +834,26 @@ const PurchaseReturn = () => {
             {selected.length > 0 && (
               <button
                 onClick={handleDeleteSelected}
-                className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+                className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg shadow cursor-pointer transition-colors"
               >
-                <Trash2 size={18} /> Delete
+                <Trash2 size={18} /> Delete Selected
               </button>
             )}
           </div>
 
           {purchaseReturns.length > 0 && (
-            <div className="flex items-center gap-8">
-              <p className="text-lg font-semibold text-gray-700">
-                Total Count:{" "}
-                <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+            <div className="flex items-center gap-6">
+              <div className="text-lg font-semibold text-gray-700">
+                Total:{" "}
+                <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">
                   {filteredReturns.length}
                 </span>
-              </p>
-              <div className="relative w-full md:w-72">
+              </div>
+              <div className="relative w-full md:w-80">
                 <Search
                   className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-                  size={16}
-                  onClick={() => inputRef.current?.focus()}
+                  size={18}
+                  onClick={handleIconClick}
                 />
                 <input
                   ref={inputRef}
@@ -694,244 +861,363 @@ const PurchaseReturn = () => {
                   placeholder="Search invoice, delivery, product..."
                   value={searchTerm}
                   onChange={handleSearchChange}
-                  className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+                  className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
                 />
               </div>
             </div>
           )}
         </div>
 
-        <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-          <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
-            <thead className="bg-gray-100 text-gray-700 border-b">
-              <tr>
-                {allFields
-                  .filter((item) => tableColumns.includes(item.id))
-                  .map((item) => (
-                    <th
-                      key={item.id}
-                      className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium"
-                    >
-                      {item.id === "invoiceNumber" ? (
-                        <div className="flex items-center gap-4">
-                          {currentReturns.length > 0 && (
-                            <input
-                              type="checkbox"
-                              aria-label="Select all return purchases"
-                              checked={
-                                selected.length === currentReturns.length &&
-                                currentReturns.length > 0
-                              }
-                              onChange={(e) =>
-                                toggleSelectAll(e.target.checked)
-                              }
-                            />
-                          )}
-                          <span>{item.name}</span>
-                        </div>
-                      ) : (
-                        item.name
-                      )}
-                    </th>
-                  ))}
-              </tr>
-            </thead>
-            <tbody>
-              {currentReturns.length === 0 ? (
+        <div className="bg-white rounded-xl shadow border border-gray-200 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-center">
+              <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <td
-                    colSpan={tableColumns.length}
-                    className="p-4 text-center text-gray-500"
-                  >
-                    No purchase returns found.
-                  </td>
-                </tr>
-              ) : (
-                currentReturns.map((ret, index) => (
-                  <tr
-                    key={ret._id}
-                    className={`hover:bg-gray-50 ${
-                      (index + 1) % returnsPerPage === 0 ||
-                      index + 1 === currentReturns.length
-                        ? ""
-                        : "border-b"
-                    }`}
-                  >
-                    {allFields
-                      .filter((item) => tableColumns.includes(item.id))
-                      .map((item) => (
-                        <td
-                          key={item.id}
-                          className="p-3 whitespace-nowrap min-w-[120px]"
-                        >
-                          {item.id === "invoiceNumber" ? (
-                            <div className="flex items-center gap-4">
+                  {allFields
+                    .filter((item) => tableColumns.includes(item.id))
+                    .map((item) => (
+                      <th
+                        key={item.id}
+                        className="p-4 text-sm font-semibold text-gray-700 whitespace-nowrap"
+                      >
+                        {item.id === "recordingDate" ? (
+                          <div className="flex items-center gap-3">
+                            {currentReturns.length > 0 && (
                               <input
                                 type="checkbox"
-                                checked={selected.includes(ret._id)}
-                                onChange={() => toggleSelect(ret)}
-                              />
-                              <span className="capitalize">
-                                {ret.invoiceNumber}
-                              </span>
-                            </div>
-                          ) : item.id === "actions" ? (
-                            <div className="flex items-center justify-center gap-3 min-w-[150px]">
-                              <button
-                                className="text-blue-600 hover:text-blue-800 cursor-pointer"
-                                onClick={() => viewPurchaseReturn(ret)}
-                                title="View"
-                              >
-                                <Eye size={18} />
-                              </button>
-                              <button
-                                className="text-green-600 hover:text-green-800 cursor-pointer"
-                                onClick={() => editPurchaseReturn(ret)}
-                                title="Edit"
-                              >
-                                <Edit size={18} />
-                              </button>
-                              <button
-                                className="text-red-600 hover:text-red-800 cursor-pointer"
-                                onClick={() =>
-                                  handleDeleteSingle(ret._id, ret.invoiceNumber)
+                                aria-label="Select all return purchases"
+                                checked={
+                                  selected.length === currentReturns.length &&
+                                  currentReturns.length > 0
                                 }
-                                title="Delete"
-                              >
-                                <Trash2 size={18} />
-                              </button>
-                            </div>
-                          ) : (
-                            getFieldValue(ret, item.dbName)
-                          )}
-                        </td>
-                      ))}
+                                onChange={(e) =>
+                                  toggleSelectAll(e.target.checked)
+                                }
+                                className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                              />
+                            )}
+                            <span>{item.name}</span>
+                          </div>
+                        ) : (
+                          item.name
+                        )}
+                      </th>
+                    ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {currentReturns.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={tableColumns.length}
+                      className="p-8 text-center text-gray-500"
+                    >
+                      No purchase returns found.
+                    </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  currentReturns.map((ret, index) => (
+                    <tr
+                      key={ret._id}
+                      className="hover:bg-gray-50 transition-colors"
+                    >
+                      {allFields
+                        .filter((item) => tableColumns.includes(item.id))
+                        .map((item) => (
+                          <td
+                            key={item.id}
+                            className="p-4 text-sm text-gray-900 whitespace-nowrap"
+                          >
+                            {item.id === "recordingDate" ? (
+                              <div className="flex items-center gap-3">
+                                <input
+                                  type="checkbox"
+                                  checked={selected.includes(ret._id)}
+                                  onChange={() => toggleSelect(ret)}
+                                  className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                                />
+                                <span className="capitalize">
+                                  {getFieldValue(ret, item.dbName)}
+                                </span>
+                              </div>
+                            ) : item.id === "actions" ? (
+                              <div className="flex items-center gap-2">
+                                <button
+                                  className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-100 rounded transition-colors cursor-pointer"
+                                  onClick={() => viewPurchaseReturn(ret)}
+                                  title="View"
+                                >
+                                  <Eye size={16} />
+                                </button>
+                                <button
+                                  className="p-1.5 text-green-600 hover:text-green-800 hover:bg-green-100 rounded transition-colors cursor-pointer"
+                                  onClick={() => editPurchaseReturn(ret)}
+                                  title="Edit"
+                                >
+                                  <Edit size={16} />
+                                </button>
+                                <button
+                                  className="p-1.5 text-red-600 hover:text-red-800 hover:bg-red-100 rounded transition-colors cursor-pointer"
+                                  onClick={() =>
+                                    handleDeleteSingle(
+                                      ret._id,
+                                      ret.invoiceNumber
+                                    )
+                                  }
+                                  title="Delete"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
+                            ) : (
+                              getFieldValue(ret, item.dbName)
+                            )}
+                          </td>
+                        ))}
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
 
           {currentReturns.length > 0 && (
-            <div className="mt-4 p-5 flex justify-start gap-2">
-              <button
-                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-                disabled={currentPage === 1}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-              >
-                Prev
-              </button>
-
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map(
-                (page) => (
-                  <button
-                    key={page}
-                    onClick={() => setCurrentPage(page)}
-                    className={`px-3 py-1 rounded cursor-pointer ${
-                      currentPage === page
-                        ? "bg-indigo-600 text-white"
-                        : "bg-gray-200 hover:bg-gray-300"
-                    }`}
-                  >
-                    {page}
-                  </button>
-                )
-              )}
-
-              <button
-                onClick={() =>
-                  setCurrentPage((prev) => Math.min(prev + 1, totalPages))
-                }
-                disabled={currentPage === totalPages}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-              >
-                Next
-              </button>
+            <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex items-center justify-between">
+              <div className="flex gap-1">
+                <button
+                  onClick={() =>
+                    setCurrentPage((prev) => Math.max(prev - 1, 1))
+                  }
+                  disabled={currentPage === 1}
+                  className="px-3 py-1.5 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer text-sm"
+                >
+                  Previous
+                </button>
+                {visiblePages.map((page, idx) =>
+                  page === "..." ? (
+                    <span
+                      key={`ellipsis-${idx}`}
+                      className="px-3 py-1.5 text-gray-500 select-none"
+                    >
+                      ...
+                    </span>
+                  ) : (
+                    <button
+                      key={page}
+                      onClick={() => setCurrentPage(page)}
+                      className={`px-3 py-1.5 border rounded-md text-sm transition cursor-pointer ${
+                        currentPage === page
+                          ? "bg-indigo-600 text-white border-indigo-600"
+                          : "bg-white border-gray-300 hover:bg-gray-50"
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  )
+                )}
+                <button
+                  onClick={() => {
+                    setCurrentPage((prev) => Math.min(prev + 1, totalPages));
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                  }}
+                  disabled={currentPage === totalPages}
+                  className="px-3 py-1.5 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer text-sm"
+                >
+                  Next
+                </button>
+              </div>
             </div>
           )}
         </div>
 
         {/* View Modal */}
-        {isViewModalOpen &&
+        {activeModal === "view" &&
           ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            <div className="fixed inset-0 flex justify-center items-center z-50">
               <div
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setIsOpen(false)}
+                onClick={closeAllModals}
               />
 
-              <div className="bg-white w-full max-w-4xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+              <div className="bg-white w-full max-w-4xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
                 <button
-                  onClick={() => setIsViewModalOpen(false)}
-                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                  onClick={closeAllModals}
+                  className="absolute top-4 right-4 text-gray-500 hover:text-gray-700 cursor-pointer"
                 >
                   <X size={20} />
                 </button>
 
-                <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                  View Purchase Return Record - {form.invoiceNumber || "N/A"}
+                <h2 className="text-xl font-semibold text-gray-800 mb-6">
+                  Purchase Return Details
                 </h2>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-h-[70vh] overflow-y-auto">
-                  {[
-                    ["Recording Date", "recordingDate"],
-                    ["Invoice Date", "invoiceDate"],
-                    ["Received Date", "receivedDate"],
-                    ["Invoice Number", "invoiceNumber"],
-                    ["Delivery Number", "deliveryNumber"],
-                    ["Product Name", "productName"],
-                    ["Purchase Quantity", "purchaseQty"],
-                    ["Return Quantity", "returnQuantity"],
-                    ["Used Quantity", "usedQty"],
-                    ["FOB", "fob"],
-                    ["CIF", "cif"],
-                    ["LC Number", "lcNumber"],
-                    ["Amount", "amount"],
-                    ["Return Amount", "returnAmount"],
-                  ].map(([label, key]) => (
-                    <div key={key}>
-                      <label className="block text-sm font-medium text-gray-600">
-                        {label}
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                        {form[key]
-                          ? [
-                              "recordingDate",
-                              "invoiceDate",
-                              "receivedDate",
-                            ].includes(key)
-                            ? new Date(form[key]).toLocaleDateString()
-                            : key === "amount" ||
-                              key === "returnAmount" ||
-                              [
-                                "purchaseQty",
-                                "returnQuantity",
-                                "usedQty",
-                                "fob",
-                                "cif",
-                              ].includes(key)
-                            ? parseFloat(form[key]).toFixed(2)
-                            : form[key]
-                          : "-"}
-                      </p>
-                    </div>
-                  ))}
-
-                  {/* Remarks - Full Width */}
-                  <div className="md:col-span-3">
-                    <label className="block text-sm font-medium text-gray-600">
-                      Remarks
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">
+                      Recording Date
                     </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                      {form.remarks || "-"}
+                    <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50">
+                      {formatDateToReadable(form.recordingDate) || "--"}
                     </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">
+                      Invoice Number
+                    </label>
+                    <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50">
+                      {form.invoiceNumber || "--"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">
+                      Invoice Date
+                    </label>
+                    <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50">
+                      {formatDateToReadable(form.invoiceDate) || "--"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">
+                      Delivery Number
+                    </label>
+                    <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50">
+                      {form.deliveryNumber || "--"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">
+                      Received Date
+                    </label>
+                    <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50">
+                      {formatDateToReadable(form.receivedDate) || "--"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">
+                      Supplier Name
+                    </label>
+                    <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 capitalize">
+                      {form.supplierName || "--"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">
+                      Return Quantity
+                    </label>
+                    <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50">
+                      {formatNumber(form.totalReturnQuantity)}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">
+                      Total Return Amount
+                    </label>
+                    <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 font-semibold text-lg">
+                      ${calculateTotalReturnAmount(form)}
+                    </p>
+                  </div>
+
+                  <div className="md:col-span-3"></div>
+                </div>
+
+                {/* Products Summary */}
+                <div className="mb-6">
+                  <h3 className="text-lg font-medium text-gray-900 mb-4">
+                    Products ({form.products?.length || 0})
+                  </h3>
+                  <div className="space-y-3">
+                    {form.products && form.products.length > 0 ? (
+                      form.products.map((product, index) => (
+                        <div
+                          key={index}
+                          className="border border-gray-200 rounded-lg p-4 bg-gray-50"
+                        >
+                          <div className="flex justify-between items-start">
+                            <h4 className="font-medium text-gray-900 text-lg capitalize">
+                              {product.productName || `Product ${index + 1}`}
+                            </h4>
+                            <button
+                              onClick={() => toggleProductDetails(index)}
+                              className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm cursor-pointer transition-colors"
+                            >
+                              {expandedProductIndex === index
+                                ? "Hide Details"
+                                : "View Details"}
+                            </button>
+                          </div>
+
+                          {expandedProductIndex === index && (
+                            <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                              {[
+                                ["Purchase Qty", "purchaseQty"],
+                                ["Return Qty", "returnQuantity"],
+                                ["Used Qty", "usedQty"],
+                                ["FOB ($)", "fob"],
+                                ["CIF ($)", "cif"],
+                                ["LC ($)", "lc"],
+                                ["Amount ($)", "amount"],
+                                ["Return Amount ($)", "returnAmount"],
+                                ["Expiry Date", "expiredDate"],
+                              ].map(([label, key], fieldIndex) => (
+                                <div key={`${index}-${key}-${fieldIndex}`}>
+                                  <label className="block text-sm font-medium text-gray-600">
+                                    {label}
+                                  </label>
+                                  <p
+                                    className={`border px-3 py-2 rounded-lg bg-white ${
+                                      key === "returnAmount"
+                                        ? "text-green-600"
+                                        : ""
+                                    }`}
+                                  >
+                                    {[
+                                      "fob",
+                                      "cif",
+                                      "lc",
+                                      "amount",
+                                      "returnAmount",
+                                    ].includes(key)
+                                      ? formatNumber(product[key])
+                                      : key === "expiredDate"
+                                      ? product[key]
+                                        ? formatDateToReadable(product[key])
+                                        : "--"
+                                      : product[key] ?? "--"}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-center text-gray-500 py-4">
+                        No products found
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                <div className="mt-6 flex justify-end">
+                <div className="mb-6">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Return Reason
+                  </label>
+                  <div className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 min-h-[60px]">
+                    {form.returnReason || "—"}
+                  </div>
+                </div>
+
+                <div className="flex justify-end">
                   <button
-                    onClick={() => setIsViewModalOpen(false)}
-                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                    onClick={closeAllModals}
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-6 py-2 rounded-lg cursor-pointer transition-colors"
                   >
                     Close
                   </button>
@@ -941,287 +1227,284 @@ const PurchaseReturn = () => {
             document.body
           )}
 
-        {/* Edit Modal - CORRECTED with dropdowns */}
-        {isEditModalOpen &&
+        {/* Edit Modal - Enhanced to match Purchase component structure */}
+        {activeModal === "edit" &&
           ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            <div className="fixed inset-0 flex justify-center items-center z-50">
               <div
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setIsOpen(false)}
+                onClick={closeAllModals}
               />
-
-              <div className="bg-white w-full max-w-4xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+              <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
                 <button
-                  onClick={() => {
-                    setIsEditModalOpen(false);
-                    setForm(INITIAL_FORM_STATE);
-                    returnReasonSuggestions.setIsOpen(false);
-                  }}
-                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                  onClick={closeAllModals}
+                  className="absolute top-4 right-4 text-gray-500 hover:text-gray-700 cursor-pointer"
                 >
                   <X size={20} />
                 </button>
 
                 <h2 className="text-xl font-semibold text-gray-800 mb-6">
-                  Edit Purchase Return Record - {form.invoiceNumber || "N/A"}
+                  Edit Purchase Return
                 </h2>
 
-                <form
-                  className="grid grid-cols-1 md:grid-cols-3 gap-4 max-h-[70vh] overflow-y-auto"
-                  onSubmit={(e) => handleUpdatePurchaseReturn(e, form)}
-                >
-                  {/* Date Fields */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">
-                      Recording Date
+                <form onSubmit={(e) => handleUpdatePurchaseReturn(e, form)}>
+                  {/* Header Section - Match view modal structure */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Recording Date
+                      </label>
+                      <DatePicker
+                        selected={
+                          form.recordingDate
+                            ? new Date(form.recordingDate)
+                            : null
+                        }
+                        onChange={(date) =>
+                          handleDateChange(date, "recordingDate")
+                        }
+                        dateFormat="yyyy-MM-dd"
+                        placeholderText="Select date"
+                        className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Invoice Number
+                      </label>
+                      <input
+                        type="text"
+                        name="invoiceNumber"
+                        value={form.invoiceNumber || ""}
+                        onChange={(e) =>
+                          handleNumericInputChange(e, enhancedHandleChange)
+                        }
+                        className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Invoice Date
+                      </label>
+                      <DatePicker
+                        selected={
+                          form.invoiceDate ? new Date(form.invoiceDate) : null
+                        }
+                        onChange={(date) =>
+                          handleDateChange(date, "invoiceDate")
+                        }
+                        dateFormat="yyyy-MM-dd"
+                        placeholderText="Select date"
+                        className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Delivery Number
+                      </label>
+                      <input
+                        type="text"
+                        name="deliveryNumber"
+                        value={form.deliveryNumber || ""}
+                        onChange={(e) =>
+                          handleNumericInputChange(e, enhancedHandleChange)
+                        }
+                        className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Received Date
+                      </label>
+                      <DatePicker
+                        selected={
+                          form.receivedDate ? new Date(form.receivedDate) : null
+                        }
+                        onChange={(date) =>
+                          handleDateChange(date, "receivedDate")
+                        }
+                        dateFormat="yyyy-MM-dd"
+                        placeholderText="Select date"
+                        className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Supplier Name
+                      </label>
+                      <SearchableDropdown
+                        value={form.supplierId}
+                        onChange={handleSupplierChange}
+                        options={[
+                          { value: "", label: "Select Supplier" },
+                          ...filteredSupplierOptions,
+                        ]}
+                        placeholder="Select Supplier"
+                        required={true}
+                        loading={loadingSuppliers}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        LC Number
+                      </label>
+                      <input
+                        type="text"
+                        name="lcNumber"
+                        value={form.lcNumber || ""}
+                        onChange={(e) =>
+                          handleNumericInputChange(e, enhancedHandleChange)
+                        }
+                        className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Amount ($)
+                      </label>
+                      <input
+                        type="number"
+                        name="amount"
+                        value={form.amount || 0}
+                        onChange={(e) =>
+                          handleNumericInputChange(e, enhancedHandleChange)
+                        }
+                        className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                        min="0"
+                        step="0.01"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Return Reason
+                      </label>
+                      <input
+                        type="text"
+                        name="returnReason"
+                        value={form.returnReason || ""}
+                        onChange={(e) =>
+                          handleNumericInputChange(e, enhancedHandleChange)
+                        }
+                        className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                        placeholder="Enter return reason"
+                      />
+                    </div>
+
+                    <div className="md:col-span-3">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Total Return Amount ($)
+                      </label>
+                      <input
+                        type="text"
+                        value={`$${calculateTotalReturnAmount(form)}`}
+                        className="w-full border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 cursor-not-allowed font-semibold text-lg"
+                        readOnly
+                        disabled
+                      />
+                    </div>
+                  </div>
+
+                  {/* Products Section - Enhanced like Purchase component */}
+                  <div className="mb-6">
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-lg font-medium text-gray-900">
+                        Products ({form.products?.length || 0})
+                      </h3>
+                    </div>
+
+                    <div className="space-y-3">
+                      {form.products && form.products.length > 0 ? (
+                        form.products.map((product, index) => (
+                          <div
+                            key={index}
+                            className="flex items-center justify-between p-3 bg-white rounded border border-gray-300"
+                          >
+                            <div className="flex-1">
+                              <span className="font-medium text-gray-700 capitalize">
+                                {product.productName || `Product ${index + 1}`}
+                              </span>
+                              <div className="text-sm text-gray-500 mt-1">
+                                Purchase Qty: {product.purchaseQty || 0} |
+                                Return Qty: {product.returnQuantity || 0} | Used
+                                Qty: {product.usedQty || 0} | Return Amount: $
+                                {product.returnAmount || "0.00"}
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  openProductEditModal(product, index)
+                                }
+                                className="ml-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm cursor-pointer"
+                              >
+                                Edit Details
+                              </button>
+                              {form.products.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => removeProduct(index)}
+                                  className="ml-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm cursor-pointer"
+                                >
+                                  Remove
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-center text-gray-500 py-8 border-2 border-dashed border-gray-300 rounded-lg">
+                          No products added
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Remarks Section */}
+                  <div className="mb-6">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Remarks
                     </label>
-                    <DatePicker
-                      selected={
-                        form.recordingDate ? new Date(form.recordingDate) : null
-                      }
-                      onChange={(date) =>
-                        handleDateChange(date, "recordingDate")
-                      }
-                      dateFormat="yyyy-MM-dd"
-                      placeholderText="Select a date"
-                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Invoice Date
-                    </label>
-                    <DatePicker
-                      selected={
-                        form.invoiceDate ? new Date(form.invoiceDate) : null
-                      }
-                      onChange={(date) => handleDateChange(date, "invoiceDate")}
-                      dateFormat="yyyy-MM-dd"
-                      placeholderText="Select a date"
-                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Received Date
-                    </label>
-                    <DatePicker
-                      selected={
-                        form.receivedDate ? new Date(form.receivedDate) : null
-                      }
-                      onChange={(date) =>
-                        handleDateChange(date, "receivedDate")
-                      }
-                      dateFormat="yyyy-MM-dd"
-                      placeholderText="Select a date"
-                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                    />
-                  </div>
-
-                  {/* Basic Information */}
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Invoice Number
-                    </label>
-                    <input
-                      type="text"
-                      name="invoiceNumber"
-                      value={form.invoiceNumber || ""}
-                      onChange={enhancedHandleChange}
-                      className="w-full border px-3 py-2 rounded-lg capitalize border-gray-300"
-                      autoComplete="off"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Delivery Number
-                    </label>
-                    <input
-                      type="text"
-                      name="deliveryNumber"
-                      value={form.deliveryNumber || ""}
-                      onChange={enhancedHandleChange}
-                      className="w-full border px-3 py-2 rounded-lg capitalize border-gray-300"
-                      autoComplete="off"
-                    />
-                  </div>
-
-                  {/* CORRECTED: Product Dropdown */}
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Product Name
-                    </label>
-                    <SearchableDropdown
-                      value={form.productId}
-                      onChange={handleProductChange}
-                      options={[
-                        { value: "", label: "Select Product" },
-                        ...productOptions,
-                      ]}
-                      placeholder="Select Product"
-                      required={true}
-                      loading={loadingProducts}
-                    />
-                  </div>
-
-                  {/* CORRECTED: Supplier Dropdown */}
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Supplier Name
-                    </label>
-                    <SearchableDropdown
-                      value={form.supplierId}
-                      onChange={handleSupplierChange}
-                      options={[
-                        { value: "", label: "Select Supplier" },
-                        ...supplierOptions,
-                      ]}
-                      placeholder="Select Supplier"
-                      required={true}
-                      loading={loadingSuppliers}
-                    />
-                  </div>
-
-                  {/* Quantity Fields */}
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Purchase Quantity
-                    </label>
-                    <input
-                      type="text"
-                      name="purchaseQty"
-                      value={form.purchaseQty || ""}
-                      onChange={(e) =>
-                        handleNumericInputChange(e, enhancedHandleChange)
-                      }
-                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                      autoComplete="off"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Return Quantity
-                    </label>
-                    <input
-                      type="text"
-                      name="returnQuantity"
-                      value={form.returnQuantity || ""}
-                      onChange={(e) =>
-                        handleNumericInputChange(e, enhancedHandleChange)
-                      }
-                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                      autoComplete="off"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Used Quantity
-                    </label>
-                    <input
-                      type="text"
-                      name="usedQty"
-                      value={form.usedQty || ""}
-                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700 border-gray-300"
-                      autoComplete="off"
-                      disabled
-                    />
-                  </div>
-
-                  {/* Financial Fields */}
-                  <div>
-                    <label className="block text-sm font-medium">FOB</label>
-                    <input
-                      type="text"
-                      name="fob"
-                      value={form.fob || ""}
-                      onChange={(e) =>
-                        handleNumericInputChange(e, enhancedHandleChange)
-                      }
-                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                      autoComplete="off"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">CIF</label>
-                    <input
-                      type="text"
-                      name="cif"
-                      value={form.cif || ""}
-                      onChange={(e) =>
-                        handleNumericInputChange(e, enhancedHandleChange)
-                      }
-                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                      autoComplete="off"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">LC</label>
-                    <input
-                      type="text"
-                      name="lcNumber"
-                      value={form.lcNumber || ""}
-                      onChange={enhancedHandleChange}
-                      className="w-full px-3 py-2 rounded-lg border border-gray-300"
-                      autoComplete="off"
-                    />
-                  </div>
-
-                  {/* Amount Fields */}
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Amount ($)
-                    </label>
-                    <input
-                      type="text"
-                      name="amount"
-                      value={form.amount || ""}
-                      onChange={(e) =>
-                        handleNumericInputChange(e, enhancedHandleChange)
-                      }
-                      className="w-full px-3 py-2 rounded-lg border border-gray-300"
-                      autoComplete="off"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Return Amount ($)
-                    </label>
-                    <input
-                      type="text"
-                      value={form.returnAmount || ""}
-                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700 border border-gray-300"
-                      disabled
-                    />
-                  </div>
-
-                  <div className="md:col-span-3">
-                    <label className="block text-sm font-medium">Remarks</label>
                     <textarea
                       name="remarks"
                       value={form.remarks || ""}
                       onChange={enhancedHandleChange}
-                      className="w-full border border-gray-300 px-3 py-2 rounded-lg capitalize resize-vertical min-h-[80px]"
-                      autoComplete="off"
+                      className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                      rows={3}
+                      placeholder="Add any remarks here..."
                     />
                   </div>
 
-                  {/* Footer buttons - full width */}
-                  <div className="md:col-span-3 mt-6 flex justify-end gap-3 pt-6">
+                  {/* Status Field */}
+                  <div className="mb-6">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Status
+                    </label>
+                    <select
+                      name="status"
+                      value={form.status || "pending"}
+                      onChange={enhancedHandleChange}
+                      className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                    >
+                      <option value="pending">Pending</option>
+                      <option value="completed">Completed</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
+                  </div>
+
+                  {/* Footer buttons */}
+                  <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
                     <button
                       type="button"
-                      onClick={() => {
-                        setIsEditModalOpen(false);
-                        setForm(INITIAL_FORM_STATE);
-                        returnReasonSuggestions.setIsOpen(false);
-                      }}
+                      onClick={closeAllModals}
                       className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-6 py-2 rounded-lg cursor-pointer transition-colors"
                     >
                       Cancel
@@ -1234,6 +1517,392 @@ const PurchaseReturn = () => {
                     </button>
                   </div>
                 </form>
+              </div>
+            </div>,
+            document.body
+          )}
+
+        {/* Product Edit Modal - Like in Purchase component */}
+        {isProductEditModalOpen &&
+          ReactDOM.createPortal(
+            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+              <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                onClick={() => setIsProductEditModalOpen(false)}
+              />
+              <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative">
+                <button
+                  onClick={() => setIsProductEditModalOpen(false)}
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                >
+                  <X size={20} />
+                </button>
+
+                <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                  Edit Product - {currentProduct?.productName || "Product"}
+                </h2>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Product Name - Using SearchableDropdown */}
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Product Name
+                    </label>
+                    <SearchableDropdown
+                      options={filteredProductOptions.map((product) => ({
+                        value: product.value,
+                        label: product.label,
+                      }))}
+                      value={currentProduct?.productId || ""}
+                      onChange={(selectedValue) => {
+                        const selectedProduct = filteredProductOptions.find(
+                          (product) => product.value === selectedValue
+                        );
+                        if (selectedProduct) {
+                          setCurrentProduct((prev) => ({
+                            ...prev,
+                            productId: selectedProduct.value,
+                            productName: selectedProduct.label,
+                          }));
+                        }
+                      }}
+                      placeholder="Select Product"
+                      className="w-full"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Purchase Quantity
+                    </label>
+                    <input
+                      type="text"
+                      name="purchaseQty"
+                      value={currentProduct?.purchaseQty || ""}
+                      onChange={handleProductNumericChange}
+                      className="w-full border border-gray-300 px-3 py-2 rounded-lg"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Return Quantity
+                    </label>
+                    <input
+                      type="text"
+                      name="returnQuantity"
+                      value={currentProduct?.returnQuantity || ""}
+                      onChange={handleProductNumericChange}
+                      className="w-full border border-gray-300 px-3 py-2 rounded-lg"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Used Quantity
+                    </label>
+                    <input
+                      type="text"
+                      name="usedQty"
+                      value={currentProduct?.usedQty || ""}
+                      className="w-full border border-gray-300 px-3 py-2 rounded-lg bg-gray-100 text-gray-700"
+                      readOnly
+                      disabled
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      FOB ($)
+                    </label>
+                    <input
+                      type="text"
+                      name="fob"
+                      value={currentProduct?.fob || ""}
+                      onChange={handleProductNumericChange}
+                      className="w-full border border-gray-300 px-3 py-2 rounded-lg"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      CIF ($)
+                    </label>
+                    <input
+                      type="text"
+                      name="cif"
+                      value={currentProduct?.cif || ""}
+                      onChange={handleProductNumericChange}
+                      className="w-full border border-gray-300 px-3 py-2 rounded-lg"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      LC ($)
+                    </label>
+                    <input
+                      type="text"
+                      name="lc"
+                      value={currentProduct?.lc || ""}
+                      onChange={handleProductNumericChange}
+                      className="w-full border border-gray-300 px-3 py-2 rounded-lg"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Amount ($)
+                    </label>
+                    <input
+                      type="text"
+                      name="amount"
+                      value={currentProduct?.amount || ""}
+                      onChange={handleProductNumericChange}
+                      className="w-full border border-gray-300 px-3 py-2 rounded-lg"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Return Amount ($)
+                    </label>
+                    <input
+                      type="text"
+                      name="returnAmount"
+                      value={currentProduct?.returnAmount || ""}
+                      className="w-full border border-gray-300 px-3 py-2 rounded-lg bg-gray-100 text-gray-700 font-semibold"
+                      readOnly
+                      disabled
+                    />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Expired Date
+                    </label>
+                    <DatePicker
+                      selected={
+                        currentProduct?.expiredDate
+                          ? new Date(currentProduct.expiredDate)
+                          : null
+                      }
+                      onChange={(date) =>
+                        setCurrentProduct((prev) => ({
+                          ...prev,
+                          expiredDate: date ? date.toISOString() : "",
+                        }))
+                      }
+                      dateFormat="yyyy-MM-dd"
+                      placeholderText="Select expiry date"
+                      className="w-full border border-gray-300 px-3 py-2 rounded-lg"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-6 flex justify-end gap-3 border-t border-gray-300 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setIsProductEditModalOpen(false)}
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+                    onClick={updateProductInForm}
+                  >
+                    Update Product
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+        {/* Return Reason Modal */}
+        {activeModal === "returnReason" &&
+          ReactDOM.createPortal(
+            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+              <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                onClick={closeAllModals}
+              />
+              <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative">
+                <button
+                  onClick={closeAllModals}
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                >
+                  <X size={20} />
+                </button>
+
+                <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                  Return Reason
+                </h2>
+
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Return Reason Details
+                  </label>
+                  <textarea
+                    readOnly
+                    value={selectedReturnReason}
+                    className="w-full border border-gray-300 px-3 py-2 rounded-lg resize-vertical min-h-[120px] bg-gray-50"
+                  />
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    onClick={closeAllModals}
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+        {/* Product Details Modal */}
+        {activeModal === "products" &&
+          ReactDOM.createPortal(
+            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+              <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                onClick={closeAllModals}
+              />
+              <div className="bg-white w-full max-w-7xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+                <button
+                  onClick={closeAllModals}
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                >
+                  <X size={20} />
+                </button>
+
+                <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                  Product Details -{" "}
+                  {selectedPurchaseReturn?.invoiceNumber || "Purchase Return"}
+                </h2>
+
+                {selectedPurchaseReturn && (
+                  <>
+                    <div className="overflow-x-auto shadow rounded-xl border border-gray-200 mb-6">
+                      <table className="w-full border-collapse bg-white rounded-xl overflow-hidden text-center">
+                        <thead className="bg-gray-50 border-b border-gray-200">
+                          <tr>
+                            <th className="p-4 text-sm font-semibold text-gray-700">
+                              Product Name
+                            </th>
+                            <th className="p-4 text-sm font-semibold text-gray-700">
+                              Purchase Qty
+                            </th>
+                            <th className="p-4 text-sm font-semibold text-gray-700">
+                              Return Qty
+                            </th>
+                            <th className="p-4 text-sm font-semibold text-gray-700">
+                              Used Qty
+                            </th>
+                            <th className="p-4 text-sm font-semibold text-gray-700">
+                              FOB (USD)
+                            </th>
+                            <th className="p-4 text-sm font-semibold text-gray-700">
+                              Return Amount ($)
+                            </th>
+                            <th className="p-4 text-sm font-semibold text-gray-700">
+                              Expired Date
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {selectedPurchaseReturn.products?.map(
+                            (product, index) => (
+                              <tr key={index} className="hover:bg-gray-50">
+                                <td className="p-4 text-sm text-gray-900 capitalize">
+                                  {product.productName || "--"}
+                                </td>
+                                <td className="p-4 text-sm text-gray-900">
+                                  {product.purchaseQty || 0}
+                                </td>
+                                <td className="p-4 text-sm text-gray-900">
+                                  {product.returnQuantity || 0}
+                                </td>
+                                <td className="p-4 text-sm text-gray-900">
+                                  {product.usedQty || 0}
+                                </td>
+                                <td className="p-4 text-sm text-gray-900">
+                                  ${formatNumber(product.fob)}
+                                </td>
+                                <td className="p-4 text-sm text-gray-900 font-semibold">
+                                  ${formatNumber(product.returnAmount)}
+                                </td>
+                                <td className="p-4 text-sm text-gray-900">
+                                  {product.expiredDate
+                                    ? formatDateToReadable(product.expiredDate)
+                                    : "--"}
+                                </td>
+                              </tr>
+                            )
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
+                        <div className="text-center">
+                          <p className="text-gray-600 font-medium">
+                            Invoice Number
+                          </p>
+                          <p className="text-lg font-bold text-indigo-600">
+                            {selectedPurchaseReturn.invoiceNumber}
+                          </p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-gray-600 font-medium">
+                            Supplier Name
+                          </p>
+                          <p className="text-lg font-bold text-green-600 capitalize">
+                            {selectedPurchaseReturn.supplierName}
+                          </p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-gray-600 font-medium">
+                            Total Return Amount
+                          </p>
+                          <p className="text-lg font-bold text-red-600">
+                            $
+                            {calculateTotalReturnAmount(selectedPurchaseReturn)}
+                          </p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-gray-600 font-medium">
+                            Return Reason
+                          </p>
+                          <p className="text-lg font-bold text-blue-600 capitalize">
+                            {selectedPurchaseReturn.returnReason || "--"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                <div className="mt-6 flex justify-end">
+                  <button
+                    onClick={closeAllModals}
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer transition-colors"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
             </div>,
             document.body
