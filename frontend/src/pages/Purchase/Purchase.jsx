@@ -862,6 +862,26 @@ function Purchase() {
     return filtered;
   }, [selectedPurchaseProduct, selectedTab, searchTerm]);
 
+  // Calculate total amount for products
+  const calculateTotalAmount = (products) => {
+    return products.reduce((total, product) => total + (Number(product.amount) || 0), 0);
+  };
+
+  // Get unique product types for filter tabs
+  const getProductTypes = useMemo(() => {
+    if (!selectedPurchaseProduct || !selectedPurchaseProduct.products) {
+      return ["All"];
+    }
+    
+    const types = [...new Set(
+      selectedPurchaseProduct.products
+        .map(p => p.productType)
+        .filter(Boolean)
+    )];
+    
+    return ["All", ...types];
+  }, [selectedPurchaseProduct]);
+
   if (loading) return <LoadingOverlay text="Please wait..." />;
 
   return (
@@ -1253,7 +1273,7 @@ function Purchase() {
                             </button>
                           </div>
 
-                          {/* Product Details - Conditionally Rendered */}
+                
                           {expandedProductIndex === index && (
                             <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
                               {[
@@ -1525,7 +1545,7 @@ function Purchase() {
             document.body
           )}
 
-        {/* PRODUCT MODAL */}
+        {/* PRODUCT MODAL - UPDATED WITH FILTER TABS */}
         {isProductModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -1533,7 +1553,7 @@ function Purchase() {
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
                 onClick={() => setIsProductModalOpen(false)}
               />
-              <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+              <div className="bg-white w-full max-w-7xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
                 <button
                   onClick={() => setIsProductModalOpen(false)}
                   className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
@@ -1546,177 +1566,147 @@ function Purchase() {
                   {selectedPurchaseProduct?.invoiceNumber || "Purchase"}
                 </h2>
 
-                {/* Filter Capsules Section */}
+                {/* Filter Tabs Section */}
                 {selectedPurchaseProduct &&
                   selectedPurchaseProduct.products &&
                   selectedPurchaseProduct.products.length > 0 && (
                     <div className="flex flex-wrap justify-between items-center gap-4 mb-6">
                       <div className="flex items-center gap-4">
                         <div className="flex flex-wrap gap-2">
-                          {(() => {
-                            const invoiceProducts =
-                              selectedPurchaseProduct.products || [];
-
-                            if (
-                              !invoiceProducts ||
-                              invoiceProducts.length === 0
-                            ) {
-                              return (
-                                <button className="px-4 py-2 rounded-full bg-indigo-600 text-white shadow-md text-sm font-medium">
-                                  All
-                                </button>
-                              );
-                            }
-
-                            const uniqueTypes = [
-                              ...new Set(
-                                invoiceProducts
-                                  .map((p) => p?.productType)
-                                  .filter(Boolean)
-                              ),
-                            ];
-
-                            return ["All", ...uniqueTypes].map(
-                              (type, typeIndex) => (
-                                <button
-                                  key={`filter-${type}-${typeIndex}`}
-                                  onClick={() => handleClick(type)}
-                                  className={`px-4 py-2 rounded-lg cursor-pointer transition-colors text-sm font-medium ${
-                                    selectedTab === type
-                                      ? "bg-indigo-600 text-white shadow-md"
-                                      : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                                  }`}
-                                >
-                                  {capitalizeFirstLetter(type)}
-                                </button>
-                              )
-                            );
-                          })()}
+                          {getProductTypes.map((type, typeIndex) => (
+                            <button
+                              key={`filter-${type}-${typeIndex}`}
+                              onClick={() => setSelectedTab(type)}
+                              className={`px-4 py-2 rounded-lg cursor-pointer transition-colors text-sm font-medium ${
+                                selectedTab === type
+                                  ? "bg-indigo-600 text-white shadow-md"
+                                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                              }`}
+                            >
+                              {capitalizeFirstLetter(type)}
+                            </button>
+                          ))}
                         </div>
                       </div>
                     </div>
                   )}
 
-                {/* Products Table */}
-                {selectedPurchaseProduct && selectedPurchaseProduct.products ? (
-                  <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-                    <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
-                      <thead className="bg-gray-100 text-gray-700 border-b">
-                        <tr>
-                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
-                            Product Name
-                          </th>
-                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
-                            Product Type
-                          </th>
-                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
-                            Box Qty
-                          </th>
-                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
-                            LC (USD)
-                          </th>
-                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
-                            Amount ($)
-                          </th>
-                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
-                            FOB (USD)
-                          </th>
-                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
-                            CIF (USD)
-                          </th>
-                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
-                            Supplier
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredProductsInModal.length > 0 ? (
-                          filteredProductsInModal.map((product, index) => (
-                            <tr
-                              key={product._id || `product-${index}`}
-                              className={`hover:bg-gray-50 ${
-                                index < filteredProductsInModal.length - 1
-                                  ? "border-b"
-                                  : ""
-                              }`}
-                            >
-                              <td className="p-3 whitespace-nowrap min-w-[120px] capitalize">
-                                {product.productName || "--"}
-                              </td>
-                              <td className="p-3 whitespace-nowrap min-w-[120px]">
-                                <span
-                                  className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                    product.productType === "physical"
-                                      ? "bg-blue-100 text-blue-800"
-                                      : product.productType === "digital"
-                                      ? "bg-purple-100 text-purple-800"
-                                      : "bg-green-100 text-green-800"
-                                  }`}
-                                >
-                                  {capitalizeFirstLetter(
-                                    product.productType || "unknown"
-                                  )}
-                                </span>
-                              </td>
-                              <td className="p-3 whitespace-nowrap min-w-[120px]">
-                                {product.quantityPerBoxStrip || 0}
-                              </td>
-                              <td className="p-3 whitespace-nowrap min-w-[120px]">
-                                {formatNumber(product.lc || product.lcNumber)}
-                              </td>
-                              <td className="p-3 whitespace-nowrap min-w-[120px] font-semibold">
-                                {formatNumber(product.amount)}
-                              </td>
-                              <td className="p-3 whitespace-nowrap min-w-[120px]">
-                                {formatNumber(product.fob)}
-                              </td>
-                              <td className="p-3 whitespace-nowrap min-w-[120px]">
-                                {formatNumber(product.cif)}
-                              </td>
-                              <td className="p-3 whitespace-nowrap min-w-[120px] capitalize">
-                                {selectedPurchaseProduct.supplierName || "--"}
+                {selectedPurchaseProduct && (
+                  <>
+                    <div className="overflow-x-auto shadow rounded-xl border border-gray-200 mb-6">
+                      <table className="w-full border-collapse bg-white rounded-xl overflow-hidden text-center">
+                        <thead className="bg-gray-50 border-b border-gray-200">
+                          <tr>
+                            <th className="p-4 text-sm font-semibold text-gray-700">
+                              Product Name
+                            </th>
+                            <th className="p-4 text-sm font-semibold text-gray-700">
+                              Product Type
+                            </th>
+                            <th className="p-4 text-sm font-semibold text-gray-700">
+                              Box Qty
+                            </th>
+                            <th className="p-4 text-sm font-semibold text-gray-700">
+                              LC (USD)
+                            </th>
+                            <th className="p-4 text-sm font-semibold text-gray-700">
+                              Amount ($)
+                            </th>
+                            <th className="p-4 text-sm font-semibold text-gray-700">
+                              FOB (USD)
+                            </th>
+                            <th className="p-4 text-sm font-semibold text-gray-700">
+                              CIF (USD)
+                            </th>
+                            <th className="p-4 text-sm font-semibold text-gray-700">
+                              Supplier
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {filteredProductsInModal.length > 0 ? (
+                            filteredProductsInModal.map((product, index) => (
+                              <tr key={product._id || `product-${index}`} className="hover:bg-gray-50">
+                                <td className="p-4 text-sm text-gray-900 capitalize">
+                                  {product.productName || "--"}
+                                </td>
+                                <td className="p-4 text-sm text-gray-900">
+                                  <span
+                                    className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                      product.productType === "physical"
+                                        ? "bg-blue-100 text-blue-800"
+                                        : product.productType === "digital"
+                                        ? "bg-purple-100 text-purple-800"
+                                        : "bg-green-100 text-green-800"
+                                    }`}
+                                  >
+                                    {capitalizeFirstLetter(
+                                      product.productType || "unknown"
+                                    )}
+                                  </span>
+                                </td>
+                                <td className="p-4 text-sm text-gray-900">
+                                  {product.quantityPerBoxStrip || 0}
+                                </td>
+                                <td className="p-4 text-sm text-gray-900">
+                                  ${formatNumber(product.lc || product.lcNumber)}
+                                </td>
+                                <td className="p-4 text-sm text-gray-900 font-semibold">
+                                  ${formatNumber(product.amount)}
+                                </td>
+                                <td className="p-4 text-sm text-gray-900">
+                                  ${formatNumber(product.fob)}
+                                </td>
+                                <td className="p-4 text-sm text-gray-900">
+                                  ${formatNumber(product.cif)}
+                                </td>
+                                <td className="p-4 text-sm text-gray-900 capitalize">
+                                  {selectedPurchaseProduct.supplierName || "--"}
+                                </td>
+                              </tr>
+                            ))
+                          ) : (
+                            <tr>
+                              <td
+                                colSpan={8}
+                                className="p-4 text-center text-gray-500"
+                              >
+                                No products found for the selected filters.
                               </td>
                             </tr>
-                          ))
-                        ) : (
-                          <tr>
-                            <td
-                              colSpan={8}
-                              className="p-4 text-center text-gray-500"
-                            >
-                              No products found for the selected filters.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
 
-                    {/* Summary Section */}
-                    <div className="bg-gray-50 p-4 border-t">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                    <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
                         <div className="text-center">
                           <p className="text-gray-600 font-medium">
-                            Total Products
+                            Invoice Number
                           </p>
                           <p className="text-lg font-bold text-indigo-600">
-                            {filteredProductsInModal.length}
+                            {selectedPurchaseProduct.invoiceNumber}
+                          </p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-gray-600 font-medium">
+                            Supplier Name
+                          </p>
+                          <p className="text-lg font-bold text-green-600 capitalize">
+                            {selectedPurchaseProduct.supplierName}
                           </p>
                         </div>
                         <div className="text-center">
                           <p className="text-gray-600 font-medium">
                             Total Amount
                           </p>
-                          <p className="text-lg font-bold text-green-600">
+                          <p className="text-lg font-bold text-red-600">
                             $
-                            {filteredProductsInModal
-                              .reduce(
-                                (sum, p) => sum + (Number(p.amount) || 0),
-                                0
-                              )
-                              .toLocaleString(undefined, {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })}
+                            {calculateTotalAmount(filteredProductsInModal).toLocaleString(undefined, {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
                           </p>
                         </div>
                         <div className="text-center">
@@ -1731,14 +1721,10 @@ function Purchase() {
                         </div>
                       </div>
                     </div>
-                  </div>
-                ) : (
-                  <p className="text-gray-500 text-center py-8">
-                    No product details found.
-                  </p>
+                  </>
                 )}
 
-                <div className="mt-6 flex justify-end gap-3">
+                <div className="mt-6 flex justify-end">
                   <button
                     onClick={() => setIsProductModalOpen(false)}
                     className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer transition-colors"

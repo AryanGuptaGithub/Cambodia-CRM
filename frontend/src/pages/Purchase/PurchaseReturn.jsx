@@ -25,6 +25,7 @@ import { showToast } from "../../utils/toast";
 import axios from "axios";
 import { getVisiblePages } from "../../utils/useVisiblePages";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
+import InputField from "../../components/common/InputField";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -88,8 +89,8 @@ const PurchaseReturn = () => {
   const [filteredSupplierOptions, setFilteredSupplierOptions] = useState([]);
   const [originalPurchaseData, setOriginalPurchaseData] = useState(null);
 
-  // State for expanded product details in view modal
-  const [expandedProductIndex, setExpandedProductIndex] = useState(-1);
+  // State for expanded product details in view modal - now using object to track multiple products
+  const [expandedProducts, setExpandedProducts] = useState({});
 
   // Product edit modal states (like in Purchase component)
   const [currentProduct, setCurrentProduct] = useState(null);
@@ -166,14 +167,31 @@ const PurchaseReturn = () => {
     []
   );
 
+  // Toggle product details in view modal
+  const toggleProductDetails = useCallback((index) => {
+    setExpandedProducts((prev) => ({
+      ...prev,
+      [index]: !prev[index],
+    }));
+  }, []);
+
   // Close all modals
   const closeAllModals = () => {
     setActiveModal(null);
     setForm(INITIAL_FORM_STATE);
-    setExpandedProductIndex(-1);
+    setExpandedProducts({});
     setIsProductEditModalOpen(false);
     setCurrentProduct(null);
     setCurrentProductIndex(null);
+  };
+
+  // Enhanced modal open function to ensure only one modal is open
+  const openModal = (modalType, purchaseReturn = null) => {
+    closeAllModals(); // Close any existing modals first
+    if (purchaseReturn) {
+      setForm(purchaseReturn);
+    }
+    setActiveModal(modalType);
   };
 
   // Fetch original purchase data by invoice number
@@ -631,8 +649,7 @@ const PurchaseReturn = () => {
   };
 
   const editPurchaseReturn = async (purchaseReturn) => {
-    setForm(purchaseReturn);
-    setActiveModal("edit");
+    openModal("edit", purchaseReturn);
 
     if (purchaseReturn.invoiceNumber) {
       const originalPurchase = await fetchOriginalPurchaseData(
@@ -644,16 +661,14 @@ const PurchaseReturn = () => {
   };
 
   const viewPurchaseReturn = (purchaseReturn) => {
-    console.log(purchaseReturn);
-    setForm(purchaseReturn);
-    setActiveModal("view");
+    openModal("view", purchaseReturn);
+    setExpandedProducts({}); // Reset expanded products when opening view modal
   };
 
   // Handle product count click
   const handleProductCountClick = (purchaseReturn) => {
     setSelectedPurchaseReturn(purchaseReturn);
-    //  closeAllModals();
-    setActiveModal("products");
+    openModal("products");
   };
 
   // Handle return reason click
@@ -661,13 +676,7 @@ const PurchaseReturn = () => {
     setSelectedReturnReason(
       purchaseReturn.returnReason || "No reason provided"
     );
-    // closeAllModals();
-    setActiveModal("returnReason");
-  };
-
-  // Toggle product details in view modal
-  const toggleProductDetails = (index) => {
-    setExpandedProductIndex(expandedProductIndex === index ? -1 : index);
+    openModal("returnReason");
   };
 
   // Product edit modal functions (like in Purchase component)
@@ -810,6 +819,28 @@ const PurchaseReturn = () => {
       }, 1000);
     }
   };
+
+  // Calculate product totals
+  const calculateProductTotals = (products) => {
+    if (!products || !Array.isArray(products))
+      return {
+        totalReturnAmount: 0,
+        totalReturnQuantity: 0,
+      };
+
+    const totals = products.reduce(
+      (acc, product) => {
+        acc.totalReturnAmount += parseFloat(product.returnAmount || 0);
+        acc.totalReturnQuantity += parseFloat(product.returnQuantity || 0);
+        return acc;
+      },
+      { totalReturnAmount: 0, totalReturnQuantity: 0 }
+    );
+
+    return totals;
+  };
+
+  const productTotals = calculateProductTotals(form.products);
 
   if (loadingData) {
     return (
@@ -1030,7 +1061,7 @@ const PurchaseReturn = () => {
           )}
         </div>
 
-        {/* View Modal */}
+        {/* View Modal - FIXED with proper product expansion */}
         {activeModal === "view" &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 flex justify-center items-center z-50">
@@ -1108,7 +1139,7 @@ const PurchaseReturn = () => {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-600 mb-1">
-                      Return Quantity
+                      Total Return Quantity
                     </label>
                     <p className="border border-gray-300 px-3 py-2 rounded-lg bg-gray-50">
                       {formatNumber(form.totalReturnQuantity)}
@@ -1127,7 +1158,7 @@ const PurchaseReturn = () => {
                   <div className="md:col-span-3"></div>
                 </div>
 
-                {/* Products Summary */}
+                {/* Products Summary - FIXED with proper expansion */}
                 <div className="mb-6">
                   <h3 className="text-lg font-medium text-gray-900 mb-4">
                     Products ({form.products?.length || 0})
@@ -1147,13 +1178,13 @@ const PurchaseReturn = () => {
                               onClick={() => toggleProductDetails(index)}
                               className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded text-sm cursor-pointer transition-colors"
                             >
-                              {expandedProductIndex === index
+                              {expandedProducts[index]
                                 ? "Hide Details"
                                 : "View Details"}
                             </button>
                           </div>
 
-                          {expandedProductIndex === index && (
+                          {expandedProducts[index] && (
                             <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
                               {[
                                 ["Purchase Qty", "purchaseQty"],
@@ -1227,200 +1258,124 @@ const PurchaseReturn = () => {
             document.body
           )}
 
-        {/* Edit Modal - Enhanced to match Purchase component structure */}
+        {/* Edit Modal */}
         {activeModal === "edit" &&
           ReactDOM.createPortal(
-            <div className="fixed inset-0 flex justify-center items-center z-50">
+            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
               <div
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
                 onClick={closeAllModals}
               />
-              <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+              <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
                 <button
                   onClick={closeAllModals}
-                  className="absolute top-4 right-4 text-gray-500 hover:text-gray-700 cursor-pointer"
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
                 >
                   <X size={20} />
                 </button>
 
-                <h2 className="text-xl font-semibold text-gray-800 mb-6">
+                <h2 className="text-xl font-semibold text-gray-800 mb-4">
                   Edit Purchase Return
                 </h2>
 
-                <form onSubmit={(e) => handleUpdatePurchaseReturn(e, form)}>
-                  {/* Header Section - Match view modal structure */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Recording Date
-                      </label>
-                      <DatePicker
-                        selected={
-                          form.recordingDate
-                            ? new Date(form.recordingDate)
-                            : null
-                        }
-                        onChange={(date) =>
-                          handleDateChange(date, "recordingDate")
-                        }
-                        dateFormat="yyyy-MM-dd"
-                        placeholderText="Select date"
-                        className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Invoice Number
-                      </label>
-                      <input
-                        type="text"
-                        name="invoiceNumber"
-                        value={form.invoiceNumber || ""}
-                        onChange={(e) =>
-                          handleNumericInputChange(e, enhancedHandleChange)
-                        }
-                        className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Invoice Date
-                      </label>
-                      <DatePicker
-                        selected={
-                          form.invoiceDate ? new Date(form.invoiceDate) : null
-                        }
-                        onChange={(date) =>
-                          handleDateChange(date, "invoiceDate")
-                        }
-                        dateFormat="yyyy-MM-dd"
-                        placeholderText="Select date"
-                        className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Delivery Number
-                      </label>
-                      <input
-                        type="text"
-                        name="deliveryNumber"
-                        value={form.deliveryNumber || ""}
-                        onChange={(e) =>
-                          handleNumericInputChange(e, enhancedHandleChange)
-                        }
-                        className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Received Date
-                      </label>
-                      <DatePicker
-                        selected={
-                          form.receivedDate ? new Date(form.receivedDate) : null
-                        }
-                        onChange={(date) =>
-                          handleDateChange(date, "receivedDate")
-                        }
-                        dateFormat="yyyy-MM-dd"
-                        placeholderText="Select date"
-                        className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Supplier Name
-                      </label>
-                      <SearchableDropdown
-                        value={form.supplierId}
-                        onChange={handleSupplierChange}
-                        options={[
-                          { value: "", label: "Select Supplier" },
-                          ...filteredSupplierOptions,
-                        ]}
-                        placeholder="Select Supplier"
-                        required={true}
-                        loading={loadingSuppliers}
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        LC Number
-                      </label>
-                      <input
-                        type="text"
-                        name="lcNumber"
-                        value={form.lcNumber || ""}
-                        onChange={(e) =>
-                          handleNumericInputChange(e, enhancedHandleChange)
-                        }
-                        className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Amount ($)
-                      </label>
-                      <input
-                        type="number"
-                        name="amount"
-                        value={form.amount || 0}
-                        onChange={(e) =>
-                          handleNumericInputChange(e, enhancedHandleChange)
-                        }
-                        className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
-                        min="0"
-                        step="0.01"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Return Reason
-                      </label>
-                      <input
-                        type="text"
-                        name="returnReason"
-                        value={form.returnReason || ""}
-                        onChange={(e) =>
-                          handleNumericInputChange(e, enhancedHandleChange)
-                        }
-                        className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
-                        placeholder="Enter return reason"
-                      />
-                    </div>
-
-                    <div className="md:col-span-3">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Total Return Amount ($)
-                      </label>
-                      <input
-                        type="text"
-                        value={`$${calculateTotalReturnAmount(form)}`}
-                        className="w-full border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 cursor-not-allowed font-semibold text-lg"
-                        readOnly
-                        disabled
-                      />
-                    </div>
+                <form
+                  onSubmit={(e) => handleUpdatePurchaseReturn(e, form)}
+                  className="grid grid-cols-1 md:grid-cols-3 gap-4 max-h-[70vh]"
+                >
+                  {/* Recording Date */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Recording Date
+                    </label>
+                    <DatePicker
+                      selected={
+                        form.recordingDate ? new Date(form.recordingDate) : null
+                      }
+                      onChange={(date) =>
+                        handleDateChange(date, "recordingDate")
+                      }
+                      dateFormat="yyyy-MM-dd"
+                      placeholderText="Select date"
+                      className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                    />
                   </div>
 
-                  {/* Products Section - Enhanced like Purchase component */}
-                  <div className="mb-6">
-                    <div className="flex justify-between items-center mb-4">
-                      <h3 className="text-lg font-medium text-gray-900">
-                        Products ({form.products?.length || 0})
-                      </h3>
-                    </div>
+                  {/* Invoice Number */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Invoice Number
+                    </label>
+                    <InputField
+                      type="text"
+                      value={form.invoiceNumber || ""}
+                      className="w-full border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 cursor-not-allowed"
+                      readOnly
+                      disabled
+                    />
+                  </div>
 
-                    <div className="space-y-3">
+                  {/* Invoice Date */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Invoice Date
+                    </label>
+                    <InputField
+                      type="text"
+                      value={formatDateToReadable(form.invoiceDate) || "--"}
+                      className="w-full border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 cursor-not-allowed"
+                      readOnly
+                      disabled
+                    />
+                  </div>
+
+                  {/* Delivery Number */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Delivery Number
+                    </label>
+                    <InputField
+                      type="text"
+                      value={form.deliveryNumber || ""}
+                      className="w-full border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 cursor-not-allowed"
+                      readOnly
+                      disabled
+                    />
+                  </div>
+
+                  {/* Received Date */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Received Date
+                    </label>
+                    <InputField
+                      type="text"
+                      value={formatDateToReadable(form.receivedDate) || "--"}
+                      className="w-full border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 cursor-not-allowed"
+                      readOnly
+                      disabled
+                    />
+                  </div>
+
+                  {/* Supplier Name */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Supplier Name
+                    </label>
+                    <InputField
+                      type="text"
+                      value={form.supplierName || ""}
+                      className="w-full border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 cursor-not-allowed capitalize"
+                      readOnly
+                      disabled
+                    />
+                  </div>
+
+                  {/* Products Section */}
+                  <div className="md:col-span-3">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Products ({form.products?.length || 0})
+                    </label>
+                    <div className="space-y-3 border rounded-lg p-4 bg-gray-50">
                       {form.products && form.products.length > 0 ? (
                         form.products.map((product, index) => (
                           <div
@@ -1432,10 +1387,9 @@ const PurchaseReturn = () => {
                                 {product.productName || `Product ${index + 1}`}
                               </span>
                               <div className="text-sm text-gray-500 mt-1">
-                                Purchase Qty: {product.purchaseQty || 0} |
-                                Return Qty: {product.returnQuantity || 0} | Used
-                                Qty: {product.usedQty || 0} | Return Amount: $
-                                {product.returnAmount || "0.00"}
+                                Purchase: {product.purchaseQty || 0} | Return:{" "}
+                                {product.returnQuantity || 0} | FOB: $
+                                {(product.fob || 0).toFixed(2)}
                               </div>
                             </div>
                             <div className="flex gap-2">
@@ -1461,57 +1415,84 @@ const PurchaseReturn = () => {
                           </div>
                         ))
                       ) : (
-                        <div className="text-center text-gray-500 py-8 border-2 border-dashed border-gray-300 rounded-lg">
+                        <div className="text-center text-gray-500 py-4">
                           No products added
                         </div>
                       )}
                     </div>
                   </div>
 
-                  {/* Remarks Section */}
-                  <div className="mb-6">
+                  {/* Financial Summary */}
+                  <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-gray-300">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">
+                        Total Return Quantity
+                      </label>
+                      <InputField
+                        type="text"
+                        name="totalReturnQuantity"
+                        value={form.totalReturnQuantity || ""}
+                        onChange={(e) =>
+                          handleNumericInputChange(e, enhancedHandleChange)
+                        }
+                        className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                        autoComplete="off"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">
+                        Total Return Amount
+                      </label>
+                      <InputField
+                        type="text"
+                        value={`$${calculateTotalReturnAmount(form)}`}
+                        className="w-full border border-gray-300 px-3 py-2 rounded-lg bg-gray-50 cursor-not-allowed font-semibold text-lg"
+                        readOnly
+                        disabled
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">
+                        Calculated Return Amount
+                      </label>
+                      <InputField
+                        type="text"
+                        value={`$${productTotals.totalReturnAmount.toFixed(2)}`}
+                        className="w-full border border-gray-300 px-3 py-2 rounded-lg bg-gray-200 text-gray-700"
+                        disabled
+                      />
+                    </div>
+                  </div>
+
+                  {/* Return Reason Section */}
+                  <div className="md:col-span-3">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Remarks
+                      Return Reason
                     </label>
                     <textarea
-                      name="remarks"
-                      value={form.remarks || ""}
+                      name="returnReason"
+                      value={form.returnReason || ""}
                       onChange={enhancedHandleChange}
                       className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
                       rows={3}
-                      placeholder="Add any remarks here..."
+                      placeholder="Add return reason here..."
                     />
                   </div>
 
-                  {/* Status Field */}
-                  <div className="mb-6">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Status
-                    </label>
-                    <select
-                      name="status"
-                      value={form.status || "pending"}
-                      onChange={enhancedHandleChange}
-                      className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
-                    >
-                      <option value="pending">Pending</option>
-                      <option value="completed">Completed</option>
-                      <option value="cancelled">Cancelled</option>
-                    </select>
-                  </div>
-
                   {/* Footer buttons */}
-                  <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+                  <div className="md:col-span-3 mt-4 flex justify-end gap-3 border-t border-gray-300 pt-4">
                     <button
                       type="button"
                       onClick={closeAllModals}
-                      className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-6 py-2 rounded-lg cursor-pointer transition-colors"
+                      className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
-                      className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg cursor-pointer transition-colors"
+                      className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
                     >
                       Update Purchase Return
                     </button>
@@ -1522,7 +1503,8 @@ const PurchaseReturn = () => {
             document.body
           )}
 
-        {/* Product Edit Modal - Like in Purchase component */}
+        {/* Product Edit Modal */}
+        {/* PRODUCT EDIT MODAL */}
         {isProductEditModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -1543,114 +1525,124 @@ const PurchaseReturn = () => {
                 </h2>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Product Name - Using SearchableDropdown */}
+                  {/* Product Name - Using SearchableDropdown with ONLY invoice products */}
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-gray-700">
                       Product Name
                     </label>
                     <SearchableDropdown
-                      options={filteredProductOptions.map((product) => ({
-                        value: product.value,
-                        label: product.label,
-                      }))}
-                      value={currentProduct?.productId || ""}
+                      options={
+                        form.products?.map((product, index) => ({
+                          value: product.productName || `Product ${index + 1}`,
+                          label: product.productName || `Product ${index + 1}`,
+                          ...product,
+                        })) || []
+                      }
+                      value={currentProduct?.productName || ""}
                       onChange={(selectedValue) => {
-                        const selectedProduct = filteredProductOptions.find(
-                          (product) => product.value === selectedValue
+                        // Find the selected product from the current invoice's products
+                        const selectedProduct = form.products?.find(
+                          (product) => product.productName === selectedValue
                         );
                         if (selectedProduct) {
                           setCurrentProduct((prev) => ({
                             ...prev,
-                            productId: selectedProduct.value,
-                            productName: selectedProduct.label,
+                            productName: selectedProduct.productName,
+                            productId: selectedProduct.productId,
+                            productType: selectedProduct.productType,
+                            // Keep existing values if they exist, otherwise use selected product values
+                            quantityPerBoxStrip:
+                              prev?.quantityPerBoxStrip ||
+                              selectedProduct.quantityPerBoxStrip,
+                            lc: prev?.lc || selectedProduct.lc,
+                            fob: prev?.fob || selectedProduct.fob,
+                            cif: prev?.cif || selectedProduct.cif,
+                            amount: prev?.amount || selectedProduct.amount,
+                            expiryDate:
+                              prev?.expiryDate || selectedProduct.expiryDate,
+                          }));
+                        } else {
+                          // If product not found (shouldn't happen with our filtered list), keep current values
+                          setCurrentProduct((prev) => ({
+                            ...prev,
+                            productName: selectedValue,
                           }));
                         }
                       }}
-                      placeholder="Select Product"
+                      placeholder="Select Product from this invoice"
                       className="w-full"
                     />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Only products from this invoice are shown
+                    </p>
                   </div>
 
-                  <div>
+                  {/* <div>
                     <label className="block text-sm font-medium text-gray-700">
-                      Purchase Quantity
+                      Product Type
                     </label>
-                    <input
+                    <InputField
                       type="text"
-                      name="purchaseQty"
-                      value={currentProduct?.purchaseQty || ""}
-                      onChange={handleProductNumericChange}
-                      className="w-full border border-gray-300 px-3 py-2 rounded-lg"
-                      autoComplete="off"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">
-                      Return Quantity
-                    </label>
-                    <input
-                      type="text"
-                      name="returnQuantity"
-                      value={currentProduct?.returnQuantity || ""}
-                      onChange={handleProductNumericChange}
-                      className="w-full border border-gray-300 px-3 py-2 rounded-lg"
-                      autoComplete="off"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">
-                      Used Quantity
-                    </label>
-                    <input
-                      type="text"
-                      name="usedQty"
-                      value={currentProduct?.usedQty || ""}
-                      className="w-full border border-gray-300 px-3 py-2 rounded-lg bg-gray-100 text-gray-700"
-                      readOnly
+                      name="productType"
+                      value={currentProduct?.productType || ""}
+                      onChange={handleProductEditChange}
+                      className="w-full border px-3 py-2 rounded-lg bg-gray-100 text-gray-700 border-gray-300"
                       disabled
                     />
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700">
-                      FOB ($)
+                      Quantity Per Box/Strip
                     </label>
-                    <input
+                    <InputField
                       type="text"
-                      name="fob"
-                      value={currentProduct?.fob || ""}
+                      name="quantityPerBoxStrip"
+                      value={currentProduct?.quantityPerBoxStrip || ""}
                       onChange={handleProductNumericChange}
-                      className="w-full border border-gray-300 px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
                       autoComplete="off"
                     />
-                  </div>
+                  </div> */}
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700">
-                      CIF ($)
+                      LC (USD)
                     </label>
-                    <input
-                      type="text"
-                      name="cif"
-                      value={currentProduct?.cif || ""}
-                      onChange={handleProductNumericChange}
-                      className="w-full border border-gray-300 px-3 py-2 rounded-lg"
-                      autoComplete="off"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">
-                      LC ($)
-                    </label>
-                    <input
+                    <InputField
                       type="text"
                       name="lc"
                       value={currentProduct?.lc || ""}
                       onChange={handleProductNumericChange}
-                      className="w-full border border-gray-300 px-3 py-2 rounded-lg"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      FOB (USD)
+                    </label>
+                    <InputField
+                      type="text"
+                      name="fob"
+                      value={currentProduct?.fob || ""}
+                      onChange={handleProductNumericChange}
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      CIF (USD)
+                    </label>
+                    <InputField
+                      type="text"
+                      name="cif"
+                      value={currentProduct?.cif || ""}
+                      onChange={handleProductNumericChange}
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
                       autoComplete="off"
                     />
                   </div>
@@ -1659,49 +1651,36 @@ const PurchaseReturn = () => {
                     <label className="block text-sm font-medium text-gray-700">
                       Amount ($)
                     </label>
-                    <input
+                    <InputField
                       type="text"
                       name="amount"
                       value={currentProduct?.amount || ""}
-                      onChange={handleProductNumericChange}
-                      className="w-full border border-gray-300 px-3 py-2 rounded-lg"
-                      autoComplete="off"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">
-                      Return Amount ($)
-                    </label>
-                    <input
-                      type="text"
-                      name="returnAmount"
-                      value={currentProduct?.returnAmount || ""}
-                      className="w-full border border-gray-300 px-3 py-2 rounded-lg bg-gray-100 text-gray-700 font-semibold"
-                      readOnly
+                      className="w-full border px-3 py-2 rounded-lg bg-gray-100 text-gray-700 border-gray-300"
                       disabled
                     />
                   </div>
 
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-gray-700">
-                      Expired Date
+                      Expiry Date
                     </label>
                     <DatePicker
                       selected={
                         currentProduct?.expiredDate
-                          ? new Date(currentProduct.expiredDate)
+                          ? formatDateToReadable(currentProduct?.expiredDate)
                           : null
                       }
                       onChange={(date) =>
                         setCurrentProduct((prev) => ({
                           ...prev,
-                          expiredDate: date ? date.toISOString() : "",
+                          expiryDate: date
+                            ? date.toISOString().split("T")[0]
+                            : "",
                         }))
                       }
                       dateFormat="yyyy-MM-dd"
-                      placeholderText="Select expiry date"
-                      className="w-full border border-gray-300 px-3 py-2 rounded-lg"
+                      placeholderText="Select a date"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
                     />
                   </div>
                 </div>
@@ -1771,7 +1750,6 @@ const PurchaseReturn = () => {
             document.body
           )}
 
-        {/* Product Details Modal */}
         {activeModal === "products" &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">

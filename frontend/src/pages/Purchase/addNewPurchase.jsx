@@ -36,7 +36,7 @@ const INITIAL_FORM_STATE = {
   invoiceDate: "",
   receivedDate: "",
   remarks: "",
-  products: [{ ...INITIAL_PRODUCT_STATE }], // Changed to array of products
+  products: [{ ...INITIAL_PRODUCT_STATE }],
 };
 
 /* ────────────────────── Utility ────────────────────── */
@@ -879,7 +879,7 @@ const AddNewPurchase = () => {
                           type="button"
                           onClick={() => removeProduct(index)}
                           disabled={isFormDisabled}
-                          className="text-red-600 hover:text-red-800"
+                          className="text-red-600 hover:text-red-800 p-1"
                         >
                           <MinusSquare size={16} />
                         </button>
