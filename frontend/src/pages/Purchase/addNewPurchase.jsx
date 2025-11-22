@@ -26,6 +26,8 @@ const INITIAL_PRODUCT_STATE = {
   amount: "",
   expiredDate: "",
   remainingStock: 0,
+  type: "", // Added type field
+  sellingPrice: "", // ADDED: sellingPrice field
 };
 
 const INITIAL_FORM_STATE = {
@@ -79,9 +81,12 @@ const usePurchaseForm = () => {
     setExpandedProductIndex((prevIndex) => (prevIndex === index ? -1 : index));
   }, []);
 
-  const isProductExpanded = useCallback((index) => {
-    return expandedProductIndex === index;
-  }, [expandedProductIndex]);
+  const isProductExpanded = useCallback(
+    (index) => {
+      return expandedProductIndex === index;
+    },
+    [expandedProductIndex]
+  );
 
   /* ───── Add/Remove Products ───── */
   const addProduct = useCallback(() => {
@@ -92,28 +97,43 @@ const usePurchaseForm = () => {
     setExpandedProductIndex(form.products.length);
   }, [form.products.length]);
 
-  const removeProduct = useCallback((index) => {
-    if (form.products.length > 1) {
-      setForm((prev) => ({
-        ...prev,
-        products: prev.products.filter((_, i) => i !== index),
-      }));
-      setExpandedProductIndex((prevIndex) => {
-        if (prevIndex === index) return 0;
-        else if (prevIndex > index) return prevIndex - 1;
-        return prevIndex;
-      });
-    }
-  }, [form.products.length]);
+  const removeProduct = useCallback(
+    (index) => {
+      if (form.products.length > 1) {
+        setForm((prev) => ({
+          ...prev,
+          products: prev.products.filter((_, i) => i !== index),
+        }));
+        setExpandedProductIndex((prevIndex) => {
+          if (prevIndex === index) return 0;
+          else if (prevIndex > index) return prevIndex - 1;
+          return prevIndex;
+        });
+      }
+    },
+    [form.products.length]
+  );
 
   /* ───── Field Validation ───── */
   const areCommonFieldsFilled = useCallback((formData) => {
-    const required = ["invoiceNumber", "deliveryNumber", "supplierId", "invoiceDate", "receivedDate"];
-    return required.every((field) => formData[field] && formData[field].toString().trim());
+    const required = [
+      "invoiceNumber",
+      "deliveryNumber",
+      "supplierId",
+      "invoiceDate",
+      "receivedDate",
+    ];
+    return required.every(
+      (field) => formData[field] && formData[field].toString().trim()
+    );
   }, []);
 
   const isProductValid = useCallback((product) => {
-    return product.productId && parseNumber(product.qtyBox) > 0 && product.expiredDate;
+    return (
+      product.productId &&
+      parseNumber(product.qtyBox) > 0 &&
+      product.expiredDate
+    );
   }, []);
 
   const isProductFilled = useCallback((product) => {
@@ -121,7 +141,9 @@ const usePurchaseForm = () => {
   }, []);
 
   const hasAtLeastOneProduct = useCallback((products) => {
-    return products.some((product) => product.productId && product.productName.trim() !== "");
+    return products.some(
+      (product) => product.productId && product.productName.trim() !== ""
+    );
   }, []);
 
   /* ───── Amount Calculation ───── */
@@ -136,10 +158,13 @@ const usePurchaseForm = () => {
   }, []);
 
   /* ───── Change Handlers ───── */
-  const handleChange = useCallback((e) => {
-    const { name, value } = e.target;
-    updateFormField(name, value);
-  }, [updateFormField]);
+  const handleChange = useCallback(
+    (e) => {
+      const { name, value } = e.target;
+      updateFormField(name, value);
+    },
+    [updateFormField]
+  );
 
   const handleProductChange = useCallback(
     (index, field, value) => {
@@ -148,9 +173,12 @@ const usePurchaseForm = () => {
     [updateProduct]
   );
 
-  const handleDateChange = useCallback((name, date) => {
-    updateFormField(name, date ? new Date(date).toISOString() : "");
-  }, [updateFormField]);
+  const handleDateChange = useCallback(
+    (name, date) => {
+      updateFormField(name, date ? new Date(date).toISOString() : "");
+    },
+    [updateFormField]
+  );
 
   const handleProductDateChange = useCallback(
     (index, name, date) => {
@@ -162,7 +190,9 @@ const usePurchaseForm = () => {
   /* ───── Dropdown Handlers ───── */
   const handleProductSelection = useCallback(
     (index, productId) => {
-      const selectedProduct = products.find((product) => product.value === productId);
+      const selectedProduct = products.find(
+        (product) => product.value === productId
+      );
       if (selectedProduct) {
         setForm((prev) => ({
           ...prev,
@@ -175,10 +205,12 @@ const usePurchaseForm = () => {
                   lcNumber: selectedProduct.lc || selectedProduct.lcNumber || 0,
                   fob: selectedProduct.fob || 0,
                   cif: selectedProduct.cif || 0,
+                  type: selectedProduct.type || "Tablet", 
                   remainingStock: selectedProduct.remainingStock || 0,
-                  qtyBox: product.qtyBox, // Keep existing quantity
-                  expiredDate: product.expiredDate, // Keep existing expiry date
-                  amount: product.amount, // Keep existing amount
+                  sellingPrice: selectedProduct.sellingPrice || 0, // ADDED: Set sellingPrice from selected product
+                  qtyBox: product.qtyBox, 
+                  expiredDate: product.expiredDate, 
+                  amount: product.amount, 
                 }
               : product
           ),
@@ -190,7 +222,9 @@ const usePurchaseForm = () => {
 
   const handleSupplierChange = useCallback(
     (supplierId) => {
-      const selectedSupplier = suppliers.find((supplier) => supplier.value === supplierId);
+      const selectedSupplier = suppliers.find(
+        (supplier) => supplier.value === supplierId
+      );
       if (selectedSupplier) {
         updateFormField("supplierId", selectedSupplier.value);
         updateFormField("supplierName", selectedSupplier.label);
@@ -199,18 +233,24 @@ const usePurchaseForm = () => {
     [suppliers, updateFormField]
   );
 
-  const handleFobUpdate = useCallback((index, fobValue) => {
-    updateProduct(index, "fob", fobValue);
-  }, [updateProduct]);
+  const handleFobUpdate = useCallback(
+    (index, fobValue) => {
+      updateProduct(index, "fob", fobValue);
+    },
+    [updateProduct]
+  );
 
   /* ───── Validation ───── */
   const validate = useCallback(() => {
     const newErrors = {};
 
     // Common fields validation
-    if (!form.invoiceNumber?.trim()) newErrors.invoiceNumber = "Invoice number is required";
-    if (!form.supplierId) newErrors.supplierId = "Supplier selection is required";
-    if (!form.deliveryNumber?.trim()) newErrors.deliveryNumber = "Delivery number is required";
+    if (!form.invoiceNumber?.trim())
+      newErrors.invoiceNumber = "Invoice number is required";
+    if (!form.supplierId)
+      newErrors.supplierId = "Supplier selection is required";
+    if (!form.deliveryNumber?.trim())
+      newErrors.deliveryNumber = "Delivery number is required";
 
     // Date validation
     const today = new Date();
@@ -231,15 +271,19 @@ const usePurchaseForm = () => {
     // Products validation
     form.products.forEach((product, index) => {
       if (product.productId) {
-        if (!product.productId) newErrors[`productId_${index}`] = "Product selection is required";
+        if (!product.productId)
+          newErrors[`productId_${index}`] = "Product selection is required";
 
         const qtyBoxNum = parseNumber(product.qtyBox);
         const fobNum = parseNumber(product.fob);
         const cifNum = parseNumber(product.cif);
         const lcNumberStr = String(product.lcNumber || "");
 
-        if (qtyBoxNum <= 0) newErrors[`qtyBox_${index}`] = "Box quantity must be greater than 0";
-        if (qtyBoxNum > 100000) newErrors[`qtyBox_${index}`] = "Box quantity seems too large, please verify";
+        if (qtyBoxNum <= 0)
+          newErrors[`qtyBox_${index}`] = "Box quantity must be greater than 0";
+        if (qtyBoxNum > 100000)
+          newErrors[`qtyBox_${index}`] =
+            "Box quantity seems too large, please verify";
         if (fobNum < 0) newErrors[`fob_${index}`] = "FOB cannot be negative";
         if (cifNum < 0) newErrors[`cif_${index}`] = "CIF cannot be negative";
 
@@ -247,7 +291,8 @@ const usePurchaseForm = () => {
           newErrors[`lcNumber_${index}`] = "Either LC or FOB is required";
         }
 
-        if (!product.expiredDate) newErrors[`expiredDate_${index}`] = "Expired date is required";
+        if (!product.expiredDate)
+          newErrors[`expiredDate_${index}`] = "Expired date is required";
       }
     });
 
@@ -265,12 +310,16 @@ const usePurchaseForm = () => {
     try {
       setLoading((prev) => ({ ...prev, products: true }));
       const result = await fetchProductsAPI();
-
+     
       if (result.success) {
         const transformedProducts = result.data.map((product) => {
+          console.log("314", product);
           let totalBoxes = 0;
           if (product.batches && Array.isArray(product.batches)) {
-            totalBoxes = product.batches.reduce((sum, batch) => sum + (batch.boxes || 0), 0);
+            totalBoxes = product.batches.reduce(
+              (sum, batch) => sum + (batch.boxes || 0),
+              0
+            );
           } else if (product.totalBoxes !== undefined) {
             totalBoxes = product.totalBoxes;
           }
@@ -281,7 +330,9 @@ const usePurchaseForm = () => {
             lc: product.lc || product.lcNumber || 0,
             fob: product.fob || 0,
             cif: product.cif || 0,
+            type: product.type || "Tablet", // Added type field
             remainingStock: totalBoxes,
+            sellingPrice: product.sellingPrice || 0, // ADDED: Include sellingPrice
           };
         });
 
@@ -296,7 +347,7 @@ const usePurchaseForm = () => {
       console.error("Error fetching products:", err);
       showToast("error", "Failed to fetch products");
       setProducts([]);
-        setIsProductsEmpty(true);
+      setIsProductsEmpty(true);
     } finally {
       setLoading((prev) => ({ ...prev, products: false }));
     }
@@ -323,7 +374,7 @@ const usePurchaseForm = () => {
       console.error("Error fetching suppliers:", err);
       showToast("error", "Failed to fetch suppliers");
       setSuppliers([]);
-        setIsSuppliersEmpty(true);
+      setIsSuppliersEmpty(true);
     } finally {
       setLoading((prev) => ({ ...prev, suppliers: false }));
     }
@@ -345,7 +396,10 @@ const usePurchaseForm = () => {
         amount: calculateProductAmount(product),
       })),
     }));
-  }, [form.products.map(p => `${p.lcNumber}-${p.fob}-${p.qtyBox}`).join(), calculateProductAmount]);
+  }, [
+    form.products.map((p) => `${p.lcNumber}-${p.fob}-${p.qtyBox}`).join(),
+    calculateProductAmount,
+  ]);
 
   return {
     form,
@@ -641,7 +695,10 @@ const AddNewPurchase = () => {
     e.preventDefault();
 
     if (isSuppliersEmpty || isProductsEmpty) {
-      showToast("error", "Cannot add purchase. No suppliers or products available.");
+      showToast(
+        "error",
+        "Cannot add purchase. No suppliers or products available."
+      );
       return;
     }
 
@@ -657,18 +714,22 @@ const AddNewPurchase = () => {
         receivedDate: form.receivedDate,
         remarks: form.remarks,
         products: form.products
-          .filter(product => product.productId) // Only include products with productId
-          .map(product => ({
+          .filter((product) => product.productId) // Only include products with productId
+          .map((product) => ({
             productId: product.productId,
             productName: product.productName,
             qtyBox: parseFloat(product.qtyBox) || 0,
-            lc: product.lcNumber,
+            lc: product.lcNumber, // Note: Changed from lcNumber to lc to match backend
             cif: parseFloat(product.cif) || 0,
             fob: parseFloat(product.fob) || 0,
             amount: parseFloat(product.amount) || 0,
             expiredDate: product.expiredDate,
+            type: product.type || "Tablet", // Added type field with default
+            sellingPrice: parseFloat(product.sellingPrice) || 0, // ADDED: sellingPrice to backend
           })),
       };
+
+      console.log("Submitting data:", submissionData);
 
       const response = await fetch(`${backendUrl}/api/purchase`, {
         method: "POST",
@@ -701,7 +762,7 @@ const AddNewPurchase = () => {
   // Check if current product is valid for enabling "Add Product" button
   const isCurrentProductValid = useCallback(() => {
     if (isFormDisabled) return false;
-    
+
     const currentProduct = form.products[form.products.length - 1];
     return isProductFilled(currentProduct);
   }, [form.products, isFormDisabled, isProductFilled]);
@@ -730,7 +791,11 @@ const AddNewPurchase = () => {
         <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
           <div className="flex items-center">
             <div className="flex-shrink-0">
-              <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+              <svg
+                className="h-5 w-5 text-red-400"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
                 <path
                   fillRule="evenodd"
                   d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
@@ -739,7 +804,9 @@ const AddNewPurchase = () => {
               </svg>
             </div>
             <div className="ml-3">
-              <h3 className="text-sm font-medium text-red-800">Missing Required Data</h3>
+              <h3 className="text-sm font-medium text-red-800">
+                Missing Required Data
+              </h3>
               <div className="mt-2 text-sm text-red-700">
                 <p>
                   {isSuppliersEmpty && isProductsEmpty
@@ -757,7 +824,9 @@ const AddNewPurchase = () => {
       <form onSubmit={handleSubmit}>
         {/* Common Fields Section */}
         <div className="mb-8 p-6 border border-gray-200 rounded-lg">
-          <h3 className="text-lg font-semibold mb-4 text-gray-700">Common Information</h3>
+          <h3 className="text-lg font-semibold mb-4 text-gray-700">
+            Common Information
+          </h3>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             <InputField
@@ -787,7 +856,9 @@ const AddNewPurchase = () => {
               value={form.supplierId}
               onChange={handleSupplierChange}
               options={supplierOptions}
-              placeholder={isSuppliersEmpty ? "No Suppliers Available" : "Select Supplier"}
+              placeholder={
+                isSuppliersEmpty ? "No Suppliers Available" : "Select Supplier"
+              }
               required={true}
               error={errors.supplierId}
               loading={loading.suppliers}
@@ -820,7 +891,9 @@ const AddNewPurchase = () => {
 
         {/* Products Section */}
         <div className="mb-8">
-          <h3 className="text-lg font-semibold mb-4 text-gray-700">Products Information</h3>
+          <h3 className="text-lg font-semibold mb-4 text-gray-700">
+            Products Information
+          </h3>
 
           {form.products.map((product, index) => {
             const currentStock = product.remainingStock || 0;
@@ -828,7 +901,10 @@ const AddNewPurchase = () => {
             const futureStock = calculateFutureStock(currentStock, purchaseQty);
 
             return (
-              <div key={index} className="border border-gray-200 rounded-lg mb-4">
+              <div
+                key={index}
+                className="border border-gray-200 rounded-lg mb-4"
+              >
                 {/* Product Header */}
                 <div className="p-4 bg-gray-50 rounded-t-lg">
                   <div className="flex justify-between items-center">
@@ -837,7 +913,9 @@ const AddNewPurchase = () => {
                         {product.productName || `Product ${index + 1}`}
                       </h4>
                       {!product.productName && (
-                        <span className="text-xs text-red-500">(Product not selected)</span>
+                        <span className="text-xs text-red-500">
+                          (Product not selected)
+                        </span>
                       )}
                       {product.productName && (
                         <div className="flex items-center gap-2">
@@ -895,9 +973,15 @@ const AddNewPurchase = () => {
                       <SearchableDropdown
                         label="Product"
                         value={product.productId}
-                        onChange={(productId) => handleProductSelection(index, productId)}
+                        onChange={(productId) =>
+                          handleProductSelection(index, productId)
+                        }
                         options={productOptions}
-                        placeholder={isProductsEmpty ? "No Products Available" : "Select Product"}
+                        placeholder={
+                          isProductsEmpty
+                            ? "No Products Available"
+                            : "Select Product"
+                        }
                         required={true}
                         error={errors[`productId_${index}`]}
                         loading={loading.products}
@@ -907,7 +991,9 @@ const AddNewPurchase = () => {
                         label="Box Quantity"
                         name={`qtyBox_${index}`}
                         value={product.qtyBox}
-                        onChange={(e) => enhancedProductChange(index, "qtyBox", e.target.value)}
+                        onChange={(e) =>
+                          enhancedProductChange(index, "qtyBox", e.target.value)
+                        }
                         error={errors[`qtyBox_${index}`]}
                         placeholder="0"
                         required
@@ -918,7 +1004,13 @@ const AddNewPurchase = () => {
                         label="LC (USD)"
                         name={`lcNumber_${index}`}
                         value={product.lcNumber}
-                        onChange={(e) => enhancedProductChange(index, "lcNumber", e.target.value)}
+                        onChange={(e) =>
+                          enhancedProductChange(
+                            index,
+                            "lcNumber",
+                            e.target.value
+                          )
+                        }
                         error={errors[`lcNumber_${index}`]}
                         placeholder="0.00"
                         allowDecimal={true}
@@ -928,7 +1020,9 @@ const AddNewPurchase = () => {
                         label="FOB (USD)"
                         name={`fob_${index}`}
                         value={product.fob}
-                        onChange={(e) => enhancedProductChange(index, "fob", e.target.value)}
+                        onChange={(e) =>
+                          enhancedProductChange(index, "fob", e.target.value)
+                        }
                         error={errors[`fob_${index}`]}
                         placeholder="0.00"
                         allowDecimal={true}
@@ -938,8 +1032,27 @@ const AddNewPurchase = () => {
                         label="CIF (USD)"
                         name={`cif_${index}`}
                         value={product.cif}
-                        onChange={(e) => enhancedProductChange(index, "cif", e.target.value)}
+                        onChange={(e) =>
+                          enhancedProductChange(index, "cif", e.target.value)
+                        }
                         error={errors[`cif_${index}`]}
+                        placeholder="0.00"
+                        allowDecimal={true}
+                        disabled={isFormDisabled}
+                      />
+                      {/* ADDED: Selling Price Field */}
+                      <NumericInputField
+                        label="Selling Price (USD)"
+                        name={`sellingPrice_${index}`}
+                        value={product.sellingPrice}
+                        onChange={(e) =>
+                          enhancedProductChange(
+                            index,
+                            "sellingPrice",
+                            e.target.value
+                          )
+                        }
+                        error={errors[`sellingPrice_${index}`]}
                         placeholder="0.00"
                         allowDecimal={true}
                         disabled={isFormDisabled}
@@ -948,7 +1061,9 @@ const AddNewPurchase = () => {
                         label="Expired Date"
                         name={`expiredDate_${index}`}
                         value={product.expiredDate}
-                        onChange={(name, date) => handleProductDateChange(index, "expiredDate", date)}
+                        onChange={(name, date) =>
+                          handleProductDateChange(index, "expiredDate", date)
+                        }
                         error={errors[`expiredDate_${index}`]}
                         required
                         disabled={isFormDisabled}
@@ -963,7 +1078,11 @@ const AddNewPurchase = () => {
                         <input
                           type="text"
                           name={`amount_${index}`}
-                          value={product.amount ? parseFloat(product.amount).toFixed(2) : "0.00"}
+                          value={
+                            product.amount
+                              ? parseFloat(product.amount).toFixed(2)
+                              : "0.00"
+                          }
                           className="w-full border px-3 py-2 rounded-lg bg-gray-100 border-gray-300"
                           readOnly
                         />
@@ -971,6 +1090,21 @@ const AddNewPurchase = () => {
                           Calculated: (FOB or LC) × Box Quantity
                         </p>
                       </div>
+
+                      {/* Display Product Type */}
+                      {product.type && (
+                        <div className="flex flex-col">
+                          <label className="text-sm font-medium text-gray-700 mb-1">
+                            Product Type
+                          </label>
+                          <input
+                            type="text"
+                            value={product.type}
+                            className="w-full border px-3 py-2 rounded-lg bg-gray-100 border-gray-300"
+                            readOnly
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

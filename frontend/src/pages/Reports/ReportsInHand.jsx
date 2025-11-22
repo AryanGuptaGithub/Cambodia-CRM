@@ -28,27 +28,31 @@ const ReportsInHand = () => {
       const data = await response.json();
 
       if (data.success) {
-        // Transform the API data to match your component structure
-        const transformedProducts = data.reports.map((product, index) => ({
-          id: product._id || index + 1,
-          name: product.productName,
-          category: product.category || "Uncategorized",
-          currentStock: product.quantity?.totalPieces || 0,
-          boxes: product.quantity?.boxes || 0,
-          piecesPerBox: product.quantity?.piecesPerBox || 0,
-          minStock: product.minStockLevel || 10,
-          status: product.status || "In Stock",
-          pricePerPiece: product.pricePerPiece || 0,
-          pricePerBox: product.pricePerBox || 0,
-          lc: product.lc || 0,
-          fob: product.fob || 0,
-          cif: product.cif || 0,
-          totalPrice: (product.fob || 0) * (product.quantity?.totalPieces || 0), // FOB * Total Pieces
-          supplierName: product.supplierName,
-          lastUpdated: new Date(product.updatedAt || product.createdAt)
-            .toISOString()
-            .split("T")[0],
-        }));
+        const transformedProducts = data.reports.map((product, index) => {
+          const latestBatch =
+            product.batches && product.batches.length > 0
+              ? product.batches[product.batches.length - 1]
+              : null;
+
+          return {
+            id: product._id || index + 1,
+            name: product.productName,
+            currentStock: product.totalBoxes || 0, // Use totalBoxes from API
+            boxes: product.totalBoxes || 0, // Use totalBoxes from API
+            piecesPerBox: 0, // Not available in API
+            minStock: product.minStockLevel || 10,
+            status: product.status || "Out of Stock",
+            pricePerPiece: latestBatch?.lc || 0, // Use LC from latest batch
+            lc: latestBatch?.lc || 0, // Use LC from latest batch
+            fob: latestBatch?.fob || 0, // Use FOB from latest batch
+            cif: latestBatch?.cif || 0, // Use CIF from latest batch
+            totalPrice: product.totalAmount || 0, // Use totalAmount from API
+            supplierName: product.supplierName,
+            lastUpdated: new Date(product.updatedAt || product.createdAt)
+              .toISOString()
+              .split("T")[0],
+          };
+        });
 
         setProducts(transformedProducts);
       } else {
@@ -71,9 +75,9 @@ const ReportsInHand = () => {
     fetchReportsInHand();
   };
 
-  // Export to Excel (placeholder - you can implement this)
-  const handleExport = () => {
-    alert("Export functionality to be implemented");
+  // Clear search
+  const handleClearSearch = () => {
+    setSearchTerm("");
   };
 
   const handleIconClick = () => {
@@ -93,8 +97,12 @@ const ReportsInHand = () => {
   const filteredProducts = products.filter(
     (product) =>
       product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      product.supplierName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      product.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (product.supplierName &&
+        product.supplierName
+          .toLowerCase()
+          .includes(searchTerm.toLowerCase())) ||
+      (product.category &&
+        product.category.toLowerCase().includes(searchTerm.toLowerCase())) ||
       product.status.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
@@ -198,7 +206,7 @@ const ReportsInHand = () => {
 
   const exportToExcel = () => {
     try {
-      // 🟢 Convert your data
+      // Convert your data
       const excelData = products.map((item, index) => ({
         "Sr No.": index + 1,
         Product: item.name,
@@ -206,18 +214,18 @@ const ReportsInHand = () => {
         Boxes: item.boxes,
         "Min Stock": item.minStock,
         Status: item.status,
-        "Price/Piece ($)": item.lc?.toFixed(2) || "0.00",
+        "LC Price ($)": item.lc?.toFixed(2) || "0.00",
         "FOB Price ($)": item.fob?.toFixed(2) || "0.00",
-        "Total Price ($)": item.totalPrice?.toFixed(2) || "0.00",
+        "Total Amount ($)": item.totalPrice?.toFixed(2) || "0.00",
         "Last Updated": item.lastUpdated,
       }));
 
-      // 🟢 Create sheet & book
+      // Create sheet & book
       const worksheet = XLSX.utils.json_to_sheet(excelData);
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, "Stock Report");
 
-      // 🟢 Column widths
+      // Column widths
       const colWidths = [
         { wch: 7 }, // Sr No
         { wch: 20 }, // Product
@@ -225,14 +233,14 @@ const ReportsInHand = () => {
         { wch: 10 }, // Boxes
         { wch: 10 }, // Min Stock
         { wch: 12 }, // Status
-        { wch: 15 }, // Price/Piece ($)
+        { wch: 15 }, // LC Price ($)
         { wch: 12 }, // FOB Price ($)
-        { wch: 14 }, // Total Price ($)
+        { wch: 14 }, // Total Amount ($)
         { wch: 15 }, // Last Updated
       ];
       worksheet["!cols"] = colWidths;
 
-      // 🟢 Center header cells (row 1)
+      // Center header cells (row 1)
       const headerRange = XLSX.utils.decode_range(worksheet["!ref"]);
       for (let C = headerRange.s.c; C <= headerRange.e.c; C++) {
         const cellAddress = XLSX.utils.encode_cell({ r: 0, c: C });
@@ -246,7 +254,7 @@ const ReportsInHand = () => {
         }
       }
 
-      // 🟢 Center all other cells
+      // Center all other cells
       for (let R = 1; R <= headerRange.e.r; R++) {
         for (let C = headerRange.s.c; C <= headerRange.e.c; C++) {
           const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
@@ -259,7 +267,7 @@ const ReportsInHand = () => {
         }
       }
 
-      // 🟢 Export file
+      // Export file
       const excelBuffer = XLSX.write(workbook, {
         bookType: "xlsx",
         type: "array",
@@ -295,7 +303,7 @@ const ReportsInHand = () => {
             <input
               ref={inputRef}
               type="text"
-              placeholder="Search by MR name..."
+              placeholder="Search by product or supplier..."
               value={searchTerm}
               onChange={(e) => {
                 setSearchTerm(e.target.value);
@@ -475,14 +483,16 @@ const ReportsInHand = () => {
               <th className="p-3 text-sm font-medium w-16">Sr No.</th>
               <th className="p-3 text-sm font-medium">Date</th>
               <th className="p-3 text-sm font-medium">Product</th>
+              <th className="p-3 text-sm font-medium">Supplier</th>
               <th className="p-3 text-sm font-medium">Boxes</th>
               <th className="p-3 text-sm font-medium">Min Stock</th>
               <th className="p-3 text-sm font-medium">Status</th>
-              <th className="p-3 text-sm font-medium">Price/Piece ($)</th>
+              <th className="p-3 text-sm font-medium">LC Price ($)</th>
               <th className="p-3 text-sm font-medium">FOB Price ($)</th>
-              <th className="p-3 text-sm font-medium">Total Price ($)</th>
+              <th className="p-3 text-sm font-medium">Total Amount ($)</th>
             </tr>
           </thead>
+          {console.log(currentProducts)}
           <tbody>
             {currentProducts.length > 0 ? (
               currentProducts.map((product, index) => (
@@ -506,6 +516,11 @@ const ReportsInHand = () => {
                   <td className="p-3">
                     <div className="text-sm font-medium text-gray-900 capitalize">
                       {product.name}
+                    </div>
+                  </td>
+                  <td className="p-3">
+                    <div className="text-sm font-medium text-gray-900 capitalize">
+                      {product.supplierName}
                     </div>
                   </td>
                   <td className="p-3">
@@ -540,7 +555,7 @@ const ReportsInHand = () => {
               ))
             ) : (
               <tr>
-                <td colSpan={14} className="p-3 text-center">
+                <td colSpan={10} className="p-3 text-center">
                   No products found in inventory
                 </td>
               </tr>

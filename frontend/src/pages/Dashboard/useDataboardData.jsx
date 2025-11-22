@@ -287,7 +287,7 @@ export const useDashboardData = () => {
       const stockItems = Array.isArray(response.data.reports)
         ? response.data.reports
         : [];
-
+      console.log(stockItems);
       const totalStockValue = calculateStockValue(stockItems);
       const lowStockItems = getLowStockItems(stockItems);
 

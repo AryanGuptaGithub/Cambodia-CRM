@@ -8,14 +8,134 @@ import {
   ChevronDown,
   ChevronUp,
   Calendar,
+  AlertCircle,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
 import { confirmDialog } from "../../utils/confirmationDialog";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
+import { formatDateToReadable } from "../../utils/dateUtil";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
+
+// Custom Dropdown Component
+const CustomDropdown = ({
+  value,
+  onChange,
+  options,
+  error,
+  disabled,
+  placeholder,
+}) => {
+  return (
+    <select
+      value={value}
+      onChange={onChange}
+      disabled={disabled}
+      className={`w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-600 ${
+        disabled ? "bg-gray-100 cursor-not-allowed" : ""
+      } ${error ? "border-red-500" : ""}`}
+    >
+      <option value="">{placeholder}</option>
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  );
+};
+
+// Custom hook for dropdown options
+const useDropdownOptions = () => {
+  const [categoryOptions, setCategoryOptions] = useState([]);
+  const [sourceOptions, setSourceOptions] = useState([]);
+  const [destinationOptions, setDestinationOptions] = useState([]);
+  const [supplierOptions, setSupplierOptions] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const fetchDropdownOptions = async () => {
+    try {
+      setError(null);
+      setLoading(true);
+
+      // Fetch category options
+      const categoryResponse = await axios.get(
+        `${backendUrl}/api/accounts/category-type`
+      );
+
+      const categories = categoryResponse.data.map((cat) => ({
+        value: cat._id,
+        label: cat.name,
+      }));
+      setCategoryOptions(categories);
+
+      // Fetch destination options (used as source for payments out)
+      const destinationResponse = await axios.get(
+        `${backendUrl}/api/accounts/destinations`
+      );
+
+      const destinations = destinationResponse.data.map((dest) => ({
+        value: dest._id,
+        label: dest.name,
+        totalAmount: dest.totalAmount || 0,
+      }));
+      setDestinationOptions(destinations);
+      setSourceOptions(destinations);
+
+      // Fetch supplier options
+      const supplierResponse = await axios.get(`${backendUrl}/api/suppliers`);
+
+      // Handle different possible response structures
+      let suppliers = [];
+      if (supplierResponse.data && Array.isArray(supplierResponse.data)) {
+        suppliers = supplierResponse.data;
+      } else if (
+        supplierResponse.data &&
+        supplierResponse.data.data &&
+        Array.isArray(supplierResponse.data.data)
+      ) {
+        suppliers = supplierResponse.data.data;
+      } else if (
+        supplierResponse.data &&
+        Array.isArray(supplierResponse.data.suppliers)
+      ) {
+        suppliers = supplierResponse.data.suppliers;
+      }
+
+      const supplierOptions = suppliers.map((supplier) => ({
+        value: supplier._id,
+        label: supplier.name,
+      }));
+      setSupplierOptions(supplierOptions);
+    } catch (err) {
+      console.error("Error fetching dropdown options:", err);
+      setError(err.message);
+      setCategoryOptions([]);
+      setSourceOptions([]);
+      setDestinationOptions([]);
+      setSupplierOptions([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDropdownOptions();
+  }, []);
+
+  return {
+    categoryOptions,
+    sourceOptions,
+    destinationOptions,
+    supplierOptions,
+    loading,
+    error,
+    refetch: fetchDropdownOptions,
+  };
+};
 
 const PurchaseOut = () => {
   const [payments, setPayments] = useState([]);
@@ -31,7 +151,19 @@ const PurchaseOut = () => {
   const [paymentDate, setPaymentDate] = useState(null);
   const [invoicesLoading, setInvoicesLoading] = useState(true);
   const [isInvoicesEmpty, setIsInvoicesEmpty] = useState(false);
+  const [amountError, setAmountError] = useState("");
   const inputRef = useRef(null);
+
+  // New state variables for amount tracking
+  const [availableAmount, setAvailableAmount] = useState(0);
+  const [afterPaymentAmount, setAfterPaymentAmount] = useState(0);
+
+  // Use the custom hook for dropdown options
+  const {
+    sourceOptions: bankOptions,
+    loading: optionsLoading,
+    refetch: refetchBankOptions,
+  } = useDropdownOptions();
 
   const [newPayment, setNewPayment] = useState({
     paymentDate: "",
@@ -87,10 +219,6 @@ const PurchaseOut = () => {
 
       if (invoicesData.length === 0) {
         setIsInvoicesEmpty(true);
-        // showToast(
-        //   "error",
-        //   "No invoices found. Please add at least one invoice first."
-        // );
       } else {
         setIsInvoicesEmpty(false);
       }
@@ -100,6 +228,24 @@ const PurchaseOut = () => {
       setIsInvoicesEmpty(true);
     } finally {
       setInvoicesLoading(false);
+    }
+  };
+
+  // Fetch fresh bank data to get updated amounts
+  const fetchFreshBankData = async () => {
+    try {
+      const response = await axios.get(
+        `${backendUrl}/api/accounts/destinations`
+      );
+      const freshBanks = response.data.map((bank) => ({
+        value: bank._id,
+        label: bank.name,
+        totalAmount: bank.totalAmount || 0,
+      }));
+      return freshBanks;
+    } catch (error) {
+      console.error("Error fetching fresh bank data:", error);
+      return bankOptions; // Return existing options if fetch fails
     }
   };
 
@@ -127,17 +273,93 @@ const PurchaseOut = () => {
     return isNaN(num) ? "" : num.toFixed(2);
   };
 
-  // Handle input change in modal form
+  // Validate if paid amount exceeds invoice amount and bank balance
+  const validateAmount = (amount, invoiceAmount) => {
+    let errors = [];
+
+    if (amount && invoiceAmount) {
+      const paidAmount = parseFloat(amount);
+      const invAmount = parseFloat(invoiceAmount);
+
+      if (paidAmount > invAmount) {
+        errors.push("Paid amount cannot exceed invoice amount");
+      }
+    }
+
+    // Check if paid amount exceeds available bank amount
+    if (amount && availableAmount > 0) {
+      const paidAmount = parseFloat(amount);
+      if (paidAmount > availableAmount) {
+        errors.push("Paid amount cannot exceed available bank amount");
+      }
+    }
+
+    if (errors.length > 0) {
+      setAmountError(errors.join(" and "));
+      return false;
+    } else {
+      setAmountError("");
+      return true;
+    }
+  };
+
+  // Update the handleBankChange function to calculate available amount with fresh data
+  const handleBankChange = async (value) => {
+    try {
+      // Fetch fresh bank data to ensure we have the latest amounts
+      const freshBanks = await fetchFreshBankData();
+      const selectedBank = freshBanks.find((bank) => bank.value === value);
+      const bankAmount = selectedBank?.totalAmount || 0;
+
+      setAvailableAmount(bankAmount);
+
+      // Calculate after payment amount when bank changes
+      if (newPayment.amount) {
+        const paidAmount = parseFloat(newPayment.amount) || 0;
+        const remaining = bankAmount - paidAmount;
+        setAfterPaymentAmount(remaining >= 0 ? remaining : 0);
+      } else {
+        setAfterPaymentAmount(bankAmount);
+      }
+
+      setNewPayment((prev) => ({
+        ...prev,
+        bank: value,
+      }));
+    } catch (error) {
+      console.error("Error handling bank change:", error);
+      // Fallback to existing bank options if fresh fetch fails
+      const selectedBank = bankOptions.find((bank) => bank.value === value);
+      const bankAmount = selectedBank?.totalAmount || 0;
+
+      setAvailableAmount(bankAmount);
+      setAfterPaymentAmount(bankAmount);
+      setNewPayment((prev) => ({
+        ...prev,
+        bank: value,
+      }));
+    }
+  };
+
   const handleInputChange = (e) => {
     const { name, value } = e.target;
 
-    // For amount fields, only allow numbers and decimal point
+    // Handle numeric inputs (amount + invoiceAmount)
     if (name === "amount" || name === "invoiceAmount") {
       if (value === "" || /^\d*\.?\d*$/.test(value)) {
         setNewPayment((prev) => ({
           ...prev,
           [name]: value,
         }));
+
+        if (name === "amount") {
+          validateAmount(value, newPayment.invoiceAmount);
+
+          // Update after payment amount when paid amount changes
+          const paidAmount = parseFloat(value) || 0;
+          const remaining = availableAmount - paidAmount;
+          setAfterPaymentAmount(remaining >= 0 ? remaining : 0);
+        }
       }
     } else {
       setNewPayment((prev) => ({
@@ -146,33 +368,37 @@ const PurchaseOut = () => {
       }));
     }
 
-    // When invoice number changes, show suggestions and filter
+    // When invoice number changes
     if (name === "invoiceNo") {
       setShowInvoiceSuggestions(true);
       filterInvoices(value);
 
-      // Auto-fill invoice date, supplier name, and invoice amount if exact match found
       if (value) {
         const selectedInvoice = invoices.find(
           (inv) => inv.invoiceNumber?.toLowerCase() === value.toLowerCase()
         );
+
         if (selectedInvoice) {
+          const invAmount = formatToTwoDecimals(selectedInvoice.totalAmount);
+
+          // Set values from invoice
           setNewPayment((prev) => ({
             ...prev,
             invoiceDate: selectedInvoice.invoiceDate || "",
             supplierName: selectedInvoice.supplierName || "",
-            invoiceAmount: formatToTwoDecimals(
-              selectedInvoice.invoiceAmount || selectedInvoice.amount || ""
-            ),
+            invoiceAmount: invAmount,
           }));
+
+          validateAmount(newPayment.amount, invAmount);
         } else {
-          // Clear auto-filled fields if invoice not found
+          // Clear if invoice not found
           setNewPayment((prev) => ({
             ...prev,
             invoiceDate: "",
             supplierName: "",
             invoiceAmount: "",
           }));
+          setAmountError("");
         }
       }
     }
@@ -180,15 +406,19 @@ const PurchaseOut = () => {
 
   // Handle invoice selection from suggestions
   const handleInvoiceSelect = (invoice) => {
+    const invoiceAmount = formatToTwoDecimals(invoice.totalAmount || "");
+
     setNewPayment({
       ...newPayment,
       invoiceNo: invoice.invoiceNumber,
       invoiceDate: invoice.invoiceDate || "",
       supplierName: invoice.supplierName || "",
-      invoiceAmount: formatToTwoDecimals(
-        invoice.invoiceAmount || invoice.amount || ""
-      ),
+      invoiceAmount: invoiceAmount,
+      amount: "", // Reset paid amount when invoice changes
     });
+
+    // Validate amount with new invoice amount
+    validateAmount("", invoiceAmount);
     setShowInvoiceSuggestions(false);
   };
 
@@ -206,7 +436,7 @@ const PurchaseOut = () => {
     };
   }, []);
 
-  // Filter payments by search term
+  // Filter payments by search term - Updated to search sourceBank
   const filteredPayments = payments.filter((p) => {
     if (searchTerm.trim() === "") return true;
 
@@ -215,7 +445,7 @@ const PurchaseOut = () => {
       p.paymentDate?.toLowerCase().includes(lowerSearch) ||
       p.invoiceNo?.toLowerCase().includes(lowerSearch) ||
       p.supplierName?.toLowerCase().includes(lowerSearch) ||
-      p.bank?.toLowerCase().includes(lowerSearch) ||
+      (p.sourceBank && p.sourceBank.toLowerCase().includes(lowerSearch)) || // Search by sourceBank name
       p.remarks?.toLowerCase().includes(lowerSearch)
     );
   });
@@ -267,6 +497,8 @@ const PurchaseOut = () => {
           prev.filter((p) => !selected.includes(p._id || p.id))
         );
         setSelected([]);
+        // Refresh bank options to get updated amounts
+        await refetchBankOptions();
         showToast(
           "success",
           `${selected.length} payment(s) deleted successfully`
@@ -292,8 +524,8 @@ const PurchaseOut = () => {
     }
   };
 
-  // Open modal for new payment
-  const handleAddNewPayment = () => {
+  // Open modal for new payment - Fetch fresh bank data when modal opens
+  const handleAddNewPayment = async () => {
     setNewPayment({
       paymentDate: "",
       invoiceNo: "",
@@ -306,11 +538,31 @@ const PurchaseOut = () => {
     });
     setPaymentDate(null); // Reset date picker
     setFilteredInvoices(invoices);
+    setAmountError(""); // Reset amount error
+    setAvailableAmount(0);
+    setAfterPaymentAmount(0);
+
+    // Fetch fresh bank data to ensure we have latest amounts
+    try {
+      await refetchBankOptions();
+    } catch (error) {
+      console.error("Error refreshing bank options:", error);
+    }
+
     setIsModalOpen(true);
   };
 
-  // Handle payment date change - CORRECTED for DatePicker
+  // Handle payment date change - PREVENT FUTURE DATES
   const handlePaymentDateChange = (date) => {
+    // Prevent future dates
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Set to start of day for accurate comparison
+
+    if (date && date > today) {
+      showToast("error", "Payment date cannot be in the future");
+      return;
+    }
+
     setPaymentDate(date);
     const formattedDate = date ? date.toISOString().split("T")[0] : "";
     setNewPayment((prev) => ({
@@ -338,9 +590,32 @@ const PurchaseOut = () => {
       !newPayment.invoiceNo ||
       !newPayment.supplierName ||
       !newPayment.amount ||
-      !newPayment.invoiceAmount
+      !newPayment.invoiceAmount ||
+      !newPayment.bank
     ) {
       showToast("warning", "Please fill in all required fields");
+      return;
+    }
+
+    // Validate payment date is not in future
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const selectedDate = new Date(newPayment.paymentDate);
+    if (selectedDate > today) {
+      showToast("error", "Payment date cannot be in the future");
+      return;
+    }
+
+    // Validate amount
+    if (!validateAmount(newPayment.amount, newPayment.invoiceAmount)) {
+      showToast("warning", amountError);
+      return;
+    }
+
+    // Additional validation for bank balance
+    const paidAmount = parseFloat(newPayment.amount);
+    if (paidAmount > availableAmount) {
+      showToast("error", "Paid amount exceeds available bank balance");
       return;
     }
 
@@ -366,6 +641,9 @@ const PurchaseOut = () => {
       if (response.status === 200 || response.status === 201) {
         // Refresh payments from server to get the actual data with _id
         await fetchPayments();
+        // Refresh bank options to get updated amounts
+        await refetchBankOptions();
+
         setIsModalOpen(false);
         setNewPayment({
           paymentDate: "",
@@ -379,6 +657,9 @@ const PurchaseOut = () => {
         });
         setPaymentDate(null); // Reset date picker
         setShowInvoiceSuggestions(false);
+        setAmountError(""); // Reset amount error
+        setAvailableAmount(0);
+        setAfterPaymentAmount(0);
         showToast("success", "Payment added successfully");
       }
     } catch (error) {
@@ -408,21 +689,9 @@ const PurchaseOut = () => {
     });
     setPaymentDate(null); // Reset date picker
     setShowInvoiceSuggestions(false);
-  };
-
-  // Format date for display
-  const formatDate = (dateString) => {
-    if (!dateString) return "";
-    try {
-      const date = new Date(dateString);
-      return date.toLocaleDateString("en-US", {
-        month: "2-digit",
-        day: "2-digit",
-        year: "numeric",
-      });
-    } catch (error) {
-      return dateString;
-    }
+    setAmountError(""); // Reset amount error
+    setAvailableAmount(0);
+    setAfterPaymentAmount(0);
   };
 
   // Format currency with 2 decimal places
@@ -444,6 +713,16 @@ const PurchaseOut = () => {
     if (amount === "" || amount === null || amount === undefined) return "";
     const num = parseFloat(amount);
     return isNaN(num) ? "" : num.toFixed(2);
+  };
+
+  // Format date for display
+  const formatDate = (dateString) => {
+    if (!dateString) return "";
+    try {
+      return new Date(dateString).toISOString().split("T")[0];
+    } catch (error) {
+      return dateString;
+    }
   };
 
   // Check if form is disabled due to empty invoices
@@ -481,7 +760,7 @@ const PurchaseOut = () => {
               <input
                 ref={inputRef}
                 type="text"
-                placeholder="Search payment date, invoice no, supplier, bank..."
+                placeholder="Search payment date, invoice no, supplier, source account..."
                 value={searchTerm}
                 onChange={handleSearchChange}
                 onKeyPress={handleSearchKeyPress}
@@ -528,17 +807,20 @@ const PurchaseOut = () => {
           <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
             <thead className="bg-gray-100 text-gray-700 border-b sticky top-0 z-10">
               <tr>
-                <th className="p-3 text-center bg-gray-100 text-sm font-medium">
-                  <input
-                    type="checkbox"
-                    checked={
-                      selected.length === currentPayments.length &&
-                      currentPayments.length > 0
-                    }
-                    onChange={(e) => toggleSelectAll(e.target.checked)}
-                    autoComplete="off"
-                  />
-                </th>
+                {/* Remove checkbox column header when there are no payments */}
+                {currentPayments.length > 0 && (
+                  <th className="p-3 text-center bg-gray-100 text-sm font-medium">
+                    <input
+                      type="checkbox"
+                      checked={
+                        selected.length === currentPayments.length &&
+                        currentPayments.length > 0
+                      }
+                      onChange={(e) => toggleSelectAll(e.target.checked)}
+                      autoComplete="off"
+                    />
+                  </th>
+                )}
                 <th className="p-3 bg-gray-100 text-sm font-medium">
                   Invoice No
                 </th>
@@ -557,15 +839,21 @@ const PurchaseOut = () => {
                 <th className="p-3 bg-gray-100 text-sm font-medium">
                   Paid Amount($)
                 </th>
-                <th className="p-3 bg-gray-100 text-sm font-medium">Bank</th>
-                <th className="p-3 bg-gray-100 text-sm font-medium">Remarks</th>
+                <th className="p-3 bg-gray-100 text-sm font-medium">
+                  Source Account
+                </th>
+
                 <th className="p-3 bg-gray-100 text-sm font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
               {currentPayments.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="p-4 text-center text-gray-500">
+                  {/* Adjust colspan based on whether checkbox column is present */}
+                  <td
+                    colSpan={currentPayments.length > 0 ? 10 : 9}
+                    className="p-4 text-center text-gray-500"
+                  >
                     {searchTerm
                       ? "No payments match your search."
                       : "No payments found."}
@@ -582,24 +870,35 @@ const PurchaseOut = () => {
                         : "border-b"
                     }`}
                   >
-                    <td className="p-3 text-center">
-                      <input
-                        type="checkbox"
-                        checked={selected.includes(payment._id || payment.id)}
-                        onChange={() => toggleSelect(payment._id || payment.id)}
-                        autoComplete="off"
-                      />
-                    </td>
+                    {/* Only show checkbox column when there are payments */}
+                    {currentPayments.length > 0 && (
+                      <td className="p-3 text-center">
+                        <input
+                          type="checkbox"
+                          checked={selected.includes(payment._id || payment.id)}
+                          onChange={() =>
+                            toggleSelect(payment._id || payment.id)
+                          }
+                          autoComplete="off"
+                        />
+                      </td>
+                    )}
                     <td className="p-3">{payment.invoiceNo}</td>
-                    <td className="p-3">{formatDate(payment.paymentDate)}</td>
-                    <td className="p-3">{formatDate(payment.invoiceDate)}</td>
+                    <td className="p-3">
+                      {formatDateToReadable(payment.paymentDate)}
+                    </td>
+                    <td className="p-3">
+                      {formatDateToReadable(payment.invoiceDate)}
+                    </td>
                     <td className="p-3">{payment.supplierName}</td>
                     <td className="p-3 font-medium">{payment.invoiceAmount}</td>
                     <td className="p-3 font-semibold">
                       {payment.paidAmount || payment.amount}
                     </td>
-                    <td className="p-3">{payment.bank}</td>
-                    <td className="p-3">{payment.remarks}</td>
+                    <td className="p-3">
+                      {payment.sourceBank || payment.bankName || "N/A"}
+                    </td>
+
                     <td className="p-3 flex items-center justify-center gap-3">
                       <button
                         className="text-green-600 hover:text-green-800 cursor-pointer"
@@ -659,6 +958,8 @@ const PurchaseOut = () => {
                                   (id) => id !== (payment._id || payment.id)
                                 )
                               );
+                              // Refresh bank options after delete
+                              await refetchBankOptions();
                               showToast(
                                 "success",
                                 "Payment deleted successfully"
@@ -781,6 +1082,43 @@ const PurchaseOut = () => {
                   </div>
                 )}
 
+                {/* Amount Summary Section - Displayed at the top */}
+                {(newPayment.bank || newPayment.amount) && (
+                  <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <h3 className="text-lg font-semibold text-blue-800 mb-3">
+                      Amount Summary
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {newPayment.bank && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm font-medium text-gray-700">
+                            Available Amount:
+                          </span>
+                          <span className="text-lg font-bold text-green-600">
+                            {formatCurrency(availableAmount)}
+                          </span>
+                        </div>
+                      )}
+                      {newPayment.amount && newPayment.bank && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm font-medium text-gray-700">
+                            After Payment Amount:
+                          </span>
+                          <span
+                            className={`text-lg font-bold ${
+                              afterPaymentAmount < 0
+                                ? "text-red-600"
+                                : "text-blue-600"
+                            }`}
+                          >
+                            {formatCurrency(afterPaymentAmount)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                   {/* Invoice No - Text Input with Suggestions */}
                   <div className="invoice-suggestions-container relative">
@@ -847,7 +1185,10 @@ const PurchaseOut = () => {
                               </div>
                               <div className="text-sm text-gray-600">
                                 {invoice.supplierName} •{" "}
-                                {formatDate(invoice.invoiceDate)}
+                                {formatDateToReadable(invoice.invoiceDate)} •{" "}
+                                {formatCurrency(
+                                  invoice.totalAmount || invoice.amount || 0
+                                )}
                               </div>
                             </div>
                           ))
@@ -856,7 +1197,7 @@ const PurchaseOut = () => {
                     )}
                   </div>
 
-                  {/* Payment Date with DatePicker */}
+                  {/* Payment Date with DatePicker - FUTURE DATES PREVENTED */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Payment Date <span className="text-red-500">*</span>
@@ -876,6 +1217,7 @@ const PurchaseOut = () => {
                         autoComplete="off"
                         showPopperArrow={false}
                         disabled={isInvoicesEmpty}
+                        maxDate={new Date()} // Prevent future dates in calendar
                       />
                       <Calendar
                         className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 pointer-events-none"
@@ -914,7 +1256,6 @@ const PurchaseOut = () => {
                     />
                   </div>
 
-                  {/* Invoice Amount - Auto-filled and disabled */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Invoice Amount
@@ -929,7 +1270,25 @@ const PurchaseOut = () => {
                     />
                   </div>
 
-                  {/* Paid Amount - Text input but only numbers allowed */}
+                  {/* Source Account Dropdown */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Source Account <span className="text-red-500">*</span>
+                    </label>
+                    <CustomDropdown
+                      value={newPayment.bank}
+                      onChange={(e) => handleBankChange(e.target.value)}
+                      options={bankOptions}
+                      disabled={isInvoicesEmpty || optionsLoading}
+                      placeholder={
+                        optionsLoading
+                          ? "Loading banks..."
+                          : "Select Source Account"
+                      }
+                    />
+                  </div>
+
+                  {/* Paid Amount */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Paid Amount <span className="text-red-500">*</span>
@@ -941,31 +1300,19 @@ const PurchaseOut = () => {
                       onChange={handleInputChange}
                       className={`w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-600 ${
                         isInvoicesEmpty ? "bg-gray-100 cursor-not-allowed" : ""
-                      }`}
+                      } ${amountError ? "border-red-500" : ""}`}
                       placeholder="0.00"
                       required
                       autoComplete="off"
                       disabled={isInvoicesEmpty}
                     />
-                  </div>
 
-                  {/* Bank */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Bank
-                    </label>
-                    <input
-                      type="text"
-                      name="bank"
-                      value={newPayment.bank}
-                      onChange={handleInputChange}
-                      className={`w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-600 ${
-                        isInvoicesEmpty ? "bg-gray-100 cursor-not-allowed" : ""
-                      }`}
-                      placeholder="Enter bank name"
-                      autoComplete="off"
-                      disabled={isInvoicesEmpty}
-                    />
+                    {amountError && (
+                      <div className="flex items-center mt-1 text-red-600 text-sm">
+                        <AlertCircle size={14} className="mr-1" />
+                        {amountError}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -1000,9 +1347,11 @@ const PurchaseOut = () => {
                     type="submit"
                     className={`px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 cursor-pointer
                      disabled:bg-indigo-400 disabled:cursor-not-allowed ${
-                       isInvoicesEmpty ? "bg-indigo-400 cursor-not-allowed" : ""
+                       isInvoicesEmpty || amountError
+                         ? "bg-indigo-400 cursor-not-allowed"
+                         : ""
                      }`}
-                    disabled={loading || isInvoicesEmpty}
+                    disabled={loading || isInvoicesEmpty || !!amountError}
                   >
                     {loading ? "Adding..." : "Add Payment"}
                   </button>

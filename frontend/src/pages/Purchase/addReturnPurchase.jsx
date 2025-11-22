@@ -19,7 +19,7 @@ const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const INITIAL_PRODUCT_STATE = {
   productName: "",
   purchaseQty: "",
-  returnQuantity: "", // Changed from 0 to empty string
+  returnQuantity: "",
   usedQty: "",
   fob: "",
   cif: "",
@@ -286,61 +286,95 @@ const AddReturnPurchase = () => {
       );
       if (!product) return;
 
+      const purchaseQty = product.quantityPerBoxStrip || product.qtyBox || 0;
+      const amount = product.amount || 0;
+
+      // Calculate initial values
+      const usedQty = purchaseQty;
+      const returnAmount = 0;
+
       updateProductField(index, "productName", productName);
       updateProductField(
         index,
         "expiredDate",
         product.expiredDate || product.expiryDate
       );
-      updateProductField(
-        index,
-        "purchaseQty",
-        product.quantityPerBoxStrip || product.qtyBox || 0
-      );
+      updateProductField(index, "purchaseQty", purchaseQty);
       updateProductField(index, "fob", product.fob || 0);
       updateProductField(index, "cif", product.cif || 0);
       updateProductField(index, "lc", product.lc || 0);
-      updateProductField(index, "amount", product.amount || 0);
-      // CHANGED: Set to empty string instead of 0
+      updateProductField(index, "amount", amount);
       updateProductField(index, "returnQuantity", "");
-      updateProductField(index, "returnAmount", 0);
-      updateProductField(
-        index,
-        "usedQty",
-        product.quantityPerBoxStrip || product.qtyBox || 0
-      );
+      updateProductField(index, "returnAmount", returnAmount);
+      updateProductField(index, "usedQty", usedQty);
     },
     [invoiceProducts, updateProductField]
   );
 
-  /* ───── Calculations ───── */
-  const calculateProductFields = useCallback(
-    (index) => {
-      const product = form.products[index];
+  /* ───── Calculations - OPTIMIZED VERSION ───── */
+  const handleReturnQuantityChange = useCallback((index, value) => {
+    setForm((prev) => {
+      const updatedProducts = [...prev.products];
+      const product = updatedProducts[index];
+
       const purchaseQty = Number(product.purchaseQty);
-      const returnQty = product.returnQuantity
-        ? Number(product.returnQuantity)
-        : 0;
+      const returnQty = value ? Number(value) : 0;
       const amount = Number(product.amount);
 
       const usedQty = Math.max(0, purchaseQty - returnQty);
       const unitPrice = purchaseQty > 0 ? amount / purchaseQty : 0;
       const returnAmount = returnQty * unitPrice;
 
-      updateProductField(index, "usedQty", usedQty);
-      updateProductField(index, "returnAmount", returnAmount);
+      updatedProducts[index] = {
+        ...product,
+        returnQuantity: value,
+        usedQty,
+        returnAmount,
+      };
+
+      return { ...prev, products: updatedProducts };
+    });
+  }, []);
+
+  /* ───── Enhanced Handlers ───── */
+  const handleChange = useCallback(
+    (e) => {
+      const { name, value } = e.target;
+      updateFormField(name, value);
     },
-    [form.products, updateProductField]
+    [updateFormField]
   );
 
-  useEffect(() => {
-    form.products.forEach((_, index) => {
-      calculateProductFields(index);
-    });
-  }, [
-    form.products.map((p) => p.returnQuantity).join(","),
-    calculateProductFields,
-  ]);
+  const handleDateChange = useCallback(
+    (name, date) => {
+      updateFormField(name, date ? new Date(date).toISOString() : "");
+    },
+    [updateFormField]
+  );
+
+  const handleProductChange = useCallback(
+    (index, e) => {
+      const { name, value } = e.target;
+      updateProductField(index, name, value);
+    },
+    [updateProductField]
+  );
+
+  const handleNumericProductChange = useCallback(
+    (index, e) => {
+      const { name, value } = e.target;
+      const regex = /^-?\d*\.?\d*$/;
+
+      if (value === "" || regex.test(value)) {
+        if (name === "returnQuantity") {
+          handleReturnQuantityChange(index, value);
+        } else {
+          updateProductField(index, name, value);
+        }
+      }
+    },
+    [updateProductField, handleReturnQuantityChange]
+  );
 
   /* ───── Product Management ───── */
   const addProduct = useCallback(() => {
@@ -417,7 +451,6 @@ const AddReturnPurchase = () => {
           : 0;
         const purchaseQty = Number(product.purchaseQty);
 
-        // CHANGED: Check if returnQuantity is provided
         if (!product.returnQuantity || product.returnQuantity.trim() === "") {
           newErrors[`returnQuantity_${index}`] = `Return quantity for item ${
             index + 1
@@ -442,7 +475,7 @@ const AddReturnPurchase = () => {
     return Object.keys(newErrors).length === 0;
   }, [form]);
 
-  /* ───── Submit Handler - UPDATED TO MATCH YOUR DATA STRUCTURE ───── */
+  /* ───── Submit Handler ───── */
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -491,8 +524,6 @@ const AddReturnPurchase = () => {
         products: validReturnProducts,
       };
 
-      console.log("Submitting return data:", returnData);
-
       const response = await fetch(`${backendUrl}/api/purchase-return`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -503,8 +534,7 @@ const AddReturnPurchase = () => {
 
       if (response.ok && result.success !== false) {
         showToast("success", "Purchase return added successfully");
-        // FIXED: Use relative navigation instead of absolute path
-        navigate(".."); // This will go back to the purchasereturn list
+        navigate("/purchaselayout/purchasereturn");
       } else {
         showToast("error", result.message || "Failed to add purchase return");
         setIsSubmitting(false);
@@ -515,42 +545,6 @@ const AddReturnPurchase = () => {
       setIsSubmitting(false);
     }
   };
-
-  /* ───── Enhanced Handlers ───── */
-  const handleChange = useCallback(
-    (e) => {
-      const { name, value } = e.target;
-      updateFormField(name, value);
-    },
-    [updateFormField]
-  );
-
-  const handleDateChange = useCallback(
-    (name, date) => {
-      updateFormField(name, date ? new Date(date).toISOString() : "");
-    },
-    [updateFormField]
-  );
-
-  const handleProductChange = useCallback(
-    (index, e) => {
-      const { name, value } = e.target;
-      updateProductField(index, name, value);
-    },
-    [updateProductField]
-  );
-
-  const handleNumericProductChange = useCallback(
-    (index, e) => {
-      const { name, value } = e.target;
-      const regex = /^-?\d*\.?\d*$/;
-
-      if (value === "" || regex.test(value)) {
-        updateProductField(index, name, value);
-      }
-    },
-    [updateProductField]
-  );
 
   /* ───── Form Validation State ───── */
   const isFormValid = useMemo(() => {
@@ -575,10 +569,9 @@ const AddReturnPurchase = () => {
     return isProductFilled(currentProduct);
   }, [form.products, isProductFilled]);
 
-  // FIXED: Cancel handler
+  // FIXED: Cancel handler with absolute path
   const handleCancel = useCallback(() => {
-    // Use relative navigation to go back to the purchasereturn list
-    navigate("..");
+    navigate("/purchaselayout/purchasereturn");
   }, [navigate]);
 
   return (
@@ -813,7 +806,6 @@ const AddReturnPurchase = () => {
                         )}
                       </div>
 
-                      {/* CHANGED: Added placeholder for return quantity */}
                       <NumericInputField
                         label="Return Quantity"
                         name="returnQuantity"

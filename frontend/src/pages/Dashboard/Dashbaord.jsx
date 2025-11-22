@@ -427,7 +427,6 @@ const Dashboard = () => {
   // Effect for payroll sub-tab changes
   useEffect(() => {
     if (activeTab === "Total Payroll") {
-      console.log("397", activePayrollSubTab);
       fetchPayrollTableData(activePayrollSubTab);
     }
   }, [activePayrollSubTab, activeTab]);

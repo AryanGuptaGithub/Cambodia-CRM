@@ -18,7 +18,7 @@ import CashAndBankLayout from "./pages/CashAndBankLayout";
 import StaffMemberLayout from "./pages/Utility/StaffMemberLayout";
 
 // Dashboard and Main pages
-import Dashboard from  "./pages/Dashboard/Dashbaord"
+import Dashboard from "./pages/Dashboard/Dashbaord";
 import Login from "./pages/Login";
 import OnlineOrders from "./pages/OnlineOrders";
 import StaffMember from "./pages/StaffMember";
@@ -111,7 +111,6 @@ import AddDailySummaryReports from "./pages/Reports/AddNewSaleSummaryReports";
 import FrontSettings from "./pages/Utility/FrontSettings";
 import ProductCard from "./pages/Utility/ProductCard";
 
-
 import HrmDashboard from "./pages/HRM/Dashboard"; // Renamed to avoid conflict
 import Holidays from "./pages/HRM/Holidays";
 import Leaves from "./pages/HRM/Leaves";
@@ -183,29 +182,12 @@ function App() {
             <Route path="addproduct" element={<AddProductForm />} />
             <Route path="printbarcode" element={<PrintBarCode />} />
           </Route>
-          {/* Purchase routes */}
-          {/* <Route path="purchaselayout" element={<PurchaseLayout />}>
-            <Route index element={<Purchase />} />
-            <Route path="purchase">
-              <Route index element={<Purchase />} />
-              <Route path="new" element={<AddNewPurchase />} />
-            </Route>
-            <Route path="purchasereturn">
-              <Route index element={<PurchaseReturn />} />
-              <Route path="new" element={<AddReturnPurchase />} />
-            </Route>
-            <Route path="purchaseout" element={<PurchaseOut />} />
-          </Route> */}
           <Route path="purchaselayout" element={<PurchaseLayout />}>
             <Route index element={<Purchase />} />
-            <Route path="purchase">
-              <Route index element={<Purchase />} />
-              <Route path="new" element={<AddNewPurchase />} />
-            </Route>
-            <Route path="purchasereturn">
-              <Route index element={<PurchaseReturn />} />
-              <Route path="new" element={<AddReturnPurchase />} />
-            </Route>
+            <Route path="purchase" element={<Purchase />} />
+            <Route path="purchase/new" element={<AddNewPurchase />} />
+            <Route path="purchasereturn" element={<PurchaseReturn />} />
+            <Route path="purchasereturn/new" element={<AddReturnPurchase />} />
             <Route path="purchaseout" element={<PurchaseOut />} />
           </Route>
           {/* Sale routes */}

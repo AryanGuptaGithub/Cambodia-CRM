@@ -29,7 +29,7 @@ import "react-datepicker/dist/react-datepicker.css";
 import { confirmDialog } from "../../utils/confirmationDialog";
 import { useNavigate } from "react-router-dom";
 import {
-  fetchProducts as fetchProductsAPI,
+  fetchProductDropdownPurchase as fetchProductsAPI,
   fetchSuppliers as fetchSuppliersAPI,
 } from "../../pages/ProductManager/common/fetchDropdown";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
@@ -724,7 +724,6 @@ function Purchase() {
         amount: productTotals.totalAmount,
         products: form.products || [],
       };
-
       const res = await axios.put(
         `${backendUrl}/api/purchase/${form._id}`,
         updateData
@@ -761,9 +760,20 @@ function Purchase() {
     setExpandedProductIndex(expandedProductIndex === index ? -1 : index);
   };
 
-  // Product edit modal functions
+  // Product edit modal functions - UPDATED
   const openProductEditModal = (product, index) => {
-    setCurrentProduct({ ...product });
+    console.log("Opening product edit modal:", product);
+    setCurrentProduct({
+      ...product,
+      // Ensure productId is set correctly - use productId first, then _id as fallback
+      productId: product.productId || product._id,
+      _id: product.productId || product._id, // For backward compatibility
+      lc: product.lc || 0,
+      fob: product.fob || 0,
+      cif: product.cif || 0,
+      quantityPerBoxStrip: product.quantityPerBoxStrip || 0,
+      amount: product.amount || 0,
+    });
     setCurrentProductIndex(index);
     setIsProductEditModalOpen(true);
   };
@@ -778,38 +788,95 @@ function Purchase() {
 
   const handleProductNumericChange = (e) => {
     const { name, value } = e.target;
-    if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
-      const processedValue = value === "" ? "" : parseFloat(value) || 0;
-      setCurrentProduct((prev) => {
-        const updatedProduct = {
-          ...prev,
-          [name]: processedValue,
-        };
 
-        // Auto-calculate amount when lc or quantity changes
-        if (name === "lc" || name === "quantityPerBoxStrip") {
+    // For quantity fields (integers only)
+    if (name === "quantityPerBoxStrip") {
+      if (value === "" || /^\d*$/.test(value)) {
+        const processedValue = value === "" ? "" : parseInt(value) || 0;
+        setCurrentProduct((prev) => {
+          const updatedProduct = {
+            ...prev,
+            [name]: processedValue,
+          };
+
+          // Auto-calculate amount when quantity changes
           const lcValue = parseFloat(updatedProduct.lc) || 0;
           const quantityValue =
             parseFloat(updatedProduct.quantityPerBoxStrip) || 0;
           updatedProduct.amount =
             Math.round(lcValue * quantityValue * 100) / 100;
-        }
 
-        return updatedProduct;
-      });
+          return updatedProduct;
+        });
+      }
+    }
+    // For decimal fields (LC, FOB, CIF, amount)
+    else if (["lc", "fob", "cif", "amount"].includes(name)) {
+      if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+        const processedValue = value === "" ? "" : parseFloat(value) || 0;
+        setCurrentProduct((prev) => {
+          const updatedProduct = {
+            ...prev,
+            [name]: processedValue,
+          };
+
+          // Auto-calculate amount when lc changes
+          if (name === "lc") {
+            const lcValue = parseFloat(updatedProduct.lc) || 0;
+            const quantityValue =
+              parseFloat(updatedProduct.quantityPerBoxStrip) || 0;
+            updatedProduct.amount =
+              Math.round(lcValue * quantityValue * 100) / 100;
+          }
+
+          return updatedProduct;
+        });
+      }
+    }
+    // For other fields
+    else {
+      setCurrentProduct((prev) => ({
+        ...prev,
+        [name]: value,
+      }));
     }
   };
 
+  // UPDATED: Fixed product update function
   const updateProductInForm = () => {
+    if (!currentProduct?.productName) {
+      showToast("error", "Please select a product name");
+      return;
+    }
+
     setForm((prev) => {
       const updatedProducts = [...prev.products];
-      updatedProducts[currentProductIndex] = currentProduct;
+
+      // Update the product with current values including LC, FOB, CIF
+      const updatedProduct = {
+        ...currentProduct,
+        // Ensure IDs are properly set - use productId as primary
+        productId: currentProduct.productId || currentProduct._id,
+        _id: currentProduct.productId || currentProduct._id, // For consistency
+        // Ensure all numeric values are properly set
+        lc: parseFloat(currentProduct.lc) || 0,
+        fob: parseFloat(currentProduct.fob) || 0,
+        cif: parseFloat(currentProduct.cif) || 0,
+        quantityPerBoxStrip: parseInt(currentProduct.quantityPerBoxStrip) || 0,
+        amount: parseFloat(currentProduct.amount) || 0,
+      };
+
+      updatedProducts[currentProductIndex] = updatedProduct;
+
+      console.log("Updated product in form:", updatedProduct);
 
       return {
         ...prev,
         products: updatedProducts,
       };
     });
+
+    showToast("success", "Product updated successfully");
     setIsProductEditModalOpen(false);
     setCurrentProduct(null);
     setCurrentProductIndex(null);
@@ -862,26 +929,6 @@ function Purchase() {
     return filtered;
   }, [selectedPurchaseProduct, selectedTab, searchTerm]);
 
-  // Calculate total amount for products
-  const calculateTotalAmount = (products) => {
-    return products.reduce((total, product) => total + (Number(product.amount) || 0), 0);
-  };
-
-  // Get unique product types for filter tabs
-  const getProductTypes = useMemo(() => {
-    if (!selectedPurchaseProduct || !selectedPurchaseProduct.products) {
-      return ["All"];
-    }
-    
-    const types = [...new Set(
-      selectedPurchaseProduct.products
-        .map(p => p.productType)
-        .filter(Boolean)
-    )];
-    
-    return ["All", ...types];
-  }, [selectedPurchaseProduct]);
-
   if (loading) return <LoadingOverlay text="Please wait..." />;
 
   return (
@@ -916,7 +963,6 @@ function Purchase() {
           {/* RIGHT SIDE: TOTAL + DOWNLOAD + SEARCH */}
           {purchases && purchases.length > 0 && (
             <div className="flex items-center gap-6 flex-wrap justify-end">
-              {/* Total Count */}
               <p className="text-lg font-semibold text-gray-700 whitespace-nowrap">
                 Total Count:{" "}
                 <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
@@ -933,7 +979,7 @@ function Purchase() {
 
               {purchases.length > 0 && (
                 <SaleExcelDownload
-                  type="purchases" // changed from "sales" to "purchases"
+                  type="purchases"
                   modalTitle="Download Purchase Report"
                   buttonText="Download Purchase Excel"
                   successMessage="Purchase Excel downloaded successfully!"
@@ -1273,7 +1319,7 @@ function Purchase() {
                             </button>
                           </div>
 
-                
+                          {/* Product Details - Conditionally Rendered */}
                           {expandedProductIndex === index && (
                             <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
                               {[
@@ -1484,7 +1530,9 @@ function Purchase() {
                               </span>
                               <div className="text-sm text-gray-500 mt-1">
                                 Qty: {product.quantityPerBoxStrip || 0} | LC: $
-                                {(product.lc || 0).toFixed(2)} | Amount: $
+                                {(product.lc || 0).toFixed(2)} | FOB: $
+                                {(product.fob || 0).toFixed(2)} | CIF: $
+                                {(product.cif || 0).toFixed(2)} | Amount: $
                                 {(product.amount || 0).toFixed(2)}
                               </div>
                             </div>
@@ -1545,7 +1593,7 @@ function Purchase() {
             document.body
           )}
 
-        {/* PRODUCT MODAL - UPDATED WITH FILTER TABS */}
+        {/* PRODUCT MODAL */}
         {isProductModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -1553,7 +1601,7 @@ function Purchase() {
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
                 onClick={() => setIsProductModalOpen(false)}
               />
-              <div className="bg-white w-full max-w-7xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+              <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
                 <button
                   onClick={() => setIsProductModalOpen(false)}
                   className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
@@ -1566,147 +1614,177 @@ function Purchase() {
                   {selectedPurchaseProduct?.invoiceNumber || "Purchase"}
                 </h2>
 
-                {/* Filter Tabs Section */}
+                {/* Filter Capsules Section */}
                 {selectedPurchaseProduct &&
                   selectedPurchaseProduct.products &&
                   selectedPurchaseProduct.products.length > 0 && (
                     <div className="flex flex-wrap justify-between items-center gap-4 mb-6">
                       <div className="flex items-center gap-4">
                         <div className="flex flex-wrap gap-2">
-                          {getProductTypes.map((type, typeIndex) => (
-                            <button
-                              key={`filter-${type}-${typeIndex}`}
-                              onClick={() => setSelectedTab(type)}
-                              className={`px-4 py-2 rounded-lg cursor-pointer transition-colors text-sm font-medium ${
-                                selectedTab === type
-                                  ? "bg-indigo-600 text-white shadow-md"
-                                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                              }`}
-                            >
-                              {capitalizeFirstLetter(type)}
-                            </button>
-                          ))}
+                          {(() => {
+                            const invoiceProducts =
+                              selectedPurchaseProduct.products || [];
+
+                            if (
+                              !invoiceProducts ||
+                              invoiceProducts.length === 0
+                            ) {
+                              return (
+                                <button className="px-4 py-2 rounded-full bg-indigo-600 text-white shadow-md text-sm font-medium">
+                                  All
+                                </button>
+                              );
+                            }
+
+                            const uniqueTypes = [
+                              ...new Set(
+                                invoiceProducts
+                                  .map((p) => p?.productType)
+                                  .filter(Boolean)
+                              ),
+                            ];
+
+                            return ["All", ...uniqueTypes].map(
+                              (type, typeIndex) => (
+                                <button
+                                  key={`filter-${type}-${typeIndex}`}
+                                  onClick={() => handleClick(type)}
+                                  className={`px-4 py-2 rounded-lg cursor-pointer transition-colors text-sm font-medium ${
+                                    selectedTab === type
+                                      ? "bg-indigo-600 text-white shadow-md"
+                                      : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                                  }`}
+                                >
+                                  {capitalizeFirstLetter(type)}
+                                </button>
+                              )
+                            );
+                          })()}
                         </div>
                       </div>
                     </div>
                   )}
 
-                {selectedPurchaseProduct && (
-                  <>
-                    <div className="overflow-x-auto shadow rounded-xl border border-gray-200 mb-6">
-                      <table className="w-full border-collapse bg-white rounded-xl overflow-hidden text-center">
-                        <thead className="bg-gray-50 border-b border-gray-200">
-                          <tr>
-                            <th className="p-4 text-sm font-semibold text-gray-700">
-                              Product Name
-                            </th>
-                            <th className="p-4 text-sm font-semibold text-gray-700">
-                              Product Type
-                            </th>
-                            <th className="p-4 text-sm font-semibold text-gray-700">
-                              Box Qty
-                            </th>
-                            <th className="p-4 text-sm font-semibold text-gray-700">
-                              LC (USD)
-                            </th>
-                            <th className="p-4 text-sm font-semibold text-gray-700">
-                              Amount ($)
-                            </th>
-                            <th className="p-4 text-sm font-semibold text-gray-700">
-                              FOB (USD)
-                            </th>
-                            <th className="p-4 text-sm font-semibold text-gray-700">
-                              CIF (USD)
-                            </th>
-                            <th className="p-4 text-sm font-semibold text-gray-700">
-                              Supplier
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200">
-                          {filteredProductsInModal.length > 0 ? (
-                            filteredProductsInModal.map((product, index) => (
-                              <tr key={product._id || `product-${index}`} className="hover:bg-gray-50">
-                                <td className="p-4 text-sm text-gray-900 capitalize">
-                                  {product.productName || "--"}
-                                </td>
-                                <td className="p-4 text-sm text-gray-900">
-                                  <span
-                                    className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                      product.productType === "physical"
-                                        ? "bg-blue-100 text-blue-800"
-                                        : product.productType === "digital"
-                                        ? "bg-purple-100 text-purple-800"
-                                        : "bg-green-100 text-green-800"
-                                    }`}
-                                  >
-                                    {capitalizeFirstLetter(
-                                      product.productType || "unknown"
-                                    )}
-                                  </span>
-                                </td>
-                                <td className="p-4 text-sm text-gray-900">
-                                  {product.quantityPerBoxStrip || 0}
-                                </td>
-                                <td className="p-4 text-sm text-gray-900">
-                                  ${formatNumber(product.lc || product.lcNumber)}
-                                </td>
-                                <td className="p-4 text-sm text-gray-900 font-semibold">
-                                  ${formatNumber(product.amount)}
-                                </td>
-                                <td className="p-4 text-sm text-gray-900">
-                                  ${formatNumber(product.fob)}
-                                </td>
-                                <td className="p-4 text-sm text-gray-900">
-                                  ${formatNumber(product.cif)}
-                                </td>
-                                <td className="p-4 text-sm text-gray-900 capitalize">
-                                  {selectedPurchaseProduct.supplierName || "--"}
-                                </td>
-                              </tr>
-                            ))
-                          ) : (
-                            <tr>
-                              <td
-                                colSpan={8}
-                                className="p-4 text-center text-gray-500"
-                              >
-                                No products found for the selected filters.
+                {/* Products Table */}
+                {selectedPurchaseProduct && selectedPurchaseProduct.products ? (
+                  <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
+                    <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
+                      <thead className="bg-gray-100 text-gray-700 border-b">
+                        <tr>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            Product Name
+                          </th>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            Product Type
+                          </th>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            Box Qty
+                          </th>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            LC (USD)
+                          </th>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            Amount ($)
+                          </th>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            FOB (USD)
+                          </th>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            CIF (USD)
+                          </th>
+                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
+                            Supplier
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredProductsInModal.length > 0 ? (
+                          filteredProductsInModal.map((product, index) => (
+                            <tr
+                              key={product._id || `product-${index}`}
+                              className={`hover:bg-gray-50 ${
+                                index < filteredProductsInModal.length - 1
+                                  ? "border-b"
+                                  : ""
+                              }`}
+                            >
+                              <td className="p-3 whitespace-nowrap min-w-[120px] capitalize">
+                                {product.productName || "--"}
+                              </td>
+                              <td className="p-3 whitespace-nowrap min-w-[120px]">
+                                <span
+                                  className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                    product.productType === "physical"
+                                      ? "bg-blue-100 text-blue-800"
+                                      : product.productType === "digital"
+                                      ? "bg-purple-100 text-purple-800"
+                                      : "bg-green-100 text-green-800"
+                                  }`}
+                                >
+                                  {capitalizeFirstLetter(
+                                    product.productType || "unknown"
+                                  )}
+                                </span>
+                              </td>
+                              <td className="p-3 whitespace-nowrap min-w-[120px]">
+                                {product.quantityPerBoxStrip || 0}
+                              </td>
+                              <td className="p-3 whitespace-nowrap min-w-[120px]">
+                                {formatNumber(product.lc || product.lcNumber)}
+                              </td>
+                              <td className="p-3 whitespace-nowrap min-w-[120px] font-semibold">
+                                {formatNumber(product.amount)}
+                              </td>
+                              <td className="p-3 whitespace-nowrap min-w-[120px]">
+                                {formatNumber(product.fob)}
+                              </td>
+                              <td className="p-3 whitespace-nowrap min-w-[120px]">
+                                {formatNumber(product.cif)}
+                              </td>
+                              <td className="p-3 whitespace-nowrap min-w-[120px] capitalize">
+                                {selectedPurchaseProduct.supplierName || "--"}
                               </td>
                             </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
+                          ))
+                        ) : (
+                          <tr>
+                            <td
+                              colSpan={8}
+                              className="p-4 text-center text-gray-500"
+                            >
+                              No products found for the selected filters.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
 
-                    <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
+                    {/* Summary Section */}
+                    <div className="bg-gray-50 p-4 border-t">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
                         <div className="text-center">
                           <p className="text-gray-600 font-medium">
-                            Invoice Number
+                            Total Products
                           </p>
                           <p className="text-lg font-bold text-indigo-600">
-                            {selectedPurchaseProduct.invoiceNumber}
-                          </p>
-                        </div>
-                        <div className="text-center">
-                          <p className="text-gray-600 font-medium">
-                            Supplier Name
-                          </p>
-                          <p className="text-lg font-bold text-green-600 capitalize">
-                            {selectedPurchaseProduct.supplierName}
+                            {filteredProductsInModal.length}
                           </p>
                         </div>
                         <div className="text-center">
                           <p className="text-gray-600 font-medium">
                             Total Amount
                           </p>
-                          <p className="text-lg font-bold text-red-600">
+                          <p className="text-lg font-bold text-green-600">
                             $
-                            {calculateTotalAmount(filteredProductsInModal).toLocaleString(undefined, {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}
+                            {filteredProductsInModal
+                              .reduce(
+                                (sum, p) => sum + (Number(p.amount) || 0),
+                                0
+                              )
+                              .toLocaleString(undefined, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
                           </p>
                         </div>
                         <div className="text-center">
@@ -1721,10 +1799,14 @@ function Purchase() {
                         </div>
                       </div>
                     </div>
-                  </>
+                  </div>
+                ) : (
+                  <p className="text-gray-500 text-center py-8">
+                    No product details found.
+                  </p>
                 )}
 
-                <div className="mt-6 flex justify-end">
+                <div className="mt-6 flex justify-end gap-3">
                   <button
                     onClick={() => setIsProductModalOpen(false)}
                     className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer transition-colors"
@@ -1737,7 +1819,7 @@ function Purchase() {
             document.body
           )}
 
-        {/* PRODUCT EDIT MODAL */}
+        {/* PRODUCT EDIT MODAL - COMPLETELY FIXED VERSION */}
         {isProductEditModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -1753,48 +1835,108 @@ function Purchase() {
                   <X size={20} />
                 </button>
 
+                {/* FIXED: Dynamic title */}
                 <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                  Edit Product - {currentProduct?.productName || "Product"}
+                  {currentProduct?.productName
+                    ? `Edit Product - ${currentProduct.productName}`
+                    : "Edit Product"}
                 </h2>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Product Name - Using SearchableDropdown */}
+                  {/* Product Name - Using SearchableDropdown - FIXED */}
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-gray-700">
-                      Product Name
+                      Product Name <span className="text-red-500">*</span>
                     </label>
                     <SearchableDropdown
                       options={productOptions.map((product) => ({
-                        value:
-                          product.productName || product.label || product._id,
+                        value: product.id, // Use id instead of _id
                         label: product.productName || product.label,
                         ...product,
                       }))}
-                      value={currentProduct?.productName || ""}
+                      value={
+                        currentProduct?.productId || currentProduct?.id || ""
+                      }
                       onChange={(selectedValue) => {
+                        console.log("Selected product ID:", selectedValue);
+                        // FIXED: Use id instead of _id for lookup
                         const selectedProduct = productOptions.find(
-                          (product) =>
-                            (product.productName ||
-                              product.label ||
-                              product._id) === selectedValue
+                          (product) => product.id === selectedValue
                         );
+                        console.log("Found product:", selectedProduct);
+
                         if (selectedProduct) {
-                          setCurrentProduct((prev) => ({
-                            ...prev,
-                            productName:
-                              selectedProduct.productName ||
-                              selectedProduct.label,
-                            productId: selectedProduct._id,
-                            productType:
-                              selectedProduct.productType ||
-                              selectedProduct.type,
-                            // Set other product properties if needed
-                          }));
+                          setCurrentProduct((prev) => {
+                            // Get the first batch if available, otherwise use product directly
+                            const firstBatch =
+                              selectedProduct.batches &&
+                              selectedProduct.batches.length > 0
+                                ? selectedProduct.batches[0]
+                                : {};
+
+                            const updatedProduct = {
+                              // Reset to new product structure
+                              productId: selectedProduct.id,
+                              id: selectedProduct.id, // For consistency
+                              _id: selectedProduct.id, // For backward compatibility
+                              productName:
+                                selectedProduct.productName ||
+                                selectedProduct.label,
+                              productType:
+                                selectedProduct.productType ||
+                                selectedProduct.type ||
+                                prev?.productType ||
+                                "",
+                              quantityPerBoxStrip:
+                                prev?.quantityPerBoxStrip || 0,
+                              // Use batch values first, then product values, then previous values
+                              lc:
+                                firstBatch.lc ||
+                                selectedProduct.lc ||
+                                prev?.lc ||
+                                0,
+                              fob:
+                                firstBatch.fob ||
+                                selectedProduct.fob ||
+                                prev?.fob ||
+                                0,
+                              cif:
+                                firstBatch.cif ||
+                                selectedProduct.cif ||
+                                prev?.cif ||
+                                0,
+                              expiryDate:
+                                firstBatch.expiryDate || prev?.expiryDate || "",
+                              amount: prev?.amount || 0,
+                            };
+
+                            // Auto-calculate amount based on LC and quantity
+                            const lcValue = parseFloat(updatedProduct.lc) || 0;
+                            const quantityValue =
+                              parseFloat(updatedProduct.quantityPerBoxStrip) ||
+                              0;
+                            updatedProduct.amount =
+                              Math.round(lcValue * quantityValue * 100) / 100;
+
+                            console.log(
+                              "Updated product after selection:",
+                              updatedProduct
+                            );
+                            return updatedProduct;
+                          });
                         } else {
+                          // If no product selected, clear the product-specific fields but keep quantity
                           setCurrentProduct((prev) => ({
                             ...prev,
-                            productName: selectedValue,
                             productId: "",
+                            id: "",
+                            _id: "",
+                            productName: "",
+                            productType: "",
+                            lc: 0,
+                            fob: 0,
+                            cif: 0,
+                            // Don't reset quantityPerBoxStrip and amount as they might be manually entered
                           }));
                         }
                       }}
@@ -1819,32 +1961,93 @@ function Purchase() {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700">
-                      Quantity Per Box/Strip
+                      Quantity Per Box/Strip{" "}
+                      <span className="text-red-500">*</span>
                     </label>
                     <InputField
                       type="text"
                       name="quantityPerBoxStrip"
                       value={currentProduct?.quantityPerBoxStrip || ""}
-                      onChange={handleProductNumericChange}
+                      onChange={(e) => {
+                        // Only allow numbers
+                        const value = e.target.value;
+                        if (value === "" || /^\d*$/.test(value)) {
+                          const validatedEvent = {
+                            target: {
+                              name: e.target.name,
+                              value: value === "" ? "" : parseInt(value) || 0,
+                            },
+                          };
+                          handleProductEditChange(validatedEvent);
+
+                          // Recalculate amount when quantity changes
+                          setTimeout(() => {
+                            setCurrentProduct((prev) => {
+                              if (!prev) return prev;
+                              const lcValue = parseFloat(prev.lc) || 0;
+                              const quantityValue =
+                                parseFloat(validatedEvent.target.value) || 0;
+                              const newAmount =
+                                Math.round(lcValue * quantityValue * 100) / 100;
+                              return {
+                                ...prev,
+                                amount: newAmount,
+                              };
+                            });
+                          }, 100);
+                        }
+                      }}
                       className="w-full border px-3 py-2 rounded-lg border-gray-300"
                       autoComplete="off"
+                      placeholder="Enter quantity"
                     />
                   </div>
 
+                  {/* LC Field */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700">
-                      LC (USD)
+                      LC (USD) <span className="text-red-500">*</span>
                     </label>
                     <InputField
                       type="text"
                       name="lc"
                       value={currentProduct?.lc || ""}
-                      onChange={handleProductNumericChange}
+                      onChange={(e) => {
+                        // Only allow numbers and decimal point
+                        const value = e.target.value;
+                        if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+                          const validatedEvent = {
+                            target: {
+                              name: e.target.name,
+                              value: value,
+                            },
+                          };
+                          handleProductEditChange(validatedEvent);
+
+                          // Recalculate amount when LC changes
+                          setTimeout(() => {
+                            setCurrentProduct((prev) => {
+                              if (!prev) return prev;
+                              const lcValue = parseFloat(value) || 0;
+                              const quantityValue =
+                                parseFloat(prev.quantityPerBoxStrip) || 0;
+                              const newAmount =
+                                Math.round(lcValue * quantityValue * 100) / 100;
+                              return {
+                                ...prev,
+                                amount: newAmount,
+                              };
+                            });
+                          }, 100);
+                        }
+                      }}
                       className="w-full border px-3 py-2 rounded-lg border-gray-300"
                       autoComplete="off"
+                      placeholder="0.00"
                     />
                   </div>
 
+                  {/* FOB Field */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700">
                       FOB (USD)
@@ -1853,12 +2056,25 @@ function Purchase() {
                       type="text"
                       name="fob"
                       value={currentProduct?.fob || ""}
-                      onChange={handleProductNumericChange}
+                      onChange={(e) => {
+                        // Only allow numbers and decimal point
+                        const value = e.target.value;
+                        if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+                          handleProductEditChange({
+                            target: {
+                              name: e.target.name,
+                              value: value,
+                            },
+                          });
+                        }
+                      }}
                       className="w-full border px-3 py-2 rounded-lg border-gray-300"
                       autoComplete="off"
+                      placeholder="0.00"
                     />
                   </div>
 
+                  {/* CIF Field */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700">
                       CIF (USD)
@@ -1867,15 +2083,27 @@ function Purchase() {
                       type="text"
                       name="cif"
                       value={currentProduct?.cif || ""}
-                      onChange={handleProductNumericChange}
+                      onChange={(e) => {
+                        // Only allow numbers and decimal point
+                        const value = e.target.value;
+                        if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+                          handleProductEditChange({
+                            target: {
+                              name: e.target.name,
+                              value: value,
+                            },
+                          });
+                        }
+                      }}
                       className="w-full border px-3 py-2 rounded-lg border-gray-300"
                       autoComplete="off"
+                      placeholder="0.00"
                     />
                   </div>
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700">
-                      Amount ($)
+                      Amount ($) <span className="text-red-500">*</span>
                     </label>
                     <InputField
                       type="text"
@@ -1883,6 +2111,7 @@ function Purchase() {
                       value={currentProduct?.amount || ""}
                       className="w-full border px-3 py-2 rounded-lg bg-gray-100 text-gray-700 border-gray-300"
                       disabled
+                      placeholder="0.00"
                     />
                   </div>
 
@@ -1905,10 +2134,48 @@ function Purchase() {
                         }))
                       }
                       dateFormat="yyyy-MM-dd"
-                      placeholderText="Select a date"
+                      placeholderText="Select expiry date"
                       className="w-full border px-3 py-2 rounded-lg border-gray-300"
                     />
                   </div>
+
+                  {/* Batch Information Display */}
+                  {currentProduct?.batches &&
+                    currentProduct.batches.length > 0 && (
+                      <div className="md:col-span-2">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Batch Information
+                        </label>
+                        <div className="border rounded-lg p-3 bg-blue-50">
+                          <div className="grid grid-cols-3 gap-2 text-sm">
+                            <div>
+                              <span className="font-medium">Batch Date:</span>
+                              <p>
+                                {formatDateToReadable(
+                                  currentProduct.batches[0].date
+                                )}
+                              </p>
+                            </div>
+                            <div>
+                              <span className="font-medium">Expiry:</span>
+                              <p>
+                                {formatDateToReadable(
+                                  currentProduct.batches[0].expiryDate
+                                )}
+                              </p>
+                            </div>
+                            <div>
+                              <span className="font-medium">Boxes:</span>
+                              <p>{currentProduct.batches[0].boxes}</p>
+                            </div>
+                          </div>
+                          <div className="mt-2 text-xs text-gray-600">
+                            Note: LC, FOB, CIF values are linked to the selected
+                            batch
+                          </div>
+                        </div>
+                      </div>
+                    )}
                 </div>
 
                 <div className="mt-6 flex justify-end gap-3 border-t border-gray-300 pt-4">
@@ -1921,8 +2188,12 @@ function Purchase() {
                   </button>
                   <button
                     type="button"
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg cursor-pointer disabled:bg-blue-400 disabled:cursor-not-allowed"
                     onClick={updateProductInForm}
+                    disabled={
+                      !currentProduct?.productName ||
+                      !currentProduct?.quantityPerBoxStrip
+                    }
                   >
                     Update Product
                   </button>

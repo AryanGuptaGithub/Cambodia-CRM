@@ -4,6 +4,7 @@ import axios from "axios";
 import { showToast } from "../utils/toast";
 import { getVisiblePages } from "../utils/useVisiblePages";
 import CustomDropdown from "./Utility/customDropdown";
+import { fetchProducts } from "./ProductManager/common/fetchDropdown.jsx";
 
 // Configuration constants
 const CONFIG = {
@@ -59,7 +60,7 @@ const StockAdjustment = () => {
   // Fetch initial data
   useEffect(() => {
     fetchAdjustments();
-    fetchProducts();
+    fetchProductsData();
   }, []);
 
   // Check if products are empty
@@ -88,11 +89,12 @@ const StockAdjustment = () => {
     }
   };
 
-  const fetchProducts = async () => {
+  const fetchProductsData = async () => {
     try {
-      const response = await fetch(`${backendUrl}/api/products-with-in-stock`);
-      const data = await response.json();
-      setProducts(data);
+      const data = await fetchProducts(backendUrl);
+      console.log('data', data);
+      setProducts(data.data);
+      console.log('97', products);
     } catch (err) {
       console.error("Fetch products error:", err);
       showToast("error", "Failed to fetch products");

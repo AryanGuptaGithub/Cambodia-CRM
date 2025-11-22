@@ -16,7 +16,8 @@ import SearchableDropdown from "../../components/common/SearchableDropdown";
 import InputField from "../../components/common/InputField";
 import {
   fetchMRList,
-  fetchCustomerList,fetchProducts
+  fetchCustomerList,
+  fetchProducts,
 } from "../../pages/ProductManager/common/fetchDropdown.jsx";
 
 const INITIAL_PRODUCT_STATE = {
@@ -30,6 +31,8 @@ const INITIAL_PRODUCT_STATE = {
   netSellingAmount: "",
   averageUnitPrice: "",
   lc: "",
+  fob: "",
+  cif: "",
   profitLoss: "",
 };
 
@@ -61,6 +64,58 @@ const INITIAL_FORM_STATE = {
       profitLoss: "0.00",
     },
   ],
+};
+
+// Helper function to calculate available stock from batches - MODIFIED
+const calculateAvailableStock = (productData) => {
+  if (!productData) return 0;
+
+  // If product has totalBoxes field and it's greater than 0, use that
+  if (
+    productData.totalBoxes !== undefined &&
+    productData.totalBoxes !== null &&
+    productData.totalBoxes > 0
+  ) {
+    return productData.totalBoxes;
+  }
+
+  // If product has batches array, sum the boxes from batches that have boxes > 0
+  if (productData.batches && Array.isArray(productData.batches)) {
+    return productData.batches.reduce(
+      (sum, batch) => sum + (batch.boxes || 0),
+      0
+    );
+  }
+
+  // Fallback to inStock.boxes if available
+  if (productData.inStock?.boxes !== undefined) {
+    return productData.inStock.boxes;
+  }
+
+  return 0;
+};
+
+// NEW: Helper function to get the nearest expiry date from batches
+const getNearestExpiryDate = (productData) => {
+  if (!productData?.batches || !Array.isArray(productData.batches)) return null;
+
+  const validBatches = productData.batches.filter(
+    (batch) => batch.boxes > 0 && batch.expiryDate
+  );
+
+  if (validBatches.length === 0) return null;
+
+  // Sort batches by expiry date (ascending - soonest first)
+  const sortedBatches = [...validBatches].sort(
+    (a, b) => new Date(a.expiryDate) - new Date(b.expiryDate)
+  );
+
+  return sortedBatches[0].expiryDate;
+};
+
+// NEW: Helper function to check if a product has any stock
+const hasStock = (productData) => {
+  return calculateAvailableStock(productData) > 0;
 };
 
 // Custom hook for suggestions
@@ -307,28 +362,6 @@ const useProductSuggestions = (products, productNames) => {
   };
 };
 
-// Helper function to calculate available stock from batches
-const calculateAvailableStock = (productData) => {
-  if (!productData) return 0;
-  
-  // If product has totalBoxes field, use that
-  if (productData.totalBoxes !== undefined && productData.totalBoxes !== null) {
-    return productData.totalBoxes;
-  }
-  
-  // If product has batches array, sum the boxes
-  if (productData.batches && Array.isArray(productData.batches)) {
-    return productData.batches.reduce((sum, batch) => sum + (batch.boxes || 0), 0);
-  }
-  
-  // Fallback to inStock.boxes if available
-  if (productData.inStock?.boxes !== undefined) {
-    return productData.inStock.boxes;
-  }
-  
-  return 0;
-};
-
 // Custom hook for form state management
 const useSaleForm = (initialCustomerCode = "") => {
   const [form, setForm] = useState({
@@ -339,15 +372,17 @@ const useSaleForm = (initialCustomerCode = "") => {
   const [expandedProductIndex, setExpandedProductIndex] = useState(0);
   const [mrList, setMrList] = useState([]);
   const [customerList, setCustomerList] = useState([]);
+  const [productsList, setProductsList] = useState([]); // NEW: State for products
   const [mrListLoading, setMrListLoading] = useState(true);
   const [customerListLoading, setCustomerListLoading] = useState(true);
+  const [productsListLoading, setProductsListLoading] = useState(true); // NEW: Loading state for products
 
   const parseNumber = useCallback((val) => {
     if (val === "" || val === null || val === undefined) return 0;
     const num = parseFloat(val);
     return isNaN(num) ? 0 : num;
   }, []);
-
+  console.log("353", productsList);
   // Calculate total amount from all products
   const calculateTotalAmount = useCallback((products) => {
     const total = products.reduce((sum, product) => {
@@ -384,7 +419,6 @@ const useSaleForm = (initialCustomerCode = "") => {
 
     return paymentStatus;
   }, []);
-
   const calculateDerivedFields = useCallback(
     (name, value, currentForm) => {
       const updatedForm = { ...currentForm, [name]: value };
@@ -414,7 +448,7 @@ const useSaleForm = (initialCustomerCode = "") => {
         } else {
           updatedForm.dueDate = "";
         }
-      }
+      } // <- This closing brace was missing
 
       if (name === "paidAmount") {
         const totalNetAmount = calculateTotalNetAmount(currentForm.products);
@@ -499,6 +533,26 @@ const useSaleForm = (initialCustomerCode = "") => {
       showToast("error", "Failed to load Customers");
     } finally {
       setCustomerListLoading(false);
+    }
+  }, []);
+
+  // NEW: Fetch Products list using imported function
+  const fetchProductsListData = useCallback(async () => {
+    try {
+      setProductsListLoading(true);
+      const result = await fetchProducts();
+      console.log("result", result.data);
+      if (result.success) {
+        setProductsList(result.data || []);
+      } else {
+        console.error("Error fetching products list:", result.error);
+        showToast("error", result.error);
+      }
+    } catch (error) {
+      console.error("Error fetching products list:", error);
+      showToast("error", "Failed to load Products");
+    } finally {
+      setProductsListLoading(false);
     }
   }, []);
 
@@ -952,13 +1006,94 @@ const useSaleForm = (initialCustomerCode = "") => {
     [form, validateTotalQuantity]
   );
 
+  // NEW: State for products and productNames
+  const [products, setProducts] = useState([]);
+  const [productNames, setProductNames] = useState([]);
+
+  // NEW: Effect to update products and productNames when productsList changes - MODIFIED
+  // NEW: Effect to update products and productNames when productsList changes - CORRECTED
+  useEffect(() => {
+    if (productsList?.length > 0) {
+      try {
+        // Filter products that have stock and sort by nearest expiry
+        const availableProducts = productsList
+          .filter((product) => {
+            try {
+              return hasStock(product);
+            } catch (error) {
+              console.error(
+                "Error checking stock for product:",
+                product,
+                error
+              );
+              return false;
+            }
+          })
+          .sort((a, b) => {
+            try {
+              const aExpiry = getNearestExpiryDate(a);
+              const bExpiry = getNearestExpiryDate(b);
+
+              // Handle cases where dates might be invalid
+              const aDate = aExpiry ? new Date(aExpiry) : null;
+              const bDate = bExpiry ? new Date(bExpiry) : null;
+
+              // Both have valid dates - sort by nearest expiry first
+              if (
+                aDate instanceof Date &&
+                !isNaN(aDate) &&
+                bDate instanceof Date &&
+                !isNaN(bDate)
+              ) {
+                return aDate.getTime() - bDate.getTime();
+              }
+
+              // Products with valid expiry dates come first
+              if (
+                aDate instanceof Date &&
+                !isNaN(aDate) &&
+                (!bDate || isNaN(bDate.getTime()))
+              )
+                return -1;
+              if (
+                bDate instanceof Date &&
+                !isNaN(bDate) &&
+                (!aDate || isNaN(aDate.getTime()))
+              )
+                return 1;
+
+              // Otherwise maintain original order
+              return 0;
+            } catch (error) {
+              console.error("Error sorting products by expiry:", error);
+              return 0;
+            }
+          });
+
+        setProducts(availableProducts);
+        setProductNames(
+          availableProducts.map((product) => product.productName)
+        );
+      } catch (error) {
+        console.error("Error processing products list:", error);
+        setProducts([]);
+        setProductNames([]);
+      }
+    } else {
+      setProducts([]);
+      setProductNames([]);
+    }
+  }, [productsList]);
+
   return {
     form,
     errors,
     mrList,
     customerList,
+    productsList, // NEW: Return products list
     mrListLoading,
     customerListLoading,
+    productsListLoading, // NEW: Return products loading state
     handleChange,
     validate,
     validateProductField,
@@ -969,6 +1104,7 @@ const useSaleForm = (initialCustomerCode = "") => {
     handleCustomerChange,
     fetchMRList: fetchMRListData,
     fetchCustomerList: fetchCustomerListData,
+    fetchProductsList: fetchProductsListData, // NEW: Return fetch products function
     addProduct,
     removeProduct,
     updateProduct,
@@ -978,6 +1114,8 @@ const useSaleForm = (initialCustomerCode = "") => {
     areCommonFieldsFilled,
     hasAtLeastOneProduct,
     setErrors,
+    products, // NEW: Return filtered products
+    productNames, // NEW: Return filtered product names
   };
 };
 
@@ -1043,7 +1181,9 @@ const DatePickerField = React.memo(
           minDate={minDate}
           className={`w-full border rounded-md px-3 py-2 ${
             error ? "border-red-500" : "border-gray-300"
-          } ${disabled ? "bg-gray-100 cursor-not-allowed" : ""} ${readOnly ? "bg-gray-200" : ""} ${className}`}
+          } ${disabled ? "bg-gray-100 cursor-not-allowed" : ""} ${
+            readOnly ? "bg-gray-200" : ""
+          } ${className}`}
           autoComplete="off"
         />
         {error && <p className="text-red-500 text-xs mt-0.5">{error}</p>}
@@ -1155,8 +1295,10 @@ const AddSale = () => {
     errors,
     mrList,
     customerList,
+    productsList, // NEW: Get productsList from useSaleForm
     mrListLoading,
     customerListLoading,
+    productsListLoading, // NEW: Get productsListLoading from useSaleForm
     handleChange,
     validate,
     validateProductField,
@@ -1167,6 +1309,7 @@ const AddSale = () => {
     handleCustomerChange,
     fetchMRList,
     fetchCustomerList,
+    fetchProductsList, // NEW: Get fetchProductsList from useSaleForm
     addProduct,
     removeProduct,
     updateProduct,
@@ -1174,19 +1317,31 @@ const AddSale = () => {
     isProductExpanded,
     areCommonFieldsFilled,
     hasAtLeastOneProduct,
+    products, // NEW: Get filtered products from useSaleForm
+    productNames, // NEW: Get filtered product names from useSaleForm
   } = useSaleForm(customerCode);
-  const { statuses, products, productNames, loading } = useInitialSaleData();
+
+  // REMOVED: useInitialSaleData hook and replaced with local state
+  const { statuses, loading: initialLoading } = useInitialSaleData();
 
   // State for showing upload message
   const [showUploadMessage, setShowUploadMessage] = useState(false);
   const [uploadMessage, setUploadMessage] = useState("");
   const [isFormDisabled, setIsFormDisabled] = useState(false);
 
-  // Fetch MR and Customer lists on component mount
+  // Fetch MR, Customer and Products lists on component mount
   useEffect(() => {
     fetchMRList();
     fetchCustomerList();
-  }, [fetchMRList, fetchCustomerList]);
+    fetchProductsList(); // NEW: Fetch products list
+  }, [fetchMRList, fetchCustomerList, fetchProductsList]);
+
+  // Calculate combined loading state
+  const loading =
+    initialLoading ||
+    mrListLoading ||
+    customerListLoading ||
+    productsListLoading;
 
   // Memoized MR options for dropdown
   const mrOptions = useMemo(() => {
@@ -1240,6 +1395,32 @@ const AddSale = () => {
   // Product Suggestions using custom hook for product rows
   const productSuggestions = useProductSuggestions(form.products, productNames);
 
+  // NEW: Function to get expiry information for a product
+  const getProductExpiryInfo = (productName) => {
+    const productData = products.find((p) => p.productName === productName);
+    if (!productData?.batches) return null;
+
+    const validBatches = productData.batches
+      .filter((batch) => batch.boxes > 0 && batch.expiryDate)
+      .sort((a, b) => new Date(a.expiryDate) - new Date(b.expiryDate));
+
+    if (validBatches.length === 0) return null;
+
+    const nearestBatch = validBatches[0];
+    const today = new Date();
+    const expiryDate = new Date(nearestBatch.expiryDate);
+    const daysUntilExpiry = Math.ceil(
+      (expiryDate - today) / (1000 * 60 * 60 * 24)
+    );
+
+    return {
+      nearestExpiry: nearestBatch.expiryDate,
+      daysUntilExpiry,
+      isNearExpiry: daysUntilExpiry <= 30, // Within 30 days is considered near expiry
+      batchCount: validBatches.length,
+    };
+  };
+
   // Function to check if required data is available and set form disabled state
   const checkRequiredData = useCallback(() => {
     const missingFields = [];
@@ -1264,12 +1445,46 @@ const AddSale = () => {
     setShowUploadMessage(false);
     setIsFormDisabled(false);
     return true;
-  }, [productNames.length, mrList.length, mrListLoading, customerList.length, customerListLoading]);
+  }, [
+    productNames.length,
+    mrList.length,
+    mrListLoading,
+    customerList.length,
+    customerListLoading,
+  ]);
 
   // Check required data when dependencies change
   useEffect(() => {
     checkRequiredData();
   }, [checkRequiredData]);
+
+  // CORRECTED: Enhanced getProductDetails function to handle batches properly
+  const getProductDetails = (productName) => {
+    const product = products.find((p) => p.productName === productName);
+    if (!product) {
+      return { lc: "", fob: "", cif: "", sellingPrice: "" };
+    }
+
+    // Check if product has batches and use batch values if available
+    let lc = product.lc || 0;
+    let fob = product.fob || 0;
+    let cif = product.cif || 0;
+
+    // If product has batches, use the first batch values (prioritize batch over direct product values)
+    if (product.batches && product.batches.length > 0) {
+      const firstBatch = product.batches[0];
+      lc = firstBatch.lc || lc;
+      fob = firstBatch.fob || fob;
+      cif = firstBatch.cif || cif;
+    }
+
+    return {
+      lc: lc.toString(),
+      fob: fob.toString(),
+      cif: cif.toString(),
+      sellingPrice: product.sellingPrice || "",
+    };
+  };
 
   // Enhanced handleChange for payment status
   const enhancedHandleChange = useCallback(
@@ -1321,15 +1536,7 @@ const AddSale = () => {
     ]
   );
 
-  const getProductDetails = (productName) => {
-    const product = products.find((p) => p.productName === productName);
-    return {
-      lc: product ? product.lc : "",
-      sellingPrice: product ? product.sellingPrice : "",
-    };
-  };
-
-  // Enhanced product change with real-time validation
+  // CORRECTED: Enhanced product change with real-time validation
   const enhancedProductChange = useCallback(
     (index, field, value) => {
       if (isFormDisabled) return;
@@ -1339,7 +1546,11 @@ const AddSale = () => {
 
       if (field === "productName") {
         const productDetails = getProductDetails(value);
+
+        // Update all fields including LC, FOB, CIF
         updateProduct(index, "lc", productDetails.lc);
+        updateProduct(index, "fob", productDetails.fob);
+        updateProduct(index, "cif", productDetails.cif);
         updateProduct(index, "sellingPrice", productDetails.sellingPrice);
 
         productSuggestions.setIsOpen(index, true);
@@ -1357,7 +1568,13 @@ const AddSale = () => {
         }, 10);
       }
     },
-    [updateProduct, productSuggestions, validateProductField, products, isFormDisabled]
+    [
+      updateProduct,
+      productSuggestions,
+      validateProductField,
+      products,
+      isFormDisabled,
+    ]
   );
 
   // Handle payment status keyboard events
@@ -1410,7 +1627,11 @@ const AddSale = () => {
 
   // Check if "Add Sale" button should be enabled
   const isAddSaleEnabled = useMemo(() => {
-    return areCommonFieldsFilled(form) && hasAtLeastOneProduct(form.products) && !isFormDisabled;
+    return (
+      areCommonFieldsFilled(form) &&
+      hasAtLeastOneProduct(form.products) &&
+      !isFormDisabled
+    );
   }, [form, areCommonFieldsFilled, hasAtLeastOneProduct, isFormDisabled]);
 
   // Check if "Add Product" button should be enabled - UPDATED with stock validation
@@ -1529,6 +1750,8 @@ const AddSale = () => {
           netSellingAmount: Number(product.netSellingAmount),
           averageUnitPrice: Number(product.averageUnitPrice),
           lc: Number(product.lc) || 0,
+          fob: Number(product.fob) || 0,
+          cif: Number(product.cif) || 0,
           profitLoss: Number(product.profitLoss) || 0,
           isProductAccept: true,
         })),
@@ -1565,22 +1788,28 @@ const AddSale = () => {
   };
 
   // Handle numeric input change
-  const handleNumericInputChange = useCallback((e, updateFunc) => {
-    if (isFormDisabled) return;
-    const value = e.target.value;
-    if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
-      updateFunc(e);
-    }
-  }, [isFormDisabled]);
+  const handleNumericInputChange = useCallback(
+    (e, updateFunc) => {
+      if (isFormDisabled) return;
+      const value = e.target.value;
+      if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+        updateFunc(e);
+      }
+    },
+    [isFormDisabled]
+  );
 
   // Handle alphanumeric input for Invoice Number
-  const handleAlphanumericInputChange = useCallback((e, updateFunc) => {
-    if (isFormDisabled) return;
-    const value = e.target.value;
-    if (value === "" || /^[a-zA-Z0-9\-\/\s]*$/.test(value)) {
-      updateFunc(e);
-    }
-  }, [isFormDisabled]);
+  const handleAlphanumericInputChange = useCallback(
+    (e, updateFunc) => {
+      if (isFormDisabled) return;
+      const value = e.target.value;
+      if (value === "" || /^[a-zA-Z0-9\-\/\s]*$/.test(value)) {
+        updateFunc(e);
+      }
+    },
+    [isFormDisabled]
+  );
 
   if (loading) {
     return (
@@ -1642,6 +1871,7 @@ const AddSale = () => {
 
       <div className="mb-6">
         {form.products.map((product, index) => {
+          console.log("pr", product);
           const productData = products.find(
             (p) => p.productName === product.productName
           );
@@ -1651,6 +1881,9 @@ const AddSale = () => {
           const totalQty = salesQty + bonusQty;
           const remainingStock = calculateRemainingStock(product, products);
           const hasStockProblem = totalQty > availableStock;
+
+          // NEW: Get expiry information
+          const expiryInfo = getProductExpiryInfo(product.productName);
 
           return (
             <div key={index} className="border p-4 mb-4 rounded shadow-sm">
@@ -1676,7 +1909,29 @@ const AddSale = () => {
                       <span className="text-sm px-2 py-1 bg-blue-100 text-blue-800 rounded border border-blue-300">
                         Available: {availableStock} boxes
                       </span>
-                      {/* Stock validation warning - now checks total quantity */}
+
+                      {/* NEW: Expiry information display */}
+                      {expiryInfo && (
+                        <span
+                          className={`text-sm px-2 py-1 rounded border ${
+                            expiryInfo.isNearExpiry
+                              ? "bg-red-100 text-red-800 border-red-300"
+                              : "bg-green-100 text-green-800 border-green-300"
+                          }`}
+                          title={`Nearest expiry: ${new Date(
+                            expiryInfo.nearestExpiry
+                          ).toLocaleDateString()} (${
+                            expiryInfo.daysUntilExpiry
+                          } days)`}
+                        >
+                          {expiryInfo.isNearExpiry ? "⚠️ " : ""}
+                          Expires: {expiryInfo.daysUntilExpiry} days
+                          {expiryInfo.batchCount > 1 &&
+                            ` (${expiryInfo.batchCount} batches)`}
+                        </span>
+                      )}
+
+                      {/* Stock validation warning */}
                       {hasStockProblem && (
                         <span className="text-red-600 text-sm font-medium">
                           ⚠️ Total quantity exceeds available stock
@@ -1690,8 +1945,8 @@ const AddSale = () => {
                   onClick={() => toggleView(index)}
                   disabled={isFormDisabled}
                   className={`font-medium ${
-                    isFormDisabled 
-                      ? "text-gray-400 cursor-not-allowed" 
+                    isFormDisabled
+                      ? "text-gray-400 cursor-not-allowed"
                       : "text-blue-600 hover:text-blue-800"
                   }`}
                 >
@@ -1712,8 +1967,8 @@ const AddSale = () => {
                         onClick={() => removeProduct(index)}
                         disabled={isFormDisabled}
                         className={`${
-                          isFormDisabled 
-                            ? "text-gray-400 cursor-not-allowed" 
+                          isFormDisabled
+                            ? "text-gray-400 cursor-not-allowed"
                             : "text-red-600 hover:text-red-800"
                         }`}
                       >
@@ -1753,12 +2008,15 @@ const AddSale = () => {
                           errors[`productName_${index}`]
                             ? "border-red-500"
                             : "border-gray-300"
-                        } ${isFormDisabled ? "bg-gray-100 cursor-not-allowed" : ""}`}
+                        } ${
+                          isFormDisabled ? "bg-gray-100 cursor-not-allowed" : ""
+                        }`}
                         placeholder="Type to search or click to see all options"
                         autoComplete="off"
                       />
                       {productSuggestions.suggestionsList[index]?.isOpen &&
-                        productSuggestions.filteredItems[index]?.length > 0 && !isFormDisabled && (
+                        productSuggestions.filteredItems[index]?.length > 0 &&
+                        !isFormDisabled && (
                           <ul
                             className="absolute z-10 bg-white border border-gray-300 w-full rounded-md max-h-60 overflow-auto shadow-lg"
                             style={{
@@ -1895,6 +2153,24 @@ const AddSale = () => {
                       value={product.lc}
                       readOnly
                       disabled={true} // Always disabled as per requirement
+                    />
+
+                    {/* FOB Field - Added */}
+                    <InputField
+                      label="FOB (USD)"
+                      name={`fob_${index}`}
+                      value={product.fob}
+                      readOnly
+                      disabled={true}
+                    />
+
+                    {/* CIF Field - Added */}
+                    <InputField
+                      label="CIF (USD)"
+                      name={`cif_${index}`}
+                      value={product.cif}
+                      readOnly
+                      disabled={true}
                     />
 
                     {/* Calculated Fields */}

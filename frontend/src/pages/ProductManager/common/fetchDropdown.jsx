@@ -101,10 +101,12 @@ export const fetchProducts = async () => {
 
     const uniqueProducts = Array.from(uniqueProductsMap.values());
 
-    // Map final structure for frontend usage
+    // Map final structure for frontend usage - ensure all required fields are included
     const formattedProducts = uniqueProducts.map((product) => ({
-      id: product._id,
+      id: product._id, // Ensure id field exists
+      _id: product._id,
       label: product.productName,
+      type: product.type,
       productName: product.productName,
       supplierName: product.supplierName,
       batches: product.batches || [],
@@ -112,19 +114,54 @@ export const fetchProducts = async () => {
       totalAmount: product.totalAmount || 0,
       status: product.status || "Out of Stock",
       minStockLevel: product.minStockLevel || 0,
-      category: product.category || "Uncategorized",
+
       lc: product.lc || 0,
       fob: product.fob || 0,
       cif: product.cif || 0,
+      sellingPrice: product.sellingPrice, // ADDED: Default to 5 if not provided
       stockLastUpdated: product.stockLastUpdated || null,
       createdAt: product.createdAt,
       updatedAt: product.updatedAt,
     }));
-
     return { success: true, data: formattedProducts };
   } catch (error) {
     console.error("❌ Error fetching products:", error);
     return { success: false, error: "Failed to load products" };
+  }
+};
+export const fetchProductDropdownPurchase = async () => {
+  try {
+    const response = await axios.get(`${backendUrl}/api/products`);
+    const products = response.data || [];
+
+    if (!Array.isArray(products)) {
+      return { success: false, error: "Invalid products data format" };
+    }
+
+    // Format products for purchase dropdown - simplified structure for purchase
+    const formattedProducts = products.map((product) => ({
+      value: product._id,
+      label: product.productName,
+      id: product._id,
+      productName: product.productName,
+      type: product.type,
+      supplierName: product.supplierName,
+      currentStock: product.totalBoxes || 0,
+      minStockLevel: product.minStockLevel || 0,
+      sellingPrice: product.sellingPrice || 0,
+      lc:  product.lc,
+      fob:product.fob,
+      cif: product.cif,
+      status: product.status || "Out of Stock",
+    }));
+    console.log("formattedProducts", formattedProducts);
+    return { success: true, data: formattedProducts };
+  } catch (error) {
+    console.error("❌ Error fetching products for purchase dropdown:", error);
+    return { 
+      success: false, 
+      error: "Failed to load products for purchase" 
+    };
   }
 };
 export const fetchProductPackingType = async () => {

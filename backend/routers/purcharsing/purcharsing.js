@@ -18,6 +18,11 @@ const calculateStockStatus = (boxes) => {
   return "In Stock";
 };
 
+const filterReportsWithBatches = (reports) => {
+  return reports.filter(
+    (report) => Array.isArray(report.batches) && report.batches.length > 0
+  );
+};
 const updateReportInHand = async (productData, operation = "add") => {
   try {
     const {
@@ -28,6 +33,8 @@ const updateReportInHand = async (productData, operation = "add") => {
       fob,
       cif,
       expiryDate,
+      type,
+      sellingPrice, // ADDED: Include sellingPrice
     } = productData;
 
     const qty = Number(quantityPerBoxStrip || 0);
@@ -42,6 +49,7 @@ const updateReportInHand = async (productData, operation = "add") => {
       item = new ReportInHand({
         productName,
         supplierName: validSupplier,
+        type: type || "Tablet",
         batches: [],
         totalBoxes: 0,
         totalAmount: 0,
@@ -61,6 +69,7 @@ const updateReportInHand = async (productData, operation = "add") => {
         cif,
         amount,
         expiryDate,
+        sellingPrice: sellingPrice || 0, // ADDED: Store sellingPrice in batch
         date: new Date(),
       });
     }
@@ -145,10 +154,10 @@ router.get("/purchase", async (req, res) => {
 
         return {
           ...p.toObject(),
-          productType: productInfo?.type || "Unknown",
+          productType: p.type || productInfo?.type || "Tablet",
           productPacking: productInfo?.packing || "",
           productQtyPerBoxStrip: productInfo?.qtyPerBoxStrip || 0,
-          sellingPrice: productInfo?.sellingPrice || 0,
+          sellingPrice: p.sellingPrice || productInfo?.sellingPrice || 0, // MODIFIED: Use purchase sellingPrice first
         };
       });
 
@@ -173,27 +182,57 @@ router.put("/purchase/:id", async (req, res) => {
   try {
     const id = req.params.id;
 
+    // Find the old invoice first
     const oldInvoice = await purchaseInventory.findById(id);
     if (!oldInvoice) return res.status(404).json({ message: "Not found" });
 
-    // Remove old stock
-    for (const p of oldInvoice.products) {
-      await updateReportInHand(
-        { ...p, supplierName: oldInvoice.supplierName },
-        "subtract"
-      );
-    }
+    // Store old products for subtraction (make a deep copy)
+    const oldProducts = JSON.parse(JSON.stringify(oldInvoice.products));
 
-    // Update invoice
+    // Update the invoice with new data
     const updated = await purchaseInventory.findByIdAndUpdate(id, req.body, {
       new: true,
       runValidators: true,
     });
 
-    // Add new stock
-    for (const p of updated.products) {
+    if (!updated) {
+      return res
+        .status(404)
+        .json({ message: "Invoice not found after update" });
+    }
+
+    // Subtract old stock from ReportInHand using OLD product data
+    for (const oldProduct of oldProducts) {
       await updateReportInHand(
-        { ...p, supplierName: updated.supplierName },
+        {
+          productName: oldProduct.productName,
+          supplierName: oldInvoice.supplierName,
+          quantityPerBoxStrip: oldProduct.quantityPerBoxStrip,
+          lc: oldProduct.lc,
+          fob: oldProduct.fob,
+          cif: oldProduct.cif,
+          expiryDate: oldProduct.expiryDate,
+          type: oldProduct.type,
+          sellingPrice: oldProduct.sellingPrice, // ADDED: Include sellingPrice
+        },
+        "subtract"
+      );
+    }
+
+    // Add new stock to ReportInHand using UPDATED product data
+    for (const newProduct of updated.products) {
+      await updateReportInHand(
+        {
+          productName: newProduct.productName,
+          supplierName: updated.supplierName,
+          quantityPerBoxStrip: newProduct.quantityPerBoxStrip,
+          lc: newProduct.lc,
+          fob: newProduct.fob,
+          cif: newProduct.cif,
+          expiryDate: newProduct.expiryDate,
+          type: newProduct.type,
+          sellingPrice: newProduct.sellingPrice, // ADDED: Include sellingPrice
+        },
         "add"
       );
     }
@@ -212,7 +251,11 @@ router.delete("/purchase/:id", async (req, res) => {
 
     for (const p of invoice.products) {
       await updateReportInHand(
-        { ...p, supplierName: invoice.supplierName },
+        {
+          ...p,
+          supplierName: invoice.supplierName,
+          type: p.type,
+        },
         "subtract"
       );
     }
@@ -233,7 +276,11 @@ router.delete("/purchase", async (req, res) => {
     for (const inv of invoices) {
       for (const p of inv.products) {
         await updateReportInHand(
-          { ...p, supplierName: inv.supplierName },
+          {
+            ...p,
+            supplierName: inv.supplierName,
+            type: p.type,
+          },
           "subtract"
         );
       }
@@ -254,7 +301,6 @@ router.delete("/purchase", async (req, res) => {
 router.post("/purchase", async (req, res) => {
   try {
     const data = req.body;
-
     if (
       !data.invoiceNumber ||
       !data.supplierName ||
@@ -277,23 +323,37 @@ router.post("/purchase", async (req, res) => {
 
     let totalAmount = 0;
 
+    // Fetch product types for all products in one query
+    const productIds = data.products.map((p) => p.productId).filter((id) => id);
+    const productsInfo = await Product.find(
+      { _id: { $in: productIds } },
+      "type"
+    );
+    const productTypeMap = new Map();
+    productsInfo.forEach((p) => {
+      productTypeMap.set(p._id.toString(), p.type);
+    });
+
     const products = data.products.map((p) => {
       const qty = Number(p.qtyBox || 0);
-      const lc = Number(p.lc || 0);
+      const lc = Number(p.lc || p.lcNumber || 0);
       const fob = Number(p.fob || 0);
       const cif = Number(p.cif || 0);
       const amount = qty * lc;
+      const sellingPrice = Number(p.sellingPrice) || 0; // ADDED: Extract sellingPrice
 
       totalAmount += amount;
 
       return {
         productName: p.productName,
+        type: p.type || productTypeMap.get(p.productId) || "Tablet",
         expiryDate: p.expiredDate ? new Date(p.expiredDate) : null,
         quantityPerBoxStrip: qty,
         lc,
         fob,
         cif,
         amount,
+        sellingPrice, // ADDED: Include sellingPrice in product data
       };
     });
 
@@ -316,6 +376,8 @@ router.post("/purchase", async (req, res) => {
           fob: p.fob,
           cif: p.cif,
           expiryDate: p.expiryDate,
+          type: p.type,
+          sellingPrice: p.sellingPrice, // ADDED: Pass sellingPrice to inventory
         },
         "add"
       );
@@ -339,6 +401,7 @@ router.post("/purchase", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
 router.post("/purchase/import", async (req, res) => {
   try {
     const rows = req.body;
@@ -381,16 +444,19 @@ router.post("/purchase/import", async (req, res) => {
       const fob = Number(row.fob || 0);
       const cif = Number(row.cif || 0);
       const amount = qty * lc;
+      const sellingPrice = Number(row.sellingPrice) || 0; // ADDED: Extract sellingPrice
 
       // push product purchase line
       inv.products.push({
         productName: row.productName?.trim() || "Unknown Product",
+        type: row.type || "Tablet",
         expiryDate: row.expiryDate ? new Date(row.expiryDate) : null,
         quantityPerBoxStrip: qty,
         lc,
         fob,
         cif,
         amount,
+        sellingPrice, // ADDED: Include sellingPrice
       });
 
       inv.totalAmount += amount;
@@ -414,6 +480,8 @@ router.post("/purchase/import", async (req, res) => {
               fob: p.fob,
               cif: p.cif,
               expiryDate: p.expiryDate,
+              type: p.type,
+              sellingPrice: p.sellingPrice, // ADDED: Pass sellingPrice
             },
             "add"
           );
@@ -435,9 +503,20 @@ router.post("/purchase/import", async (req, res) => {
 router.get("/reports-in-hand", async (req, res) => {
   try {
     const reports = await ReportInHand.find().sort({ createdAt: -1 });
-    res.json({ success: true, count: reports.length, reports });
-  } catch (err) {
-    res.status(500).json({ message: "Failed to fetch reports" });
+
+    const filteredReports = filterReportsWithBatches(reports);
+    res.status(200).json({
+      success: true,
+      count: filteredReports.length,
+      reports: filteredReports,
+    });
+  } catch (error) {
+    console.error("Error fetching reports in hand:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch reports",
+      error: error.message,
+    });
   }
 });
 
@@ -475,7 +554,7 @@ router.post("/purchases/download-excel", async (req, res) => {
     const worksheet = workbook.addWorksheet("Purchases");
 
     // ------------------------------
-    // Header Row
+    // Header Row (ADDED Selling Price)
     // ------------------------------
     const header = [
       "Invoice Number",
@@ -483,12 +562,14 @@ router.post("/purchases/download-excel", async (req, res) => {
       "Delivery No.",
       "Received Date",
       "Product Name",
+      "Product Type",
       "Supplier Name",
       "Expiry Date",
       "Quantity Per Box/Strip",
       "FOB (USD)",
       "CIF (USD)",
       "LC (USD)",
+      "Selling Price (USD)", // ADDED: Selling Price column
       "Amount",
       "Remarks",
     ];
@@ -497,7 +578,7 @@ router.post("/purchases/download-excel", async (req, res) => {
     headerRow.font = { bold: true };
 
     // ------------------------------
-    // Column Widths
+    // Column Widths (Updated for new column)
     // ------------------------------
     worksheet.columns = [
       { width: 18 },
@@ -505,18 +586,20 @@ router.post("/purchases/download-excel", async (req, res) => {
       { width: 15 },
       { width: 15 },
       { width: 22 },
+      { width: 15 },
       { width: 25 },
       { width: 15 },
       { width: 20 },
       { width: 12 },
       { width: 12 },
       { width: 12 },
+      { width: 15 }, // ADDED: Selling Price column width
       { width: 15 },
       { width: 20 },
     ];
 
     // ------------------------------
-    // Add Data
+    // Add Data (INCLUDING Selling Price)
     // ------------------------------
     purchases.forEach((purchase) => {
       purchase.products.forEach((p) => {
@@ -526,12 +609,14 @@ router.post("/purchases/download-excel", async (req, res) => {
           purchase.deliveryNumber,
           dayjs(purchase.receivedDate).format("DD/MM/YYYY"),
           p.productName,
+          p.type || "Tablet",
           purchase.supplierName,
           dayjs(p.expiryDate).format("DD/MM/YYYY"),
           p.quantityPerBoxStrip,
           p.fob,
           p.cif,
           p.lc,
+          p.sellingPrice || 0, // ADDED: Selling Price data
           p.amount ?? Number(p.quantityPerBoxStrip) * Number(p.lc || 0),
           purchase.remarks || "",
         ]);

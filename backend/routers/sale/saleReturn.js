@@ -2,11 +2,12 @@ import express from "express";
 import mongoose from "mongoose";
 import SalesReturn from "../../models/sale/saleReturn.js";
 import SaleSummary from "../../models/sale/saleSummary.js";
+import ProductInventory from "../../models/purcharsing/purchaseInventory.js"; 
 import ExcelJS from "exceljs";
 
 const router = express.Router();
 
-// Helper function to calculate product totals
+// Helper function to calculate product totals with profit/loss
 const calculateProductTotals = (products) => {
   return products.reduce(
     (totals, product) => {
@@ -15,15 +16,18 @@ const calculateProductTotals = (products) => {
       const sellingPrice = parseFloat(product.sellingPrice) || 0;
       const discount = parseFloat(product.discount) || 0;
       const returnQuantity = parseFloat(product.returnQuantity) || 0;
-      const usedPrice = parseFloat(product.usedPrice) || 0;
+      const lc = parseFloat(product.lc) || 0;
 
-      // Calculate amounts
-      const amount = salesQty * sellingPrice;
+      // Calculate amounts based on used quantity
+      const usedQty = parseFloat(product.usedQty) || salesQty - returnQuantity;
+      const amount = usedQty * sellingPrice;
       const netSellingAmount = amount - discount;
-      const totalQty = salesQty + bonusQty;
-      const usedQty = Math.max(0, salesQty - returnQuantity);
-      const usedAmount = usedQty * usedPrice;
+      const totalQty = usedQty + bonusQty;
+      const usedAmount = usedQty * sellingPrice;
       const averageUnitPrice = totalQty > 0 ? netSellingAmount / totalQty : 0;
+      
+      // Calculate profit/loss
+      const profitLoss = netSellingAmount - (usedQty * lc);
 
       // Update product with calculated values
       product.amount = amount;
@@ -32,14 +36,15 @@ const calculateProductTotals = (products) => {
       product.usedQty = usedQty;
       product.usedAmount = usedAmount;
       product.averageUnitPrice = averageUnitPrice;
+      product.profitLoss = profitLoss;
 
       // Update totals
       totals.totalAmount += netSellingAmount;
-      totals.totalPaid += parseFloat(product.paidAmount) || 0;
+      totals.totalAmount += parseFloat(product.amount) || 0;
 
       return totals;
     },
-    { totalAmount: 0, totalPaid: 0 }
+    { totalAmount: 0, totalAmount: 0 }
   );
 };
 
@@ -57,7 +62,8 @@ const formatDateToReadable = (dateString) => {
 router.post("/salesreturn", async (req, res) => {
   try {
     const data = req.body;
-
+    console.log(data);
+    
     // Handle both single object and array
     const records = Array.isArray(data) ? data : [data];
 
@@ -103,8 +109,8 @@ router.post("/salesreturn", async (req, res) => {
         // Calculate product totals and amounts
         const { totalAmount } = calculateProductTotals(record.products);
 
-        const paidAmount = parseFloat(record.paidAmount) || 0;
-        const dueAmount = Math.max(0, totalAmount - paidAmount);
+        const amount = parseFloat(record.amount) || 0;
+        const dueAmount = Math.max(0, totalAmount - amount);
 
         // Calculate due date from credit days
         const creditDays = parseInt(record.creditDays) || 0;
@@ -129,11 +135,13 @@ router.post("/salesreturn", async (req, res) => {
             lc: Number(product.lc) || 0,
             returnQuantity: Number(product.returnQuantity) || 0,
             usedPrice: Number(product.usedPrice) || 0,
+            usedQty: Number(product.usedQty) || 0,
+            usedAmount: Number(product.usedAmount) || 0,
           })),
           creditDays: creditDays,
           dueDate: dueDate,
           deliveryDate: record.deliveryDate || record.invoiceDate,
-          paidAmount: paidAmount,
+          amount: amount,
           dueAmount: dueAmount,
           totalAmount: totalAmount,
           paymentStatus: record.paymentStatus || "Pending",
@@ -144,6 +152,49 @@ router.post("/salesreturn", async (req, res) => {
 
     // Save all sales return records
     const savedReturns = await SalesReturn.insertMany(processedData);
+
+    // Update inventory with return quantities
+    const inventoryUpdatePromises = processedData.flatMap((record) =>
+      record.products.map(async (product) => {
+        if (product.returnQuantity > 0) {
+          // Find the inventory item by product name
+          const inventoryItem = await ProductInventory.findOne({
+            productName: product.productName
+          });
+
+          if (inventoryItem) {
+            // Update the total boxes by adding return quantity
+            inventoryItem.totalBoxes += product.returnQuantity;
+            
+            // Update the first batch or add a new batch for returned items
+            if (inventoryItem.batches && inventoryItem.batches.length > 0) {
+              inventoryItem.batches[0].boxes += product.returnQuantity;
+              inventoryItem.batches[0].amount = inventoryItem.batches[0].boxes * inventoryItem.batches[0].lc;
+            } else {
+              inventoryItem.batches.push({
+                boxes: product.returnQuantity,
+                lc: product.lc || 0.9,
+                fob: 1.1,
+                cif: 1.2,
+                amount: product.returnQuantity * (product.lc || 0.9),
+                expiryDate: new Date('2029-11-21'),
+                date: new Date()
+              });
+            }
+
+            // Update total amount
+            inventoryItem.totalAmount = inventoryItem.batches.reduce((sum, batch) => sum + batch.amount, 0);
+            
+            // Update status based on stock level
+            inventoryItem.status = inventoryItem.totalBoxes > inventoryItem.minStockLevel ? "In Stock" : "Out of Stock";
+            
+            await inventoryItem.save();
+          }
+        }
+      })
+    );
+
+    await Promise.all(inventoryUpdatePromises);
 
     // Update SaleSummary: set isProductAccept = false for returned products
     const updatePromises = processedData.flatMap((record) =>
@@ -161,6 +212,11 @@ router.post("/salesreturn", async (req, res) => {
               "products.$.usedQty": product.usedQty,
               "products.$.usedPrice": product.usedPrice,
               "products.$.usedAmount": product.usedAmount,
+              "products.$.profitLoss": product.profitLoss,
+              "products.$.netSellingAmount": product.netSellingAmount,
+              "products.$.amount": product.amount,
+              "products.$.totalQty": product.totalQty,
+              "products.$.averageUnitPrice": product.averageUnitPrice,
             },
           }
         )
@@ -259,11 +315,133 @@ router.get("/salesreturn/:id", async (req, res) => {
   }
 });
 
+// PUT - Update sale product based on invoiceNumber and productName
+router.put("/salesreturn/update-product", async (req, res) => {
+  try {
+    const { invoiceNumber, productName, salesQty, bonusQty, returnQuantity } = req.body;
+
+    if (!invoiceNumber || !productName) {
+      return res.status(400).json({
+        success: false,
+        message: "invoiceNumber and productName are required",
+      });
+    }
+
+    // Find the sale record by invoiceNumber
+    const saleRecord = await SaleSummary.findOne({ invoiceNumber });
+    
+    if (!saleRecord) {
+      return res.status(404).json({
+        success: false,
+        message: "Sale record not found with the provided invoice number",
+      });
+    }
+
+    // Find the specific product in the products array
+    const productIndex = saleRecord.products.findIndex(
+      product => product.productName === productName
+    );
+
+    if (productIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found in the sale record",
+      });
+    }
+
+    const product = saleRecord.products[productIndex];
+    
+    // Update the product quantities
+    const updatedSalesQty = salesQty !== undefined ? Number(salesQty) : product.salesQty;
+    const updatedBonusQty = bonusQty !== undefined ? Number(bonusQty) : product.bonusQty;
+    const updatedReturnQuantity = returnQuantity !== undefined ? Number(returnQuantity) : product.returnQuantity;
+    
+    // Calculate used quantity
+    const usedQty = Math.max(0, updatedSalesQty - updatedReturnQuantity);
+    
+    // Calculate total quantity
+    const totalQty = usedQty + updatedBonusQty;
+    
+    // Calculate amounts
+    const amount = usedQty * product.sellingPrice;
+    const netSellingAmount = amount - product.discount;
+    const usedAmount = usedQty * product.sellingPrice;
+    const averageUnitPrice = totalQty > 0 ? netSellingAmount / totalQty : 0;
+    const profitLoss = netSellingAmount - (usedQty * product.lc);
+
+    // Update the product
+    saleRecord.products[productIndex] = {
+      ...product,
+      salesQty: updatedSalesQty,
+      bonusQty: updatedBonusQty,
+      returnQuantity: updatedReturnQuantity,
+      usedQty: usedQty,
+      totalQty: totalQty,
+      amount: amount,
+      netSellingAmount: netSellingAmount,
+      usedAmount: usedAmount,
+      averageUnitPrice: averageUnitPrice,
+      profitLoss: profitLoss,
+      isProductAccept: updatedReturnQuantity > 0 ? false : product.isProductAccept
+    };
+
+    // Recalculate total amounts for the entire sale record
+    const totalNetSellingAmount = saleRecord.products.reduce((sum, prod) => sum + prod.netSellingAmount, 0);
+    const totalDueAmount = Math.max(0, totalNetSellingAmount - saleRecord.amount);
+
+    saleRecord.totalAmount = totalNetSellingAmount;
+    saleRecord.dueAmount = totalDueAmount;
+
+    // Save the updated sale record
+    await saleRecord.save();
+
+    // Update inventory if return quantity changed
+    if (returnQuantity !== undefined && returnQuantity > 0) {
+      const inventoryItem = await ProductInventory.findOne({
+        productName: productName
+      });
+
+      if (inventoryItem) {
+        // Calculate the difference in return quantity
+        const returnQtyDifference = returnQuantity - product.returnQuantity;
+        
+        if (returnQtyDifference !== 0) {
+          inventoryItem.totalBoxes += returnQtyDifference;
+          
+          if (inventoryItem.batches && inventoryItem.batches.length > 0) {
+            inventoryItem.batches[0].boxes += returnQtyDifference;
+            inventoryItem.batches[0].amount = inventoryItem.batches[0].boxes * inventoryItem.batches[0].lc;
+          }
+
+          inventoryItem.totalAmount = inventoryItem.batches.reduce((sum, batch) => sum + batch.amount, 0);
+          inventoryItem.status = inventoryItem.totalBoxes > inventoryItem.minStockLevel ? "In Stock" : "Out of Stock";
+          
+          await inventoryItem.save();
+        }
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Product updated successfully",
+      data: saleRecord,
+    });
+  } catch (error) {
+    console.error("Error updating product:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+});
+
 // PUT - Update a single sales return by ID
 router.put("/salesreturn/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const updatedData = req.body;
+    
     // ✅ Validate main ID
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
@@ -308,8 +486,8 @@ router.put("/salesreturn/:id", async (req, res) => {
     // ✅ Recalculate totals using the helper function
     const { totalAmount } = calculateProductTotals(updatedData.products);
 
-    const paidAmount = parseFloat(updatedData.paidAmount) || 0;
-    const dueAmount = Math.max(0, totalAmount - paidAmount);
+    const amount = parseFloat(updatedData.amount) || 0;
+    const dueAmount = Math.max(0, totalAmount - amount);
     const creditDays = parseInt(updatedData.creditDays) || 0;
 
     const invoiceDate = new Date(updatedData.invoiceDate);
@@ -333,11 +511,12 @@ router.put("/salesreturn/:id", async (req, res) => {
         usedPrice: Number(product.usedPrice) || 0,
         usedQty: Number(product.usedQty) || 0,
         usedAmount: Number(product.usedAmount) || 0,
+        profitLoss: Number(product.profitLoss) || 0,
       })),
       creditDays,
       dueDate,
       deliveryDate: updatedData.deliveryDate || updatedData.invoiceDate,
-      paidAmount,
+      amount,
       dueAmount,
       totalAmount,
     };
@@ -355,6 +534,41 @@ router.put("/salesreturn/:id", async (req, res) => {
       });
     }
 
+    // ✅ Update inventory for returned products
+    const inventoryUpdatePromises = updatedData.products.map(async (product) => {
+      if (product.returnQuantity > 0) {
+        const inventoryItem = await ProductInventory.findOne({
+          productName: product.productName
+        });
+
+        if (inventoryItem) {
+          // For update, we need to find the old record to calculate the difference
+          const oldRecord = await SalesReturn.findById(id);
+          const oldProduct = oldRecord.products.find(p => p.productName === product.productName);
+          
+          if (oldProduct) {
+            const returnQtyDifference = product.returnQuantity - oldProduct.returnQuantity;
+            
+            if (returnQtyDifference !== 0) {
+              inventoryItem.totalBoxes += returnQtyDifference;
+              
+              if (inventoryItem.batches && inventoryItem.batches.length > 0) {
+                inventoryItem.batches[0].boxes += returnQtyDifference;
+                inventoryItem.batches[0].amount = inventoryItem.batches[0].boxes * inventoryItem.batches[0].lc;
+              }
+
+              inventoryItem.totalAmount = inventoryItem.batches.reduce((sum, batch) => sum + batch.amount, 0);
+              inventoryItem.status = inventoryItem.totalBoxes > inventoryItem.minStockLevel ? "In Stock" : "Out of Stock";
+              
+              await inventoryItem.save();
+            }
+          }
+        }
+      }
+    });
+
+    await Promise.all(inventoryUpdatePromises);
+
     // ✅ Also update related SaleSummary entries
     await Promise.all(
       updatedData.products.map((product) =>
@@ -366,11 +580,16 @@ router.put("/salesreturn/:id", async (req, res) => {
           },
           {
             $set: {
-              "products.$.isProductAccept": false,
+              "products.$.isProductAccept": product.returnQuantity > 0 ? false : true,
               "products.$.returnQuantity": product.returnQuantity,
               "products.$.usedQty": product.usedQty,
               "products.$.usedPrice": product.usedPrice,
               "products.$.usedAmount": product.usedAmount,
+              "products.$.profitLoss": product.profitLoss,
+              "products.$.netSellingAmount": product.netSellingAmount,
+              "products.$.amount": product.amount,
+              "products.$.totalQty": product.totalQty,
+              "products.$.averageUnitPrice": product.averageUnitPrice,
             },
           }
         )
@@ -423,6 +642,9 @@ router.delete("/salesreturn", async (req, res) => {
       });
     }
 
+    // Get the records before deletion to update inventory
+    const recordsToDelete = await SalesReturn.find({ _id: { $in: validIds } });
+
     const result = await SalesReturn.deleteMany({ _id: { $in: validIds } });
 
     if (result.deletedCount === 0) {
@@ -431,6 +653,33 @@ router.delete("/salesreturn", async (req, res) => {
         message: "No sale returns found with the provided IDs",
       });
     }
+
+    // Revert inventory changes
+    const inventoryRevertPromises = recordsToDelete.flatMap((record) =>
+      record.products.map(async (product) => {
+        if (product.returnQuantity > 0) {
+          const inventoryItem = await ProductInventory.findOne({
+            productName: product.productName
+          });
+
+          if (inventoryItem) {
+            inventoryItem.totalBoxes -= product.returnQuantity;
+            
+            if (inventoryItem.batches && inventoryItem.batches.length > 0) {
+              inventoryItem.batches[0].boxes -= product.returnQuantity;
+              inventoryItem.batches[0].amount = inventoryItem.batches[0].boxes * inventoryItem.batches[0].lc;
+            }
+
+            inventoryItem.totalAmount = inventoryItem.batches.reduce((sum, batch) => sum + batch.amount, 0);
+            inventoryItem.status = inventoryItem.totalBoxes > inventoryItem.minStockLevel ? "In Stock" : "Out of Stock";
+            
+            await inventoryItem.save();
+          }
+        }
+      })
+    );
+
+    await Promise.all(inventoryRevertPromises);
 
     return res.status(200).json({
       success: true,
@@ -459,14 +708,42 @@ router.delete("/salesreturn/:id", async (req, res) => {
   }
 
   try {
-    const deleted = await SalesReturn.findByIdAndDelete(id);
+    // Get the record before deletion to update inventory
+    const recordToDelete = await SalesReturn.findById(id);
 
-    if (!deleted) {
+    if (!recordToDelete) {
       return res.status(404).json({
         success: false,
         message: "Sales return not found",
       });
     }
+
+    const deleted = await SalesReturn.findByIdAndDelete(id);
+
+    // Revert inventory changes
+    const inventoryRevertPromises = recordToDelete.products.map(async (product) => {
+      if (product.returnQuantity > 0) {
+        const inventoryItem = await ProductInventory.findOne({
+          productName: product.productName
+        });
+
+        if (inventoryItem) {
+          inventoryItem.totalBoxes -= product.returnQuantity;
+          
+          if (inventoryItem.batches && inventoryItem.batches.length > 0) {
+            inventoryItem.batches[0].boxes -= product.returnQuantity;
+            inventoryItem.batches[0].amount = inventoryItem.batches[0].boxes * inventoryItem.batches[0].lc;
+          }
+
+          inventoryItem.totalAmount = inventoryItem.batches.reduce((sum, batch) => sum + batch.amount, 0);
+          inventoryItem.status = inventoryItem.totalBoxes > inventoryItem.minStockLevel ? "In Stock" : "Out of Stock";
+          
+          await inventoryItem.save();
+        }
+      }
+    });
+
+    await Promise.all(inventoryRevertPromises);
 
     res.status(200).json({
       success: true,
@@ -516,7 +793,7 @@ router.post("/salesreturn/download-excel", async (req, res) => {
     const filteredReturns = await SalesReturn.find({
       invoiceDate: { $gte: start, $lte: end },
     })
-      .populate("customerId") // optional: if you want customer details
+      .populate("customerId")
       .sort({ invoiceDate: 1 });
 
     if (filteredReturns.length === 0) {
@@ -567,11 +844,16 @@ router.post("/salesreturn/download-excel", async (req, res) => {
       { key: "netSellingAmount", width: 25 },
       { key: "averageUnitPrice", width: 25 },
       { key: "lc", width: 10 },
+      { key: "profitLoss", width: 12 },
+      { key: "returnQuantity", width: 12 },
+      { key: "usedQty", width: 10 },
+      { key: "usedPrice", width: 12 },
+      { key: "usedAmount", width: 12 },
       { key: "isProductAccept", width: 15 },
       { key: "creditDays", width: 15 },
       { key: "dueDate", width: 15 },
       { key: "deliveryDate", width: 20 },
-      { key: "paidAmount", width: 15 },
+      { key: "amount", width: 15 },
       { key: "dueAmount", width: 15 },
       { key: "totalAmount", width: 15 },
       { key: "paymentStatus", width: 15 },
@@ -597,11 +879,16 @@ router.post("/salesreturn/download-excel", async (req, res) => {
       "Net Selling Amount",
       "Average Unit Price",
       "LC",
+      "Profit/Loss",
+      "Return Quantity",
+      "Used Qty",
+      "Used Price",
+      "Used Amount",
       "Product Accept",
       "Credit Days",
       "Due Date",
       "Delivery Date",
-      "Paid Amount",
+      "Amount",
       "Due Amount",
       "Total Amount",
       "Payment Status",
@@ -633,11 +920,16 @@ router.post("/salesreturn/download-excel", async (req, res) => {
           netSellingAmount: prod.netSellingAmount,
           averageUnitPrice: prod.averageUnitPrice,
           lc: prod.lc,
+          profitLoss: prod.profitLoss,
+          returnQuantity: prod.returnQuantity,
+          usedQty: prod.usedQty,
+          usedPrice: prod.usedPrice,
+          usedAmount: prod.usedAmount,
           isProductAccept: prod.isProductAccept ? "Yes" : "No",
           creditDays: sale.creditDays,
           dueDate: sale.dueDate,
           deliveryDate: sale.deliveryDate,
-          paidAmount: sale.paidAmount,
+          amount: sale.amount,
           dueAmount: sale.dueAmount,
           totalAmount: sale.totalAmount,
           paymentStatus: sale.paymentStatus,

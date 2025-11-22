@@ -96,32 +96,44 @@ const useReturnSaleForm = () => {
   );
 
   const calculateProductFields = useCallback((prod) => {
-    const salesQty = parseInt(prod.salesQty) || 0;
-    const returnQty = parseInt(prod.returnQuantity) || 0;
-    const price = parseFloat(prod.sellingPrice) || 0;
-    const disc = parseFloat(prod.discount) || 0;
-    const bonusQty = parseInt(prod.bonusQty) || 0;
+    const salesQty = parseNumber(prod.salesQty);
+    const returnQty = parseNumber(prod.returnQuantity);
+    const bonusQty = parseNumber(prod.bonusQty);
+    const sellingPrice = parseNumber(prod.sellingPrice);
+    const discount = parseNumber(prod.discount);
+    const lc = parseNumber(prod.lc);
 
+    // Ensure return quantity doesn't exceed sales quantity
     const validReturn = Math.min(returnQty, salesQty);
-    const used = Math.max(salesQty - validReturn, 0);
-    const totalQty = salesQty + bonusQty;
-    const amount = (price * salesQty).toFixed(2);
-    const net = (parseFloat(amount) - disc).toFixed(2);
-    const usedPrice = price;
-    const usedAmt = (used * usedPrice).toFixed(2);
-    const avgUnitPrice =
-      totalQty > 0 ? (parseFloat(net) / totalQty).toFixed(2) : "0.00";
+    const usedQty = Math.max(salesQty - validReturn, 0);
+    const totalQty = usedQty + bonusQty;
+
+    // Calculate Amount based on used quantity * lc
+    const amount = (usedQty * lc).toFixed(2);
+
+    // Calculate Net Selling Amount (Amount - discount)
+    const netSellingAmount = (parseNumber(amount) - discount).toFixed(2);
+
+    // Calculate Average Unit Price (Amount / totalQty)
+    const averageUnitPrice = totalQty > 0 ? (parseNumber(amount) / totalQty).toFixed(2) : "0.00";
+
+    // Calculate Profit/Loss: usedQty * sellingPrice - (usedQty + bonusQty) * lc
+    const profitLoss = (usedQty * sellingPrice - (usedQty + bonusQty) * lc).toFixed(2);
+
+    // Calculate used amount (usedQty * sellingPrice)
+    const usedAmount = (usedQty * sellingPrice).toFixed(2);
 
     return {
       ...prod,
       returnQuantity: validReturn.toString(),
-      usedQty: used.toString(),
+      usedQty: usedQty.toString(),
       totalQty: totalQty.toString(),
       amount,
-      netSellingAmount: net,
-      usedPrice,
-      usedAmount: usedAmt,
-      averageUnitPrice: avgUnitPrice,
+      netSellingAmount,
+      usedPrice: sellingPrice.toString(),
+      usedAmount,
+      averageUnitPrice,
+      profitLoss,
       isProductAccept: false,
     };
   }, []);
@@ -132,8 +144,8 @@ const useReturnSaleForm = () => {
         const prods = [...prev.products];
         prods[idx] = { ...prods[idx], [field]: value };
 
-        // Recalculate product fields when return quantity changes
-        if (field === "returnQuantity") {
+        // Recalculate product fields when return quantity or other key fields change
+        if (field === "returnQuantity" || field === "discount" || field === "lc") {
           const recalculated = prods.map(calculateProductFields);
           const total = recalculated
             .reduce((s, p) => s + parseFloat(p.netSellingAmount || 0), 0)
@@ -572,6 +584,9 @@ const AddReturnSale = () => {
         updateProduct(idx, "lc", prod.lc?.toString() ?? "0");
         updateProduct(idx, "profitLoss", prod.profitLoss?.toString() ?? "0");
         updateProduct(idx, "isProductAccept", false);
+
+        // Trigger recalculation with initial values
+        updateProduct(idx, "returnQuantity", "0");
 
         expandProduct(idx);
       }
