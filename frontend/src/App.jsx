@@ -10,7 +10,7 @@ import SettingsLayout from "./pages/SettingsLayout";
 import ProductManagerLayout from "./pages/ProductManagerLayout";
 import PurchaseLayout from "./pages/PurchaseLayout";
 import SaleLayout from "./pages/SaleLayout";
-import ExpenseLayout from "./pages/ExepenseLayout"; // Fixed typo in import
+import ExpenseLayout from "./pages/ExepenseLayout"; 
 import ReportsLayout from "./pages/ReportsLayout";
 import UtilityLayout from "./pages/UtilityLayout";
 import HrmLayout from "./pages/HrmLayout";
