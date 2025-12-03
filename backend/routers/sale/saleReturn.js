@@ -2,7 +2,7 @@ import express from "express";
 import mongoose from "mongoose";
 import SalesReturn from "../../models/sale/saleReturn.js";
 import SaleSummary from "../../models/sale/saleSummary.js";
-import ProductInventory from "../../models/purcharsing/purchaseInventory.js"; 
+import ProductInventory from "../../models/purcharsing/purchaseInventory.js";
 import ExcelJS from "exceljs";
 
 const router = express.Router();
@@ -25,9 +25,9 @@ const calculateProductTotals = (products) => {
       const totalQty = usedQty + bonusQty;
       const usedAmount = usedQty * sellingPrice;
       const averageUnitPrice = totalQty > 0 ? netSellingAmount / totalQty : 0;
-      
+
       // Calculate profit/loss
-      const profitLoss = netSellingAmount - (usedQty * lc);
+      const profitLoss = netSellingAmount - usedQty * lc;
 
       // Update product with calculated values
       product.amount = amount;
@@ -51,10 +51,10 @@ const calculateProductTotals = (products) => {
 // Helper function to format dates for Excel
 const formatDateToReadable = (dateString) => {
   const date = new Date(dateString);
-  return date.toLocaleDateString('en-US', { 
-    year: 'numeric', 
-    month: 'short', 
-    day: 'numeric' 
+  return date.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
   });
 };
 
@@ -62,8 +62,7 @@ const formatDateToReadable = (dateString) => {
 router.post("/salesreturn", async (req, res) => {
   try {
     const data = req.body;
-    console.log(data);
-    
+
     // Handle both single object and array
     const records = Array.isArray(data) ? data : [data];
 
@@ -102,7 +101,9 @@ router.post("/salesreturn", async (req, res) => {
         // Validate products array
         if (!Array.isArray(record.products) || record.products.length === 0) {
           throw new Error(
-            `Products array is required and cannot be empty in record ${index + 1}`
+            `Products array is required and cannot be empty in record ${
+              index + 1
+            }`
           );
         }
 
@@ -159,17 +160,18 @@ router.post("/salesreturn", async (req, res) => {
         if (product.returnQuantity > 0) {
           // Find the inventory item by product name
           const inventoryItem = await ProductInventory.findOne({
-            productName: product.productName
+            productName: product.productName,
           });
 
           if (inventoryItem) {
             // Update the total boxes by adding return quantity
             inventoryItem.totalBoxes += product.returnQuantity;
-            
+
             // Update the first batch or add a new batch for returned items
             if (inventoryItem.batches && inventoryItem.batches.length > 0) {
               inventoryItem.batches[0].boxes += product.returnQuantity;
-              inventoryItem.batches[0].amount = inventoryItem.batches[0].boxes * inventoryItem.batches[0].lc;
+              inventoryItem.batches[0].amount =
+                inventoryItem.batches[0].boxes * inventoryItem.batches[0].lc;
             } else {
               inventoryItem.batches.push({
                 boxes: product.returnQuantity,
@@ -177,17 +179,23 @@ router.post("/salesreturn", async (req, res) => {
                 fob: 1.1,
                 cif: 1.2,
                 amount: product.returnQuantity * (product.lc || 0.9),
-                expiryDate: new Date('2029-11-21'),
-                date: new Date()
+                expiryDate: new Date("2029-11-21"),
+                date: new Date(),
               });
             }
 
             // Update total amount
-            inventoryItem.totalAmount = inventoryItem.batches.reduce((sum, batch) => sum + batch.amount, 0);
-            
+            inventoryItem.totalAmount = inventoryItem.batches.reduce(
+              (sum, batch) => sum + batch.amount,
+              0
+            );
+
             // Update status based on stock level
-            inventoryItem.status = inventoryItem.totalBoxes > inventoryItem.minStockLevel ? "In Stock" : "Out of Stock";
-            
+            inventoryItem.status =
+              inventoryItem.totalBoxes > inventoryItem.minStockLevel
+                ? "In Stock"
+                : "Out of Stock";
+
             await inventoryItem.save();
           }
         }
@@ -318,7 +326,8 @@ router.get("/salesreturn/:id", async (req, res) => {
 // PUT - Update sale product based on invoiceNumber and productName
 router.put("/salesreturn/update-product", async (req, res) => {
   try {
-    const { invoiceNumber, productName, salesQty, bonusQty, returnQuantity } = req.body;
+    const { invoiceNumber, productName, salesQty, bonusQty, returnQuantity } =
+      req.body;
 
     if (!invoiceNumber || !productName) {
       return res.status(400).json({
@@ -329,7 +338,7 @@ router.put("/salesreturn/update-product", async (req, res) => {
 
     // Find the sale record by invoiceNumber
     const saleRecord = await SaleSummary.findOne({ invoiceNumber });
-    
+
     if (!saleRecord) {
       return res.status(404).json({
         success: false,
@@ -339,7 +348,7 @@ router.put("/salesreturn/update-product", async (req, res) => {
 
     // Find the specific product in the products array
     const productIndex = saleRecord.products.findIndex(
-      product => product.productName === productName
+      (product) => product.productName === productName
     );
 
     if (productIndex === -1) {
@@ -350,24 +359,29 @@ router.put("/salesreturn/update-product", async (req, res) => {
     }
 
     const product = saleRecord.products[productIndex];
-    
+
     // Update the product quantities
-    const updatedSalesQty = salesQty !== undefined ? Number(salesQty) : product.salesQty;
-    const updatedBonusQty = bonusQty !== undefined ? Number(bonusQty) : product.bonusQty;
-    const updatedReturnQuantity = returnQuantity !== undefined ? Number(returnQuantity) : product.returnQuantity;
-    
+    const updatedSalesQty =
+      salesQty !== undefined ? Number(salesQty) : product.salesQty;
+    const updatedBonusQty =
+      bonusQty !== undefined ? Number(bonusQty) : product.bonusQty;
+    const updatedReturnQuantity =
+      returnQuantity !== undefined
+        ? Number(returnQuantity)
+        : product.returnQuantity;
+
     // Calculate used quantity
     const usedQty = Math.max(0, updatedSalesQty - updatedReturnQuantity);
-    
+
     // Calculate total quantity
     const totalQty = usedQty + updatedBonusQty;
-    
+
     // Calculate amounts
     const amount = usedQty * product.sellingPrice;
     const netSellingAmount = amount - product.discount;
     const usedAmount = usedQty * product.sellingPrice;
     const averageUnitPrice = totalQty > 0 ? netSellingAmount / totalQty : 0;
-    const profitLoss = netSellingAmount - (usedQty * product.lc);
+    const profitLoss = netSellingAmount - usedQty * product.lc;
 
     // Update the product
     saleRecord.products[productIndex] = {
@@ -382,12 +396,19 @@ router.put("/salesreturn/update-product", async (req, res) => {
       usedAmount: usedAmount,
       averageUnitPrice: averageUnitPrice,
       profitLoss: profitLoss,
-      isProductAccept: updatedReturnQuantity > 0 ? false : product.isProductAccept
+      isProductAccept:
+        updatedReturnQuantity > 0 ? false : product.isProductAccept,
     };
 
     // Recalculate total amounts for the entire sale record
-    const totalNetSellingAmount = saleRecord.products.reduce((sum, prod) => sum + prod.netSellingAmount, 0);
-    const totalDueAmount = Math.max(0, totalNetSellingAmount - saleRecord.amount);
+    const totalNetSellingAmount = saleRecord.products.reduce(
+      (sum, prod) => sum + prod.netSellingAmount,
+      0
+    );
+    const totalDueAmount = Math.max(
+      0,
+      totalNetSellingAmount - saleRecord.amount
+    );
 
     saleRecord.totalAmount = totalNetSellingAmount;
     saleRecord.dueAmount = totalDueAmount;
@@ -398,24 +419,31 @@ router.put("/salesreturn/update-product", async (req, res) => {
     // Update inventory if return quantity changed
     if (returnQuantity !== undefined && returnQuantity > 0) {
       const inventoryItem = await ProductInventory.findOne({
-        productName: productName
+        productName: productName,
       });
 
       if (inventoryItem) {
         // Calculate the difference in return quantity
         const returnQtyDifference = returnQuantity - product.returnQuantity;
-        
+
         if (returnQtyDifference !== 0) {
           inventoryItem.totalBoxes += returnQtyDifference;
-          
+
           if (inventoryItem.batches && inventoryItem.batches.length > 0) {
             inventoryItem.batches[0].boxes += returnQtyDifference;
-            inventoryItem.batches[0].amount = inventoryItem.batches[0].boxes * inventoryItem.batches[0].lc;
+            inventoryItem.batches[0].amount =
+              inventoryItem.batches[0].boxes * inventoryItem.batches[0].lc;
           }
 
-          inventoryItem.totalAmount = inventoryItem.batches.reduce((sum, batch) => sum + batch.amount, 0);
-          inventoryItem.status = inventoryItem.totalBoxes > inventoryItem.minStockLevel ? "In Stock" : "Out of Stock";
-          
+          inventoryItem.totalAmount = inventoryItem.batches.reduce(
+            (sum, batch) => sum + batch.amount,
+            0
+          );
+          inventoryItem.status =
+            inventoryItem.totalBoxes > inventoryItem.minStockLevel
+              ? "In Stock"
+              : "Out of Stock";
+
           await inventoryItem.save();
         }
       }
@@ -441,7 +469,7 @@ router.put("/salesreturn/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const updatedData = req.body;
-    
+
     // ✅ Validate main ID
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
@@ -535,37 +563,50 @@ router.put("/salesreturn/:id", async (req, res) => {
     }
 
     // ✅ Update inventory for returned products
-    const inventoryUpdatePromises = updatedData.products.map(async (product) => {
-      if (product.returnQuantity > 0) {
-        const inventoryItem = await ProductInventory.findOne({
-          productName: product.productName
-        });
+    const inventoryUpdatePromises = updatedData.products.map(
+      async (product) => {
+        if (product.returnQuantity > 0) {
+          const inventoryItem = await ProductInventory.findOne({
+            productName: product.productName,
+          });
 
-        if (inventoryItem) {
-          // For update, we need to find the old record to calculate the difference
-          const oldRecord = await SalesReturn.findById(id);
-          const oldProduct = oldRecord.products.find(p => p.productName === product.productName);
-          
-          if (oldProduct) {
-            const returnQtyDifference = product.returnQuantity - oldProduct.returnQuantity;
-            
-            if (returnQtyDifference !== 0) {
-              inventoryItem.totalBoxes += returnQtyDifference;
-              
-              if (inventoryItem.batches && inventoryItem.batches.length > 0) {
-                inventoryItem.batches[0].boxes += returnQtyDifference;
-                inventoryItem.batches[0].amount = inventoryItem.batches[0].boxes * inventoryItem.batches[0].lc;
+          if (inventoryItem) {
+            // For update, we need to find the old record to calculate the difference
+            const oldRecord = await SalesReturn.findById(id);
+            const oldProduct = oldRecord.products.find(
+              (p) => p.productName === product.productName
+            );
+
+            if (oldProduct) {
+              const returnQtyDifference =
+                product.returnQuantity - oldProduct.returnQuantity;
+
+              if (returnQtyDifference !== 0) {
+                inventoryItem.totalBoxes += returnQtyDifference;
+
+                if (inventoryItem.batches && inventoryItem.batches.length > 0) {
+                  inventoryItem.batches[0].boxes += returnQtyDifference;
+                  inventoryItem.batches[0].amount =
+                    inventoryItem.batches[0].boxes *
+                    inventoryItem.batches[0].lc;
+                }
+
+                inventoryItem.totalAmount = inventoryItem.batches.reduce(
+                  (sum, batch) => sum + batch.amount,
+                  0
+                );
+                inventoryItem.status =
+                  inventoryItem.totalBoxes > inventoryItem.minStockLevel
+                    ? "In Stock"
+                    : "Out of Stock";
+
+                await inventoryItem.save();
               }
-
-              inventoryItem.totalAmount = inventoryItem.batches.reduce((sum, batch) => sum + batch.amount, 0);
-              inventoryItem.status = inventoryItem.totalBoxes > inventoryItem.minStockLevel ? "In Stock" : "Out of Stock";
-              
-              await inventoryItem.save();
             }
           }
         }
       }
-    });
+    );
 
     await Promise.all(inventoryUpdatePromises);
 
@@ -580,7 +621,8 @@ router.put("/salesreturn/:id", async (req, res) => {
           },
           {
             $set: {
-              "products.$.isProductAccept": product.returnQuantity > 0 ? false : true,
+              "products.$.isProductAccept":
+                product.returnQuantity > 0 ? false : true,
               "products.$.returnQuantity": product.returnQuantity,
               "products.$.usedQty": product.usedQty,
               "products.$.usedPrice": product.usedPrice,
@@ -659,20 +701,27 @@ router.delete("/salesreturn", async (req, res) => {
       record.products.map(async (product) => {
         if (product.returnQuantity > 0) {
           const inventoryItem = await ProductInventory.findOne({
-            productName: product.productName
+            productName: product.productName,
           });
 
           if (inventoryItem) {
             inventoryItem.totalBoxes -= product.returnQuantity;
-            
+
             if (inventoryItem.batches && inventoryItem.batches.length > 0) {
               inventoryItem.batches[0].boxes -= product.returnQuantity;
-              inventoryItem.batches[0].amount = inventoryItem.batches[0].boxes * inventoryItem.batches[0].lc;
+              inventoryItem.batches[0].amount =
+                inventoryItem.batches[0].boxes * inventoryItem.batches[0].lc;
             }
 
-            inventoryItem.totalAmount = inventoryItem.batches.reduce((sum, batch) => sum + batch.amount, 0);
-            inventoryItem.status = inventoryItem.totalBoxes > inventoryItem.minStockLevel ? "In Stock" : "Out of Stock";
-            
+            inventoryItem.totalAmount = inventoryItem.batches.reduce(
+              (sum, batch) => sum + batch.amount,
+              0
+            );
+            inventoryItem.status =
+              inventoryItem.totalBoxes > inventoryItem.minStockLevel
+                ? "In Stock"
+                : "Out of Stock";
+
             await inventoryItem.save();
           }
         }
@@ -721,27 +770,36 @@ router.delete("/salesreturn/:id", async (req, res) => {
     const deleted = await SalesReturn.findByIdAndDelete(id);
 
     // Revert inventory changes
-    const inventoryRevertPromises = recordToDelete.products.map(async (product) => {
-      if (product.returnQuantity > 0) {
-        const inventoryItem = await ProductInventory.findOne({
-          productName: product.productName
-        });
+    const inventoryRevertPromises = recordToDelete.products.map(
+      async (product) => {
+        if (product.returnQuantity > 0) {
+          const inventoryItem = await ProductInventory.findOne({
+            productName: product.productName,
+          });
 
-        if (inventoryItem) {
-          inventoryItem.totalBoxes -= product.returnQuantity;
-          
-          if (inventoryItem.batches && inventoryItem.batches.length > 0) {
-            inventoryItem.batches[0].boxes -= product.returnQuantity;
-            inventoryItem.batches[0].amount = inventoryItem.batches[0].boxes * inventoryItem.batches[0].lc;
+          if (inventoryItem) {
+            inventoryItem.totalBoxes -= product.returnQuantity;
+
+            if (inventoryItem.batches && inventoryItem.batches.length > 0) {
+              inventoryItem.batches[0].boxes -= product.returnQuantity;
+              inventoryItem.batches[0].amount =
+                inventoryItem.batches[0].boxes * inventoryItem.batches[0].lc;
+            }
+
+            inventoryItem.totalAmount = inventoryItem.batches.reduce(
+              (sum, batch) => sum + batch.amount,
+              0
+            );
+            inventoryItem.status =
+              inventoryItem.totalBoxes > inventoryItem.minStockLevel
+                ? "In Stock"
+                : "Out of Stock";
+
+            await inventoryItem.save();
           }
-
-          inventoryItem.totalAmount = inventoryItem.batches.reduce((sum, batch) => sum + batch.amount, 0);
-          inventoryItem.status = inventoryItem.totalBoxes > inventoryItem.minStockLevel ? "In Stock" : "Out of Stock";
-          
-          await inventoryItem.save();
         }
       }
-    });
+    );
 
     await Promise.all(inventoryRevertPromises);
 
@@ -817,7 +875,9 @@ router.post("/salesreturn/download-excel", async (req, res) => {
     };
 
     worksheet.mergeCells("A2:AC2");
-    worksheet.getCell("A2").value = `Sales Return Summary (${formatDateToReadable(
+    worksheet.getCell(
+      "A2"
+    ).value = `Sales Return Summary (${formatDateToReadable(
       startDate
     )} - ${formatDateToReadable(endDate)})`;
     worksheet.getCell("A2").font = { bold: true, size: 14 };

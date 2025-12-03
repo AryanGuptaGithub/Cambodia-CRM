@@ -153,7 +153,7 @@ function App() {
           <Route path="accountlayout" element={<CashAndBankLayout />}>
             <Route index element={<CashAndBank />} />
           </Route>
-          {/* Staff Member routes */}
+          
           <Route path="staffmemberLayout" element={<StaffMemberLayout />}>
             <Route path="staffmember" element={<StaffMember />} />
             <Route path="staffmember/add" element={<AddStaffMember />} />

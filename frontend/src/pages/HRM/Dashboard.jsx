@@ -32,15 +32,130 @@ import "react-datepicker/dist/react-datepicker.css";
 import ReactDOM from "react-dom";
 import { fetchMRList, fetchHRMSalary } from "../../utils/customerUtil";
 import SampleExcelDownloadStaff from "../../excels/SampleExcelDownloadStaff";
+import { parseExcelDate } from "../../utils/excelUtility";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
+
 // Function to format date as "MMM YYYY" (e.g., "Oct 2025")
 const formatMonthYear = (date) => {
   return date.toLocaleString("en-US", {
     month: "short",
     year: "numeric",
   });
+};
+
+// Function to format date as "DD MMM YYYY" (e.g., "13 Mar 2025")
+const formatDateToDDMMMYYYY = (dateString) => {
+  if (!dateString) return "";
+
+  try {
+    let date;
+
+    // Check if it's already a Date object
+    if (dateString instanceof Date) {
+      date = dateString;
+    } else if (typeof dateString === "string") {
+      // Try to parse the date string
+      // First, check for DD/MM/YYYY format
+      const ddmmyyyyMatch = dateString.match(
+        /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/
+      );
+      if (ddmmyyyyMatch) {
+        const day = parseInt(ddmmyyyyMatch[1], 10);
+        const month = parseInt(ddmmyyyyMatch[2], 10) - 1; // Months are 0-indexed
+        const year = parseInt(ddmmyyyyMatch[3], 10);
+        date = new Date(year, month, day);
+      } else {
+        // Try parsing as ISO string or other formats
+        date = new Date(dateString);
+      }
+    } else {
+      date = new Date(dateString);
+    }
+
+    if (isNaN(date.getTime())) {
+      console.error("Invalid date:", dateString);
+      return dateString || "--";
+    }
+
+    const months = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
+
+    const day = date.getDate();
+    const month = months[date.getMonth()];
+    const year = date.getFullYear();
+
+    return `${day} ${month} ${year}`;
+  } catch (error) {
+    console.error("Error formatting date:", error, dateString);
+    return dateString || "--";
+  }
+};
+
+// Improved date parsing function for Excel data
+const parseDateFromString = (dateString) => {
+  if (!dateString) return null;
+
+  try {
+    // If it's already a Date object
+    if (dateString instanceof Date) {
+      return dateString;
+    }
+
+    // If it's a number (Excel serial date)
+    if (typeof dateString === "number") {
+      return parseExcelDate(dateString);
+    }
+
+    // Try different date formats
+    const dateStr = dateString.toString().trim();
+
+    // Format: DD/MM/YYYY or DD-MM-YYYY
+    const ddmmyyyyMatch = dateStr.match(
+      /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/
+    );
+    if (ddmmyyyyMatch) {
+      const day = parseInt(ddmmyyyyMatch[1], 10);
+      const month = parseInt(ddmmyyyyMatch[2], 10) - 1; // Months are 0-indexed
+      const year = parseInt(ddmmyyyyMatch[3], 10);
+      return new Date(year, month, day);
+    }
+
+    // Format: YYYY-MM-DD (ISO)
+    const yyyymmddMatch = dateStr.match(
+      /^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/
+    );
+    if (yyyymmddMatch) {
+      const year = parseInt(yyyymmddMatch[1], 10);
+      const month = parseInt(yyyymmddMatch[2], 10) - 1;
+      const day = parseInt(yyyymmddMatch[3], 10);
+      return new Date(year, month, day);
+    }
+
+    // Try Date.parse for other formats
+    const parsedDate = new Date(dateStr);
+    if (!isNaN(parsedDate.getTime())) {
+      return parsedDate;
+    }
+
+    return null;
+  } catch (error) {
+    console.error("Error parsing date:", error, dateString);
+    return null;
+  }
 };
 
 const Dashboard = () => {
@@ -59,12 +174,11 @@ const Dashboard = () => {
   const staffPerPage = 5;
   const [activeTab, setActiveTab] = useState("Total MRs");
 
-  // Payroll State - Changed from number to array
-
+  // Payroll State
   const [previousMonthLabel, setPreviousMonthLabel] = useState("");
   const [payrollData, setPayrollData] = useState([]);
   const [totalPayroll, setTotalPayroll] = useState(0);
-  
+
   // User State
   const [user, setUser] = useState({
     name: "",
@@ -81,6 +195,7 @@ const Dashboard = () => {
     date: "",
     enabled: "",
     _id: null,
+    userId: null,
   });
 
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
@@ -113,7 +228,6 @@ const Dashboard = () => {
       );
 
       if (!response.ok) {
-        // Handle different error statuses
         if (response.status === 404) {
           throw new Error("No data found for the specified period");
         } else if (response.status === 400) {
@@ -123,7 +237,6 @@ const Dashboard = () => {
         }
       }
 
-      // Check if response is Excel file - FIXED CONTENT TYPE CHECK
       const contentType = response.headers.get("content-type");
       const isExcelFile =
         contentType &&
@@ -134,7 +247,6 @@ const Dashboard = () => {
           ));
 
       if (!isExcelFile) {
-        // If not Excel, try to read as JSON error
         try {
           const errorData = await response.json();
           throw new Error(errorData.message || "Invalid response format");
@@ -143,7 +255,6 @@ const Dashboard = () => {
         }
       }
 
-      // Get the filename from Content-Disposition header or use default
       const contentDisposition = response.headers.get("Content-Disposition");
       let filename = `MR_Payroll_${year}_${month}.xlsx`;
 
@@ -154,7 +265,6 @@ const Dashboard = () => {
         }
       }
 
-      // Create blob and download
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -194,56 +304,23 @@ const Dashboard = () => {
       });
       if (response.data && response.data.success) {
         setPayrollData(response.data.data || []);
+
+        // Calculate total payroll
+        const total = response.data.data.reduce((sum, item) => {
+          return sum + (item.netSalary || 0);
+        }, 0);
+        setTotalPayroll(total);
       } else {
         setPayrollData([]);
+        setTotalPayroll(0);
       }
     } catch (error) {
       console.error("Error fetching payroll data:", error);
       setPayrollData([]);
-      showToast("error", "Failed to fetch payroll data");
+      setTotalPayroll(0);
     }
   };
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        // Fetch user data
-        await fetchUserData();
-        // Fetch MR List
-        const mrData = await fetchMRList();
-        setMrList(mrData.data);
-
-        // Calculate previous month label
-        const currentDate = new Date();
-        const previousMonthDate = new Date(
-          currentDate.getFullYear(),
-          currentDate.getMonth() - 1,
-          1
-        );
-        const formattedPreviousMonth = formatMonthYear(previousMonthDate);
-        setPreviousMonthLabel(formattedPreviousMonth);
-
-        // Fetch Payroll Data
-        const salaryData = await fetchHRMSalary();
-
-        if (salaryData && salaryData.success && salaryData.data) {
-          setTotalPayroll(salaryData.data.previousMonth);
-        } else {
-          // Set default value if no data
-          setTotalPayroll(0);
-        }
-
-        await fetchTeams();
-      } catch (err) {
-        showToast("error", err.message || "Failed to fetch data");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-  }, []);
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -330,21 +407,21 @@ const Dashboard = () => {
     setCurrentPage(1);
   }, [searchTerm, activeTab]);
 
-  // Calculate dashboard stats
+  // Calculate dashboard stats using userId.isActive
   const dashboardStats = useMemo(() => {
     const totalMRs = mrList.length;
-    const enabledMRs = mrList.filter((mr) => mr.enabled).length;
-    const disabledMRs = mrList.filter((mr) => !mr.enabled).length;
+    const enabledMRs = mrList.filter((mr) => mr.userId?.isActive).length;
+    const disabledMRs = mrList.filter((mr) => !mr.userId?.isActive).length;
     const totalTeams = [
       ...new Set(mrList.map((mr) => mr.teamName).filter(Boolean)),
     ].length;
 
-    // Recent joins (last 30 days)
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const recentJoins = mrList.filter((mr) => {
-      const joinDate = new Date(mr.date);
-      return joinDate >= thirtyDaysAgo;
+      if (!mr.date) return false;
+      const joinDate = parseDateFromString(mr.date);
+      return joinDate && joinDate >= thirtyDaysAgo;
     }).length;
 
     return {
@@ -354,19 +431,19 @@ const Dashboard = () => {
       totalTeams,
       recentJoins,
     };
-  }, [mrList, payrollData]);
+  }, [mrList]);
 
-  // Filter MR data based on active tab
+  // Filter MR data based on active tab using userId.isActive
   const filteredMR = useMemo(() => {
     const lowerSearch = searchTerm.toLowerCase();
 
     let filteredData = mrList;
 
-    // Apply tab filter
+    // Apply tab filter using userId.isActive
     if (activeTab === "Active MRs") {
-      filteredData = filteredData.filter((mr) => mr.enabled === true);
+      filteredData = filteredData.filter((mr) => mr.userId?.isActive === true);
     } else if (activeTab === "Inactive MRs") {
-      filteredData = filteredData.filter((mr) => mr.enabled === false);
+      filteredData = filteredData.filter((mr) => mr.userId?.isActive === false);
     }
 
     // Apply search filter
@@ -440,12 +517,18 @@ const Dashboard = () => {
   );
 
   const handleMRView = useCallback((mr) => {
-    setForm(mr);
+    setForm({
+      ...mr,
+      date: mr.date ? parseDateFromString(mr.date) : null,
+    });
     setIsViewModalOpen(true);
   }, []);
 
   const handleMREdit = useCallback((mr) => {
-    setForm(mr);
+    setForm({
+      ...mr,
+      date: mr.date ? parseDateFromString(mr.date) : null,
+    });
     setIsEditModalOpen(true);
   }, []);
 
@@ -518,23 +601,33 @@ const Dashboard = () => {
     });
   };
 
-  // Status toggle function
+  // Status toggle function using userId.isActive
   const handleStatusToggle = async (mr) => {
     try {
+      const newStatus = !mr.userId?.isActive;
       const res = await axios.put(`${backendUrl}/api/staff/${mr._id}`, {
-        enabled: !mr.enabled,
+        enabled: newStatus,
       });
 
       if (res.status === 200) {
         setMrList((prev) =>
           prev.map((item) =>
-            item._id === mr._id ? { ...item, enabled: !item.enabled } : item
+            item._id === mr._id
+              ? {
+                  ...item,
+                  enabled: newStatus,
+                  userId: {
+                    ...item.userId,
+                    isActive: newStatus,
+                  },
+                }
+              : item
           )
         );
         showToast(
           "success",
           `MR <b>${mr.medicalRepName}</b> ${
-            !mr.enabled ? "enabled" : "disabled"
+            newStatus ? "enabled" : "disabled"
           } successfully`
         );
       }
@@ -562,6 +655,7 @@ const Dashboard = () => {
         let headerRowIndex = -1;
         let headersMap = {};
 
+        // Find header row including PASSWORD
         for (let i = 0; i < rows.length; i++) {
           const row = rows[i];
           const normalizedRow = row.map((cell) =>
@@ -574,7 +668,8 @@ const Dashboard = () => {
             normalizedRow.includes("contact no") &&
             normalizedRow.includes("email") &&
             (normalizedRow.includes("joining date") ||
-              normalizedRow.includes("instance of joining date"))
+              normalizedRow.includes("instance of joining date")) &&
+            normalizedRow.includes("password") // <-- NEW REQUIRED FIELD
           ) {
             headerRowIndex = i;
             headersMap = normalizedRow.reduce((acc, header, index) => {
@@ -588,7 +683,7 @@ const Dashboard = () => {
         if (headerRowIndex === -1) {
           showToast(
             "error",
-            "Required headers not found in Excel file. Please ensure columns: MR Name, Team Name, Contact No, Email, Joining Date"
+            "Required headers missing! Please include: MR Name, Team Name, Contact No, Email, Joining Date, Password"
           );
           return;
         }
@@ -605,14 +700,16 @@ const Dashboard = () => {
               item["joining date"] !== undefined
                 ? "joining date"
                 : "instance of joining date";
+
             const rawDate = item[joiningDateKey];
-            const parsedDate = rawDate ? new Date(rawDate) : null;
+            const parsedDate = parseDateFromString(rawDate);
 
             return {
-              medicalRepName: item["mr name"],
-              teamName: item["team name"],
-              contactNo: item["contact no"],
-              email: item["email"],
+              medicalRepName: item["mr name"]?.toString().trim() || "",
+              teamName: item["team name"]?.toString().trim() || "",
+              contactNo: item["contact no"]?.toString().trim() || "",
+              email: item["email"]?.toString().trim() || "",
+              password: item["password"]?.toString().trim() || "", 
               date: parsedDate ? parsedDate.toISOString() : null,
             };
           })
@@ -621,12 +718,18 @@ const Dashboard = () => {
               entry.medicalRepName ||
               entry.teamName ||
               entry.contactNo ||
-              entry.email
+              entry.email ||
+              entry.password
           );
+
         setParsedData(mappedData);
+        showToast(
+          "success",
+          `Parsed ${mappedData.length} records successfully`
+        );
       } catch (error) {
         console.error("Error parsing file:", error);
-        showToast("error", "Error parsing Excel file");
+        showToast("error", "Error parsing Excel file: " + error.message);
       }
     };
 
@@ -643,9 +746,18 @@ const Dashboard = () => {
     }
     setIsUploading(true);
     try {
+      const validData = parsedData.filter(
+        (item) => item.medicalRepName && item.medicalRepName.trim() !== ""
+      );
+
+      if (validData.length === 0) {
+        showToast("error", "No valid records found in the file");
+        return;
+      }
+
       const res = await axios.post(
         `${backendUrl}/api/staffs/import`,
-        parsedData
+        validData
       );
 
       if (res.status === 200) {
@@ -670,7 +782,15 @@ const Dashboard = () => {
     if (!form._id) return;
 
     try {
-      const res = await axios.put(`${backendUrl}/api/staff/${form._id}`, form);
+      const updatedData = {
+        ...form,
+        date: form.date ? new Date(form.date).toISOString() : null,
+      };
+
+      const res = await axios.put(
+        `${backendUrl}/api/staff/${form._id}`,
+        updatedData
+      );
 
       if (res.status === 200) {
         showToast("success", "MR updated successfully");
@@ -679,7 +799,7 @@ const Dashboard = () => {
         await fetchTeams();
       }
     } catch (err) {
-      showToast("error", "Failed to update MR.");
+      showToast("error", err.response?.data?.message || "Failed to update MR.");
     }
   };
 
@@ -740,7 +860,7 @@ const Dashboard = () => {
     );
   };
 
-  // Dashboard Cards Component - Now clickable
+  // Dashboard Cards Component
   const DashboardCards = () => (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
       {/* Total MRs Card */}
@@ -808,6 +928,7 @@ const Dashboard = () => {
         </div>
       </div>
 
+      {/* Total Payroll Card */}
       <div
         className={`rounded-xl shadow-md border border-gray-200 p-6 cursor-pointer transition-all ${
           activeTab === "Total Payroll" ? "bg-gray-200" : "bg-white"
@@ -834,7 +955,12 @@ const Dashboard = () => {
   const RecentActivity = () => {
     const recentMRs = useMemo(() => {
       return mrList
-        .sort((a, b) => new Date(b.date) - new Date(a.date))
+        .filter((mr) => mr.date) // Filter out MRs without date
+        .sort((a, b) => {
+          const dateA = parseDateFromString(a.date);
+          const dateB = parseDateFromString(b.date);
+          return dateB - dateA;
+        })
         .slice(0, 5);
     }, [mrList]);
 
@@ -848,7 +974,7 @@ const Dashboard = () => {
           {recentMRs.length > 0 ? (
             recentMRs.map((mr, index) => (
               <div
-                key={mr._id}
+                key={mr._id || index}
                 className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg"
               >
                 <div className="flex items-center space-x-3">
@@ -857,23 +983,25 @@ const Dashboard = () => {
                   </div>
                   <div>
                     <p className="text-sm font-medium text-gray-800 capitalize">
-                      {mr.medicalRepName}
+                      {mr.medicalRepName || "Unknown"}
                     </p>
-                    <p className="text-xs text-gray-500">{mr.teamName}</p>
+                    <p className="text-xs text-gray-500">
+                      {mr.teamName || "No Team"}
+                    </p>
                   </div>
                 </div>
                 <div className="text-right">
                   <p className="text-xs text-gray-500">
-                    {formatDateToReadable(mr.date)}
+                    {mr.date ? formatDateToDDMMMYYYY(mr.date) : "No Date"}
                   </p>
                   <span
                     className={`inline-block px-2 py-1 rounded-full text-xs ${
-                      mr.enabled
+                      mr.userId?.isActive
                         ? "bg-green-100 text-green-800"
                         : "bg-red-100 text-red-800"
                     }`}
                   >
-                    {mr.enabled ? "Active" : "Inactive"}
+                    {mr.userId?.isActive ? "Active" : "Inactive"}
                   </span>
                 </div>
               </div>
@@ -886,8 +1014,7 @@ const Dashboard = () => {
     );
   };
 
-  // Payroll Table Component - Updated to use actual payroll data
-
+  // Payroll Table Component
   const PayrollTable = () => (
     <div className="bg-white rounded-xl shadow-md border border-gray-200">
       <div className="p-6 border-b border-gray-200">
@@ -905,7 +1032,6 @@ const Dashboard = () => {
               <th className="p-4 text-sm font-semibold text-gray-700">
                 MR Name
               </th>
-
               <th className="p-4 text-sm font-semibold text-gray-700">
                 Contact No
               </th>
@@ -926,7 +1052,10 @@ const Dashboard = () => {
           </thead>
           <tbody className="divide-y divide-gray-200">
             {payrollData.map((item, index) => (
-              <tr key={item._id} className="hover:bg-gray-50 transition-colors">
+              <tr
+                key={item._id || index}
+                className="hover:bg-gray-50 transition-colors"
+              >
                 <td className="p-4 text-sm text-gray-600">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 text-sm font-semibold">
@@ -937,35 +1066,38 @@ const Dashboard = () => {
                         : "MR"}
                     </div>
                     <span className="capitalize">
-                      {item.employeeId?.medicalRepName}
+                      {item.employeeId?.medicalRepName || "Unknown"}
                     </span>
                   </div>
                 </td>
-
                 <td className="p-4 text-sm text-gray-600">
-                  {item.employeeId?.contactNo}
+                  {item.employeeId?.contactNo || "N/A"}
                 </td>
                 <td className="p-4 text-sm text-gray-600">
-                  {item.employeeId?.email}
+                  {item.employeeId?.email || "N/A"}
                 </td>
                 <td className="p-4 text-sm text-gray-600">
                   <span className="font-semibold text-blue-700">
-                    {item.basicSalary || 0}
+                    {item.basicSalary
+                      ? formatCurrency(item.basicSalary)
+                      : "0.00"}
                   </span>
                 </td>
                 <td className="p-4 text-sm text-gray-600">
                   <span className="font-semibold text-green-700">
-                    {item.totalAllowance || 0}
+                    {item.totalAllowance
+                      ? formatCurrency(item.totalAllowance)
+                      : "0.00"}
                   </span>
                 </td>
                 <td className="p-4 text-sm text-gray-600">
                   <span className="font-semibold text-red-700">
-                    {item.deductions || 0}
+                    {item.deductions ? formatCurrency(item.deductions) : "0.00"}
                   </span>
                 </td>
                 <td className="p-4 text-sm text-gray-600">
                   <span className="font-semibold text-purple-700">
-                    {item.netSalary || 0}
+                    {item.netSalary ? formatCurrency(item.netSalary) : "0.00"}
                   </span>
                 </td>
               </tr>
@@ -981,6 +1113,8 @@ const Dashboard = () => {
       </div>
     </div>
   );
+
+  // DataTable Component
   const DataTable = ({
     data,
     columns,
@@ -990,7 +1124,7 @@ const Dashboard = () => {
     onExport,
     selectable = false,
     showButtons = false,
-    buttonMode = "all", // "all" or "deleteOnly"
+    buttonMode = "all",
   }) => (
     <div className="bg-white rounded-xl shadow-md border border-gray-200">
       <div className="p-6 border-b border-gray-200">
@@ -998,7 +1132,6 @@ const Dashboard = () => {
           <h3 className="text-xl font-semibold text-gray-800">MR Management</h3>
           {showButtons && (
             <div className="flex gap-3">
-              {/* Show Export, Add New, Import only in "all" mode (Total MRs tab) */}
               {buttonMode === "all" && (
                 <>
                   <button
@@ -1024,7 +1157,6 @@ const Dashboard = () => {
                 </>
               )}
 
-              {/* Show delete button when there are selected items - Available in all modes */}
               {selected.length > 0 && (
                 <button
                   onClick={deleteSelectedMR}
@@ -1039,12 +1171,11 @@ const Dashboard = () => {
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full border-collapse">
+        <table className="w-full border-collapse text-center">
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
-              {/* Only show checkbox column header if there's data AND it's selectable */}
               {selectable && data.length > 0 && (
-                <th className="p-4 text-left">
+                <th className="p-4">
                   <input
                     type="checkbox"
                     checked={selected.length === data.length && data.length > 0}
@@ -1066,20 +1197,22 @@ const Dashboard = () => {
               {columns.map((column) => (
                 <th
                   key={column.key}
-                  className="p-4 text-left text-sm font-semibold text-gray-700"
+                  className="p-4 text-sm font-semibold text-gray-700"
                 >
                   {column.title}
                 </th>
               ))}
-              <th className="p-4 text-left text-sm font-semibold text-gray-700">
+              <th className="p-4 text-sm font-semibold text-gray-700">
                 Actions
               </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
             {data.map((item, index) => (
-              <tr key={item._id} className="hover:bg-gray-50 transition-colors">
-                {/* Only show checkbox cell if there's data AND it's selectable */}
+              <tr
+                key={item._id || index}
+                className="hover:bg-gray-50 transition-colors"
+              >
                 {selectable && data.length > 0 && (
                   <td className="p-4">
                     <input
@@ -1133,6 +1266,8 @@ const Dashboard = () => {
       </div>
     </div>
   );
+
+  // MRManagement Component
   const MRManagement = () => {
     const columns = [
       {
@@ -1145,17 +1280,28 @@ const Dashboard = () => {
                 ? item.medicalRepName.substring(0, 2).toUpperCase()
                 : "MR"}
             </div>
-            <span className="capitalize">{item.medicalRepName}</span>
+            <span className="capitalize">
+              {item.medicalRepName || "Unknown"}
+            </span>
           </div>
         ),
       },
-      { key: "teamName", title: "Team" },
-      { key: "contactNo", title: "Contact No" },
-      { key: "email", title: "Email" },
+      {
+        key: "teamName",
+        title: "Team",
+        render: (item) => item.teamName || "No Team",
+      },
+      {
+        key: "contactNo",
+        title: "Contact No",
+        render: (item) => item.contactNo || "N/A",
+      },
+      { key: "email", title: "Email", render: (item) => item.email || "N/A" },
       {
         key: "date",
         title: "Joining Date",
-        render: (item) => formatDateToReadable(item.date),
+        render: (item) =>
+          item.date ? formatDateToDDMMMYYYY(item.date) : "No Date",
       },
       {
         key: "enabled",
@@ -1164,18 +1310,17 @@ const Dashboard = () => {
           <button
             onClick={() => handleStatusToggle(item)}
             className={`px-3 py-1 rounded-full text-sm font-medium cursor-pointer transition-colors ${
-              item.enabled
+              item.userId?.isActive
                 ? "bg-green-100 text-green-800 hover:bg-green-200"
                 : "bg-red-100 text-red-800 hover:bg-red-200"
             }`}
           >
-            {item.enabled ? "Enabled" : "Disabled"}
+            {item.userId?.isActive ? "Enabled" : "Disabled"}
           </button>
         ),
       },
     ];
 
-    // Determine button mode based on active tab
     const getButtonMode = () => {
       if (activeTab === "Total MRs") return "all";
       if (activeTab === "Active MRs" || activeTab === "Inactive MRs")
@@ -1185,82 +1330,78 @@ const Dashboard = () => {
 
     return (
       <div className="space-y-6">
-        {/* Dashboard Cards */}
         <DashboardCards />
 
-        {/* Recent Activity and Stats Side by Side */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Recent Activity */}
           <div className="lg:col-span-1">
             <RecentActivity />
           </div>
 
-          {/* Main Content */}
           <div className="lg:col-span-2">
-            {/* Conditionally render MR Table or Payroll Table */}
             {activeTab === "Total Payroll" ? (
               <PayrollTable />
             ) : (
-              <DataTable
-                data={currentMR}
-                columns={columns}
-                onEdit={handleMREdit}
-                onDelete={deleteMR}
-                onAdd={() => navigate("/hrmlayout/dashboard/new")}
-                onExport={handleExport}
-                selectable={true}
-                // Show buttons for all MR tabs (Total MRs, Active MRs, Inactive MRs)
-                showButtons={activeTab !== "Total Payroll"}
-                // Control which buttons to show based on tab
-                buttonMode={getButtonMode()}
-              />
-            )}
+              <>
+                <DataTable
+                  data={currentMR}
+                  columns={columns}
+                  onEdit={handleMREdit}
+                  onDelete={deleteMR}
+                  onAdd={() => navigate("/hrmlayout/dashboard/new")}
+                  onExport={handleExport}
+                  selectable={true}
+                  showButtons={activeTab !== "Total Payroll"}
+                  buttonMode={getButtonMode()}
+                />
 
-            {/* Pagination - Only show for MR tables, not payroll */}
-            {activeTab !== "Total Payroll" && filteredMR.length > 0 && (
-              <div className="mt-4 p-5 flex justify-start gap-2">
-                <button
-                  onClick={() =>
-                    setCurrentPage((prev) => Math.max(prev - 1, 1))
-                  }
-                  disabled={currentPage === 1}
-                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-                >
-                  Prev
-                </button>
-                {visiblePages.map((page, idx) =>
-                  page === "..." ? (
-                    <span
-                      key={`ellipsis-${idx}`}
-                      className="px-3 py-1 text-gray-500 select-none"
-                    >
-                      ...
-                    </span>
-                  ) : (
+                {activeTab !== "Total Payroll" && filteredMR.length > 0 && (
+                  <div className="mt-4 p-5 flex justify-start gap-2">
                     <button
-                      key={page}
-                      onClick={() => setCurrentPage(page)}
-                      className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
-                        currentPage === page
-                          ? "bg-indigo-600 text-white"
-                          : "bg-gray-200 hover:bg-gray-300"
-                      }`}
+                      onClick={() =>
+                        setCurrentPage((prev) => Math.max(prev - 1, 1))
+                      }
+                      disabled={currentPage === 1}
+                      className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
                     >
-                      {page}
+                      Prev
                     </button>
-                  )
+                    {visiblePages.map((page, idx) =>
+                      page === "..." ? (
+                        <span
+                          key={`ellipsis-${idx}`}
+                          className="px-3 py-1 text-gray-500 select-none"
+                        >
+                          ...
+                        </span>
+                      ) : (
+                        <button
+                          key={page}
+                          onClick={() => setCurrentPage(page)}
+                          className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
+                            currentPage === page
+                              ? "bg-indigo-600 text-white"
+                              : "bg-gray-200 hover:bg-gray-300"
+                          }`}
+                        >
+                          {page}
+                        </button>
+                      )
+                    )}
+                    <button
+                      onClick={() => {
+                        setCurrentPage((prev) =>
+                          Math.min(prev + 1, totalPages)
+                        );
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }}
+                      disabled={currentPage === totalPages}
+                      className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+                    >
+                      Next
+                    </button>
+                  </div>
                 )}
-                <button
-                  onClick={() => {
-                    setCurrentPage((prev) => Math.min(prev + 1, totalPages));
-                    window.scrollTo({ top: 0, behavior: "smooth" });
-                  }}
-                  disabled={currentPage === totalPages}
-                  className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-                >
-                  Next
-                </button>
-              </div>
+              </>
             )}
           </div>
         </div>
@@ -1319,7 +1460,7 @@ const Dashboard = () => {
         </main>
       </div>
 
-      {/* Rest of your modals remain the same */}
+      {/* View Modal */}
       {isViewModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -1378,16 +1519,15 @@ const Dashboard = () => {
                     Joining Date
                   </label>
                   <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                    {form.date ? formatDateToReadable(form.date) : "--"}
+                    {form.date ? formatDateToDDMMMYYYY(form.date) : "--"}
                   </p>
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-600">
                     Status
                   </label>
                   <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.enabled ? "Enabled" : "Disabled"}
+                    {form.userId?.isActive ? "Enabled" : "Disabled"}
                   </p>
                 </div>
               </div>
@@ -1405,6 +1545,7 @@ const Dashboard = () => {
           document.body
         )}
 
+      {/* Edit Modal */}
       {isEditModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -1424,140 +1565,152 @@ const Dashboard = () => {
                 Edit MR
               </h2>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    MR Name
-                  </label>
-                  <input
-                    type="text"
-                    name="medicalRepName"
-                    value={form.medicalRepName}
-                    onChange={handleChange}
-                    className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
-                  />
+              <form onSubmit={updateMR}>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      MR Name
+                    </label>
+                    <input
+                      type="text"
+                      name="medicalRepName"
+                      value={form.medicalRepName}
+                      onChange={handleChange}
+                      className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                      required
+                    />
+                  </div>
+
+                  <div className="relative">
+                    <label className="block text-sm font-medium text-gray-600 mb-1">
+                      Team Name
+                    </label>
+                    <input
+                      type="text"
+                      name="teamName"
+                      value={form.teamName}
+                      onChange={handleChange}
+                      onKeyDown={handleKeyDown}
+                      className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                      placeholder="Type or select a team"
+                      autoComplete="off"
+                      onFocus={() => setShowSuggestions(true)}
+                      onBlur={() =>
+                        setTimeout(() => setShowSuggestions(false), 150)
+                      }
+                      required
+                    />
+
+                    {showSuggestions && teamSuggestions.length > 0 && (
+                      <ul className="absolute z-10 bg-white border w-full max-h-40 overflow-y-auto mt-1 rounded shadow">
+                        {teamSuggestions.map((team, index) => (
+                          <li
+                            key={index}
+                            onMouseDown={() => handleSelect(team)}
+                            className={`px-4 py-2 cursor-pointer ${
+                              highlightedIndex === index
+                                ? "bg-blue-100"
+                                : "hover:bg-gray-100"
+                            } ${
+                              index !== teamSuggestions.length - 1
+                                ? "border-b"
+                                : ""
+                            }`}
+                          >
+                            {team}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Contact No
+                    </label>
+                    <input
+                      type="text"
+                      name="contactNo"
+                      value={form.contactNo}
+                      onChange={handleChange}
+                      className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Email
+                    </label>
+                    <input
+                      type="email"
+                      name="email"
+                      value={form.email}
+                      onChange={handleChange}
+                      className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Joining Date
+                    </label>
+                    <DatePicker
+                      selected={
+                        form.date ? parseDateFromString(form.date) : null
+                      }
+                      onChange={(date) =>
+                        date
+                          ? setForm({ ...form, date: date.toISOString() })
+                          : null
+                      }
+                      dateFormat="dd/MM/yyyy"
+                      placeholderText="DD/MM/YYYY"
+                      className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600">
+                      Status
+                    </label>
+                    <select
+                      value={form.userId?.isActive ?? form.enabled}
+                      onChange={(e) =>
+                        setForm({ ...form, enabled: e.target.value === "true" })
+                      }
+                      className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                    >
+                      <option value="true">Enabled</option>
+                      <option value="false">Disabled</option>
+                    </select>
+                  </div>
                 </div>
 
-                <div className="relative">
-                  <label className="block text-sm font-medium text-gray-600 mb-1">
-                    Team Name
-                  </label>
-                  <input
-                    type="text"
-                    name="teamName"
-                    value={form.teamName}
-                    onChange={handleChange}
-                    onKeyDown={handleKeyDown}
-                    className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
-                    placeholder="Type or select a team"
-                    autoComplete="off"
-                    onBlur={() =>
-                      setTimeout(() => setShowSuggestions(false), 150)
-                    }
-                  />
-
-                  {showSuggestions && teamSuggestions.length > 0 && (
-                    <ul className="absolute z-10 bg-white border w-full max-h-40 overflow-y-auto mt-1 rounded shadow">
-                      {teamSuggestions.map((team, index) => (
-                        <li
-                          key={index}
-                          onMouseDown={() => handleSelect(team)}
-                          className={`px-4 py-2 cursor-pointer ${
-                            highlightedIndex === index
-                              ? "bg-blue-100"
-                              : "hover:bg-gray-100"
-                          } ${
-                            index !== teamSuggestions.length - 1
-                              ? "border-b"
-                              : ""
-                          }`}
-                        >
-                          {team}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Contact No
-                  </label>
-                  <input
-                    type="text"
-                    name="contactNo"
-                    value={form.contactNo}
-                    onChange={handleChange}
-                    className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Email
-                  </label>
-                  <input
-                    type="email"
-                    name="email"
-                    value={form.email}
-                    onChange={handleChange}
-                    className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Joining Date
-                  </label>
-                  <DatePicker
-                    selected={form.date ? new Date(form.date) : null}
-                    onChange={(date) =>
-                      date
-                        ? setForm({ ...form, date: date.toISOString() })
-                        : null
-                    }
-                    dateFormat="yyyy-MM-dd"
-                    placeholderText="Select a date"
-                    className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-600">
-                    Status
-                  </label>
-                  <select
-                    value={form.enabled}
-                    onChange={(e) =>
-                      setForm({ ...form, enabled: e.target.value === "true" })
-                    }
-                    className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                <div className="mt-6 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditModalOpen(false)}
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
                   >
-                    <option value="true">Enabled</option>
-                    <option value="false">Disabled</option>
-                  </select>
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+                  >
+                    Update
+                  </button>
                 </div>
-              </div>
-
-              <div className="mt-6 flex justify-end gap-2">
-                <button
-                  onClick={() => setIsEditModalOpen(false)}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={updateMR}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg cursor-pointer"
-                >
-                  Update
-                </button>
-              </div>
+              </form>
             </div>
           </div>,
           document.body
         )}
 
+      {/* Import Modal */}
       {showImportModal &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -1583,14 +1736,20 @@ const Dashboard = () => {
                 <label className="block text-gray-700 mb-2">File</label>
                 <input
                   type="file"
-                  accept=".csv, .xlsx"
+                  accept=".csv, .xlsx, .xls"
                   onChange={handleFileUpload}
                   className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
                 />
+                {parsedData.length > 0 && (
+                  <p className="text-sm text-green-600 mt-2">
+                    Found {parsedData.length} records
+                  </p>
+                )}
               </div>
 
               <div className="flex justify-end gap-3">
                 <button
+                  type="button"
                   onClick={() => setShowImportModal(false)}
                   disabled={isUploading}
                   className={`px-5 py-2 rounded-lg cursor-pointer ${
@@ -1602,6 +1761,7 @@ const Dashboard = () => {
                   Cancel
                 </button>
                 <button
+                  type="button"
                   onClick={handleImport}
                   disabled={isUploading || parsedData.length === 0}
                   className={`px-5 py-2 rounded-lg cursor-pointer ${

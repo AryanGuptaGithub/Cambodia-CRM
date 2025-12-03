@@ -9,7 +9,7 @@ export const initialFormState = {
   medicalRepId: "",
   name: "",
   typeOfBusiness: "",
-  customerNumber: "",
+  customerPhoneNumber: "",
   address: "",
   zone: "",
   province: "",
@@ -41,8 +41,8 @@ export const validateCustomerForm = (form) => {
   if (!form.province) newErrors.province = "Province is required";
 
   // Customer Number validation - only numbers allowed
-  if (form.customerNumber && !/^\d+$/.test(form.customerNumber)) {
-    newErrors.customerNumber = "Customer Number must contain only numbers";
+  if (form.customerPhoneNumber && !/^\d+$/.test(form.customerPhoneNumber)) {
+    newErrors.customerPhoneNumber = "Customer Number must contain only numbers";
   }
 
   return newErrors;
@@ -143,7 +143,7 @@ export const EXCEL_CONFIG = {
     { key: "medicalRep", width: 40, header: "Medical Representative Name" },
     { key: "customerName", width: 55, header: "Customer Name in English" },
     { key: "businessType", width: 25, header: "Types of Business" },
-    { key: "customerNumber", width: 55, header: "Customer Number" },
+    { key: "customerPhoneNumber", width: 55, header: "Customer Phone Number" },
     { key: "customerAddress", width: 55, header: "Customer Address" },
     { key: "zone", width: 25, header: "Zone" },
     { key: "province", width: 25, header: "Province" },

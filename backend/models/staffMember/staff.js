@@ -15,13 +15,20 @@ const staffSchema = new mongoose.Schema(
     teamName: { type: String, required: true },
     contactNo: { 
       type: String, 
-      required: false, 
-      unique: true, // Add unique constraint
-      sparse: true  // Allows multiple null values but enforces uniqueness for non-null values
+      unique: true,
+      sparse: true
     },
-    email: { type: String, required: false },
+    email: { 
+      type: String, 
+      unique: true,
+      sparse: true
+    },
     date: { type: Date, required: true },
-    enabled: { type: Boolean, default: true },
+
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User"
+    }
   },
   { timestamps: true }
 );

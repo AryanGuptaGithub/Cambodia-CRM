@@ -1,43 +1,153 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from "react";
 import { useNavigate } from "react-router-dom";
 import { showToast } from "../utils/toast.jsx";
 import CustomDropdown from "./Utility/customDropdown.jsx";
 import axios from "axios";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
+import {
+  Package,
+  Calendar,
+  Hash,
+  User,
+  Plus,
+  Trash2,
+  Eye,
+  X,
+} from "lucide-react";
+import SearchableDropdown from "../components/common/SearchableDropdown";
+import InputField from "../components/common/InputField";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-const INITIAL_PRODUCT_ITEM = {
-  id: null,
-  productId: "",
-  productName: "",
-  boxQuantity: "",
-  expenses: "",
+// Reusable Multiple Select Dropdown (same as Payroll)
+const MultipleSelectDropdown = ({
+  value = [],
+  onChange,
+  options,
+  placeholder,
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const ref = useRef(null);
+
+  // Filter out already selected options and apply search filter
+  const filtered = options.filter((o) => {
+    const isNotSelected = !value.includes(o.value);
+    const matchesSearch = o.label.toLowerCase().includes(search.toLowerCase());
+    return isNotSelected && matchesSearch;
+  });
+
+  const toggle = (val) => {
+    // Only add if not already selected
+    if (!value.includes(val)) {
+      onChange([...value, val]);
+      setSearch(""); // Clear search after selection
+    }
+  };
+
+  const removeSelected = (val, e) => {
+    e.stopPropagation();
+    onChange(value.filter((v) => v !== val));
+  };
+
+  useEffect(() => {
+    const clickOutside = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) {
+        setIsOpen(false);
+        setSearch("");
+      }
+    };
+    document.addEventListener("mousedown", clickOutside);
+    return () => document.removeEventListener("mousedown", clickOutside);
+  }, []);
+
+  return (
+    <div ref={ref} className="relative">
+      <div
+        onClick={() => setIsOpen(!isOpen)}
+        className="border border-gray-300 rounded-lg px-4 py-2 min-h-[42px] flex flex-wrap gap-2 items-center cursor-pointer bg-white hover:border-blue-500 transition"
+      >
+        {value.length === 0 ? (
+          <span className="text-gray-500">{placeholder}</span>
+        ) : (
+          value.map((v) => {
+            const opt = options.find((o) => o.value === v);
+            return (
+              <span
+                key={v}
+                className="bg-indigo-100 text-indigo-800 px-3 py-1 rounded-full text-sm flex items-center gap-1"
+              >
+                {opt?.label}
+                <button
+                  type="button"
+                  onClick={(e) => removeSelected(v, e)}
+                  className="ml-1 hover:bg-indigo-200 rounded-full w-4 h-4 flex items-center justify-center"
+                >
+                  ×
+                </button>
+              </span>
+            );
+          })
+        )}
+      </div>
+
+      {isOpen && (
+        <div className="absolute z-10 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
+          <input
+            type="text"
+            placeholder="Search products..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full px-4 py-2 border-b sticky top-0 bg-white outline-none"
+            onClick={(e) => e.stopPropagation()}
+          />
+          {filtered.length === 0 ? (
+            <div className="p-3 text-gray-500 text-center">
+              {search ? "No matching products found" : "All products selected"}
+            </div>
+          ) : (
+            filtered.map((opt) => (
+              <div
+                key={opt.value}
+                onClick={() => toggle(opt.value)}
+                className={`px-4 py-2 hover:bg-indigo-50 cursor-pointer flex items-center gap-3 ${
+                  value.includes(opt.value) ? "bg-indigo-50" : ""
+                }`}
+              >
+                <div className="w-4 h-4 border border-gray-300 rounded flex items-center justify-center">
+                  <Plus size={12} className="text-gray-600" />
+                </div>
+                <span>{opt.label}</span>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
 };
 
-const INITIAL_FORM_STATE = {
-  invoiceNumber: "",
-  transferDate: "",
-  product: "",
-  remarks: "",
-  orderStatus: "",
-  shipping: "",
-  transferType: "send",
-  destination: "", // New field for Send
-  source: "", // New field for Receive
-  items: [],
-};
-
-// Transfer type options
-const TRANSFER_TYPE_OPTIONS = [
-  { value: "send", label: "Send" },
-  { value: "receive", label: "Receive" },
-];
-
-// Custom hook for form state management
+// Custom hook for general form (from original)
 const useStockTransferForm = () => {
-  const [form, setForm] = useState(INITIAL_FORM_STATE);
+  const [form, setForm] = useState({
+    invoiceNumber: "",
+    transferDate: "",
+    product: "",
+    remarks: "",
+    orderStatus: "",
+    shipping: "",
+    transferType: "send",
+    destination: "",
+    source: "",
+    items: [],
+  });
   const [errors, setErrors] = useState({});
   const [items, setItems] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -51,55 +161,62 @@ const useStockTransferForm = () => {
     setForm((prev) => ({ ...prev, [name]: value }));
   }, []);
 
-  const validate = useCallback((products = []) => {
-    const newErrors = {};
+  const validate = useCallback(
+    (products = []) => {
+      const newErrors = {};
 
-    if (!form.transferDate)
-      newErrors.transferDate = "Transfer date is required";
-    if (!form.orderStatus) newErrors.orderStatus = "Order status is required";
-    if (!form.transferType)
-      newErrors.transferType = "Transfer type is required";
+      if (!form.transferDate)
+        newErrors.transferDate = "Transfer date is required";
+      if (!form.orderStatus) newErrors.orderStatus = "Order status is required";
+      if (!form.transferType)
+        newErrors.transferType = "Transfer type is required";
 
-    // Conditional validation for destination/source
-    if (form.transferType === "send" && !form.destination) {
-      newErrors.destination = "Destination is required for Send transfers";
-    }
-    if (form.transferType === "receive" && !form.source) {
-      newErrors.source = "Source is required for Receive transfers";
-    }
-
-    if (items.length === 0)
-      newErrors.items = "At least one product item is required";
-
-    items.forEach((item, index) => {
-      if (!item.productId) {
-        newErrors[`product_${index}`] = `Product for item ${
-          index + 1
-        } is required`;
+      if (form.transferType === "send" && !form.destination) {
+        newErrors.destination = "Destination is required for Send transfers";
       }
-      
-      const boxQuantity = parseNumber(item.boxQuantity);
-      if (!item.boxQuantity || boxQuantity < 0) {
-        newErrors[`boxQuantity_${index}`] = `Box quantity for item ${
-          index + 1
-        } must be non-negative`;
+      if (form.transferType === "receive" && !form.source) {
+        newErrors.source = "Source is required for Receive transfers";
       }
 
-      // Stock validation - ONLY for send transfers
-      if (form.transferType === "send" && item.productId && item.boxQuantity) {
-        const product = products.find(p => p._id === item.productId);
-        if (product && product.inStock) {
-          const availableStock = product.inStock.boxes;
-          if (boxQuantity > availableStock) {
-            newErrors[`boxQuantity_${index}`] = `Box quantity cannot exceed available stock (${availableStock} boxes)`;
+      if (items.length === 0)
+        newErrors.items = "At least one product item is required";
+
+      items.forEach((item, index) => {
+        if (!item.productId) {
+          newErrors[`product_${index}`] = `Product for item ${
+            index + 1
+          } is required`;
+        }
+
+        const boxQuantity = parseNumber(item.boxQuantity);
+        if (!item.boxQuantity || boxQuantity <= 0) {
+          newErrors[`boxQuantity_${index}`] = `Box quantity for item ${
+            index + 1
+          } must be greater than 0`;
+        }
+
+        if (
+          form.transferType === "send" &&
+          item.productId &&
+          item.boxQuantity
+        ) {
+          const product = products.find((p) => p._id === item.productId);
+          if (product && product.inStock) {
+            const availableStock = product.inStock.boxes;
+            if (boxQuantity > availableStock) {
+              newErrors[
+                `boxQuantity_${index}`
+              ] = `Box quantity cannot exceed available stock (${availableStock} boxes)`;
+            }
           }
         }
-      }
-    });
+      });
 
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  }, [form, items, parseNumber]);
+      setErrors(newErrors);
+      return Object.keys(newErrors).length === 0;
+    },
+    [form, items, parseNumber]
+  );
 
   const addItem = useCallback((newItem) => {
     setItems((prev) => [...prev, newItem]);
@@ -163,7 +280,6 @@ const useStockTransferForm = () => {
         const lastNumber = response.data.lastNumber || 0;
         const nextNumber = lastNumber + 1;
 
-        // Format the number, e.g., ST-0002
         const formattedNumber = `ST-${String(nextNumber).padStart(4, "0")}`;
 
         return formattedNumber;
@@ -185,7 +301,6 @@ const useStockTransferForm = () => {
     setStockTransferNumber();
   }, [generateStockTransferNumber, updateFormField]);
 
-  // Calculate totals - Expenses are NOT multiplied with quantity
   const calculateTotals = useCallback(() => {
     const totalExpenses = items.reduce(
       (sum, item) => sum + parseNumber(item.expenses),
@@ -219,48 +334,646 @@ const useStockTransferForm = () => {
   };
 };
 
-// Reusable Components
-const InputField = React.memo(
-  ({
-    label,
-    name,
-    type = "text",
-    value,
-    onChange,
-    error,
-    placeholder = "",
-    required = false,
-    readOnly = false,
-    disabled = false,
-    className = "",
-    ...props
-  }) => (
-    <div className="flex flex-col">
-      <label className="text-sm font-medium text-gray-700 mb-1">
-        {label}
-        {required && <span className="text-red-500 ml-1">*</span>}
-      </label>
-      <input
-        type={type}
-        name={name}
-        value={value}
-        onChange={onChange}
-        placeholder={placeholder}
-        readOnly={readOnly}
-        disabled={disabled}
-        className={`border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-          error ? "border-red-500" : "border-gray-300"
-        } ${
-          readOnly || disabled ? "bg-gray-100 cursor-not-allowed" : ""
-        } ${className}`}
-        autoComplete="off"
-        {...props}
-      />
-      {error && <p className="text-red-500 text-xs mt-1">{error}</p>}
-    </div>
-  )
-);
+// Custom hook to fetch products with stock data
+const useProductsWithStock = () => {
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [isProductsEmpty, setIsProductsEmpty] = useState(false);
 
+  const fetchProducts = useCallback(async () => {
+    try {
+      setLoading(true);
+      const response = await axios.get(
+        `${backendUrl}/api/products-with-in-stock`
+      );
+      const productsData = response.data || [];
+      setProducts(productsData);
+
+      if (productsData.length === 0) {
+        setIsProductsEmpty(true);
+      } else {
+        setIsProductsEmpty(false);
+      }
+    } catch (err) {
+      console.error("Error fetching products:", err);
+      showToast("error", "Failed to fetch products");
+      setIsProductsEmpty(true);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchProducts();
+  }, [fetchProducts]);
+
+  return { products, loading, isProductsEmpty, refetch: fetchProducts };
+};
+
+// Helper function to validate numeric input
+const validateNumericInput = (value) => {
+  // Remove any non-numeric characters except decimal point
+  const numericValue = value.replace(/[^0-9.]/g, "");
+
+  // Allow only one decimal point
+  const parts = numericValue.split(".");
+  if (parts.length > 2) {
+    return parts[0] + "." + parts.slice(1).join("");
+  }
+
+  return numericValue;
+};
+
+// General Transfer Form Component (extracted from original)
+const GeneralTransferForm = ({ navigate }) => {
+  const [orderStatuses, setOrderStatuses] = useState([]);
+
+  const {
+    form,
+    errors,
+    items,
+    isLoading,
+    setIsLoading,
+    handleChange,
+    handleNumberChange,
+    handleSelectChange,
+    validate,
+    addItem,
+    removeItem,
+    updateItem,
+    calculateTotals,
+  } = useStockTransferForm();
+
+  const { products, loading, isProductsEmpty } = useProductsWithStock();
+  const { totalExpenses, shipping, grandTotal } = calculateTotals();
+
+  const isFormDisabled = isProductsEmpty;
+
+  const productOptions = useMemo(() => {
+    if (isProductsEmpty) {
+      return [
+        {
+          value: "",
+          label: "No Products Available",
+          disabled: true,
+        },
+      ];
+    }
+
+    if (!products || products.length === 0) {
+      return [{ value: "", label: "Loading products..." }];
+    }
+
+    return [
+      { value: "", label: "Select Product" },
+      ...products.map((product) => {
+        const stockInfo = product.inStock;
+        const stockLabel =
+          form.transferType === "send" && stockInfo
+            ? `${product.productName} (Available: ${stockInfo.boxes} boxes)`
+            : product.productName;
+
+        return {
+          value: product._id,
+          label: stockLabel,
+          product: product,
+        };
+      }),
+    ];
+  }, [products, form.transferType, isProductsEmpty]);
+
+  const orderStatusOptions = useMemo(
+    () => [
+      ...orderStatuses.map((status) => ({
+        value: status.code,
+        label: status.name,
+      })),
+    ],
+    [orderStatuses]
+  );
+
+  const getProductDetails = (productId) => {
+    return products.find((p) => p._id === productId);
+  };
+
+  const fetchOrderStatuses = useCallback(async () => {
+    try {
+      const response = await axios.get(`${backendUrl}/api/order-statuses`);
+      setOrderStatuses(response.data);
+    } catch (err) {
+      console.error("Error fetching order statuses:", err);
+      showToast("error", "Failed to fetch order statuses");
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchOrderStatuses();
+  }, [fetchOrderStatuses]);
+
+  const handleFormChange = useCallback(
+    (field, value) => {
+      if (isProductsEmpty) {
+        showToast("error", "Cannot modify form. No products available.");
+        return;
+      }
+      handleSelectChange(field, value);
+    },
+    [handleSelectChange, isProductsEmpty]
+  );
+
+  const handleAddItem = useCallback(() => {
+    if (isProductsEmpty) {
+      showToast("error", "Cannot add items. No products available.");
+      return;
+    }
+
+    if (!form.product) {
+      showToast("error", "Please select a product first");
+      return;
+    }
+
+    const selectedProduct = getProductDetails(form.product);
+    if (!selectedProduct) {
+      showToast("error", "Selected product not found");
+      return;
+    }
+
+    const newItem = {
+      id: Date.now(),
+      productId: form.product,
+      productName: selectedProduct.productName,
+      boxQuantity: "",
+      expenses: "",
+    };
+
+    addItem(newItem);
+    handleFormChange("product", "");
+  }, [form.product, products, addItem, handleFormChange, isProductsEmpty]);
+
+  const handleItemChange = useCallback(
+    (id, field, value) => {
+      if (isProductsEmpty) {
+        showToast("error", "Cannot modify items. No products available.");
+        return;
+      }
+
+      if (field === "boxQuantity") {
+        // Only allow numeric values
+        const numericValue = validateNumericInput(value);
+
+        // Check stock for send transfers
+        if (form.transferType === "send") {
+          const item = items.find((item) => item.id === id);
+          if (item && item.productId) {
+            const product = getProductDetails(item.productId);
+            if (product && product.inStock) {
+              const availableStock = product.inStock.boxes;
+              const requestedQuantity = parseFloat(numericValue) || 0;
+
+              if (requestedQuantity > availableStock) {
+                showToast(
+                  "error",
+                  `Cannot exceed available stock (${availableStock} boxes)`
+                );
+              }
+            }
+          }
+        }
+
+        updateItem(id, field, numericValue);
+      } else {
+        updateItem(id, field, value);
+      }
+    },
+    [updateItem, items, products, form.transferType, isProductsEmpty]
+  );
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    if (isProductsEmpty) {
+      showToast(
+        "error",
+        "Cannot create stock transfer. No products available."
+      );
+      return;
+    }
+
+    if (!validate(products)) {
+      showToast("error", "Please fix the form errors before submitting");
+      return;
+    }
+
+    setIsLoading(true);
+
+    const payload = {
+      invoiceNo: form.invoiceNumber,
+      date: form.transferDate,
+      items: items.map((item) => ({
+        productId: item.productId,
+        productName: item.productName,
+        boxQuantity: parseFloat(item.boxQuantity || 0),
+        expenses: parseFloat(item.expenses || 0),
+      })),
+      remarks: form.remarks || "",
+      status: form.orderStatus,
+      transferType: form.transferType,
+      shipping: parseFloat(form.shipping || 0),
+      totalExpenses: parseFloat(totalExpenses || 0),
+      grandTotal: parseFloat(grandTotal || 0),
+      destination: form.destination || "",
+      source: form.source || "",
+    };
+
+    try {
+      const response = await axios.post(
+        `${backendUrl}/api/stock-transfers`,
+        payload
+      );
+
+      if (response.data.success) {
+        showToast(
+          "success",
+          response.data.message || "Stock transfer created successfully"
+        );
+        navigate("/stocktransfer");
+      } else {
+        throw new Error(
+          response.data.message || "Failed to create stock transfer"
+        );
+      }
+    } catch (error) {
+      console.error("Error creating stock transfer:", error);
+
+      let errorMessage = error.message;
+      if (error.response) {
+        errorMessage =
+          error.response.data.message ||
+          error.response.data.error ||
+          error.message;
+      } else if (error.request) {
+        errorMessage = "Network error: Unable to connect to server";
+      }
+
+      showToast("error", errorMessage);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const isCurrentProductValid = useMemo(
+    () =>
+      !isProductsEmpty &&
+      form.product &&
+      form.product.trim() !== "" &&
+      form.transferDate &&
+      form.transferDate.trim() !== "" &&
+      form.orderStatus &&
+      form.orderStatus.trim() !== "" &&
+      form.transferType &&
+      form.transferType.trim() !== "" &&
+      ((form.transferType === "send" &&
+        form.destination &&
+        form.destination.trim() !== "") ||
+        (form.transferType === "receive" &&
+          form.source &&
+          form.source.trim() !== "")),
+    [
+      form.product,
+      form.transferDate,
+      form.orderStatus,
+      form.transferType,
+      form.destination,
+      form.source,
+      isProductsEmpty,
+    ]
+  );
+
+  const TRANSFER_TYPE_OPTIONS = [
+    { value: "send", label: "Send" },
+    { value: "receive", label: "Receive" },
+  ];
+
+  if (isProductsEmpty) {
+    return (
+      <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+        <div className="flex items-center">
+          <div className="flex-shrink-0">
+            <svg
+              className="h-5 w-5 text-red-400"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+            >
+              <path
+                fillRule="evenodd"
+                d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                clipRule="evenodd"
+              />
+            </svg>
+          </div>
+          <div className="ml-3">
+            <h3 className="text-sm font-medium text-red-800">
+              No Products Available
+            </h3>
+            <div className="mt-2 text-sm text-red-700">
+              <p>
+                You need to add at least one product before creating stock
+                transfers. Add products in the product management section first.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <InputField
+          label="Stock Transfer No"
+          name="invoiceNumber"
+          value={form.invoiceNumber}
+          onChange={handleChange}
+          placeholder="Auto-generated"
+          readOnly
+          disabled={isFormDisabled}
+        />
+        <SelectField
+          label="Order Status"
+          name="orderStatus"
+          value={form.orderStatus}
+          onChange={(e) => handleSelectChange("orderStatus", e.target.value)}
+          options={orderStatusOptions}
+          error={errors.orderStatus}
+          placeholder="Select Order Status"
+          required
+          disabled={isFormDisabled}
+        />
+        <InputField
+          label="Transfer Date"
+          name="transferDate"
+          type="date"
+          value={form.transferDate}
+          onChange={handleChange}
+          error={errors.transferDate}
+          required
+          disabled={isFormDisabled}
+        />
+        <SelectField
+          label="Transfer Type"
+          name="transferType"
+          value={form.transferType}
+          onChange={(e) => handleSelectChange("transferType", e.target.value)}
+          options={TRANSFER_TYPE_OPTIONS}
+          error={errors.transferType}
+          placeholder="Select Transfer Type"
+          required
+          disabled={isFormDisabled}
+        />
+
+        {form.transferType === "send" && (
+          <InputField
+            label="Destination"
+            name="destination"
+            value={form.destination}
+            onChange={handleChange}
+            error={errors.destination}
+            placeholder="Enter destination"
+            required
+            disabled={isFormDisabled}
+          />
+        )}
+
+        {form.transferType === "receive" && (
+          <InputField
+            label="Source"
+            name="source"
+            value={form.source}
+            onChange={handleChange}
+            error={errors.source}
+            placeholder="Enter source"
+            required
+            disabled={isFormDisabled}
+          />
+        )}
+
+        <InputField
+          label="Shipping ($)"
+          name="shipping"
+          value={form.shipping}
+          onChange={(e) => handleNumberChange("shipping", e.target.value)}
+          placeholder="Enter Shipping"
+          type="text"
+          disabled={isFormDisabled}
+        />
+      </div>
+
+      <div className="mb-6 p-4 border border-gray-200 rounded-lg">
+        <h3 className="text-lg font-semibold mb-4">Add Products</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Product <span className="text-red-500">*</span>
+            </label>
+            {loading ? (
+              <div className="border rounded-lg px-3 py-2 bg-gray-100 text-gray-500">
+                Loading products...
+              </div>
+            ) : (
+              <CustomDropdown
+                value={form.product}
+                onChange={(value) => handleFormChange("product", value)}
+                placeholder={
+                  isProductsEmpty ? "No Products Available" : "Select Product"
+                }
+                options={productOptions}
+                required
+                disabled={isFormDisabled}
+              />
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={handleAddItem}
+            disabled={!isCurrentProductValid || isFormDisabled}
+            className={`px-4 py-2 rounded-lg transition-colors ${
+              isCurrentProductValid && !isFormDisabled
+                ? "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
+                : "bg-gray-400 text-gray-200 cursor-not-allowed"
+            }`}
+          >
+            Add Product
+          </button>
+        </div>
+        {errors.items && (
+          <p className="text-red-500 text-sm mt-2">{errors.items}</p>
+        )}
+      </div>
+
+      {items.length > 0 && (
+        <div className="mb-6">
+          <h3 className="text-lg font-semibold mb-4">Product Items</h3>
+          <div className="space-y-4">
+            {items.map((item, index) => {
+              const product = getProductDetails(item.productId);
+              const stockInfo = product?.inStock;
+
+              return (
+                <div
+                  key={item.id}
+                  className="border border-gray-300 rounded-lg p-4 bg-gray-50"
+                >
+                  <div className="flex justify-between items-start mb-3">
+                    <div className="flex items-center gap-4">
+                      <h4 className="text-md font-semibold text-gray-800">
+                        {item.productName}
+                      </h4>
+                      {form.transferType === "send" && stockInfo && (
+                        <span
+                          className={`text-sm px-2 py-1 rounded ${
+                            stockInfo.status === "Out of Stock"
+                              ? "bg-red-100 text-red-800 border border-red-300"
+                              : stockInfo.status === "Low Stock" ||
+                                stockInfo.status === "Critical"
+                              ? "bg-yellow-100 text-yellow-800 border border-yellow-300"
+                              : "bg-green-100 text-green-800 border border-green-300"
+                          }`}
+                        >
+                          Available: {stockInfo.boxes} boxes
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeItem(item.id)}
+                      disabled={isFormDisabled}
+                      className={`px-3 py-1 rounded text-sm transition-colors ${
+                        isFormDisabled
+                          ? "bg-gray-400 text-white opacity-50 cursor-not-allowed"
+                          : "bg-red-600 hover:bg-red-700 text-white cursor-pointer"
+                      }`}
+                    >
+                      Remove
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4">
+                    {/* Show Box Quantity for ALL products */}
+                    <div className="flex flex-col">
+                      <label className="text-sm font-medium text-gray-700 mb-1">
+                        Box Quantity <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={item.boxQuantity}
+                        onChange={(e) =>
+                          handleItemChange(
+                            item.id,
+                            "boxQuantity",
+                            e.target.value
+                          )
+                        }
+                        disabled={isFormDisabled}
+                        className={`w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                          errors[`boxQuantity_${index}`]
+                            ? "border-red-500"
+                            : "border-gray-300"
+                        } ${
+                          isFormDisabled
+                            ? "bg-gray-100 cursor-not-allowed"
+                            : ""
+                        }`}
+                        placeholder="Enter box quantity"
+                        onKeyPress={(e) => {
+                          // Allow only numbers and decimal point
+                          const char = String.fromCharCode(e.which);
+                          if (!/[\d.]/.test(char)) {
+                            e.preventDefault();
+                          }
+                        }}
+                      />
+                      {errors[`boxQuantity_${index}`] && (
+                        <p className="text-red-500 text-xs mt-1">
+                          {errors[`boxQuantity_${index}`]}
+                        </p>
+                      )}
+                      {form.transferType === "send" && stockInfo && (
+                        <p className="text-xs text-gray-500 mt-1">
+                          Maximum allowed: {stockInfo.boxes} boxes
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="mb-6">
+        <TextAreaField
+          label="Remarks"
+          name="remarks"
+          value={form.remarks}
+          onChange={handleChange}
+          placeholder="Enter remarks or additional information"
+          rows={4}
+          disabled={isFormDisabled}
+          className="w-full"
+        />
+      </div>
+
+      <div className="bg-gray-50 p-4 rounded-lg mb-6">
+        <h3 className="text-lg font-semibold mb-4">Financial Summary</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+          <div>
+            <strong>Total Expenses:</strong>
+            <div className="text-green-600 font-semibold">
+              ${totalExpenses.toFixed(2)}
+            </div>
+          </div>
+          <div>
+            <strong>Shipping:</strong>
+            <div className="text-blue-600 font-semibold">
+              ${shipping.toFixed(2)}
+            </div>
+          </div>
+          <div>
+            <strong>Grand Total:</strong>
+            <div className="text-purple-600 font-bold text-lg">
+              ${grandTotal.toFixed(2)}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex justify-end gap-4">
+        <button
+          type="button"
+          onClick={() => navigate("/stocktransfer")}
+          className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-6 py-2 rounded-lg transition-colors cursor-pointer"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={isLoading || isFormDisabled}
+          className={`px-6 py-2 rounded-lg transition-colors ${
+            isLoading || isFormDisabled
+              ? "bg-gray-400 text-gray-200 cursor-not-allowed"
+              : "bg-green-600 hover:bg-green-700 text-white cursor-pointer"
+          }`}
+        >
+          {isLoading ? "Saving..." : "Save Transfer"}
+        </button>
+      </div>
+    </form>
+  );
+};
+
+// SelectField and TextAreaField (from original)
 const SelectField = React.memo(
   ({
     label,
@@ -330,640 +1043,534 @@ const TextAreaField = React.memo(
   )
 );
 
-// Custom hook to fetch products with stock data
-const useProductsWithStock = () => {
-  const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [isProductsEmpty, setIsProductsEmpty] = useState(false);
+const StockTransferForm = () => {
+  const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState("toMR"); // "toMR" | "general"
 
-  const fetchProducts = useCallback(async () => {
+  // === TAB 1: Transfer to MR ===
+  const [mrTransfer, setMrTransfer] = useState({
+    transferNo: "",
+    date: new Date().toISOString().split("T")[0],
+    mrId: "",
+    products: [],
+  });
+  const [mrList, setMrList] = useState([]);
+  const [mrListLoading, setMrListLoading] = useState(true);
+  const [isMrListEmpty, setIsMrListEmpty] = useState(false);
+  const [products, setProducts] = useState([]);
+  const [showProductModal, setShowProductModal] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  // Fetch MRs
+  const fetchMRs = useCallback(async () => {
     try {
-      setLoading(true);
-      const backendUrl = import.meta.env.VITE_BACKEND_URL;
-      const response = await axios.get(`${backendUrl}/api/products-with-in-stock`);
-      const productsData = response.data || [];
-      setProducts(productsData);
-      
-      // Check if products are empty
-      if (productsData.length === 0) {
-        setIsProductsEmpty(true);
+      setMrListLoading(true);
+      const response = await axios.get(`${backendUrl}/api/staffs`);
+      const data = response.data || [];
+
+      if (data && data.length > 0) {
+        setMrList(data);
+        setIsMrListEmpty(false);
       } else {
-        setIsProductsEmpty(false);
+        setMrList([]);
+        setIsMrListEmpty(true);
       }
     } catch (err) {
-      console.error("Error fetching products:", err);
-      showToast("error", "Failed to fetch products");
-      setIsProductsEmpty(true);
+      console.error("Error fetching MRs:", err);
+      showToast("error", "Failed to load MR list");
+      setMrList([]);
+      setIsMrListEmpty(true);
     } finally {
-      setLoading(false);
+      setMrListLoading(false);
     }
   }, []);
 
+  // Updated fetchProducts function using the provided format
+  const fetchProducts = useCallback(async () => {
+    try {
+      const response = await axios.get(`${backendUrl}/api/dropdown-products`);
+
+      // Get data from API
+      const products = response.data?.data || [];
+
+      if (!Array.isArray(products)) {
+        showToast("error", "Invalid products data format");
+        return;
+      }
+
+      // ✅ Remove duplicate product names (case-insensitive)
+      const uniqueProductsMap = new Map();
+      products.forEach((product) => {
+        const name = product.productName?.trim().toLowerCase();
+        if (name && !uniqueProductsMap.has(name)) {
+          uniqueProductsMap.set(name, product);
+        }
+      });
+
+      const uniqueProducts = Array.from(uniqueProductsMap.values());
+
+      // Map final structure for frontend usage - ensure all required fields are included
+      const formattedProducts = uniqueProducts.map((product) => ({
+        id: product._id,
+        _id: product._id,
+        label: product.productName,
+        type: product.type,
+        productName: product.productName,
+        supplierName: product.supplierName,
+        batches: product.batches || [],
+        totalBoxes: product.totalBoxes || 0,
+        totalAmount: product.totalAmount || 0,
+        status: product.status || "Out of Stock",
+        minStockLevel: product.minStockLevel || 0,
+        lc: product.lc || 0,
+        fob: product.fob || 0,
+        cif: product.cif || 0,
+        sellingPrice: product.sellingPrice,
+        stockLastUpdated: product.stockLastUpdated || null,
+        createdAt: product.createdAt,
+        updatedAt: product.updatedAt,
+      }));
+      
+      setProducts(formattedProducts);
+    } catch (error) {
+      console.error("❌ Error fetching products:", error);
+      showToast("error", "Failed to load products");
+    }
+  }, []);
+
+  // Updated generateTransferNo function
+  const generateTransferNo = async () => {
+    try {
+      const last = await axios.get(
+        `${backendUrl}/api/stock-transfers/last-number`
+      );
+      const next = (last.data.lastNumber || 0) + 1;
+      return `ST-${String(next).padStart(4, "0")}`;
+    } catch {
+      return `ST-${Date.now().toString().slice(-6)}`;
+    }
+  };
+
   useEffect(() => {
+    fetchMRs();
     fetchProducts();
-  }, [fetchProducts]);
+    generateTransferNo().then((no) =>
+      setMrTransfer((prev) => ({ ...prev, transferNo: no }))
+    );
+  }, [fetchMRs, fetchProducts]);
 
-  return { products, loading, isProductsEmpty, refetch: fetchProducts };
-};
+  const productOptions = useMemo(
+    () => products.map((p) => ({ value: p._id, label: p.productName })),
+    [products]
+  );
 
-const StockTransferForm = () => {
-  const navigate = useNavigate();
-  const [orderStatuses, setOrderStatuses] = useState([]);
-
-  const {
-    form,
-    errors,
-    items,
-    isLoading,
-    setIsLoading,
-    handleChange,
-    handleNumberChange,
-    handleSelectChange,
-    validate,
-    addItem,
-    removeItem,
-    updateItem,
-    calculateTotals,
-  } = useStockTransferForm();
-
-  const { products, loading, isProductsEmpty } = useProductsWithStock();
-  const { totalExpenses, shipping, grandTotal } = calculateTotals();
-
-  // Check if form should be disabled
-  const isFormDisabled = isProductsEmpty;
-
-  // Memoized options with stock information
-  const productOptions = useMemo(() => {
-    if (isProductsEmpty) {
+  const mrOptions = useMemo(() => {
+    if (isMrListEmpty) {
       return [
         {
           value: "",
-          label: "No Products Available",
+          label: "No MRs Available",
           disabled: true,
         },
       ];
     }
 
-    if (!products || products.length === 0) {
-      return [{ value: "", label: "Loading products..." }];
-    }
+    return mrList.map((mr) => ({
+      value: mr._id,
+      label: mr.medicalRepName || mr.employeeName || `MR ${mr._id}`,
+    }));
+  }, [mrList, isMrListEmpty]);
 
-    return [
-      { value: "", label: "Select Product" },
-      ...products.map((product) => {
-        const stockInfo = product.inStock;
-        // Only show stock info in dropdown for send transfers
-        const stockLabel = form.transferType === "send" && stockInfo
-          ? `${product.productName}`
-          : product.productName;
+  const selectedProductIds = mrTransfer.products.map((p) => p.productId);
 
-        return {
-          value: product._id,
-          label: stockLabel,
-          product: product, // Include full product data for stock info
-        };
-      }),
-    ];
-  }, [products, form.transferType, isProductsEmpty]);
+  // Find the selected MR name
+  const selectedMr = useMemo(() => {
+    if (!mrTransfer.mrId) return null;
+    return mrOptions.find((mr) => mr.value === mrTransfer.mrId);
+  }, [mrTransfer.mrId, mrOptions]);
 
-  const orderStatusOptions = useMemo(
-    () => [
-      ...orderStatuses.map((status) => ({
-        value: status.code,
-        label: status.name,
-      })),
-    ],
-    [orderStatuses]
-  );
+  // Create dynamic button text based on selected MR
+  const getTransferButtonText = useMemo(() => {
+    if (loading) return "Saving...";
+    if (selectedMr) return `Transfer to ${selectedMr.label}`;
+    return "Transfer to MR";
+  }, [loading, selectedMr]);
 
-  // Helper function to get product details including stock
-  const getProductDetails = (productId) => {
-    return products.find((p) => p._id === productId);
+  const handleProductSelect = (selectedIds) => {
+    const updated = selectedIds.map((id) => {
+      const existing = mrTransfer.products.find((p) => p.productId === id);
+      if (existing) return existing;
+      const product = products.find((p) => p._id === id);
+      return {
+        productId: id,
+        productName: product?.productName || "",
+        boxQty: "",
+      };
+    });
+    setMrTransfer((prev) => ({ ...prev, products: updated }));
   };
 
-  // API calls
-  const fetchOrderStatuses = useCallback(async () => {
-    try {
-      const response = await axios.get(`${backendUrl}/api/order-statuses`);
-      setOrderStatuses(response.data);
-    } catch (err) {
-      console.error("Error fetching order statuses:", err);
-      showToast("error", "Failed to fetch order statuses");
+  const updateProductQty = (productId, field, value) => {
+    if (field === "boxQty") {
+      // Validate numeric input for boxQty
+      const numericValue = validateNumericInput(value);
+      setMrTransfer((prev) => ({
+        ...prev,
+        products: prev.products.map((p) =>
+          p.productId === productId ? { ...p, [field]: numericValue } : p
+        ),
+      }));
     }
-  }, []);
+  };
 
-  useEffect(() => {
-    fetchOrderStatuses();
-  }, [fetchOrderStatuses]);
+  const removeProduct = (productId) => {
+    setMrTransfer((prev) => ({
+      ...prev,
+      products: prev.products.filter((p) => p.productId !== productId),
+    }));
+  };
 
-  const handleFormChange = useCallback(
-    (field, value) => {
-      if (isProductsEmpty) {
-        showToast("error", "Cannot modify form. No products available.");
-        return;
-      }
-      handleSelectChange(field, value);
-    },
-    [handleSelectChange, isProductsEmpty]
-  );
-
-  const handleAddItem = useCallback(() => {
-    if (isProductsEmpty) {
-      showToast("error", "Cannot add items. No products available.");
-      return;
-    }
-
-    if (!form.product) {
-      showToast("error", "Please select a product first");
-      return;
-    }
-
-    const selectedProduct = getProductDetails(form.product);
-    if (!selectedProduct) {
-      showToast("error", "Selected product not found");
-      return;
-    }
-
-    const newItem = {
-      ...INITIAL_PRODUCT_ITEM,
-      id: Date.now(),
-      productId: form.product,
-      productName: selectedProduct.productName,
-    };
-
-    addItem(newItem);
-    handleFormChange("product", "");
-  }, [form.product, products, addItem, handleFormChange, isProductsEmpty]);
-
-  const handleItemChange = useCallback(
-    (id, field, value) => {
-      if (isProductsEmpty) {
-        showToast("error", "Cannot modify items. No products available.");
-        return;
-      }
-
-      if (field === "boxQuantity" && form.transferType === "send") {
-        const item = items.find(item => item.id === id);
-        if (item && item.productId) {
-          const product = getProductDetails(item.productId);
-          if (product && product.inStock) {
-            const availableStock = product.inStock.boxes;
-            const requestedQuantity = parseFloat(value);
-            
-            if (requestedQuantity > availableStock) {
-              showToast("error", `Cannot exceed available stock (${availableStock} boxes)`);
-              // You can choose to either block the input or allow it but show error
-              // For now, we'll allow the input but validation will catch it on submit
-            }
-          }
-        }
-      }
-      
-      updateItem(id, field, value);
-    },
-    [updateItem, items, products, form.transferType, isProductsEmpty]
-  );
-
-  const handleSubmit = async (e) => {
+  const handleMrTransferSubmit = async (e) => {
     e.preventDefault();
     
-    if (isProductsEmpty) {
-      showToast("error", "Cannot create stock transfer. No products available.");
+    // Filter out products with 0 or empty box quantity
+    const validProducts = mrTransfer.products.filter(
+      (p) => p.boxQty && parseFloat(p.boxQty) > 0
+    );
+    
+    if (!mrTransfer.mrId || validProducts.length === 0) {
+      showToast("error", "Please select MR and at least one product with valid box quantity");
       return;
     }
 
-    // Pass products to validate for stock validation
-    if (!validate(products)) {
-      showToast("error", "Please fix the form errors before submitting");
-      return;
-    }
-
-    setIsLoading(true);
-
-    const payload = {
-      invoiceNo: form.invoiceNumber,
-      date: form.transferDate,
-      items: items.map((item) => ({
-        productId: item.productId,
-        productName: item.productName,
-        boxQuantity: parseFloat(item.boxQuantity || 0),
-        expenses: parseFloat(item.expenses || 0),
-      })),
-      remarks: form.remarks || "",
-      status: form.orderStatus,
-      transferType: form.transferType,
-      shipping: parseFloat(form.shipping || 0),
-      totalExpenses: parseFloat(totalExpenses || 0),
-      grandTotal: parseFloat(grandTotal || 0),
-      destination: form.destination || "", // Include destination in payload
-      source: form.source || "", // Include source in payload
-    };
-
+    setLoading(true);
     try {
-      const response = await axios.post(
-        `${backendUrl}/api/stock-transfers`,
-        payload
-      );
+      const selectedMr = mrOptions.find((m) => m.value === mrTransfer.mrId);
+      const payload = {
+        invoiceNo: mrTransfer.transferNo,
+        date: mrTransfer.date,
+        transferType: "send",
+        destination: selectedMr?.label || "",
+        status: "pending",
+        items: validProducts.map((p) => ({
+          productId: p.productId,
+          productName: p.productName,
+          boxQuantity: parseFloat(p.boxQty) || 0,
+        })),
+        totalExpenses: 0,
+        shipping: 0,
+        grandTotal: 0,
+      };
 
-      if (response.data.success) {
-        showToast(
-          "success",
-          response.data.message || "Stock transfer created successfully"
-        );
-        navigate("/stocktransfer");
-      } else {
-        throw new Error(
-          response.data.message || "Failed to create stock transfer"
-        );
-      }
-    } catch (error) {
-      console.error("Error creating stock transfer:", error);
-
-      // Handle different error types
-      let errorMessage = error.message;
-      if (error.response) {
-        // Server responded with error status
-        errorMessage =
-          error.response.data.message ||
-          error.response.data.error ||
-          error.message;
-      } else if (error.request) {
-        // Request was made but no response received
-        errorMessage = "Network error: Unable to connect to server";
-      }
-
-      showToast("error", errorMessage);
+      await axios.post(`${backendUrl}/api/stock-transfers`, payload);
+      showToast("success", "Stock transferred to MR successfully!");
+      navigate("/stocktransfer");
+    } catch (err) {
+      showToast("error", err.response?.data?.message || "Failed to transfer");
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
-  const isCurrentProductValid = useMemo(
-    () =>
-      !isProductsEmpty &&
-      form.product &&
-      form.product.trim() !== "" &&
-      form.shipping &&
-      form.shipping.trim() !== "" &&
-      form.transferDate &&
-      form.transferDate.trim() !== "" &&
-      form.orderStatus &&
-      form.orderStatus.trim() !== "" &&
-      form.transferType &&
-      form.transferType.trim() !== "" &&
-      // Additional validation for destination/source
-      ((form.transferType === "send" &&
-        form.destination &&
-        form.destination.trim() !== "") ||
-        (form.transferType === "receive" &&
-          form.source &&
-          form.source.trim() !== "")),
-    [
-      form.product,
-      form.shipping,
-      form.transferDate,
-      form.orderStatus,
-      form.transferType,
-      form.destination,
-      form.source,
-      isProductsEmpty,
-    ]
-  );
+  const handleEmployeeChange = (mrId) => {
+    setMrTransfer((prev) => ({ ...prev, mrId }));
+  };
+
+  // Function to filter out products with 0 box quantity when modal closes
+  const handleModalClose = () => {
+    const filteredProducts = mrTransfer.products.filter(
+      (p) => p.boxQty && parseFloat(p.boxQty) > 0
+    );
+    setMrTransfer((prev) => ({ ...prev, products: filteredProducts }));
+    setShowProductModal(false);
+  };
 
   return (
-    <div className="max-w-3xl mx-auto p-6 bg-white rounded-2xl shadow-lg">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-gray-800">
-          Create Stock Transfer
-        </h2>
+    <div className="max-w-5xl mx-auto p-6">
+      {/* Tabs */}
+      <div className="flex gap-4 mb-8 border-b">
+        {["toMR", "general"].map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`px-8 py-3 font-medium text-lg border-b-4 transition-all ${
+              activeTab === tab
+                ? "border-indigo-600 text-indigo-600"
+                : "border-transparent text-gray-600 hover:text-indigo-600"
+            }`}
+          >
+            {tab === "toMR"
+              ? "Stock Transfer to MR"
+              : "General Transfer (Send/Receive)"}
+          </button>
+        ))}
       </div>
 
-      {/* Warning message if products are empty */}
-      {isProductsEmpty && (
-        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-          <div className="flex items-center">
-            <div className="flex-shrink-0">
-              <svg
-                className="h-5 w-5 text-red-400"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                  clipRule="evenodd"
-                />
-              </svg>
-            </div>
-            <div className="ml-3">
-              <h3 className="text-sm font-medium text-red-800">
-                No Products Available
-              </h3>
-              <div className="mt-2 text-sm text-red-700">
-                <p>
-                  You need to add at least one product before creating stock transfers. 
-                  Add products in the product management section first.
-                </p>
+      {/* === TAB 1: Stock Transfer to MR === */}
+      {activeTab === "toMR" && (
+        <div className="bg-white rounded-2xl shadow-lg p-8">
+          <h2 className="text-2xl font-bold text-gray-800 mb-8 flex items-center gap-3">
+            <Package size={28} /> Stock Transfer to MR
+          </h2>
+
+          {isMrListEmpty && (
+            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+              <div className="flex items-center">
+                <div className="flex-shrink-0">
+                  <svg
+                    className="h-5 w-5 text-red-400"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                </div>
+                <div className="ml-3">
+                  <h3 className="text-sm font-medium text-red-800">
+                    No MRs Available
+                  </h3>
+                  <div className="mt-2 text-sm text-red-700">
+                    <p>
+                      You need to add at least one MR before creating stock
+                      transfer records.
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
+          )}
+
+          <form onSubmit={handleMrTransferSubmit}>
+            {/* Row 1 */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+              <div className="flex flex-col">
+                <label className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+                  <Hash size={18} /> Transfer No
+                </label>
+                <input
+                  type="text"
+                  value={mrTransfer.transferNo}
+                  readOnly
+                  className="border border-gray-300 rounded-lg px-4 py-3 bg-gray-50"
+                />
+              </div>
+
+              <div className="flex flex-col">
+                <label className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
+                  <Calendar size={18} /> Transfer Date{" "}
+                  <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  value={mrTransfer.date}
+                  onChange={(e) =>
+                    setMrTransfer((prev) => ({ ...prev, date: e.target.value }))
+                  }
+                  required
+                  className="border border-gray-300 rounded-lg px-4 py-3"
+                />
+              </div>
+
+              <SearchableDropdown
+                label="MR Name"
+                value={mrTransfer.mrId}
+                onChange={handleEmployeeChange}
+                options={mrOptions}
+                placeholder={
+                  isMrListEmpty ? "No MR List Available" : "Select MR"
+                }
+                required={true}
+                loading={mrListLoading}
+                error={mrTransfer.mrId ? "" : "MR Name is required"}
+                disabled={isMrListEmpty}
+              />
+            </div>
+
+            {/* Product Selection */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+              <div className="md:col-span-2">
+                <label className="text-sm font-medium text-gray-700 mb-2">
+                  Select Products <span className="text-red-500">*</span>
+                </label>
+                <MultipleSelectDropdown
+                  value={selectedProductIds}
+                  onChange={handleProductSelect}
+                  options={productOptions}
+                  placeholder="Search and select products..."
+                />
+              </div>
+
+              <div className="flex flex-col justify-end">
+                <label className="text-sm font-medium text-gray-700 mb-2">
+                  Total Products
+                </label>
+                <div className="flex gap-3">
+                  <input
+                    type="text"
+                    value={mrTransfer.products.length}
+                    readOnly
+                    className="w-full border border-gray-300 rounded-lg px-4 py-3 bg-gray-100 text-center font-semibold"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowProductModal(true)}
+                    disabled={mrTransfer.products.length === 0 || isMrListEmpty}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg disabled:bg-gray-400 flex items-center gap-2"
+                  >
+                    <Eye size={18} /> View
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-4">
+              <button
+                type="button"
+                onClick={() => navigate("/stocktransfer")}
+                className="px-8 py-3 bg-gray-300 hover:bg-gray-400 text-gray-800 rounded-lg font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={
+                  loading ||
+                  !mrTransfer.mrId ||
+                  mrTransfer.products.length === 0 ||
+                  isMrListEmpty
+                }
+                className={`px-8 py-3 rounded-lg font-medium flex items-center gap-2 ${
+                  loading ||
+                  !mrTransfer.mrId ||
+                  mrTransfer.products.length === 0 ||
+                  isMrListEmpty
+                    ? "bg-gray-400 text-gray-200 cursor-not-allowed"
+                    : "bg-green-600 hover:bg-green-700 text-white"
+                }`}
+              >
+                <Plus size={20} /> {getTransferButtonText}
+              </button>
+            </div>
+          </form>
         </div>
       )}
 
-      <form onSubmit={handleSubmit}>
-        {/* Form Fields */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-          <InputField
-            label="Stock Transfer No"
-            name="invoiceNumber"
-            value={form.invoiceNumber}
-            onChange={handleChange}
-            placeholder="Auto-generated"
-            readOnly
-            disabled={isFormDisabled}
-          />
-          <SelectField
-            label="Order Status"
-            name="orderStatus"
-            value={form.orderStatus}
-            onChange={(e) => handleSelectChange("orderStatus", e.target.value)}
-            options={orderStatusOptions}
-            error={errors.orderStatus}
-            placeholder="Select Order Status"
-            required
-            disabled={isFormDisabled}
-          />
-          <InputField
-            label="Transfer Date"
-            name="transferDate"
-            type="date"
-            value={form.transferDate}
-            onChange={handleChange}
-            error={errors.transferDate}
-            required
-            disabled={isFormDisabled}
-          />
-          <SelectField
-            label="Transfer Type"
-            name="transferType"
-            value={form.transferType}
-            onChange={(e) => handleSelectChange("transferType", e.target.value)}
-            options={TRANSFER_TYPE_OPTIONS}
-            error={errors.transferType}
-            placeholder="Select Transfer Type"
-            required
-            disabled={isFormDisabled}
-          />
-
-          {/* Conditional Destination/Source Field */}
-          {form.transferType === "send" && (
-            <InputField
-              label="Destination"
-              name="destination"
-              value={form.destination}
-              onChange={handleChange}
-              error={errors.destination}
-              placeholder="Enter destination"
-              required
-              disabled={isFormDisabled}
-            />
-          )}
-
-          {form.transferType === "receive" && (
-            <InputField
-              label="Source"
-              name="source"
-              value={form.source}
-              onChange={handleChange}
-              error={errors.source}
-              placeholder="Enter source"
-              required
-              disabled={isFormDisabled}
-            />
-          )}
-
-          <InputField
-            label="Shipping ($)"
-            name="shipping"
-            value={form.shipping}
-            onChange={(e) => handleNumberChange("shipping", e.target.value)}
-            placeholder="Enter Shipping"
-            type="text"
-            disabled={isFormDisabled}
-          />
+      {/* === TAB 2: General Transfer === */}
+      {activeTab === "general" && (
+        <div className="bg-white rounded-2xl shadow-lg p-8">
+          <h2 className="text-2xl font-bold text-gray-800 mb-6">
+            General Stock Transfer (Send / Receive)
+          </h2>
+          <GeneralTransferForm navigate={navigate} />
         </div>
+      )}
 
-        {/* Product Selection */}
-        <div className="mb-6 p-4 border border-gray-200 rounded-lg">
-          <h3 className="text-lg font-semibold mb-4">Add Products</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Product <span className="text-red-500">*</span>
-              </label>
-              {loading ? (
-                <div className="border rounded-lg px-3 py-2 bg-gray-100 text-gray-500">
-                  Loading products...
-                </div>
-              ) : (
-                <CustomDropdown
-                  value={form.product}
-                  onChange={(value) => handleFormChange("product", value)}
-                  placeholder={isProductsEmpty ? "No Products Available" : "Select Product"}
-                  options={productOptions}
-                  required
-                  disabled={isFormDisabled}
-                />
-              )}
+      {/* Product Modal */}
+      {showProductModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-3xl w-full max-h-[85vh] overflow-y-auto p-8">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-2xl font-bold">Product Transfer Details</h3>
+              <button onClick={handleModalClose}>
+                <X size={28} className="text-gray-500 hover:text-gray-700" />
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={handleAddItem}
-              disabled={!isCurrentProductValid || isFormDisabled}
-              className={`px-4 py-2 rounded-lg transition-colors ${
-                isCurrentProductValid && !isFormDisabled
-                  ? "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
-                  : "bg-gray-400 text-gray-200 cursor-not-allowed"
-              }`}
-            >
-              Add Product
-            </button>
-          </div>
-          {errors.items && (
-            <p className="text-red-500 text-sm mt-2">{errors.items}</p>
-          )}
-        </div>
 
-        {items.length > 0 && (
-          <div className="mb-6">
-            <h3 className="text-lg font-semibold mb-4">Product Items</h3>
-            <div className="space-y-4">
-              {items.map((item, index) => {
-                const product = getProductDetails(item.productId);
-                const stockInfo = product?.inStock;
+            <div className="space-y-6">
+              {mrTransfer.products.map((prod) => {
+                const product = products.find((p) => p._id === prod.productId);
+                const availableStock = product?.totalBoxes || 0;
                 
                 return (
-                  <div key={item.id} className="border border-gray-300 rounded-lg p-4 bg-gray-50">
-                    <div className="flex justify-between items-start mb-3">
-                      <div className="flex items-center gap-4">
-                        <h4 className="text-md font-semibold text-gray-800">
-                          {item.productName}
+                  <div
+                    key={prod.productId}
+                    className="border rounded-xl px-6 py-4 bg-gray-50"
+                  >
+                    <div className="flex justify-between items-center mb-4">
+                      <div>
+                        <h4 className="text-lg font-semibold text-gray-800">
+                          {prod.productName}
                         </h4>
-                        {/* Stock information display - ONLY for send transfers */}
-                        {form.transferType === "send" && stockInfo && (
-                          <span
-                            className={`text-sm px-2 py-1 rounded ${
-                              stockInfo.status === "Out of Stock"
-                                ? "bg-red-100 text-red-800 border border-red-300"
-                                : stockInfo.status === "Low Stock" ||
-                                  stockInfo.status === "Critical"
-                                ? "bg-yellow-100 text-yellow-800 border border-yellow-300"
-                                : "bg-green-100 text-green-800 border border-green-300"
-                            }`}
-                          >
-                            Available: {stockInfo.boxes} boxes
-                          </span>
-                        )}
+                        <p className="text-sm text-gray-600 mt-1">
+                          Available: {availableStock} boxes
+                        </p>
                       </div>
                       <button
                         type="button"
-                        onClick={() => removeItem(item.id)}
-                        disabled={isFormDisabled}
-                        className={`px-3 py-1 rounded text-sm transition-colors ${
-                          isFormDisabled
-                            ? "bg-gray-400 text-white opacity-50 cursor-not-allowed"
-                            : "bg-red-600 hover:bg-red-700 text-white cursor-pointer"
-                        }`}
+                        onClick={() => removeProduct(prod.productId)}
+                        className="text-red-600 hover:text-red-800"
                       >
-                        Remove
+                        <Trash2 size={20} />
                       </button>
                     </div>
-                    
+
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="flex flex-col">
-                        <label className="text-sm font-medium text-gray-700 mb-1">
-                          Box Quantity <span className="text-red-500">*</span>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Available Boxes
                         </label>
                         <input
                           type="text"
-                          value={item.boxQuantity}
-                          onChange={(e) =>
-                            handleItemChange(
-                              item.id,
-                              "boxQuantity",
-                              e.target.value
-                            )
-                          }
-                          disabled={isFormDisabled}
-                          className={`w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-                            errors[`boxQuantity_${index}`] ? "border-red-500" : "border-gray-300"
-                          } ${isFormDisabled ? "bg-gray-100 cursor-not-allowed" : ""}`}
-                          placeholder="Enter box quantity"
-                          max={form.transferType === "send" ? stockInfo?.boxes : undefined} // Only set max for send transfers
+                          value={availableStock}
+                          readOnly
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-100"
                         />
-                        {errors[`boxQuantity_${index}`] && (
-                          <p className="text-red-500 text-xs mt-1">
-                            {errors[`boxQuantity_${index}`]}
-                          </p>
-                        )}
-                        {/* Show maximum allowed ONLY for send transfers */}
-                        {form.transferType === "send" && stockInfo && (
-                          <p className="text-xs text-gray-500 mt-1">
-                            Maximum allowed: {stockInfo.boxes} boxes
-                          </p>
-                        )}
                       </div>
-                      
-                      <div className="flex flex-col">
-                        <label className="text-sm font-medium text-gray-700 mb-1">
-                          Expenses ($)
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Transfer Boxes <span className="text-red-500">*</span>
                         </label>
                         <input
                           type="text"
-                          value={item.expenses}
-                          onChange={(e) =>
-                            handleItemChange(
-                              item.id,
-                              "expenses",
-                              e.target.value
-                            )
-                          }
-                          disabled={isFormDisabled}
-                          className={`w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-                            isFormDisabled ? "bg-gray-100 cursor-not-allowed" : ""
-                          }`}
-                          placeholder="Enter expenses"
+                          value={prod.boxQty}
+                          onChange={(e) => {
+                            const value = validateNumericInput(e.target.value);
+                            const numericValue = parseFloat(value) || 0;
+                            
+                            // Validate against available stock
+                            if (numericValue > availableStock) {
+                              showToast("error", `Cannot exceed available stock (${availableStock} boxes)`);
+                              updateProductQty(prod.productId, "boxQty", availableStock);
+                            } else {
+                              updateProductQty(prod.productId, "boxQty", value);
+                            }
+                          }}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Enter box quantity"
+                          onKeyPress={(e) => {
+                            const char = String.fromCharCode(e.which);
+                            if (!/[\d.]/.test(char)) {
+                              e.preventDefault();
+                            }
+                          }}
                         />
+                        {prod.boxQty && (
+                          <p className="text-xs text-gray-500 mt-1">
+                            Remaining after transfer: {availableStock - (parseFloat(prod.boxQty) || 0)} boxes
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>
                 );
               })}
             </div>
-          </div>
-        )}
 
-        {/* Remarks Field - Full Width */}
-        <div className="mb-6">
-          <TextAreaField
-            label="Remarks"
-            name="remarks"
-            value={form.remarks}
-            onChange={handleChange}
-            placeholder="Enter remarks or additional information"
-            rows={4}
-            disabled={isFormDisabled}
-            className="w-full"
-          />
-        </div>
-
-        {/* Summary Section */}
-        <div className="bg-gray-50 p-4 rounded-lg mb-6">
-          <h3 className="text-lg font-semibold mb-4">Financial Summary</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-            <div>
-              <strong>Total Expenses:</strong>
-              <div className="text-green-600 font-semibold">
-                ${totalExpenses.toFixed(2)}
-              </div>
-            </div>
-            <div>
-              <strong>Shipping:</strong>
-              <div className="text-blue-600 font-semibold">
-                ${shipping.toFixed(2)}
-              </div>
-            </div>
-            <div>
-              <strong>Grand Total:</strong>
-              <div className="text-purple-600 font-bold text-lg">
-                ${grandTotal.toFixed(2)}
-              </div>
+            <div className="mt-8 flex justify-end">
+              <button
+                onClick={handleModalClose}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 rounded-lg font-medium"
+              >
+                Done
+              </button>
             </div>
           </div>
         </div>
-
-        {/* Buttons */}
-        <div className="flex justify-end gap-4">
-          <button
-            type="button"
-            onClick={() => navigate("/stocktransfer")}
-            className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-6 py-2 rounded-lg transition-colors cursor-pointer"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={isLoading || isFormDisabled}
-            className={`px-6 py-2 rounded-lg transition-colors ${
-              isLoading || isFormDisabled
-                ? "bg-gray-400 text-gray-200 cursor-not-allowed"
-                : "bg-green-600 hover:bg-green-700 text-white cursor-pointer"
-            }`}
-          >
-            {isLoading ? "Saving..." : "Save Transfer"}
-          </button>
-        </div>
-      </form>
+      )}
     </div>
   );
 };
