@@ -9,8 +9,6 @@ import { useNavigate } from "react-router-dom";
 import { showToast } from "../utils/toast.jsx";
 import CustomDropdown from "./Utility/customDropdown.jsx";
 import axios from "axios";
-import DatePicker from "react-datepicker";
-import "react-datepicker/dist/react-datepicker.css";
 import {
   Package,
   Calendar,
@@ -26,12 +24,27 @@ import InputField from "../components/common/InputField";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
+// Helper function to validate numeric input
+const validateNumericInput = (value) => {
+  // Remove any non-numeric characters except decimal point
+  const numericValue = value.replace(/[^0-9.]/g, "");
+
+  // Allow only one decimal point
+  const parts = numericValue.split(".");
+  if (parts.length > 2) {
+    return parts[0] + "." + parts.slice(1).join("");
+  }
+
+  return numericValue;
+};
+
 // Reusable Multiple Select Dropdown (same as Payroll)
 const MultipleSelectDropdown = ({
   value = [],
   onChange,
   options,
   placeholder,
+  disabled = false,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -45,6 +58,7 @@ const MultipleSelectDropdown = ({
   });
 
   const toggle = (val) => {
+    if (disabled) return;
     // Only add if not already selected
     if (!value.includes(val)) {
       onChange([...value, val]);
@@ -71,8 +85,12 @@ const MultipleSelectDropdown = ({
   return (
     <div ref={ref} className="relative">
       <div
-        onClick={() => setIsOpen(!isOpen)}
-        className="border border-gray-300 rounded-lg px-4 py-2 min-h-[42px] flex flex-wrap gap-2 items-center cursor-pointer bg-white hover:border-blue-500 transition"
+        onClick={() => !disabled && setIsOpen(!isOpen)}
+        className={`border rounded-lg px-4 py-2 min-h-[42px] flex flex-wrap gap-2 items-center ${
+          disabled
+            ? "bg-gray-100 cursor-not-allowed"
+            : "cursor-pointer bg-white hover:border-blue-500"
+        } border-gray-300 transition`}
       >
         {value.length === 0 ? (
           <span className="text-gray-500">{placeholder}</span>
@@ -85,20 +103,22 @@ const MultipleSelectDropdown = ({
                 className="bg-indigo-100 text-indigo-800 px-3 py-1 rounded-full text-sm flex items-center gap-1"
               >
                 {opt?.label}
-                <button
-                  type="button"
-                  onClick={(e) => removeSelected(v, e)}
-                  className="ml-1 hover:bg-indigo-200 rounded-full w-4 h-4 flex items-center justify-center"
-                >
-                  ×
-                </button>
+                {!disabled && (
+                  <button
+                    type="button"
+                    onClick={(e) => removeSelected(v, e)}
+                    className="ml-1 hover:bg-indigo-200 rounded-full w-4 h-4 flex items-center justify-center"
+                  >
+                    ×
+                  </button>
+                )}
               </span>
             );
           })
         )}
       </div>
 
-      {isOpen && (
+      {isOpen && !disabled && (
         <div className="absolute z-10 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-auto">
           <input
             type="text"
@@ -134,11 +154,81 @@ const MultipleSelectDropdown = ({
   );
 };
 
-// Custom hook for general form (from original)
+// SelectField and TextAreaField Components (moved up for proper hoisting)
+const SelectField = React.memo(
+  ({
+    label,
+    name,
+    value,
+    onChange,
+    options,
+    error,
+    placeholder = "",
+    required = false,
+    disabled = false,
+    className = "",
+  }) => (
+    <div className="flex flex-col">
+      <label className="text-sm font-medium text-gray-700 mb-1">
+        {label}
+        {required && <span className="text-red-500 ml-1">*</span>}
+      </label>
+      <select
+        name={name}
+        value={value}
+        onChange={onChange}
+        disabled={disabled}
+        className={`border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+          error ? "border-red-500" : "border-gray-300"
+        } ${disabled ? "bg-gray-100 cursor-not-allowed" : ""} ${className}`}
+      >
+        <option value="">{placeholder}</option>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      {error && <p className="text-red-500 text-xs mt-1">{error}</p>}
+    </div>
+  )
+);
+
+const TextAreaField = React.memo(
+  ({
+    label,
+    name,
+    value,
+    onChange,
+    error,
+    placeholder = "",
+    rows = 3,
+    disabled = false,
+    className = "",
+  }) => (
+    <div className="flex flex-col">
+      <label className="text-sm font-medium text-gray-700 mb-1">{label}</label>
+      <textarea
+        name={name}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        rows={rows}
+        disabled={disabled}
+        className={`border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+          error ? "border-red-500" : "border-gray-300"
+        } ${disabled ? "bg-gray-100 cursor-not-allowed" : ""} ${className}`}
+      />
+      {error && <p className="text-red-500 text-xs mt-1">{error}</p>}
+    </div>
+  )
+);
+
+// Custom hook for general form
 const useStockTransferForm = () => {
   const [form, setForm] = useState({
     invoiceNumber: "",
-    transferDate: "",
+    transferDate: new Date().toISOString().split("T")[0], // Default to today
     product: "",
     remarks: "",
     orderStatus: "",
@@ -146,7 +236,6 @@ const useStockTransferForm = () => {
     transferType: "send",
     destination: "",
     source: "",
-    items: [],
   });
   const [errors, setErrors] = useState({});
   const [items, setItems] = useState([]);
@@ -257,7 +346,7 @@ const useStockTransferForm = () => {
 
   const handleNumberChange = useCallback(
     (name, value) => {
-      const numericValue = value.toString().replace(/[^0-9.]/g, "");
+      const numericValue = validateNumericInput(value.toString());
       updateFormField(name, numericValue);
     },
     [updateFormField]
@@ -331,6 +420,7 @@ const useStockTransferForm = () => {
     updateItem,
     calculateTotals,
     setErrors,
+    updateFormField,
   };
 };
 
@@ -370,21 +460,7 @@ const useProductsWithStock = () => {
   return { products, loading, isProductsEmpty, refetch: fetchProducts };
 };
 
-// Helper function to validate numeric input
-const validateNumericInput = (value) => {
-  // Remove any non-numeric characters except decimal point
-  const numericValue = value.replace(/[^0-9.]/g, "");
-
-  // Allow only one decimal point
-  const parts = numericValue.split(".");
-  if (parts.length > 2) {
-    return parts[0] + "." + parts.slice(1).join("");
-  }
-
-  return numericValue;
-};
-
-// General Transfer Form Component (extracted from original)
+// General Transfer Form Component
 const GeneralTransferForm = ({ navigate }) => {
   const [orderStatuses, setOrderStatuses] = useState([]);
 
@@ -402,6 +478,7 @@ const GeneralTransferForm = ({ navigate }) => {
     removeItem,
     updateItem,
     calculateTotals,
+    updateFormField,
   } = useStockTransferForm();
 
   const { products, loading, isProductsEmpty } = useProductsWithStock();
@@ -444,10 +521,11 @@ const GeneralTransferForm = ({ navigate }) => {
 
   const orderStatusOptions = useMemo(
     () => [
-      ...orderStatuses.map((status) => ({
-        value: status.code,
+      { value: "", label: "Select Order Status" },
+      ...(orderStatuses.map((status) => ({
+        value: status.code || status._id,
         label: status.name,
-      })),
+      })) || []),
     ],
     [orderStatuses]
   );
@@ -459,7 +537,7 @@ const GeneralTransferForm = ({ navigate }) => {
   const fetchOrderStatuses = useCallback(async () => {
     try {
       const response = await axios.get(`${backendUrl}/api/order-statuses`);
-      setOrderStatuses(response.data);
+      setOrderStatuses(response.data || []);
     } catch (err) {
       console.error("Error fetching order statuses:", err);
       showToast("error", "Failed to fetch order statuses");
@@ -880,9 +958,7 @@ const GeneralTransferForm = ({ navigate }) => {
                             ? "border-red-500"
                             : "border-gray-300"
                         } ${
-                          isFormDisabled
-                            ? "bg-gray-100 cursor-not-allowed"
-                            : ""
+                          isFormDisabled ? "bg-gray-100 cursor-not-allowed" : ""
                         }`}
                         placeholder="Enter box quantity"
                         onKeyPress={(e) => {
@@ -973,85 +1049,17 @@ const GeneralTransferForm = ({ navigate }) => {
   );
 };
 
-// SelectField and TextAreaField (from original)
-const SelectField = React.memo(
-  ({
-    label,
-    name,
-    value,
-    onChange,
-    options,
-    error,
-    placeholder = "",
-    required = false,
-    disabled = false,
-    className = "",
-  }) => (
-    <div className="flex flex-col">
-      <label className="text-sm font-medium text-gray-700 mb-1">
-        {label}
-        {required && <span className="text-red-500 ml-1">*</span>}
-      </label>
-      <select
-        name={name}
-        value={value}
-        onChange={onChange}
-        disabled={disabled}
-        className={`border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-          error ? "border-red-500" : "border-gray-300"
-        } ${disabled ? "bg-gray-100 cursor-not-allowed" : ""} ${className}`}
-      >
-        <option value="">{placeholder}</option>
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-      {error && <p className="text-red-500 text-xs mt-1">{error}</p>}
-    </div>
-  )
-);
-
-const TextAreaField = React.memo(
-  ({
-    label,
-    name,
-    value,
-    onChange,
-    error,
-    placeholder = "",
-    rows = 3,
-    disabled = false,
-    className = "",
-  }) => (
-    <div className="flex flex-col">
-      <label className="text-sm font-medium text-gray-700 mb-1">{label}</label>
-      <textarea
-        name={name}
-        value={value}
-        onChange={onChange}
-        placeholder={placeholder}
-        rows={rows}
-        disabled={disabled}
-        className={`border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-          error ? "border-red-500" : "border-gray-300"
-        } ${disabled ? "bg-gray-100 cursor-not-allowed" : ""} ${className}`}
-      />
-      {error && <p className="text-red-500 text-xs mt-1">{error}</p>}
-    </div>
-  )
-);
-
+// Main Component
 const StockTransferForm = () => {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState("toMR"); // "toMR" | "general"
+  const [activeTab, setActiveTab] = useState("toMR");
 
   // === TAB 1: Transfer to MR ===
   const [mrTransfer, setMrTransfer] = useState({
     transferNo: "",
     date: new Date().toISOString().split("T")[0],
     mrId: "",
+    transferType: "send", // Added transferType
     products: [],
   });
   const [mrList, setMrList] = useState([]);
@@ -1060,6 +1068,7 @@ const StockTransferForm = () => {
   const [products, setProducts] = useState([]);
   const [showProductModal, setShowProductModal] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [errors, setErrors] = useState({});
 
   // Fetch MRs
   const fetchMRs = useCallback(async () => {
@@ -1130,7 +1139,7 @@ const StockTransferForm = () => {
         createdAt: product.createdAt,
         updatedAt: product.updatedAt,
       }));
-      
+
       setProducts(formattedProducts);
     } catch (error) {
       console.error("❌ Error fetching products:", error);
@@ -1159,8 +1168,16 @@ const StockTransferForm = () => {
     );
   }, [fetchMRs, fetchProducts]);
 
+  const TRANSFER_TYPE_OPTIONS = [
+    { value: "send", label: "Send" },
+    { value: "receive", label: "Receive" },
+  ];
+
   const productOptions = useMemo(
-    () => products.map((p) => ({ value: p._id, label: p.productName })),
+    () =>
+      products
+        .filter((pr) => pr.totalBoxes > 0)
+        .map((p) => ({ value: p._id, label: p.productName })),
     [products]
   );
 
@@ -1192,9 +1209,15 @@ const StockTransferForm = () => {
   // Create dynamic button text based on selected MR
   const getTransferButtonText = useMemo(() => {
     if (loading) return "Saving...";
-    if (selectedMr) return `Transfer to ${selectedMr.label}`;
-    return "Transfer to MR";
-  }, [loading, selectedMr]);
+    if (selectedMr) {
+      return mrTransfer.transferType === "send"
+        ? `Transfer to ${selectedMr.label}`
+        : `Receive from ${selectedMr.label}`;
+    }
+    return mrTransfer.transferType === "send"
+      ? "Transfer to MR"
+      : "Receive from MR";
+  }, [loading, selectedMr, mrTransfer.transferType]);
 
   const handleProductSelect = (selectedIds) => {
     const updated = selectedIds.map((id) => {
@@ -1230,16 +1253,57 @@ const StockTransferForm = () => {
     }));
   };
 
+  const validateMrTransfer = () => {
+    const newErrors = {};
+
+    if (!mrTransfer.date) newErrors.date = "Transfer date is required";
+    if (!mrTransfer.transferType)
+      newErrors.transferType = "Transfer type is required";
+    if (!mrTransfer.mrId) newErrors.mrId = "MR Name is required";
+
+    const validProducts = mrTransfer.products.filter(
+      (p) => p.boxQty && parseFloat(p.boxQty) > 0
+    );
+    if (validProducts.length === 0) {
+      newErrors.products = "At least one product with valid box quantity is required";
+    }
+
+    // Validate stock for send transfers
+    if (mrTransfer.transferType === "send") {
+      mrTransfer.products.forEach((prod, index) => {
+        const product = products.find((p) => p._id === prod.productId);
+        if (product) {
+          const availableStock = product.totalBoxes || 0;
+          const requestedQuantity = parseFloat(prod.boxQty) || 0;
+          if (requestedQuantity > availableStock) {
+            newErrors[`product_${index}`] = `Box quantity cannot exceed available stock (${availableStock} boxes)`;
+          }
+        }
+      });
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
   const handleMrTransferSubmit = async (e) => {
     e.preventDefault();
-    
+
+    if (!validateMrTransfer()) {
+      showToast("error", "Please fix the form errors before submitting");
+      return;
+    }
+
     // Filter out products with 0 or empty box quantity
     const validProducts = mrTransfer.products.filter(
       (p) => p.boxQty && parseFloat(p.boxQty) > 0
     );
-    
+
     if (!mrTransfer.mrId || validProducts.length === 0) {
-      showToast("error", "Please select MR and at least one product with valid box quantity");
+      showToast(
+        "error",
+        "Please select MR and at least one product with valid box quantity"
+      );
       return;
     }
 
@@ -1249,8 +1313,9 @@ const StockTransferForm = () => {
       const payload = {
         invoiceNo: mrTransfer.transferNo,
         date: mrTransfer.date,
-        transferType: "send",
-        destination: selectedMr?.label || "",
+        transferType: mrTransfer.transferType,
+        destination: mrTransfer.transferType === "send" ? selectedMr?.label || "" : "",
+        source: mrTransfer.transferType === "receive" ? selectedMr?.label || "" : "",
         status: "pending",
         items: validProducts.map((p) => ({
           productId: p.productId,
@@ -1263,7 +1328,10 @@ const StockTransferForm = () => {
       };
 
       await axios.post(`${backendUrl}/api/stock-transfers`, payload);
-      showToast("success", "Stock transferred to MR successfully!");
+      showToast(
+        "success",
+        `Stock ${mrTransfer.transferType === "send" ? "transferred to" : "received from"} MR successfully!`
+      );
       navigate("/stocktransfer");
     } catch (err) {
       showToast("error", err.response?.data?.message || "Failed to transfer");
@@ -1274,6 +1342,10 @@ const StockTransferForm = () => {
 
   const handleEmployeeChange = (mrId) => {
     setMrTransfer((prev) => ({ ...prev, mrId }));
+  };
+
+  const handleTransferTypeChange = (transferType) => {
+    setMrTransfer((prev) => ({ ...prev, transferType }));
   };
 
   // Function to filter out products with 0 box quantity when modal closes
@@ -1346,7 +1418,7 @@ const StockTransferForm = () => {
 
           <form onSubmit={handleMrTransferSubmit}>
             {/* Row 1 */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
               <div className="flex flex-col">
                 <label className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-2">
                   <Hash size={18} /> Transfer No
@@ -1371,8 +1443,38 @@ const StockTransferForm = () => {
                     setMrTransfer((prev) => ({ ...prev, date: e.target.value }))
                   }
                   required
-                  className="border border-gray-300 rounded-lg px-4 py-3"
+                  className={`border rounded-lg px-4 py-3 ${
+                    errors.date ? "border-red-500" : "border-gray-300"
+                  }`}
                 />
+                {errors.date && (
+                  <p className="text-red-500 text-xs mt-1">{errors.date}</p>
+                )}
+              </div>
+
+              <div className="flex flex-col">
+                <label className="text-sm font-medium text-gray-700 mb-2">
+                  Transfer Type <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={mrTransfer.transferType}
+                  onChange={(e) => handleTransferTypeChange(e.target.value)}
+                  disabled={isMrListEmpty}
+                  className={`border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                    errors.transferType ? "border-red-500" : "border-gray-300"
+                  } ${isMrListEmpty ? "bg-gray-100 cursor-not-allowed" : ""}`}
+                >
+                  {TRANSFER_TYPE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                {errors.transferType && (
+                  <p className="text-red-500 text-xs mt-1">
+                    {errors.transferType}
+                  </p>
+                )}
               </div>
 
               <SearchableDropdown
@@ -1385,7 +1487,7 @@ const StockTransferForm = () => {
                 }
                 required={true}
                 loading={mrListLoading}
-                error={mrTransfer.mrId ? "" : "MR Name is required"}
+                error={errors.mrId}
                 disabled={isMrListEmpty}
               />
             </div>
@@ -1401,7 +1503,11 @@ const StockTransferForm = () => {
                   onChange={handleProductSelect}
                   options={productOptions}
                   placeholder="Search and select products..."
+                  disabled={isMrListEmpty}
                 />
+                {errors.products && (
+                  <p className="text-red-500 text-xs mt-1">{errors.products}</p>
+                )}
               </div>
 
               <div className="flex flex-col justify-end">
@@ -1481,10 +1587,10 @@ const StockTransferForm = () => {
             </div>
 
             <div className="space-y-6">
-              {mrTransfer.products.map((prod) => {
+              {mrTransfer.products.map((prod, index) => {
                 const product = products.find((p) => p._id === prod.productId);
                 const availableStock = product?.totalBoxes || 0;
-                
+
                 return (
                   <div
                     key={prod.productId}
@@ -1495,30 +1601,11 @@ const StockTransferForm = () => {
                         <h4 className="text-lg font-semibold text-gray-800">
                           {prod.productName}
                         </h4>
-                        <p className="text-sm text-gray-600 mt-1">
-                          Available: {availableStock} boxes
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => removeProduct(prod.productId)}
-                        className="text-red-600 hover:text-red-800"
-                      >
-                        <Trash2 size={20} />
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Available Boxes
-                        </label>
-                        <input
-                          type="text"
-                          value={availableStock}
-                          readOnly
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-100"
-                        />
+                        {mrTransfer.transferType === "send" && (
+                          <p className="text-sm text-gray-600 mt-1">
+                            Available: {availableStock} boxes
+                          </p>
+                        )}
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1530,16 +1617,30 @@ const StockTransferForm = () => {
                           onChange={(e) => {
                             const value = validateNumericInput(e.target.value);
                             const numericValue = parseFloat(value) || 0;
-                            
-                            // Validate against available stock
-                            if (numericValue > availableStock) {
-                              showToast("error", `Cannot exceed available stock (${availableStock} boxes)`);
-                              updateProductQty(prod.productId, "boxQty", availableStock);
+
+                            // Validate against available stock for send transfers
+                            if (
+                              mrTransfer.transferType === "send" &&
+                              numericValue > availableStock
+                            ) {
+                              showToast(
+                                "error",
+                                `Cannot exceed available stock (${availableStock} boxes)`
+                              );
+                              updateProductQty(
+                                prod.productId,
+                                "boxQty",
+                                availableStock
+                              );
                             } else {
                               updateProductQty(prod.productId, "boxQty", value);
                             }
                           }}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className={`w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                            errors[`product_${index}`]
+                              ? "border-red-500"
+                              : "border-gray-300"
+                          }`}
                           placeholder="Enter box quantity"
                           onKeyPress={(e) => {
                             const char = String.fromCharCode(e.which);
@@ -1548,9 +1649,16 @@ const StockTransferForm = () => {
                             }
                           }}
                         />
-                        {prod.boxQty && (
+                        {errors[`product_${index}`] && (
+                          <p className="text-red-500 text-xs mt-1">
+                            {errors[`product_${index}`]}
+                          </p>
+                        )}
+                        {mrTransfer.transferType === "send" && prod.boxQty && (
                           <p className="text-xs text-gray-500 mt-1">
-                            Remaining after transfer: {availableStock - (parseFloat(prod.boxQty) || 0)} boxes
+                            Remaining after transfer:{" "}
+                            {availableStock - (parseFloat(prod.boxQty) || 0)}{" "}
+                            boxes
                           </p>
                         )}
                       </div>
