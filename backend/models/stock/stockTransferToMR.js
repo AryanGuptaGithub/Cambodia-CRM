@@ -14,7 +14,7 @@ const itemSchema = new mongoose.Schema({
 
 const stockTransferToMRSchema = new mongoose.Schema(
   {
-    invoiceNo: { type: String, required: true },
+    invoiceNo: { type: String, required: true, unique: true },
     date: { type: String, required: true },
     transferType: { type: String, enum: ["send", "receive"], required: true },
 

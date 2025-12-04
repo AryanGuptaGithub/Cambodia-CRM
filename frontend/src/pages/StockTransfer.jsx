@@ -46,7 +46,7 @@ const StockTransfer = () => {
   const [selectedProducts, setSelectedProducts] = useState([]);
   const inputRef = useRef(null);
 
-  // Form state - separate for general and mr
+  // Form state
   const [form, setForm] = useState({
     invoiceNo: "",
     date: "",
@@ -58,31 +58,85 @@ const StockTransfer = () => {
     shipping: 0,
     totalExpenses: 0,
     grandTotal: 0,
-    // For general transfers
     source: "",
     destination: "",
-    // For MR transfers
     mrName: "",
     mrId: "",
+    stockTransferToMr: "", // Added this field
+    stockTransferFromMrToMain: "", // Added this field
   });
 
-  // Helper function to format numbers to 2 decimal places
+  // FIXED: Improved formatCurrency function
   const formatCurrency = (value) => {
-    if (value === null || value === undefined) return "0.00";
+    if (value === null || value === undefined || value === "") return "0.00";
     const num = parseFloat(value);
-    return isNaN(num) ? "0.00" : num.toFixed(2);
+    if (isNaN(num)) return "0.00";
+    return num.toLocaleString('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
   };
 
-  // Helper function to calculate total cost from items
+  // FIXED: Improved calculateTotalTransferCost function
   const calculateTotalTransferCost = (items) => {
     if (!items || !Array.isArray(items)) return 0;
     const total = items.reduce((sum, item) => {
-      const itemCost =
-        item.productCost || (item.lc || 0) * (item.boxQuantity || 0);
-      return sum + parseFloat(itemCost);
+      let itemCost = 0;
+      if (item.productCost !== undefined && item.productCost !== null) {
+        itemCost = parseFloat(item.productCost);
+      } else if (item.lc && item.boxQuantity) {
+        itemCost = parseFloat(item.lc) * parseInt(item.boxQuantity);
+      }
+      return sum + (isNaN(itemCost) ? 0 : itemCost);
     }, 0);
     return parseFloat(total.toFixed(2));
   };
+
+  // NEW: Calculate grand total including shipping and expenses
+  const calculateGrandTotal = (items, shipping = 0, expenses = 0) => {
+    const productTotal = calculateTotalTransferCost(items);
+    const shippingNum = parseFloat(shipping) || 0;
+    const expensesNum = parseFloat(expenses) || 0;
+    return parseFloat((productTotal + shippingNum + expensesNum).toFixed(2));
+  };
+
+  // Helper function to extract number from invoiceNo
+  const extractNumberFromInvoice = (invoiceNo) => {
+    if (!invoiceNo || typeof invoiceNo !== 'string') return 0;
+    const match = invoiceNo.match(/ST-(\d+)/);
+    return match ? parseInt(match[1], 10) : 0;
+  };
+
+  // Get next stock transfer number from backend
+  const getNextStockTransferNumber = useCallback(async () => {
+    try {
+      const response = await axios.get(`${backendUrl}/api/stock-transfers/next-number`);
+      if (response.data.success) {
+        return response.data.nextNumber;
+      }
+      throw new Error(response.data.message || "Failed to get next number");
+    } catch (error) {
+      console.error("Error fetching next stock transfer number:", error);
+      
+      // Fallback: Calculate from existing data
+      const allTransfers = [...generalTransfers, ...mrTransfers];
+      
+      if (allTransfers.length === 0) return "ST-0001";
+      
+      // Extract all ST- numbers and find the highest
+      const stNumbers = allTransfers
+        .map(t => t.invoiceNo)
+        .filter(invoiceNo => invoiceNo && typeof invoiceNo === 'string')
+        .map(extractNumberFromInvoice)
+        .filter(num => !isNaN(num) && num > 0);
+      
+      if (stNumbers.length === 0) return "ST-0001";
+      
+      const maxNum = Math.max(...stNumbers);
+      const nextNum = maxNum + 1;
+      return `ST-${nextNum.toString().padStart(4, '0')}`;
+    }
+  }, [generalTransfers, mrTransfers]);
 
   const productOptions = useMemo(
     () => [
@@ -106,7 +160,6 @@ const StockTransfer = () => {
     }
   }, []);
 
-  // Fetch General Stock Transfers
   const fetchGeneralTransfers = useCallback(async () => {
     if (activeTab !== "general") return;
 
@@ -127,7 +180,6 @@ const StockTransfer = () => {
     }
   }, [activeTab]);
 
-  // Fetch MR Stock Transfers
   const fetchMRTransfers = useCallback(async () => {
     if (activeTab !== "mr") return;
 
@@ -171,6 +223,26 @@ const StockTransfer = () => {
     fetchProducts();
   }, [fetchProducts]);
 
+  // FIXED: Improved numeric input handler to always format to 2 decimal places
+  const handleNumericInputChange = (e, onChangeFunc) => {
+    const { name, value } = e.target;
+    if (value === "" || /^\d*\.?\d*$/.test(value)) {
+      let numericValue = value === "" ? 0 : parseFloat(value);
+      if (isNaN(numericValue)) numericValue = 0;
+      
+      // Always format to 2 decimal places
+      const formattedValue = parseFloat(numericValue.toFixed(2));
+      
+      const syntheticEvent = {
+        target: {
+          name,
+          value: formattedValue,
+        },
+      };
+      onChangeFunc(syntheticEvent);
+    }
+  };
+
   // Handle deleting item from form
   const handleDeleteItem = (index) => {
     if (window.confirm("Are you sure you want to remove this item?")) {
@@ -181,12 +253,22 @@ const StockTransfer = () => {
     }
   };
 
-  // Handle form field changes
+  // FIXED: Improved handleChange to format numeric values
   const handleChange = (e) => {
     const { name, value } = e.target;
+    if (name === "invoiceNo") return;
+    
+    let newValue = value;
+    
+    // Format numeric fields to 2 decimal places
+    if (name === "shipping" || name === "totalExpenses" || name === "grandTotal") {
+      const num = parseFloat(value);
+      newValue = isNaN(num) ? 0 : parseFloat(num.toFixed(2));
+    }
+    
     setForm((prev) => ({
       ...prev,
-      [name]: value,
+      [name]: newValue,
     }));
   };
 
@@ -200,27 +282,6 @@ const StockTransfer = () => {
     setIsProductModalOpen(true);
   };
 
-  // Numeric input handler
-  const handleNumericInputChange = (e, onChangeFunc) => {
-    const { name, value } = e.target;
-    if (value === "" || /^\d*\.?\d*$/.test(value)) {
-      const syntheticEvent = {
-        target: {
-          name,
-          value:
-            value === ""
-              ? ""
-              : name === "shipping" ||
-                name === "totalExpenses" ||
-                name === "grandTotal"
-              ? parseFloat(value) || 0
-              : value,
-        },
-      };
-      onChangeFunc(syntheticEvent);
-    }
-  };
-
   // Update transfer based on type
   const handleUpdateTransfer = async (e, formData) => {
     e.preventDefault();
@@ -231,6 +292,8 @@ const StockTransfer = () => {
       if (activeTab === "general") {
         url = `${backendUrl}/api/stock-transfers/${formData._id}`;
         // Remove MR fields from general transfer data
+        delete requestData.stockTransferToMr;
+        delete requestData.stockTransferFromMrToMain;
         delete requestData.mrName;
         delete requestData.mrId;
       } else {
@@ -239,6 +302,10 @@ const StockTransfer = () => {
         delete requestData.transferType;
         delete requestData.source;
         delete requestData.destination;
+        // Ensure MR name field is correctly set
+        if (requestData.stockTransferToMr) {
+          requestData.mrName = requestData.stockTransferToMr;
+        }
       }
 
       // Transform items data with calculated costs
@@ -253,12 +320,14 @@ const StockTransfer = () => {
           expenses: parseFloat(item.expenses) || 0,
         };
 
-        // If we have lc, calculate productCost
+        // Calculate product cost
         if (item.lc) {
-          itemData.lc = parseFloat(item.lc);
+          itemData.lc = parseFloat(parseFloat(item.lc).toFixed(2));
           itemData.productCost = parseFloat(
-            (item.lc * (item.boxQuantity || 0)).toFixed(2)
+            (itemData.lc * (itemData.boxQuantity || 0)).toFixed(2)
           );
+        } else if (item.productCost) {
+          itemData.productCost = parseFloat(parseFloat(item.productCost).toFixed(2));
         }
 
         return itemData;
@@ -267,6 +336,13 @@ const StockTransfer = () => {
       // Calculate total transfer cost
       requestData.totalTransferCost = calculateTotalTransferCost(
         requestData.items
+      );
+
+      // FIXED: Calculate grand total
+      requestData.grandTotal = calculateGrandTotal(
+        requestData.items,
+        requestData.shipping,
+        requestData.totalExpenses
       );
 
       const response = await fetch(url, {
@@ -310,23 +386,23 @@ const StockTransfer = () => {
 
     return data.filter((transfer) => {
       // Common search fields
-      const matchesInvoice = transfer.invoiceNo
-        ?.toLowerCase()
+      const matchesInvoice = (transfer.invoiceNo || "")
+        .toLowerCase()
         .includes(lowerSearch);
-      const matchesRemarks = transfer.remarks
-        ?.toLowerCase()
+      const matchesRemarks = (transfer.remarks || "")
+        .toLowerCase()
         .includes(lowerSearch);
 
       if (activeTab === "general") {
         const matchesSourceDest =
           (transfer.transferType === "send"
-            ? transfer.destination?.toLowerCase().includes(lowerSearch)
-            : transfer.source?.toLowerCase().includes(lowerSearch)) ?? false;
+            ? (transfer.destination || "").toLowerCase().includes(lowerSearch)
+            : (transfer.source || "").toLowerCase().includes(lowerSearch)) ?? false;
 
         return matchesInvoice || matchesRemarks || matchesSourceDest;
       } else {
-        const matchesMRName = transfer.mrName
-          ?.toLowerCase()
+        const matchesMRName = (transfer.stockTransferToMr || transfer.mrName || "")
+          .toLowerCase()
           .includes(lowerSearch);
         return matchesInvoice || matchesRemarks || matchesMRName;
       }
@@ -408,13 +484,24 @@ const StockTransfer = () => {
     });
   };
 
-  // Handle item field changes
+  // FIXED: Improved handleItemChange to format numeric values
   const handleItemChange = (index, field, value) => {
     setForm((prev) => {
       const updatedItems = [...prev.items];
+      let newValue = value;
+      
+      // Format numeric fields
+      if (field === "lc" || field === "expenses") {
+        const num = parseFloat(value);
+        newValue = isNaN(num) ? 0 : parseFloat(num.toFixed(2));
+      } else if (field === "boxQuantity" || field === "openPieces" || field === "qtyPerCarton") {
+        const num = parseInt(value);
+        newValue = isNaN(num) ? 0 : num;
+      }
+      
       updatedItems[index] = {
         ...updatedItems[index],
-        [field]: value,
+        [field]: newValue,
       };
 
       // Auto-calculate totalPieces
@@ -423,26 +510,19 @@ const StockTransfer = () => {
         field === "openPieces" ||
         field === "qtyPerCarton"
       ) {
-        const boxQuantity =
-          field === "boxQuantity"
-            ? value
-            : updatedItems[index].boxQuantity || 0;
-        const openPieces =
-          field === "openPieces" ? value : updatedItems[index].openPieces || 0;
-        const qtyPerCarton =
-          field === "qtyPerCarton"
-            ? value
-            : updatedItems[index].qtyPerCarton || 0;
+        const boxQuantity = updatedItems[index].boxQuantity || 0;
+        const openPieces = updatedItems[index].openPieces || 0;
+        const qtyPerCarton = updatedItems[index].qtyPerCarton || 0;
 
-        updatedItems[index].totalPieces =
-          parseInt(boxQuantity) * parseInt(qtyPerCarton) + parseInt(openPieces);
+        updatedItems[index].totalPieces = (boxQuantity * qtyPerCarton) + openPieces;
       }
 
       // If boxQuantity or lc changes, recalculate productCost
       if (field === "boxQuantity" || field === "lc") {
-        const lc = updatedItems[index].lc || 0;
-        const boxQty = updatedItems[index].boxQuantity || 0;
-        updatedItems[index].productCost = parseFloat((lc * boxQty).toFixed(2));
+        const lc = parseFloat(updatedItems[index].lc) || 0;
+        const boxQty = parseInt(updatedItems[index].boxQuantity) || 0;
+        const productCost = parseFloat((lc * boxQty).toFixed(2));
+        updatedItems[index].productCost = productCost;
       }
 
       return {
@@ -546,12 +626,30 @@ const StockTransfer = () => {
   };
 
   const handleView = (transfer) => {
-    setForm({ ...transfer });
+    setForm({ 
+      ...transfer,
+      // Ensure MR name is correctly set
+      mrName: transfer.stockTransferToMr || transfer.mrName || "",
+      stockTransferToMr: transfer.stockTransferToMr || transfer.mrName || "",
+      // FIXED: Format numeric values
+      shipping: parseFloat(transfer.shipping || 0).toFixed(2),
+      totalExpenses: parseFloat(transfer.totalExpenses || 0).toFixed(2),
+      grandTotal: parseFloat(transfer.grandTotal || 0).toFixed(2),
+    });
     setIsViewModalOpen(true);
   };
 
   const handleEdit = (transfer) => {
-    setForm({ ...transfer });
+    setForm({ 
+      ...transfer,
+      // Ensure MR name is correctly set
+      mrName: transfer.stockTransferToMr || transfer.mrName || "",
+      stockTransferToMr: transfer.stockTransferToMr || transfer.mrName || "",
+      // FIXED: Format numeric values for display
+      shipping: parseFloat(transfer.shipping || 0).toFixed(2),
+      totalExpenses: parseFloat(transfer.totalExpenses || 0).toFixed(2),
+      grandTotal: parseFloat(transfer.grandTotal || 0).toFixed(2),
+    });
     setIsEditModalOpen(true);
   };
 
@@ -562,8 +660,22 @@ const StockTransfer = () => {
     setSearchTerm("");
   };
 
-  const handleNavigateToForm = () => {
-    navigate("/stocktransferform");
+  const handleNavigateToForm = async () => {
+    try {
+      // Get next stock transfer number
+      const nextNumber = await getNextStockTransferNumber();
+      
+      // Pass the next number to the form page
+      navigate("/stocktransferform", { 
+        state: { 
+          nextStockTransferNo: nextNumber,
+          transferType: activeTab 
+        } 
+      });
+    } catch (error) {
+      console.error("Error getting next stock transfer number:", error);
+      showToast("error", "Failed to generate next stock transfer number");
+    }
   };
 
   if (loading) {
@@ -608,7 +720,7 @@ const StockTransfer = () => {
       </div>
 
       {/* Tabs and Search Section */}
-      <div className="flex flex-row justify-between items-center gap-4 mb-6">
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
         <div className="flex gap-3">
           <button
             onClick={() => handleTabChange("general")}
@@ -632,7 +744,7 @@ const StockTransfer = () => {
           </button>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto">
           {/* Total Count */}
           <div className="flex items-center">
             <p className="text-base font-semibold text-gray-700 whitespace-nowrap">
@@ -644,7 +756,7 @@ const StockTransfer = () => {
           </div>
 
           {/* Search Input */}
-          <div className="relative w-60">
+          <div className="relative w-full lg:w-60">
             <Search
               className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
               size={16}
@@ -655,8 +767,8 @@ const StockTransfer = () => {
               type="text"
               placeholder={
                 activeTab === "general"
-                  ? "Search by Invoice, Remarks, Source/Destination"
-                  : "Search by Invoice, Remarks, MR Name"
+                  ? "Search by Stock Transfer No, Remarks, Source/Destination"
+                  : "Search by Stock Transfer No, Remarks, MR Name"
               }
               value={searchTerm}
               onChange={(e) => {
@@ -674,7 +786,7 @@ const StockTransfer = () => {
         <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
-              <th className="p-3 min-w-[120px] text-sm font-medium">
+              <th className="p-3 min-w-[150px] text-sm font-medium">
                 <div className="flex items-center gap-4">
                   {currentTransfers.length > 0 && (
                     <input
@@ -687,10 +799,10 @@ const StockTransfer = () => {
                       onChange={handleSelectAll}
                     />
                   )}
-                  <span>Transfer No</span>
+                  <span>Stock Transfer No</span>
                 </div>
               </th>
-              <th className="p-3 min-w-[120px] text-sm font-medium">
+              <th className="p-3 min-w-[150px] text-sm font-medium">
                 {activeTab === "general" ? "Source/Destination" : "MR Name"}
               </th>
               <th className="p-3 min-w-[100px] text-sm font-medium">Type</th>
@@ -722,7 +834,7 @@ const StockTransfer = () => {
                 // Calculate total from items to ensure consistency
                 const calculatedTotal = calculateTotalTransferCost(item.items);
                 const displayTotal = item.totalTransferCost || calculatedTotal;
-
+              
                 return (
                   <tr
                     key={item._id}
@@ -733,43 +845,53 @@ const StockTransfer = () => {
                         : "border-b"
                     }`}
                   >
-                    <td className="p-3 min-w-[120px]">
+                    <td className="p-3 min-w-[150px]">
                       <div className="flex items-center gap-4">
                         <input
                           type="checkbox"
                           checked={selectedRows.includes(item._id)}
                           onChange={() => handleSelectRow(item._id)}
                         />
-                        <span className="capitalize">{item.invoiceNo}</span>
+                        <span className="font-medium text-indigo-600">
+                          {item.invoiceNo || "N/A"}
+                        </span>
                       </div>
                     </td>
-                    <td className="p-3 min-w-[120px]">
+                    <td className="p-3 min-w-[150px]">
                       {activeTab === "general"
                         ? item.transferType === "send"
                           ? item.destination || "Main Warehouse"
                           : item.source || "Main Warehouse"
-                        : item.stockTransferToMr || "-"}
+                        : item.stockTransferToMr || item.mrName || "-"}
                     </td>
                     <td className="p-3 min-w-[100px]">
                       <span
-                        className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        className={`px-3 py-1 rounded-full text-xs font-medium ${
                           item.transferType === "send"
                             ? "bg-green-100 text-green-800"
-                            : "bg-blue-100 text-blue-800"
+                            : item.transferType === "receive"
+                            ? "bg-blue-100 text-blue-800"
+                            : "bg-gray-100 text-gray-800"
                         }`}
                       >
-                        {item.transferType === "send" ? "Send" : "Receive"}
+                        {item.transferType === "send" 
+                          ? "Send" 
+                          : item.transferType === "receive" 
+                          ? "Receive" 
+                          : activeTab === "mr" 
+                          ? "MR Transfer" 
+                          : "General"}
                       </span>
                     </td>
                     <td className="p-3 min-w-[120px]">
                       {formatDateToReadable(item.date)}
                     </td>
-                    <td className="p-3 min-w-[120px]">
+                    <td className="p-3 min-w-[120px] font-medium">
                       ${formatCurrency(displayTotal)}
                     </td>
                     <td className="p-3 min-w-[120px]">
                       <div className="flex items-center justify-center gap-3">
-                        {productCount}{" "}
+                        <span className="font-medium">{productCount}</span>
                         <button
                           className="text-purple-600 hover:text-purple-800 cursor-pointer"
                           onClick={() => handleViewProducts(item)}
@@ -784,18 +906,21 @@ const StockTransfer = () => {
                         <button
                           className="text-blue-600 hover:text-blue-800 cursor-pointer"
                           onClick={() => handleView(item)}
+                          title="View Details"
                         >
                           <Eye size={18} />
                         </button>
                         <button
                           className="text-green-600 hover:text-green-800 cursor-pointer"
                           onClick={() => handleEdit(item)}
+                          title="Edit"
                         >
                           <Edit size={18} />
                         </button>
                         <button
                           className="text-red-600 hover:text-red-800 cursor-pointer"
                           onClick={() => handleDeleteSingle(item)}
+                          title="Delete"
                         >
                           <Trash2 size={18} />
                         </button>
@@ -809,7 +934,7 @@ const StockTransfer = () => {
         </table>
 
         {currentTransfers.length > 0 && (
-          <div className="mt-4 p-5 flex justify-start gap-2">
+          <div className="mt-4 p-5 flex flex-wrap justify-start gap-2">
             <button
               onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
               disabled={currentPage === 1}
@@ -866,17 +991,14 @@ const StockTransfer = () => {
               </h2>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-h-[70vh] overflow-y-auto">
-                {/* Transfer No */}
                 <div>
                   <label className="block text-sm font-medium text-gray-600">
-                    Transfer No
+                    Stock Transfer No
                   </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 font-medium text-indigo-600">
                     {form.invoiceNo || "-"}
                   </p>
                 </div>
-
-                {/* Date */}
                 <div>
                   <label className="block text-sm font-medium text-gray-600">
                     Date
@@ -916,7 +1038,7 @@ const StockTransfer = () => {
                       MR Name
                     </label>
                     <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                      {form.stockTransferToMr || "-"}
+                      {form.stockTransferToMr || form.mrName || "-"}
                     </p>
                   </div>
                 )}
@@ -966,7 +1088,7 @@ const StockTransfer = () => {
                   <label className="block text-sm font-medium text-gray-600">
                     Product Total ($)
                   </label>
-                  <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                  <p className="border px-3 py-2 rounded-lg bg-gray-100 font-medium">
                     ${formatCurrency(calculateTotalTransferCost(form.items))}
                   </p>
                 </div>
@@ -994,13 +1116,14 @@ const StockTransfer = () => {
                 {/* Items Section */}
                 <div className="md:col-span-3">
                   <h3 className="text-lg font-medium text-gray-800 mb-3">
-                    Products
+                    Products ({form.items?.length || 0})
                   </h3>
                   <div className="space-y-4 max-h-60 overflow-y-auto border rounded-lg p-4">
                     {form.items && form.items.length > 0 ? (
                       form.items.map((item, index) => {
+                        
                         const productCost =
-                          item.productCost ||
+                          item.itemCost ||
                           (item.lc || 0) * (item.boxQuantity || 0);
                         return (
                           <div
@@ -1036,7 +1159,7 @@ const StockTransfer = () => {
                                 <label className="block text-sm font-medium text-gray-600">
                                   Product Cost ($)
                                 </label>
-                                <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                                <p className="border px-3 py-2 rounded-lg bg-gray-100 font-medium">
                                   ${formatCurrency(productCost)}
                                 </p>
                               </div>
@@ -1064,7 +1187,7 @@ const StockTransfer = () => {
           document.body
         )}
 
-      {/* Edit Modal - Similar structure with form fields */}
+      {/* Edit Modal */}
       {isEditModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -1086,22 +1209,22 @@ const StockTransfer = () => {
               </h2>
 
               <form className="grid grid-cols-1 md:grid-cols-3 gap-4 max-h-[70vh] overflow-y-auto">
-                {/* Invoice Number */}
+                {/* Stock Transfer Number - Read Only */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
-                    Transfer No
+                    Stock Transfer No
                   </label>
                   <input
                     type="text"
                     name="invoiceNo"
                     value={form.invoiceNo || ""}
-                    onChange={handleChange}
-                    className="w-full border px-3 py-2 rounded-lg capitalize"
-                    autoComplete="off"
+                    readOnly
+                    className="w-full border px-3 py-2 rounded-lg bg-gray-100 font-medium text-indigo-600"
                   />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Stock Transfer Number cannot be changed
+                  </p>
                 </div>
-
-                {/* Date */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
                     Date
@@ -1171,8 +1294,8 @@ const StockTransfer = () => {
                     </label>
                     <input
                       type="text"
-                      name="mrName"
-                      value={form.stockTransferToMr || ""}
+                      name="stockTransferToMr"
+                      value={form.stockTransferToMr || form.mrName || ""}
                       onChange={handleChange}
                       className="w-full border px-3 py-2 rounded-lg capitalize"
                       autoComplete="off"
@@ -1196,16 +1319,19 @@ const StockTransfer = () => {
                     <option value="pending">Pending</option>
                     <option value="confirmed">Confirmed</option>
                     <option value="cancelled">Cancelled</option>
+                    <option value="completed">Completed</option>
                   </select>
                 </div>
 
-                {/* Shipping */}
+                {/* Shipping - FIXED: Always show 2 decimal places */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
                     Shipping ($)
                   </label>
                   <input
-                    type="text"
+                    type="number"
+                    step="0.01"
+                    min="0"
                     name="shipping"
                     value={form.shipping || 0}
                     onChange={(e) => handleNumericInputChange(e, handleChange)}
@@ -1214,13 +1340,15 @@ const StockTransfer = () => {
                   />
                 </div>
 
-                {/* Total Expenses */}
+                {/* Total Expenses - FIXED: Always show 2 decimal places */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
                     Total Expenses ($)
                   </label>
                   <input
-                    type="text"
+                    type="number"
+                    step="0.01"
+                    min="0"
                     name="totalExpenses"
                     value={form.totalExpenses || 0}
                     onChange={(e) => handleNumericInputChange(e, handleChange)}
@@ -1229,19 +1357,25 @@ const StockTransfer = () => {
                   />
                 </div>
 
-                {/* Grand Total */}
+                {/* Grand Total - FIXED: Always show 2 decimal places */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
                     Grand Total ($)
                   </label>
                   <input
-                    type="text"
+                    type="number"
+                    step="0.01"
+                    min="0"
                     name="grandTotal"
                     value={form.grandTotal || 0}
                     onChange={(e) => handleNumericInputChange(e, handleChange)}
                     className="w-full border px-3 py-2 rounded-lg"
                     autoComplete="off"
+                    readOnly
                   />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Calculated automatically
+                  </p>
                 </div>
 
                 {/* Remarks */}
@@ -1277,12 +1411,11 @@ const StockTransfer = () => {
                 {/* Items Section */}
                 <div className="md:col-span-3">
                   <h3 className="text-lg font-medium text-gray-800 mb-3">
-                    Products
+                    Products ({form.items?.length || 0})
                   </h3>
                   <div className="space-y-4 max-h-60 overflow-y-auto border rounded-lg p-4">
                     {form.items && form.items.length > 0 ? (
                       form.items.map((item, index) => {
-                        console.log("item", item);
                         const productCost =
                           item.productCost ||
                           (item.lc || 0) * (item.boxQuantity || 0);
@@ -1329,7 +1462,8 @@ const StockTransfer = () => {
                                   Box Quantity
                                 </label>
                                 <input
-                                  type="text"
+                                  type="number"
+                                  min="0"
                                   value={item.boxQuantity || 0}
                                   onChange={(e) =>
                                     handleItemChange(
@@ -1347,7 +1481,9 @@ const StockTransfer = () => {
                                   LC ($)
                                 </label>
                                 <input
-                                  type="text"
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
                                   value={item.lc || 0}
                                   onChange={(e) =>
                                     handleItemChange(
@@ -1368,7 +1504,7 @@ const StockTransfer = () => {
                                   type="text"
                                   value={formatCurrency(productCost)}
                                   readOnly
-                                  className="w-full border px-3 py-2 rounded-lg bg-gray-100"
+                                  className="w-full border px-3 py-2 rounded-lg bg-gray-100 font-medium"
                                 />
                               </div>
                             </div>
@@ -1469,7 +1605,6 @@ const StockTransfer = () => {
                     <tbody>
                       {selectedProducts.length > 0 ? (
                         selectedProducts.map((product, index) => {
-                          console.log('product', product);
                           const productCost =
                             product.itemCost ||
                             (product.lc || 0) * (product.boxQuantity || 0);
@@ -1493,7 +1628,7 @@ const StockTransfer = () => {
                               <td className="p-3 min-w-[120px]">
                                 ${formatCurrency(product.lc)}
                               </td>
-                              <td className="p-3 min-w-[120px]">
+                              <td className="p-3 min-w-[120px] font-medium">
                                 ${formatCurrency(productCost)}
                               </td>
                             </tr>

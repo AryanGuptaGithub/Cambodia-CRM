@@ -74,7 +74,7 @@ router.get("/staffs/:id", async (req, res) => {
 router.post("/staffs", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-  console.log('values of ')
+  
   try {
     const { medicalRepName, teamName, contactNo, email, password, date, enabled } = req.body;
 
@@ -350,7 +350,6 @@ router.post("/staffs/import", async (req, res) => {
 
     // Import
     for (const row of list) {
-      console.log('values of row', row);
       const trimmedName = row.medicalRepName.trim();
       const trimmedEmail = row.email?.trim().toLowerCase() || "";
       const trimmedContact = row.contactNo.toString()?.trim() || "";

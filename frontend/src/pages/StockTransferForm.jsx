@@ -24,18 +24,58 @@ import InputField from "../components/common/InputField";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-// Helper function to validate numeric input
+// Helper function to validate numeric input with consistent decimal handling
 const validateNumericInput = (value) => {
-  // Remove any non-numeric characters except decimal point
-  const numericValue = value.toString().replace(/[^0-9.]/g, "");
+  if (value === "" || value === null || value === undefined) return "";
+  
+  let stringValue = value.toString();
+  
+  // Remove any non-numeric characters except decimal point and minus sign
+  let numericValue = stringValue.replace(/[^0-9.-]/g, "");
 
-  // Allow only one decimal point
+  // Handle multiple decimal points - keep only the first one
   const parts = numericValue.split(".");
   if (parts.length > 2) {
-    return parts[0] + "." + parts.slice(1).join("");
+    numericValue = parts[0] + "." + parts.slice(1).join("");
+  }
+
+  // Ensure only one decimal point and limit to 2 decimal places
+  const decimalIndex = numericValue.indexOf(".");
+  if (decimalIndex !== -1) {
+    const integerPart = numericValue.substring(0, decimalIndex);
+    let decimalPart = numericValue.substring(decimalIndex + 1);
+    
+    // Limit decimal part to 2 digits
+    if (decimalPart.length > 2) {
+      decimalPart = decimalPart.substring(0, 2);
+    }
+    
+    // Remove leading zeros from integer part (but keep at least one digit)
+    const cleanInteger = integerPart.replace(/^0+/, "") || "0";
+    
+    numericValue = cleanInteger + "." + decimalPart;
+    
+    // Remove trailing decimal point if no decimal part
+    if (decimalPart === "") {
+      numericValue = numericValue.slice(0, -1);
+    }
+  } else {
+    // Remove leading zeros
+    numericValue = numericValue.replace(/^0+/, "") || "0";
   }
 
   return numericValue;
+};
+
+// Helper function to format numbers consistently with 2 decimal places
+const formatNumber = (value) => {
+  if (value === "" || value === null || value === undefined) return "";
+  
+  const num = parseFloat(value);
+  if (isNaN(num)) return "";
+  
+  // Round to 2 decimal places and format
+  return num.toFixed(2);
 };
 
 // Reusable Multiple Select Dropdown (same as Payroll)
@@ -154,7 +194,7 @@ const MultipleSelectDropdown = ({
   );
 };
 
-// SelectField and TextAreaField Components (moved up for proper hoisting)
+// SelectField and TextAreaField Components
 const SelectField = React.memo(
   ({
     label,
@@ -228,7 +268,7 @@ const TextAreaField = React.memo(
 const useStockTransferForm = () => {
   const [form, setForm] = useState({
     invoiceNumber: "",
-    transferDate: new Date().toISOString().split("T")[0], // Default to today
+    transferDate: new Date().toISOString().split("T")[0],
     product: "",
     remarks: "",
     orderStatus: "",
@@ -242,8 +282,14 @@ const useStockTransferForm = () => {
   const [isLoading, setIsLoading] = useState(false);
 
   const parseNumber = useCallback((val) => {
-    const num = parseFloat(val);
-    return isNaN(num) ? 0 : num;
+    if (val === "" || val === null || val === undefined) return 0;
+    
+    // Clean the value
+    const cleanVal = val.toString().replace(/[^0-9.-]/g, "");
+    const num = parseFloat(cleanVal);
+    
+    // Return 0 for invalid numbers, otherwise round to 2 decimal places
+    return isNaN(num) ? 0 : Math.round(num * 100) / 100;
   }, []);
 
   const updateFormField = useCallback((name, value) => {
@@ -359,44 +405,65 @@ const useStockTransferForm = () => {
     [updateFormField]
   );
 
+  // ✅ FIXED: Generate stock transfer number using the next-number endpoint
   const generateStockTransferNumber = useCallback(async () => {
     try {
       const response = await axios.get(
-        `${backendUrl}/api/stock-transfers/last-number`
+        `${backendUrl}/api/stock-transfers/next-number`
       );
-
-      if (response.data.success) {
-        const lastNumber = response.data.lastNumber || 0;
-        const nextNumber = lastNumber + 1;
-
-        const formattedNumber = `ST-${String(nextNumber).padStart(4, "0")}`;
-
-        return formattedNumber;
-      } else {
-        console.error("Failed to fetch last number");
-        return null;
+      console.log('values of responst', response);
+      if (response.data.success && response.data.nextNumber) {
+        console.log("Next stock transfer number:", response.data.nextNumber);
+        return response.data.nextNumber;
       }
+      // Fallback to ST-0001
+      return "ST-0001";
     } catch (error) {
       console.error("Error generating stock transfer number:", error);
-      return null;
+      // Return a properly formatted default
+      return "ST-0001";
     }
   }, []);
 
+  // ✅ FIXED: Set stock transfer number on component mount with proper error handling
   useEffect(() => {
     const setStockTransferNumber = async () => {
-      const generatedNumber = await generateStockTransferNumber();
-      updateFormField("invoiceNumber", generatedNumber);
+      try {
+        const generatedNumber = await generateStockTransferNumber();
+        if (generatedNumber) {
+          // Ensure the number is properly formatted
+          let formattedNumber = generatedNumber;
+          // If it doesn't start with ST-, add it
+          if (!formattedNumber.startsWith('ST-')) {
+            // Try to extract number from the string
+            const match = formattedNumber.match(/\d+/);
+            if (match) {
+              const num = parseInt(match[0]);
+              formattedNumber = `ST-${num.toString().padStart(4, "0")}`;
+            } else {
+              formattedNumber = "ST-0001";
+            }
+          }
+          updateFormField("invoiceNumber", formattedNumber);
+          
+        }
+      } catch (error) {
+        console.error("Error setting stock transfer number:", error);
+        // Set a default value
+        updateFormField("invoiceNumber", "ST-0001");
+      }
     };
     setStockTransferNumber();
   }, [generateStockTransferNumber, updateFormField]);
 
   const calculateTotals = useCallback(() => {
+    // Calculate with consistent parsing
     const totalExpenses = items.reduce(
-      (sum, item) => sum + parseNumber(item.expenses),
+      (sum, item) => sum + parseNumber(item.expenses || 0),
       0
     );
-    const shipping = parseNumber(form.shipping);
-    const grandTotal = totalExpenses + shipping;
+    const shipping = parseNumber(form.shipping || 0);
+    const grandTotal = parseNumber(totalExpenses + shipping);
 
     return {
       totalExpenses,
@@ -596,7 +663,6 @@ const GeneralTransferForm = ({ navigate }) => {
       }
 
       if (field === "boxQuantity") {
-        // Only allow numeric values
         const numericValue = validateNumericInput(value);
 
         // Check stock for send transfers
@@ -618,6 +684,9 @@ const GeneralTransferForm = ({ navigate }) => {
           }
         }
 
+        updateItem(id, field, numericValue);
+      } else if (field === "expenses") {
+        const numericValue = validateNumericInput(value);
         updateItem(id, field, numericValue);
       } else {
         updateItem(id, field, value);
@@ -839,9 +908,9 @@ const GeneralTransferForm = ({ navigate }) => {
         <InputField
           label="Shipping ($)"
           name="shipping"
-          value={form.shipping}
+          value={form.shipping || ""}
           onChange={(e) => handleNumberChange("shipping", e.target.value)}
-          placeholder="Enter Shipping"
+          placeholder="0.00"
           type="text"
           disabled={isFormDisabled}
         />
@@ -936,15 +1005,14 @@ const GeneralTransferForm = ({ navigate }) => {
                     </button>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-4">
-                    {/* Show Box Quantity for ALL products */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="flex flex-col">
                       <label className="text-sm font-medium text-gray-700 mb-1">
                         Box Quantity <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="text"
-                        value={item.boxQuantity}
+                        value={item.boxQuantity || ""}
                         onChange={(e) =>
                           handleItemChange(
                             item.id,
@@ -962,7 +1030,6 @@ const GeneralTransferForm = ({ navigate }) => {
                         }`}
                         placeholder="Enter box quantity"
                         onKeyPress={(e) => {
-                          // Allow only numbers and decimal point
                           const char = String.fromCharCode(e.which);
                           if (!/[\d.]/.test(char)) {
                             e.preventDefault();
@@ -977,6 +1044,43 @@ const GeneralTransferForm = ({ navigate }) => {
                       {form.transferType === "send" && stockInfo && (
                         <p className="text-xs text-gray-500 mt-1">
                           Maximum allowed: {stockInfo.boxes} boxes
+                        </p>
+                      )}
+                    </div>
+                    
+                    <div className="flex flex-col">
+                      <label className="text-sm font-medium text-gray-700 mb-1">
+                        Expenses ($)
+                      </label>
+                      <input
+                        type="text"
+                        value={item.expenses || ""}
+                        onChange={(e) =>
+                          handleItemChange(
+                            item.id,
+                            "expenses",
+                            e.target.value
+                          )
+                        }
+                        disabled={isFormDisabled}
+                        className={`w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                          errors[`expenses_${index}`]
+                            ? "border-red-500"
+                            : "border-gray-300"
+                        } ${
+                          isFormDisabled ? "bg-gray-100 cursor-not-allowed" : ""
+                        }`}
+                        placeholder="0.00"
+                        onKeyPress={(e) => {
+                          const char = String.fromCharCode(e.which);
+                          if (!/[\d.]/.test(char)) {
+                            e.preventDefault();
+                          }
+                        }}
+                      />
+                      {errors[`expenses_${index}`] && (
+                        <p className="text-red-500 text-xs mt-1">
+                          {errors[`expenses_${index}`]}
                         </p>
                       )}
                     </div>
@@ -1007,19 +1111,19 @@ const GeneralTransferForm = ({ navigate }) => {
           <div>
             <strong>Total Expenses:</strong>
             <div className="text-green-600 font-semibold">
-              ${totalExpenses.toFixed(2)}
+              ${formatNumber(totalExpenses)}
             </div>
           </div>
           <div>
             <strong>Shipping:</strong>
             <div className="text-blue-600 font-semibold">
-              ${shipping.toFixed(2)}
+              ${formatNumber(shipping)}
             </div>
           </div>
           <div>
             <strong>Grand Total:</strong>
             <div className="text-purple-600 font-bold text-lg">
-              ${grandTotal.toFixed(2)}
+              ${formatNumber(grandTotal)}
             </div>
           </div>
         </div>
@@ -1059,7 +1163,7 @@ const StockTransferForm = () => {
     transferNo: "",
     date: new Date().toISOString().split("T")[0],
     mrId: "",
-    transferType: "send", // Added transferType
+    transferType: "send",
     products: [],
   });
   const [mrList, setMrList] = useState([]);
@@ -1094,12 +1198,10 @@ const StockTransferForm = () => {
     }
   }, []);
 
-  // Updated fetchProducts function using the provided format
+  // Fetch products
   const fetchProducts = useCallback(async () => {
     try {
       const response = await axios.get(`${backendUrl}/api/dropdown-products`);
-
-      // Get data from API
       const products = response.data?.data || [];
 
       if (!Array.isArray(products)) {
@@ -1107,7 +1209,6 @@ const StockTransferForm = () => {
         return;
       }
 
-      // ✅ Remove duplicate product names (case-insensitive)
       const uniqueProductsMap = new Map();
       products.forEach((product) => {
         const name = product.productName?.trim().toLowerCase();
@@ -1118,7 +1219,6 @@ const StockTransferForm = () => {
 
       const uniqueProducts = Array.from(uniqueProductsMap.values());
 
-      // Map final structure for frontend usage - ensure all required fields are included
       const formattedProducts = uniqueProducts.map((product) => ({
         id: product._id,
         _id: product._id,
@@ -1147,26 +1247,50 @@ const StockTransferForm = () => {
     }
   }, []);
 
-  // Updated generateTransferNo function
-  const generateTransferNo = async () => {
+  // ✅ FIXED: Generate transfer number - Now properly returns ST-0001, ST-0002, etc.
+  const generateTransferNo = useCallback(async () => {
     try {
-      const last = await axios.get(
-        `${backendUrl}/api/stock-transfers/last-number`
+      const response = await axios.get(
+        `${backendUrl}/api/stock-transfers-mr/next-number`
       );
-      const next = (last.data.lastNumber || 0) + 1;
-      return `ST-${String(next).padStart(4, "0")}`;
-    } catch {
-      return `ST-${Date.now().toString().slice(-6)}`;
+      
+      if (response.data.success && response.data.nextNumber) {
+        return response.data.nextNumber;
+      } else {
+        // Fallback to ST-0001
+        console.warn("No valid next number from API, using fallback");
+        return "ST-0001";
+      }
+    } catch (error) {
+      console.error("Error generating transfer number:", error);
+      // Return a properly formatted default
+      return "ST-0001";
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchMRs();
     fetchProducts();
-    generateTransferNo().then((no) =>
-      setMrTransfer((prev) => ({ ...prev, transferNo: no }))
-    );
-  }, [fetchMRs, fetchProducts]);
+
+    // Generate transfer number on component mount
+    const initTransferNo = async () => {
+      const transferNo = await generateTransferNo();
+      // Ensure the number is properly formatted
+      let formattedTransferNo = transferNo;
+      if (!formattedTransferNo.startsWith('ST-')) {
+        const match = formattedTransferNo.match(/\d+/);
+        if (match) {
+          const num = parseInt(match[0]);
+          formattedTransferNo = `ST-${num.toString().padStart(4, "0")}`;
+        } else {
+          formattedTransferNo = "ST-0001";
+        }
+      }
+      setMrTransfer((prev) => ({ ...prev, transferNo: formattedTransferNo }));
+    };
+
+    initTransferNo();
+  }, [fetchMRs, fetchProducts, generateTransferNo]);
 
   const TRANSFER_TYPE_OPTIONS = [
     { value: "send", label: "Send" },
@@ -1235,7 +1359,6 @@ const StockTransferForm = () => {
 
   const updateProductQty = (productId, field, value) => {
     if (field === "boxQty") {
-      // Validate numeric input for boxQty
       const numericValue = validateNumericInput(value);
       setMrTransfer((prev) => ({
         ...prev,
@@ -1265,7 +1388,8 @@ const StockTransferForm = () => {
       (p) => p.boxQty && parseFloat(p.boxQty) > 0
     );
     if (validProducts.length === 0) {
-      newErrors.products = "At least one product with valid box quantity is required";
+      newErrors.products =
+        "At least one product with valid box quantity is required";
     }
 
     // Validate stock for send transfers
@@ -1276,7 +1400,9 @@ const StockTransferForm = () => {
           const availableStock = product.totalBoxes || 0;
           const requestedQuantity = parseFloat(prod.boxQty) || 0;
           if (requestedQuantity > availableStock) {
-            newErrors[`product_${index}`] = `Box quantity cannot exceed available stock (${availableStock} boxes)`;
+            newErrors[
+              `product_${index}`
+            ] = `Box quantity cannot exceed available stock (${availableStock} boxes)`;
           }
         }
       });
@@ -1314,21 +1440,26 @@ const StockTransferForm = () => {
         invoiceNo: mrTransfer.transferNo,
         date: mrTransfer.date,
         transferType: mrTransfer.transferType,
-        stockTransferToMr: mrTransfer.transferType === "send" ? selectedMr?.label || "" : "",
-        stockTransferFromMrToMain: mrTransfer.transferType === "receive" ? selectedMr?.label || "" : "",
-        
+        stockTransferToMr:
+          mrTransfer.transferType === "send" ? selectedMr?.label || "" : "",
+        stockTransferFromMrToMain:
+          mrTransfer.transferType === "receive" ? selectedMr?.label || "" : "",
+
         items: validProducts.map((p) => ({
           productId: p.productId,
           productName: p.productName,
           boxQuantity: parseFloat(p.boxQty) || 0,
         })),
-      
       };
-      console.log('values of 1327', payload);
+
       await axios.post(`${backendUrl}/api/stock-transfers-to-mr`, payload);
       showToast(
         "success",
-        `Stock ${mrTransfer.transferType === "send" ? "transferred to" : "received from"} MR successfully!`
+        `Stock ${
+          mrTransfer.transferType === "send"
+            ? "transferred to"
+            : "received from"
+        } MR successfully!`
       );
       navigate("/stocktransfer");
     } catch (err) {
@@ -1413,7 +1544,6 @@ const StockTransferForm = () => {
               </div>
             </div>
           )}
-
           <form onSubmit={handleMrTransferSubmit}>
             {/* Row 1 */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -1611,7 +1741,7 @@ const StockTransferForm = () => {
                         </label>
                         <input
                           type="text"
-                          value={prod.boxQty}
+                          value={prod.boxQty || ""}
                           onChange={(e) => {
                             const value = validateNumericInput(e.target.value);
                             const numericValue = parseFloat(value) || 0;
