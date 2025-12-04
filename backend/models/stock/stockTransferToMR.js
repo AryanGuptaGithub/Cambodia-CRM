@@ -1,54 +1,119 @@
 import mongoose from "mongoose";
 
-const stockItemSchema = new mongoose.Schema({
+const itemSchema = new mongoose.Schema({
   productId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Product",
     required: true,
   },
-
-  productName: {
-    type: String,
-    required: true,
-    trim: true,
-  },
-
-  boxQuantity: {
-    type: Number,
-    required: true,
-    min: 1,
-  },
+  productName: String,
+  boxQuantity: { type: Number, required: true, default: 0 },
+  lc: { type: Number, required: true, default: 0 }, // Landed cost per box
+  productCost: { type: Number, default: 0 }, // Math.ceil(lc * boxQuantity)
 });
 
-const stockTransferSchema = new mongoose.Schema(
+const stockTransferToMRSchema = new mongoose.Schema(
   {
-    invoiceNo: {
-      type: String,
-      required: true,
-      unique: true,
-      trim: true,
-    },
+    invoiceNo: { type: String, required: true },
+    date: { type: String, required: true },
+    transferType: { type: String, enum: ["send", "receive"], required: true },
 
-    date: {
-      type: Date,
-      required: true,
-    },
+    stockTransferToMr: { type: String, default: "" },
+    stockTransferFromMrToMain: { type: String, default: "" },
 
-    destination: {
-      type: String,
-      required: true,
-      trim: true,
-    },
+    items: [itemSchema],
 
-    items: {
-      type: [stockItemSchema],
-      validate: {
-        validator: (arr) => arr.length > 0,
-        message: "At least one item is required.",
-      },
-    },
+    // Total cost fields
+    totalTransferCost: { type: Number, default: 0 }, // Sum of all productCost
   },
   { timestamps: true }
 );
 
-export default mongoose.model("StockTransferToMR", stockTransferSchema);
+// Pre-save middleware to calculate costs
+stockTransferToMRSchema.pre("save", async function (next) {
+  try {
+    let totalCost = 0;
+
+    // Calculate cost for each item
+    for (const item of this.items) {
+      // If lc is not provided, fetch it from Product
+      if (!item.lc && item.productId) {
+        const Product = mongoose.model("Product");
+        const product = await Product.findById(item.productId);
+        if (product) {
+          item.lc = product.lc || product.costPrice || 0;
+        }
+      }
+
+      // Calculate product cost with Math.ceil
+      const rawCost = (item.lc || 0) * (item.boxQuantity || 0);
+      item.productCost = Math.ceil(rawCost);
+      totalCost += item.productCost;
+    }
+
+    // Also apply Math.ceil to totalTransferCost for consistency
+    this.totalTransferCost = Math.ceil(totalCost);
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Pre-update middleware for findOneAndUpdate operations
+stockTransferToMRSchema.pre("findOneAndUpdate", async function (next) {
+  try {
+    const update = this.getUpdate();
+
+    if (update.$set && update.$set.items) {
+      let totalCost = 0;
+
+      for (const item of update.$set.items) {
+        // If lc is not provided, fetch it from Product
+        if (!item.lc && item.productId) {
+          const Product = mongoose.model("Product");
+          const product = await Product.findById(item.productId);
+          if (product) {
+            item.lc = product.lc || product.costPrice || 0;
+          }
+        }
+
+        // Calculate product cost with Math.ceil
+        const rawCost = (item.lc || 0) * (item.boxQuantity || 0);
+        item.productCost = Math.ceil(rawCost);
+        totalCost += item.productCost;
+      }
+
+      // Apply Math.ceil to totalTransferCost
+      update.$set.totalTransferCost = Math.ceil(totalCost);
+    }
+    
+    // Also handle direct updates to items array
+    if (update.items) {
+      let totalCost = 0;
+
+      for (const item of update.items) {
+        // If lc is not provided, fetch it from Product
+        if (!item.lc && item.productId) {
+          const Product = mongoose.model("Product");
+          const product = await Product.findById(item.productId);
+          if (product) {
+            item.lc = product.lc || product.costPrice || 0;
+          }
+        }
+
+        // Calculate product cost with Math.ceil
+        const rawCost = (item.lc || 0) * (item.boxQuantity || 0);
+        item.productCost = Math.ceil(rawCost);
+        totalCost += item.productCost;
+      }
+
+      update.totalTransferCost = Math.ceil(totalCost);
+    }
+    
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+export default mongoose.model("StockTransferToMR", stockTransferToMRSchema);

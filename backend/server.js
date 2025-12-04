@@ -56,6 +56,8 @@ import expiryStockReport from "./routers/reports/expiryStockReport.js";
 import hrmDashboard from "./routers/hrm/dashboard.js";
 import payrollExport from "./routers/hrm/payrollExport.js";
 import leaves from './routers/hrm/Leave.js';
+import stockTransferToMR from "./routers/stock/stockTransferToMRRoutes.js";
+
 
 dotenv.config();
 
@@ -139,6 +141,8 @@ app.use("/api", expiryStockReport);
 app.use("/api", hrmDashboard);
 app.use("/api", payrollExport);
 app.use("/api",leaves);
+app.use("/api", stockTransferToMR);
+
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
 });

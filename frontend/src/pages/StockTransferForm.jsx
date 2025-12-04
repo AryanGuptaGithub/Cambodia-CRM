@@ -27,7 +27,7 @@ const backendUrl = import.meta.env.VITE_BACKEND_URL;
 // Helper function to validate numeric input
 const validateNumericInput = (value) => {
   // Remove any non-numeric characters except decimal point
-  const numericValue = value.replace(/[^0-9.]/g, "");
+  const numericValue = value.toString().replace(/[^0-9.]/g, "");
 
   // Allow only one decimal point
   const parts = numericValue.split(".");
@@ -1314,20 +1314,18 @@ const StockTransferForm = () => {
         invoiceNo: mrTransfer.transferNo,
         date: mrTransfer.date,
         transferType: mrTransfer.transferType,
-        destination: mrTransfer.transferType === "send" ? selectedMr?.label || "" : "",
-        source: mrTransfer.transferType === "receive" ? selectedMr?.label || "" : "",
-        status: "pending",
+        stockTransferToMr: mrTransfer.transferType === "send" ? selectedMr?.label || "" : "",
+        stockTransferFromMrToMain: mrTransfer.transferType === "receive" ? selectedMr?.label || "" : "",
+        
         items: validProducts.map((p) => ({
           productId: p.productId,
           productName: p.productName,
           boxQuantity: parseFloat(p.boxQty) || 0,
         })),
-        totalExpenses: 0,
-        shipping: 0,
-        grandTotal: 0,
+      
       };
-
-      await axios.post(`${backendUrl}/api/stock-transfers`, payload);
+      console.log('values of 1327', payload);
+      await axios.post(`${backendUrl}/api/stock-transfers-to-mr`, payload);
       showToast(
         "success",
         `Stock ${mrTransfer.transferType === "send" ? "transferred to" : "received from"} MR successfully!`
