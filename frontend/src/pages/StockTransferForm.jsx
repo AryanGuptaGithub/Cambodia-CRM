@@ -520,7 +520,7 @@ const GeneralTransferForm = ({ navigate, products, productsLoading }) => {
     if (!products || !Array.isArray(products)) {
       return [];
     }
-    console.log("products", products);
+    
     const filteredProducts = products.filter((pr) => {
       const hasStock = pr.totalBoxes > 0;
       return hasStock;
@@ -967,9 +967,7 @@ const GeneralTransferForm = ({ navigate, products, productsLoading }) => {
               const availableStock = product?.totalBoxes || 0;
               const lc = item.lc || 0; // Use LC from item (which comes from batches)
 
-              console.log('values of product', product);
-              console.log('value of lc', lc);
-              console.log('values of available', availableStock);
+          
 
               return (
                 <div

@@ -7,18 +7,16 @@ import ReportInHand from "../../models/reports/reportsInHand.js";
 
 const router = express.Router();
 
-/* ==========================================================================
-   🔧 Function: Update ReportInHand after Stock Transfer (Send / Receive)
-   ========================================================================== */
 const updateReportInHandAfterStockTransfer = async (
   productName,
   boxQuantity,
-  transferType
+  transferType,
+  session = null
 ) => {
   try {
     if (boxQuantity <= 0) return 0;
 
-    const existingProduct = await ReportInHand.findOne({ productName });
+    const existingProduct = await ReportInHand.findOne({ productName }).session(session);
     if (!existingProduct) {
       console.warn(
         `⚠️ Product "${productName}" not found in ReportInHand inventory`
@@ -26,20 +24,26 @@ const updateReportInHandAfterStockTransfer = async (
       return 0;
     }
 
-    // Determine change direction
-    const quantityChange = transferType === "send" ? -boxQuantity : boxQuantity;
+    // Check if quantity exists and has boxes property
+    if (!existingProduct.quantity || typeof existingProduct.quantity !== 'object') {
+      throw new Error(`Invalid quantity structure for product "${productName}"`);
+    }
 
-    // Prevent sending more than available
-    if (
-      transferType === "send" &&
-      existingProduct.quantity.boxes < boxQuantity
-    ) {
+    const currentBoxes = existingProduct.quantity.boxes || 0;
+
+    console.log("existingProduct", existingProduct, "Current boxes:", currentBoxes);
+
+    // Check stock availability for send transfers
+    if (transferType === "send" && currentBoxes < boxQuantity) {
       throw new Error(
-        `Insufficient stock for "${productName}". Available: ${existingProduct.quantity.boxes}, Required: ${boxQuantity}`
+        `Insufficient stock for "${productName}". Available: ${currentBoxes}, Required: ${boxQuantity}`
       );
     }
 
-    const updatedBoxes = existingProduct.quantity.boxes + quantityChange;
+    // Determine change direction
+    const quantityChange = transferType === "send" ? -boxQuantity : boxQuantity;
+
+    const updatedBoxes = currentBoxes + quantityChange;
 
     // Determine new stock status
     let updatedStatus = "In Stock";
@@ -47,12 +51,18 @@ const updateReportInHandAfterStockTransfer = async (
     else if (updatedBoxes < 10) updatedStatus = "Critical";
     else if (updatedBoxes < 25) updatedStatus = "Low Stock";
 
-    await ReportInHand.findByIdAndUpdate(existingProduct._id, {
+    const updateData = {
       $set: {
         "quantity.boxes": updatedBoxes,
         status: updatedStatus,
       },
-    });
+    };
+
+    if (session) {
+      await ReportInHand.findByIdAndUpdate(existingProduct._id, updateData, { session });
+    } else {
+      await ReportInHand.findByIdAndUpdate(existingProduct._id, updateData);
+    }
 
     return existingProduct.lc || 0;
   } catch (error) {
@@ -65,8 +75,185 @@ const updateReportInHandAfterStockTransfer = async (
 };
 
 /* ==========================================================================
-   🔧 Function: Restore ReportInHand after Stock Transfer Deletion
+   🔹 POST: Create New Stock Transfer (Fixed Version)
    ========================================================================== */
+router.post("/stock-transfers", async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const {
+      invoiceNo,
+      date,
+      items,
+      remarks,
+      status,
+      transferType,
+      shipping,
+      totalExpenses,
+      grandTotal,
+      destination,
+      source,
+    } = req.body;
+
+    console.log('Received stock transfer request:', req.body);
+
+    if (!invoiceNo || !date || !items || !status || !transferType) {
+      await session.abortTransaction();
+      session.endSession();
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing required fields" });
+    }
+
+    if (transferType === "send" && !destination) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Destination is required for send transfers",
+      });
+    }
+
+    if (transferType === "receive" && !source) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Source is required for receive transfers",
+      });
+    }
+
+    if (!Array.isArray(items) || items.length === 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res
+        .status(400)
+        .json({ success: false, message: "At least one item is required" });
+    }
+
+    // First, check all products and their availability
+    for (const item of items) {
+      if (!item.productId || !item.productName) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          success: false,
+          message: "Each item must have productId and productName",
+        });
+      }
+
+      // Check if product exists
+      const product = await Product.findById(item.productId).session(session);
+      if (!product) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(404).json({
+          success: false,
+          message: `Product not found: ${item.productName}`,
+        });
+      }
+
+      // For send transfers, check inventory availability
+      if (transferType === "send") {
+        const existingProduct = await ReportInHand.findOne({
+          productName: item.productName,
+        }).session(session);
+        
+        console.log(`Checking inventory for ${item.productName}:`, existingProduct);
+        
+        if (!existingProduct) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(400).json({
+            success: false,
+            message: `Product "${item.productName}" not found in inventory`,
+          });
+        }
+
+        // Check if product has quantity structure
+        if (!existingProduct.quantity || typeof existingProduct.quantity !== 'object') {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(400).json({
+            success: false,
+            message: `Invalid inventory data for product "${item.productName}"`,
+          });
+        }
+
+        const availableBoxes = existingProduct.quantity.boxes || 0;
+        
+        console.log(`Available boxes for ${item.productName}: ${availableBoxes}, Requested: ${item.boxQuantity}`);
+        
+        if (availableBoxes < item.boxQuantity) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(400).json({
+            success: false,
+            message: `Insufficient stock for ${item.productName}. Available: ${availableBoxes}, Required: ${item.boxQuantity}`,
+          });
+        }
+      }
+    }
+
+    // Create the stock transfer document
+    const stockTransfer = new StockTransfer({
+      invoiceNo,
+      date: new Date(date),
+      items: items.map((item) => ({
+        productId: item.productId,
+        productName: item.productName,
+        boxQuantity: parseFloat(item.boxQuantity),
+        expenses: parseFloat(item.expenses || 0),
+        lc: parseFloat(item.lc || 0),
+      })),
+      remarks: remarks || "",
+      status,
+      transferType,
+      shipping: parseFloat(shipping || 0),
+      totalExpenses: parseFloat(totalExpenses || 0),
+      grandTotal: parseFloat(grandTotal || 0),
+      destination: destination || "",
+      source: source || "",
+    });
+
+    // Save the stock transfer
+    const savedTransfer = await stockTransfer.save({ session });
+
+    // Update inventory for each item
+    for (const item of items) {
+      await updateReportInHandAfterStockTransfer(
+        item.productName,
+        parseFloat(item.boxQuantity),
+        transferType,
+        session
+      );
+    }
+
+    // Commit transaction
+    await session.commitTransaction();
+    session.endSession();
+
+    res.status(201).json({
+      success: true,
+      message: `Stock transfer ${
+        transferType === "send" ? "sent" : "received"
+      } successfully`,
+      data: savedTransfer,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error("Error creating stock transfer:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+});
+
+
 const restoreReportInHandAfterStockTransferDeletion = async (
   productName,
   boxQuantity,
@@ -296,6 +483,7 @@ router.post("/stock-transfers", async (req, res) => {
 
     if (!invoiceNo || !date || !items || !status || !transferType) {
       await session.abortTransaction();
+      session.endSession();
       return res
         .status(400)
         .json({ success: false, message: "Missing required fields" });
@@ -303,6 +491,7 @@ router.post("/stock-transfers", async (req, res) => {
 
     if (transferType === "send" && !destination) {
       await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({
         success: false,
         message: "Destination is required for send transfers",
@@ -311,6 +500,7 @@ router.post("/stock-transfers", async (req, res) => {
 
     if (transferType === "receive" && !source) {
       await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({
         success: false,
         message: "Source is required for receive transfers",
@@ -319,6 +509,7 @@ router.post("/stock-transfers", async (req, res) => {
 
     if (!Array.isArray(items) || items.length === 0) {
       await session.abortTransaction();
+      session.endSession();
       return res
         .status(400)
         .json({ success: false, message: "At least one item is required" });
@@ -327,6 +518,7 @@ router.post("/stock-transfers", async (req, res) => {
     for (const item of items) {
       if (!item.productId || !item.productName) {
         await session.abortTransaction();
+        session.endSession();
         return res.status(400).json({
           success: false,
           message: "Each item must have productId and productName",
@@ -336,6 +528,7 @@ router.post("/stock-transfers", async (req, res) => {
       const product = await Product.findById(item.productId);
       if (!product) {
         await session.abortTransaction();
+        session.endSession();
         return res.status(404).json({
           success: false,
           message: `Product not found: ${item.productName}`,
@@ -346,19 +539,28 @@ router.post("/stock-transfers", async (req, res) => {
         const existingProduct = await ReportInHand.findOne({
           productName: item.productName,
         });
+        
         if (!existingProduct) {
           await session.abortTransaction();
+          session.endSession();
           return res.status(400).json({
             success: false,
             message: `Product "${item.productName}" not found in inventory`,
           });
         }
 
-        if (existingProduct.quantity.boxes < item.boxQuantity) {
+        const availableQuantity = existingProduct.quantity || 
+                                 (existingProduct.quantity && existingProduct.quantity.boxes) || 
+                                 (existingProduct.boxes) || 
+                                 (existingProduct.stock) || 
+                                 0;
+                
+        if (availableQuantity < item.boxQuantity) {
           await session.abortTransaction();
+          session.endSession();
           return res.status(400).json({
             success: false,
-            message: `Insufficient stock for ${item.productName}. Available: ${existingProduct.quantity.boxes}, Required: ${item.boxQuantity}`,
+            message: `Insufficient stock for ${item.productName}. Available: ${availableQuantity}, Required: ${item.boxQuantity}`,
           });
         }
       }
@@ -372,6 +574,7 @@ router.post("/stock-transfers", async (req, res) => {
         productName: item.productName,
         boxQuantity: parseFloat(item.boxQuantity),
         expenses: parseFloat(item.expenses),
+        lc: parseFloat(item.lc || 0), 
       })),
       remarks: remarks || "",
       status,
@@ -389,7 +592,8 @@ router.post("/stock-transfers", async (req, res) => {
       await updateReportInHandAfterStockTransfer(
         item.productName,
         parseFloat(item.boxQuantity),
-        transferType
+        transferType,
+        session 
       );
     }
 
@@ -414,7 +618,6 @@ router.post("/stock-transfers", async (req, res) => {
     });
   }
 });
-
 /* ==========================================================================
    🔹 PUT: Update Existing Stock Transfer
    ========================================================================== */
