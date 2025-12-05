@@ -152,7 +152,6 @@ const generateNextStockTransferNumber = async () => {
 router.get("/stock-transfers-mr/next-number", async (req, res) => {
   try {
     const nextNumber = await generateNextStockTransferNumber();
-    console.log("Generated next number:", nextNumber);
     res.json({ success: true, nextNumber });
   } catch (error) {
     console.error("Error generating next stock transfer number:", error);

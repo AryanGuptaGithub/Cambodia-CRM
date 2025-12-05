@@ -1,6 +1,7 @@
 import express from "express";
 import mongoose from "mongoose";
 import StockTransfer from "../../models/stock/stockTransfer.js";
+import StockTransferToMR from "../../models/stock/stockTransferToMR.js"; // ADD THIS
 import Product from "../../models/projectManger/product.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
 
@@ -107,15 +108,28 @@ const restoreReportInHandAfterStockTransferDeletion = async (
    ========================================================================== */
 router.get("/stock-transfers/last-number", async (req, res) => {
   try {
-    const lastTransfer = await StockTransfer.findOne()
+    // Use imported models directly
+    const lastGeneralTransfer = await StockTransfer.findOne()
       .sort({ invoiceNo: -1 })
       .select("invoiceNo");
 
-    let lastNumber = 0;
-    if (lastTransfer?.invoiceNo) {
-      const match = lastTransfer.invoiceNo.match(/\d+/);
-      lastNumber = match ? parseInt(match[0]) : 0;
-    }
+    const lastMRTransfer = await StockTransferToMR.findOne()
+      .sort({ invoiceNo: -1 })
+      .select("invoiceNo");
+
+    // Function to extract number from invoiceNo
+    const extractNumber = (invoiceNo) => {
+      if (!invoiceNo) return 0;
+      const match = invoiceNo.match(/ST-(\d+)/);
+      return match ? parseInt(match[1], 10) : 0;
+    };
+
+    // Get numbers from both
+    const generalNumber = extractNumber(lastGeneralTransfer?.invoiceNo);
+    const mrNumber = extractNumber(lastMRTransfer?.invoiceNo);
+
+    // Get the highest number
+    const lastNumber = Math.max(generalNumber, mrNumber);
 
     res.json({ success: true, lastNumber });
   } catch (error) {
@@ -123,6 +137,43 @@ router.get("/stock-transfers/last-number", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Error fetching last stock transfer number",
+    });
+  }
+});
+router.get("/stock-transfers/next-number", async (req, res) => {
+  try {
+    const lastGeneralTransfer = await StockTransfer.findOne()
+      .sort({ invoiceNo: -1 })
+      .select("invoiceNo");
+
+    const lastMRTransfer = await StockTransferToMR.findOne()
+      .sort({ invoiceNo: -1 })
+      .select("invoiceNo");
+
+    const extractNumber = (invoiceNo) => {
+      if (!invoiceNo) return 0;
+      const match = invoiceNo.match(/ST-(\d+)/);
+      const num = match ? parseInt(match[1], 10) : 0;
+
+      return num;
+    };
+
+    const generalNumber = extractNumber(lastGeneralTransfer?.invoiceNo);
+    const mrNumber = extractNumber(lastMRTransfer?.invoiceNo);
+    const lastNumber = Math.max(generalNumber, mrNumber);
+    const nextNumber = lastNumber + 1;
+    const nextInvoiceNo = `ST-${nextNumber.toString().padStart(4, "0")}`;
+    res.json({
+      success: true,
+      lastNumber,
+      nextNumber: nextInvoiceNo,
+    });
+  } catch (error) {
+    console.error("❌ Error generating next stock transfer number:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error generating next stock transfer number",
+      error: error.message,
     });
   }
 });
@@ -578,94 +629,6 @@ router.delete("/stock-transfers/bulk/delete", async (req, res) => {
       success: false,
       message: "Server error during bulk delete",
       error: error.message,
-    });
-  }
-});
-
-// Add this route to your stock transfer routes
-router.get("/stock-transfers/last-number", async (req, res) => {
-  try {
-    // Import both models
-    const StockTransfer = mongoose.model("StockTransfer");
-    const StockTransferToMR = mongoose.model("StockTransferToMR");
-
-    // Get the last transfer from both collections
-    const lastGeneralTransfer = await StockTransfer.findOne()
-      .sort({ invoiceNo: -1 })
-      .select("invoiceNo");
-
-    const lastMRTransfer = await StockTransferToMR.findOne()
-      .sort({ invoiceNo: -1 })
-      .select("invoiceNo");
-
-    // Function to extract number from invoiceNo
-    const extractNumber = (invoiceNo) => {
-      if (!invoiceNo) return 0;
-      const match = invoiceNo.match(/ST-(\d+)/);
-      return match ? parseInt(match[1], 10) : 0;
-    };
-
-    // Get numbers from both
-    const generalNumber = extractNumber(lastGeneralTransfer?.invoiceNo);
-    const mrNumber = extractNumber(lastMRTransfer?.invoiceNo);
-
-    // Get the highest number
-    const lastNumber = Math.max(generalNumber, mrNumber);
-
-    res.json({ success: true, lastNumber });
-  } catch (error) {
-    console.error("Error fetching last stock transfer number:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching last stock transfer number",
-    });
-  }
-});
-
-// Add this route to get next number directly
-router.get("/stock-transfers/next-number", async (req, res) => {
-  try {
-    // Import both models
-    const StockTransfer = mongoose.model("StockTransfer");
-    const StockTransferToMR = mongoose.model("StockTransferToMR");
-
-    // Get the last transfer from both collections
-    const lastGeneralTransfer = await StockTransfer.findOne()
-      .sort({ invoiceNo: -1 })
-      .select("invoiceNo");
-    console.log("670", lastGeneralTransfer);
-    const lastMRTransfer = await StockTransferToMR.findOne()
-      .sort({ invoiceNo: -1 })
-      .select("invoiceNo");
-
-    // Function to extract number from invoiceNo
-    const extractNumber = (invoiceNo) => {
-      if (!invoiceNo) return 0;
-      const match = invoiceNo.match(/ST-(\d+)/);
-      return match ? parseInt(match[1], 10) : 0;
-    };
-
-    // Get numbers from both
-    const generalNumber = extractNumber(lastGeneralTransfer?.invoiceNo);
-    const mrNumber = extractNumber(lastMRTransfer?.invoiceNo);
-
-    // Get the highest number
-    const lastNumber = Math.max(generalNumber, mrNumber);
-    const nextNumber = lastNumber + 1;
-
-    // Format the next number
-    const nextInvoiceNo = `ST-${nextNumber.toString().padStart(4, "0")}`;
-
-    res.json({
-      success: true,
-      lastNumber,
-      nextNumber: nextInvoiceNo,
-    });
-  } catch (error) {
-    console.error("Error generating next stock transfer number:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error generating next stock transfer number",
     });
   }
 });

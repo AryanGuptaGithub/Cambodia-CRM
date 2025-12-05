@@ -105,7 +105,6 @@ app.use("/api", dailySummary);
 app.use("/api", dailyReports);
 app.use("/api", SalesReturn);
 app.use("/api", stockAdjustment);
-app.use("/api", stockTransfer);
 app.use("/api", warehouse);
 app.use("/api", orderStatus);
 app.use("/api", purchaseReturn);
@@ -142,6 +141,7 @@ app.use("/api", hrmDashboard);
 app.use("/api", payrollExport);
 app.use("/api",leaves);
 app.use("/api", stockTransferToMR);
+app.use("/api", stockTransfer);
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);

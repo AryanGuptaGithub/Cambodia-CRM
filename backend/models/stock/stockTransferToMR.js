@@ -22,6 +22,8 @@ const stockTransferToMRSchema = new mongoose.Schema(
     stockTransferFromMrToMain: { type: String, default: "" },
 
     items: [itemSchema],
+    
+    remarks: { type: String, default: "" }, // Added remarks field
 
     // Total cost fields
     totalTransferCost: { type: Number, default: 0 }, // Sum of all productCost
