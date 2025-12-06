@@ -3,6 +3,7 @@ import express from "express";
 import SaleSummary from "../../models/sale/saleSummary.js";
 import Payroll from "../../models/Hrm/Payroll.js";
 import Staff from "../../models/staffMember/staff.js";
+import MR from "../../models/stock/stockTransferToMR.js"
 import mongoose from "mongoose";
 
 const router = express.Router();
@@ -416,27 +417,40 @@ router.get("/sales-salary-ratio-optimized", async (req, res) => {
 // GET MR List for dropdowns
 router.get("/mrs", async (req, res) => {
   try {
-    const mrList = await SaleSummary.aggregate([
+    const mrList = await MR.aggregate([
       {
-        $group: {
-          _id: "$mrName",
-          mrId: { $first: "$mrId" },
-          saleCount: { $sum: 1 },
-          totalSales: { $sum: "$totalAmount" },
-        },
+        $lookup: {
+          from: "salesummaries", // The name of your SaleSummary collection
+          localField: "mrName", // Field in MR collection
+          foreignField: "mrName", // Field in SaleSummary collection
+          as: "sales"
+        }
+      },
+      {
+        $addFields: {
+          saleCount: { $size: "$sales" },
+          totalSales: { 
+            $sum: "$sales.totalAmount" 
+          },
+          // If SaleSummary has mrId, you might want to use it
+          // Otherwise, use MR's _id
+          displayMrId: "$_id"
+        }
       },
       {
         $project: {
           _id: 0,
-          mrName: "$_id",
-          mrId: 1,
+          mrName: 1,
+          mrId: "$displayMrId",
           saleCount: 1,
           totalSales: 1,
-        },
+          createdAt: 1,
+          updatedAt: 1,
+        }
       },
-      { $sort: { mrName: 1 } },
+      { $sort: { mrName: 1 } }
     ]);
-
+    console.log("mrList", mrList);
     res.status(200).json({
       success: true,
       data: mrList,

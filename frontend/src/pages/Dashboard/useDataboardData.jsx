@@ -260,7 +260,7 @@ export const useDashboardData = () => {
         (sum, item) => sum + (item.netSalary || 0),
         0
       );
-      
+
       setTotalPayroll(total);
       setPayrollYTDTotal(total);
     } catch (error) {
@@ -287,7 +287,7 @@ export const useDashboardData = () => {
       const stockItems = Array.isArray(response.data.reports)
         ? response.data.reports
         : [];
-      console.log(stockItems);
+
       const totalStockValue = calculateStockValue(stockItems);
       const lowStockItems = getLowStockItems(stockItems);
 

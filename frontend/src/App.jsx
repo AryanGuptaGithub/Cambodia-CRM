@@ -10,12 +10,13 @@ import SettingsLayout from "./pages/SettingsLayout";
 import ProductManagerLayout from "./pages/ProductManagerLayout";
 import PurchaseLayout from "./pages/PurchaseLayout";
 import SaleLayout from "./pages/SaleLayout";
-import ExpenseLayout from "./pages/ExepenseLayout"; 
+import ExpenseLayout from "./pages/ExepenseLayout";
 import ReportsLayout from "./pages/ReportsLayout";
 import UtilityLayout from "./pages/UtilityLayout";
 import HrmLayout from "./pages/HrmLayout";
 import CashAndBankLayout from "./pages/CashAndBankLayout";
 import StaffMemberLayout from "./pages/Utility/StaffMemberLayout";
+import MrCarryStockLayout from "./pages/MrCarryStock/MrCarryStockLayout";
 
 // Dashboard and Main pages
 import Dashboard from "./pages/Dashboard/Dashbaord";
@@ -111,13 +112,18 @@ import AddDailySummaryReports from "./pages/Reports/AddNewSaleSummaryReports";
 import FrontSettings from "./pages/Utility/FrontSettings";
 import ProductCard from "./pages/Utility/ProductCard";
 
+// HRM pages
 import HrmDashboard from "./pages/HRM/Dashboard"; // Renamed to avoid conflict
 import Holidays from "./pages/HRM/Holidays";
 import Leaves from "./pages/HRM/Leaves";
 import Payroll from "./pages/HRM/Payroll";
 import AddPayroll from "./pages/HRM/addPayroll";
 
+// Account pages
 import CashAndBank from "./pages/Account/CashAndBank";
+import CarryStockView from "./pages/MrCarryStock/CarryStockView";
+import StockReturn from "./pages/MrCarryStock/StockReturn";
+import StockReplacement from "./pages/MrCarryStock/StockReplacement";
 
 // Other components
 import StockTransferForm from "./pages/StockTransferForm";
@@ -148,12 +154,11 @@ function App() {
           <Route path="onlineorder" element={<OnlineOrders />} />
           <Route path="stockadjustment" element={<StockAdjustment />} />
           <Route path="stocktransfer" element={<StockTransfer />} />
-          <Route path="stocktransferform" element={<StockTransferForm />} />
+          <Route path="createstocktransfer" element={<StockTransferForm />} />
           {/* Account routes */}
           <Route path="accountlayout" element={<CashAndBankLayout />}>
             <Route index element={<CashAndBank />} />
           </Route>
-          
           <Route path="staffmemberLayout" element={<StaffMemberLayout />}>
             <Route path="staffmember" element={<StaffMember />} />
             <Route path="staffmember/add" element={<AddStaffMember />} />
@@ -182,6 +187,7 @@ function App() {
             <Route path="addproduct" element={<AddProductForm />} />
             <Route path="printbarcode" element={<PrintBarCode />} />
           </Route>
+          {/* Purchase routes */}
           <Route path="purchaselayout" element={<PurchaseLayout />}>
             <Route index element={<Purchase />} />
             <Route path="purchase" element={<Purchase />} />
@@ -340,6 +346,12 @@ function App() {
               <Route index element={<Payroll />} />
               <Route path="new" element={<AddPayroll />} />
             </Route>
+          </Route>
+          {/* NEW: MR Carry Stock routes */}
+          <Route path="mrcarrystocklayout" element={<MrCarryStockLayout />}>
+            <Route path="carrystockview" element={<CarryStockView />} />
+            <Route path="stockreturn" element={<StockReturn />} />
+            <Route path="stockreplacement" element={<StockReplacement />} />
           </Route>
         </Route>
       </Routes>

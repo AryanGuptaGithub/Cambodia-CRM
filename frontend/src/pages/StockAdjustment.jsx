@@ -92,9 +92,7 @@ const StockAdjustment = () => {
   const fetchProductsData = async () => {
     try {
       const data = await fetchProducts(backendUrl);
-      console.log('data', data);
       setProducts(data.data);
-      console.log('97', products);
     } catch (err) {
       console.error("Fetch products error:", err);
       showToast("error", "Failed to fetch products");
@@ -259,7 +257,7 @@ const StockAdjustment = () => {
       showToast("error", CONFIG.MESSAGES.NO_PRODUCTS);
       return;
     }
-    
+
     setEditingAdjustment(adjustment);
     setFormData({
       product: adjustment.productId?._id || adjustment.productId,
@@ -514,8 +512,9 @@ const StockAdjustment = () => {
                 </h3>
                 <div className="mt-2 text-sm text-red-700">
                   <p>
-                    You need to add at least one product before creating stock adjustments. 
-                    Add products in the product management section first.
+                    You need to add at least one product before creating stock
+                    adjustments. Add products in the product management section
+                    first.
                   </p>
                 </div>
               </div>
@@ -655,8 +654,8 @@ const StockAdjustment = () => {
                                 checked={selectedIds.includes(adj._id)}
                                 onChange={() => toggleSelect(adj)}
                                 className={`rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 ${
-                                  isProductsEmpty 
-                                    ? "cursor-not-allowed opacity-50" 
+                                  isProductsEmpty
+                                    ? "cursor-not-allowed opacity-50"
                                     : "cursor-pointer"
                                 }`}
                                 disabled={isProductsEmpty}
@@ -803,7 +802,11 @@ const StockAdjustment = () => {
                       value={formData.product}
                       onChange={(value) => handleFormChange("product", value)}
                       disabled={!!editingAdjustment || isProductsEmpty}
-                      placeholder={isProductsEmpty ? "No Products Available" : "Select Product"}
+                      placeholder={
+                        isProductsEmpty
+                          ? "No Products Available"
+                          : "Select Product"
+                      }
                       options={productOptions}
                       required
                     />
@@ -820,7 +823,9 @@ const StockAdjustment = () => {
                       }
                       disabled={isProductsEmpty}
                       className={`w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
-                        isProductsEmpty ? "bg-gray-100 cursor-not-allowed" : "cursor-pointer"
+                        isProductsEmpty
+                          ? "bg-gray-100 cursor-not-allowed"
+                          : "cursor-pointer"
                       }`}
                       required
                     >

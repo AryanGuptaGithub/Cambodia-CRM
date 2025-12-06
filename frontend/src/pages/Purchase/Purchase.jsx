@@ -762,7 +762,6 @@ function Purchase() {
 
   // Product edit modal functions - UPDATED
   const openProductEditModal = (product, index) => {
-    console.log("Opening product edit modal:", product);
     setCurrentProduct({
       ...product,
       // Ensure productId is set correctly - use productId first, then _id as fallback
@@ -867,8 +866,6 @@ function Purchase() {
       };
 
       updatedProducts[currentProductIndex] = updatedProduct;
-
-      console.log("Updated product in form:", updatedProduct);
 
       return {
         ...prev,
@@ -1858,12 +1855,10 @@ function Purchase() {
                         currentProduct?.productId || currentProduct?.id || ""
                       }
                       onChange={(selectedValue) => {
-                        console.log("Selected product ID:", selectedValue);
                         // FIXED: Use id instead of _id for lookup
                         const selectedProduct = productOptions.find(
                           (product) => product.id === selectedValue
                         );
-                        console.log("Found product:", selectedProduct);
 
                         if (selectedProduct) {
                           setCurrentProduct((prev) => {
@@ -1918,10 +1913,6 @@ function Purchase() {
                             updatedProduct.amount =
                               Math.round(lcValue * quantityValue * 100) / 100;
 
-                            console.log(
-                              "Updated product after selection:",
-                              updatedProduct
-                            );
                             return updatedProduct;
                           });
                         } else {

@@ -149,18 +149,18 @@ export const fetchProductDropdownPurchase = async () => {
       currentStock: product.totalBoxes || 0,
       minStockLevel: product.minStockLevel || 0,
       sellingPrice: product.sellingPrice || 0,
-      lc:  product.lc,
-      fob:product.fob,
+      lc: product.lc,
+      fob: product.fob,
       cif: product.cif,
       status: product.status || "Out of Stock",
     }));
-    console.log("formattedProducts", formattedProducts);
+
     return { success: true, data: formattedProducts };
   } catch (error) {
     console.error("❌ Error fetching products for purchase dropdown:", error);
-    return { 
-      success: false, 
-      error: "Failed to load products for purchase" 
+    return {
+      success: false,
+      error: "Failed to load products for purchase",
     };
   }
 };

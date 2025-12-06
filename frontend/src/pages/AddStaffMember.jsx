@@ -50,7 +50,7 @@ const AddStaffMember = () => {
       });
 
       const data = await response.json();
-      console.log('values of data', data);
+      
       if (!response.ok) throw new Error(data.message || "Failed to add staff member");
 
       showToast("success", data.message || "Staff member added successfully!");

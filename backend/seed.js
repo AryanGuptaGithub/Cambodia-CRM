@@ -31,8 +31,21 @@ async function connectDB() {
 async function seedUsers() {
   await User.deleteMany({});
   const users = [
-    { username: "superadmin", password: "123456", role: "super-admin" },
-    { username: "admin", password: "123456", role: "admin" },
+    {
+      name: "superAdmin",
+      username: "superAdmin",
+      email: "superadmin@example.com",
+      password: "123456",
+      role: "admin", 
+    },
+    {
+      name: "admin",
+      username: "admin",
+      email: "admin@example.com",
+      password: "123456",
+      role: "admin",
+    },
+   
   ];
 
   for (const u of users) {
@@ -437,7 +450,17 @@ async function seedHTabs() {
       category: "main",
       reportType: "Hide/Show Tabs",
     },
-
+    {
+      tabId: "settings",
+      name: "Settings",
+      description: "System settings",
+      path: "",
+      icon: "Settings",
+      level: 0,
+      sequence: 3,
+      category: "main",
+      reportType: "Hide/Show Tabs",
+    },
     {
       tabId: "products",
       name: "Product Manager",
@@ -493,6 +516,18 @@ async function seedHTabs() {
       category: "main",
       reportType: "Hide/Show Tabs",
     },
+    // ADDED: MR Carry Stock main tab
+    {
+      tabId: "mrCarryStock",
+      name: "MR Carry Stock",
+      description: "MR Carry Stock management",
+      path: "",
+      icon: "UserCheck",
+      level: 0,
+      sequence: 9,
+      category: "main",
+      reportType: "Hide/Show Tabs",
+    },
     {
       tabId: "accounts",
       name: "Accounts",
@@ -500,7 +535,7 @@ async function seedHTabs() {
       path: "",
       icon: "Landmark",
       level: 0,
-      sequence: 9,
+      sequence: 10,
       category: "accounts",
       reportType: "Hide/Show Tabs",
     },
@@ -511,7 +546,7 @@ async function seedHTabs() {
       path: "",
       icon: "FileText",
       level: 0,
-      sequence: 10,
+      sequence: 11,
       category: "expense",
       reportType: "Hide/Show Tabs",
     },
@@ -522,7 +557,7 @@ async function seedHTabs() {
       path: "",
       icon: "BarChart3",
       level: 0,
-      sequence: 11,
+      sequence: 12,
       category: "reports",
       reportType: "Hide/Show Tabs",
     },
@@ -533,7 +568,7 @@ async function seedHTabs() {
       path: "/staffmemberLayout/staffmember",
       icon: "UserCog",
       level: 0,
-      sequence: 12,
+      sequence: 13,
       category: "staff",
       reportType: "Hide/Show Tabs",
     },
@@ -544,8 +579,19 @@ async function seedHTabs() {
       path: "",
       icon: "Settings",
       level: 0,
-      sequence: 13,
+      sequence: 14,
       category: "utility",
+      reportType: "Hide/Show Tabs",
+    },
+    {
+      tabId: "onlineOrders",
+      name: "Online Orders",
+      description: "Online orders management",
+      path: "/onlineOrders",
+      icon: "ShoppingBag",
+      level: 0,
+      sequence: 15,
+      category: "main",
       reportType: "Hide/Show Tabs",
     },
     {
@@ -555,7 +601,7 @@ async function seedHTabs() {
       path: "",
       icon: "UserCog",
       level: 0,
-      sequence: 14,
+      sequence: 16,
       category: "hrm",
       reportType: "Hide/Show Tabs",
     },
@@ -737,6 +783,68 @@ async function seedHTabs() {
       level: 1,
       sequence: 2,
       category: "expense",
+      reportType: "Hide/Show Tabs",
+    },
+
+    // ADDED: MR Carry Stock Sub-tabs (Level 1)
+    {
+      tabId: "mrCarryStock_mrlist",
+      name: "MR List",
+      description: "MR list management",
+      path: "/mrCarryStocklayout/mrlist",
+      icon: "Users",
+      parentTabId: "mrCarryStock",
+      level: 1,
+      sequence: 1,
+      category: "main",
+      reportType: "Hide/Show Tabs",
+    },
+    {
+      tabId: "mrCarryStock_assigncarrystock",
+      name: "Assign Carry Stock",
+      description: "Assign carry stock to MR",
+      path: "/mrCarryStocklayout/assigncarrystock",
+      icon: "Package",
+      parentTabId: "mrCarryStock",
+      level: 1,
+      sequence: 2,
+      category: "main",
+      reportType: "Hide/Show Tabs",
+    },
+    {
+      tabId: "mrCarryStock_carrystockview",
+      name: "Carry Stock View",
+      description: "View MR carry stock",
+      path: "/mrCarryStocklayout/carrystockview",
+      icon: "Eye",
+      parentTabId: "mrCarryStock",
+      level: 1,
+      sequence: 3,
+      category: "main",
+      reportType: "Hide/Show Tabs",
+    },
+    {
+      tabId: "mrCarryStock_stockreturn",
+      name: "Stock Return",
+      description: "Stock return management",
+      path: "/mrCarryStocklayout/stockreturn",
+      icon: "RotateCcw",
+      parentTabId: "mrCarryStock",
+      level: 1,
+      sequence: 4,
+      category: "main",
+      reportType: "Hide/Show Tabs",
+    },
+    {
+      tabId: "mrCarryStock_stockreplacement",
+      name: "Stock Replacement",
+      description: "Stock replacement management",
+      path: "/mrCarryStocklayout/stockreplacement",
+      icon: "RefreshCw",
+      parentTabId: "mrCarryStock",
+      level: 1,
+      sequence: 5,
+      category: "main",
       reportType: "Hide/Show Tabs",
     },
 
@@ -993,9 +1101,8 @@ async function seedHTabs() {
       category: "reports",
       reportType: "Hide/Show Tabs",
     },
-    // NEW: Expiry Stock Report added here
     {
-      tabId: "reports_expirystockreport",
+      tabId: "reports_expirystock",
       name: "Expiry Stock Report",
       description: "Expiry stock report and analytics",
       path: "/reportlayout/expiry-stock-report",
@@ -1145,7 +1252,7 @@ async function seedHTabs() {
       reportType: "Hide/Show Tabs",
     },
 
-    // HRM Sub-tabs (Level 1) - UPDATED: Combined Leaves and Attendance into LeaveAttendance
+    // HRM Sub-tabs (Level 1)
     {
       tabId: "hrm_dashboard",
       name: "Dashboard",
@@ -1210,9 +1317,7 @@ async function seedHTabs() {
 
   await HTab.insertMany(sampleTabs);
   const count = await HTab.countDocuments();
-  
 }
-
 // Run all seeders in order
 async function runSeeders() {
   await connectDB();
@@ -1231,8 +1336,6 @@ async function runSeeders() {
     await seedProductPackingTypes();
     await seedAllowanceTypes(); // Add allowance types seeding
     await seedHTabs();
-
-    
   } catch (error) {
     console.error("❌ Seeding error:", error);
   } finally {

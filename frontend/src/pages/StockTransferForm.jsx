@@ -70,21 +70,38 @@ const formatNumber = (value) => {
 // Helper function to get LC from product (from batches array)
 const getProductLc = (product) => {
   if (!product) return 0;
-  
+
   // First check if there are batches with LC
-  if (product.batches && Array.isArray(product.batches) && product.batches.length > 0) {
+  if (
+    product.batches &&
+    Array.isArray(product.batches) &&
+    product.batches.length > 0
+  ) {
     // Get the first batch with valid LC
-    const batchWithLc = product.batches.find(batch => batch.lc && batch.lc > 0);
+    const batchWithLc = product.batches.find(
+      (batch) => batch.lc && batch.lc > 0
+    );
     if (batchWithLc) return batchWithLc.lc;
-    
+
     // If no batch with LC, check first batch
     if (product.batches[0].lc !== undefined) {
       return product.batches[0].lc || 0;
     }
   }
-  
+
   // Fallback to product-level LC
   return product.lc || 0;
+};
+
+// Helper function to convert boxes to proper quantity structure
+const convertToQuantityStructure = (boxQuantity) => {
+  const boxes = Math.floor(boxQuantity);
+  return {
+    boxes: boxes,
+    strips: 0,
+    pieces: 0,
+    totalPieces: boxes,
+  };
 };
 
 // Reusable Multiple Select Dropdown (same as Payroll)
@@ -520,7 +537,7 @@ const GeneralTransferForm = ({ navigate, products, productsLoading }) => {
     if (!products || !Array.isArray(products)) {
       return [];
     }
-    
+
     const filteredProducts = products.filter((pr) => {
       const hasStock = pr.totalBoxes > 0;
       return hasStock;
@@ -529,7 +546,7 @@ const GeneralTransferForm = ({ navigate, products, productsLoading }) => {
     const options = filteredProducts.map((p) => ({
       value: p._id,
       label: p.productName || `Product ${p._id}`,
-      lc: getProductLc(p), // Use helper function to get LC from batches
+      lc: getProductLc(p),
     }));
 
     return options;
@@ -616,7 +633,8 @@ const GeneralTransferForm = ({ navigate, products, productsLoading }) => {
           productName: selectedProduct.productName,
           boxQuantity: "",
           expenses: 0,
-          lc: lc, // Store LC with the item
+          lc: lc,
+          quantity: convertToQuantityStructure(0),
         };
       })
       .filter((item) => item !== null);
@@ -666,9 +684,17 @@ const GeneralTransferForm = ({ navigate, products, productsLoading }) => {
             }
           }
 
-          // Use the item's stored LC for calculation
           const lc = item.lc || 0;
           updateItem(id, field, numericValue, lc);
+
+          const boxQuantity = parseFloat(numericValue) || 0;
+          setItems((prev) =>
+            prev.map((item) =>
+              item.id === id
+                ? { ...item, quantity: convertToQuantityStructure(boxQuantity) }
+                : item
+            )
+          );
         }
       }
     },
@@ -693,6 +719,14 @@ const GeneralTransferForm = ({ navigate, products, productsLoading }) => {
 
     setIsLoading(true);
 
+    const totalExpensesFromItems = items.reduce(
+      (sum, item) => sum + parseFloat(item.expenses || 0),
+      0
+    );
+
+    const shippingCost = parseFloat(form.shipping || 0);
+    const grandTotalCalc = totalExpensesFromItems + shippingCost;
+
     const payload = {
       invoiceNo: form.invoiceNumber,
       date: form.transferDate,
@@ -700,15 +734,16 @@ const GeneralTransferForm = ({ navigate, products, productsLoading }) => {
         productId: item.productId,
         productName: item.productName,
         boxQuantity: parseFloat(item.boxQuantity || 0),
+        quantity: convertToQuantityStructure(parseFloat(item.boxQuantity || 0)),
         expenses: parseFloat(item.expenses || 0),
-        lc: item.lc || 0, // Include LC in payload
+        lc: parseFloat(item.lc || 0),
       })),
       remarks: form.remarks || "",
       status: form.orderStatus,
       transferType: form.transferType,
-      shipping: parseFloat(form.shipping || 0),
-      totalExpenses: parseFloat(totalExpenses || 0),
-      grandTotal: parseFloat(grandTotal || 0),
+      shipping: shippingCost,
+      totalExpenses: totalExpensesFromItems,
+      grandTotal: grandTotalCalc,
       destination: form.destination || "",
       source: form.source || "",
     };
@@ -739,6 +774,7 @@ const GeneralTransferForm = ({ navigate, products, productsLoading }) => {
           error.response.data.message ||
           error.response.data.error ||
           error.message;
+        console.error("Backend error details:", error.response.data);
       } else if (error.request) {
         errorMessage = "Network error: Unable to connect to server";
       }
@@ -965,9 +1001,7 @@ const GeneralTransferForm = ({ navigate, products, productsLoading }) => {
             {items.map((item, index) => {
               const product = getProductDetails(item.productId);
               const availableStock = product?.totalBoxes || 0;
-              const lc = item.lc || 0; // Use LC from item (which comes from batches)
-
-          
+              const lc = item.lc || 0;
 
               return (
                 <div
@@ -1166,12 +1200,9 @@ const GeneralTransferForm = ({ navigate, products, productsLoading }) => {
 const CreateStockTransfer = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const [activeTab, setActiveTab] = useState(() => {
-    if (location.state && location.state.activeTab) {
-      return location.state.activeTab;
-    }
-    return "mr";
-  });
+  
+  // FIXED: Always default to "mr" (first tab) on initial load
+  const [activeTab, setActiveTab] = useState("mr");
 
   const [mrList, setMrList] = useState([]);
   const [mrListLoading, setMrListLoading] = useState(true);
@@ -1191,13 +1222,8 @@ const CreateStockTransfer = () => {
     remarks: "",
   });
 
-  useEffect(() => {
-    if (location.state && location.state.activeTab) {
-      setTimeout(() => {
-        window.history.replaceState({}, document.title);
-      }, 0);
-    }
-  }, [location]);
+  // REMOVED the useEffect that was overriding the default tab
+  // This ensures "mr" tab is always active on first load
 
   const fetchMRs = useCallback(async () => {
     try {
@@ -1256,7 +1282,7 @@ const CreateStockTransfer = () => {
         totalAmount: product.totalAmount || 0,
         status: product.status || "Out of Stock",
         minStockLevel: product.minStockLevel || 0,
-        lc: getProductLc(product), // Get LC from batches
+        lc: getProductLc(product),
         fob: product.fob || 0,
         cif: product.cif || 0,
         sellingPrice: product.sellingPrice,
@@ -1331,7 +1357,7 @@ const CreateStockTransfer = () => {
     const options = filteredProducts.map((p) => ({
       value: p._id,
       label: p.productName || `Product ${p._id}`,
-      lc: getProductLc(p), // Get LC from batches
+      lc: getProductLc(p),
     }));
 
     return options;
@@ -1339,13 +1365,7 @@ const CreateStockTransfer = () => {
 
   const mrOptions = useMemo(() => {
     if (isMrListEmpty) {
-      return [
-        {
-          value: "",
-          label: "No MRs Available",
-          disabled: true,
-        },
-      ];
+      return [];
     }
 
     return mrList.map((mr) => ({
@@ -1383,7 +1403,8 @@ const CreateStockTransfer = () => {
         productId: id,
         productName: product?.productName || "",
         boxQty: "",
-        lc: productOption?.lc || getProductLc(product) || 0, // Store LC from batches
+        lc: productOption?.lc || getProductLc(product) || 0,
+        quantity: convertToQuantityStructure(0),
       };
     });
     setMrTransfer((prev) => ({ ...prev, products: updated }));
@@ -1397,12 +1418,13 @@ const CreateStockTransfer = () => {
         products: prev.products.map((p) => {
           if (p.productId === productId) {
             const updatedProduct = { ...p, [field]: numericValue };
-            // Calculate expenses if LC is available
             if (p.lc && numericValue) {
               const boxQty = parseFloat(numericValue) || 0;
               const lc = parseFloat(p.lc) || 0;
               updatedProduct.expenses = boxQty * lc;
             }
+            const boxQuantity = parseFloat(numericValue) || 0;
+            updatedProduct.quantity = convertToQuantityStructure(boxQuantity);
             return updatedProduct;
           }
           return p;
@@ -1476,6 +1498,13 @@ const CreateStockTransfer = () => {
     setLoading(true);
     try {
       const selectedMr = mrOptions.find((m) => m.value === mrTransfer.mrId);
+
+      // Calculate total expenses from items
+      const totalExpensesFromItems = validProducts.reduce(
+        (sum, p) => sum + parseFloat(p.expenses || 0),
+        0
+      );
+
       const payload = {
         invoiceNo: mrTransfer.transferNo,
         date: mrTransfer.date,
@@ -1488,10 +1517,13 @@ const CreateStockTransfer = () => {
           productId: p.productId,
           productName: p.productName,
           boxQuantity: parseFloat(p.boxQty) || 0,
+          quantity: convertToQuantityStructure(parseFloat(p.boxQty) || 0),
           expenses: parseFloat(p.expenses || 0),
           lc: parseFloat(p.lc || 0),
         })),
         remarks: mrTransfer.remarks || "",
+        totalExpenses: totalExpensesFromItems,
+        grandTotal: totalExpensesFromItems,
       };
 
       await axios.post(`${backendUrl}/api/stock-transfers-to-mr`, payload);
@@ -1508,6 +1540,7 @@ const CreateStockTransfer = () => {
       });
     } catch (err) {
       showToast("error", err.response?.data?.message || "Failed to transfer");
+      console.error("Backend error details:", err.response?.data);
     } finally {
       setLoading(false);
     }
@@ -1598,33 +1631,17 @@ const CreateStockTransfer = () => {
                 disabled={isMrListEmpty}
               />
 
-              <div className="flex flex-col">
-                <label className="text-sm font-medium text-gray-700 mb-1">
-                  MR Name <span className="text-red-500">*</span>
-                </label>
-                <select
-                  value={mrTransfer.mrId}
-                  onChange={(e) => handleEmployeeChange(e.target.value)}
-                  disabled={isMrListEmpty}
-                  className={`border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-                    errors.mrId ? "border-red-500" : "border-gray-300"
-                  } ${isMrListEmpty ? "bg-gray-100 cursor-not-allowed" : ""}`}
-                >
-                  <option value="">Select MR</option>
-                  {mrOptions.map((option) => (
-                    <option
-                      key={option.value}
-                      value={option.value}
-                      disabled={option.disabled}
-                    >
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                {errors.mrId && (
-                  <p className="text-red-500 text-xs mt-1">{errors.mrId}</p>
-                )}
-              </div>
+              <SearchableDropdown
+                label="MR Name"
+                value={mrTransfer.mrId}
+                onChange={(value) => handleEmployeeChange(value)}
+                options={mrOptions}
+                placeholder={isMrListEmpty ? "No MRs Available" : "Select MR"}
+                required={true}
+                loading={mrListLoading}
+                error={errors.mrId}
+                disabled={isMrListEmpty}
+              />
             </div>
           </div>
 
@@ -1962,5 +1979,4 @@ const CreateStockTransfer = () => {
     </div>
   );
 };
-
 export default CreateStockTransfer;

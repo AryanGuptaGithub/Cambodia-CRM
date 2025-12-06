@@ -17,6 +17,8 @@ import {
   Users,
   Truck,
   Pencil,
+  DollarSign,
+  Box,
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { getVisiblePages } from "../utils/useVisiblePages.jsx";
@@ -25,6 +27,7 @@ import CustomDropdown from "./Utility/customDropdown.jsx";
 import axios from "axios";
 import { showToast } from "../utils/toast.jsx";
 import { confirmDialog } from "../utils/confirmationDialog.js";
+import SearchableDropdown from "../components/common/SearchableDropdown"; // Added import
 
 const ITEMS_PER_PAGE = 9,
   backendUrl = import.meta.env.VITE_BACKEND_URL;
@@ -73,6 +76,11 @@ const StockTransfer = () => {
   const [currentProductIndex, setCurrentProductIndex] = useState(null);
   const [isProductEditModalOpen, setIsProductEditModalOpen] = useState(false);
 
+  // MR List state
+  const [mrList, setMrList] = useState([]);
+  const [mrListLoading, setMrListLoading] = useState(true);
+  const [isMrListEmpty, setIsMrListEmpty] = useState(false);
+
   // Form state
   const [form, setForm] = useState({
     invoiceNo: "",
@@ -93,6 +101,67 @@ const StockTransfer = () => {
     stockTransferFromMrToMain: "",
   });
 
+  // Helper function to get LC from product batches
+  const getProductLc = useCallback((product) => {
+    if (!product) return 0;
+
+    // First check if there are batches with LC
+    if (
+      product.batches &&
+      Array.isArray(product.batches) &&
+      product.batches.length > 0
+    ) {
+      // Get the first batch with valid LC
+      const batchWithLc = product.batches.find(
+        (batch) => batch.lc && batch.lc > 0
+      );
+      if (batchWithLc) return batchWithLc.lc;
+
+      // If no batch with LC, check first batch
+      if (product.batches[0].lc !== undefined) {
+        return product.batches[0].lc || 0;
+      }
+    }
+
+    // Fallback to product-level LC
+    return product.lc || 0;
+  }, []);
+
+  // Fetch MR List
+  const fetchMRList = useCallback(async () => {
+    try {
+      setMrListLoading(true);
+      const response = await axios.get(`${backendUrl}/api/staffs`);
+      const data = response.data || [];
+
+      if (data && data.length > 0) {
+        setMrList(data);
+        setIsMrListEmpty(false);
+      } else {
+        setMrList([]);
+        setIsMrListEmpty(true);
+      }
+    } catch (err) {
+      console.error("Error fetching MR list:", err);
+      setMrList([]);
+      setIsMrListEmpty(true);
+    } finally {
+      setMrListLoading(false);
+    }
+  }, []);
+
+  // MR Options for dropdown
+  const mrOptions = useMemo(() => {
+    if (isMrListEmpty) {
+      return [];
+    }
+
+    return mrList.map((mr) => ({
+      value: mr._id,
+      label: mr.medicalRepName || mr.employeeName || `MR ${mr._id}`,
+    }));
+  }, [mrList, isMrListEmpty]);
+
   // Save active tab to localStorage whenever it changes
   useEffect(() => {
     localStorage.setItem("stockTransferActiveTab", activeTab);
@@ -104,6 +173,10 @@ const StockTransfer = () => {
       window.history.replaceState({}, document.title);
     }
   }, [location.state]);
+
+  useEffect(() => {
+    fetchMRList();
+  }, [fetchMRList]);
 
   const formatCurrency = (value) => {
     if (value === null || value === undefined || value === "") return "0.00";
@@ -171,34 +244,84 @@ const StockTransfer = () => {
   const fetchProducts = useCallback(async () => {
     try {
       // Fetch products with LC and stock information
-      const response = await axios.get(`${backendUrl}/api/products-with-lc`);
-      setProducts(response.data || []);
+      const response = await axios.get(`${backendUrl}/api/dropdown-products`);
+      const productsData = response.data?.data || [];
+
+      if (!Array.isArray(productsData)) {
+        showToast("error", "Invalid products data format");
+        return;
+      }
+
+      const uniqueProductsMap = new Map();
+      productsData.forEach((product) => {
+        if (product && product._id && product.productName) {
+          const name = product.productName.trim().toLowerCase();
+          if (!uniqueProductsMap.has(name)) {
+            uniqueProductsMap.set(name, product);
+          }
+        }
+      });
+
+      const uniqueProducts = Array.from(uniqueProductsMap.values());
+
+      const formattedProducts = uniqueProducts.map((product) => ({
+        id: product._id,
+        _id: product._id,
+        label: product.productName || `Product ${product._id}`,
+        type: product.type,
+        productName: product.productName,
+        supplierName: product.supplierName,
+        batches: product.batches || [],
+        totalBoxes: product.totalBoxes || 0,
+        totalAmount: product.totalAmount || 0,
+        status: product.status || "Out of Stock",
+        minStockLevel: product.minStockLevel || 0,
+        lc: getProductLc(product), // Get LC from batches
+        fob: product.fob || 0,
+        cif: product.cif || 0,
+        sellingPrice: product.sellingPrice,
+        stockLastUpdated: product.stockLastUpdated || null,
+        createdAt: product.createdAt,
+        updatedAt: product.updatedAt,
+      }));
+
+      setProducts(formattedProducts);
     } catch (err) {
       console.error("Error fetching products with LC:", err);
-      // Fallback to regular products endpoint
-      try {
-        const response = await axios.get(`${backendUrl}/api/products`);
-        setProducts(response.data || []);
-      } catch (fallbackErr) {
-        console.error("Error fetching products:", fallbackErr);
-        showToast("error", "Failed to fetch products");
-      }
+      showToast("error", "Failed to fetch products");
     }
-  }, []);
+  }, [getProductLc]);
 
   const productOptions = useMemo(() => {
-    // Filter products with box quantity > 0 and LC > 0
+    // Filter products with box quantity > 0 (greater than zero)
     const availableProducts = products.filter(
-      (product) => 
-        (product.totalBoxes > 0 || product.availableStock > 0) && 
-        (product.lc > 0 || product.landedCost > 0)
+      (product) => product.totalBoxes > 0
     );
 
     return [
       { value: "", label: "Select Product" },
       ...availableProducts.map((product) => ({
         value: product._id,
-        label: `${product.productName} (Stock: ${product.totalBoxes || product.availableStock || 0} boxes, LC: $${product.lc || product.landedCost || 0})`,
+        label: `${product.productName} (Stock: ${
+          product.totalBoxes || product.availableStock || 0
+        } boxes, LC: $${formatCurrency(product.lc)})`,
+        qtyPerCarton: product.qtyPerCarton || 0,
+        lc: product.lc || product.landedCost || 0,
+        availableStock: product.totalBoxes || product.availableStock || 0,
+        productName: product.productName,
+      })),
+    ];
+  }, [products]);
+
+  // Product options for edit modal - includes all products (even if stock is 0) to allow editing
+  const productOptionsForEdit = useMemo(() => {
+    return [
+      { value: "", label: "Select Product" },
+      ...products.map((product) => ({
+        value: product._id,
+        label: `${product.productName} (Stock: ${
+          product.totalBoxes || product.availableStock || 0
+        } boxes, LC: $${formatCurrency(product.lc)})`,
         qtyPerCarton: product.qtyPerCarton || 0,
         lc: product.lc || product.landedCost || 0,
         availableStock: product.totalBoxes || product.availableStock || 0,
@@ -312,11 +435,28 @@ const StockTransfer = () => {
   };
 
   const handleViewProducts = (transfer) => {
-    const productsWithCost = transfer.items.map((item) => ({
-      ...item,
-      productCost: item.productCost || (item.lc || 0) * (item.boxQuantity || 0),
-    }));
-    setSelectedProducts(productsWithCost || []);
+    if (!transfer || !Array.isArray(transfer.items)) {
+      setSelectedProducts([]);
+      setIsProductModalOpen(true);
+      return;
+    }
+
+    const productsWithCost = transfer.items.map((item) => {
+      const boxQuantity = parseFloat(item.boxQuantity) || 0;
+
+      const lc = parseFloat(item.lc) || 0;
+
+      const productCost = parseFloat(item.productCost) || lc * boxQuantity;
+
+      return {
+        ...item,
+        boxQuantity,
+        lc,
+        productCost,
+      };
+    });
+
+    setSelectedProducts(productsWithCost);
     setIsProductModalOpen(true);
   };
 
@@ -355,7 +495,7 @@ const StockTransfer = () => {
   // NEW: Handle Box Quantity Change in Add Product Modal
   const handleNewProductBoxQuantityChange = (e) => {
     const value = e.target.value;
-    
+
     // Only allow numbers
     if (value === "" || /^\d+$/.test(value)) {
       const boxQty = value === "" ? "" : parseInt(value);
@@ -364,14 +504,14 @@ const StockTransfer = () => {
           ...prev,
           boxQuantity: boxQty,
         };
-        
+
         // Calculate product cost
         if (boxQty !== "" && prev.lc) {
           updated.productCost = parseFloat((prev.lc * boxQty).toFixed(2));
         } else {
           updated.productCost = 0;
         }
-        
+
         return updated;
       });
     }
@@ -379,8 +519,15 @@ const StockTransfer = () => {
 
   // NEW: Add the new product to the form
   const handleAddProductToForm = () => {
-    if (!newProductForm.productId || !newProductForm.boxQuantity || newProductForm.boxQuantity <= 0) {
-      showToast("error", "Please select a product and enter a valid box quantity");
+    if (
+      !newProductForm.productId ||
+      !newProductForm.boxQuantity ||
+      newProductForm.boxQuantity <= 0
+    ) {
+      showToast(
+        "error",
+        "Please select a product and enter a valid box quantity"
+      );
       return;
     }
 
@@ -398,14 +545,20 @@ const StockTransfer = () => {
       setForm((prev) => {
         const updatedItems = [...prev.items];
         const existingItem = updatedItems[existingIndex];
-        
+
         const newBoxQuantity = parseInt(newProductForm.boxQuantity) || 0;
-        const totalBoxQuantity = (parseInt(existingItem.boxQuantity) || 0) + newBoxQuantity;
-        
+        const totalBoxQuantity =
+          (parseInt(existingItem.boxQuantity) || 0) + newBoxQuantity;
+
         updatedItems[existingIndex] = {
           ...existingItem,
           boxQuantity: totalBoxQuantity,
-          productCost: parseFloat((newProductForm.lc * totalBoxQuantity).toFixed(2)),
+          lc: newProductForm.lc || existingItem.lc || 0,
+          productCost: parseFloat(
+            (
+              (newProductForm.lc || existingItem.lc || 0) * totalBoxQuantity
+            ).toFixed(2)
+          ),
         };
 
         return {
@@ -413,7 +566,7 @@ const StockTransfer = () => {
           items: updatedItems,
         };
       });
-      
+
       showToast("success", "Product quantity updated successfully");
     } else {
       // Add new product
@@ -431,7 +584,9 @@ const StockTransfer = () => {
         },
         openPieces: 0,
         qtyPerCarton: selectedProduct?.qtyPerCarton || 0,
-        totalPieces: (parseInt(newProductForm.boxQuantity) || 0) * (selectedProduct?.qtyPerCarton || 0),
+        totalPieces:
+          (parseInt(newProductForm.boxQuantity) || 0) *
+          (selectedProduct?.qtyPerCarton || 0),
         expenses: 0,
       };
 
@@ -598,7 +753,7 @@ const StockTransfer = () => {
   const handleItemProductChange = (index, productValue) => {
     setForm((prev) => {
       const updatedItems = [...prev.items];
-      const selectedProduct = productOptions.find(
+      const selectedProduct = productOptionsForEdit.find(
         (opt) => opt.value === productValue
       );
 
@@ -611,6 +766,7 @@ const StockTransfer = () => {
         },
         productName: selectedProduct?.label || productValue,
         qtyPerCarton: selectedProduct?.qtyPerCarton || 0,
+        lc: selectedProduct?.lc || 0, // Set LC from product
       };
 
       const boxQuantity = updatedItems[index].boxQuantity || 0;
@@ -620,7 +776,7 @@ const StockTransfer = () => {
       updatedItems[index].totalPieces =
         parseInt(boxQuantity) * parseInt(qtyPerCarton) + parseInt(openPieces);
 
-      const lc = updatedItems[index].lc || 0;
+      const lc = selectedProduct?.lc || 0;
       updatedItems[index].productCost = parseFloat(
         (lc * (boxQuantity || 0)).toFixed(2)
       );
@@ -792,6 +948,7 @@ const StockTransfer = () => {
       shipping: parseFloat(transfer.shipping || 0).toFixed(2),
       totalExpenses: parseFloat(transfer.totalExpenses || 0).toFixed(2),
       grandTotal: parseFloat(transfer.grandTotal || 0).toFixed(2),
+      mrId: transfer.mrId || "", // Added mrId for dropdown
     });
     setIsEditModalOpen(true);
   };
@@ -821,7 +978,7 @@ const StockTransfer = () => {
 
   const handleProductNumericChange = (e, isInteger = false) => {
     const { name, value } = e.target;
-    
+
     if (isInteger) {
       // For integer fields (boxQuantity)
       if (value === "" || /^\d*$/.test(value)) {
@@ -831,14 +988,16 @@ const StockTransfer = () => {
             ...prev,
             [name]: processedValue,
           };
-          
+
           // Recalculate product cost when box quantity changes
           if (name === "boxQuantity") {
             const lcValue = parseFloat(updatedProduct.lc) || 0;
             const boxQty = parseInt(processedValue) || 0;
-            updatedProduct.productCost = parseFloat((lcValue * boxQty).toFixed(2));
+            updatedProduct.productCost = parseFloat(
+              (lcValue * boxQty).toFixed(2)
+            );
           }
-          
+
           return updatedProduct;
         });
       }
@@ -851,14 +1010,16 @@ const StockTransfer = () => {
             ...prev,
             [name]: processedValue,
           };
-          
+
           // Recalculate product cost when lc changes
           if (name === "lc") {
             const lcValue = parseFloat(processedValue) || 0;
             const boxQty = parseInt(updatedProduct.boxQuantity) || 0;
-            updatedProduct.productCost = parseFloat((lcValue * boxQty).toFixed(2));
+            updatedProduct.productCost = parseFloat(
+              (lcValue * boxQty).toFixed(2)
+            );
           }
-          
+
           return updatedProduct;
         });
       }
@@ -866,10 +1027,10 @@ const StockTransfer = () => {
   };
 
   const handleProductSelectChange = (selectedValue) => {
-    const selectedProduct = productOptions.find(
+    const selectedProduct = productOptionsForEdit.find(
       (opt) => opt.value === selectedValue
     );
-    
+
     if (selectedProduct) {
       setCurrentProduct((prev) => {
         const updatedProduct = {
@@ -885,13 +1046,13 @@ const StockTransfer = () => {
           qtyPerCarton: selectedProduct.qtyPerCarton || 0,
           lc: selectedProduct.lc || 0,
         };
-        
+
         // Keep the existing box quantity
         updatedProduct.boxQuantity = prev.boxQuantity || 0;
         updatedProduct.productCost = parseFloat(
           ((selectedProduct.lc || 0) * (prev.boxQuantity || 0)).toFixed(2)
         );
-        
+
         return updatedProduct;
       });
     }
@@ -919,7 +1080,10 @@ const StockTransfer = () => {
         boxQuantity: parseInt(currentProduct.boxQuantity) || 0,
         openPieces: parseInt(currentProduct.openPieces) || 0,
         qtyPerCarton: parseInt(currentProduct.qtyPerCarton) || 0,
-        totalPieces: (parseInt(currentProduct.boxQuantity) || 0) * (parseInt(currentProduct.qtyPerCarton) || 0) + (parseInt(currentProduct.openPieces) || 0),
+        totalPieces:
+          (parseInt(currentProduct.boxQuantity) || 0) *
+            (parseInt(currentProduct.qtyPerCarton) || 0) +
+          (parseInt(currentProduct.openPieces) || 0),
         lc: parseFloat(currentProduct.lc) || 0,
         productCost: parseFloat(currentProduct.productCost) || 0,
       };
@@ -938,6 +1102,17 @@ const StockTransfer = () => {
     setCurrentProductIndex(null);
   };
 
+  // Handle MR Name change in edit modal
+  const handleMRNameChange = (selectedValue) => {
+    const selectedMR = mrOptions.find((mr) => mr.value === selectedValue);
+    setForm((prev) => ({
+      ...prev,
+      mrId: selectedValue,
+      stockTransferToMr: selectedMR?.label || "",
+      mrName: selectedMR?.label || "",
+    }));
+  };
+
   const handleTabChange = (tab) => {
     setActiveTab(tab);
     localStorage.setItem("stockTransferActiveTab", tab);
@@ -950,7 +1125,7 @@ const StockTransfer = () => {
     try {
       const formTab = activeTab === "mr" ? "toMR" : "general";
       const nextNumber = await getNextStockTransferNumber();
-      navigate("/stocktransferform", {
+      navigate("/createstocktransfer", {
         state: {
           nextStockTransferNo: nextNumber,
           activeTab: formTab,
@@ -960,7 +1135,7 @@ const StockTransfer = () => {
       console.error("Error getting next stock transfer number:", error);
       showToast("error", "Failed to generate next stock transfer number");
       const formTab = activeTab === "mr" ? "toMR" : "general";
-      navigate("/stocktransferform", {
+      navigate("/createstocktransfer", {
         state: {
           activeTab: formTab,
         },
@@ -1030,7 +1205,7 @@ const StockTransfer = () => {
                 : "bg-gray-200 text-gray-700 hover:bg-gray-300"
             }`}
           >
-            <Users size={18} /> Stock Transfered To MR
+            <Users size={18} /> Stock Transfer To MR
           </button>
         </div>
 
@@ -1098,8 +1273,9 @@ const StockTransfer = () => {
               <th className="p-3 min-w-[100px] text-sm font-medium">Type</th>
               <th className="p-3 min-w-[120px] text-sm font-medium">Date</th>
               <th className="p-3 min-w-[120px] text-sm font-medium">
-                Total Cost ($)
+                Total LC Cost ($)
               </th>
+
               <th className="p-3 min-w-[120px] text-sm font-medium">
                 # Products
               </th>
@@ -1109,7 +1285,7 @@ const StockTransfer = () => {
           <tbody>
             {currentTransfers.length === 0 ? (
               <tr>
-                <td colSpan={7} className="p-4 text-center text-gray-500">
+                <td colSpan={8} className="p-4 text-center text-gray-500">
                   {searchTerm
                     ? "No matching records found"
                     : "No data available"}
@@ -1123,6 +1299,15 @@ const StockTransfer = () => {
 
                 const calculatedTotal = calculateTotalTransferCost(item.items);
                 const displayTotal = item.totalTransferCost || calculatedTotal;
+
+                // Calculate average LC per box
+                let avgLcPerBox = 0;
+                if (item.items && item.items.length > 0) {
+                  const totalLc = item.items.reduce((sum, product) => {
+                    return sum + (parseFloat(product.lc) || 0);
+                  }, 0);
+                  avgLcPerBox = totalLc / item.items.length;
+                }
 
                 return (
                   <tr
@@ -1173,8 +1358,14 @@ const StockTransfer = () => {
                       {formatDateToReadable(item.date)}
                     </td>
                     <td className="p-3 min-w-[120px] font-medium">
-                      ${formatCurrency(displayTotal)}
+                      <div className="flex items-center justify-center gap-1">
+                        <DollarSign size={14} className="text-green-600" />
+                        <span className="text-green-700">
+                          {formatCurrency(displayTotal)}
+                        </span>
+                      </div>
                     </td>
+
                     <td className="p-3 min-w-[120px]">
                       <div className="flex items-center justify-center gap-3">
                         <span className="font-medium">{productCount}</span>
@@ -1263,7 +1454,7 @@ const StockTransfer = () => {
               onClick={() => setIsViewModalOpen(false)}
             />
 
-            <div className="bg-white w-full max-w-3xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+            <div className="bg-white w-full max-w-4xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
               <button
                 onClick={() => setIsViewModalOpen(false)}
                 className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
@@ -1331,34 +1522,9 @@ const StockTransfer = () => {
                         {form.stockTransferToMr || form.mrName || "-"}
                       </p>
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600">
-                        Product Cost ($)
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100 font-medium">
-                        $
-                        {formatCurrency(calculateTotalTransferCost(form.items))}
-                      </p>
-                    </div>
                   </>
                 )}
 
-                {/* Additional fields for General Transfer */}
-                {activeTab === "general" && (
-                  <>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600">
-                        Product Cost ($)
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100 font-medium">
-                        $
-                        {formatCurrency(calculateTotalTransferCost(form.items))}
-                      </p>
-                    </div>
-                  </>
-                )}
-
-                {/* Remarks - Full width */}
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-gray-600">
                     Remarks
@@ -1382,14 +1548,14 @@ const StockTransfer = () => {
                         return (
                           <div
                             key={item._id || index}
-                            className="border-b pb-4 last:border-b-0"
+                            className="border-b pb-4 last:border-b-0 bg-gray-50 p-3 rounded-lg"
                           >
-                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                               <div>
                                 <label className="block text-sm font-medium text-gray-600">
                                   Product Name
                                 </label>
-                                <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                                <p className="px-3 py-2 rounded bg-white">
                                   {item.productName || "-"}
                                 </p>
                               </div>
@@ -1397,7 +1563,8 @@ const StockTransfer = () => {
                                 <label className="block text-sm font-medium text-gray-600">
                                   Box Quantity
                                 </label>
-                                <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                                <p className="px-3 py-2 rounded bg-white flex items-center gap-1">
+                                  <Box size={14} className="text-gray-500" />
                                   {item.boxQuantity || 0}
                                 </p>
                               </div>
@@ -1405,15 +1572,27 @@ const StockTransfer = () => {
                                 <label className="block text-sm font-medium text-gray-600">
                                   LC ($)
                                 </label>
-                                <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                                  ${formatCurrency(item.lc)}
+                                <p className="px-3 py-2 rounded bg-white flex items-center gap-1">
+                                  <DollarSign
+                                    size={14}
+                                    className="text-green-600"
+                                  />
+                                  {formatCurrency(item.lc)}
                                 </p>
                               </div>
                               <div>
                                 <label className="block text-sm font-medium text-gray-600">
-                                  Product Cost ($)
+                                  LC Per Box ($)
                                 </label>
-                                <p className="border px-3 py-2 rounded-lg bg-gray-100 font-medium">
+                                <p className="px-3 py-2 rounded bg-white font-medium">
+                                  ${formatCurrency(item.lc || 0)}
+                                </p>
+                              </div>
+                              <div>
+                                <label className="block text-sm font-medium text-gray-600">
+                                  Total Cost ($)
+                                </label>
+                                <p className="px-3 py-2 rounded bg-white font-medium text-green-700">
                                   ${formatCurrency(productCost)}
                                 </p>
                               </div>
@@ -1423,6 +1602,38 @@ const StockTransfer = () => {
                       })
                     ) : (
                       <p className="text-gray-500 text-center">No items</p>
+                    )}
+
+                    {/* Total Row */}
+                    {form.items && form.items.length > 0 && (
+                      <div className="border-t pt-4 mt-4">
+                        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                          <div className="md:col-span-3">
+                            <p className="text-right font-semibold text-gray-700">
+                              Total:
+                            </p>
+                          </div>
+                          <div>
+                            <p className="px-3 py-2 rounded bg-blue-50 font-semibold text-blue-800">
+                              {formatCurrency(
+                                form.items.reduce(
+                                  (sum, item) =>
+                                    sum + (parseFloat(item.lc) || 0),
+                                  0
+                                ) / form.items.length
+                              )}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="px-3 py-2 rounded bg-green-50 font-semibold text-green-800">
+                              $
+                              {formatCurrency(
+                                calculateTotalTransferCost(form.items)
+                              )}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -1449,7 +1660,7 @@ const StockTransfer = () => {
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={() => setIsEditModalOpen(false)}
             />
-            <div className="bg-white w-full max-w-3xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
+            <div className="bg-white w-full max-w-4xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
               <button
                 onClick={() => setIsEditModalOpen(false)}
                 className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
@@ -1516,14 +1727,16 @@ const StockTransfer = () => {
                         <label className="block text-sm font-medium text-gray-700">
                           MR Name
                         </label>
-                        <input
-                          type="text"
-                          name="stockTransferToMr"
-                          value={form.stockTransferToMr || form.mrName || ""}
-                          onChange={handleChange}
-                          className="w-full border px-3 py-2 rounded-lg capitalize"
-                          autoComplete="off"
-                          placeholder="Enter MR name"
+                        <SearchableDropdown
+                          value={form.mrId || ""}
+                          onChange={(value) => handleMRNameChange(value)}
+                          options={mrOptions}
+                          placeholder={
+                            isMrListEmpty ? "No MRs Available" : "Select MR"
+                          }
+                          required={true}
+                          loading={mrListLoading}
+                          disabled={isMrListEmpty}
                         />
                       </div>
                     )}
@@ -1570,7 +1783,7 @@ const StockTransfer = () => {
                 {/* Row 4: Product Cost ($) - Full width */}
                 <div className="md:col-span-3">
                   <label className="block text-sm font-medium text-gray-700">
-                    Product Cost ($)
+                    Total LC Cost ($)
                   </label>
                   <input
                     type="number"
@@ -1579,11 +1792,11 @@ const StockTransfer = () => {
                     name="grandTotal"
                     value={calculateTotalTransferCost(form.items)}
                     readOnly
-                    className="w-full border px-3 py-2 rounded-lg bg-gray-100 font-medium"
+                    className="w-full border px-3 py-2 rounded-lg bg-gray-100 font-medium text-green-700"
                     autoComplete="off"
                   />
                   <p className="text-xs text-gray-500 mt-1">
-                    Calculated automatically from items
+                    Calculated automatically from items (LC × Box Quantity)
                   </p>
                 </div>
 
@@ -1625,15 +1838,22 @@ const StockTransfer = () => {
                                   {item.productName || "Product"}
                                 </h4>
                                 <p className="text-sm text-gray-600">
-                                  Quantity: {item.boxQuantity || 0} | LC: $
-                                  {formatCurrency(item.lc)} | Cost: $
-                                  {formatCurrency(productCost)}
+                                  Boxes: {item.boxQuantity || 0} | LC:{" "}
+                                  <span className="text-green-600 font-medium">
+                                    ${formatCurrency(item.lc)}
+                                  </span>{" "}
+                                  | Total:{" "}
+                                  <span className="text-green-700 font-medium">
+                                    ${formatCurrency(productCost)}
+                                  </span>
                                 </p>
                               </div>
                               <div className="flex items-center gap-3">
                                 <button
                                   type="button"
-                                  onClick={() => openProductEditModal(item, index)}
+                                  onClick={() =>
+                                    openProductEditModal(item, index)
+                                  }
                                   className="text-blue-600 hover:text-blue-800 text-sm flex items-center gap-1 cursor-pointer"
                                 >
                                   <Pencil size={16} />
@@ -1718,16 +1938,26 @@ const StockTransfer = () => {
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Product Name <span className="text-red-500">*</span>
                   </label>
-                  <CustomDropdown
+                  <SearchableDropdown
                     value={newProductForm.productId}
-                    onChange={handleNewProductSelect}
+                    onChange={(value) => handleNewProductSelect(value)}
                     placeholder="Select Product"
                     options={productOptions}
                     required
+                    disabled={productOptions.length === 0}
                   />
                   {newProductForm.productId && (
                     <p className="text-xs text-gray-500 mt-1">
-                      Available: {productOptions.find(p => p.value === newProductForm.productId)?.availableStock || 0} boxes
+                      Available:{" "}
+                      {productOptions.find(
+                        (p) => p.value === newProductForm.productId
+                      )?.availableStock || 0}{" "}
+                      boxes | LC: $
+                      {formatCurrency(
+                        productOptions.find(
+                          (p) => p.value === newProductForm.productId
+                        )?.lc || 0
+                      )}
                     </p>
                   )}
                 </div>
@@ -1740,7 +1970,11 @@ const StockTransfer = () => {
                   <input
                     type="number"
                     min="1"
-                    max={productOptions.find(p => p.value === newProductForm.productId)?.availableStock || 1000}
+                    max={
+                      productOptions.find(
+                        (p) => p.value === newProductForm.productId
+                      )?.availableStock || 1000
+                    }
                     value={newProductForm.boxQuantity}
                     onChange={handleNewProductBoxQuantityChange}
                     className="w-full border px-3 py-2 rounded-lg border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -1752,29 +1986,33 @@ const StockTransfer = () => {
                 {/* LC ($) - Auto-filled and Disabled */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    LC ($)
+                    LC ($) Per Box
                   </label>
                   <input
                     type="text"
-                    value={newProductForm.lc ? `$${formatCurrency(newProductForm.lc)}` : "$0.00"}
-                    className="w-full border px-3 py-2 rounded-lg bg-gray-100"
+                    value={
+                      newProductForm.lc
+                        ? `$${formatCurrency(newProductForm.lc)}`
+                        : "$0.00"
+                    }
+                    className="w-full border px-3 py-2 rounded-lg bg-gray-100 text-green-700"
                     readOnly
                     disabled
                   />
                   <p className="text-xs text-gray-500 mt-1">
-                    Auto-filled from product data
+                    Auto-filled from product batches data
                   </p>
                 </div>
 
                 {/* Product Cost ($) - Auto-calculated and Disabled */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Product Cost ($)
+                    Total LC Cost ($)
                   </label>
                   <input
                     type="text"
                     value={`$${formatCurrency(newProductForm.productCost)}`}
-                    className="w-full border px-3 py-2 rounded-lg bg-gray-100 font-medium"
+                    className="w-full border px-3 py-2 rounded-lg bg-gray-100 font-medium text-green-700"
                     readOnly
                     disabled
                   />
@@ -1796,7 +2034,11 @@ const StockTransfer = () => {
                   type="button"
                   className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg cursor-pointer disabled:bg-blue-400 disabled:cursor-not-allowed"
                   onClick={handleAddProductToForm}
-                  disabled={!newProductForm.productId || !newProductForm.boxQuantity || newProductForm.boxQuantity <= 0}
+                  disabled={
+                    !newProductForm.productId ||
+                    !newProductForm.boxQuantity ||
+                    newProductForm.boxQuantity <= 0
+                  }
                 >
                   Add Product
                 </button>
@@ -1827,16 +2069,18 @@ const StockTransfer = () => {
               </h2>
 
               <div className="space-y-4">
-                {/* Product Name - Read only */}
+                {/* Product Name - Searchable Dropdown with all products */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
-                    Product Name
+                    Product Name <span className="text-red-500">*</span>
                   </label>
-                  <input
-                    type="text"
-                    value={currentProduct?.productName || ""}
-                    className="w-full border px-3 py-2 rounded-lg bg-gray-100 capitalize"
-                    readOnly
+                  <SearchableDropdown
+                    value={currentProduct?.productId || ""}
+                    onChange={(value) => handleProductSelectChange(value)}
+                    options={productOptionsForEdit}
+                    placeholder="Select Product"
+                    required
+                    disabled={productOptionsForEdit.length === 0}
                   />
                 </div>
 
@@ -1859,28 +2103,33 @@ const StockTransfer = () => {
                 {/* LC ($) */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
-                    LC ($) <span className="text-red-500">*</span>
+                    LC ($) Per Box <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
                     name="lc"
                     value={currentProduct?.lc || ""}
                     onChange={(e) => handleProductNumericChange(e, false)}
-                    className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                    className="w-full border px-3 py-2 rounded-lg border-gray-300 text-green-700"
                     autoComplete="off"
                     placeholder="0.00"
                   />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Landed Cost per box from product batches
+                  </p>
                 </div>
 
                 {/* Product Cost ($) - Read only */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700">
-                    Product Cost ($)
+                    Total LC Cost ($)
                   </label>
                   <input
                     type="text"
-                    value={formatCurrency(currentProduct?.productCost || 0)}
-                    className="w-full border px-3 py-2 rounded-lg bg-gray-100 font-medium"
+                    value={`$${formatCurrency(
+                      currentProduct?.productCost || 0
+                    )}`}
+                    className="w-full border px-3 py-2 rounded-lg bg-gray-100 font-medium text-green-700"
                     readOnly
                   />
                   <p className="text-xs text-gray-500 mt-1">
@@ -1902,8 +2151,9 @@ const StockTransfer = () => {
                   className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg cursor-pointer disabled:bg-blue-400 disabled:cursor-not-allowed"
                   onClick={updateProductInForm}
                   disabled={
+                    !currentProduct?.productName ||
                     !currentProduct?.boxQuantity ||
-                    !currentProduct?.lc
+                    currentProduct?.boxQuantity <= 0
                   }
                 >
                   Update Product
@@ -1926,7 +2176,7 @@ const StockTransfer = () => {
             <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-2xl shadow-lg relative flex flex-col border border-gray-200">
               <div className="flex items-center justify-between p-6 border-b">
                 <h2 className="text-xl font-semibold text-gray-800">
-                  Product Details
+                  Product Details with LC (Landed Cost)
                 </h2>
                 <button
                   onClick={() => setIsProductModalOpen(false)}
@@ -1948,10 +2198,10 @@ const StockTransfer = () => {
                           Box Quantity
                         </th>
                         <th className="p-3 min-w-[120px] text-sm font-medium">
-                          LC ($)
+                          LC ($) Per Box
                         </th>
                         <th className="p-3 min-w-[120px] text-sm font-medium">
-                          Product Cost ($)
+                          Total LC Cost ($)
                         </th>
                       </tr>
                     </thead>
@@ -1975,13 +2225,29 @@ const StockTransfer = () => {
                                 {product.productName || "-"}
                               </td>
                               <td className="p-3 min-w-[120px]">
-                                {product.boxQuantity || 0}
+                                <div className="flex items-center justify-center gap-1">
+                                  <Box size={14} className="text-gray-500" />
+                                  {product.boxQuantity || 0}
+                                </div>
                               </td>
                               <td className="p-3 min-w-[120px]">
-                                ${formatCurrency(product.lc)}
+                                <div className="flex items-center justify-center gap-1">
+                                  <DollarSign
+                                    size={14}
+                                    className="text-green-600"
+                                  />
+
+                                  {formatCurrency(product.lc)}
+                                </div>
                               </td>
                               <td className="p-3 min-w-[120px] font-medium">
-                                ${formatCurrency(productCost)}
+                                <div className="flex items-center justify-center gap-1">
+                                  <DollarSign
+                                    size={14}
+                                    className="text-green-700"
+                                  />
+                                  {formatCurrency(product.productCost)}
+                                </div>
                               </td>
                             </tr>
                           );
@@ -2005,16 +2271,21 @@ const StockTransfer = () => {
                             Total:
                           </td>
                           <td className="p-3 min-w-[120px]">
-                            $
-                            {formatCurrency(
-                              selectedProducts.reduce((sum, product) => {
-                                const cost =
-                                  product.itemCost ||
-                                  (product.lc || 0) *
-                                    (product.boxQuantity || 0);
-                                return sum + cost;
-                              }, 0)
-                            )}
+                            <div className="flex items-center justify-center gap-1">
+                              <DollarSign
+                                size={14}
+                                className="text-green-800"
+                              />
+                              {formatCurrency(
+                                selectedProducts.reduce((sum, product) => {
+                                  const cost =
+                                    product.itemCost ||
+                                    (product.lc || 0) *
+                                      (product.boxQuantity || 0);
+                                  return sum + cost;
+                                }, 0)
+                              )}
+                            </div>
                           </td>
                         </tr>
                       )}

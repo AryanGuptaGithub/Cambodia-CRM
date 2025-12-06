@@ -205,12 +205,12 @@ const usePurchaseForm = () => {
                   lcNumber: selectedProduct.lc || selectedProduct.lcNumber || 0,
                   fob: selectedProduct.fob || 0,
                   cif: selectedProduct.cif || 0,
-                  type: selectedProduct.type || "Tablet", 
+                  type: selectedProduct.type || "Tablet",
                   remainingStock: selectedProduct.remainingStock || 0,
                   sellingPrice: selectedProduct.sellingPrice || 0, // ADDED: Set sellingPrice from selected product
-                  qtyBox: product.qtyBox, 
-                  expiredDate: product.expiredDate, 
-                  amount: product.amount, 
+                  qtyBox: product.qtyBox,
+                  expiredDate: product.expiredDate,
+                  amount: product.amount,
                 }
               : product
           ),
@@ -310,10 +310,9 @@ const usePurchaseForm = () => {
     try {
       setLoading((prev) => ({ ...prev, products: true }));
       const result = await fetchProductsAPI();
-     
+
       if (result.success) {
         const transformedProducts = result.data.map((product) => {
-          console.log("314", product);
           let totalBoxes = 0;
           if (product.batches && Array.isArray(product.batches)) {
             totalBoxes = product.batches.reduce(
@@ -728,8 +727,6 @@ const AddNewPurchase = () => {
             sellingPrice: parseFloat(product.sellingPrice) || 0, // ADDED: sellingPrice to backend
           })),
       };
-
-      console.log("Submitting data:", submissionData);
 
       const response = await fetch(`${backendUrl}/api/purchase`, {
         method: "POST",

@@ -492,7 +492,7 @@ const ReportsInHand = () => {
               <th className="p-3 text-sm font-medium">Total Amount ($)</th>
             </tr>
           </thead>
-          {console.log(currentProducts)}
+
           <tbody>
             {currentProducts.length > 0 ? (
               currentProducts.map((product, index) => (

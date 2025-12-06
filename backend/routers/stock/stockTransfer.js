@@ -1,7 +1,7 @@
 import express from "express";
 import mongoose from "mongoose";
 import StockTransfer from "../../models/stock/stockTransfer.js";
-import StockTransferToMR from "../../models/stock/stockTransferToMR.js"; // ADD THIS
+import StockTransferToMR from "../../models/stock/stockTransferToMR.js";
 import Product from "../../models/projectManger/product.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
 
@@ -14,38 +14,30 @@ const updateReportInHandAfterStockTransfer = async (
   session = null
 ) => {
   try {
-    if (boxQuantity <= 0) return 0;
-
-    const existingProduct = await ReportInHand.findOne({ productName }).session(session);
-    if (!existingProduct) {
-      console.warn(
-        `⚠️ Product "${productName}" not found in ReportInHand inventory`
-      );
+    if (boxQuantity <= 0) {
       return 0;
     }
 
-    // Check if quantity exists and has boxes property
-    if (!existingProduct.quantity || typeof existingProduct.quantity !== 'object') {
-      throw new Error(`Invalid quantity structure for product "${productName}"`);
+    const existingProduct = await ReportInHand.findOne({ productName }).session(
+      session
+    );
+
+    if (!existingProduct) {
+      return 0;
     }
 
-    const currentBoxes = existingProduct.quantity.boxes || 0;
+    const currentBoxes = existingProduct.totalBoxes || 0;
 
-    console.log("existingProduct", existingProduct, "Current boxes:", currentBoxes);
-
-    // Check stock availability for send transfers
     if (transferType === "send" && currentBoxes < boxQuantity) {
       throw new Error(
         `Insufficient stock for "${productName}". Available: ${currentBoxes}, Required: ${boxQuantity}`
       );
     }
 
-    // Determine change direction
     const quantityChange = transferType === "send" ? -boxQuantity : boxQuantity;
 
     const updatedBoxes = currentBoxes + quantityChange;
 
-    // Determine new stock status
     let updatedStatus = "In Stock";
     if (updatedBoxes <= 0) updatedStatus = "Out of Stock";
     else if (updatedBoxes < 10) updatedStatus = "Critical";
@@ -53,13 +45,27 @@ const updateReportInHandAfterStockTransfer = async (
 
     const updateData = {
       $set: {
-        "quantity.boxes": updatedBoxes,
+        totalBoxes: updatedBoxes,
         status: updatedStatus,
       },
     };
 
+    if (existingProduct.batches && existingProduct.batches.length > 0) {
+      const updatedBatches = [...existingProduct.batches];
+      if (updatedBatches[0]) {
+        updatedBatches[0].boxes = Math.max(
+          0,
+          updatedBatches[0].boxes + quantityChange
+        );
+      }
+
+      updateData.$set.batches = updatedBatches;
+    }
+
     if (session) {
-      await ReportInHand.findByIdAndUpdate(existingProduct._id, updateData, { session });
+      await ReportInHand.findByIdAndUpdate(existingProduct._id, updateData, {
+        session,
+      });
     } else {
       await ReportInHand.findByIdAndUpdate(existingProduct._id, updateData);
     }
@@ -75,7 +81,7 @@ const updateReportInHandAfterStockTransfer = async (
 };
 
 /* ==========================================================================
-   🔹 POST: Create New Stock Transfer (Fixed Version)
+   🔹 POST: Create New Stock Transfer
    ========================================================================== */
 router.post("/stock-transfers", async (req, res) => {
   const session = await mongoose.startSession();
@@ -96,14 +102,15 @@ router.post("/stock-transfers", async (req, res) => {
       source,
     } = req.body;
 
-    console.log('Received stock transfer request:', req.body);
-
+    // Validate required fields
     if (!invoiceNo || !date || !items || !status || !transferType) {
       await session.abortTransaction();
       session.endSession();
-      return res
-        .status(400)
-        .json({ success: false, message: "Missing required fields" });
+      return res.status(400).json({
+        success: false,
+        message:
+          "Missing required fields: invoiceNo, date, items, status, or transferType",
+      });
     }
 
     if (transferType === "send" && !destination) {
@@ -127,23 +134,28 @@ router.post("/stock-transfers", async (req, res) => {
     if (!Array.isArray(items) || items.length === 0) {
       await session.abortTransaction();
       session.endSession();
-      return res
-        .status(400)
-        .json({ success: false, message: "At least one item is required" });
+      return res.status(400).json({
+        success: false,
+        message: "At least one item is required",
+      });
     }
 
-    // First, check all products and their availability
+    // Validate items
     for (const item of items) {
-      if (!item.productId || !item.productName) {
+      if (
+        !item.productId ||
+        !item.productName ||
+        item.boxQuantity === undefined
+      ) {
         await session.abortTransaction();
         session.endSession();
         return res.status(400).json({
           success: false,
-          message: "Each item must have productId and productName",
+          message:
+            "Each item must have productId, productName, and boxQuantity",
         });
       }
 
-      // Check if product exists
       const product = await Product.findById(item.productId).session(session);
       if (!product) {
         await session.abortTransaction();
@@ -154,14 +166,12 @@ router.post("/stock-transfers", async (req, res) => {
         });
       }
 
-      // For send transfers, check inventory availability
+      // Inventory check for send transfers
       if (transferType === "send") {
         const existingProduct = await ReportInHand.findOne({
           productName: item.productName,
         }).session(session);
-        
-        console.log(`Checking inventory for ${item.productName}:`, existingProduct);
-        
+
         if (!existingProduct) {
           await session.abortTransaction();
           session.endSession();
@@ -171,56 +181,54 @@ router.post("/stock-transfers", async (req, res) => {
           });
         }
 
-        // Check if product has quantity structure
-        if (!existingProduct.quantity || typeof existingProduct.quantity !== 'object') {
-          await session.abortTransaction();
-          session.endSession();
-          return res.status(400).json({
-            success: false,
-            message: `Invalid inventory data for product "${item.productName}"`,
-          });
-        }
+        const availableBoxes = existingProduct.totalBoxes || 0;
+        const requestedQuantity = parseFloat(item.boxQuantity) || 0;
 
-        const availableBoxes = existingProduct.quantity.boxes || 0;
-        
-        console.log(`Available boxes for ${item.productName}: ${availableBoxes}, Requested: ${item.boxQuantity}`);
-        
-        if (availableBoxes < item.boxQuantity) {
+        if (availableBoxes < requestedQuantity) {
           await session.abortTransaction();
           session.endSession();
           return res.status(400).json({
             success: false,
-            message: `Insufficient stock for ${item.productName}. Available: ${availableBoxes}, Required: ${item.boxQuantity}`,
+            message: `Insufficient stock for ${item.productName}. Available: ${availableBoxes}, Required: ${requestedQuantity}`,
           });
         }
       }
     }
 
-    // Create the stock transfer document
+    // Prepare items with proper data types
+    const preparedItems = items.map((item) => ({
+      productId: item.productId,
+      productName: item.productName,
+      boxQuantity: parseFloat(item.boxQuantity) || 0,
+      quantity: item.quantity || {
+        boxes: parseFloat(item.boxQuantity) || 0,
+        strips: 0,
+        pieces: 0,
+        totalPieces: parseFloat(item.boxQuantity) || 0,
+      },
+      expenses: parseFloat(item.expenses) || 0,
+      lc: parseFloat(item.lc) || 0,
+    }));
+
+    // Create stock transfer
     const stockTransfer = new StockTransfer({
       invoiceNo,
       date: new Date(date),
-      items: items.map((item) => ({
-        productId: item.productId,
-        productName: item.productName,
-        boxQuantity: parseFloat(item.boxQuantity),
-        expenses: parseFloat(item.expenses || 0),
-        lc: parseFloat(item.lc || 0),
-      })),
+      items: preparedItems,
       remarks: remarks || "",
       status,
       transferType,
-      shipping: parseFloat(shipping || 0),
-      totalExpenses: parseFloat(totalExpenses || 0),
-      grandTotal: parseFloat(grandTotal || 0),
+      shipping: parseFloat(shipping) || 0,
+      totalExpenses: parseFloat(totalExpenses) || 0,
+      grandTotal: parseFloat(grandTotal) || 0,
       destination: destination || "",
       source: source || "",
     });
 
-    // Save the stock transfer
     const savedTransfer = await stockTransfer.save({ session });
 
-    // Update inventory for each item
+    // Update inventory
+
     for (const item of items) {
       await updateReportInHandAfterStockTransfer(
         item.productName,
@@ -230,7 +238,6 @@ router.post("/stock-transfers", async (req, res) => {
       );
     }
 
-    // Commit transaction
     await session.commitTransaction();
     session.endSession();
 
@@ -242,9 +249,19 @@ router.post("/stock-transfers", async (req, res) => {
       data: savedTransfer,
     });
   } catch (error) {
+    console.error("❌ Error in stock transfer:", error);
     await session.abortTransaction();
     session.endSession();
-    console.error("Error creating stock transfer:", error);
+
+    // Handle duplicate invoice number
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: "Invoice number already exists",
+        error: error.message,
+      });
+    }
+
     res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -252,7 +269,6 @@ router.post("/stock-transfers", async (req, res) => {
     });
   }
 });
-
 
 const restoreReportInHandAfterStockTransferDeletion = async (
   productName,
@@ -267,7 +283,8 @@ const restoreReportInHandAfterStockTransferDeletion = async (
 
     // Reverse the previous operation
     const quantityChange = transferType === "send" ? boxQuantity : -boxQuantity;
-    const updatedBoxes = existingProduct.quantity.boxes + quantityChange;
+    const currentBoxes = existingProduct.totalBoxes || 0;
+    const updatedBoxes = currentBoxes + quantityChange;
 
     // Determine new stock status
     let updatedStatus = "In Stock";
@@ -275,12 +292,25 @@ const restoreReportInHandAfterStockTransferDeletion = async (
     else if (updatedBoxes < 10) updatedStatus = "Critical";
     else if (updatedBoxes < 25) updatedStatus = "Low Stock";
 
-    await ReportInHand.findByIdAndUpdate(existingProduct._id, {
+    const updateData = {
       $set: {
-        "quantity.boxes": updatedBoxes,
+        totalBoxes: updatedBoxes,
         status: updatedStatus,
       },
-    });
+    };
+
+    if (existingProduct.batches && existingProduct.batches.length > 0) {
+      const updatedBatches = [...existingProduct.batches];
+      if (updatedBatches[0]) {
+        updatedBatches[0].boxes = Math.max(
+          0,
+          updatedBatches[0].boxes + quantityChange
+        );
+      }
+      updateData.$set.batches = updatedBatches;
+    }
+
+    await ReportInHand.findByIdAndUpdate(existingProduct._id, updateData);
   } catch (error) {
     console.error(
       `❌ Error restoring ReportInHand for product "${productName}":`,
@@ -291,42 +321,8 @@ const restoreReportInHandAfterStockTransferDeletion = async (
 };
 
 /* ==========================================================================
-   🔹 GET: Last Stock Transfer Number
+   🔹 GET: Next Stock Transfer Number
    ========================================================================== */
-router.get("/stock-transfers/last-number", async (req, res) => {
-  try {
-    // Use imported models directly
-    const lastGeneralTransfer = await StockTransfer.findOne()
-      .sort({ invoiceNo: -1 })
-      .select("invoiceNo");
-
-    const lastMRTransfer = await StockTransferToMR.findOne()
-      .sort({ invoiceNo: -1 })
-      .select("invoiceNo");
-
-    // Function to extract number from invoiceNo
-    const extractNumber = (invoiceNo) => {
-      if (!invoiceNo) return 0;
-      const match = invoiceNo.match(/ST-(\d+)/);
-      return match ? parseInt(match[1], 10) : 0;
-    };
-
-    // Get numbers from both
-    const generalNumber = extractNumber(lastGeneralTransfer?.invoiceNo);
-    const mrNumber = extractNumber(lastMRTransfer?.invoiceNo);
-
-    // Get the highest number
-    const lastNumber = Math.max(generalNumber, mrNumber);
-
-    res.json({ success: true, lastNumber });
-  } catch (error) {
-    console.error("Error fetching last stock transfer number:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching last stock transfer number",
-    });
-  }
-});
 router.get("/stock-transfers/next-number", async (req, res) => {
   try {
     const lastGeneralTransfer = await StockTransfer.findOne()
@@ -341,7 +337,6 @@ router.get("/stock-transfers/next-number", async (req, res) => {
       if (!invoiceNo) return 0;
       const match = invoiceNo.match(/ST-(\d+)/);
       const num = match ? parseInt(match[1], 10) : 0;
-
       return num;
     };
 
@@ -350,6 +345,7 @@ router.get("/stock-transfers/next-number", async (req, res) => {
     const lastNumber = Math.max(generalNumber, mrNumber);
     const nextNumber = lastNumber + 1;
     const nextInvoiceNo = `ST-${nextNumber.toString().padStart(4, "0")}`;
+
     res.json({
       success: true,
       lastNumber,
@@ -366,23 +362,15 @@ router.get("/stock-transfers/next-number", async (req, res) => {
 });
 
 /* ==========================================================================
-   🔹 GET: All Stock Transfers (With Pagination & Filters)
+   🔹 GET: All Stock Transfers
    ========================================================================== */
 router.get("/stock-transfers", async (req, res) => {
   try {
-    const {
-      type,
-      page = 1,
-      limit = 10,
-      search,
-      status,
-      paymentStatus,
-    } = req.query;
+    const { type, page = 1, limit = 10, search, status } = req.query;
     const filter = {};
 
     if (type && type !== "all") filter.transferType = type;
     if (status) filter.status = status;
-    if (paymentStatus) filter.paymentStatus = paymentStatus;
 
     if (search) {
       filter.$or = [
@@ -390,6 +378,7 @@ router.get("/stock-transfers", async (req, res) => {
         { destination: { $regex: search, $options: "i" } },
         { source: { $regex: search, $options: "i" } },
         { remarks: { $regex: search, $options: "i" } },
+        { "items.productName": { $regex: search, $options: "i" } },
       ];
     }
 
@@ -400,6 +389,7 @@ router.get("/stock-transfers", async (req, res) => {
     const [transfers, totalCount] = await Promise.all([
       StockTransfer.find(filter)
         .sort({ createdAt: -1 })
+        .populate("items.productId", "productName")
         .limit(limitNum)
         .skip(skip)
         .lean(),
@@ -439,9 +429,8 @@ router.get("/stock-transfers/:id", async (req, res) => {
 
   try {
     const transfer = await StockTransfer.findById(id)
-      .populate("createdBy", "name email")
-      .populate("updatedBy", "name email")
-      .populate("items.productId", "productName sku category");
+      .populate("items.productId", "productName sku category")
+      .lean();
 
     if (!transfer)
       return res
@@ -459,165 +448,6 @@ router.get("/stock-transfers/:id", async (req, res) => {
   }
 });
 
-/* ==========================================================================
-   🔹 POST: Create New Stock Transfer
-   ========================================================================== */
-router.post("/stock-transfers", async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  try {
-    const {
-      invoiceNo,
-      date,
-      items,
-      remarks,
-      status,
-      transferType,
-      shipping,
-      totalExpenses,
-      grandTotal,
-      destination,
-      source,
-    } = req.body;
-
-    if (!invoiceNo || !date || !items || !status || !transferType) {
-      await session.abortTransaction();
-      session.endSession();
-      return res
-        .status(400)
-        .json({ success: false, message: "Missing required fields" });
-    }
-
-    if (transferType === "send" && !destination) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Destination is required for send transfers",
-      });
-    }
-
-    if (transferType === "receive" && !source) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Source is required for receive transfers",
-      });
-    }
-
-    if (!Array.isArray(items) || items.length === 0) {
-      await session.abortTransaction();
-      session.endSession();
-      return res
-        .status(400)
-        .json({ success: false, message: "At least one item is required" });
-    }
-
-    for (const item of items) {
-      if (!item.productId || !item.productName) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({
-          success: false,
-          message: "Each item must have productId and productName",
-        });
-      }
-
-      const product = await Product.findById(item.productId);
-      if (!product) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(404).json({
-          success: false,
-          message: `Product not found: ${item.productName}`,
-        });
-      }
-
-      if (transferType === "send") {
-        const existingProduct = await ReportInHand.findOne({
-          productName: item.productName,
-        });
-        
-        if (!existingProduct) {
-          await session.abortTransaction();
-          session.endSession();
-          return res.status(400).json({
-            success: false,
-            message: `Product "${item.productName}" not found in inventory`,
-          });
-        }
-
-        const availableQuantity = existingProduct.quantity || 
-                                 (existingProduct.quantity && existingProduct.quantity.boxes) || 
-                                 (existingProduct.boxes) || 
-                                 (existingProduct.stock) || 
-                                 0;
-                
-        if (availableQuantity < item.boxQuantity) {
-          await session.abortTransaction();
-          session.endSession();
-          return res.status(400).json({
-            success: false,
-            message: `Insufficient stock for ${item.productName}. Available: ${availableQuantity}, Required: ${item.boxQuantity}`,
-          });
-        }
-      }
-    }
-
-    const stockTransfer = new StockTransfer({
-      invoiceNo,
-      date: new Date(date),
-      items: items.map((item) => ({
-        productId: item.productId,
-        productName: item.productName,
-        boxQuantity: parseFloat(item.boxQuantity),
-        expenses: parseFloat(item.expenses),
-        lc: parseFloat(item.lc || 0), 
-      })),
-      remarks: remarks || "",
-      status,
-      transferType,
-      shipping: parseFloat(shipping || 0),
-      totalExpenses: parseFloat(totalExpenses || 0),
-      grandTotal: parseFloat(grandTotal || 0),
-      destination: destination || "",
-      source: source || "",
-    });
-
-    const savedTransfer = await stockTransfer.save({ session });
-
-    for (const item of items) {
-      await updateReportInHandAfterStockTransfer(
-        item.productName,
-        parseFloat(item.boxQuantity),
-        transferType,
-        session 
-      );
-    }
-
-    await session.commitTransaction();
-    session.endSession();
-
-    res.status(201).json({
-      success: true,
-      message: `Stock transfer ${
-        transferType === "send" ? "sent" : "received"
-      } successfully`,
-      data: savedTransfer,
-    });
-  } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-    console.error("Error creating stock transfer:", error);
-    res.status(500).json({
-      success: false,
-      message: "Internal server error",
-      error: error.message,
-    });
-  }
-});
 /* ==========================================================================
    🔹 PUT: Update Existing Stock Transfer
    ========================================================================== */
@@ -678,6 +508,22 @@ router.put("/stock-transfers/:id", async (req, res) => {
           updateData.transferType
         );
       }
+    }
+
+    // Prepare items with proper data types
+    if (updateData.items) {
+      updateData.items = updateData.items.map((item) => ({
+        ...item,
+        boxQuantity: parseFloat(item.boxQuantity) || 0,
+        expenses: parseFloat(item.expenses) || 0,
+        lc: parseFloat(item.lc) || 0,
+        quantity: item.quantity || {
+          boxes: parseFloat(item.boxQuantity) || 0,
+          strips: 0,
+          pieces: 0,
+          totalPieces: parseFloat(item.boxQuantity) || 0,
+        },
+      }));
     }
 
     const updatedTransfer = await StockTransfer.findByIdAndUpdate(
@@ -763,74 +609,42 @@ router.delete("/stock-transfers/:id", async (req, res) => {
 });
 
 /* ==========================================================================
-   🔹 DELETE: Bulk Delete Stock Transfers
+   🔹 GET: Stock Transfer Summary/Stats
    ========================================================================== */
-router.delete("/stock-transfers/bulk/delete", async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
+router.get("/stock-transfers/summary", async (req, res) => {
   try {
-    const { ids } = req.body;
+    const { startDate, endDate } = req.query;
 
-    if (!Array.isArray(ids) || ids.length === 0) {
-      await session.abortTransaction();
-      return res
-        .status(400)
-        .json({ success: false, message: "No stock transfer IDs provided" });
+    let matchStage = {};
+
+    if (startDate || endDate) {
+      matchStage.date = {};
+      if (startDate) matchStage.date.$gte = new Date(startDate);
+      if (endDate) matchStage.date.$lte = new Date(endDate);
     }
 
-    const validIds = ids.filter((id) => mongoose.Types.ObjectId.isValid(id));
-    const invalidIds = ids.filter((id) => !mongoose.Types.ObjectId.isValid(id));
-
-    if (invalidIds.length > 0) {
-      await session.abortTransaction();
-      return res.status(400).json({
-        success: false,
-        message: "Invalid ID(s) provided",
-        invalidIds,
-      });
-    }
-
-    const transfers = await StockTransfer.find({ _id: { $in: validIds } });
-
-    for (const transfer of transfers) {
-      for (const item of transfer.items) {
-        await restoreReportInHandAfterStockTransferDeletion(
-          item.productName,
-          parseFloat(item.boxQuantity),
-          transfer.transferType
-        );
-      }
-    }
-
-    const result = await StockTransfer.deleteMany(
-      { _id: { $in: validIds } },
-      { session }
-    );
-
-    if (result.deletedCount === 0) {
-      await session.abortTransaction();
-      return res.status(404).json({
-        success: false,
-        message: "No stock transfers found to delete",
-      });
-    }
-
-    await session.commitTransaction();
-    session.endSession();
+    const summary = await StockTransfer.aggregate([
+      { $match: matchStage },
+      {
+        $group: {
+          _id: "$transferType",
+          count: { $sum: 1 },
+          totalBoxes: { $sum: { $sum: "$items.boxQuantity" } },
+          totalExpenses: { $sum: "$totalExpenses" },
+          totalGrandTotal: { $sum: "$grandTotal" },
+        },
+      },
+    ]);
 
     res.status(200).json({
       success: true,
-      message: `${result.deletedCount} stock transfer(s) deleted successfully`,
-      deletedCount: result.deletedCount,
+      data: summary,
     });
   } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-    console.error("Error bulk deleting stock transfers:", error);
+    console.error("Error fetching stock transfer summary:", error);
     res.status(500).json({
       success: false,
-      message: "Server error during bulk delete",
+      message: "Server error while fetching summary",
       error: error.message,
     });
   }

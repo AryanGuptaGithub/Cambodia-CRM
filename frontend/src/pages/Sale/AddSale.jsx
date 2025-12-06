@@ -382,7 +382,7 @@ const useSaleForm = (initialCustomerCode = "") => {
     const num = parseFloat(val);
     return isNaN(num) ? 0 : num;
   }, []);
-  console.log("353", productsList);
+
   // Calculate total amount from all products
   const calculateTotalAmount = useCallback((products) => {
     const total = products.reduce((sum, product) => {
@@ -541,7 +541,7 @@ const useSaleForm = (initialCustomerCode = "") => {
     try {
       setProductsListLoading(true);
       const result = await fetchProducts();
-      console.log("result", result.data);
+
       if (result.success) {
         setProductsList(result.data || []);
       } else {
@@ -1871,7 +1871,6 @@ const AddSale = () => {
 
       <div className="mb-6">
         {form.products.map((product, index) => {
-          console.log("pr", product);
           const productData = products.find(
             (p) => p.productName === product.productName
           );

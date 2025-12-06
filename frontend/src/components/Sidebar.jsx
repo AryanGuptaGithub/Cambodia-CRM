@@ -50,6 +50,11 @@ import {
   Building,
   Eye,
   Clock,
+  BriefcaseMedical,
+  Archive,
+  ShoppingBag,
+  UserCheck,
+  RefreshCw,
 } from "lucide-react";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
@@ -79,7 +84,7 @@ const tabService = {
         return transformed;
       }
 
-      if (data.data && typeof data.data === 'object') {
+      if (data.data && typeof data.data === "object") {
         return data.data;
       }
 
@@ -120,13 +125,14 @@ const tabService = {
       sales: { visible: true, sequence: 6 },
       stockAdjustment: { visible: true, sequence: 7 },
       stockTransfer: { visible: true, sequence: 8 },
-      accounts: { visible: true, sequence: 9 },
-      expense: { visible: true, sequence: 10 },
-      reports: { visible: true, sequence: 11 },
-      staff: { visible: true, sequence: 12 },
-      utility: { visible: true, sequence: 13 },
-      onlineOrders: { visible: true, sequence: 14 },
-      hrm: { visible: true, sequence: 15 },
+      mrCarryStock: { visible: true, sequence: 9 },
+      accounts: { visible: true, sequence: 10 },
+      expense: { visible: true, sequence: 11 },
+      reports: { visible: true, sequence: 12 },
+      staff: { visible: true, sequence: 13 },
+      utility: { visible: true, sequence: 14 },
+      onlineOrders: { visible: true, sequence: 15 },
+      hrm: { visible: true, sequence: 16 },
 
       // Master sub-tabs
       master_customers: { visible: true, sequence: 1 },
@@ -148,6 +154,12 @@ const tabService = {
       // Expense sub-tabs
       expense_categories: { visible: true, sequence: 1 },
       expense_expenses: { visible: true, sequence: 2 },
+
+      // NEW: MR Carry Stock sub-tabs
+
+      mrCarryStock_carrystockview: { visible: true, sequence: 1 },
+      mrCarryStock_stockreturn: { visible: true, sequence: 2 },
+      mrCarryStock_stockreplacement: { visible: true, sequence: 3 },
 
       // Reports sub-tabs
       reports_dailyreport: { visible: true, sequence: 1 },
@@ -197,12 +209,19 @@ const tabService = {
       // HRM sub-tabs - UPDATED: Changed from hrm_management to hrm_leaveattendance
       hrm_dashboard: { visible: true, sequence: 1 },
       hrm_holidays: { visible: true, sequence: 2 },
-      hrm_leaveattendance: { visible: true, sequence: 3 }, 
+      hrm_leaveattendance: { visible: true, sequence: 3 },
       hrm_payroll: { visible: true, sequence: 4 },
       hrm_settings: { visible: true, sequence: 5 },
     };
   },
 };
+
+// NEW: MR Carry Stock paths
+const mrCarryStockPaths = [
+  "/mrcarrystocklayout/carrystockview",
+  "/mrcarrystocklayout/stockreturn",
+  "/mrcarrystocklayout/stockreplacement",
+];
 
 // Path constants
 const masterPaths = ["/masterlayout/customer", "/masterlayout/supplier"];
@@ -399,6 +418,8 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
       setActiveParentMenu("accounts");
     } else if (location.pathname.startsWith("/settingslayout")) {
       setActiveParentMenu("settings");
+    } else if (location.pathname.startsWith("/mrcarrystocklayout")) {
+      setActiveParentMenu("mrCarryStock"); // NEW: Add MR Carry Stock detection
     } else {
       setActiveParentMenu(null);
     }
@@ -893,6 +914,75 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
             <Truck className="w-5 h-5" />
             {isOpen && <span className="mx-auto">Stock Transfer</span>}
           </Link>
+        )}
+
+        {/* NEW: MR Carry Stock */}
+        {shouldShowTab("mrCarryStock") && (
+          <div>
+            <button
+              onClick={() => toggleMenu("mrCarryStock")}
+              className={getDropdownButtonClass(
+                "mrCarryStock",
+                mrCarryStockPaths
+              )}
+            >
+              <span className="flex items-center gap-3">
+                <BriefcaseMedical className="w-5 h-5" />
+              </span>
+              <span>{isOpen && "MR Carry Stock"}</span>
+              {isOpen && (
+                <ChevronDown
+                  className={`w-4 h-4 transform transition-transform ${
+                    activeParentMenu === "mrCarryStock" ? "rotate-180" : ""
+                  }`}
+                />
+              )}
+            </button>
+            {activeParentMenu === "mrCarryStock" && isOpen && (
+              <div className="ml-6 mt-1 space-y-1">
+                {getSortedTabs([
+                  "mrCarryStock_carrystockview",
+                  "mrCarryStock_stockreturn",
+                  "mrCarryStock_stockreplacement",
+                ]).map((tabId) => {
+                  const linkMap = {
+                    mrCarryStock_carrystockview:
+                      "/mrcarrystocklayout/carrystockview",
+                    mrCarryStock_stockreturn: "/mrcarrystocklayout/stockreturn",
+                    mrCarryStock_stockreplacement:
+                      "/mrcarrystocklayout/stockreplacement",
+                  };
+
+                  const iconMap = {
+                    mrCarryStock_carrystockview: Eye,
+                    mrCarryStock_stockreturn: RefreshCw,
+                    mrCarryStock_stockreplacement: Archive,
+                  };
+
+                  const labelMap = {
+                    mrCarryStock_carrystockview: "Carry Stock View",
+                    mrCarryStock_stockreturn: "Stock Return",
+                    mrCarryStock_stockreplacement: "Stock Replacement",
+                  };
+
+                  const IconComponent = iconMap[tabId];
+                  const path = linkMap[tabId];
+                  const label = labelMap[tabId];
+
+                  return (
+                    <Link
+                      key={tabId}
+                      to={path}
+                      className={getChildLinkClass(path)}
+                    >
+                      <IconComponent className="w-4 h-4" />
+                      <span className="mx-auto">{label}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         )}
 
         {/* Accounts */}
@@ -1399,8 +1489,8 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                     >
                       <IconComponent className="w-4 h-4" />
                       <span className="mx-auto">
-                        {tabId === "hrm_leaveattendance" 
-                          ? "Leave & Attendance"  // Updated display name
+                        {tabId === "hrm_leaveattendance"
+                          ? "Leave & Attendance" // Updated display name
                           : tabId.split("_")[1].charAt(0).toUpperCase() +
                             tabId.split("_")[1].slice(1)}
                       </span>

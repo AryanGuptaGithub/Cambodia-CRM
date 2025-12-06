@@ -28,10 +28,22 @@ const stockTransferSchema = new mongoose.Schema(
           required: true,
           min: 0,
         },
+        quantity: {
+          boxes: { type: Number, default: 0 },
+          strips: { type: Number, default: 0 },
+          pieces: { type: Number, default: 0 },
+          totalPieces: { type: Number, default: 0 },
+        },
         expenses: {
           type: Number,
           required: true,
           min: 0,
+        },
+        lc: {
+          type: Number,
+          required: true,
+          min: 0,
+          default: 0,
         },
       },
     ],
@@ -68,7 +80,6 @@ const stockTransferSchema = new mongoose.Schema(
       min: 0,
       default: 0,
     },
-    // New fields for destination and source
     destination: {
       type: String,
       trim: true,
@@ -91,7 +102,6 @@ stockTransferSchema.statics.generateInvoiceNo = async function () {
 
   let lastNumber = 0;
   if (lastTransfer && lastTransfer.invoiceNo) {
-    // Extract number from format "ST-0001"
     const match = lastTransfer.invoiceNo.match(/\d+/);
     lastNumber = match ? parseInt(match[0]) : 0;
   }

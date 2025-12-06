@@ -443,7 +443,157 @@ router.get("/stock-transfers-to-mr", async (req, res) => {
     res.status(500).json({ error: "Server Error" });
   }
 });
+router.get("/stock-in-mr-hand-admin", async (req, res) => {
+  try {
+    const { mrName } = req.query;
 
+    // Build match stage for aggregation
+    let matchStage = { $match: {} };
+    if (mrName && mrName !== "all") {
+      matchStage.$match.mrName = mrName;
+    }
+
+    // First, get all stock transfers to calculate assigned quantities
+    const transferAggregation = [
+      {
+        $match: { transferType: "send" },
+      },
+      { $unwind: "$items" },
+      {
+        $group: {
+          _id: {
+            mrName: "$stockTransferToMr",
+            productId: "$items.productId",
+          },
+          totalAssigned: { $sum: "$items.boxQuantity" },
+          latestTransferDate: { $max: "$createdAt" },
+        },
+      },
+    ];
+
+    const transferResults = await StockTransferToMR.aggregate(
+      transferAggregation
+    );
+
+    // Create a map for quick lookup of assigned quantities
+    const assignedMap = {};
+    transferResults.forEach((item) => {
+      const key = `${item._id.mrName}_${item._id.productId}`;
+      assignedMap[key] = {
+        totalAssigned: item.totalAssigned,
+        latestTransferDate: item.latestTransferDate,
+      };
+    });
+
+    // Now get current stock in hand
+    const stockAggregation = [
+      matchStage,
+      { $unwind: "$products" },
+      {
+        $lookup: {
+          from: "products",
+          localField: "products.productId",
+          foreignField: "_id",
+          as: "productDetails",
+        },
+      },
+      {
+        $unwind: { path: "$productDetails", preserveNullAndEmptyArrays: true },
+      },
+      {
+        $project: {
+          mrName: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          productId: "$products.productId",
+          productName: {
+            $cond: {
+              if: { $gt: ["$products.productName", ""] },
+              then: "$products.productName",
+              else: "$productDetails.productName",
+            },
+          },
+          boxQuantity: "$products.boxQuantity", // This is remaining stock
+          lc: "$productDetails.lc",
+          costPrice: "$productDetails.costPrice",
+          unit: "$productDetails.unit",
+          category: "$productDetails.category",
+          packSize: "$productDetails.packSize",
+          productCode: "$productDetails.productCode",
+          stockId: "$_id",
+        },
+      },
+      { $sort: { mrName: 1, productName: 1 } },
+    ];
+
+    const stockResults = await StockInMRHand.aggregate(stockAggregation);
+
+    // Format the result with assigned and remaining values
+    const formattedResult = stockResults.map((item, index) => {
+      const key = `${item.mrName}_${item.productId}`;
+      const assignedData = assignedMap[key] || {
+        totalAssigned: 0,
+        latestTransferDate: null,
+      };
+
+      // Calculate used quantity
+      const assignedQty = assignedData.totalAssigned || 0;
+      const remainingQty = item.boxQuantity || 0;
+      const usedQty = assignedQty - remainingQty;
+
+      return {
+        // Original expected fields
+        assignedDate: assignedData.latestTransferDate
+          ? new Date(assignedData.latestTransferDate)
+              .toISOString()
+              .split("T")[0]
+          : item.createdAt
+          ? new Date(item.createdAt).toISOString().split("T")[0]
+          : "N/A",
+        assignedQty: assignedQty,
+        batch: "N/A",
+        createdAt: item.createdAt
+          ? new Date(item.createdAt).toISOString().split("T")[0]
+          : new Date().toISOString().split("T")[0],
+        expiry: "N/A",
+        id: item.stockId
+          ? item.stockId.toString()
+          : `${item.mrName}-${item.productId}-${index}`,
+        invoiceNumbers: [], // You might want to fetch these from StockTransferToMR
+        mrCode: item.mrName,
+        mrName: item.mrName,
+        productCode:
+          item.productCode ||
+          `PROD-${item.productId?.toString().slice(-4) || "0000"}`,
+        productId: item.productId,
+        productName: item.productName || "Unknown Product",
+        remainingQty: remainingQty,
+        usedQty: usedQty,
+        status: remainingQty > 0 ? "In Stock" : "Depleted",
+
+        // Additional data
+        boxQuantity: item.boxQuantity || 0,
+        lc: item.lc || 0,
+        unit: item.unit || "pcs",
+        category: item.category || "General",
+        packSize: item.packSize || 0,
+        costPrice: item.costPrice || 0,
+      };
+    });
+
+    res.json({
+      success: true,
+      data: formattedResult,
+      count: formattedResult.length,
+    });
+  } catch (err) {
+    console.error("Failed to fetch MR stock:", err);
+    res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
 router.get("/stock-in-mr-hand", async (req, res) => {
   try {
     const stock = await StockInMRHand.find()
