@@ -121,6 +121,8 @@ import AddPayroll from "./pages/HRM/addPayroll";
 
 // Account pages
 import CashAndBank from "./pages/Account/CashAndBank";
+import MRCash from "./pages/Account/MRCash";
+
 import CarryStockView from "./pages/MrCarryStock/CarryStockView";
 import StockReturn from "./pages/MrCarryStock/StockReturn";
 
@@ -157,6 +159,7 @@ function App() {
           {/* Account routes */}
           <Route path="accountlayout" element={<CashAndBankLayout />}>
             <Route index element={<CashAndBank />} />
+            <Route path="mrcash" element={<MRCash />} />
           </Route>
           <Route path="staffmemberLayout" element={<StaffMemberLayout />}>
             <Route path="staffmember" element={<StaffMember />} />

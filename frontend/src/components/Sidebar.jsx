@@ -156,9 +156,12 @@ const tabService = {
       expense_expenses: { visible: true, sequence: 2 },
 
       // NEW: MR Carry Stock sub-tabs
-
       mrCarryStock_carrystockview: { visible: true, sequence: 1 },
       mrCarryStock_stockreturn: { visible: true, sequence: 2 },
+
+      // Accounts sub-tabs - ADDED: Three sub-tabs
+      accounts_cashbank: { visible: true, sequence: 1 },
+      accounts_mrcash: { visible: true, sequence: 2 },
 
       // Reports sub-tabs
       reports_dailyreport: { visible: true, sequence: 1 },
@@ -205,7 +208,7 @@ const tabService = {
       utility_companyprofile: { visible: true, sequence: 1 },
       utility_tabhideview: { visible: true, sequence: 2 },
 
-      // HRM sub-tabs - UPDATED: Changed from hrm_management to hrm_leaveattendance
+      // HRM sub-tabs
       hrm_dashboard: { visible: true, sequence: 1 },
       hrm_holidays: { visible: true, sequence: 2 },
       hrm_leaveattendance: { visible: true, sequence: 3 },
@@ -237,11 +240,11 @@ const productPaths = [
   "/productmanagerlayout/printbarcode",
 ];
 
-// UPDATED: Changed from /hrmlayout/management to /hrmlayout/leaveattendance
+// HRM paths
 const hrmPaths = [
   "/hrmlayout/dashboard",
   "/hrmlayout/holidays",
-  "/hrmlayout/leaveattendance", // Changed from /hrmlayout/management
+  "/hrmlayout/leaveattendance",
   "/hrmlayout/payroll",
 ];
 
@@ -255,6 +258,12 @@ const salesPaths = [
 const expensePaths = [
   "/expenselayout/expensecategories",
   "/expenselayout/expenses",
+];
+
+// Accounts paths - UPDATED: Added paths for new sub-tabs
+const accountPaths = [
+  "/accountlayout",
+  "/accountlayout/mrcash"
 ];
 
 const reportPaths = [
@@ -328,8 +337,6 @@ const settingsPaths = [
   "/settinglayout/companyprofile",
   "/settinglayout/tabHideView",
 ];
-
-const accountPaths = ["/accountlayout"];
 
 const utilityPaths = [
   "/utilitylayout/companyprofile",
@@ -413,11 +420,11 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
     } else if (location.pathname.startsWith("/hrmlayout")) {
       setActiveParentMenu("hrm");
     } else if (location.pathname.startsWith("/accountlayout")) {
-      setActiveParentMenu("accounts");
+      setActiveParentMenu("accounts"); // Updated: Accounts detection
     } else if (location.pathname.startsWith("/settingslayout")) {
       setActiveParentMenu("settings");
     } else if (location.pathname.startsWith("/mrcarrystocklayout")) {
-      setActiveParentMenu("mrCarryStock"); // NEW: Add MR Carry Stock detection
+      setActiveParentMenu("mrCarryStock");
     } else {
       setActiveParentMenu(null);
     }
@@ -978,7 +985,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
           </div>
         )}
 
-        {/* Accounts */}
+        {/* Accounts - UPDATED: Now with 3 sub-tabs */}
         {shouldShowTab("accounts") && (
           <div>
             <button
@@ -999,13 +1006,43 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
             </button>
             {activeParentMenu === "accounts" && isOpen && (
               <div className="ml-6 mt-1 space-y-1">
-                <Link
-                  to="/accountlayout"
-                  className={getChildLinkClass("/accountlayout")}
-                >
-                  <Wallet className="w-4 h-4" />
-                  <span className="mx-auto">Cash & Bank</span>
-                </Link>
+                {getSortedTabs([
+                  "accounts_cashbank",
+                  "accounts_mrcash",
+                  
+                ]).map((tabId) => {
+                  const linkMap = {
+                    accounts_cashbank: "/accountlayout",
+                    accounts_mrcash: "/accountlayout/mrcash"
+                  };
+
+                  const iconMap = {
+                    accounts_cashbank: Wallet,
+                    accounts_mrcash: Coins,
+                   
+                  };
+
+                  const labelMap = {
+                    accounts_cashbank: "Cash & Bank",
+                    accounts_mrcash: "MR Cash",
+                   
+                  };
+
+                  const IconComponent = iconMap[tabId];
+                  const path = linkMap[tabId];
+                  const label = labelMap[tabId];
+
+                  return (
+                    <Link
+                      key={tabId}
+                      to={path}
+                      className={getChildLinkClass(path)}
+                    >
+                      <IconComponent className="w-4 h-4" />
+                      <span className="mx-auto">{label}</span>
+                    </Link>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1430,7 +1467,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
           </div>
         )}
 
-        {/* HRM - UPDATED: Changed from hrm_management to hrm_leaveattendance */}
+        {/* HRM */}
         {shouldShowTab("hrm") && (
           <div>
             <button
@@ -1454,20 +1491,20 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                 {getSortedTabs([
                   "hrm_dashboard",
                   "hrm_holidays",
-                  "hrm_leaveattendance", // Changed from hrm_management
+                  "hrm_leaveattendance",
                   "hrm_payroll",
                 ]).map((tabId) => {
                   const linkMap = {
                     hrm_dashboard: "/hrmlayout/dashboard",
                     hrm_holidays: "/hrmlayout/holidays",
-                    hrm_leaveattendance: "/hrmlayout/leaveattendance", // Changed from /hrmlayout/management
+                    hrm_leaveattendance: "/hrmlayout/leaveattendance",
                     hrm_payroll: "/hrmlayout/payroll",
                   };
 
                   const iconMap = {
                     hrm_dashboard: Home,
                     hrm_holidays: Umbrella,
-                    hrm_leaveattendance: Calendar, // Combined icon
+                    hrm_leaveattendance: Calendar,
                     hrm_payroll: DollarSign,
                   };
 
@@ -1483,7 +1520,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                       <IconComponent className="w-4 h-4" />
                       <span className="mx-auto">
                         {tabId === "hrm_leaveattendance"
-                          ? "Leave & Attendance" // Updated display name
+                          ? "Leave & Attendance"
                           : tabId.split("_")[1].charAt(0).toUpperCase() +
                             tabId.split("_")[1].slice(1)}
                       </span>

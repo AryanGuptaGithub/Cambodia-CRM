@@ -14,6 +14,7 @@ import BusinessType from "./models/master/businessTypes.js";
 import ProductType from "./models/projectManger/productType.js";
 import ProductPackingType from "./models/projectManger/ProductPackingType.js";
 import AllowanceType from "./models/Hrm/AllowanceType.js";
+import MRCash from "./models/accounts/MRCash.js";
 
 dotenv.config();
 
@@ -36,7 +37,7 @@ async function seedUsers() {
       username: "superAdmin",
       email: "superadmin@example.com",
       password: "123456",
-      role: "admin", 
+      role: "admin",
     },
     {
       name: "admin",
@@ -45,7 +46,6 @@ async function seedUsers() {
       password: "123456",
       role: "admin",
     },
-   
   ];
 
   for (const u of users) {
@@ -788,30 +788,6 @@ async function seedHTabs() {
 
     // ADDED: MR Carry Stock Sub-tabs (Level 1)
     {
-      tabId: "mrCarryStock_mrlist",
-      name: "MR List",
-      description: "MR list management",
-      path: "/mrCarryStocklayout/mrlist",
-      icon: "Users",
-      parentTabId: "mrCarryStock",
-      level: 1,
-      sequence: 1,
-      category: "main",
-      reportType: "Hide/Show Tabs",
-    },
-    {
-      tabId: "mrCarryStock_assigncarrystock",
-      name: "Assign Carry Stock",
-      description: "Assign carry stock to MR",
-      path: "/mrCarryStocklayout/assigncarrystock",
-      icon: "Package",
-      parentTabId: "mrCarryStock",
-      level: 1,
-      sequence: 2,
-      category: "main",
-      reportType: "Hide/Show Tabs",
-    },
-    {
       tabId: "mrCarryStock_carrystockview",
       name: "Carry Stock View",
       description: "View MR carry stock",
@@ -819,7 +795,7 @@ async function seedHTabs() {
       icon: "Eye",
       parentTabId: "mrCarryStock",
       level: 1,
-      sequence: 3,
+      sequence: 1,
       category: "main",
       reportType: "Hide/Show Tabs",
     },
@@ -831,20 +807,46 @@ async function seedHTabs() {
       icon: "RotateCcw",
       parentTabId: "mrCarryStock",
       level: 1,
-      sequence: 4,
+      sequence: 2,
       category: "main",
       reportType: "Hide/Show Tabs",
     },
+
+    // ADDED: Accounts Sub-tabs (Level 1) - Three tabs
     {
-      tabId: "mrCarryStock_stockreplacement",
-      name: "Stock Replacement",
-      description: "Stock replacement management",
-      path: "/mrCarryStocklayout/stockreplacement",
-      icon: "RefreshCw",
-      parentTabId: "mrCarryStock",
+      tabId: "accounts_cashbank",
+      name: "Cash & Bank",
+      description: "Cash and bank account management",
+      path: "/accountlayout",
+      icon: "Wallet",
+      parentTabId: "accounts",
       level: 1,
-      sequence: 5,
-      category: "main",
+      sequence: 1,
+      category: "accounts",
+      reportType: "Hide/Show Tabs",
+    },
+    {
+      tabId: "accounts_mrcash",
+      name: "MR Cash",
+      description: "MR cash management",
+      path: "/accountlayout/mrcash",
+      icon: "Coins",
+      parentTabId: "accounts",
+      level: 1,
+      sequence: 2,
+      category: "accounts",
+      reportType: "Hide/Show Tabs",
+    },
+    {
+      tabId: "accounts_mrcashtransfer",
+      name: "MR Cash Transfer to Admin",
+      description: "MR cash transfer to admin management",
+      path: "/accountlayout/mrcashtransfer",
+      icon: "RefreshCw",
+      parentTabId: "accounts",
+      level: 1,
+      sequence: 3,
+      category: "accounts",
       reportType: "Hide/Show Tabs",
     },
 
@@ -1318,6 +1320,48 @@ async function seedHTabs() {
   await HTab.insertMany(sampleTabs);
   const count = await HTab.countDocuments();
 }
+
+async function seedMRCashes() {
+  try {
+    await MRCash.deleteMany({});
+
+    // First, get some MRs from the staff collection
+    const MRStaff = await mongoose.connection.db
+      .collection("staffs")
+      .find({ role: "mr" })
+      .limit(10)
+      .toArray();
+
+    if (MRStaff.length === 0) {
+      console.log("⚠️ No MR staff found to seed MR Cash data");
+      return;
+    }
+
+    const mrCashes = MRStaff.map((mr, index) => ({
+      mrId: mr._id,
+      mrName: mr.medicalRepName || mr.employeeName || `MR ${index + 1}`,
+      currentCash: Math.floor(Math.random() * 5000) + 1000, // Random cash between 1000-6000
+      cashTransferredToAdmin: Math.floor(Math.random() * 3000), // Random transferred amount 0-3000
+      lastTransferDate: new Date(
+        Date.now() - Math.floor(Math.random() * 30) * 24 * 60 * 60 * 1000
+      ), // Random date within last 30 days
+      notes:
+        index % 3 === 0
+          ? "Active MR"
+          : index % 3 === 1
+          ? "Senior MR"
+          : "New MR",
+      isActive: true,
+      createdBy: new mongoose.Types.ObjectId(), // Mock user ID
+      updatedBy: new mongoose.Types.ObjectId(), // Mock user ID
+    }));
+
+    await MRCash.insertMany(mrCashes);
+    console.log(`✅ Seeded ${mrCashes.length} MR Cash records`);
+  } catch (error) {
+    console.error("❌ Error seeding MR Cash data:", error);
+  }
+}
 // Run all seeders in order
 async function runSeeders() {
   await connectDB();
@@ -1336,6 +1380,7 @@ async function runSeeders() {
     await seedProductPackingTypes();
     await seedAllowanceTypes(); // Add allowance types seeding
     await seedHTabs();
+    await seedMRCashes();
   } catch (error) {
     console.error("❌ Seeding error:", error);
   } finally {
