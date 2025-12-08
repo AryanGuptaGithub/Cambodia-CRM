@@ -123,7 +123,6 @@ import AddPayroll from "./pages/HRM/addPayroll";
 import CashAndBank from "./pages/Account/CashAndBank";
 import CarryStockView from "./pages/MrCarryStock/CarryStockView";
 import StockReturn from "./pages/MrCarryStock/StockReturn";
-import StockReplacement from "./pages/MrCarryStock/StockReplacement";
 
 // Other components
 import StockTransferForm from "./pages/StockTransferForm";
@@ -351,7 +350,6 @@ function App() {
           <Route path="mrcarrystocklayout" element={<MrCarryStockLayout />}>
             <Route path="carrystockview" element={<CarryStockView />} />
             <Route path="stockreturn" element={<StockReturn />} />
-            <Route path="stockreplacement" element={<StockReplacement />} />
           </Route>
         </Route>
       </Routes>

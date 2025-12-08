@@ -28,7 +28,6 @@ const saleSummarySchema = new Schema(
     invoiceNumber: { type: String, required: true, trim: true },
     invoiceDate: { type: Date, required: true },
     
-    // Medical Representative
     mrName: { type: String, required: true, trim: true },
     mrId: { 
       type: Schema.Types.ObjectId, 

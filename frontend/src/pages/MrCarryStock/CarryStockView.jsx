@@ -37,10 +37,11 @@ const CarryStockView = () => {
   const [mrList, setMrList] = useState([]);
   const [mrListLoading, setMrListLoading] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
-  const [allStockData, setAllStockData] = useState([]); // Store all data for filtering
+  const [allStockData, setAllStockData] = useState([]);
+  const [filteredData, setFilteredData] = useState([]);
   const inputRef = useRef(null);
 
-  const STOCK_PER_PAGE = 9;
+  const STOCK_PER_PAGE = 5; // Changed from 6 to 5
 
   // Fetch MR List for dropdown
   const fetchMRList = useCallback(async () => {
@@ -66,13 +67,14 @@ const CarryStockView = () => {
     try {
       setLoading(true);
 
-      // Build query parameters - Note: Backend expects mrName, not mrCode
+      // Build query parameters
       const params = {};
 
       // Add MR filter - use mrName parameter for backend
       if (selectedMr !== "all") {
-        // Find the MR object to get the mrName
-        const selectedMrObj = mrList.find(mr => mr.mrCode === selectedMr || mr.mrName === selectedMr);
+        const selectedMrObj = mrList.find(
+          (mr) => mr.mrCode === selectedMr || mr.mrName === selectedMr
+        );
         if (selectedMrObj) {
           params.mrName = selectedMrObj.mrName || selectedMrObj.mrCode;
         } else {
@@ -85,54 +87,50 @@ const CarryStockView = () => {
         params.search = searchTerm;
       }
 
-      console.log("Fetching with params:", params);
-
       const response = await axios.get(
         `${backendUrl}/api/stock-in-mr-hand-admin`,
         { params }
       );
-      
-      console.log("API Response:", response.data);
+
 
       if (response.data.success) {
         const transformedData = transformAPIData(response.data.data);
         console.log("Transformed data:", transformedData.length, "items");
-        
-        // Store all data for filtering
+
+        // Store all data
         setAllStockData(transformedData);
-        
-        // Apply search filter if needed
-        let filteredData = transformedData;
-        if (searchTerm.trim()) {
-          filteredData = transformedData.filter(item =>
-            item.productName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            item.productCode?.toLowerCase().includes(searchTerm.toLowerCase())
-          );
-        }
-        
-        // Apply date filtering if needed
-        if (dateFilter !== "all") {
-          filteredData = applyDateFilter(filteredData, dateFilter, customStartDate, customEndDate);
-        }
-        
-        // Calculate pagination
-        const totalItems = filteredData.length;
-        setTotalCount(totalItems);
-        
+
+        // Apply initial filtering
+        const filtered = applyAllFilters(
+          transformedData,
+          searchTerm,
+          dateFilter,
+          customStartDate,
+          customEndDate
+        );
+        setFilteredData(filtered);
+        setTotalCount(filtered.length);
+
+        // Reset to first page
+        setCurrentPage(1);
+
         // Get data for current page
-        const startIndex = (currentPage - 1) * STOCK_PER_PAGE;
-        const endIndex = startIndex + STOCK_PER_PAGE;
-        const paginatedData = filteredData.slice(startIndex, endIndex);
-        
+        const startIndex = 0;
+        const endIndex = STOCK_PER_PAGE;
+        const paginatedData = filtered.slice(startIndex, endIndex);
         setStockData(paginatedData);
       } else {
         toast.error(response.data.message || "Failed to load carry stock data");
+        setAllStockData([]);
+        setFilteredData([]);
         setStockData([]);
         setTotalCount(0);
       }
     } catch (error) {
       console.error("Error fetching stock data:", error);
       toast.error("Failed to load carry stock data");
+      setAllStockData([]);
+      setFilteredData([]);
       setStockData([]);
       setTotalCount(0);
     } finally {
@@ -141,12 +139,43 @@ const CarryStockView = () => {
   }, [
     selectedMr,
     searchTerm,
+    mrList,
     dateFilter,
     customStartDate,
     customEndDate,
-    currentPage,
-    mrList,
   ]);
+
+  // Apply all filters
+  const applyAllFilters = (
+    data,
+    searchTerm,
+    dateFilter,
+    customStartDate,
+    customEndDate
+  ) => {
+    let filtered = [...data];
+
+    // Apply search filter
+    if (searchTerm.trim()) {
+      filtered = filtered.filter(
+        (item) =>
+          item.productName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          item.productCode?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          item.mrName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          item.mrCode?.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+
+    // Apply date filter
+    filtered = applyDateFilter(
+      filtered,
+      dateFilter,
+      customStartDate,
+      customEndDate
+    );
+
+    return filtered;
+  };
 
   // Apply date filter to data
   const applyDateFilter = (data, filterType, startDate, endDate) => {
@@ -158,11 +187,7 @@ const CarryStockView = () => {
     switch (filterType) {
       case "today":
         dateFrom = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        dateTo = new Date(
-          now.getFullYear(),
-          now.getMonth(),
-          now.getDate() + 1
-        );
+        dateTo = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
         break;
       case "currentMonth":
         dateFrom = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -188,9 +213,9 @@ const CarryStockView = () => {
         return data;
     }
 
-    return data.filter(item => {
+    return data.filter((item) => {
       if (!item.assignedDate) return false;
-      
+
       const itemDate = new Date(item.assignedDate);
       return itemDate >= dateFrom && itemDate <= dateTo;
     });
@@ -211,16 +236,17 @@ const CarryStockView = () => {
       expiry: item.expiry || item.expiryDate || "N/A",
       assignedQty: item.assignedQty || 0,
       remainingQty: item.remainingQty || 0,
-      usedQty: item.usedQty || (item.assignedQty || 0) - (item.remainingQty || 0),
+      usedQty:
+        item.usedQty || (item.assignedQty || 0) - (item.remainingQty || 0),
       assignedDate: item.assignedDate || new Date().toISOString().split("T")[0],
       createdAt: item.createdAt || item.assignedDate,
       status: (item.remainingQty || 0) > 0 ? "Active" : "Depleted",
       invoiceNumbers: item.invoiceNumbers || [],
       lc: item.lc || 0,
-      unit: item.unit || 'pcs',
-      category: item.category || 'General',
+      unit: item.unit,
+      category: item.category || "General",
       packSize: item.packSize || 0,
-      costPrice: item.costPrice || 0
+      costPrice: item.costPrice || 0,
     }));
   };
 
@@ -229,30 +255,23 @@ const CarryStockView = () => {
     fetchMRList();
   }, []);
 
-  // Re-fetch when filters change
+  // Re-fetch when filters that require API call change
   useEffect(() => {
     setCurrentPage(1);
     fetchStockData();
-  }, [selectedMr, dateFilter, customStartDate, customEndDate]);
+  }, [selectedMr, searchTerm, dateFilter, customStartDate, customEndDate]);
 
-  // Re-fetch when page changes
+  // Handle page change
   useEffect(() => {
-    if (currentPage > 1) {
-      fetchStockData();
+    if (filteredData.length > 0) {
+      const startIndex = (currentPage - 1) * STOCK_PER_PAGE;
+      const endIndex = startIndex + STOCK_PER_PAGE;
+      const paginatedData = filteredData.slice(startIndex, endIndex);
+      setStockData(paginatedData);
+    } else {
+      setStockData([]);
     }
-  }, [currentPage]);
-
-  // Handle search with debounce
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (searchTerm.trim() !== "") {
-        setCurrentPage(1);
-        fetchStockData();
-      }
-    }, 500); // 500ms debounce
-
-    return () => clearTimeout(timer);
-  }, [searchTerm]);
+  }, [currentPage, filteredData]);
 
   // Calculate utilization percentage
   const calculateUtilization = (assigned, remaining) => {
@@ -269,17 +288,16 @@ const CarryStockView = () => {
     mrList.forEach((mr) => {
       options.push({
         value: mr.mrCode || mr.mrName,
-        label: `${mr.mrName} (${mr.mrCode || mr.mrName})`,
+        label: `${mr.mrName}`,
       });
     });
 
     return options;
-  }, [mrList, totalCount]);
+  }, [mrList]);
 
   // Pagination calculations
-  const totalPages = Math.ceil(totalCount / STOCK_PER_PAGE);
+  const totalPages = Math.ceil(totalCount / STOCK_PER_PAGE) || 1;
 
-  // Get visible pages for pagination
   const getVisiblePages = (currentPage, totalPages) => {
     const delta = 2;
     const range = [];
@@ -354,7 +372,6 @@ const CarryStockView = () => {
   // Handle date filter change
   const handleDateFilterChange = (filterType) => {
     setDateFilter(filterType);
-    setCurrentPage(1);
   };
 
   // Clear custom date range
@@ -367,7 +384,6 @@ const CarryStockView = () => {
   // Handle MR change
   const handleMrChange = (value) => {
     setSelectedMr(value);
-    setCurrentPage(1);
   };
 
   // Handle export
@@ -408,6 +424,12 @@ const CarryStockView = () => {
       console.error("Error exporting data:", error);
       toast.error("Failed to export data");
     }
+  };
+
+  // Handle refresh
+  const handleRefresh = () => {
+    setCurrentPage(1);
+    fetchStockData();
   };
 
   // Table columns configuration
@@ -474,23 +496,20 @@ const CarryStockView = () => {
         return (
           <div>
             <div className="font-semibold text-gray-900">{item.mrName}</div>
-            <div className="text-sm text-gray-500">Code: {item.mrCode}</div>
           </div>
         );
 
       case "productDetails":
         return (
           <div>
-            <div className="font-semibold text-gray-900">{item.productName}</div>
-            <div className="text-sm text-gray-500">Code: {item.productCode}</div>
-            {item.category && (
-              <div className="text-xs text-gray-400">Category: {item.category}</div>
-            )}
+            <div className="font-semibold text-gray-900">
+              {item.productName}
+            </div>
           </div>
         );
 
       case "quantity":
-        const used = item.usedQty || (item.assignedQty - item.remainingQty);
+        const used = item.usedQty || item.assignedQty - item.remainingQty;
         return (
           <div className="text-sm">
             <div className="flex justify-between">
@@ -556,7 +575,8 @@ const CarryStockView = () => {
                 : "bg-gray-100 text-gray-800"
             }`}
           >
-            {item.status || ((item.remainingQty || 0) > 0 ? "Active" : "Depleted")}
+            {item.status ||
+              ((item.remainingQty || 0) > 0 ? "Active" : "Depleted")}
           </span>
         );
 
@@ -602,25 +622,9 @@ const CarryStockView = () => {
 
           {/* RIGHT SIDE: TOTAL + BUTTONS + SEARCH */}
           <div className="flex items-center gap-6 flex-wrap justify-end">
-            <p className="text-lg font-semibold text-gray-700 whitespace-nowrap">
-              Total Count:{" "}
-              <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-                {totalCount}
-              </span>
-              {totalCount > STOCK_PER_PAGE && (
-                <span className="ml-2 text-sm text-gray-600">
-                  (Showing {Math.min(STOCK_PER_PAGE, stockData.length)} of{" "}
-                  {totalCount} on page {currentPage})
-                </span>
-              )}
-            </p>
-
             <div className="flex gap-2">
               <button
-                onClick={() => {
-                  setCurrentPage(1);
-                  fetchStockData();
-                }}
+                onClick={handleRefresh}
                 className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 flex items-center gap-2 cursor-pointer shadow-sm"
                 disabled={loading}
               >
@@ -795,6 +799,7 @@ const CarryStockView = () => {
                   setCustomEndDate(null);
                   setSearchTerm("");
                   setCurrentPage(1);
+                  fetchStockData();
                 }}
                 className="text-blue-600 hover:text-blue-800 underline text-xs"
               >
@@ -853,9 +858,11 @@ const CarryStockView = () => {
                       </div>
                     ) : (
                       <div>
-                        <div className="text-lg mb-2">No carry stock records found</div>
+                        <div className="text-lg mb-2">
+                          No carry stock records found
+                        </div>
                         <div className="text-sm text-gray-400">
-                          {selectedMr !== "all" 
+                          {selectedMr !== "all"
                             ? `No stock found for selected MR: ${selectedMr}`
                             : "Try changing your filters or search term"}
                         </div>
@@ -892,12 +899,6 @@ const CarryStockView = () => {
           {/* Enhanced Pagination Controls */}
           {totalCount > STOCK_PER_PAGE && (
             <div className="mt-4 p-5 flex flex-col sm:flex-row justify-between items-center gap-4 bg-gray-50 border-t">
-              <div className="text-sm text-gray-600">
-                Showing {(currentPage - 1) * STOCK_PER_PAGE + 1} to{" "}
-                {Math.min(currentPage * STOCK_PER_PAGE, totalCount)} of{" "}
-                {totalCount} entries
-              </div>
-
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => {

@@ -159,7 +159,6 @@ const tabService = {
 
       mrCarryStock_carrystockview: { visible: true, sequence: 1 },
       mrCarryStock_stockreturn: { visible: true, sequence: 2 },
-      mrCarryStock_stockreplacement: { visible: true, sequence: 3 },
 
       // Reports sub-tabs
       reports_dailyreport: { visible: true, sequence: 1 },
@@ -220,7 +219,6 @@ const tabService = {
 const mrCarryStockPaths = [
   "/mrcarrystocklayout/carrystockview",
   "/mrcarrystocklayout/stockreturn",
-  "/mrcarrystocklayout/stockreplacement",
 ];
 
 // Path constants
@@ -943,26 +941,21 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                 {getSortedTabs([
                   "mrCarryStock_carrystockview",
                   "mrCarryStock_stockreturn",
-                  "mrCarryStock_stockreplacement",
                 ]).map((tabId) => {
                   const linkMap = {
                     mrCarryStock_carrystockview:
                       "/mrcarrystocklayout/carrystockview",
                     mrCarryStock_stockreturn: "/mrcarrystocklayout/stockreturn",
-                    mrCarryStock_stockreplacement:
-                      "/mrcarrystocklayout/stockreplacement",
                   };
 
                   const iconMap = {
                     mrCarryStock_carrystockview: Eye,
                     mrCarryStock_stockreturn: RefreshCw,
-                    mrCarryStock_stockreplacement: Archive,
                   };
 
                   const labelMap = {
                     mrCarryStock_carrystockview: "Carry Stock View",
                     mrCarryStock_stockreturn: "Stock Return",
-                    mrCarryStock_stockreplacement: "Stock Replacement",
                   };
 
                   const IconComponent = iconMap[tabId];
