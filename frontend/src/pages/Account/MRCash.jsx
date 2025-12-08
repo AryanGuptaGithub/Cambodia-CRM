@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from "react";
 import ReactDOM from "react-dom";
 import {
   Plus,
@@ -37,47 +43,47 @@ function MRCash() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
-  
+
   // Modal states
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState(null);
-  
+
   // Form states
   const [formData, setFormData] = useState({
     mrId: "",
     currentCash: "",
     cashTransferredToAdmin: "",
-    notes: ""
+    notes: "",
   });
-  
+
   const [transferForm, setTransferForm] = useState({
     amount: "",
-    notes: ""
+    notes: "",
   });
-  
+
   // MR List for dropdown
   const [mrList, setMrList] = useState([]);
   const [mrListLoading, setMrListLoading] = useState(false);
-  
+
   // Sorting
   const [sortConfig, setSortConfig] = useState({
     field: "createdAt",
-    direction: "desc"
+    direction: "desc",
   });
-  
+
   const inputRef = useRef(null);
 
   // Format currency
   const formatCurrency = (value) => {
     if (value === null || value === undefined) return "$0.00";
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
       minimumFractionDigits: 2,
-      maximumFractionDigits: 2
+      maximumFractionDigits: 2,
     }).format(value);
   };
 
@@ -95,7 +101,9 @@ function MRCash() {
   const fetchMRList = useCallback(async () => {
     try {
       setMrListLoading(true);
-      const response = await axios.get(`${backendUrl}/api/accounts/mrcash/mr-list`);
+      const response = await axios.get(
+        `${backendUrl}/api/accounts/mrcash/mr-list`
+      );
       if (response.data.success) {
         setMrList(response.data.data || []);
       }
@@ -108,35 +116,44 @@ function MRCash() {
   }, []);
 
   // Fetch MR Cash records
-  const fetchMRCashes = useCallback(async (page = 1) => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      const params = {
-        page,
-        limit: ITEMS_PER_PAGE,
-        search: searchTerm,
-        sortBy: sortConfig.field,
-        sortOrder: sortConfig.direction
-      };
-      
-      const response = await axios.get(`${backendUrl}/api/accounts/mrcash`, { params });
-      
-      if (response.data.success) {
-        setMrCashes(response.data.data || []);
-        setTotalPages(response.data.pagination?.pages || 1);
-        setTotalCount(response.data.pagination?.total || 0);
-      } else {
-        throw new Error(response.data.message || "Failed to fetch data");
+  const fetchMRCashes = useCallback(
+    async (page = 1) => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const params = {
+          page,
+          limit: ITEMS_PER_PAGE,
+          search: searchTerm,
+          sortBy: sortConfig.field,
+          sortOrder: sortConfig.direction,
+        };
+
+        const response = await axios.get(`${backendUrl}/api/accounts/mrcash`, {
+          params,
+        });
+
+        if (response.data.success) {
+          setMrCashes(response.data.data || []);
+          setTotalPages(response.data.pagination?.pages || 1);
+          setTotalCount(response.data.pagination?.total || 0);
+        } else {
+          throw new Error(response.data.message || "Failed to fetch data");
+        }
+      } catch (error) {
+        setError(
+          error.response?.data?.message ||
+            error.message ||
+            "Failed to load MR Cash data"
+        );
+        showToast("error", "Failed to load MR Cash data");
+      } finally {
+        setLoading(false);
       }
-    } catch (error) {
-      setError(error.response?.data?.message || error.message || "Failed to load MR Cash data");
-      showToast("error", "Failed to load MR Cash data");
-    } finally {
-      setLoading(false);
-    }
-  }, [searchTerm, sortConfig]);
+    },
+    [searchTerm, sortConfig]
+  );
 
   // Initial load
   useEffect(() => {
@@ -150,15 +167,16 @@ function MRCash() {
       setCurrentPage(1);
       fetchMRCashes(1);
     }, 500);
-    
+
     return () => clearTimeout(timer);
   }, [searchTerm, fetchMRCashes]);
 
   // Handle sort
   const handleSort = (field) => {
-    setSortConfig(prev => ({
+    setSortConfig((prev) => ({
       field,
-      direction: prev.field === field && prev.direction === "asc" ? "desc" : "asc"
+      direction:
+        prev.field === field && prev.direction === "asc" ? "desc" : "asc",
     }));
   };
 
@@ -168,7 +186,7 @@ function MRCash() {
       mrId: "",
       currentCash: "",
       cashTransferredToAdmin: "",
-      notes: ""
+      notes: "",
     });
     setIsAddModalOpen(true);
   };
@@ -186,7 +204,7 @@ function MRCash() {
       mrId: record.mrId?._id || record.mrId,
       currentCash: record.currentCash,
       cashTransferredToAdmin: record.cashTransferredToAdmin,
-      notes: record.notes || ""
+      notes: record.notes || "",
     });
     setIsEditModalOpen(true);
   };
@@ -196,7 +214,7 @@ function MRCash() {
     setSelectedRecord(record);
     setTransferForm({
       amount: "",
-      notes: ""
+      notes: "",
     });
     setIsTransferModalOpen(true);
   };
@@ -208,7 +226,7 @@ function MRCash() {
       text: `Are you sure you want to delete the cash record for <b>${record.mrName}</b>?`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
-      cancelButtonText: "Cancel"
+      cancelButtonText: "Cancel",
     });
 
     if (confirm.isConfirmed) {
@@ -217,7 +235,10 @@ function MRCash() {
         showToast("success", "MR Cash record deleted successfully");
         fetchMRCashes(currentPage);
       } catch (error) {
-        showToast("error", error.response?.data?.message || "Failed to delete record");
+        showToast(
+          "error",
+          error.response?.data?.message || "Failed to delete record"
+        );
       }
     }
   };
@@ -225,38 +246,41 @@ function MRCash() {
   // Handle form input changes
   const handleFormChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      [name]: value
+      [name]: value,
     }));
   };
 
   // Handle transfer form changes
   const handleTransferFormChange = (e) => {
     const { name, value } = e.target;
-    setTransferForm(prev => ({
+    setTransferForm((prev) => ({
       ...prev,
-      [name]: value
+      [name]: value,
     }));
   };
 
   // Handle MR selection
   const handleMRSelect = (value) => {
-    const selectedMR = mrList.find(mr => mr.value === value);
-    setFormData(prev => ({
+    const selectedMR = mrList.find((mr) => mr.value === value);
+    setFormData((prev) => ({
       ...prev,
       mrId: value,
-      mrName: selectedMR?.label || ""
+      mrName: selectedMR?.label || "",
     }));
   };
 
   // Submit add form
   const handleSubmitAdd = async (e) => {
     e.preventDefault();
-    
+
     try {
-      const response = await axios.post(`${backendUrl}/api/accounts/mrcash`, formData);
-      
+      const response = await axios.post(
+        `${backendUrl}/api/accounts/mrcash`,
+        formData
+      );
+
       if (response.data.success) {
         showToast("success", "MR Cash record created successfully");
         setIsAddModalOpen(false);
@@ -264,47 +288,56 @@ function MRCash() {
         fetchMRList(); // Refresh MR list
       }
     } catch (error) {
-      showToast("error", error.response?.data?.message || "Failed to create record");
+      showToast(
+        "error",
+        error.response?.data?.message || "Failed to create record"
+      );
     }
   };
 
   // Submit edit form
   const handleSubmitEdit = async (e) => {
     e.preventDefault();
-    
+
     try {
       const response = await axios.put(
         `${backendUrl}/api/accounts/mrcash/${selectedRecord._id}`,
         formData
       );
-      
+
       if (response.data.success) {
         showToast("success", "MR Cash record updated successfully");
         setIsEditModalOpen(false);
         fetchMRCashes(currentPage);
       }
     } catch (error) {
-      showToast("error", error.response?.data?.message || "Failed to update record");
+      showToast(
+        "error",
+        error.response?.data?.message || "Failed to update record"
+      );
     }
   };
 
   // Submit transfer form
   const handleSubmitTransfer = async (e) => {
     e.preventDefault();
-    
+
     try {
       const response = await axios.post(
         `${backendUrl}/api/accounts/mrcash/${selectedRecord._id}/transfer`,
         transferForm
       );
-      
+
       if (response.data.success) {
         showToast("success", "Cash transferred to admin successfully");
         setIsTransferModalOpen(false);
         fetchMRCashes(currentPage);
       }
     } catch (error) {
-      showToast("error", error.response?.data?.message || "Failed to transfer cash");
+      showToast(
+        "error",
+        error.response?.data?.message || "Failed to transfer cash"
+      );
     }
   };
 
@@ -314,7 +347,9 @@ function MRCash() {
       (acc, record) => ({
         currentCash: acc.currentCash + (record.currentCash || 0),
         transferred: acc.transferred + (record.cashTransferredToAdmin || 0),
-        total: acc.total + ((record.currentCash || 0) + (record.cashTransferredToAdmin || 0))
+        total:
+          acc.total +
+          ((record.currentCash || 0) + (record.cashTransferredToAdmin || 0)),
       }),
       { currentCash: 0, transferred: 0, total: 0 }
     );
@@ -325,9 +360,11 @@ function MRCash() {
     if (sortConfig.field !== field) {
       return <ChevronDown className="w-4 h-4 opacity-50" />;
     }
-    return sortConfig.direction === "asc" ? 
-      <ChevronUp className="w-4 h-4" /> : 
-      <ChevronDown className="w-4 h-4" />;
+    return sortConfig.direction === "asc" ? (
+      <ChevronUp className="w-4 h-4" />
+    ) : (
+      <ChevronDown className="w-4 h-4" />
+    );
   };
 
   if (loading && mrCashes.length === 0) {
@@ -342,16 +379,21 @@ function MRCash() {
     <div className="p-6">
       {/* Breadcrumb */}
       <div className="mb-4 text-gray-600 text-sm">
-        Dashboard <span className="mx-2">{">"}</span> Accounts <span className="mx-2">{">"}</span> MR Cash
+        Dashboard <span className="mx-2">{">"}</span> Accounts{" "}
+        <span className="mx-2">{">"}</span> MR Cash
       </div>
 
       {/* Header */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">MR Cash Management</h1>
-          <p className="text-gray-600">Manage MR cash balances and transfers to admin</p>
+          <h1 className="text-2xl font-bold text-gray-800">
+            MR Cash Management
+          </h1>
+          <p className="text-gray-600">
+            Manage MR cash balances and transfers to admin
+          </p>
         </div>
-        
+
         <div className="flex gap-3">
           <button
             onClick={handleAdd}
@@ -381,11 +423,13 @@ function MRCash() {
             </div>
             <div>
               <p className="text-sm text-gray-600">Current Cash Balance</p>
-              <p className="text-2xl font-bold text-blue-700">{formatCurrency(totals.currentCash)}</p>
+              <p className="text-2xl font-bold text-blue-700">
+                {formatCurrency(totals.currentCash)}
+              </p>
             </div>
           </div>
         </div>
-        
+
         <div className="bg-white p-4 rounded-lg shadow border border-gray-200">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-green-100 rounded-lg">
@@ -393,11 +437,13 @@ function MRCash() {
             </div>
             <div>
               <p className="text-sm text-gray-600">Transferred to Admin</p>
-              <p className="text-2xl font-bold text-green-700">{formatCurrency(totals.transferred)}</p>
+              <p className="text-2xl font-bold text-green-700">
+                {formatCurrency(totals.transferred)}
+              </p>
             </div>
           </div>
         </div>
-        
+
         <div className="bg-white p-4 rounded-lg shadow border border-gray-200">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-purple-100 rounded-lg">
@@ -405,7 +451,9 @@ function MRCash() {
             </div>
             <div>
               <p className="text-sm text-gray-600">Total Cash Managed</p>
-              <p className="text-2xl font-bold text-purple-700">{formatCurrency(totals.total)}</p>
+              <p className="text-2xl font-bold text-purple-700">
+                {formatCurrency(totals.total)}
+              </p>
             </div>
           </div>
         </div>
@@ -415,9 +463,11 @@ function MRCash() {
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
         <div className="flex items-center gap-2">
           <Filter size={20} className="text-gray-500" />
-          <span className="text-gray-700">Total Records: <span className="font-semibold">{totalCount}</span></span>
+          <span className="text-gray-700">
+            Total Records: <span className="font-semibold">{totalCount}</span>
+          </span>
         </div>
-        
+
         <div className="relative w-full lg:w-80">
           <Search
             className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
@@ -441,48 +491,44 @@ function MRCash() {
           <table className="w-full min-w-max">
             <thead className="bg-gray-50 border-b">
               <tr>
-                <th 
+                <th
                   className="p-4 text-left cursor-pointer"
                   onClick={() => handleSort("mrName")}
                 >
                   <div className="flex items-center gap-2">
                     <User size={16} className="text-gray-500" />
                     <span>MR Name</span>
-                    {renderSortIcon("mrName")}
                   </div>
                 </th>
-                <th 
+                <th
                   className="p-4 text-left cursor-pointer"
                   onClick={() => handleSort("currentCash")}
                 >
                   <div className="flex items-center gap-2">
                     <DollarSign size={16} className="text-blue-500" />
                     <span>Current Cash</span>
-                    {renderSortIcon("currentCash")}
                   </div>
                 </th>
-                <th 
+                <th
                   className="p-4 text-left cursor-pointer"
                   onClick={() => handleSort("cashTransferredToAdmin")}
                 >
                   <div className="flex items-center gap-2">
                     <TrendingUp size={16} className="text-green-500" />
                     <span>Transferred to Admin</span>
-                    
-                </div>
+                  </div>
                 </th>
                 <th className="p-4 text-left">Total Cash</th>
-                <th 
+                <th
                   className="p-4 text-left cursor-pointer"
                   onClick={() => handleSort("lastTransferDate")}
                 >
                   <div className="flex items-center gap-2">
                     <Calendar size={16} className="text-gray-500" />
                     <span>Last Transfer Date</span>
-                    
                   </div>
                 </th>
-                <th 
+                <th
                   className="p-4 text-left cursor-pointer"
                   onClick={() => handleSort("updatedAt")}
                 >
@@ -499,18 +545,24 @@ function MRCash() {
               {mrCashes.length === 0 ? (
                 <tr>
                   <td colSpan="7" className="p-8 text-center text-gray-500">
-                    {searchTerm ? "No matching records found" : "No MR Cash records available"}
+                    {searchTerm
+                      ? "No matching records found"
+                      : "No MR Cash records available"}
                   </td>
                 </tr>
               ) : (
                 mrCashes.map((record, index) => (
-                  <tr 
-                    key={record._id} 
-                    className={`hover:bg-gray-50 ${index < mrCashes.length - 1 ? "border-b" : ""}`}
+                  <tr
+                    key={record._id}
+                    className={`hover:bg-gray-50 ${
+                      index < mrCashes.length - 1 ? "border-b" : ""
+                    }`}
                   >
                     <td className="p-4">
                       <div>
-                        <div className="font-medium text-gray-900">{record.mrName}</div>
+                        <div className="font-medium text-gray-900">
+                          {record.mrName}
+                        </div>
                         {record.mrDetails && (
                           <div className="text-sm text-gray-500 mt-1">
                             <div className="flex items-center gap-2">
@@ -542,7 +594,9 @@ function MRCash() {
                     </td>
                     <td className="p-4">
                       <div className="text-gray-700">
-                        {record.lastTransferDate ? formatDate(record.lastTransferDate) : "N/A"}
+                        {record.lastTransferDate
+                          ? formatDate(record.lastTransferDate)
+                          : "N/A"}
                       </div>
                     </td>
                     <td className="p-4">
@@ -594,13 +648,13 @@ function MRCash() {
       {totalPages > 1 && (
         <div className="flex justify-center items-center gap-4 mt-6">
           <button
-            onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+            onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
             disabled={currentPage === 1}
             className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             Previous
           </button>
-          
+
           <div className="flex items-center gap-2">
             {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
               let pageNum;
@@ -613,7 +667,7 @@ function MRCash() {
               } else {
                 pageNum = currentPage - 2 + i;
               }
-              
+
               return (
                 <button
                   key={pageNum}
@@ -629,9 +683,11 @@ function MRCash() {
               );
             })}
           </div>
-          
+
           <button
-            onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+            onClick={() =>
+              setCurrentPage((prev) => Math.min(totalPages, prev + 1))
+            }
             disabled={currentPage === totalPages}
             className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
@@ -641,347 +697,396 @@ function MRCash() {
       )}
 
       {/* View Modal */}
-      {isViewModalOpen && selectedRecord && ReactDOM.createPortal(
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center p-6 border-b">
-              <h2 className="text-xl font-bold text-gray-800">MR Cash Details</h2>
-              <button
-                onClick={() => setIsViewModalOpen(false)}
-                className="text-gray-500 hover:text-gray-700 cursor-pointer"
-              >
-                <X size={24} />
-              </button>
-            </div>
-            
-            <div className="p-6 space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-2">MR Name</label>
-                  <div className="p-3 bg-gray-50 rounded-lg font-medium">{selectedRecord.mrName}</div>
+      {isViewModalOpen &&
+        selectedRecord &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center p-6 border-b">
+                <h2 className="text-xl font-bold text-gray-800">
+                  MR Cash Details
+                </h2>
+                <button
+                  onClick={() => setIsViewModalOpen(false)}
+                  className="text-gray-500 hover:text-gray-700 cursor-pointer"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-2">
+                      MR Name
+                    </label>
+                    <div className="p-3 bg-gray-50 rounded-lg font-medium">
+                      {selectedRecord.mrName}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-2">
+                      Current Cash
+                    </label>
+                    <div className="p-3 bg-blue-50 rounded-lg font-bold text-blue-700">
+                      {formatCurrency(selectedRecord.currentCash)}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-2">
+                      Transferred to Admin
+                    </label>
+                    <div className="p-3 bg-green-50 rounded-lg font-bold text-green-700">
+                      {formatCurrency(selectedRecord.cashTransferredToAdmin)}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-2">
+                      Total Cash
+                    </label>
+                    <div className="p-3 bg-purple-50 rounded-lg font-bold text-purple-700">
+                      {formatCurrency(selectedRecord.totalCash)}
+                    </div>
+                  </div>
                 </div>
-                
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-2">
+                      Last Transfer Date
+                    </label>
+                    <div className="p-3 bg-gray-50 rounded-lg">
+                      {selectedRecord.lastTransferDate
+                        ? formatDate(selectedRecord.lastTransferDate)
+                        : "N/A"}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-2">
+                      Created Date
+                    </label>
+                    <div className="p-3 bg-gray-50 rounded-lg">
+                      {formatDate(selectedRecord.createdAt)}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-2">
+                      Updated Date
+                    </label>
+                    <div className="p-3 bg-gray-50 rounded-lg">
+                      {formatDate(selectedRecord.updatedAt)}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-2">
+                      Notes
+                    </label>
+                    <div className="p-3 bg-gray-50 rounded-lg min-h-[100px]">
+                      {selectedRecord.notes || "No notes"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-6 border-t flex justify-end">
+                <button
+                  onClick={() => setIsViewModalOpen(false)}
+                  className="px-6 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {/* Add Modal */}
+      {isAddModalOpen &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-lg max-w-md w-full">
+              <div className="flex justify-between items-center p-6 border-b">
+                <h2 className="text-xl font-bold text-gray-800">
+                  Add New MR Cash
+                </h2>
+                <button
+                  onClick={() => setIsAddModalOpen(false)}
+                  className="text-gray-500 hover:text-gray-700 cursor-pointer"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              <form onSubmit={handleSubmitAdd} className="p-6 space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-2">Current Cash</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Select MR <span className="text-red-500">*</span>
+                  </label>
+                  <SearchableDropdown
+                    value={formData.mrId}
+                    onChange={handleMRSelect}
+                    options={mrList}
+                    placeholder={mrListLoading ? "Loading MRs..." : "Select MR"}
+                    required
+                    disabled={mrListLoading || mrList.length === 0}
+                  />
+                  {mrList.length === 0 && !mrListLoading && (
+                    <p className="text-sm text-red-500 mt-1">
+                      No available MRs found
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Initial Cash Balance ($)
+                  </label>
+                  <input
+                    type="number"
+                    name="currentCash"
+                    value={formData.currentCash}
+                    onChange={handleFormChange}
+                    min="0"
+                    step="0.01"
+                    className="w-full border px-3 py-2 rounded-lg"
+                    placeholder="0.00"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Notes
+                  </label>
+                  <textarea
+                    name="notes"
+                    value={formData.notes}
+                    onChange={handleFormChange}
+                    rows="3"
+                    className="w-full border px-3 py-2 rounded-lg"
+                    placeholder="Additional notes..."
+                  />
+                </div>
+
+                <div className="flex justify-end gap-3 pt-4 border-t">
+                  <button
+                    type="button"
+                    onClick={() => setIsAddModalOpen(false)}
+                    className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer"
+                    disabled={!formData.mrId}
+                  >
+                    Add Record
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {/* Edit Modal */}
+      {isEditModalOpen &&
+        selectedRecord &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-lg max-w-md w-full">
+              <div className="flex justify-between items-center p-6 border-b">
+                <h2 className="text-xl font-bold text-gray-800">
+                  Edit MR Cash
+                </h2>
+                <button
+                  onClick={() => setIsEditModalOpen(false)}
+                  className="text-gray-500 hover:text-gray-700 cursor-pointer"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              <form onSubmit={handleSubmitEdit} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    MR Name
+                  </label>
+                  <div className="p-3 bg-gray-50 rounded-lg font-medium">
+                    {selectedRecord.mrName}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Current Cash ($)
+                  </label>
+                  <input
+                    type="number"
+                    name="currentCash"
+                    value={formData.currentCash}
+                    onChange={handleFormChange}
+                    min="0"
+                    step="0.01"
+                    className="w-full border px-3 py-2 rounded-lg"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Transferred to Admin ($)
+                  </label>
+                  <input
+                    type="number"
+                    name="cashTransferredToAdmin"
+                    value={formData.cashTransferredToAdmin}
+                    onChange={handleFormChange}
+                    min="0"
+                    step="0.01"
+                    className="w-full border px-3 py-2 rounded-lg"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Notes
+                  </label>
+                  <textarea
+                    name="notes"
+                    value={formData.notes}
+                    onChange={handleFormChange}
+                    rows="3"
+                    className="w-full border px-3 py-2 rounded-lg"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-3 pt-4 border-t">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditModalOpen(false)}
+                    className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg cursor-pointer"
+                  >
+                    Update
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {/* Transfer Modal */}
+      {isTransferModalOpen &&
+        selectedRecord &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-lg max-w-md w-full">
+              <div className="flex justify-between items-center p-6 border-b">
+                <h2 className="text-xl font-bold text-gray-800">
+                  Transfer Cash to Admin
+                </h2>
+                <button
+                  onClick={() => setIsTransferModalOpen(false)}
+                  className="text-gray-500 hover:text-gray-700 cursor-pointer"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              <form onSubmit={handleSubmitTransfer} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    MR Name
+                  </label>
+                  <div className="p-3 bg-gray-50 rounded-lg font-medium">
+                    {selectedRecord.mrName}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Available Cash
+                  </label>
                   <div className="p-3 bg-blue-50 rounded-lg font-bold text-blue-700">
                     {formatCurrency(selectedRecord.currentCash)}
                   </div>
                 </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-2">Transferred to Admin</label>
-                  <div className="p-3 bg-green-50 rounded-lg font-bold text-green-700">
-                    {formatCurrency(selectedRecord.cashTransferredToAdmin)}
-                  </div>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-2">Total Cash</label>
-                  <div className="p-3 bg-purple-50 rounded-lg font-bold text-purple-700">
-                    {formatCurrency(selectedRecord.totalCash)}
-                  </div>
-                </div>
-              </div>
-              
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-2">Last Transfer Date</label>
-                  <div className="p-3 bg-gray-50 rounded-lg">
-                    {selectedRecord.lastTransferDate ? formatDate(selectedRecord.lastTransferDate) : "N/A"}
-                  </div>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-2">Created Date</label>
-                  <div className="p-3 bg-gray-50 rounded-lg">
-                    {formatDate(selectedRecord.createdAt)}
-                  </div>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-2">Updated Date</label>
-                  <div className="p-3 bg-gray-50 rounded-lg">
-                    {formatDate(selectedRecord.updatedAt)}
-                  </div>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-2">Notes</label>
-                  <div className="p-3 bg-gray-50 rounded-lg min-h-[100px]">
-                    {selectedRecord.notes || "No notes"}
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            <div className="p-6 border-t flex justify-end">
-              <button
-                onClick={() => setIsViewModalOpen(false)}
-                className="px-6 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
 
-      {/* Add Modal */}
-      {isAddModalOpen && ReactDOM.createPortal(
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-lg max-w-md w-full">
-            <div className="flex justify-between items-center p-6 border-b">
-              <h2 className="text-xl font-bold text-gray-800">Add New MR Cash</h2>
-              <button
-                onClick={() => setIsAddModalOpen(false)}
-                className="text-gray-500 hover:text-gray-700 cursor-pointer"
-              >
-                <X size={24} />
-              </button>
-            </div>
-            
-            <form onSubmit={handleSubmitAdd} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Select MR <span className="text-red-500">*</span>
-                </label>
-                <SearchableDropdown
-                  value={formData.mrId}
-                  onChange={handleMRSelect}
-                  options={mrList}
-                  placeholder={mrListLoading ? "Loading MRs..." : "Select MR"}
-                  required
-                  disabled={mrListLoading || mrList.length === 0}
-                />
-                {mrList.length === 0 && !mrListLoading && (
-                  <p className="text-sm text-red-500 mt-1">No available MRs found</p>
-                )}
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Initial Cash Balance ($)
-                </label>
-                <input
-                  type="number"
-                  name="currentCash"
-                  value={formData.currentCash}
-                  onChange={handleFormChange}
-                  min="0"
-                  step="0.01"
-                  className="w-full border px-3 py-2 rounded-lg"
-                  placeholder="0.00"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Notes
-                </label>
-                <textarea
-                  name="notes"
-                  value={formData.notes}
-                  onChange={handleFormChange}
-                  rows="3"
-                  className="w-full border px-3 py-2 rounded-lg"
-                  placeholder="Additional notes..."
-                />
-              </div>
-              
-              <div className="flex justify-end gap-3 pt-4 border-t">
-                <button
-                  type="button"
-                  onClick={() => setIsAddModalOpen(false)}
-                  className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer"
-                  disabled={!formData.mrId}
-                >
-                  Add Record
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>,
-        document.body
-      )}
-
-      {/* Edit Modal */}
-      {isEditModalOpen && selectedRecord && ReactDOM.createPortal(
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-lg max-w-md w-full">
-            <div className="flex justify-between items-center p-6 border-b">
-              <h2 className="text-xl font-bold text-gray-800">Edit MR Cash</h2>
-              <button
-                onClick={() => setIsEditModalOpen(false)}
-                className="text-gray-500 hover:text-gray-700 cursor-pointer"
-              >
-                <X size={24} />
-              </button>
-            </div>
-            
-            <form onSubmit={handleSubmitEdit} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">MR Name</label>
-                <div className="p-3 bg-gray-50 rounded-lg font-medium">{selectedRecord.mrName}</div>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Current Cash ($)
-                </label>
-                <input
-                  type="number"
-                  name="currentCash"
-                  value={formData.currentCash}
-                  onChange={handleFormChange}
-                  min="0"
-                  step="0.01"
-                  className="w-full border px-3 py-2 rounded-lg"
-                  required
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Transferred to Admin ($)
-                </label>
-                <input
-                  type="number"
-                  name="cashTransferredToAdmin"
-                  value={formData.cashTransferredToAdmin}
-                  onChange={handleFormChange}
-                  min="0"
-                  step="0.01"
-                  className="w-full border px-3 py-2 rounded-lg"
-                  required
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Notes
-                </label>
-                <textarea
-                  name="notes"
-                  value={formData.notes}
-                  onChange={handleFormChange}
-                  rows="3"
-                  className="w-full border px-3 py-2 rounded-lg"
-                />
-              </div>
-              
-              <div className="flex justify-end gap-3 pt-4 border-t">
-                <button
-                  type="button"
-                  onClick={() => setIsEditModalOpen(false)}
-                  className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg cursor-pointer"
-                >
-                  Update
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>,
-        document.body
-      )}
-
-      {/* Transfer Modal */}
-      {isTransferModalOpen && selectedRecord && ReactDOM.createPortal(
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-lg max-w-md w-full">
-            <div className="flex justify-between items-center p-6 border-b">
-              <h2 className="text-xl font-bold text-gray-800">Transfer Cash to Admin</h2>
-              <button
-                onClick={() => setIsTransferModalOpen(false)}
-                className="text-gray-500 hover:text-gray-700 cursor-pointer"
-              >
-                <X size={24} />
-              </button>
-            </div>
-            
-            <form onSubmit={handleSubmitTransfer} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">MR Name</label>
-                <div className="p-3 bg-gray-50 rounded-lg font-medium">{selectedRecord.mrName}</div>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Available Cash
-                </label>
-                <div className="p-3 bg-blue-50 rounded-lg font-bold text-blue-700">
-                  {formatCurrency(selectedRecord.currentCash)}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Transfer Amount ($) <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    name="amount"
+                    value={transferForm.amount}
+                    onChange={handleTransferFormChange}
+                    min="0.01"
+                    max={selectedRecord.currentCash}
+                    step="0.01"
+                    className="w-full border px-3 py-2 rounded-lg"
+                    placeholder="Enter amount"
+                    required
+                  />
+                  <p className="text-sm text-gray-500 mt-1">
+                    Maximum: {formatCurrency(selectedRecord.currentCash)}
+                  </p>
                 </div>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Transfer Amount ($) <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="number"
-                  name="amount"
-                  value={transferForm.amount}
-                  onChange={handleTransferFormChange}
-                  min="0.01"
-                  max={selectedRecord.currentCash}
-                  step="0.01"
-                  className="w-full border px-3 py-2 rounded-lg"
-                  placeholder="Enter amount"
-                  required
-                />
-                <p className="text-sm text-gray-500 mt-1">
-                  Maximum: {formatCurrency(selectedRecord.currentCash)}
-                </p>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Transfer Notes
-                </label>
-                <textarea
-                  name="notes"
-                  value={transferForm.notes}
-                  onChange={handleTransferFormChange}
-                  rows="3"
-                  className="w-full border px-3 py-2 rounded-lg"
-                  placeholder="Reason for transfer..."
-                />
-              </div>
-              
-              <div className="flex justify-end gap-3 pt-4 border-t">
-                <button
-                  type="button"
-                  onClick={() => setIsTransferModalOpen(false)}
-                  className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg cursor-pointer"
-                  disabled={!transferForm.amount || parseFloat(transferForm.amount) > selectedRecord.currentCash}
-                >
-                  Transfer
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>,
-        document.body
-      )}
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Transfer Notes
+                  </label>
+                  <textarea
+                    name="notes"
+                    value={transferForm.notes}
+                    onChange={handleTransferFormChange}
+                    rows="3"
+                    className="w-full border px-3 py-2 rounded-lg"
+                    placeholder="Reason for transfer..."
+                  />
+                </div>
+
+                <div className="flex justify-end gap-3 pt-4 border-t">
+                  <button
+                    type="button"
+                    onClick={() => setIsTransferModalOpen(false)}
+                    className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg cursor-pointer"
+                    disabled={
+                      !transferForm.amount ||
+                      parseFloat(transferForm.amount) >
+                        selectedRecord.currentCash
+                    }
+                  >
+                    Transfer
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
