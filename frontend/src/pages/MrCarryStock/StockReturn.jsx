@@ -175,7 +175,7 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
         returnDate: returnDate.toISOString().split("T")[0],
         remarks: "",
       };
-
+      console.log("setReturnItems", returnItems);
       setReturnItems([...returnItems, item]);
       toast.success(`${selectedProduct.productName} added to return list`);
     }
@@ -250,7 +250,7 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
           },
         }
       );
-
+      
       if (response.data.success) {
         toast.success("Stock return created successfully!");
         onSuccess();
@@ -501,7 +501,7 @@ const StockReturn = () => {
           Authorization: `Bearer ${localStorage.getItem("token")}`,
         },
       });
-
+      console.log("response", response);
       if (response.data.success) {
         const data = response.data.data || [];
         setReturnsHistory(data);
@@ -742,6 +742,18 @@ const StockReturn = () => {
     });
   };
 
+  // Helper to get currentCash value from return item
+  const getCurrentCash = (returnItem) => {
+    // Try to get from mrCashDetails first, then from root level
+    return returnItem.mrCashDetails?.currentCash || returnItem.currentCash || 0;
+  };
+
+  // Check if currentCash is greater than 1000
+  const isCashAboveThreshold = (returnItem) => {
+    const currentCash = getCurrentCash(returnItem);
+    return currentCash > 1000;
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -822,11 +834,11 @@ const StockReturn = () => {
                     <span className="text-sm font-medium">MR Name</span>
                   </div>
                 </th>
-
                 <th className="p-3 text-sm font-medium">Return Date</th>
                 <th className="p-3 text-sm font-medium"># Products</th>
                 <th className="p-3 text-sm font-medium">Total Qty</th>
                 <th className="p-3 text-sm font-medium">Total Value</th>
+                <th className="p-3 text-sm font-medium">Current Cash</th>
                 <th className="p-3 text-sm font-medium">Status</th>
                 <th className="p-3 text-sm font-medium">Actions</th>
               </tr>
@@ -834,7 +846,7 @@ const StockReturn = () => {
             <tbody>
               {currentReturns.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="p-4 text-center text-gray-500">
+                  <td colSpan={9} className="p-4 text-center text-gray-500">
                     No returns found.
                   </td>
                 </tr>
@@ -847,6 +859,7 @@ const StockReturn = () => {
                       0
                     ) || 0;
                   const totalValue = returnItem.totalValue || 0;
+                  const currentCash = getCurrentCash(returnItem);
 
                   return (
                     <tr
@@ -890,6 +903,20 @@ const StockReturn = () => {
                       <td className="p-3">
                         <span className="font-medium text-green-700">
                           ${formatCurrency(totalValue)}
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        <span className={`font-medium ${
+                          currentCash > 1000 
+                            ? "text-green-700" 
+                            : "text-red-600"
+                        }`}>
+                          ${formatCurrency(currentCash)}
+                          {currentCash <= 1000 && (
+                            <span className="text-xs text-red-500 block mt-1">
+                              Below $1,000
+                            </span>
+                          )}
                         </span>
                       </td>
                       <td className="p-3">
@@ -1051,6 +1078,23 @@ const StockReturn = () => {
                       ${formatCurrency(selectedReturn.totalValue)}
                     </p>
                   </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">
+                      Current Cash
+                    </label>
+                    <p className={`border rounded-lg px-3 py-2 bg-gray-50 font-medium ${
+                      isCashAboveThreshold(selectedReturn) 
+                        ? "text-green-700" 
+                        : "text-red-600"
+                    }`}>
+                      ${formatCurrency(getCurrentCash(selectedReturn))}
+                      {!isCashAboveThreshold(selectedReturn) && (
+                        <span className="text-xs text-red-500 block mt-1">
+                          Must be above $1,000 to approve
+                        </span>
+                      )}
+                    </p>
+                  </div>
                   {selectedReturn.approvedAt && (
                     <div>
                       <label className="block text-sm font-medium mb-1">
@@ -1142,8 +1186,19 @@ const StockReturn = () => {
                       </button>
                       <button
                         onClick={() => handleStatusUpdate("Approved")}
-                        className="px-5 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                        disabled={!isCashAboveThreshold(selectedReturn)}
+                        className={`px-5 py-2 text-white rounded-lg flex items-center gap-2 ${
+                          isCashAboveThreshold(selectedReturn)
+                            ? "bg-green-600 hover:bg-green-700 cursor-pointer"
+                            : "bg-gray-400 cursor-not-allowed"
+                        }`}
+                        title={
+                          !isCashAboveThreshold(selectedReturn)
+                            ? "Current cash must be greater than $1,000 to approve"
+                            : ""
+                        }
                       >
+                        <CheckCircle size={18} />
                         Approve
                       </button>
                     </div>

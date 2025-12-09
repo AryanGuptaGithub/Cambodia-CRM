@@ -1321,45 +1321,48 @@ async function seedHTabs() {
   const count = await HTab.countDocuments();
 }
 
-async function seedMRCashes() {
+async function seedMRCash() {
   try {
-    await MRCash.deleteMany({});
+    const deleteResult = await MRCash.deleteMany({});
+    const staffList = await Staff.find({});
 
-    // First, get some MRs from the staff collection
-    const MRStaff = await mongoose.connection.db
-      .collection("staffs")
-      .find({ role: "mr" })
-      .limit(10)
-      .toArray();
+    const mrStaffList = staffList.filter((staff) => {
+      const role = staff.role || staff.staffRole || staff.position;
+      return !role || role.toLowerCase().includes("mr") || role === "";
+    });
 
-    if (MRStaff.length === 0) {
-      console.log("⚠️ No MR staff found to seed MR Cash data");
-      return;
+    if (!mrStaffList.length) {
+      mrStaffList = staffList;
     }
 
-    const mrCashes = MRStaff.map((mr, index) => ({
-      mrId: mr._id,
-      mrName: mr.medicalRepName || mr.employeeName || `MR ${index + 1}`,
-      currentCash: Math.floor(Math.random() * 5000) + 1000, // Random cash between 1000-6000
-      cashTransferredToAdmin: Math.floor(Math.random() * 3000), // Random transferred amount 0-3000
-      lastTransferDate: new Date(
-        Date.now() - Math.floor(Math.random() * 30) * 24 * 60 * 60 * 1000
-      ), // Random date within last 30 days
-      notes:
-        index % 3 === 0
-          ? "Active MR"
-          : index % 3 === 1
-          ? "Senior MR"
-          : "New MR",
-      isActive: true,
-      createdBy: new mongoose.Types.ObjectId(), // Mock user ID
-      updatedBy: new mongoose.Types.ObjectId(), // Mock user ID
-    }));
+    const mrCashDocs = mrStaffList.map((staff) => {
+      const name =
+        staff.medicalRepName ||
+        staff.name ||
+        staff.employeeName ||
+        staff.fullName ||
+        `MR ${staff.MRId || staff._id.toString().slice(-4)}`;
 
-    await MRCash.insertMany(mrCashes);
-    console.log(`✅ Seeded ${mrCashes.length} MR Cash records`);
+      const createdById =
+        staff.userId || staff.createdBy || new mongoose.Types.ObjectId();
+
+      return {
+        mrId: staff._id,
+        mrName: name,
+        currentCash: 1000,
+        cashTransferredToAdmin: 100,
+        lastTransferDate: new Date(),
+        notes: `Team: ${staff.teamName || "N/A"}, MR ID: ${
+          staff.MRId || "N/A"
+        }`,
+        isActive: staff.isActive !== false, // Default to true if not set
+        createdBy: createdById,
+        updatedBy: createdById,
+      };
+    });
+    const result = await MRCash.insertMany(mrCashDocs);
   } catch (error) {
-    console.error("❌ Error seeding MR Cash data:", error);
+    console.error("❌ Error seeding MRCash:", error.message);
   }
 }
 // Run all seeders in order
@@ -1380,7 +1383,7 @@ async function runSeeders() {
     await seedProductPackingTypes();
     await seedAllowanceTypes(); // Add allowance types seeding
     await seedHTabs();
-    await seedMRCashes();
+    await seedMRCash();
   } catch (error) {
     console.error("❌ Seeding error:", error);
   } finally {

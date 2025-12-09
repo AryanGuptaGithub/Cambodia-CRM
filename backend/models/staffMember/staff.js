@@ -8,6 +8,7 @@ const counterSchema = new mongoose.Schema({
 
 const Counter = mongoose.model("Counter", counterSchema);
 
+// Staff / MR schema
 const staffSchema = new mongoose.Schema(
   {
     MRId: { type: Number, unique: true },
@@ -24,11 +25,17 @@ const staffSchema = new mongoose.Schema(
       sparse: true
     },
     date: { type: Date, required: true },
-
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User"
-    }
+    },
+    products: [
+      {
+        productId: String,
+        boxQuantity: Number,
+        updatedAt: Date,
+      }
+    ]
   },
   { timestamps: true }
 );
@@ -38,7 +45,7 @@ staffSchema.pre("save", async function (next) {
   if (this.isNew) {
     try {
       const counter = await Counter.findByIdAndUpdate(
-        { _id: "staffMRId" },
+        "staffMRId",         // use string ID directly
         { $inc: { seq: 1 } },
         { new: true, upsert: true }
       );
@@ -52,4 +59,7 @@ staffSchema.pre("save", async function (next) {
   }
 });
 
-export default mongoose.model("Staff", staffSchema);
+// Important: Export model as "MR" to match StockReturn ref
+const MR = mongoose.model("MR", staffSchema);
+
+export default MR;

@@ -39,9 +39,19 @@ const mRCashSchema = new mongoose.Schema({
   isActive: {
     type: Boolean,
     default: true,
-  }
+  },
+  // Add transfer history
+  transferHistory: [{
+    amount: Number,
+    transferDate: Date,
+    notes: String,
+    transferredBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User"
+    }
+  }]
 }, {
-  timestamps: true, // This will add createdAt and updatedAt automatically
+  timestamps: true,
   toJSON: { virtuals: true },
   toObject: { virtuals: true }
 });
@@ -50,36 +60,61 @@ const mRCashSchema = new mongoose.Schema({
 mRCashSchema.index({ mrId: 1 });
 mRCashSchema.index({ mrName: 1 });
 mRCashSchema.index({ isActive: 1 });
+mRCashSchema.index({ currentCash: -1 });
 
 // Virtual for total cash (current cash + transferred)
 mRCashSchema.virtual("totalCash").get(function() {
   return this.currentCash + this.cashTransferredToAdmin;
 });
 
-// Method to add cash
-mRCashSchema.methods.addCash = function(amount) {
-  if (amount <= 0) {
-    throw new Error("Amount must be positive");
-  }
-  this.currentCash += amount;
-  return this.save();
-};
-
 // Method to transfer cash to admin
-mRCashSchema.methods.transferToAdmin = function(amount) {
+mRCashSchema.methods.transferToAdmin = async function(amount, notes = "", userId = null) {
   if (amount <= 0) {
-    throw new Error("Amount must be positive");
+    throw new Error("Transfer amount must be positive");
   }
   if (amount > this.currentCash) {
-    throw new Error("Insufficient cash available");
+    throw new Error(`Insufficient cash available. Available: ${this.currentCash}, Requested: ${amount}`);
   }
   
+  // Update cash values
   this.currentCash -= amount;
   this.cashTransferredToAdmin += amount;
   this.lastTransferDate = new Date();
   
-  return this.save();
+  // Add to transfer history
+  this.transferHistory.push({
+    amount: amount,
+    transferDate: new Date(),
+    notes: notes,
+    transferredBy: userId || this.updatedBy
+  });
+  
+  // Update updatedBy if userId provided
+  if (userId) {
+    this.updatedBy = userId;
+  }
+  
+  return await this.save();
 };
 
-const MRCash = mongoose.model("MRCash", mRCashSchema);
+// Method to add cash
+mRCashSchema.methods.addCash = async function(amount, notes = "", userId = null) {
+  if (amount <= 0) {
+    throw new Error("Amount must be positive");
+  }
+  
+  this.currentCash += amount;
+  
+  if (notes) {
+    this.notes = notes;
+  }
+  
+  if (userId) {
+    this.updatedBy = userId;
+  }
+  
+  return await this.save();
+};
+
+const MRCash = mongoose.model("MRCashes", mRCashSchema);
 export default MRCash;

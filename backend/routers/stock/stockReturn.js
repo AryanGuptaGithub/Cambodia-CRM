@@ -2,7 +2,8 @@ import express from "express";
 import mongoose from "mongoose";
 import StockReturn from "../../models/stock/StockReturn.js";
 import StockInMrHand from "../../models/stock/StockInMRHand.js";
-import MR from "../../models/stock/stockTransferToMR.js";
+import MRCash from "../../models/accounts/MRCash.js";
+
 
 const router = express.Router();
 
@@ -24,9 +25,45 @@ const generateReturnId = async () => {
   return `${prefix}${year}${month}${sequence.toString().padStart(4, "0")}`;
 };
 
-/* ==========================================================================
-   🔹 GET: All Stock Returns
-   ========================================================================== */
+// -----------------------------
+// 🔥 FUNCTION: CLEAN USER INPUT
+// -----------------------------
+const cleanString = (str) => {
+  if (!str) return "";
+  return str
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/[^a-zA-Z0-9 ]/g, "")
+    .toLowerCase();
+};
+
+// ----------------------------------------------
+// 🔥 FUNCTION: FIND MR DATA WITH FALLBACK LOGIC
+const findMR = async (returnItem) => {
+  const mrName = returnItem.mrName?.trim();
+
+  if (!mrName) {
+    return null;
+  }
+
+  let mrCashData = null;
+
+  try {
+    // Case-insensitive exact or partial match
+    const regex = new RegExp(mrName, "i");
+    mrCashData = await MRCash.findOne({
+      mrName: mrName,
+      isActive: true,
+    })
+      .select("currentCash")
+      .lean();
+  } catch (err) {
+    console.error("Try 1 Error:", err);
+  }
+
+  return mrCashData;
+};
+
 router.get("/stock-returns", async (req, res) => {
   try {
     const {
@@ -43,6 +80,7 @@ router.get("/stock-returns", async (req, res) => {
 
     const query = { isDeleted: false };
 
+    // Search filter
     if (search) {
       query.$or = [
         { returnId: { $regex: search, $options: "i" } },
@@ -51,41 +89,67 @@ router.get("/stock-returns", async (req, res) => {
       ];
     }
 
+    // MR Code filter
     if (mrCode) {
       query.mrCode = mrCode;
     }
 
+    // Status filter
     if (status) {
       query.status = status;
     }
 
+    // Date range filter
     if (startDate || endDate) {
       query.returnDate = {};
-      if (startDate) {
-        query.returnDate.$gte = new Date(startDate);
-      }
-      if (endDate) {
-        query.returnDate.$lte = new Date(endDate);
-      }
+      if (startDate) query.returnDate.$gte = new Date(startDate);
+      if (endDate) query.returnDate.$lte = new Date(endDate);
     }
 
+    // Sorting options
     const sortOptions = {};
     sortOptions[sortBy] = sortOrder === "desc" ? -1 : 1;
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
+    // Fetch stock returns
     const stockReturns = await StockReturn.find(query)
       .sort(sortOptions)
       .skip(skip)
       .limit(parseInt(limit))
       .populate("createdBy", "name email")
-      .populate("approvedBy", "name email");
+      .populate("approvedBy", "name email")
+      .lean();
+
+    // -------------------------------------------------
+    // 🔥 Enhance all return items with MR Cash details
+    // -------------------------------------------------
+    const enhancedReturns = await Promise.all(
+      stockReturns.map(async (item) => {
+        try {
+          const mrCashData = await findMR(item);
+
+          return {
+            ...item,
+            currentCash: mrCashData?.currentCash || 0,
+            mrCashDetails: mrCashData || null,
+          };
+        } catch (err) {
+          console.error("Error enhancing MR data:", err);
+          return {
+            ...item,
+            currentCash: 0,
+            mrCashDetails: null,
+          };
+        }
+      })
+    );
 
     const total = await StockReturn.countDocuments(query);
 
     return res.status(200).json({
       success: true,
-      data: stockReturns,
+      data: enhancedReturns,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -94,6 +158,7 @@ router.get("/stock-returns", async (req, res) => {
       },
     });
   } catch (error) {
+    console.error("Error fetching stock returns:", error);
     return res.status(500).json({
       success: false,
       message: "Failed to fetch stock returns",
@@ -102,9 +167,6 @@ router.get("/stock-returns", async (req, res) => {
   }
 });
 
-/* ==========================================================================
-   🔹 GET: Stock Return by ID
-   ========================================================================== */
 router.get("/stock-returns/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -122,7 +184,8 @@ router.get("/stock-returns/:id", async (req, res) => {
     })
       .populate("createdBy", "name email")
       .populate("approvedBy", "name email")
-      .populate("items.stockRecordId");
+      .populate("items.stockRecordId")
+      .lean();
 
     if (!stockReturn) {
       return res.status(404).json({
@@ -131,11 +194,21 @@ router.get("/stock-returns/:id", async (req, res) => {
       });
     }
 
+    // Get MR data using the findMR function
+    const mrCashData = await findMR(stockReturn);
+
+    const enhancedReturn = {
+      ...stockReturn,
+      currentCash: mrCashData?.currentCash || 0,
+      mrDetails: mrCashData,
+    };
+
     return res.status(200).json({
       success: true,
-      data: stockReturn,
+      data: enhancedReturn,
     });
   } catch (error) {
+    console.error("Error fetching stock return:", error);
     return res.status(500).json({
       success: false,
       message: "Failed to fetch stock return",
@@ -144,9 +217,6 @@ router.get("/stock-returns/:id", async (req, res) => {
   }
 });
 
-/* ==========================================================================
-   🔹 PUT: Update Stock Return Status
-   ========================================================================== */
 router.put("/stock-returns/:id/status", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -174,7 +244,9 @@ router.put("/stock-returns/:id/status", async (req, res) => {
     const stockReturn = await StockReturn.findOne({
       _id: id,
       isDeleted: false,
-    }).session(session);
+    })
+      .populate("mrId")
+      .session(session);
 
     if (!stockReturn) {
       await session.abortTransaction();
@@ -184,9 +256,11 @@ router.put("/stock-returns/:id/status", async (req, res) => {
       });
     }
 
-    if (status === "Rejected" && stockReturn.status !== "Rejected") {
-      const stockUpdates = [];
+    const previousStatus = stockReturn.status;
 
+    const stockUpdates = [];
+    const mrUpdates = [];
+    if (status === "Rejected" && previousStatus !== "Rejected") {
       for (const item of stockReturn.items) {
         stockUpdates.push({
           updateOne: {
@@ -197,16 +271,28 @@ router.put("/stock-returns/:id/status", async (req, res) => {
             },
           },
         });
-      }
 
-      if (stockUpdates.length > 0) {
-        await StockInMrHand.bulkWrite(stockUpdates, { session });
+        if (previousStatus === "Approved") {
+          mrUpdates.push({
+            updateOne: {
+              filter: {
+                _id: stockReturn.mrId,
+                "products.productId": item.productId,
+              },
+              update: {
+                $inc: { "products.$.boxQuantity": item.returnQty },
+                $set: {
+                  "products.$.updatedAt": new Date(),
+                  updatedAt: new Date(),
+                },
+              },
+            },
+          });
+        }
       }
     }
 
-    if (status === "Approved" && stockReturn.status === "Rejected") {
-      const stockUpdates = [];
-
+    if (status === "Approved" && previousStatus === "Rejected") {
       for (const item of stockReturn.items) {
         stockUpdates.push({
           updateOne: {
@@ -217,13 +303,56 @@ router.put("/stock-returns/:id/status", async (req, res) => {
             },
           },
         });
-      }
 
-      if (stockUpdates.length > 0) {
-        await StockInMrHand.bulkWrite(stockUpdates, { session });
+        mrUpdates.push({
+          updateOne: {
+            filter: {
+              _id: stockReturn.mrId,
+              "products.productId": item.productId,
+            },
+            update: {
+              $inc: { "products.$.boxQuantity": -item.returnQty },
+              $set: {
+                "products.$.updatedAt": new Date(),
+                updatedAt: new Date(),
+              },
+            },
+          },
+        });
       }
     }
 
+    if (status === "Approved" && previousStatus === "Pending") {
+      for (const item of stockReturn.items) {
+        mrUpdates.push({
+          updateOne: {
+            filter: {
+              _id: stockReturn.mrId,
+              "products.productId": item.productId,
+            },
+            update: {
+              $inc: { "products.$.boxQuantity": -item.returnQty },
+              $set: {
+                "products.$.updatedAt": new Date(),
+                updatedAt: new Date(),
+              },
+            },
+          },
+        });
+      }
+    }
+
+    if (stockUpdates.length > 0) {
+      await StockInMrHand.bulkWrite(stockUpdates, { session });
+    }
+
+    if (mrUpdates.length > 0) {
+      await MR.bulkWrite(mrUpdates, { session });
+    }
+
+    // =============================
+    // UPDATE STATUS
+    // =============================
     stockReturn.status = status;
 
     if (status === "Approved") {
@@ -232,8 +361,8 @@ router.put("/stock-returns/:id/status", async (req, res) => {
       stockReturn.rejectedReason = undefined;
     }
 
-    if (status === "Rejected" && rejectedReason) {
-      stockReturn.rejectedReason = rejectedReason;
+    if (status === "Rejected") {
+      stockReturn.rejectedReason = rejectedReason || "No reason provided";
     }
 
     await stockReturn.save({ session });
@@ -242,16 +371,31 @@ router.put("/stock-returns/:id/status", async (req, res) => {
 
     const updatedReturn = await StockReturn.findById(id)
       .populate("createdBy", "name email")
-      .populate("approvedBy", "name email");
+      .populate("approvedBy", "name email")
+      .populate("mrId")
+      .lean();
+
+    const updatedMR = await MR.findById(stockReturn.mrId).lean();
+
+    const mrCashData = await findMR(updatedReturn);
 
     return res.status(200).json({
       success: true,
       message: `Stock return ${status.toLowerCase()} successfully`,
-      data: updatedReturn,
+      data: {
+        ...updatedReturn,
+        currentCash: mrCashData?.currentCash || 0,
+        mrDetails: {
+          ...mrCashData,
+          mrData: updatedMR,
+        },
+      },
     });
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
+
+    console.error("Error updating stock return status:", error);
 
     return res.status(500).json({
       success: false,
@@ -261,9 +405,6 @@ router.put("/stock-returns/:id/status", async (req, res) => {
   }
 });
 
-/* ==========================================================================
-   🔹 DELETE: Single Stock Return
-   ========================================================================== */
 router.delete("/stock-returns/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -340,9 +481,6 @@ router.delete("/stock-returns/:id", async (req, res) => {
   }
 });
 
-/* ==========================================================================
-   🔹 DELETE: Multiple Stock Returns
-   ========================================================================== */
 router.delete("/stock-returns/bulk", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -437,9 +575,6 @@ router.delete("/stock-returns/bulk", async (req, res) => {
   }
 });
 
-/* ==========================================================================
-   🔹 GET: MR's Available Stock for Return
-   ========================================================================== */
 router.get("/mr-stock/:mrName", async (req, res) => {
   try {
     const { mrName } = req.params;
@@ -500,9 +635,6 @@ router.get("/mr-stock/:mrName", async (req, res) => {
   }
 });
 
-/* ==========================================================================
-   🔹 GET: Stock Return Statistics
-   ========================================================================== */
 router.get("/stock-returns/statistics", async (req, res) => {
   try {
     const { mrCode, startDate, endDate } = req.query;
@@ -595,9 +727,6 @@ router.get("/stock-returns/statistics", async (req, res) => {
   }
 });
 
-/* ==========================================================================
-   🔹 POST: Create New Stock Return
-   ========================================================================== */
 router.post("/stock-returns", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();

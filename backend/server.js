@@ -58,6 +58,7 @@ import payrollExport from "./routers/hrm/payrollExport.js";
 import leaves from './routers/hrm/Leave.js';
 import stockTransferToMR from "./routers/stock/stockTransferToMRRoutes.js";
 import StockReturn from "./routers/stock/stockReturn.js";
+import mrCash from "./routers/accounts/mrCashRoutes.js";
 
 
 dotenv.config();
@@ -144,6 +145,7 @@ app.use("/api",leaves);
 app.use("/api", stockTransferToMR);
 app.use("/api", stockTransfer);
 app.use("/api", StockReturn);
+app.use("/api", mrCash);
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);

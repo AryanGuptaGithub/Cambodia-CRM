@@ -1,30 +1,13 @@
-import React, {
-  useState,
-  useEffect,
-  useMemo,
-  useCallback,
-  useRef,
-} from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import ReactDOM from "react-dom";
 import {
   Plus,
   Search,
   Eye,
-  Edit,
-  Trash2,
   X,
-  Users,
   DollarSign,
-  RefreshCw,
-  Download,
-  Filter,
-  ChevronDown,
-  ChevronUp,
-  User,
-  Phone,
-  Mail,
-  Calendar,
   TrendingUp,
+  History,
 } from "lucide-react";
 import axios from "axios";
 import { format } from "date-fns";
@@ -37,25 +20,37 @@ const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
 function MRCash() {
   const [mrCashes, setMrCashes] = useState([]);
+  const [allMRCashes, setAllMRCashes] = useState([]); // Store all data
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
+  const [activeTab, setActiveTab] = useState("carry");
+
+  // Totals from backend
+  const [totals, setTotals] = useState({
+    totalCurrentCash: 0,
+    totalTransferred: 0,
+    totalAll: 0,
+  });
 
   // Modal states
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState(null);
+  const [selectedMRCash, setSelectedMRCash] = useState(null);
+
+  // Transfer history state
+  const [transferHistory, setTransferHistory] = useState([]);
+  const [transferHistoryLoading, setTransferHistoryLoading] = useState(false);
 
   // Form states
   const [formData, setFormData] = useState({
-    mrId: "",
-    currentCash: "",
-    cashTransferredToAdmin: "",
+    mrCashId: "",
+    transferAmount: "",
     notes: "",
   });
 
@@ -67,12 +62,6 @@ function MRCash() {
   // MR List for dropdown
   const [mrList, setMrList] = useState([]);
   const [mrListLoading, setMrListLoading] = useState(false);
-
-  // Sorting
-  const [sortConfig, setSortConfig] = useState({
-    field: "createdAt",
-    direction: "desc",
-  });
 
   const inputRef = useRef(null);
 
@@ -102,7 +91,7 @@ function MRCash() {
     try {
       setMrListLoading(true);
       const response = await axios.get(
-        `${backendUrl}/api/accounts/mrcash/mr-list`
+        `${backendUrl}/api/mrcash/mr-list-with-cash`
       );
       if (response.data.success) {
         setMrList(response.data.data || []);
@@ -115,108 +104,153 @@ function MRCash() {
     }
   }, []);
 
-  // Fetch MR Cash records
-  const fetchMRCashes = useCallback(
-    async (page = 1) => {
-      try {
-        setLoading(true);
-        setError(null);
-
-        const params = {
-          page,
-          limit: ITEMS_PER_PAGE,
-          search: searchTerm,
-          sortBy: sortConfig.field,
-          sortOrder: sortConfig.direction,
-        };
-
-        const response = await axios.get(`${backendUrl}/api/accounts/mrcash`, {
-          params,
-        });
-
-        if (response.data.success) {
-          setMrCashes(response.data.data || []);
-          setTotalPages(response.data.pagination?.pages || 1);
-          setTotalCount(response.data.pagination?.total || 0);
-        } else {
-          throw new Error(response.data.message || "Failed to fetch data");
+  // Fetch transfer history for a specific MR
+  const fetchTransferHistory = useCallback(async (mrCashId) => {
+    try {
+      setTransferHistoryLoading(true);
+      const response = await axios.get(
+        `${backendUrl}/api/mrcash/${mrCashId}/transfers`,
+        {
+          params: {
+            limit: 30,
+            page: 1,
+          },
         }
-      } catch (error) {
-        setError(
-          error.response?.data?.message ||
-            error.message ||
-            "Failed to load MR Cash data"
-        );
-        showToast("error", "Failed to load MR Cash data");
-      } finally {
-        setLoading(false);
+      );
+      if (response.data.success) {
+        setTransferHistory(response.data.data || []);
       }
-    },
-    [searchTerm, sortConfig]
-  );
+    } catch (error) {
+      console.error("Error fetching transfer history:", error);
+      showToast("error", "Failed to load transfer history");
+      setTransferHistory([]);
+    } finally {
+      setTransferHistoryLoading(false);
+    }
+  }, []);
+
+  // Fetch all MR Cash records (no pagination from backend)
+  const fetchAllMRCashes = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const response = await axios.get(`${backendUrl}/api/mrcash`, {
+        params: {
+          limit: 1000, // Get all records in one request
+          page: 1,
+        },
+      });
+
+      if (response.data.success) {
+        const allData = response.data.data || [];
+        setAllMRCashes(allData); // Store all data
+
+        // Set totals from backend
+        setTotals(
+          response.data.totals || {
+            totalCurrentCash: 0,
+            totalTransferred: 0,
+            totalAll: 0,
+          }
+        );
+
+        // Apply initial filter and pagination
+        filterAndPaginateData(allData, currentPage, activeTab, searchTerm);
+      } else {
+        throw new Error(response.data.message || "Failed to fetch data");
+      }
+    } catch (error) {
+      setError(
+        error.response?.data?.message ||
+          error.message ||
+          "Failed to load MR Cash data"
+      );
+      showToast("error", "Failed to load MR Cash data");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Filter and paginate data locally
+  const filterAndPaginateData = (data, page, tab, search = "") => {
+    // Apply search filter
+    let filteredData = data;
+    if (search) {
+      filteredData = data.filter(
+        (record) =>
+          record.mrName?.toLowerCase().includes(search.toLowerCase()) ||
+          record.notes?.toLowerCase().includes(search.toLowerCase())
+      );
+    }
+
+    // Apply tab filter
+    if (tab === "carry") {
+      filteredData = filteredData.filter((record) => record.currentCash > 0);
+    } else {
+      filteredData = filteredData.filter(
+        (record) => record.cashTransferredToAdmin > 0
+      );
+    }
+
+    // Calculate pagination
+    const total = filteredData.length;
+    const totalPages = Math.ceil(total / ITEMS_PER_PAGE);
+    const startIndex = (page - 1) * ITEMS_PER_PAGE;
+    const endIndex = startIndex + ITEMS_PER_PAGE;
+    const paginatedData = filteredData.slice(startIndex, endIndex);
+
+    // Update state
+    setMrCashes(paginatedData);
+    setTotalCount(total);
+    setTotalPages(totalPages);
+  };
+
+  // Handle tab change
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+    setCurrentPage(1);
+    filterAndPaginateData(allMRCashes, 1, tab, searchTerm);
+  };
+
+  // Handle search
+  const handleSearch = useCallback(() => {
+    setCurrentPage(1);
+    filterAndPaginateData(allMRCashes, 1, activeTab, searchTerm);
+  }, [allMRCashes, activeTab, searchTerm]);
 
   // Initial load
   useEffect(() => {
-    fetchMRCashes(currentPage);
+    fetchAllMRCashes();
     fetchMRList();
-  }, [currentPage, fetchMRCashes, fetchMRList]);
+  }, [fetchAllMRCashes, fetchMRList]);
 
   // Handle search with debounce
   useEffect(() => {
     const timer = setTimeout(() => {
-      setCurrentPage(1);
-      fetchMRCashes(1);
+      handleSearch();
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [searchTerm, fetchMRCashes]);
+  }, [searchTerm, handleSearch]);
 
-  // Handle sort
-  const handleSort = (field) => {
-    setSortConfig((prev) => ({
-      field,
-      direction:
-        prev.field === field && prev.direction === "asc" ? "desc" : "asc",
-    }));
-  };
-
-  // Handle add new MR Cash
+  // Handle add new MR Cash transfer
   const handleAdd = () => {
     setFormData({
-      mrId: "",
-      currentCash: "",
-      cashTransferredToAdmin: "",
+      mrCashId: "",
+      transferAmount: "",
       notes: "",
     });
+    setSelectedMRCash(null);
     setIsAddModalOpen(true);
+    fetchMRList();
   };
 
   // Handle view details
-  const handleView = (record) => {
+  const handleView = async (record) => {
     setSelectedRecord(record);
     setIsViewModalOpen(true);
-  };
-
-  // Handle edit
-  const handleEdit = (record) => {
-    setSelectedRecord(record);
-    setFormData({
-      mrId: record.mrId?._id || record.mrId,
-      currentCash: record.currentCash,
-      cashTransferredToAdmin: record.cashTransferredToAdmin,
-      notes: record.notes || "",
-    });
-    setIsEditModalOpen(true);
-  };
-
-  // Handle transfer cash
-  const handleTransfer = (record) => {
-    setSelectedRecord(record);
-    setTransferForm({
-      amount: "",
-      notes: "",
-    });
-    setIsTransferModalOpen(true);
+    await fetchTransferHistory(record._id);
   };
 
   // Handle delete
@@ -231,9 +265,10 @@ function MRCash() {
 
     if (confirm.isConfirmed) {
       try {
-        await axios.delete(`${backendUrl}/api/accounts/mrcash/${record._id}`);
+        await axios.delete(`${backendUrl}/api/mrcash/${record._id}`);
         showToast("success", "MR Cash record deleted successfully");
-        fetchMRCashes(currentPage);
+        fetchAllMRCashes();
+        fetchMRList();
       } catch (error) {
         showToast(
           "error",
@@ -243,9 +278,25 @@ function MRCash() {
     }
   };
 
-  // Handle form input changes
+  // Handle form input changes for Add Modal
   const handleFormChange = (e) => {
     const { name, value } = e.target;
+
+    if (name === "transferAmount" && selectedMRCash) {
+      const maxAmount = selectedMRCash.currentCash || 0;
+      const inputAmount = parseFloat(value) || 0;
+
+      if (inputAmount > maxAmount) {
+        showToast(
+          "error",
+          `Cannot transfer more than available cash (${formatCurrency(
+            maxAmount
+          )})`
+        );
+        return;
+      }
+    }
+
     setFormData((prev) => ({
       ...prev,
       [name]: value,
@@ -261,110 +312,142 @@ function MRCash() {
     }));
   };
 
-  // Handle MR selection
+  // Handle MR selection in Add Modal
   const handleMRSelect = (value) => {
     const selectedMR = mrList.find((mr) => mr.value === value);
-    setFormData((prev) => ({
-      ...prev,
-      mrId: value,
-      mrName: selectedMR?.label || "",
-    }));
+    if (selectedMR) {
+      setSelectedMRCash(selectedMR);
+      setFormData((prev) => ({
+        ...prev,
+        mrCashId: value,
+        transferAmount:
+          selectedMR.currentCash > 0 ? selectedMR.currentCash.toString() : "0",
+        notes: "",
+      }));
+    }
   };
 
-  // Submit add form
-  const handleSubmitAdd = async (e) => {
+  // Submit add form (for transferring cash to admin)
+  const handleSubmitTransferToAdmin = async (e) => {
     e.preventDefault();
+
+    if (
+      !formData.mrCashId ||
+      !formData.transferAmount ||
+      parseFloat(formData.transferAmount) <= 0
+    ) {
+      showToast(
+        "error",
+        "Please select an MR and enter a valid transfer amount"
+      );
+      return;
+    }
+
+    const selectedMR = mrList.find((mr) => mr.value === formData.mrCashId);
+    const transferAmount = parseFloat(formData.transferAmount);
+
+    if (selectedMR && transferAmount > selectedMR.currentCash) {
+      showToast(
+        "error",
+        `Insufficient cash available. Available: ${formatCurrency(
+          selectedMR.currentCash
+        )}, Requested: ${formatCurrency(transferAmount)}`
+      );
+      return;
+    }
 
     try {
       const response = await axios.post(
-        `${backendUrl}/api/accounts/mrcash`,
-        formData
+        `${backendUrl}/api/mrcash/${formData.mrCashId}/transfer`,
+        {
+          amount: transferAmount,
+          notes: formData.notes,
+        }
       );
 
       if (response.data.success) {
-        showToast("success", "MR Cash record created successfully");
+        showToast("success", "Cash transferred to admin successfully");
         setIsAddModalOpen(false);
-        fetchMRCashes(currentPage);
-        fetchMRList(); // Refresh MR list
+        // Reset form
+        setFormData({
+          mrCashId: "",
+          transferAmount: "",
+          notes: "",
+        });
+        setSelectedMRCash(null);
+        // Refresh data
+        fetchAllMRCashes();
+        fetchMRList();
       }
     } catch (error) {
+      console.error("Transfer error:", error);
       showToast(
         "error",
-        error.response?.data?.message || "Failed to create record"
+        error.response?.data?.message ||
+          error.message ||
+          "Failed to transfer cash"
       );
     }
   };
 
-  // Submit edit form
-  const handleSubmitEdit = async (e) => {
-    e.preventDefault();
-
-    try {
-      const response = await axios.put(
-        `${backendUrl}/api/accounts/mrcash/${selectedRecord._id}`,
-        formData
-      );
-
-      if (response.data.success) {
-        showToast("success", "MR Cash record updated successfully");
-        setIsEditModalOpen(false);
-        fetchMRCashes(currentPage);
-      }
-    } catch (error) {
-      showToast(
-        "error",
-        error.response?.data?.message || "Failed to update record"
-      );
-    }
-  };
-
-  // Submit transfer form
+  // Submit transfer form (from table row)
   const handleSubmitTransfer = async (e) => {
     e.preventDefault();
 
+    const transferAmount = parseFloat(transferForm.amount);
+
+    if (transferAmount > selectedRecord.currentCash) {
+      showToast(
+        "error",
+        `Insufficient cash available. Available: ${formatCurrency(
+          selectedRecord.currentCash
+        )}, Requested: ${formatCurrency(transferAmount)}`
+      );
+      return;
+    }
+
     try {
       const response = await axios.post(
-        `${backendUrl}/api/accounts/mrcash/${selectedRecord._id}/transfer`,
-        transferForm
+        `${backendUrl}/api/mrcash/${selectedRecord._id}/transfer`,
+        {
+          amount: transferAmount,
+          notes: transferForm.notes,
+        }
       );
 
       if (response.data.success) {
         showToast("success", "Cash transferred to admin successfully");
         setIsTransferModalOpen(false);
-        fetchMRCashes(currentPage);
+        setTransferForm({ amount: "", notes: "" });
+        // Refresh data
+        fetchAllMRCashes();
+        fetchMRList();
       }
     } catch (error) {
+      console.error("Transfer error:", error);
       showToast(
         "error",
-        error.response?.data?.message || "Failed to transfer cash"
+        error.response?.data?.message ||
+          error.message ||
+          "Failed to transfer cash"
       );
     }
   };
 
-  // Calculate totals
-  const totals = useMemo(() => {
-    return mrCashes.reduce(
-      (acc, record) => ({
-        currentCash: acc.currentCash + (record.currentCash || 0),
-        transferred: acc.transferred + (record.cashTransferredToAdmin || 0),
-        total:
-          acc.total +
-          ((record.currentCash || 0) + (record.cashTransferredToAdmin || 0)),
-      }),
-      { currentCash: 0, transferred: 0, total: 0 }
-    );
-  }, [mrCashes]);
+  // Handle opening transfer modal from table
+  const handleOpenTransferModal = (record) => {
+    setSelectedRecord(record);
+    setTransferForm({
+      amount: record.currentCash > 0 ? record.currentCash.toString() : "0",
+      notes: "",
+    });
+    setIsTransferModalOpen(true);
+  };
 
-  // Render sort icon
-  const renderSortIcon = (field) => {
-    if (sortConfig.field !== field) {
-      return <ChevronDown className="w-4 h-4 opacity-50" />;
-    }
-    return sortConfig.direction === "asc" ? (
-      <ChevronUp className="w-4 h-4" />
-    ) : (
-      <ChevronDown className="w-4 h-4" />
-    );
+  // Handle page change
+  const handlePageChange = (newPage) => {
+    setCurrentPage(newPage);
+    filterAndPaginateData(allMRCashes, newPage, activeTab, searchTerm);
   };
 
   if (loading && mrCashes.length === 0) {
@@ -386,21 +469,30 @@ function MRCash() {
       {/* Header */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">
-            MR Cash Management
-          </h1>
-          <p className="text-gray-600">
-            Manage MR cash balances and transfers to admin
-          </p>
-        </div>
-
-        <div className="flex gap-3">
           <button
             onClick={handleAdd}
             className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg shadow-md cursor-pointer"
           >
-            <Plus size={18} /> Add New MR Cash
+            <TrendingUp size={18} /> Transfer Cash to Admin
           </button>
+        </div>
+
+        <div className="flex gap-3">
+          <div className="relative w-full lg:w-80">
+            <Search
+              className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+              size={18}
+              onClick={() => inputRef.current?.focus()}
+            />
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Search by MR name or notes..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-200 focus:border-blue-400 outline-none"
+            />
+          </div>
         </div>
       </div>
 
@@ -415,16 +507,19 @@ function MRCash() {
       )}
 
       {/* Totals Summary */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <div className="bg-white p-4 rounded-lg shadow border border-gray-200">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-blue-100 rounded-lg">
               <DollarSign className="w-6 h-6 text-blue-600" />
             </div>
             <div>
-              <p className="text-sm text-gray-600">Current Cash Balance</p>
+              <p className="text-sm text-gray-600">All MR Carry Current Cash</p>
               <p className="text-2xl font-bold text-blue-700">
-                {formatCurrency(totals.currentCash)}
+                {formatCurrency(totals.totalCurrentCash)}
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                Sum of all MRs' current cash
               </p>
             </div>
           </div>
@@ -436,52 +531,73 @@ function MRCash() {
               <TrendingUp className="w-6 h-6 text-green-600" />
             </div>
             <div>
-              <p className="text-sm text-gray-600">Transferred to Admin</p>
-              <p className="text-2xl font-bold text-green-700">
-                {formatCurrency(totals.transferred)}
+              <p className="text-sm text-gray-600">
+                Total Transferred to Admin (All MRs)
               </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white p-4 rounded-lg shadow border border-gray-200">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-purple-100 rounded-lg">
-              <DollarSign className="w-6 h-6 text-purple-600" />
-            </div>
-            <div>
-              <p className="text-sm text-gray-600">Total Cash Managed</p>
-              <p className="text-2xl font-bold text-purple-700">
-                {formatCurrency(totals.total)}
+              <p className="text-2xl font-bold text-green-700">
+                {formatCurrency(totals.totalTransferred)}
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                Sum of all transfers to admin
               </p>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Search and Filters */}
-      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
-        <div className="flex items-center gap-2">
-          <Filter size={20} className="text-gray-500" />
-          <span className="text-gray-700">
-            Total Records: <span className="font-semibold">{totalCount}</span>
-          </span>
-        </div>
-
-        <div className="relative w-full lg:w-80">
-          <Search
-            className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-            size={18}
-            onClick={() => inputRef.current?.focus()}
-          />
-          <input
-            ref={inputRef}
-            type="text"
-            placeholder="Search by MR name or notes..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-200 focus:border-blue-400 outline-none"
-          />
+      {/* Tabs */}
+      <div className="mb-6 border-b border-gray-200">
+        <div className="flex space-x-4">
+          <button
+            onClick={() => handleTabChange("carry")}
+            className={`py-2 px-4 font-medium text-sm transition-colors ${
+              activeTab === "carry"
+                ? "text-blue-600 border-b-2 border-blue-600"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            MR Carry Cash
+            <span className="ml-2 bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
+              {
+                allMRCashes.filter(
+                  (record) =>
+                    record.currentCash > 0 &&
+                    (searchTerm === "" ||
+                      record.mrName
+                        ?.toLowerCase()
+                        .includes(searchTerm.toLowerCase()) ||
+                      record.notes
+                        ?.toLowerCase()
+                        .includes(searchTerm.toLowerCase()))
+                ).length
+              }
+            </span>
+          </button>
+          <button
+            onClick={() => handleTabChange("transferred")}
+            className={`py-2 px-4 font-medium text-sm transition-colors ${
+              activeTab === "transferred"
+                ? "text-blue-600 border-b-2 border-blue-600"
+                : "text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            MR Transfer Cash To Admin
+            <span className="ml-2 bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full">
+              {
+                allMRCashes.filter(
+                  (record) =>
+                    record.cashTransferredToAdmin > 0 &&
+                    (searchTerm === "" ||
+                      record.mrName
+                        ?.toLowerCase()
+                        .includes(searchTerm.toLowerCase()) ||
+                      record.notes
+                        ?.toLowerCase()
+                        .includes(searchTerm.toLowerCase()))
+                ).length
+              }
+            </span>
+          </button>
         </div>
       </div>
 
@@ -491,63 +607,51 @@ function MRCash() {
           <table className="w-full min-w-max">
             <thead className="bg-gray-50 border-b">
               <tr>
-                <th
-                  className="p-4 text-left cursor-pointer"
-                  onClick={() => handleSort("mrName")}
-                >
-                  <div className="flex items-center gap-2">
-                    <User size={16} className="text-gray-500" />
+                <th className="py-3 px-4 text-center">
+                  <div className="flex items-center justify-center gap-2">
                     <span>MR Name</span>
                   </div>
                 </th>
-                <th
-                  className="p-4 text-left cursor-pointer"
-                  onClick={() => handleSort("currentCash")}
-                >
-                  <div className="flex items-center gap-2">
-                    <DollarSign size={16} className="text-blue-500" />
-                    <span>Current Cash</span>
-                  </div>
-                </th>
-                <th
-                  className="p-4 text-left cursor-pointer"
-                  onClick={() => handleSort("cashTransferredToAdmin")}
-                >
-                  <div className="flex items-center gap-2">
-                    <TrendingUp size={16} className="text-green-500" />
-                    <span>Transferred to Admin</span>
-                  </div>
-                </th>
-                <th className="p-4 text-left">Total Cash</th>
-                <th
-                  className="p-4 text-left cursor-pointer"
-                  onClick={() => handleSort("lastTransferDate")}
-                >
-                  <div className="flex items-center gap-2">
-                    <Calendar size={16} className="text-gray-500" />
-                    <span>Last Transfer Date</span>
-                  </div>
-                </th>
-                <th
-                  className="p-4 text-left cursor-pointer"
-                  onClick={() => handleSort("updatedAt")}
-                >
-                  <div className="flex items-center gap-2">
-                    <Calendar size={16} className="text-gray-500" />
-                    <span>Updated Date</span>
-                    {renderSortIcon("updatedAt")}
-                  </div>
-                </th>
-                <th className="p-4 text-left">Actions</th>
+                {activeTab === "carry" ? (
+                  <>
+                    <th className="py-3 px-4 text-center">
+                      <div className="flex items-center justify-center gap-2">
+                        <span>Current Cash</span>
+                      </div>
+                    </th>
+                    <th className="py-3 px-4 text-center">
+                      <div className="flex items-center justify-center gap-2">
+                        <span>Last Transfer</span>
+                      </div>
+                    </th>
+                    <th className="py-3 px-4 text-center">Actions</th>
+                  </>
+                ) : (
+                  <>
+                    <th className="py-3 px-4 text-center">
+                      <div className="flex items-center justify-center gap-2">
+                        <span>Transferred to Admin</span>
+                      </div>
+                    </th>
+                    <th className="py-3 px-4 text-center">
+                      <div className="flex items-center justify-center gap-2">
+                        <span>Last Transfer</span>
+                      </div>
+                    </th>
+                    <th className="py-3 px-4 text-center">Actions</th>
+                  </>
+                )}
               </tr>
             </thead>
             <tbody>
               {mrCashes.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="p-8 text-center text-gray-500">
+                  <td colSpan="4" className="p-8 text-gray-500 text-center">
                     {searchTerm
                       ? "No matching records found"
-                      : "No MR Cash records available"}
+                      : activeTab === "carry"
+                      ? "No MRs with current cash available"
+                      : "No MRs with transferred cash to admin"}
                   </td>
                 </tr>
               ) : (
@@ -558,84 +662,73 @@ function MRCash() {
                       index < mrCashes.length - 1 ? "border-b" : ""
                     }`}
                   >
-                    <td className="p-4">
-                      <div>
-                        <div className="font-medium text-gray-900">
-                          {record.mrName}
-                        </div>
-                        {record.mrDetails && (
-                          <div className="text-sm text-gray-500 mt-1">
-                            <div className="flex items-center gap-2">
-                              <Phone size={14} />
-                              <span>{record.mrDetails.phone || "N/A"}</span>
-                            </div>
-                            <div className="flex items-center gap-2 mt-1">
-                              <Mail size={14} />
-                              <span>{record.mrDetails.email || "N/A"}</span>
-                            </div>
+                    <td className="py-3 px-4 text-center">
+                      <div className="font-medium text-gray-900">
+                        {record.mrName}
+                      </div>
+                    </td>
+
+                    {activeTab === "carry" ? (
+                      <>
+                        <td className="py-3 px-4 text-center">
+                          <div className="text-blue-700 font-semibold">
+                            {formatCurrency(record.currentCash)}
                           </div>
-                        )}
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <div className="text-blue-700 font-semibold">
-                        {formatCurrency(record.currentCash)}
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <div className="text-green-700 font-semibold">
-                        {formatCurrency(record.cashTransferredToAdmin)}
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <div className="text-purple-700 font-bold">
-                        {formatCurrency(record.totalCash)}
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <div className="text-gray-700">
-                        {record.lastTransferDate
-                          ? formatDate(record.lastTransferDate)
-                          : "N/A"}
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <div className="text-gray-700">
-                        {formatDate(record.updatedAt)}
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <div className="flex items-center gap-3">
-                        <button
-                          onClick={() => handleView(record)}
-                          className="text-blue-600 hover:text-blue-800 cursor-pointer"
-                          title="View Details"
-                        >
-                          <Eye size={18} />
-                        </button>
-                        <button
-                          onClick={() => handleEdit(record)}
-                          className="text-green-600 hover:text-green-800 cursor-pointer"
-                          title="Edit"
-                        >
-                          <Edit size={18} />
-                        </button>
-                        <button
-                          onClick={() => handleTransfer(record)}
-                          className="text-purple-600 hover:text-purple-800 cursor-pointer"
-                          title="Transfer Cash"
-                        >
-                          <RefreshCw size={18} />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(record)}
-                          className="text-red-600 hover:text-red-800 cursor-pointer"
-                          title="Delete"
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      </div>
-                    </td>
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <div className="text-gray-700">
+                            {record.lastTransferDate
+                              ? formatDate(record.lastTransferDate)
+                              : "N/A"}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <div className="flex items-center justify-center gap-3">
+                            <button
+                              onClick={() => handleView(record)}
+                              className="text-blue-600 hover:text-blue-800 cursor-pointer"
+                              title="View Details"
+                            >
+                              <Eye size={18} />
+                            </button>
+                            <button
+                              onClick={() => handleOpenTransferModal(record)}
+                              className="text-green-600 hover:text-green-800 cursor-pointer"
+                              title="Transfer to Admin"
+                              disabled={record.currentCash <= 0}
+                            >
+                              <TrendingUp size={18} />
+                            </button>
+                          </div>
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="py-3 px-4 text-center">
+                          <div className="text-green-700 font-semibold">
+                            {formatCurrency(record.cashTransferredToAdmin)}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <div className="text-gray-700">
+                            {record.lastTransferDate
+                              ? formatDate(record.lastTransferDate)
+                              : "N/A"}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <div className="flex items-center justify-center gap-3">
+                            <button
+                              onClick={() => handleView(record)}
+                              className="text-blue-600 hover:text-blue-800 cursor-pointer"
+                              title="View Transfer History"
+                            >
+                              <History size={18} />
+                            </button>
+                          </div>
+                        </td>
+                      </>
+                    )}
                   </tr>
                 ))
               )}
@@ -644,160 +737,233 @@ function MRCash() {
         </div>
       </div>
 
-      {/* Pagination */}
+      {/* Pagination - FIXED */}
       {totalPages > 1 && (
-        <div className="flex justify-center items-center gap-4 mt-6">
-          <button
-            onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
-            disabled={currentPage === 1}
-            className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-          >
-            Previous
-          </button>
+        <div className="flex flex-col md:flex-row items-center justify-between gap-4 mt-6">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => handlePageChange(currentPage - 1)}
+              disabled={currentPage === 1}
+              className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center gap-2"
+            >
+              <span>Previous</span>
+            </button>
 
-          <div className="flex items-center gap-2">
-            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-              let pageNum;
-              if (totalPages <= 5) {
-                pageNum = i + 1;
-              } else if (currentPage <= 3) {
-                pageNum = i + 1;
-              } else if (currentPage >= totalPages - 2) {
-                pageNum = totalPages - 4 + i;
-              } else {
-                pageNum = currentPage - 2 + i;
-              }
+            <div className="flex items-center gap-2">
+              {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                let pageNum;
+                if (totalPages <= 5) {
+                  pageNum = i + 1;
+                } else if (currentPage <= 3) {
+                  pageNum = i + 1;
+                } else if (currentPage >= totalPages - 2) {
+                  pageNum = totalPages - 4 + i;
+                } else {
+                  pageNum = currentPage - 2 + i;
+                }
 
-              return (
-                <button
-                  key={pageNum}
-                  onClick={() => setCurrentPage(pageNum)}
-                  className={`px-3 py-1 rounded-lg min-w-[40px] cursor-pointer ${
-                    currentPage === pageNum
-                      ? "bg-blue-600 text-white"
-                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                  }`}
-                >
-                  {pageNum}
-                </button>
-              );
-            })}
+                return (
+                  <button
+                    key={pageNum}
+                    onClick={() => handlePageChange(pageNum)}
+                    className={`px-3 py-1 rounded-lg min-w-[40px] cursor-pointer ${
+                      currentPage === pageNum
+                        ? "bg-blue-600 text-white"
+                        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    }`}
+                  >
+                    {pageNum}
+                  </button>
+                );
+              })}
+            </div>
+
+            <button
+              onClick={() => handlePageChange(currentPage + 1)}
+              disabled={currentPage === totalPages}
+              className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center gap-2"
+            >
+              <span>Next</span>
+            </button>
           </div>
-
-          <button
-            onClick={() =>
-              setCurrentPage((prev) => Math.min(totalPages, prev + 1))
-            }
-            disabled={currentPage === totalPages}
-            className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-          >
-            Next
-          </button>
         </div>
       )}
 
-      {/* View Modal */}
       {isViewModalOpen &&
         selectedRecord &&
         ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-              <div className="flex justify-between items-center p-6 border-b">
-                <h2 className="text-xl font-bold text-gray-800">
-                  MR Cash Details
-                </h2>
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => {
+                setIsViewModalOpen(false);
+                setTransferHistory([]);
+              }}
+            />
+
+            <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-[90vh]">
+              <button
+                onClick={() => {
+                  setIsViewModalOpen(false);
+                  setTransferHistory([]);
+                }}
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+
+              {activeTab === "carry" ? (
+                <>
+                  <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                    MR Cash Details
+                  </h2>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600 mb-1">
+                        MR Name
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                        {selectedRecord.mrName}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600 mb-1">
+                        Current Cash
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100 font-bold text-blue-700">
+                        {formatCurrency(selectedRecord.currentCash)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600 mb-1">
+                        Last Transfer Date
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                        {selectedRecord.lastTransferDate
+                          ? formatDate(selectedRecord.lastTransferDate)
+                          : "N/A"}
+                      </p>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                    MR Transfer History - {selectedRecord.mrName}
+                  </h2>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600 mb-1">
+                        MR Name
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                        {selectedRecord.mrName}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600 mb-1">
+                        Total Transferred to Admin
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100 font-bold text-green-700">
+                        {formatCurrency(selectedRecord.cashTransferredToAdmin)}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600 mb-1">
+                        Last Transfer Date
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                        {selectedRecord.lastTransferDate
+                          ? formatDate(selectedRecord.lastTransferDate)
+                          : "N/A"}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Transfer History Table */}
+                  <div className="mb-6">
+                    <h3 className="text-lg font-medium text-gray-700 mb-3">
+                      Last 30 Transfer Records
+                    </h3>
+
+                    {transferHistoryLoading ? (
+                      <div className="text-center py-4">
+                        <div className="text-gray-600">
+                          Loading transfer history...
+                        </div>
+                      </div>
+                    ) : transferHistory.length === 0 ? (
+                      <div className="text-center py-4 border rounded-lg bg-gray-50">
+                        <div className="text-gray-500">
+                          No transfer records found
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto border rounded-lg">
+                        <table className="w-full min-w-max text-center">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="py-3 px-4 font-medium text-gray-700">
+                                Transfer Date
+                              </th>
+                              <th className="py-3 px-4 font-medium text-gray-700">
+                                Amount
+                              </th>
+                              <th className="py-3 px-4 font-medium text-gray-700">
+                                Notes
+                              </th>
+                              <th className="py-3 px-4 font-medium text-gray-700">
+                                Transferred By
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {transferHistory.map((transfer, index) => (
+                              <tr
+                                key={transfer._id}
+                                className={`hover:bg-gray-50 ${
+                                  index < transferHistory.length - 1
+                                    ? "border-b"
+                                    : ""
+                                }`}
+                              >
+                                <td className="py-3 px-4">
+                                  {formatDate(transfer.transferredAt)}
+                                </td>
+                                <td className="py-3 px-4 font-medium text-green-700">
+                                  {formatCurrency(transfer.amount)}
+                                </td>
+                                <td className="py-3 px-4 text-gray-600">
+                                  {transfer.notes || "N/A"}
+                                </td>
+                                <td className="py-3 px-4 text-gray-600">
+                                  {transfer.transferredBy?.name || "System"}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              <div className="mt-6 flex justify-end border-t border-gray-300 pt-4">
                 <button
-                  onClick={() => setIsViewModalOpen(false)}
-                  className="text-gray-500 hover:text-gray-700 cursor-pointer"
-                >
-                  <X size={24} />
-                </button>
-              </div>
-
-              <div className="p-6 space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-2">
-                      MR Name
-                    </label>
-                    <div className="p-3 bg-gray-50 rounded-lg font-medium">
-                      {selectedRecord.mrName}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-2">
-                      Current Cash
-                    </label>
-                    <div className="p-3 bg-blue-50 rounded-lg font-bold text-blue-700">
-                      {formatCurrency(selectedRecord.currentCash)}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-2">
-                      Transferred to Admin
-                    </label>
-                    <div className="p-3 bg-green-50 rounded-lg font-bold text-green-700">
-                      {formatCurrency(selectedRecord.cashTransferredToAdmin)}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-2">
-                      Total Cash
-                    </label>
-                    <div className="p-3 bg-purple-50 rounded-lg font-bold text-purple-700">
-                      {formatCurrency(selectedRecord.totalCash)}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-2">
-                      Last Transfer Date
-                    </label>
-                    <div className="p-3 bg-gray-50 rounded-lg">
-                      {selectedRecord.lastTransferDate
-                        ? formatDate(selectedRecord.lastTransferDate)
-                        : "N/A"}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-2">
-                      Created Date
-                    </label>
-                    <div className="p-3 bg-gray-50 rounded-lg">
-                      {formatDate(selectedRecord.createdAt)}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-2">
-                      Updated Date
-                    </label>
-                    <div className="p-3 bg-gray-50 rounded-lg">
-                      {formatDate(selectedRecord.updatedAt)}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-2">
-                      Notes
-                    </label>
-                    <div className="p-3 bg-gray-50 rounded-lg min-h-[100px]">
-                      {selectedRecord.notes || "No notes"}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="p-6 border-t flex justify-end">
-                <button
-                  onClick={() => setIsViewModalOpen(false)}
-                  className="px-6 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer"
+                  onClick={() => {
+                    setIsViewModalOpen(false);
+                    setTransferHistory([]);
+                  }}
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
                 >
                   Close
                 </button>
@@ -806,63 +972,97 @@ function MRCash() {
           </div>,
           document.body
         )}
-
-      {/* Add Modal */}
       {isAddModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl shadow-lg max-w-md w-full">
               <div className="flex justify-between items-center p-6 border-b">
                 <h2 className="text-xl font-bold text-gray-800">
-                  Add New MR Cash
+                  MR Cash Transfer To Admin
                 </h2>
                 <button
-                  onClick={() => setIsAddModalOpen(false)}
+                  onClick={() => {
+                    setIsAddModalOpen(false);
+                    setSelectedMRCash(null);
+                    setFormData({
+                      mrCashId: "",
+                      transferAmount: "",
+                      notes: "",
+                    });
+                  }}
                   className="text-gray-500 hover:text-gray-700 cursor-pointer"
                 >
                   <X size={24} />
                 </button>
               </div>
 
-              <form onSubmit={handleSubmitAdd} className="p-6 space-y-4">
+              <form
+                onSubmit={handleSubmitTransferToAdmin}
+                className="p-6 space-y-4"
+              >
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Select MR <span className="text-red-500">*</span>
                   </label>
                   <SearchableDropdown
-                    value={formData.mrId}
+                    value={formData.mrCashId}
                     onChange={handleMRSelect}
                     options={mrList}
-                    placeholder={mrListLoading ? "Loading MRs..." : "Select MR"}
+                    placeholder={
+                      mrListLoading ? "Loading MRs with cash..." : "Select MR"
+                    }
                     required
                     disabled={mrListLoading || mrList.length === 0}
                   />
                   {mrList.length === 0 && !mrListLoading && (
-                    <p className="text-sm text-red-500 mt-1">
-                      No available MRs found
+                    <p className="text-sm text-gray-500 mt-1">
+                      No MRs found with positive cash balance
+                    </p>
+                  )}
+                </div>
+
+                {/* Show selected MR's current cash */}
+                {selectedMRCash && (
+                  <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-medium text-gray-700">
+                        Available Cash:
+                      </span>
+                      <span className="text-lg font-bold text-blue-700">
+                        {formatCurrency(selectedMRCash.currentCash)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Transfer Amount ($) <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    name="transferAmount"
+                    value={formData.transferAmount}
+                    onChange={handleFormChange}
+                    min="0.01"
+                    max={selectedMRCash?.currentCash || 0}
+                    step="0.01"
+                    className="w-full border px-3 py-2 rounded-lg"
+                    placeholder="Enter amount to transfer"
+                    required
+                    disabled={!selectedMRCash}
+                  />
+                  {selectedMRCash && (
+                    <p className="text-sm text-gray-500 mt-1">
+                      Maximum transferable:{" "}
+                      {formatCurrency(selectedMRCash.currentCash)}
                     </p>
                   )}
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Initial Cash Balance ($)
-                  </label>
-                  <input
-                    type="number"
-                    name="currentCash"
-                    value={formData.currentCash}
-                    onChange={handleFormChange}
-                    min="0"
-                    step="0.01"
-                    className="w-full border px-3 py-2 rounded-lg"
-                    placeholder="0.00"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Notes
+                    Transfer Notes
                   </label>
                   <textarea
                     name="notes"
@@ -870,109 +1070,22 @@ function MRCash() {
                     onChange={handleFormChange}
                     rows="3"
                     className="w-full border px-3 py-2 rounded-lg"
-                    placeholder="Additional notes..."
+                    placeholder="Reason for transfer..."
                   />
                 </div>
 
                 <div className="flex justify-end gap-3 pt-4 border-t">
                   <button
                     type="button"
-                    onClick={() => setIsAddModalOpen(false)}
-                    className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer"
-                    disabled={!formData.mrId}
-                  >
-                    Add Record
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>,
-          document.body
-        )}
-
-      {/* Edit Modal */}
-      {isEditModalOpen &&
-        selectedRecord &&
-        ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-lg max-w-md w-full">
-              <div className="flex justify-between items-center p-6 border-b">
-                <h2 className="text-xl font-bold text-gray-800">
-                  Edit MR Cash
-                </h2>
-                <button
-                  onClick={() => setIsEditModalOpen(false)}
-                  className="text-gray-500 hover:text-gray-700 cursor-pointer"
-                >
-                  <X size={24} />
-                </button>
-              </div>
-
-              <form onSubmit={handleSubmitEdit} className="p-6 space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    MR Name
-                  </label>
-                  <div className="p-3 bg-gray-50 rounded-lg font-medium">
-                    {selectedRecord.mrName}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Current Cash ($)
-                  </label>
-                  <input
-                    type="number"
-                    name="currentCash"
-                    value={formData.currentCash}
-                    onChange={handleFormChange}
-                    min="0"
-                    step="0.01"
-                    className="w-full border px-3 py-2 rounded-lg"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Transferred to Admin ($)
-                  </label>
-                  <input
-                    type="number"
-                    name="cashTransferredToAdmin"
-                    value={formData.cashTransferredToAdmin}
-                    onChange={handleFormChange}
-                    min="0"
-                    step="0.01"
-                    className="w-full border px-3 py-2 rounded-lg"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Notes
-                  </label>
-                  <textarea
-                    name="notes"
-                    value={formData.notes}
-                    onChange={handleFormChange}
-                    rows="3"
-                    className="w-full border px-3 py-2 rounded-lg"
-                  />
-                </div>
-
-                <div className="flex justify-end gap-3 pt-4 border-t">
-                  <button
-                    type="button"
-                    onClick={() => setIsEditModalOpen(false)}
+                    onClick={() => {
+                      setIsAddModalOpen(false);
+                      setSelectedMRCash(null);
+                      setFormData({
+                        mrCashId: "",
+                        transferAmount: "",
+                        notes: "",
+                      });
+                    }}
                     className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer"
                   >
                     Cancel
@@ -980,8 +1093,16 @@ function MRCash() {
                   <button
                     type="submit"
                     className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg cursor-pointer"
+                    disabled={
+                      !formData.mrCashId ||
+                      !formData.transferAmount ||
+                      parseFloat(formData.transferAmount) <= 0 ||
+                      (selectedMRCash &&
+                        parseFloat(formData.transferAmount) >
+                          selectedMRCash.currentCash)
+                    }
                   >
-                    Update
+                    Transfer to Admin
                   </button>
                 </div>
               </form>
@@ -989,8 +1110,6 @@ function MRCash() {
           </div>,
           document.body
         )}
-
-      {/* Transfer Modal */}
       {isTransferModalOpen &&
         selectedRecord &&
         ReactDOM.createPortal(
@@ -1075,6 +1194,7 @@ function MRCash() {
                     className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg cursor-pointer"
                     disabled={
                       !transferForm.amount ||
+                      parseFloat(transferForm.amount) <= 0 ||
                       parseFloat(transferForm.amount) >
                         selectedRecord.currentCash
                     }
