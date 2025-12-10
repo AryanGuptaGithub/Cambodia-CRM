@@ -175,7 +175,6 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
         returnDate: returnDate.toISOString().split("T")[0],
         remarks: "",
       };
-      console.log("setReturnItems", returnItems);
       setReturnItems([...returnItems, item]);
       toast.success(`${selectedProduct.productName} added to return list`);
     }
@@ -501,7 +500,6 @@ const StockReturn = () => {
           Authorization: `Bearer ${localStorage.getItem("token")}`,
         },
       });
-      console.log("response", response);
       if (response.data.success) {
         const data = response.data.data || [];
         setReturnsHistory(data);

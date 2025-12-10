@@ -32,6 +32,9 @@ export const useDashboardData = () => {
     todayPrevious: 0,
     monthlyPrevious: 0,
     yearPrevious: 0,
+    overdueAmount: 0, // Added overdue amount
+    creditSale: 0, // Added credit sale amount
+    unreceivePayment: 0, // Added credit sale cash not received
   });
 
   const [outstandingData, setOutstandingData] = useState({
@@ -46,12 +49,15 @@ export const useDashboardData = () => {
     monthlyPrevious: 0,
     yearPrevious: 0,
     mrWiseOutstanding: [],
+    overdueAmount: 0, // Added overdue amount for outstanding
   });
 
   const [stockData, setStockData] = useState({
     totalStock: 0,
     stockValue: 0,
     lowStockItems: [],
+    overdueStockValue: 0, // Added overdue stock value
+    unreceivedStockValue: 0, // Added unreceived stock value
   });
 
   const [expenseData, setExpenseData] = useState({
@@ -61,9 +67,176 @@ export const useDashboardData = () => {
     yearExpense: 0,
     previousMonthExpense: 0,
     latestExpenses: [],
+    overduePayroll: 0, // Added overdue payroll
+    unpaidPayroll: 0, // Added unpaid payroll
   });
 
-  // --- Helper functions ---
+  // --- NEW: Fetch overdue data from salesummaries ---
+  const fetchOverdueData = async () => {
+    try {
+      const response = await axios.get(
+        `${backendUrl}/api/salesummaries/overdue`
+      );
+
+      if (response.data.success) {
+        const overdueData = response.data.data || [];
+
+        // Calculate total overdue amount
+        const totalOverdue = overdueData.reduce((sum, invoice) => {
+          // Calculate overdue amount based on your business logic
+          // If dueAmount exists, use it, otherwise calculate from totalAmount - paidAmount
+          const overdueAmount =
+            invoice.dueAmount > 0
+              ? invoice.dueAmount
+              : invoice.totalAmount - invoice.paidAmount;
+          return sum + (overdueAmount || 0);
+        }, 0);
+
+        // Update sales data with overdue amount
+        setSalesData((prev) => ({
+          ...prev,
+          overdueAmount: totalOverdue,
+        }));
+
+        return {
+          totalOverdue,
+          overdueInvoices: overdueData,
+        };
+      }
+      return { totalOverdue: 0, overdueInvoices: [] };
+    } catch (error) {
+      console.error("Error fetching overdue data:", error);
+      return { totalOverdue: 0, overdueInvoices: [] };
+    }
+  };
+
+  // --- NEW: Fetch credit sale cash not received ---
+  const fetchCreditSaleCashNotReceived = async () => {
+    try {
+      const response = await axios.get(
+        `${backendUrl}/api/salesummaries/credit-sale-cash-not-receive`
+      );
+
+      if (response.data.success) {
+        const creditSales = response.data.data || [];
+
+        // Calculate total credit sale cash not received
+        const totalCreditSaleCashNotReceived = creditSales.reduce(
+          (sum, invoice) => {
+            // Calculate unpaid amount for credit sales
+            // Only include credit sales (paymentStatus: 'Credit') with unpaid amounts
+            if (
+              invoice.paymentStatus === "Credit" ||
+              invoice.paymentStatus === "Credit Sale"
+            ) {
+              const unpaidAmount =
+                invoice.dueAmount > 0
+                  ? invoice.dueAmount
+                  : invoice.totalAmount - invoice.paidAmount;
+              return sum + (unpaidAmount || 0);
+            }
+            return sum;
+          },
+          0
+        );
+
+        // Update sales data with credit sale cash not received
+        setSalesData((prev) => ({
+          ...prev,
+          creditSale: totalCreditSaleCashNotReceived,
+          unreceivePayment: totalCreditSaleCashNotReceived,
+        }));
+
+        return {
+          totalCreditSaleCashNotReceived,
+          creditSaleInvoices: creditSales,
+        };
+      }
+      return { totalCreditSaleCashNotReceived: 0, creditSaleInvoices: [] };
+    } catch (error) {
+      console.error("Error fetching credit sale cash not received:", error);
+      return { totalCreditSaleCashNotReceived: 0, creditSaleInvoices: [] };
+    }
+  };
+
+  // --- NEW: Fetch overdue invoices with date check ---
+  const fetchOverdueInvoices = async () => {
+    try {
+      const currentDate = new Date();
+
+      // Get all sales summaries that are NOT sale returns
+      const response = await axios.get(
+        `${backendUrl}/api/overdue`,
+        {
+          params: {
+            currentDate: currentDate.toISOString(), // Pass current date to backend
+          },
+        }
+      );
+
+      if (response.data.success) {
+        // Backend should already filter and return overdue invoices
+        const overdueInvoices = response.data.data || [];
+        const totalOverdueAmount = response.data.totalOverdueAmount || 0;
+
+        return {
+          overdueInvoices,
+          totalOverdueAmount,
+        };
+      }
+
+      return { overdueInvoices: [], totalOverdueAmount: 0 };
+    } catch (error) {
+      console.error("Error fetching overdue invoices:", error);
+      return { overdueInvoices: [], totalOverdueAmount: 0 };
+    }
+  };
+  // --- NEW: Fetch credit sale invoices with cash not received ---
+  const fetchCreditSaleInvoices = async () => {
+    try {
+      const response = await axios.get(
+        `${backendUrl}/api/sales/credit-sale-not-received`
+      );
+
+      if (response.data.success) {
+        const creditSaleInvoices = response.data.data || [];
+
+        // Filter for credit sales where cash is not fully received
+        const unpaidCreditSales = creditSaleInvoices.filter((invoice) => {
+          const isCreditSale =
+            invoice.paymentStatus === "Credit" ||
+            invoice.paymentStatus === "Credit Sale" ||
+            invoice.creditDays > 0;
+
+          if (!isCreditSale) return false;
+
+          // Check if cash is not fully received
+          const isPaid = invoice.paidAmount >= invoice.totalAmount;
+          return !isPaid;
+        });
+
+        // Calculate total unpaid amount
+        const totalUnpaidAmount = unpaidCreditSales.reduce((sum, invoice) => {
+          const unpaidAmount =
+            invoice.dueAmount > 0
+              ? invoice.dueAmount
+              : Math.max(0, invoice.totalAmount - invoice.paidAmount);
+          return sum + (unpaidAmount || 0);
+        }, 0);
+
+        return {
+          creditSaleInvoices: unpaidCreditSales,
+          totalUnpaidAmount,
+        };
+      }
+      return { creditSaleInvoices: [], totalUnpaidAmount: 0 };
+    } catch (error) {
+      console.error("Error fetching credit sale invoices:", error);
+      return { creditSaleInvoices: [], totalUnpaidAmount: 0 };
+    }
+  };
+
+  // --- Helper functions (keep existing) ---
   const fetchCustomRangeSales = async (startDate, endDate) => {
     try {
       const response = await axios.get(
@@ -134,7 +307,7 @@ export const useDashboardData = () => {
         previousStart = new Date(start);
         previousStart.setMonth(previousStart.getMonth() - 1);
         previousEnd = new Date(start);
-        previousEnd.setDate(0); // last day previous month
+        previousEnd.setDate(0);
         previousEnd.setHours(23, 59, 59, 999);
         break;
       case "Year":
@@ -238,7 +411,7 @@ export const useDashboardData = () => {
     }
   };
 
-  // --- Fetch data functions ---
+  // --- Existing fetch functions ---
   const fetchPayrollData = async () => {
     try {
       const currentDate = new Date();
@@ -291,10 +464,24 @@ export const useDashboardData = () => {
       const totalStockValue = calculateStockValue(stockItems);
       const lowStockItems = getLowStockItems(stockItems);
 
+      // Calculate overdue stock value (example logic)
+      const currentDate = new Date();
+      const overdueStockValue = stockItems
+        .filter((item) => {
+          const expiry = item.expiry ? new Date(item.expiry) : null;
+          return expiry && expiry < currentDate;
+        })
+        .reduce(
+          (sum, item) => sum + (item.costPrice || 0) * (item.availableQty || 0),
+          0
+        );
+
       setStockData({
         totalStock: totalStockValue,
         stockValue: totalStockValue,
         lowStockItems: lowStockItems,
+        overdueStockValue: overdueStockValue,
+        unreceivedStockValue: 0, // You can add logic for this
       });
     } catch (error) {
       console.error("Error fetching stock data:", error);
@@ -308,6 +495,7 @@ export const useDashboardData = () => {
       if (response.data) {
         const expenses = response.data.data;
         const today = new Date();
+        const currentDate = new Date();
 
         // Calculate totals
         const totalExpense = expenses.reduce(
@@ -331,7 +519,7 @@ export const useDashboardData = () => {
           .filter((exp) => new Date(exp.date).getFullYear() === currentYear)
           .reduce((sum, exp) => sum + (exp.amount || 0), 0);
 
-        // Calculate previous month expense (similar to payroll)
+        // Calculate previous month expense
         const previousMonth = new Date(
           today.getFullYear(),
           today.getMonth() - 1,
@@ -347,19 +535,41 @@ export const useDashboardData = () => {
           })
           .reduce((sum, exp) => sum + (exp.amount || 0), 0);
 
+        // Calculate overdue expenses
+        const overdueExpenses = expenses.filter((exp) => {
+          const dueDate = new Date(exp.dueDate || exp.date);
+          return dueDate < currentDate && exp.status !== "Paid";
+        });
+
+        const overduePayroll = overdueExpenses.reduce(
+          (sum, exp) => sum + (exp.amount || 0),
+          0
+        );
+
+        // Calculate unpaid expenses
+        const unpaidExpenses = expenses.filter((exp) => {
+          return exp.status === "Pending" || exp.status === "Unpaid";
+        });
+
+        const unpaidPayroll = unpaidExpenses.reduce(
+          (sum, exp) => sum + (exp.amount || 0),
+          0
+        );
+
         setExpenseData({
           totalExpense,
           monthlyExpense,
           todayExpense,
           yearExpense,
           previousMonthExpense,
-          latestExpenses: expenses.slice(-5).reverse(), // last 5 expenses
+          latestExpenses: expenses.slice(-5).reverse(),
+          overduePayroll,
+          unpaidPayroll,
         });
       }
     } catch (err) {
       console.error("Error fetching expenses:", err);
       showToast("error", "Failed to fetch expenses");
-      // Set default values on error
       setExpenseData({
         totalExpense: 0,
         monthlyExpense: 0,
@@ -367,6 +577,8 @@ export const useDashboardData = () => {
         yearExpense: 0,
         previousMonthExpense: 0,
         latestExpenses: [],
+        overduePayroll: 0,
+        unpaidPayroll: 0,
       });
     }
   };
@@ -387,6 +599,12 @@ export const useDashboardData = () => {
         fetchTeams(),
         fetchStockData(),
         fetchExpenseData(),
+      ]);
+
+      // Fetch overdue and credit sale data
+      const [overdueResult, creditSaleResult] = await Promise.all([
+        fetchOverdueInvoices(),
+        fetchCreditSaleInvoices(),
       ]);
 
       const [todaySales, monthSales, yearSales] = await Promise.all([
@@ -413,6 +631,9 @@ export const useDashboardData = () => {
         yearPrevious: yearSales.previousSales,
         yearGrowth: yearSales.growth,
         totalSales: yearSales.salesAmount,
+        overdueAmount: overdueResult.totalOverdueAmount,
+        creditSale: creditSaleResult.totalUnpaidAmount,
+        unreceivePayment: creditSaleResult.totalUnpaidAmount,
       });
 
       setOutstandingData({
@@ -427,6 +648,7 @@ export const useDashboardData = () => {
         yearGrowth: yearOutstanding.growth,
         totalOutstanding: yearOutstanding.outstandingAmount,
         mrWiseOutstanding: yearOutstanding.outstandingInvoices,
+        overdueAmount: overdueResult.totalOverdueAmount,
       });
     } catch (error) {
       showToast("error", error.message || "Failed to fetch dashboard data");
@@ -453,6 +675,8 @@ export const useDashboardData = () => {
     expenseData,
     fetchSalesBySubTab,
     fetchOutstandingBySubTab,
+    fetchOverdueInvoices, // Export new function
+    fetchCreditSaleInvoices, // Export new function
     setSalesData,
     setOutstandingData,
     setMrList,

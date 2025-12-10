@@ -95,8 +95,6 @@ const CarryStockView = () => {
 
       if (response.data.success) {
         const transformedData = transformAPIData(response.data.data);
-        console.log("Transformed data:", transformedData.length, "items");
-
         // Store all data
         setAllStockData(transformedData);
 

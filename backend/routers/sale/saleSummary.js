@@ -9,6 +9,10 @@ import Customer from "../../models/master/customer.js";
 
 const router = express.Router();
 
+// ============================================================================
+// 🔧 HELPER FUNCTIONS
+// ============================================================================
+
 const excelDateToJSDate = (serial) => {
   if (typeof serial === "number") {
     const utc_days = Math.floor(serial - 25569);
@@ -69,7 +73,7 @@ const getTableDateRanges = (period) => {
   }
 };
 
-// 🔧 FIXED Inventory Management Functions
+// 🔧 INVENTORY MANAGEMENT FUNCTIONS
 const updateReportInHandAfterSale = async (productName, salesQty, bonusQty) => {
   try {
     const totalQtyToDeduct = salesQty + bonusQty;
@@ -83,7 +87,7 @@ const updateReportInHandAfterSale = async (productName, salesQty, bonusQty) => {
       return 0;
     }
 
-    // Determine current stock - FIXED LOGIC
+    // Determine current stock
     let currentStock = 0;
 
     if (
@@ -91,7 +95,6 @@ const updateReportInHandAfterSale = async (productName, salesQty, bonusQty) => {
       Array.isArray(existingProduct.batches) &&
       existingProduct.batches.length > 0
     ) {
-      // Sum all boxes from all batches
       currentStock = existingProduct.batches.reduce(
         (total, batch) => total + (batch.boxes || 0),
         0
@@ -124,18 +127,16 @@ const updateReportInHandAfterSale = async (productName, salesQty, bonusQty) => {
 
     let updateFields = {};
 
-    // FIXED: Update the correct field based on the data structure
+    // Update based on data structure
     if (
       existingProduct.batches &&
       Array.isArray(existingProduct.batches) &&
       existingProduct.batches.length > 0
     ) {
-      // Update the first batch (FIFO) or distribute the deduction - for simplicity, updating first batch
       const updatedBatches = [...existingProduct.batches];
       if (updatedBatches[0].boxes >= totalQtyToDeduct) {
         updatedBatches[0].boxes -= totalQtyToDeduct;
       } else {
-        // If first batch doesn't have enough, deduct from multiple batches
         let remainingDeduction = totalQtyToDeduct;
         for (
           let i = 0;
@@ -180,7 +181,7 @@ const updateReportInHandAfterSale = async (productName, salesQty, bonusQty) => {
       $set: updateFields,
     });
 
-    // Get LC value from the product - FIXED: Get from batches if available
+    // Get LC value
     let lcValue = 0;
     if (
       existingProduct.batches &&
@@ -207,9 +208,6 @@ const updateReportInHandAfterSale = async (productName, salesQty, bonusQty) => {
   }
 };
 
-/* -----------------------------------------------------------
- * FIXED RESTORE AFTER SALE DELETE
- * ----------------------------------------------------------- */
 const restoreReportInHandAfterSaleDeletion = async (
   productName,
   salesQty,
@@ -230,7 +228,6 @@ const restoreReportInHandAfterSaleDeletion = async (
 
     let currentStock = 0;
 
-    // FIXED: Use the same logic as update function
     if (
       existingProduct.batches &&
       Array.isArray(existingProduct.batches) &&
@@ -262,13 +259,11 @@ const restoreReportInHandAfterSaleDeletion = async (
 
     let updateFields = {};
 
-    // FIXED: Update the correct field based on the data structure
     if (
       existingProduct.batches &&
       Array.isArray(existingProduct.batches) &&
       existingProduct.batches.length > 0
     ) {
-      // Restore to the first batch (simplified approach)
       const updatedBatches = [...existingProduct.batches];
       updatedBatches[0].boxes += totalQtyToRestore;
       updateFields = { batches: updatedBatches, totalBoxes: updatedStock };
@@ -333,379 +328,346 @@ const parseDateString = (dateStr) => {
   return null;
 };
 
-// 📊 ANALYTICS ENDPOINTS
-router.get("/analytics/today", async (req, res) => {
+// ============================================================================
+// ✅ NEW ENDPOINTS FOR CREDIT SALES NOT RECEIVED
+// ============================================================================
+// Add this endpoint to your sales router (in your backend code)
+
+router.get("/sales/pending-collection-today", async (req, res) => {
   try {
-    const { today, now } = getDateRanges();
+    console.log("🔍 Fetching pending collections for today...");
 
-    const todaySales = await SaleSummary.aggregate([
-      {
-        $match: {
-          invoiceDate: {
-            $gte: today,
-            $lte: now,
-          },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalSales: { $sum: "$totalAmount" },
-          count: { $sum: 1 },
-        },
-      },
-    ]);
-
-    const result =
-      todaySales.length > 0 ? todaySales[0] : { totalSales: 0, count: 0 };
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-router.get("/analytics/month", async (req, res) => {
-  try {
-    const { monthStart, now } = getDateRanges();
-
-    const monthlySales = await SaleSummary.aggregate([
-      {
-        $match: {
-          invoiceDate: {
-            $gte: monthStart,
-            $lte: now,
-          },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalSales: { $sum: "$totalAmount" },
-          count: { $sum: 1 },
-        },
-      },
-    ]);
-
-    const result =
-      monthlySales.length > 0 ? monthlySales[0] : { totalSales: 0, count: 0 };
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-router.get("/analytics/year", async (req, res) => {
-  try {
-    const { yearStart, now } = getDateRanges();
-
-    const yearlySales = await SaleSummary.aggregate([
-      {
-        $match: {
-          invoiceDate: {
-            $gte: yearStart,
-            $lte: now,
-          },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalSales: { $sum: "$totalAmount" },
-          count: { $sum: 1 },
-        },
-      },
-    ]);
-
-    const result =
-      yearlySales.length > 0 ? yearlySales[0] : { totalSales: 0, count: 0 };
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-router.get("/analytics/dashboard", async (req, res) => {
-  try {
+    // Get current date in IST (Indian Standard Time)
     const now = new Date();
-    const today = new Date(now);
-    today.setHours(0, 0, 0, 0);
 
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const yearStart = new Date(now.getFullYear(), 0, 1);
+    // For debugging: check what day it is
+    console.log("Current server time:", now);
+    console.log(
+      "Current server date (YYYY-MM-DD):",
+      now.toISOString().split("T")[0]
+    );
+    console.log("Current server local time:", now.toString());
 
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    yesterday.setHours(0, 0, 0, 0);
-
-    const prevDayEnd = new Date(yesterday);
-    prevDayEnd.setHours(23, 59, 59, 999);
-
-    const [todayResult, monthlyResult, yearlyResult, yesterdayResult] =
-      await Promise.all([
-        SaleSummary.aggregate([
-          {
-            $match: {
-              invoiceDate: {
-                $gte: today,
-                $lte: now,
-              },
-            },
-          },
-          {
-            $group: {
-              _id: null,
-              amount: { $sum: "$totalAmount" },
-            },
-          },
-        ]),
-        SaleSummary.aggregate([
-          {
-            $match: {
-              invoiceDate: {
-                $gte: monthStart,
-                $lte: now,
-              },
-            },
-          },
-          {
-            $group: {
-              _id: null,
-              amount: { $sum: "$totalAmount" },
-            },
-          },
-        ]),
-        SaleSummary.aggregate([
-          {
-            $match: {
-              invoiceDate: {
-                $gte: yearStart,
-                $lte: now,
-              },
-            },
-          },
-          {
-            $group: {
-              _id: null,
-              amount: { $sum: "$totalAmount" },
-            },
-          },
-        ]),
-        SaleSummary.aggregate([
-          {
-            $match: {
-              invoiceDate: {
-                $gte: yesterday,
-                $lte: prevDayEnd,
-              },
-            },
-          },
-          {
-            $group: {
-              _id: null,
-              amount: { $sum: "$totalAmount" },
-            },
-          },
-        ]),
-      ]);
-
-    const todaySales = todayResult[0]?.amount || 0;
-    const monthlySales = monthlyResult[0]?.amount || 0;
-    const yearlySales = yearlyResult[0]?.amount || 0;
-    const yesterdaySales = yesterdayResult[0]?.amount || 0;
-
-    const growth =
-      yesterdaySales > 0
-        ? ((todaySales - yesterdaySales) / yesterdaySales) * 100
-        : 0;
-
-    res.json({
-      totalSales: yearlySales,
-      monthlySales,
-      todaySales,
-      yearSales: yearlySales,
-      growth: parseFloat(growth.toFixed(2)),
-    });
-  } catch (error) {
-    console.error("❌ Error in getSalesDashboard:", error);
-    res.status(500).json({
-      message: error.message,
-      totalSales: 0,
-      monthlySales: 0,
-      todaySales: 0,
-      yearSales: 0,
-      growth: 0,
-    });
-  }
-});
-
-// ... (Keep all the other endpoints exactly as they were in your original code)
-// The rest of your endpoints remain unchanged - I've only fixed the inventory management functions
-
-// ➕ SALES CRUD OPERATIONS
-router.post("/sales", async (req, res) => {
-  try {
-    const saleData = req.body;
-
-    if (!saleData || typeof saleData !== "object") {
-      return res.status(400).json({ error: "Invalid or missing request body" });
-    }
-
-    const requiredFields = [
-      "recordingDate",
-      "invoiceNumber",
-      "invoiceDate",
-      "mrName",
-      "customerCode",
-      "products",
-    ];
-
-    const missingFields = requiredFields.filter(
-      (field) =>
-        saleData[field] === undefined ||
-        saleData[field] === null ||
-        saleData[field] === ""
+    // Get today's date at 00:00:00.000 in UTC
+    const todayUTC = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
     );
 
-    if (missingFields.length > 0) {
-      return res.status(400).json({
-        error: `Missing required fields: ${missingFields.join(", ")}`,
-      });
-    }
-
-    if (!Array.isArray(saleData.products) || saleData.products.length === 0) {
-      return res
-        .status(400)
-        .json({ error: "Products array is missing or empty" });
-    }
-
-    const invoiceExists = await checkInvoiceNumberExists(
-      saleData.invoiceNumber
+    // Get tomorrow's date at 00:00:00.000 in UTC (exclusive boundary)
+    const tomorrowUTC = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)
     );
-    if (invoiceExists) {
-      return res.status(400).json({
-        error: `Invoice number "${saleData.invoiceNumber}" already exists. Please use a different invoice number.`,
-      });
-    }
 
-    let customerName = saleData.customerName;
-    if ((!customerName || customerName.trim() === "") && saleData.customerId) {
-      const customer = await Customer.findById(saleData.customerId).select(
-        "name"
-      );
-      if (customer) {
-        customerName = customer.name;
-      } else {
-        return res.status(400).json({
-          error: `Customer not found for ID: ${saleData.customerId}`,
-        });
-      }
-    }
+    console.log("📅 Query date range:");
+    console.log("From (UTC):", todayUTC);
+    console.log("To (UTC):", tomorrowUTC);
+    console.log("From (ISO):", todayUTC.toISOString());
+    console.log("To (ISO):", tomorrowUTC.toISOString());
 
-    if (!customerName) {
-      return res.status(400).json({
-        error: "Missing customerName and no valid customerId provided",
-      });
-    }
-
-    const totalAmount = saleData.products.reduce(
-      (total, product) => total + (parseFloat(product.netSellingAmount) || 0),
+    // ALTERNATIVE: Use moment.js style approach if dates aren't matching
+    const todayStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      0,
+      0,
+      0,
       0
     );
+    const todayEnd = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      23,
+      59,
+      59,
+      999
+    );
 
-    const paidAmount = parseFloat(saleData.paidAmount) || 0;
-    const dueAmount = totalAmount - paidAmount;
+    console.log("📅 Alternative range (local time):");
+    console.log("From (local):", todayStart);
+    console.log("To (local):", todayEnd);
 
-    const newSaleData = {
-      recordingDate: new Date(saleData.recordingDate),
-      invoiceNumber: saleData.invoiceNumber,
-      invoiceDate: new Date(saleData.invoiceDate),
-      mrName: saleData.mrName,
-      mrId: saleData.mrId || "",
-      customerName,
-      customerCode: saleData.customerCode,
-      customerId: saleData.customerId || "",
-      products: saleData.products.map((product) => ({
-        productName: product.productName,
-        salesQty: Number(product.salesQty),
-        bonusQty: Number(product.bonusQty) || 0,
-        totalQty: Number(product.totalQty),
-        sellingPrice: Number(product.sellingPrice),
-        amount: Number(product.amount),
-        discount: Number(product.discount) || 0,
-        netSellingAmount: Number(product.netSellingAmount),
-        averageUnitPrice: Number(product.averageUnitPrice),
-        lc: Number(product.lc) || 0,
-        profitLoss: Number(product.profitLoss) || 0,
-        isProductAccept:
-          product.isProductAccept !== undefined
-            ? product.isProductAccept
-            : true,
-      })),
-      creditDays: saleData.creditDays ? Number(saleData.creditDays) : 0,
-      dueDate: saleData.dueDate ? new Date(saleData.dueDate) : null,
-      deliveryDate: saleData.deliveryDate
-        ? new Date(saleData.deliveryDate)
-        : null,
-      paidAmount,
-      dueAmount,
-      totalAmount,
-      paymentStatus: saleData.paymentStatus || "Credit",
-      remark: saleData.remark || saleData.remarks || "",
+    // Log the query we're about to run
+    const query = {
+      // Try BOTH date comparison methods to see which works
+      $or: [
+        // Method 1: Exact day match using $gte and $lt with UTC
+        {
+          dueDate: {
+            $gte: todayUTC,
+            $lt: tomorrowUTC,
+          },
+        },
+        // Method 2: Day match using local time
+        {
+          dueDate: {
+            $gte: todayStart,
+            $lte: todayEnd,
+          },
+        },
+      ],
+      // Payment status is NOT "Cash"
+      paymentStatus: { $ne: "Cash" },
+      // Has outstanding payment - check multiple conditions
+      $or: [
+        { dueAmount: { $gt: 0 } },
+        {
+          $expr: {
+            $gt: [
+              { $subtract: ["$totalAmount", { $ifNull: ["$paidAmount", 0] }] },
+              0,
+            ],
+          },
+        },
+      ],
     };
 
-    const inventoryUpdates = [];
-    for (const product of newSaleData.products) {
-      if (product.salesQty > 0 || product.bonusQty > 0) {
-        try {
-          const lcValue = await updateReportInHandAfterSale(
-            product.productName,
-            product.salesQty,
-            product.bonusQty
-          );
+    console.log("🔍 MongoDB Query:", JSON.stringify(query, null, 2));
 
-          product.lc = lcValue;
-          product.profitLoss =
-            product.netSellingAmount - product.totalQty * lcValue;
+    // Find invoices
+    const pendingCollections = await SaleSummary.find(query)
+      .select(
+        "invoiceNumber invoiceDate mrName mrId customerName customerId products creditDays dueDate deliveryDate paidAmount dueAmount totalAmount paymentStatus remark createdAt updatedAt"
+      )
+      .sort({ dueDate: 1 }) // Sort by due date ascending
+      .lean();
 
-          inventoryUpdates.push({
-            productName: product.productName,
-            status: "success",
-            deducted: product.salesQty + product.bonusQty,
-            lc: lcValue,
-          });
-        } catch (error) {
-          return res.status(400).json({
-            error: `Inventory update failed for ${product.productName}: ${error.message}`,
-          });
-        }
-      }
-    }
+    console.log(
+      `📊 Found ${pendingCollections.length} pending collections for today`
+    );
 
-    const savedSale = await SaleSummary.create(newSaleData);
+    // Log ALL found invoices for debugging
+    if (pendingCollections.length > 0) {
+      console.log("📄 ALL pending collections found:");
+      pendingCollections.forEach((inv, idx) => {
+        console.log(`${idx + 1}. Invoice: ${inv.invoiceNumber}`);
+        console.log(`   Customer: ${inv.customerName}`);
+        console.log(`   MR: ${inv.mrName}`);
+        console.log(`   Due Date: ${inv.dueDate}`);
+        console.log(`   Due Date (ISO): ${inv.dueDate?.toISOString()}`);
+        console.log(`   Payment Status: ${inv.paymentStatus}`);
+        console.log(
+          `   Total: ${inv.totalAmount}, Paid: ${inv.paidAmount}, Due: ${inv.dueAmount}`
+        );
+        console.log(`   Created At: ${inv.createdAt}`);
+        console.log(`---`);
+      });
+    } else {
+      console.log("⚠️ No pending collections found!");
 
-    res.status(201).json({
-      message: `Sale with ${savedSale.products.length} product(s) added successfully`,
-      sale: savedSale,
-      inventoryUpdates,
-    });
-  } catch (error) {
-    console.error("❌ Sale creation error:", error);
+      // Let's check what dates actually exist in the database for debugging
+      const allDates = await SaleSummary.distinct("dueDate", {
+        paymentStatus: { $ne: "Cash" },
+        $or: [
+          { dueAmount: { $gt: 0 } },
+          {
+            $expr: {
+              $gt: [
+                {
+                  $subtract: ["$totalAmount", { $ifNull: ["$paidAmount", 0] }],
+                },
+                0,
+              ],
+            },
+          },
+        ],
+      }).limit(10);
 
-    if (error.code === 11000) {
-      return res.status(400).json({
-        error: `Invoice number "${req.body.invoiceNumber}" already exists.`,
+      console.log(
+        "📅 Sample due dates in database (non-cash, with outstanding):"
+      );
+      allDates.forEach((date, idx) => {
+        console.log(`${idx + 1}. ${date} (${date?.toISOString()})`);
       });
     }
 
-    if (error.name === "ValidationError") {
-      return res.status(400).json({ error: error.message });
-    }
+    // Calculate totals and format data
+    const totalPendingAmount = pendingCollections.reduce((total, invoice) => {
+      const outstandingAmount =
+        invoice.dueAmount > 0
+          ? invoice.dueAmount
+          : Math.max(0, (invoice.totalAmount || 0) - (invoice.paidAmount || 0));
+      return total + outstandingAmount;
+    }, 0);
 
-    res.status(500).json({ error: "Failed to add new sale" });
+    // Format the response with additional calculated fields
+    const formattedCollections = pendingCollections.map((invoice) => {
+      const outstandingAmount =
+        invoice.dueAmount > 0
+          ? invoice.dueAmount
+          : Math.max(0, (invoice.totalAmount || 0) - (invoice.paidAmount || 0));
+
+      // Calculate paid percentage
+      const paidPercentage =
+        invoice.totalAmount > 0
+          ? (((invoice.paidAmount || 0) / invoice.totalAmount) * 100).toFixed(1)
+          : 0;
+
+      // Get product summary
+      const productSummary =
+        invoice.products?.map((product) => ({
+          name: product.productName || product.name || "Unknown Product",
+          quantity: product.salesQty || product.quantity || 0,
+          amount: product.netSellingAmount || product.amount || 0,
+        })) || [];
+
+      return {
+        ...invoice,
+        outstandingAmount,
+        paidPercentage,
+        productSummary,
+        productsCount: invoice.products?.length || 0,
+        // Add formatted dates for frontend
+        dueDateFormatted: invoice.dueDate
+          ? new Date(invoice.dueDate).toISOString().split("T")[0]
+          : null,
+        invoiceDateFormatted: invoice.invoiceDate
+          ? new Date(invoice.invoiceDate).toISOString().split("T")[0]
+          : null,
+      };
+    });
+
+    res.json({
+      success: true,
+      data: formattedCollections,
+      totalAmount: totalPendingAmount.toFixed(2),
+      count: formattedCollections.length,
+      dateRange: {
+        start: todayUTC,
+        end: tomorrowUTC,
+        startLocal: todayStart,
+        endLocal: todayEnd,
+      },
+      query: query, // Include query for debugging
+      message:
+        formattedCollections.length > 0
+          ? `Found ${formattedCollections.length} pending collections for today`
+          : "No pending collections found for today",
+      debug: {
+        serverTime: now,
+        serverDate: now.toISOString().split("T")[0],
+        todayUTC: todayUTC.toISOString(),
+        tomorrowUTC: tomorrowUTC.toISOString(),
+      },
+    });
+  } catch (error) {
+    console.error("❌ Error fetching pending collections for today:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error while fetching pending collections",
+      error: error.message,
+      stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
+      data: [],
+      totalAmount: 0,
+      count: 0,
+    });
+  }
+});
+router.get("/sales/credit-sale-not-received", async (req, res) => {
+  try {
+    const creditSales = await SaleSummary.find({
+      $or: [
+        { saleReturn: { $exists: false } },
+        { saleReturn: false },
+        { saleReturn: null },
+      ],
+      paymentStatus: { $ne: "Cash" },
+      $or: [
+        { dueAmount: { $gt: 0 } },
+        { $expr: { $gt: [{ $subtract: ["$totalAmount", "$paidAmount"] }, 0] } },
+      ],
+    })
+      .sort({ invoiceDate: -1 })
+      .lean();
+
+    const totalAmount = creditSales.reduce((total, invoice) => {
+      const outstandingAmount =
+        invoice.dueAmount > 0
+          ? invoice.dueAmount
+          : Math.max(0, invoice.totalAmount - (invoice.paidAmount || 0));
+      return total + outstandingAmount;
+    }, 0);
+
+    const formattedSales = creditSales.map((invoice) => ({
+      ...invoice,
+      outstandingAmount:
+        invoice.dueAmount > 0
+          ? invoice.dueAmount
+          : Math.max(0, invoice.totalAmount - (invoice.paidAmount || 0)),
+    }));
+
+    res.json({
+      success: true,
+      data: formattedSales,
+      totalAmount: totalAmount.toFixed(2),
+      count: formattedSales.length,
+      message: `Found ${formattedSales.length} credit sales where cash is not received`,
+    });
+  } catch (error) {
+    console.error("Error fetching credit sales not received:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error while fetching credit sales",
+      error: error.message,
+      data: [],
+      totalAmount: 0,
+      count: 0,
+    });
   }
 });
 
+router.get("/overdue", async (req, res) => {
+  try {
+    const { currentDate } = req.query;
+
+    const referenceDate = currentDate ? new Date(currentDate) : new Date();
+
+    const overdueInvoices = await SaleSummary.find({
+      $or: [
+        { saleReturn: { $exists: false } },
+        { saleReturn: false },
+        { saleReturn: null },
+      ],
+      dueDate: { $exists: true, $ne: null, $lt: referenceDate },
+      $or: [
+        { dueAmount: { $gt: 0 } },
+        { $expr: { $gt: [{ $subtract: ["$totalAmount", "$paidAmount"] }, 0] } },
+      ],
+    })
+      .sort({ dueDate: 1 })
+      .lean();
+
+    const totalOverdueAmount = overdueInvoices.reduce((total, invoice) => {
+      const overdueAmount =
+        invoice.dueAmount > 0
+          ? invoice.dueAmount
+          : Math.max(0, invoice.totalAmount - invoice.paidAmount);
+      return total + overdueAmount;
+    }, 0);
+
+    res.json({
+      success: true,
+      data: overdueInvoices,
+      totalOverdueAmount: totalOverdueAmount,
+      count: overdueInvoices.length,
+      currentDate: referenceDate,
+      message: `Found ${overdueInvoices.length} overdue invoices`,
+    });
+  } catch (error) {
+    console.error("Error fetching overdue invoices:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error while fetching overdue invoices",
+      error: error.message,
+    });
+  }
+});
+
+// ============================================================================
 // 📊 ANALYTICS ENDPOINTS
+// ============================================================================
+
 router.get("/analytics/today", async (req, res) => {
   try {
     const { today, now } = getDateRanges();
@@ -965,7 +927,10 @@ router.get("/analytics/breakdown", async (req, res) => {
   }
 });
 
+// ============================================================================
 // 💰 OUTSTANDING ENDPOINTS
+// ============================================================================
+
 router.get("/outstanding/custom-range", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
@@ -1430,7 +1395,10 @@ router.get("/outstanding/customer-wise", async (req, res) => {
   }
 });
 
+// ============================================================================
 // 📈 SALES ENDPOINTS
+// ============================================================================
+
 router.get("/sales/analytics/custom-range", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
@@ -1781,7 +1749,10 @@ router.get("/custom-range", async (req, res) => {
   }
 });
 
+// ============================================================================
 // 🛒 PRODUCT-WISE SALES ENDPOINTS
+// ============================================================================
+
 router.get("/sales/product-wise", async (req, res) => {
   try {
     const {
@@ -2129,10 +2100,14 @@ router.get("/sales/product/:productName", async (req, res) => {
   }
 });
 
+// ============================================================================
 // ➕ SALES CRUD OPERATIONS
+// ============================================================================
+
 router.post("/sales", async (req, res) => {
   try {
     const saleData = req.body;
+
     if (!saleData || typeof saleData !== "object") {
       return res.status(400).json({ error: "Invalid or missing request body" });
     }
@@ -2271,7 +2246,7 @@ router.post("/sales", async (req, res) => {
     const savedSale = await SaleSummary.create(newSaleData);
 
     res.status(201).json({
-      message: `✅ Sale with ${savedSale.products.length} product(s) added successfully`,
+      message: `Sale with ${savedSale.products.length} product(s) added successfully`,
       sale: savedSale,
       inventoryUpdates,
     });
@@ -2633,7 +2608,10 @@ router.delete("/sales/:id", async (req, res) => {
   }
 });
 
+// ============================================================================
 // 📥 EXPORT ENDPOINTS
+// ============================================================================
+
 router.post("/sales/download-excel", async (req, res) => {
   try {
     const { startDate, endDate } = req.body;
@@ -2880,7 +2858,10 @@ router.post("/sales/download-excel", async (req, res) => {
   }
 });
 
+// ============================================================================
 // 🔧 UTILITY ENDPOINTS
+// ============================================================================
+
 router.get("/sales/payment-status", async (req, res) => {
   try {
     const statuses = await paymentStatus.find().sort({ type: 1 });

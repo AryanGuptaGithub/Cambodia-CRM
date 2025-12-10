@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+// Dashboard.jsx
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { DashboardCards } from "./DashboardCards";
 import { SidePanel } from "./SidePanel";
@@ -17,10 +18,13 @@ import {
   getStockDateRanges,
   calculateStockValue,
   getLowStockItems,
+  formatCurrency,
 } from "./DashboardUtil";
 import axios from "axios";
 import { StockTable } from "./StockTable";
 import BatchDetailsModal from "./BatchDetailsModal";
+import { OverdueTable } from "./OverdueTable";
+import { CreditSaleTable } from "./CreditSaleTable";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -72,6 +76,17 @@ const Dashboard = () => {
   const [loadingExpenseData, setLoadingExpenseData] = useState(false);
   const [payrollTableData, setPayrollTableData] = useState([]);
   const [loadingPayrollData, setLoadingPayrollData] = useState(false);
+  const [pendingCollectionData, setPendingCollectionData] = useState([]);
+  const [loadingPendingCollectionData, setLoadingPendingCollectionData] =
+    useState(false);
+
+  // OVERDUE DATA STATES
+  const [overdueTableData, setOverdueTableData] = useState([]);
+  const [loadingOverdueData, setLoadingOverdueData] = useState(false);
+
+  // CREDIT SALE DATA STATES
+  const [creditSaleTableData, setCreditSaleTableData] = useState([]);
+  const [loadingCreditSaleData, setLoadingCreditSaleData] = useState(false);
 
   // ADD THESE STATES FOR DYNAMIC PAYROLL TOTALS
   const [currentPayrollTotal, setCurrentPayrollTotal] = useState(0);
@@ -86,6 +101,11 @@ const Dashboard = () => {
     totalStock: 0,
     stockValue: 0,
     lowStockItems: [],
+    overdueStockValue: 0,
+    unreceivedStockValue: 0,
+    lowStockValue: 0,
+    expiringStockValue: 0,
+    totalStockValue: 0,
   });
 
   // MODALS
@@ -125,15 +145,40 @@ const Dashboard = () => {
 
       setStockTableData(stockDataFromAPI);
 
-      // Update stock cards locally
+      // Update stock cards locally with overdue/unreceive values
       const totalStockValue = calculateStockValue(stockDataFromAPI);
       const lowStockItems = getLowStockItems(stockDataFromAPI);
 
-      setStockData({
+      // Calculate overdue stock value
+      const overdueStockValue = stockDataFromAPI
+        .filter((item) => {
+          const expiry = item.expiry ? new Date(item.expiry) : null;
+          return expiry && expiry < new Date();
+        })
+        .reduce(
+          (sum, item) => sum + (item.costPrice || 0) * (item.availableQty || 0),
+          0
+        );
+
+      // Calculate unreceived stock value
+      const unreceivedStockValue = stockDataFromAPI
+        .filter(
+          (item) => item.status === "pending" || item.status === "unreceived"
+        )
+        .reduce(
+          (sum, item) => sum + (item.costPrice || 0) * (item.availableQty || 0),
+          0
+        );
+
+      setStockData((prev) => ({
+        ...prev,
         totalStock: totalStockValue,
         stockValue: totalStockValue,
         lowStockItems: lowStockItems,
-      });
+        overdueStockValue: overdueStockValue,
+        unreceivedStockValue: unreceivedStockValue,
+        totalStockValue: totalStockValue,
+      }));
     } catch (error) {
       console.error("Error fetching stock table data:", error);
     } finally {
@@ -216,6 +261,37 @@ const Dashboard = () => {
           });
           break;
 
+        case "Overdue":
+          filteredExpenses = expenses.filter((expense) => {
+            const dueDate = new Date(expense.dueDate || expense.date);
+            return dueDate < currentDate && expense.status !== "Paid";
+          });
+          break;
+
+        case "Unreceive_Payment":
+          filteredExpenses = expenses.filter((expense) => {
+            return expense.status === "Pending" || expense.status === "Unpaid";
+          });
+          break;
+
+        case "Pending":
+          filteredExpenses = expenses.filter((expense) => {
+            return expense.status === "Pending";
+          });
+          break;
+
+        case "Approved":
+          filteredExpenses = expenses.filter((expense) => {
+            return expense.status === "Approved";
+          });
+          break;
+
+        case "Rejected":
+          filteredExpenses = expenses.filter((expense) => {
+            return expense.status === "Rejected";
+          });
+          break;
+
         default:
           filteredExpenses = expenses;
       }
@@ -286,8 +362,11 @@ const Dashboard = () => {
         payrollPeriod = `${year}-${month}`;
       } else if (period === "YTD") {
         const year = currentDate.getFullYear();
-
         payrollPeriod = `${year}-YTD`;
+      } else if (period === "Overdue") {
+        payrollPeriod = "overdue";
+      } else if (period === "Unreceive_Payment") {
+        payrollPeriod = "unreceived";
       }
 
       const response = await axios.get(`${backendUrl}/api/payrolls`, {
@@ -299,7 +378,6 @@ const Dashboard = () => {
       // Calculate and log the total
       const totalNetSalary = payrolls.reduce((sum, item) => {
         const netSalary = item.netSalary || 0;
-
         return sum + netSalary;
       }, 0);
 
@@ -310,13 +388,73 @@ const Dashboard = () => {
         setCurrentPayrollTotal(totalNetSalary);
       } else if (period === "YTD") {
         setCurrentYTDTotal(totalNetSalary);
+      } else if (period === "Overdue") {
+        setCurrentPayrollTotal(totalNetSalary);
+      } else if (period === "Unreceive_Payment") {
+        setCurrentYTDTotal(totalNetSalary);
       }
     } catch (error) {
-      console.error("30. Error in fetchPayrollTableData:", error);
-
+      console.error("Error in fetchPayrollTableData:", error);
       setPayrollTableData([]);
     } finally {
       setLoadingPayrollData(false);
+    }
+  };
+
+  // Fetch overdue invoices
+  const fetchOverdueTableData = async () => {
+    try {
+      setLoadingOverdueData(true);
+
+      const response = await axios.get(`${backendUrl}/api/overdue`, {
+        params: {
+          currentDate: new Date().toISOString(),
+        },
+      });
+
+      if (response.data.success) {
+        const formattedData = response.data.data.map((invoice) => ({
+          ...invoice,
+          overdueAmount:
+            invoice.dueAmount > 0
+              ? invoice.dueAmount
+              : Math.max(0, invoice.totalAmount - (invoice.paidAmount || 0)),
+        }));
+
+        setOverdueTableData(formattedData);
+
+        if (salesData) {
+          setSalesData((prev) => ({
+            ...prev,
+            overdueAmount: response.data.totalOverdueAmount || 0,
+          }));
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching overdue table data:", error);
+      setOverdueTableData([]);
+    } finally {
+      setLoadingOverdueData(false);
+    }
+  };
+
+  // Fetch credit sale cash not received data - CORRECTED ENDPOINT
+  const fetchCreditSaleTableData = async () => {
+    try {
+      setLoadingCreditSaleData(true);
+      const response = await axios.get(
+        `${backendUrl}/api/sales/credit-sale-not-received`
+      );
+
+      if (response.data.success) {
+        setCreditSaleTableData(response.data.data || []);
+      }
+    } catch (error) {
+      console.error("Error fetching credit sale data:", error);
+      console.error("Error details:", error.response?.data || error.message);
+      setCreditSaleTableData([]);
+    } finally {
+      setLoadingCreditSaleData(false);
     }
   };
 
@@ -345,91 +483,245 @@ const Dashboard = () => {
     setShowBatchModal(true);
   };
 
+  // Handler for viewing invoice details from OverdueTable
+  const handleViewInvoiceDetails = (invoice) => {
+    // Create details array for the modal
+    const details = [
+      `Invoice Number: ${invoice.invoiceNumber || "N/A"}`,
+      `Invoice Date: ${new Date(invoice.invoiceDate).toLocaleDateString()}`,
+      `Due Date: ${new Date(invoice.dueDate).toLocaleDateString()}`,
+      `MR Name: ${invoice.mrName || "N/A"}`,
+      `Customer: ${invoice.customerName || "N/A"}`,
+      `Total Amount: $${formatCurrency(invoice.totalAmount || 0)}`,
+      `Paid Amount: $${formatCurrency(invoice.paidAmount || 0)}`,
+      `Due Amount: $${formatCurrency(invoice.dueAmount || 0)}`,
+      `Overdue Amount: $${formatCurrency(invoice.overdueAmount || 0)}`,
+      `Payment Status: ${invoice.paymentStatus || "N/A"}`,
+      `Credit Days: ${invoice.creditDays || 0}`,
+      `Delivery Date: ${
+        invoice.deliveryDate
+          ? new Date(invoice.deliveryDate).toLocaleDateString()
+          : "N/A"
+      }`,
+      `Remark: ${invoice.remark || "No remark"}`,
+    ];
+
+    // Add product details if available
+    if (invoice.products && invoice.products.length > 0) {
+      details.push(`\nProducts:`);
+      invoice.products.forEach((product, index) => {
+        details.push(
+          `  ${index + 1}. ${product.productName || "Product"} - Qty: ${
+            product.quantity || 0
+          } - Price: $${product.price || 0}`
+        );
+      });
+    }
+
+    setSelectedMRName(`Invoice: ${invoice.invoiceNumber || "Details"}`);
+    setSelectedMRProducts(details);
+    setShowProductsModal(true);
+  };
+
+  // Handler for viewing credit sale details
+  const handleViewCreditSaleDetails = (invoice) => {
+    // Create details array for the modal
+    const details = [
+      `Invoice Number: ${invoice.invoiceNumber || "N/A"}`,
+      `Invoice Date: ${new Date(invoice.invoiceDate).toLocaleDateString()}`,
+      `MR Name: ${invoice.mrName || "N/A"}`,
+      `Customer: ${invoice.customerName || "N/A"}`,
+      `Customer Code: ${invoice.customerCode || "N/A"}`,
+      `Total Amount: $${formatCurrency(invoice.totalAmount || 0)}`,
+      `Paid Amount: $${formatCurrency(invoice.paidAmount || 0)}`,
+      `Due Amount: $${formatCurrency(invoice.dueAmount || 0)}`,
+      `Payment Status: ${invoice.paymentStatus || "N/A"}`,
+      `Credit Days: ${invoice.creditDays || 0}`,
+      `Due Date: ${
+        invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString() : "N/A"
+      }`,
+      `Delivery Date: ${
+        invoice.deliveryDate
+          ? new Date(invoice.deliveryDate).toLocaleDateString()
+          : "N/A"
+      }`,
+      `Remark: ${invoice.remark || "No remark"}`,
+    ];
+
+    // Add product details if available
+    if (invoice.products && invoice.products.length > 0) {
+      details.push(`\nProducts:`);
+      invoice.products.forEach((product, index) => {
+        details.push(
+          `  ${index + 1}. ${product.productName || "Product"} - Sales Qty: ${
+            product.salesQty || 0
+          } - Bonus Qty: ${product.bonusQty || 0} - Price: $${
+            product.sellingPrice || 0
+          }`
+        );
+      });
+    }
+
+    setSelectedMRName(`Credit Sale: ${invoice.invoiceNumber || "Details"}`);
+    setSelectedMRProducts(details);
+    setShowProductsModal(true);
+  };
+
   // SUB-TAB CHANGE HANDLERS
   const handleSalesSubTabChange = (subTab) => {
     setActiveSalesSubTab(subTab);
+    if (activeTab === "Sales") {
+      fetchSalesTableData(subTab);
+    }
   };
 
   const handleOutstandingSubTabChange = (subTab) => {
     setActiveOutstandingSubTab(subTab);
+    if (activeTab === "Outstanding") {
+      fetchOutstandingTableData(subTab);
+    }
   };
 
   const handleStockSubTabChange = (subTab) => {
     setActiveStockSubTab(subTab);
+    if (activeTab === "Stock in Hands") {
+      fetchStockTableData(subTab);
+    }
   };
 
   const handleExpenseSubTabChange = (subTab) => {
     setActiveExpenseSubTab(subTab);
+    if (activeTab === "Expenses") {
+      fetchExpenseTableData(subTab);
+    }
   };
 
   const handlePayrollSubTabChange = (subTab) => {
     setActivePayrollSubTab(subTab);
+    if (activeTab === "Total Payroll") {
+      fetchPayrollTableData(subTab);
+    }
+  };
+
+  const fetchPendingCollectionData = async () => {
+    try {
+      setLoadingPendingCollectionData(true);
+
+      const response = await axios.get(
+        `${backendUrl}/api/sales/pending-collection-today`
+      );
+      console.log("responst", response);
+      if (response.data.success) {
+        const data = response.data.data || [];
+
+        setPendingCollectionData(data);
+      } else {
+        console.error("❌ API returned success: false", response.data.message);
+        setPendingCollectionData([]);
+      }
+    } catch (error) {
+      console.error("❌ Error fetching pending collection data:", error);
+      console.error("❌ Error details:", error.response?.data || error.message);
+      setPendingCollectionData([]);
+    } finally {
+      setLoadingPendingCollectionData(false);
+    }
   };
 
   const handleParentTabChange = (newTab) => {
     setPreviousActiveTab(activeTab);
     setActiveTab(newTab);
 
-    if (newTab === "Stock in Hands") {
-      setActiveStockSubTab("Today");
-      fetchStockTableData("Today");
-    }
-    if (newTab === "Sales") {
-      setActiveSalesSubTab("Today");
-      fetchSalesTableData("Today");
-    }
-    if (newTab === "Outstanding") {
-      setActiveOutstandingSubTab("Today");
-      fetchOutstandingTableData("Today");
-    }
-    if (newTab === "Total Payroll") {
-      setActivePayrollSubTab("Prev Month");
-      fetchPayrollTableData("Prev Month");
-    }
-    if (newTab === "Expenses") {
-      setActiveExpenseSubTab("Month");
-      fetchExpenseTableData("Month");
+    // Reset sub-tabs and fetch data based on the new tab
+    switch (newTab) {
+      case "Stock in Hands":
+        setActiveStockSubTab("Today");
+        fetchStockTableData("Today");
+        break;
+      case "Sales":
+        setActiveSalesSubTab("Today");
+        fetchSalesTableData("Today");
+        break;
+      case "Outstanding":
+        setActiveOutstandingSubTab("Today");
+        fetchOutstandingTableData("Today");
+        break;
+      case "Total Payroll":
+        setActivePayrollSubTab("Prev Month");
+        fetchPayrollTableData("Prev Month");
+        break;
+      case "Expenses":
+        setActiveExpenseSubTab("Month");
+        fetchExpenseTableData("Month");
+        break;
+      case "Overdue":
+        fetchOverdueTableData();
+        break;
+      case "Credit Sale Cash Not Receive":
+        fetchCreditSaleTableData();
+        break;
+      case "Pending Collection":
+        fetchPendingCollectionData(); // NEW: Fetch pending collections
+        break;
+      default:
+        break;
     }
   };
 
   // ------------------ EFFECTS ------------------
   // Initial data fetch
   useEffect(() => {
-    fetchSalesTableData("Today");
-    fetchOutstandingTableData("Today");
-    fetchExpenseTableData("Month");
-    fetchStockTableData("Today");
+    const initializeData = async () => {
+      await Promise.all([
+        fetchSalesTableData("Today"),
+        fetchOutstandingTableData("Today"),
+        fetchExpenseTableData("Month"),
+        fetchStockTableData("Today"),
+      ]);
 
-    // Initialize payroll totals with data from useDashboardData hook
-    setCurrentPayrollTotal(totalPayroll);
-    setCurrentYTDTotal(payrollYTDTotal);
-  }, []);
+      // Initialize payroll totals with data from useDashboardData hook
+      setCurrentPayrollTotal(totalPayroll);
+      setCurrentYTDTotal(payrollYTDTotal);
+    };
 
+    initializeData();
+  }, []); // Empty dependency array - runs only once on mount
+
+  // Effect for active tab changes
   useEffect(() => {
-    if (activeTab === "Stock in Hands") {
-      fetchStockTableData(activeStockSubTab);
+    switch (activeTab) {
+      case "Stock in Hands":
+        fetchStockTableData(activeStockSubTab);
+        break;
+      case "Sales":
+        fetchSalesTableData(activeSalesSubTab);
+        break;
+      case "Outstanding":
+        fetchOutstandingTableData(activeOutstandingSubTab);
+        break;
+      case "Expenses":
+        fetchExpenseTableData(activeExpenseSubTab);
+        break;
+      case "Total Payroll":
+        fetchPayrollTableData(activePayrollSubTab);
+        break;
+      case "Overdue":
+        fetchOverdueTableData();
+        break;
+      case "Credit Sale Cash Not Receive":
+        fetchCreditSaleTableData();
+        break;
+      default:
+        break;
     }
-  }, [activeTab, activeStockSubTab]);
-
-  useEffect(() => {
-    if (activeTab === "Sales") fetchSalesTableData(activeSalesSubTab);
-  }, [activeSalesSubTab, activeTab]);
-
-  useEffect(() => {
-    if (activeTab === "Outstanding")
-      fetchOutstandingTableData(activeOutstandingSubTab);
-  }, [activeOutstandingSubTab, activeTab]);
-
-  useEffect(() => {
-    if (activeTab === "Expenses") fetchExpenseTableData(activeExpenseSubTab);
-  }, [activeExpenseSubTab, activeTab]);
-
-  // Effect for payroll sub-tab changes
-  useEffect(() => {
-    if (activeTab === "Total Payroll") {
-      fetchPayrollTableData(activePayrollSubTab);
-    }
-  }, [activePayrollSubTab, activeTab]);
+  }, [
+    activeTab,
+    activeStockSubTab,
+    activeSalesSubTab,
+    activeOutstandingSubTab,
+    activeExpenseSubTab,
+    activePayrollSubTab,
+  ]);
 
   // Update local totals when hook data changes
   useEffect(() => {
@@ -489,6 +781,22 @@ const Dashboard = () => {
             onViewStockDetails={handleViewStockDetails}
           />
         );
+      case "Overdue":
+        return (
+          <OverdueTable
+            overdueData={overdueTableData}
+            loading={loadingOverdueData}
+            onViewDetails={handleViewInvoiceDetails}
+          />
+        );
+      case "Credit Sale Cash Not Receive":
+        return (
+          <CreditSaleTable
+            creditSaleData={creditSaleTableData}
+            loading={loadingCreditSaleData}
+            onViewDetails={handleViewCreditSaleDetails}
+          />
+        );
       default:
         return <div>Table for {activeTab}</div>;
     }
@@ -510,14 +818,22 @@ const Dashboard = () => {
         outstandingData={outstandingData}
         stockData={stockData}
         expenseData={expenseData}
-        totalPayroll={currentPayrollTotal} // Use dynamic currentPayrollTotal
-        payrollYTDTotal={currentYTDTotal} // Use dynamic currentYTDTotal
+        totalPayroll={currentPayrollTotal}
+        payrollYTDTotal={currentYTDTotal}
         activeSalesSubTab={activeSalesSubTab}
         activeOutstandingSubTab={activeOutstandingSubTab}
         activeExpenseSubTab={activeExpenseSubTab}
         activePayrollSubTab={activePayrollSubTab}
+        activeStockSubTab={activeStockSubTab}
+        onSalesSubTabChange={handleSalesSubTabChange}
+        onExpenseSubTabChange={handleExpenseSubTabChange}
+        onPayrollSubTabChange={handlePayrollSubTabChange}
+        onOutstandingSubTabChange={handleOutstandingSubTabChange}
+        onStockSubTabChange={handleStockSubTabChange}
         dateRanges={dateRanges}
         prevMonthRanges={prevMonthRanges}
+        overdueTableData={overdueTableData}
+        creditSaleTableData={creditSaleTableData}
       />
 
       <SubTabs
@@ -555,8 +871,13 @@ const Dashboard = () => {
           onViewProducts={handleViewProducts}
           onViewInvoices={handleViewInvoices}
           onViewExpenseDetails={handleViewExpenseDetails}
+          overdueTableData={overdueTableData}
+          loadingOverdueData={loadingOverdueData}
+          pendingCollectionData={pendingCollectionData || []}
+          loadingPendingCollectionData={loadingPendingCollectionData || false}
+          creditSaleTableData={creditSaleTableData || []} // ADD THIS
+          loadingCreditSaleData={loadingCreditSaleData || false} // ADD THIS
         />
-
         <div className="lg:col-span-2">{renderMainTable()}</div>
       </div>
 
