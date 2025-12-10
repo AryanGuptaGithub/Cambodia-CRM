@@ -60,6 +60,5 @@ staffSchema.pre("save", async function (next) {
 });
 
 // Important: Export model as "MR" to match StockReturn ref
-const MR = mongoose.model("MR", staffSchema);
-
-export default MR;
+const Staff = mongoose.model("Staff", staffSchema);
+export default Staff;
