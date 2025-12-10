@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-
+import staff from "../../models/staffMember/staff.js"
 const mRCashSchema = new mongoose.Schema({
   mrId: {
     type: mongoose.Schema.Types.ObjectId,
