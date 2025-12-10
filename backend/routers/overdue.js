@@ -8,8 +8,6 @@ const router = express.Router();
 router.get("/overdue", async (req, res) => {
   try {
     const { currentDate } = req.query;
-
-    // Use provided currentDate or default to server's current date
     const referenceDate = currentDate ? new Date(currentDate) : new Date();
 
     // Get start of today for date comparison (00:00:00)
