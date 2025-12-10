@@ -17,13 +17,37 @@ const attendanceSchema = new mongoose.Schema(
     totalTime: {
       type: String,
     },
+    workingHoursPerDay: {
+      type: Number,
+      default: 9, // 9 hours per day
+    },
+    extraHours: {
+      type: String,
+      default: "00:00:00",
+    },
+    extraHoursInMinutes: {
+      type: Number,
+      default: 0,
+    },
+    isLeaveDay: {
+      type: Boolean,
+      default: false,
+    },
+    leaveType: {
+      type: String,
+      enum: ["regular", "extra_hours_converted", "other"],
+      default: "regular",
+    },
+    remarks: {
+      type: String,
+    },
   },
   {
     timestamps: true,
   }
 );
 
-// Calculate total time before saving
+// Calculate total time and extra hours before saving
 attendanceSchema.pre("save", function (next) {
   if (this.logoutTime && this.loginTime) {
     const timeDiff = this.logoutTime - this.loginTime;
@@ -34,7 +58,24 @@ attendanceSchema.pre("save", function (next) {
     this.totalTime = `${hours.toString().padStart(2, "0")}:${minutes
       .toString()
       .padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+
+    // Calculate total minutes worked
+    const totalMinutesWorked = Math.floor(timeDiff / (1000 * 60));
+    const totalMinutesExpected = this.workingHoursPerDay * 60;
+    
+    // Calculate extra minutes (if worked more than expected)
+    const extraMinutes = Math.max(0, totalMinutesWorked - totalMinutesExpected);
+    
+    if (extraMinutes > 0) {
+      this.extraHoursInMinutes = extraMinutes;
+      const extraHours = Math.floor(extraMinutes / 60);
+      const extraMins = extraMinutes % 60;
+      this.extraHours = `${extraHours.toString().padStart(2, "0")}:${extraMins
+        .toString()
+        .padStart(2, "0")}:00`;
+    }
   }
+  
   next();
 });
 
