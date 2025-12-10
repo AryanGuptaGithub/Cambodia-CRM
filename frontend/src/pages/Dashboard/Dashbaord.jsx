@@ -669,7 +669,7 @@ const Dashboard = () => {
   };
 
   // ------------------ EFFECTS ------------------
-  // Initial data fetch
+  // Initial data fetch - UPDATED TO INCLUDE CREDIT SALE DATA
   useEffect(() => {
     const initializeData = async () => {
       await Promise.all([
@@ -677,6 +677,7 @@ const Dashboard = () => {
         fetchOutstandingTableData("Today"),
         fetchExpenseTableData("Month"),
         fetchStockTableData("Today"),
+        fetchCreditSaleTableData(), // ADD THIS: Fetch credit sale data on initial load
       ]);
 
       // Initialize payroll totals with data from useDashboardData hook
@@ -833,7 +834,7 @@ const Dashboard = () => {
         dateRanges={dateRanges}
         prevMonthRanges={prevMonthRanges}
         overdueTableData={overdueTableData}
-        creditSaleTableData={creditSaleTableData}
+        creditSaleTableData={creditSaleTableData} // PASS THE CREDIT SALE DATA
       />
 
       <SubTabs

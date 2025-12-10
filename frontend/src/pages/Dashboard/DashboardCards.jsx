@@ -85,7 +85,8 @@ export const DashboardCards = ({
   onStockSubTabChange,
   dateRanges,
   prevMonthRanges,
-  overdueTableData, // Add this prop
+  overdueTableData,
+  creditSaleTableData, // ADD THIS PROP
 }) => {
   const getCurrentSalesAmount = () => {
     switch (activeSalesSubTab) {
@@ -306,8 +307,16 @@ export const DashboardCards = ({
     return salesData?.overdueAmount || 0;
   };
 
-  // Get credit sale cash not received amount
+  // Get credit sale cash not received amount - UPDATED
   const getCreditSaleCashNotReceived = () => {
+    // First, try to calculate from creditSaleTableData (same as SidePanel)
+    if (creditSaleTableData && creditSaleTableData.length > 0) {
+      return creditSaleTableData.reduce((total, invoice) => {
+        return total + (invoice.outstandingAmount || invoice.dueAmount || 0);
+      }, 0);
+    }
+    
+    // Fallback to salesData if creditSaleTableData is not available
     return salesData?.unreceivePayment || salesData?.creditSale || 0;
   };
 
@@ -325,7 +334,8 @@ export const DashboardCards = ({
         return activeStockSubTab;
       case "Overdue":
         return "Total Overdue";
-
+      case "Credit Sale Cash Not Receive":
+        return "Unreceive Payment";
       default:
         return "";
     }
@@ -382,16 +392,16 @@ export const DashboardCards = ({
       icon: AlertCircle,
       color: "red",
       subtitle: getSubtitle("Overdue"),
-      growth: 0,
+      growth: salesData?.overdueGrowth || 0,
     },
     {
       id: "Credit Sale Cash Not Receive",
       title: "Pending Collection",
-      amount: getCreditSaleCashNotReceived(),
+      amount: getCreditSaleCashNotReceived(), 
       icon: CreditCard,
       color: "indigo",
       subtitle: getSubtitle("Credit Sale Cash Not Receive"),
-      growth: 0,
+      growth: salesData?.unreceivePaymentGrowth || 0,
     },
   ];
 

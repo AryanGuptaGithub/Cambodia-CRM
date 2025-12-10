@@ -589,41 +589,26 @@ const RecentActivityPendingCollection = ({
   pendingCollectionData = [],
   loadingPendingCollectionData = false,
 }) => {
-  console.log(
-    "📊 RecentActivityPendingCollection - Data:",
-    pendingCollectionData
-  );
-  console.log(
-    "📊 RecentActivityPendingCollection - Loading:",
-    loadingPendingCollectionData
-  );
-
   // Moved ALL hooks to the top, before any conditional returns
   const todayPendingCollections = React.useMemo(() => {
     // If data is undefined or null, return empty array
     if (!pendingCollectionData || pendingCollectionData.length === 0) {
-      console.log("📊 No pending collection data available");
       return [];
     }
 
-    console.log(
-      `📊 Received ${pendingCollectionData.length} pending collections`
-    );
+    // Filter to show only invoices with due date TODAY
+    const today = new Date();
+    const todayStr = today.toISOString().split("T")[0]; // Get YYYY-MM-DD format
 
-    // Log first item for debugging
-    if (pendingCollectionData[0]) {
-      console.log("📊 First item details:", {
-        invoiceNumber: pendingCollectionData[0].invoiceNumber,
-        dueDate: pendingCollectionData[0].dueDate,
-        paymentStatus: pendingCollectionData[0].paymentStatus,
-        totalAmount: pendingCollectionData[0].totalAmount,
-        paidAmount: pendingCollectionData[0].paidAmount,
-        dueAmount: pendingCollectionData[0].dueAmount,
-        outstandingAmount: pendingCollectionData[0].outstandingAmount,
-      });
-    }
+    return pendingCollectionData.filter((invoice) => {
+      if (!invoice.dueDate) return false;
 
-    return pendingCollectionData;
+      const invoiceDueDate = new Date(invoice.dueDate);
+      const invoiceDueDateStr = invoiceDueDate.toISOString().split("T")[0];
+
+      // Check if due date is exactly today
+      return invoiceDueDateStr === todayStr;
+    });
   }, [pendingCollectionData]);
 
   // Calculate totals
@@ -657,13 +642,6 @@ const RecentActivityPendingCollection = ({
       invoicesByStatus[status] = (invoicesByStatus[status] || 0) + 1;
     });
 
-    console.log("📊 Calculated totals:", {
-      totalAmount,
-      totalOutstanding,
-      totalPaid,
-      invoicesByStatus,
-    });
-
     return {
       totalAmount,
       totalOutstanding,
@@ -695,7 +673,7 @@ const RecentActivityPendingCollection = ({
       .slice(0, 5);
   }, [todayPendingCollections]);
 
-  // Get today's date for footer
+  // Get today's date for display
   const today = new Date();
   const todayString = today.toLocaleDateString();
 
@@ -783,14 +761,11 @@ const RecentActivityPendingCollection = ({
         </div>
       )}
 
-    
-      {/* Top 5 Pending Collections for Today */}
       <PanelContent
         data={topCollections}
         loading={false}
         emptyText="No pending collections found for today"
         renderItem={(item, index) => {
-          // Calculate outstanding amount - use existing or calculate
           const outstandingAmount =
             item.outstandingAmount ||
             item.dueAmount ||
@@ -887,7 +862,10 @@ const RecentActivityPendingCollection = ({
                 Showing top {Math.min(5, todayPendingCollections.length)} of{" "}
                 {todayPendingCollections.length}
               </p>
-              <p className="text-xs text-gray-400">Due date: {formatDateToReadable(todayString)}</p>
+              <p className="text-xs text-gray-400">
+                Due date: {formatDateToReadable(new Date())}{" "}
+                {/* Fixed this line */}
+              </p>
             </div>
             <div className="text-right">
               <p className="text-xs font-medium text-gray-900">
@@ -903,7 +881,7 @@ const RecentActivityPendingCollection = ({
             </div>
           </div>
         </div>
-      )}
+      )}  
     </div>
   );
 };
