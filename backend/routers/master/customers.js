@@ -1,7 +1,7 @@
 import express from "express";
 import Customer from "../../models/master/customer.js";
 import Province from "../../models/master/Province.js";
-import MedicalRep from "../../models/staffMember/staff.js"
+import MedicalRep from "../../models/staffMember/staff.js";
 
 const router = express.Router();
 
@@ -28,8 +28,18 @@ const handleDuplicateError = (res, err) => {
   });
 };
 
-
 const safeStr = (val) => (val == null ? "" : String(val).trim());
+
+// Helper to normalize MR name for matching
+const normalizeMRName = (name) => {
+  if (!name) return "";
+  return name
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ") // Normalize multiple spaces
+    .replace(/[.,]/g, ""); // Remove dots and commas
+};
 
 router.post("/customers/import", async (req, res) => {
   try {
@@ -42,16 +52,23 @@ router.post("/customers/import", async (req, res) => {
       });
     }
 
-    // Fetch all MRs to map name → _id
+    // Fetch all MRs including USER ID (important)
     const mrList = await MedicalRep.find().select(
-      "medicalRepName _id staffName"
+      "medicalRepName staffName userId"
     );
+
+    // Map MR Name → USER ID (NOT MR ID)
     const mrMap = new Map();
     mrList.forEach((mr) => {
-      const name = (mr.medicalRepName || mr.staffName || "")
-        .trim()
-        .toLowerCase();
-      if (name) mrMap.set(name, mr._id);
+      const medRepName = safeStr(mr.medicalRepName);
+      const staffName = safeStr(mr.staffName);
+
+      if (medRepName) {
+        mrMap.set(medRepName.toLowerCase(), mr.userId?.toString());
+      }
+      if (staffName) {
+        mrMap.set(staffName.toLowerCase(), mr.userId?.toString());
+      }
     });
 
     // Get last customer code
@@ -65,86 +82,89 @@ router.post("/customers/import", async (req, res) => {
       if (!isNaN(parsed)) nextCode = parsed + 1;
     }
 
-    // Convert all fields to safe strings + map MR
-    const newCustomers = customers.map((item, idx) => {
-      const mrName = safeStr(item.medicalRepName).trim().toLowerCase();
-      const medicalRepId = mrMap.get(mrName) || null;
+    const newCustomers = [];
 
-      return {
-        customerCode: (nextCode + idx).toString().padStart(4, "0"),
-        date: item.date ? new Date(item.date) : new Date(),
-        medicalRepName: safeStr(item.medicalRepName),
-        medicalRepId, // Critical: Must be ObjectId or null
-        name: safeStr(item.name),
-        typeOfBusiness: safeStr(item.typeOfBusiness),
-        customerNumber: safeStr(item.customerNumber),
-        address: safeStr(item.customerAddress),
-        zone: safeStr(item.zone),
-        province: safeStr(item.province),
-        remark: safeStr(item.remark),
-        isNew: true,
+    for (let i = 0; i < customers.length; i++) {
+      const item = customers[i];
+
+      let name = safeStr(item.name);
+      if (!name || name.trim() === "") {
+        name = `Customer_${nextCode + newCustomers.length}_${Date.now()}`;
+      }
+
+      let date = new Date();
+      if (item.date) {
+        const parsedDate = new Date(item.date);
+        if (!isNaN(parsedDate.getTime())) {
+          date = parsedDate;
+        }
+      }
+
+      // MR Name → USER ID
+      let medicalRepId = null; // final field stored in DB
+      let mrName = safeStr(item.medicalRepName);
+
+      if (!mrName || mrName.trim() === "") {
+        mrName = "Not Provided";
+      } else {
+        const mrKey = mrName.toLowerCase();
+        medicalRepId = mrMap.get(mrKey);
+
+        // Partial match fallback
+        if (!medicalRepId) {
+          for (const [key, value] of mrMap) {
+            if (key.includes(mrKey) || mrKey.includes(key)) {
+              medicalRepId = value;
+              break;
+            }
+          }
+        }
+      }
+
+      const customerNumber = safeStr(item.customerNumber);
+
+      newCustomers.push({
+        customerCode: (nextCode + newCustomers.length)
+          .toString()
+          .padStart(4, "0"),
+        date: date.toISOString().split("T")[0],
+        medicalRepName: mrName,
+
+        // ⭐ STORE USER ID HERE (NOT MR ID)
+        medicalRepId,
+
+        name,
+        typeOfBusiness: safeStr(item.typeOfBusiness) || "Not Provided",
+        customerNumber: customerNumber || "",
+        address: safeStr(item.customerAddress) || "Not Provided",
+        zone: safeStr(item.zone) || "Not Provided",
+        province: safeStr(item.province) || "Not Provided",
+        remark: safeStr(item.remark) || "Not Provided",
         enabled: true,
-      };
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    }
+
+    if (newCustomers.length === 0) {
+      return res.status(400).json({
+        message: "No valid customers to import.",
+        ok: false,
+      });
+    }
+
+    const inserted = await Customer.insertMany(newCustomers, {
+      ordered: false,
     });
 
-    // Filter out empty names
-    const validCustomers = newCustomers.filter((c) => c.name && c.medicalRepId);
-
-    if (validCustomers.length === 0) {
-      return res.status(400).json({
-        message: "No valid customers to import (missing name or MR not found).",
-        ok: false,
-      });
-    }
-
-    // Check duplicate customer numbers in DB
-    const importedNumbers = validCustomers
-      .map((c) => c.customerNumber)
-      .filter((n) => n);
-
-    if (importedNumbers.length > 0) {
-      const existing = await Customer.find({
-        customerNumber: { $in: importedNumbers },
-      }).select("customerNumber name");
-
-      if (existing.length > 0) {
-        const dup = existing[0];
-        return res.status(400).json({
-          message: `Customer with mobile number <b style="color:#EF4444">${dup.customerNumber}</b> already exists.`,
-          duplicateNumber: dup.customerNumber,
-          existingCustomer: dup.name,
-          ok: false,
-        });
-      }
-    }
-
-    // Check duplicate names
-    const existingNames = await Customer.find({
-      name: { $in: validCustomers.map((c) => c.name) },
-    }).select("name");
-
-    const existingNameSet = new Set(existingNames.map((c) => c.name));
-    const uniqueCustomers = validCustomers.filter(
-      (c) => !existingNameSet.has(c.name)
-    );
-
-    if (uniqueCustomers.length === 0) {
-      return res.status(400).json({
-        message: "No new customers to import (all already exist).",
-        ok: false,
-      });
-    }
-
-    const inserted = await Customer.insertMany(uniqueCustomers);
-
     res.status(200).json({
-      message: `${inserted.length} customer(s) imported successfully.`,
+      message: `Successfully imported ${inserted.length} customer(s).`,
       importedCount: inserted.length,
-      skippedCount: validCustomers.length - inserted.length,
+      skippedCount: 0,
       ok: true,
     });
   } catch (err) {
-    console.error("Import error:", err); // Log full error
+    console.error("Import error:", err);
 
     if (err.code === 11000) {
       if (err.keyPattern?.customerNumber) {
@@ -169,6 +189,7 @@ router.post("/customers/import", async (req, res) => {
     handleServerError(res, err, "Failed to import customers");
   }
 });
+
 // 2. POST: Create new customer
 router.post("/customers", async (req, res) => {
   try {

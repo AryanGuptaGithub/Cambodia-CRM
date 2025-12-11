@@ -277,21 +277,35 @@ const ImportModal = ({
             className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
           />
         </div>
-        <div className="flex justify-end gap-3">
-          <button
-            onClick={onClose}
-            className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
-            disabled={isUploading}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onImport}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg cursor-pointer"
-            disabled={isUploading || parsedData.length === 0}
-          >
-            {isUploading ? "Uploading…" : "Upload"}
-          </button>
+        <div className="flex justify-between items-center">
+          <div className="text-sm text-gray-600">
+            {parsedData.length > 0 ? (
+              <>
+                Rows to import:{" "}
+                <span className="font-semibold text-blue-600">
+                  {parsedData.length}
+                </span>
+              </>
+            ) : (
+              <span className="text-gray-500">No data to import</span>
+            )}
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={onClose}
+              className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+              disabled={isUploading}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={onImport}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+              disabled={isUploading || parsedData.length === 0}
+            >
+              {isUploading ? "Uploading…" : "Upload"}
+            </button>
+          </div>
         </div>
       </div>
     </div>,
@@ -505,7 +519,7 @@ const Supplier = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [activeTab, setActiveTab] = useState("All");
   const [search, setSearch] = useState("");
-  const [isOpen, setIsOpen] = useState(false); // Controls modal visibility: "import", "view", "edit", or null
+  const [isOpen, setIsOpen] = useState(false);
   const [parsedData, setParsedData] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
   const [form, setForm] = useState({
@@ -515,6 +529,7 @@ const Supplier = () => {
     siteRegistrationExpiryDate: "",
     enabled: "",
   });
+  const [importWarnings, setImportWarnings] = useState([]);
 
   // Fetch suppliers
   useEffect(() => {
@@ -616,7 +631,7 @@ const Supplier = () => {
           setSelected([]);
         }
       } catch (err) {
-        console.error("Delete error:", err.response?.data || err.message); // Debug log
+        console.error("Delete error:", err.response?.data || err.message);
         showToast("error", "Failed to delete suppliers.");
       }
     } else {
@@ -648,6 +663,7 @@ const Supplier = () => {
       }
     }
   };
+
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -663,96 +679,101 @@ const Supplier = () => {
         defval: "",
       });
 
-      // Expected headers (normalized)
-      const EXPECTED_HEADERS = [
-        "supplier name",
-        "address",
-        "site registration date",
-        "site registration expiry date",
-      ];
-      const normalizeHeader = (header) =>
-        header?.toString().trim().toLowerCase();
+      console.log("Raw Excel rows:", allRows);
 
-      // Find the header row (skip title rows)
-      let headerRowIndex = -1;
-      for (let i = 0; i < allRows.length; i++) {
-        const row = allRows[i].map(normalizeHeader);
-        const isMatch = EXPECTED_HEADERS.every((header) =>
-          row.includes(header)
-        );
-        if (isMatch) {
-          headerRowIndex = i;
-          break;
-        }
-      }
+      // Remove empty rows
+      const cleanedRows = allRows.filter(
+        (row) =>
+          row.length > 0 &&
+          row.some((cell) => cell && cell.toString().trim() !== "")
+      );
 
-      if (headerRowIndex === -1) {
-        showToast("error", "Required headers not found in the file.");
-        return;
-      }
+      // Check if first row is header
+      const firstRow = cleanedRows[0];
+      const hasHeader = firstRow.some(
+        (cell) =>
+          (typeof cell === "string" &&
+            cell.toLowerCase().includes("supplier")) ||
+          cell.toLowerCase().includes("name") ||
+          cell.toLowerCase().includes("address")
+      );
 
-      const headers = allRows[headerRowIndex];
-      const dataRows = allRows.slice(headerRowIndex + 1);
+      // If header exists, remove it
+      const dataRows = hasHeader ? cleanedRows.slice(1) : cleanedRows;
 
-      const parsedData = dataRows
-        .map((row) => {
-          const obj = {};
-          headers.forEach((header, idx) => {
-            obj[normalizeHeader(header)] = row[idx];
-          });
+      // Map the data correctly
+      const parsedData = dataRows.map((row, index) => {
+        const supplierName = (row[0] || "").toString().trim();
+        const address = (row[1] || "").toString().trim();
+        const siteRegistrationNumber = (row[2] || "").toString().trim();
+        const expiryDateStr = (row[3] || "").toString().trim();
 
-          const siteRegistrationDate = parseExcelDate(
-            obj["site registration date"]
-          );
-          const siteRegistrationExpiryDate = parseExcelDate(
-            obj["site registration expiry date"]
-          );
-
-          return {
-            supplierName: obj["supplier name"]?.toString().trim() || "",
-            address: obj["address"]?.toString().trim() || "",
-            siteRegistrationDate:
-              siteRegistrationDate && !isNaN(siteRegistrationDate.getTime())
-                ? siteRegistrationDate.toISOString()
-                : null,
-            siteRegistrationExpiryDate:
-              siteRegistrationExpiryDate &&
-              !isNaN(siteRegistrationExpiryDate.getTime())
-                ? siteRegistrationExpiryDate.toISOString()
-                : null,
-          };
-        })
-        .filter((item) => {
-          const hasValidDates =
-            item.siteRegistrationDate !== null &&
-            item.siteRegistrationExpiryDate !== null;
-          const hasRequiredFields = item.supplierName && item.address;
-          if (!hasValidDates) {
-            console.warn("Skipping item with invalid dates:", item);
+        // Parse expiry date if available
+        let parsedExpiryDate = null;
+        if (expiryDateStr) {
+          // Try DD/MM/YYYY format
+          const parts = expiryDateStr.split("/");
+          if (parts.length === 3) {
+            const day = parseInt(parts[0], 10);
+            const month = parseInt(parts[1], 10) - 1;
+            const year = parseInt(parts[2], 10);
+            parsedExpiryDate = new Date(year, month, day);
+          } else {
+            // Try other date formats
+            parsedExpiryDate = new Date(expiryDateStr);
           }
-          return hasRequiredFields && hasValidDates;
-        });
+        }
 
-      setParsedData(parsedData);
+        // Prepare the data object
+        const dataObj = {
+          supplierName,
+          address,
+        };
+
+        // Only add dates if they're valid
+        if (parsedExpiryDate && !isNaN(parsedExpiryDate.getTime())) {
+          dataObj.siteRegistrationExpiryDate = parsedExpiryDate.toISOString();
+        }
+
+        // Note: siteRegistrationDate will be set by the backend to current date if not provided
+
+        return dataObj;
+      });
+
+      // Filter out rows without supplier name
+      const validData = parsedData.filter(
+        (item) => item.supplierName && item.supplierName.trim() !== ""
+      );
+
+      console.log("Parsed data:", validData);
+
+      // Count missing data for warning
+      const missingExpiryDates = validData.filter(
+        (item) => !item.siteRegistrationExpiryDate
+      ).length;
+
+      if (missingExpiryDates > 0) {
+        showToast(
+          "warning",
+          `${missingExpiryDates} supplier(s) have missing/invalid expiry dates. Default values will be applied.`
+        );
+      }
+
+      setParsedData(validData);
+
+      if (validData.length === 0) {
+        showToast(
+          "warning",
+          "No valid data found in the Excel file. Please check the format."
+        );
+      }
     };
     reader.readAsArrayBuffer(file);
   };
 
-  // ✅ handleImport function stays the same
   const handleImport = async () => {
     if (parsedData.length === 0) {
       showToast("warning", "Excel File is Empty");
-      return;
-    }
-
-    const invalidDates = parsedData.filter(
-      (item) => !item.siteRegistrationDate || !item.siteRegistrationExpiryDate
-    );
-    if (invalidDates.length > 0) {
-      showToast(
-        "warning",
-        `Found ${invalidDates.length} records with invalid dates. Please check your Excel file.`
-      );
       return;
     }
 
@@ -763,11 +784,33 @@ const Supplier = () => {
         parsedData
       );
       if (res.status === 200) {
-        showToast(
-          "success",
-          res.data.message || "Suppliers imported successfully!"
-        );
-        setIsOpen(null);
+        let toastMessage = res.data.message || "Suppliers imported successfully!";
+        
+        // Show warnings if any
+        if (res.data.warnings && res.data.warnings.length > 0) {
+          setImportWarnings(res.data.warnings);
+          toastMessage += " Some rows had warnings.";
+          
+          // Show first 3 warnings as a toast
+          if (res.data.warnings.length <= 3) {
+            res.data.warnings.forEach(warning => {
+              showToast("warning", warning);
+            });
+          } else {
+            showToast("warning", `${res.data.warnings.length} rows had warnings. Check console for details.`);
+            console.warn("Import warnings:", res.data.warnings);
+          }
+        }
+        
+        showToast("success", toastMessage);
+        
+        // Only close modal if no errors
+        if (res.data.errorCount === 0) {
+          setIsOpen(null);
+          setImportWarnings([]);
+        }
+        
+        // Refresh suppliers
         const updated = await fetch(`${backendUrl}/api/suppliers`);
         setSuppliers(await updated.json());
         setParsedData([]);
@@ -777,6 +820,11 @@ const Supplier = () => {
         err.response?.data?.message?.replace(/<[^>]+>/g, "") ||
         "Failed to import suppliers.";
       showToast("error", message);
+      
+      // Store warnings if any
+      if (err.response?.data?.warnings) {
+        setImportWarnings(err.response.data.warnings);
+      }
     } finally {
       setIsUploading(false);
     }
@@ -883,7 +931,10 @@ const Supplier = () => {
       )}
       <ImportModal
         show={isOpen === "import"}
-        onClose={() => setIsOpen(null)}
+        onClose={() => {
+          setIsOpen(null);
+          setImportWarnings([]);
+        }}
         isUploading={isUploading}
         onFileUpload={handleFileUpload}
         onImport={handleImport}

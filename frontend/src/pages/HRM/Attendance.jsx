@@ -15,6 +15,8 @@ import {
   Calendar as CalendarIcon,
   CalendarRange,
   Info,
+  User,
+  Users,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
@@ -148,10 +150,20 @@ const Attendance = () => {
     attendanceRecordsWithExtraHours: [],
     monthlyRecordsWithExtraHours: [],
     loading: false,
-    useMonthlyOnly: true, // Default to using monthly extra hours only
+    useMonthlyOnly: true,
   });
   const [selectedDateForLeave, setSelectedDateForLeave] = useState("");
   const [convertingLeave, setConvertingLeave] = useState(false);
+
+  // State for filtered MRs based on date selection
+  const [filteredMrOptions, setFilteredMrOptions] = useState([]);
+  const [dateValidation, setDateValidation] = useState({
+    isValid: false,
+    message: "",
+    isHoliday: false,
+    isSunday: false,
+    holidayName: ""
+  });
 
   useEffect(() => {
     fetchMRList();
@@ -189,6 +201,27 @@ const Attendance = () => {
     }
   }, [selectedMr, showCalendarView, currentMonth, currentYear]);
 
+  // Update filtered MR options when date changes
+  useEffect(() => {
+    if (startDate) {
+      validateAndFilterMRs(startDate);
+    } else {
+      // If no date selected, show all MRs
+      setFilteredMrOptions(mrList.map((mr) => ({
+        value: mr._id,
+        label: `${mr.medicalRepName} (${mr.MRId})`,
+      })));
+      setDateValidation({
+        isValid: false,
+        message: "Please select a date first",
+        isHoliday: false,
+        isSunday: false,
+        holidayName: ""
+      });
+      setSelectedAttendanceMr(null);
+    }
+  }, [startDate, mrList]);
+
   const fetchMRList = async () => {
     try {
       setLoading(true);
@@ -220,45 +253,129 @@ const Attendance = () => {
     }
   };
 
-  // Fetch extra hours data for selected MR from backend - UPDATED
+  // Validate date and filter MRs who haven't recorded attendance on that date
+  const validateAndFilterMRs = (date) => {
+    // Check if date is Sunday
+    if (isSunday(date)) {
+      setDateValidation({
+        isValid: false,
+        message: "Cannot record attendance on Sunday",
+        isHoliday: false,
+        isSunday: true,
+        holidayName: ""
+      });
+      setFilteredMrOptions([]);
+      setSelectedAttendanceMr(null);
+      return;
+    }
+
+    // Check if date is holiday
+    const holidayName = getHolidayName(date);
+    if (holidayName) {
+      setDateValidation({
+        isValid: false,
+        message: `Cannot record attendance on holiday: ${holidayName}`,
+        isHoliday: true,
+        isSunday: false,
+        holidayName: holidayName
+      });
+      setFilteredMrOptions([]);
+      setSelectedAttendanceMr(null);
+      return;
+    }
+
+    // Check if date is in the future
+    const selectedDate = new Date(date);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    if (selectedDate > today) {
+      setDateValidation({
+        isValid: false,
+        message: "Cannot record attendance for future dates",
+        isHoliday: false,
+        isSunday: false,
+        holidayName: ""
+      });
+      setFilteredMrOptions([]);
+      setSelectedAttendanceMr(null);
+      return;
+    }
+
+    // Date is valid, now filter MRs
+    const selectedDateStart = new Date(date);
+    selectedDateStart.setHours(0, 0, 0, 0);
+    
+    const selectedDateEnd = new Date(date);
+    selectedDateEnd.setHours(23, 59, 59, 999);
+
+    // Get MRs who have already recorded attendance on this date
+    const mrIdsWithAttendance = attendanceRecords
+      .filter(record => {
+        const recordDate = new Date(record.loginTime);
+        return recordDate >= selectedDateStart && recordDate <= selectedDateEnd;
+      })
+      .map(record => record.userId?._id);
+
+    // Filter MRs who haven't recorded attendance on this date
+    const availableMRs = mrList.filter(mr => !mrIdsWithAttendance.includes(mr._id));
+
+    // Create dropdown options
+    const options = availableMRs.map((mr) => ({
+      value: mr._id,
+      label: `${mr.medicalRepName} (${mr.MRId})`,
+      disabled: false
+    }));
+
+    setFilteredMrOptions(options);
+    
+    // Reset selected MR if it's not in the filtered list
+    if (selectedAttendanceMr && !availableMRs.find(mr => mr._id === selectedAttendanceMr)) {
+      setSelectedAttendanceMr(null);
+    }
+
+    // Update date validation state
+    setDateValidation({
+      isValid: true,
+      message: `Valid working day. ${availableMRs.length} MRs available for attendance.`,
+      isHoliday: false,
+      isSunday: false,
+      holidayName: ""
+    });
+  };
+
+  // Fetch extra hours data for selected MR from backend
   const fetchExtraHoursData = async (mrId) => {
     try {
-      setExtraHoursData((prev) => ({ ...prev, loading: true }));
-
+      setExtraHoursData(prev => ({ ...prev, loading: true }));
+      
       // Get monthly extra hours for the current view month
-      const response = await axios.get(
-        `${backendUrl}/api/attendance/extra-hours/${mrId}`,
-        {
-          params: {
-            year: currentYear,
-            month: currentMonth,
-          },
+      const response = await axios.get(`${backendUrl}/api/attendance/extra-hours/${mrId}`, {
+        params: {
+          year: currentYear,
+          month: currentMonth
         }
-      );
-
+      });
+      
       if (response.data.success) {
         const data = response.data.data;
-
+        
         // Determine which leave days available to show
-        const showLeaveDaysAvailable = data.isMonthly
-          ? data.monthlyLeaveDaysAvailable
-          : data.leaveDaysAvailable;
-
+        const showLeaveDaysAvailable = data.isMonthly ? 
+          data.monthlyLeaveDaysAvailable : data.leaveDaysAvailable;
+        
         // Determine which extra hours to show
-        const showExtraHours = data.isMonthly
-          ? data.monthlyExtraHours
-          : data.totalExtraHours;
-
+        const showExtraHours = data.isMonthly ? 
+          data.monthlyExtraHours : data.totalExtraHours;
+        
         // Determine which minutes to show
-        const showExtraMinutes = data.isMonthly
-          ? data.monthlyExtraMinutes
-          : data.totalExtraMinutes;
-
+        const showExtraMinutes = data.isMonthly ? 
+          data.monthlyExtraMinutes : data.totalExtraMinutes;
+        
         // Determine which remaining minutes to show
-        const showRemainingMinutes = data.isMonthly
-          ? data.monthlyRemainingMinutes
-          : data.remainingMinutes;
-
+        const showRemainingMinutes = data.isMonthly ? 
+          data.monthlyRemainingMinutes : data.remainingMinutes;
+        
         setExtraHoursData({
           totalExtraHours: data.totalExtraHours || 0,
           totalExtraMinutes: data.totalExtraMinutes || 0,
@@ -276,7 +393,7 @@ const Attendance = () => {
           showExtraHours,
           showExtraMinutes,
           showRemainingMinutes,
-          isMonthlyData: data.isMonthly,
+          isMonthlyData: data.isMonthly
         });
       } else {
         throw new Error(response.data.message);
@@ -300,7 +417,7 @@ const Attendance = () => {
         showExtraHours: 0,
         showExtraMinutes: 0,
         showRemainingMinutes: 0,
-        isMonthlyData: false,
+        isMonthlyData: false
       });
       showToast("error", "Failed to load extra hours data");
     }
@@ -308,33 +425,29 @@ const Attendance = () => {
 
   // Toggle between monthly and total extra hours
   const toggleUseMonthlyOnly = () => {
-    setExtraHoursData((prev) => {
+    setExtraHoursData(prev => {
       const useMonthlyOnly = !prev.useMonthlyOnly;
-
+      
       // Determine which values to show based on toggle
-      const showLeaveDaysAvailable = useMonthlyOnly
-        ? prev.monthlyLeaveDaysAvailable
-        : prev.leaveDaysAvailable;
-
-      const showExtraHours = useMonthlyOnly
-        ? prev.monthlyExtraHours
-        : prev.totalExtraHours;
-
-      const showExtraMinutes = useMonthlyOnly
-        ? prev.monthlyExtraMinutes
-        : prev.totalExtraMinutes;
-
-      const showRemainingMinutes = useMonthlyOnly
-        ? prev.monthlyRemainingMinutes
-        : prev.remainingMinutes;
-
+      const showLeaveDaysAvailable = useMonthlyOnly ? 
+        prev.monthlyLeaveDaysAvailable : prev.leaveDaysAvailable;
+      
+      const showExtraHours = useMonthlyOnly ? 
+        prev.monthlyExtraHours : prev.totalExtraHours;
+      
+      const showExtraMinutes = useMonthlyOnly ? 
+        prev.monthlyExtraMinutes : prev.totalExtraMinutes;
+      
+      const showRemainingMinutes = useMonthlyOnly ? 
+        prev.monthlyRemainingMinutes : prev.remainingMinutes;
+      
       return {
         ...prev,
         useMonthlyOnly,
         showLeaveDaysAvailable,
         showExtraHours,
         showExtraMinutes,
-        showRemainingMinutes,
+        showRemainingMinutes
       };
     });
   };
@@ -343,33 +456,21 @@ const Attendance = () => {
   const formatMinutesToTime = (minutes) => {
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
-    return `${hours.toString().padStart(2, "0")}:${mins
-      .toString()
-      .padStart(2, "0")}:00`;
+    return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:00`;
   };
 
   // Format date for display
   const formatDate = (dateString) => {
     const date = new Date(dateString);
-    return date.toLocaleDateString("en-US", {
-      weekday: "short",
-      year: "numeric",
-      month: "short",
-      day: "numeric",
+    return date.toLocaleDateString('en-US', {
+      weekday: 'short',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
     });
   };
 
-  // Calculate total extra hours from records
-  const calculateTotalExtraHours = (records) => {
-    if (!records || !Array.isArray(records)) return 0;
-    return (
-      records.reduce((total, record) => {
-        return total + (record.extraHoursInMinutes || 0);
-      }, 0) / 60
-    );
-  };
-
-  // Convert extra hours to leave - UPDATED
+  // Convert extra hours to leave
   const handleConvertToLeave = async () => {
     if (!selectedAttendanceMr || !selectedDateForLeave) {
       showToast("error", "Please select MR and date for leave");
@@ -377,16 +478,12 @@ const Attendance = () => {
     }
 
     // Check which leave days are available based on selection
-    const availableLeaveDays = extraHoursData.useMonthlyOnly
-      ? extraHoursData.monthlyLeaveDaysAvailable
-      : extraHoursData.leaveDaysAvailable;
-
+    const availableLeaveDays = extraHoursData.useMonthlyOnly ? 
+      extraHoursData.monthlyLeaveDaysAvailable : extraHoursData.leaveDaysAvailable;
+    
     if (availableLeaveDays < 1) {
       const source = extraHoursData.useMonthlyOnly ? "monthly" : "total";
-      showToast(
-        "error",
-        `Insufficient ${source} extra hours. Minimum 9 hours required for 1 leave day.`
-      );
+      showToast("error", `Insufficient ${source} extra hours. Minimum 9 hours required for 1 leave day.`);
       return;
     }
 
@@ -406,7 +503,7 @@ const Attendance = () => {
     const selectedDate = new Date(selectedDateForLeave);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-
+    
     if (selectedDate < today) {
       showToast("error", "Cannot convert leave for past dates");
       return;
@@ -419,7 +516,7 @@ const Attendance = () => {
         userId: selectedAttendanceMr,
         date: selectedDateForLeave,
         hoursToConvert: 9, // Convert 9 hours to 1 leave day
-        useMonthlyOnly: extraHoursData.useMonthlyOnly,
+        useMonthlyOnly: extraHoursData.useMonthlyOnly
       };
 
       const response = await axios.post(
@@ -431,28 +528,19 @@ const Attendance = () => {
         // Update extra hours data locally
         if (extraHoursData.useMonthlyOnly) {
           // Deduct from monthly hours
-          const updatedMonthlyMinutes =
-            extraHoursData.monthlyExtraMinutes - 9 * 60;
-          const updatedMonthlyLeaveDays = Math.max(
-            0,
-            Math.floor(updatedMonthlyMinutes / 540)
-          );
+          const updatedMonthlyMinutes = extraHoursData.monthlyExtraMinutes - (9 * 60);
+          const updatedMonthlyLeaveDays = Math.max(0, Math.floor(updatedMonthlyMinutes / 540));
           const updatedMonthlyRemainingMinutes = updatedMonthlyMinutes % 540;
 
           // Also update total (since monthly is part of total)
-          const updatedTotalMinutes = extraHoursData.totalExtraMinutes - 9 * 60;
-          const updatedTotalLeaveDays = Math.max(
-            0,
-            Math.floor(updatedTotalMinutes / 540)
-          );
+          const updatedTotalMinutes = extraHoursData.totalExtraMinutes - (9 * 60);
+          const updatedTotalLeaveDays = Math.max(0, Math.floor(updatedTotalMinutes / 540));
           const updatedTotalRemainingMinutes = updatedTotalMinutes % 540;
 
-          setExtraHoursData((prev) => ({
+          setExtraHoursData(prev => ({
             ...prev,
             monthlyExtraMinutes: updatedMonthlyMinutes,
-            monthlyExtraHours: parseFloat(
-              (updatedMonthlyMinutes / 60).toFixed(2)
-            ),
+            monthlyExtraHours: parseFloat((updatedMonthlyMinutes / 60).toFixed(2)),
             monthlyLeaveDaysAvailable: updatedMonthlyLeaveDays,
             monthlyRemainingMinutes: updatedMonthlyRemainingMinutes,
             totalExtraMinutes: updatedTotalMinutes,
@@ -462,57 +550,44 @@ const Attendance = () => {
             showLeaveDaysAvailable: updatedMonthlyLeaveDays,
             showExtraHours: parseFloat((updatedMonthlyMinutes / 60).toFixed(2)),
             showExtraMinutes: updatedMonthlyMinutes,
-            showRemainingMinutes: updatedMonthlyRemainingMinutes,
+            showRemainingMinutes: updatedMonthlyRemainingMinutes
           }));
         } else {
           // Deduct from total hours
-          const updatedTotalMinutes = extraHoursData.totalExtraMinutes - 9 * 60;
-          const updatedTotalLeaveDays = Math.max(
-            0,
-            Math.floor(updatedTotalMinutes / 540)
-          );
+          const updatedTotalMinutes = extraHoursData.totalExtraMinutes - (9 * 60);
+          const updatedTotalLeaveDays = Math.max(0, Math.floor(updatedTotalMinutes / 540));
           const updatedTotalRemainingMinutes = updatedTotalMinutes % 540;
 
           // Also try to update monthly if possible
           const selectedDateObj = new Date(selectedDateForLeave);
           const selectedMonth = selectedDateObj.getMonth();
           const selectedYear = selectedDateObj.getFullYear();
-
+          
           let updatedMonthlyMinutes = extraHoursData.monthlyExtraMinutes;
-          let updatedMonthlyLeaveDays =
-            extraHoursData.monthlyLeaveDaysAvailable;
-          let updatedMonthlyRemainingMinutes =
-            extraHoursData.monthlyRemainingMinutes;
-
+          let updatedMonthlyLeaveDays = extraHoursData.monthlyLeaveDaysAvailable;
+          let updatedMonthlyRemainingMinutes = extraHoursData.monthlyRemainingMinutes;
+          
           // If the leave date is in the current month, deduct from monthly too
           if (selectedMonth === currentMonth && selectedYear === currentYear) {
-            updatedMonthlyMinutes = Math.max(
-              0,
-              extraHoursData.monthlyExtraMinutes - 9 * 60
-            );
-            updatedMonthlyLeaveDays = Math.max(
-              0,
-              Math.floor(updatedMonthlyMinutes / 540)
-            );
+            updatedMonthlyMinutes = Math.max(0, extraHoursData.monthlyExtraMinutes - (9 * 60));
+            updatedMonthlyLeaveDays = Math.max(0, Math.floor(updatedMonthlyMinutes / 540));
             updatedMonthlyRemainingMinutes = updatedMonthlyMinutes % 540;
           }
 
-          setExtraHoursData((prev) => ({
+          setExtraHoursData(prev => ({
             ...prev,
             totalExtraMinutes: updatedTotalMinutes,
             totalExtraHours: parseFloat((updatedTotalMinutes / 60).toFixed(2)),
             leaveDaysAvailable: updatedTotalLeaveDays,
             remainingMinutes: updatedTotalRemainingMinutes,
             monthlyExtraMinutes: updatedMonthlyMinutes,
-            monthlyExtraHours: parseFloat(
-              (updatedMonthlyMinutes / 60).toFixed(2)
-            ),
+            monthlyExtraHours: parseFloat((updatedMonthlyMinutes / 60).toFixed(2)),
             monthlyLeaveDaysAvailable: updatedMonthlyLeaveDays,
             monthlyRemainingMinutes: updatedMonthlyRemainingMinutes,
             showLeaveDaysAvailable: updatedTotalLeaveDays,
             showExtraHours: parseFloat((updatedTotalMinutes / 60).toFixed(2)),
             showExtraMinutes: updatedTotalMinutes,
-            showRemainingMinutes: updatedTotalRemainingMinutes,
+            showRemainingMinutes: updatedTotalRemainingMinutes
           }));
         }
 
@@ -521,7 +596,7 @@ const Attendance = () => {
 
         // Refresh attendance records
         fetchAttendanceRecords();
-
+        
         // Refresh extra hours data
         if (selectedAttendanceMr) {
           fetchExtraHoursData(selectedAttendanceMr);
@@ -724,15 +799,14 @@ const Attendance = () => {
     });
 
     // Calculate extra hours for this MR
-    const mrExtraHoursRecords = mrRecords.filter(
-      (record) => record.extraHoursInMinutes && record.extraHoursInMinutes > 0
+    const mrExtraHoursRecords = mrRecords.filter(record => 
+      record.extraHoursInMinutes && record.extraHoursInMinutes > 0
     );
-
-    const totalExtraMinutes = mrExtraHoursRecords.reduce(
-      (sum, record) => sum + (record.extraHoursInMinutes || 0),
-      0
+    
+    const totalExtraMinutes = mrExtraHoursRecords.reduce((sum, record) => 
+      sum + (record.extraHoursInMinutes || 0), 0
     );
-
+    
     const extraHoursAvailable = totalExtraMinutes / 60;
     const extraLeaveDaysAvailable = Math.floor(totalExtraMinutes / 540);
 
@@ -743,7 +817,7 @@ const Attendance = () => {
       currentStatus: todayRecord ? "Logged In" : "Logged Out",
       currentAttendanceId: todayRecord?._id,
       extraHoursAvailable: parseFloat(extraHoursAvailable.toFixed(2)),
-      extraLeaveDaysAvailable,
+      extraLeaveDaysAvailable
     };
   };
 
@@ -802,7 +876,7 @@ const Attendance = () => {
         userId: selectedAttendanceMr,
         loginTime: loginDateTime.toISOString(),
         logoutTime: logoutDateTime.toISOString(),
-        workingHoursPerDay: 9, // 9 hours per day
+        workingHoursPerDay: 9 // 9 hours per day
       };
 
       const response = await axios.post(
@@ -817,6 +891,15 @@ const Attendance = () => {
         setStartDate("");
         setStartTime("");
         setEndTime("");
+        
+        // Reset date validation
+        setDateValidation({
+          isValid: false,
+          message: "Please select a date first",
+          isHoliday: false,
+          isSunday: false,
+          holidayName: ""
+        });
 
         // Refresh attendance records and extra hours data
         fetchAttendanceRecords();
@@ -837,6 +920,18 @@ const Attendance = () => {
     setShowAddAttendanceModal(true);
     setSelectedAttendanceMr(null);
     setSelectedDateForLeave("");
+    setStartDate("");
+    setStartTime("");
+    setEndTime("");
+
+    // Reset date validation
+    setDateValidation({
+      isValid: false,
+      message: "Please select a date first",
+      isHoliday: false,
+      isSunday: false,
+      holidayName: ""
+    });
 
     // Set default dates to today
     const today = new Date();
@@ -851,23 +946,13 @@ const Attendance = () => {
   // Get month name
   const getMonthName = (month) => {
     const monthNames = [
-      "January",
-      "February",
-      "March",
-      "April",
-      "May",
-      "June",
-      "July",
-      "August",
-      "September",
-      "October",
-      "November",
-      "December",
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"
     ];
     return monthNames[month];
   };
 
-  // Render monthly calendar - UPDATED WITH EXTRA HOURS INFO
+  // Render monthly calendar
   const renderMonthlyCalendar = () => {
     const days = getDaysInMonth();
     const monthNames = [
@@ -887,13 +972,13 @@ const Attendance = () => {
 
     const attendanceStats = selectedMr
       ? getAttendanceStats(selectedMr._id)
-      : {
-          monthly: 0,
-          annual: 0,
-          percentage: 0,
+      : { 
+          monthly: 0, 
+          annual: 0, 
+          percentage: 0, 
           currentStatus: "Logged Out",
           extraHoursAvailable: 0,
-          extraLeaveDaysAvailable: 0,
+          extraLeaveDaysAvailable: 0
         };
 
     const today = new Date();
@@ -919,7 +1004,7 @@ const Attendance = () => {
                 Monthly Attendance: {attendanceStats.monthly}
               </div>
             </div>
-
+            
             {attendanceStats.extraLeaveDaysAvailable > 0 && (
               <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-2">
                 <div className="text-sm font-medium text-green-800">
@@ -927,20 +1012,20 @@ const Attendance = () => {
                 </div>
               </div>
             )}
-
+            
             <div className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-2">
               <div className="text-sm font-medium text-gray-800">
                 Status: {attendanceStats.currentStatus}
               </div>
             </div>
-
+            
             <button
               onClick={() => navigateMonth("prev")}
               className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer transition-colors"
             >
               <ChevronLeft size={20} />
             </button>
-
+            
             <button
               onClick={() => navigateMonth("next")}
               disabled={!canNavigateNext("next", "monthly")}
@@ -962,19 +1047,16 @@ const Attendance = () => {
               <div className="flex items-center gap-3">
                 <Clock className="text-blue-600" size={20} />
                 <div>
-                  <h3 className="font-semibold text-blue-800">
-                    Extra Hours Summary for {getMonthName(currentMonth)}
-                  </h3>
+                  <h3 className="font-semibold text-blue-800">Extra Hours Summary for {getMonthName(currentMonth)}</h3>
                   <p className="text-sm text-blue-600">
-                    Monthly: {extraHoursData.monthlyExtraHours.toFixed(2)} hours
-                    • Total: {extraHoursData.totalExtraHours.toFixed(2)} hours
+                    Monthly: {extraHoursData.monthlyExtraHours.toFixed(2)} hours • 
+                    Total: {extraHoursData.totalExtraHours.toFixed(2)} hours
                   </p>
                 </div>
               </div>
               <div className="text-right">
                 <div className="text-lg font-bold text-green-700">
-                  {extraHoursData.monthlyLeaveDaysAvailable} Leave Days
-                  Available
+                  {extraHoursData.monthlyLeaveDaysAvailable} Leave Days Available
                 </div>
                 <div className="text-sm text-gray-600">
                   (9 hours = 1 leave day)
@@ -1043,13 +1125,9 @@ const Attendance = () => {
             }
 
             // Show extra hours badge
-            const hasExtraHours =
-              attendance && attendance.extraHoursInMinutes > 0;
-            const extraHoursDisplay = hasExtraHours
-              ? `+${Math.floor(attendance.extraHoursInMinutes / 60)}h${
-                  attendance.extraHoursInMinutes % 60
-                }m`
-              : "";
+            const hasExtraHours = attendance && attendance.extraHoursInMinutes > 0;
+            const extraHoursDisplay = hasExtraHours ? 
+              `+${Math.floor(attendance.extraHoursInMinutes / 60)}h${attendance.extraHoursInMinutes % 60}m` : "";
 
             return (
               <div
@@ -1059,9 +1137,7 @@ const Attendance = () => {
                   isHolidayDay
                     ? `Holiday: ${getHolidayName(date)}`
                     : attendance
-                    ? `${
-                        attendance.isLeaveDay ? "Leave Day" : "Present"
-                      }\nLogin: ${new Date(
+                    ? `${attendance.isLeaveDay ? 'Leave Day' : 'Present'}\nLogin: ${new Date(
                         attendance.loginTime
                       ).toLocaleTimeString()} ${
                         attendance.logoutTime
@@ -1182,6 +1258,14 @@ const Attendance = () => {
                   setShowAddAttendanceModal(false);
                   setSelectedAttendanceMr(null);
                   setSelectedDateForLeave("");
+                  setStartDate("");
+                  setDateValidation({
+                    isValid: false,
+                    message: "Please select a date first",
+                    isHoliday: false,
+                    isSunday: false,
+                    holidayName: ""
+                  });
                 }}
                 className="text-gray-400 hover:text-gray-600 text-2xl"
               >
@@ -1190,42 +1274,31 @@ const Attendance = () => {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Date
-                </label>
-                <div className="flex items-center gap-2">
-                  <Calendar size={18} className="text-gray-400" />
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                </div>
-              </div>
+              {/* Left side: Record Attendance Form */}
               <div>
+                {/* Date Selection - NOW FIRST */}
                 <div className="mb-6">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Select Medical Representative
+                    Date <span className="text-red-500">*</span>
                   </label>
-                  <CustomDropdown
-                    value={selectedAttendanceMr}
-                    onChange={setSelectedAttendanceMr}
-                    options={mrOptions}
-                    placeholder="Select MR"
-                    required={true}
-                  />
+                  <div className="flex items-center gap-2">
+                    <Calendar size={18} className="text-gray-400" />
+                    <input
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      required
+                    />
+                  </div>
                 </div>
 
+                {/* Date Validation Message */}
                 {startDate && (
                   <div className="mb-6">
-                    {isSunday(startDate) ? (
+                    {dateValidation.isSunday ? (
                       <div className="bg-red-50 border border-red-200 rounded-md p-3 flex items-start gap-2">
-                        <AlertCircle
-                          size={20}
-                          className="text-red-600 flex-shrink-0 mt-0.5"
-                        />
+                        <AlertCircle size={20} className="text-red-600 flex-shrink-0 mt-0.5" />
                         <div>
                           <p className="text-red-700 text-sm font-medium">
                             Cannot record attendance on Sunday
@@ -1235,33 +1308,38 @@ const Attendance = () => {
                           </p>
                         </div>
                       </div>
-                    ) : isHoliday(startDate) ? (
+                    ) : dateValidation.isHoliday ? (
                       <div className="bg-red-50 border border-red-200 rounded-md p-3 flex items-start gap-2">
-                        <AlertCircle
-                          size={20}
-                          className="text-red-600 flex-shrink-0 mt-0.5"
-                        />
+                        <AlertCircle size={20} className="text-red-600 flex-shrink-0 mt-0.5" />
                         <div>
                           <p className="text-red-700 text-sm font-medium">
                             Cannot record attendance on holiday
                           </p>
                           <p className="text-red-600 text-xs mt-1">
-                            {getHolidayName(startDate)}
+                            {dateValidation.holidayName}
+                          </p>
+                        </div>
+                      </div>
+                    ) : dateValidation.isValid ? (
+                      <div className="bg-green-50 border border-green-200 rounded-md p-3 flex items-start gap-2">
+                        <CalendarDays size={20} className="text-green-600 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-green-700 text-sm font-medium">
+                            {dateValidation.message}
+                          </p>
+                          <p className="text-green-600 text-xs mt-1">
+                            {filteredMrOptions.length === 0 
+                              ? "All MRs have already recorded attendance for this date" 
+                              : "Select an MR from the list below"}
                           </p>
                         </div>
                       </div>
                     ) : (
-                      <div className="bg-green-50 border border-green-200 rounded-md p-3 flex items-start gap-2">
-                        <CalendarDays
-                          size={20}
-                          className="text-green-600 flex-shrink-0 mt-0.5"
-                        />
+                      <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3 flex items-start gap-2">
+                        <AlertCircle size={20} className="text-yellow-600 flex-shrink-0 mt-0.5" />
                         <div>
-                          <p className="text-green-700 text-sm font-medium">
-                            Valid working day
-                          </p>
-                          <p className="text-green-600 text-xs mt-1">
-                            You can record attendance on this date
+                          <p className="text-yellow-700 text-sm font-medium">
+                            {dateValidation.message}
                           </p>
                         </div>
                       </div>
@@ -1269,83 +1347,126 @@ const Attendance = () => {
                   </div>
                 )}
 
-                {/* Start & End Time */}
-                <div className="grid grid-cols-2 gap-4 mb-6">
-                  <div>
+                {/* MR Selection Dropdown - ONLY SHOW IF DATE IS VALID */}
+                {dateValidation.isValid && filteredMrOptions.length > 0 && (
+                  <div className="mb-6">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Start Time
+                      Select Medical Representative <span className="text-red-500">*</span>
                     </label>
-                    <div className="flex items-center gap-2">
-                      <Clock size={18} className="text-gray-400" />
-                      <input
-                        type="time"
-                        value={startTime}
-                        onChange={(e) => setStartTime(e.target.value)}
-                        className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      />
+                    <CustomDropdown
+                      value={selectedAttendanceMr}
+                      onChange={setSelectedAttendanceMr}
+                      options={filteredMrOptions}
+                      placeholder="Select MR"
+                      required={true}
+                      disabled={!dateValidation.isValid || filteredMrOptions.length === 0}
+                    />
+                    <div className="mt-2 flex items-center gap-2 text-sm text-gray-500">
+                      <Users size={14} />
+                      <span>{filteredMrOptions.length} MRs available for this date</span>
                     </div>
                   </div>
+                )}
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      End Time
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <Clock4 size={18} className="text-gray-400" />
-                      <input
-                        type="time"
-                        value={endTime}
-                        onChange={(e) => setEndTime(e.target.value)}
-                        className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      />
+                {/* Start & End Time - ONLY SHOW IF MR IS SELECTED */}
+                {selectedAttendanceMr && (
+                  <>
+                    <div className="grid grid-cols-2 gap-4 mb-6">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Start Time <span className="text-red-500">*</span>
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <Clock size={18} className="text-gray-400" />
+                          <input
+                            type="time"
+                            value={startTime}
+                            onChange={(e) => setStartTime(e.target.value)}
+                            className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          End Time <span className="text-red-500">*</span>
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <Clock4 size={18} className="text-gray-400" />
+                          <input
+                            type="time"
+                            value={endTime}
+                            onChange={(e) => setEndTime(e.target.value)}
+                            className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            required
+                          />
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
 
-                {/* Time Info */}
-                <div className="mb-6 bg-blue-50 border border-blue-200 rounded-md p-3">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Briefcase size={16} className="text-blue-600" />
-                    <p className="text-sm font-medium text-blue-800">
-                      Standard Working Hours: 9 hours per day (9 AM - 6 PM)
+                    {/* Time Info */}
+                    <div className="mb-6 bg-blue-50 border border-blue-200 rounded-md p-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Briefcase size={16} className="text-blue-600" />
+                        <p className="text-sm font-medium text-blue-800">
+                          Standard Working Hours: 9 hours per day (9 AM - 6 PM)
+                        </p>
+                      </div>
+                      <p className="text-xs text-blue-600">
+                        Hours worked beyond 9 hours will be counted as extra hours. 9 extra hours = 1 leave day.
+                      </p>
+                    </div>
+
+                    {/* Attendance Button */}
+                    <button
+                      onClick={handleRecordAttendance}
+                      disabled={
+                        attendanceLoading ||
+                        !selectedAttendanceMr ||
+                        !startDate ||
+                        !startTime ||
+                        !endTime ||
+                        !dateValidation.isValid ||
+                        isSunday(startDate) ||
+                        isHoliday(startDate) ||
+                        startTime >= endTime
+                      }
+                      className={`w-full py-3 px-4 rounded-lg flex items-center justify-center gap-2 ${
+                        attendanceLoading ||
+                        !selectedAttendanceMr ||
+                        !startDate ||
+                        !startTime ||
+                        !endTime ||
+                        !dateValidation.isValid ||
+                        isSunday(startDate) ||
+                        isHoliday(startDate) ||
+                        startTime >= endTime
+                          ? "bg-gray-400 cursor-not-allowed"
+                          : "bg-green-600 hover:bg-green-700"
+                      } text-white font-medium transition-colors`}
+                    >
+                      <Clock size={18} />
+                      {attendanceLoading ? "Recording..." : "Record Attendance"}
+                    </button>
+                  </>
+                )}
+
+                {/* Message when no MRs available for selected date */}
+                {dateValidation.isValid && filteredMrOptions.length === 0 && (
+                  <div className="mt-6 text-center py-8 bg-gray-50 rounded-lg border border-gray-200">
+                    <User size={48} className="mx-auto text-gray-400 mb-3" />
+                    <p className="text-gray-500 font-medium">
+                      No MRs available for this date
+                    </p>
+                    <p className="text-sm text-gray-400 mt-1">
+                      All MRs have already recorded attendance for {startDate}
                     </p>
                   </div>
-                  <p className="text-xs text-blue-600">
-                    Hours worked beyond 9 hours will be counted as extra hours.
-                    9 extra hours = 1 leave day.
-                  </p>
-                </div>
-
-                {/* Attendance Button */}
-                <button
-                  onClick={handleRecordAttendance}
-                  disabled={
-                    attendanceLoading ||
-                    !selectedAttendanceMr ||
-                    !startDate ||
-                    !startTime ||
-                    !endTime ||
-                    isSunday(startDate) ||
-                    isHoliday(startDate)
-                  }
-                  className={`w-full py-3 px-4 rounded-lg flex items-center justify-center gap-2 ${
-                    attendanceLoading ||
-                    !selectedAttendanceMr ||
-                    !startDate ||
-                    !startTime ||
-                    !endTime ||
-                    isSunday(startDate) ||
-                    isHoliday(startDate)
-                      ? "bg-gray-400 cursor-not-allowed"
-                      : "bg-green-600 hover:bg-green-700"
-                  } text-white font-medium transition-colors`}
-                >
-                  <Clock size={18} />
-                  {attendanceLoading ? "Recording..." : "Record Attendance"}
-                </button>
+                )}
               </div>
 
-              {/* Right side: Extra Hours & Leave Management - UPDATED */}
+              {/* Right side: Extra Hours & Leave Management */}
               <div>
                 <h3 className="text-lg font-bold mb-4 text-gray-800">
                   Extra Hours & Leave Management
@@ -1353,10 +1474,7 @@ const Attendance = () => {
 
                 {!selectedAttendanceMr ? (
                   <div className="text-center py-8 bg-gray-50 rounded-lg border border-gray-200">
-                    <Briefcase
-                      size={48}
-                      className="mx-auto text-gray-400 mb-3"
-                    />
+                    <Briefcase size={48} className="mx-auto text-gray-400 mb-3" />
                     <p className="text-gray-500 font-medium">
                       Select an MR to view extra hours
                     </p>
@@ -1367,9 +1485,7 @@ const Attendance = () => {
                 ) : extraHoursData.loading ? (
                   <div className="text-center py-8">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-                    <p className="text-gray-500 mt-3">
-                      Loading extra hours data...
-                    </p>
+                    <p className="text-gray-500 mt-3">Loading extra hours data...</p>
                   </div>
                 ) : extraHoursData.showExtraHours > 0 ? (
                   <>
@@ -1378,9 +1494,7 @@ const Attendance = () => {
                       <div className="flex items-center gap-2">
                         <CalendarRange size={18} className="text-blue-600" />
                         <span className="font-medium text-gray-700">
-                          {extraHoursData.useMonthlyOnly
-                            ? "Monthly Extra Hours"
-                            : "Total Extra Hours"}
+                          {extraHoursData.useMonthlyOnly ? 'Monthly Extra Hours' : 'Total Extra Hours'}
                         </span>
                       </div>
                       <button
@@ -1388,9 +1502,7 @@ const Attendance = () => {
                         className="flex items-center gap-2 px-3 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-md text-sm transition-colors"
                       >
                         <CalendarIcon size={14} />
-                        {extraHoursData.useMonthlyOnly
-                          ? "Show Total"
-                          : "Show Monthly"}
+                        {extraHoursData.useMonthlyOnly ? 'Show Total' : 'Show Monthly'}
                       </button>
                     </div>
 
@@ -1398,25 +1510,19 @@ const Attendance = () => {
                     <div className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-5">
                       <h3 className="text-lg font-semibold text-blue-800 mb-4 flex items-center gap-2">
                         <Clock size={20} />
-                        {extraHoursData.useMonthlyOnly
-                          ? "Monthly"
-                          : "Total"}{" "}
-                        Extra Working Hours Summary
+                        {extraHoursData.useMonthlyOnly ? 'Monthly' : 'Total'} Extra Working Hours Summary
                       </h3>
 
                       <div className="space-y-4">
                         <div className="flex justify-between items-center bg-white p-3 rounded-lg shadow-sm">
                           <div>
                             <p className="text-gray-700 font-medium">
-                              {extraHoursData.useMonthlyOnly
-                                ? "Monthly"
-                                : "Total"}{" "}
-                              Extra Hours
+                              {extraHoursData.useMonthlyOnly ? 'Monthly' : 'Total'} Extra Hours
                             </p>
                             <p className="text-xs text-gray-500">
-                              {extraHoursData.useMonthlyOnly
-                                ? "Hours beyond 9-hour workday this month"
-                                : "Total hours beyond 9-hour workday"}
+                              {extraHoursData.useMonthlyOnly 
+                                ? 'Hours beyond 9-hour workday this month' 
+                                : 'Total hours beyond 9-hour workday'}
                             </p>
                           </div>
                           <span className="text-2xl font-bold text-blue-700">
@@ -1426,12 +1532,8 @@ const Attendance = () => {
 
                         <div className="flex justify-between items-center bg-white p-3 rounded-lg shadow-sm">
                           <div>
-                            <p className="text-gray-700 font-medium">
-                              Leave Days Available
-                            </p>
-                            <p className="text-xs text-gray-500">
-                              9 hours = 1 leave day
-                            </p>
+                            <p className="text-gray-700 font-medium">Leave Days Available</p>
+                            <p className="text-xs text-gray-500">9 hours = 1 leave day</p>
                           </div>
                           <span className="text-2xl font-bold text-green-700">
                             {extraHoursData.showLeaveDaysAvailable} days
@@ -1440,18 +1542,12 @@ const Attendance = () => {
 
                         <div className="flex justify-between items-center bg-white p-3 rounded-lg shadow-sm">
                           <div>
-                            <p className="text-gray-700 font-medium">
-                              Remaining Hours
-                            </p>
-                            <p className="text-xs text-gray-500">
-                              After leave conversion
-                            </p>
+                            <p className="text-gray-700 font-medium">Remaining Hours</p>
+                            <p className="text-xs text-gray-500">After leave conversion</p>
                           </div>
                           <span className="text-xl font-bold text-gray-700">
-                            {Math.floor(
-                              extraHoursData.showRemainingMinutes / 60
-                            )}
-                            h {extraHoursData.showRemainingMinutes % 60}m
+                            {Math.floor(extraHoursData.showRemainingMinutes / 60)}h{" "}
+                            {extraHoursData.showRemainingMinutes % 60}m
                           </span>
                         </div>
 
@@ -1460,11 +1556,7 @@ const Attendance = () => {
                           <div className="mt-3 pt-3 border-t border-blue-100">
                             <div className="flex items-center gap-2 text-sm text-blue-600">
                               <Info size={14} />
-                              <span>
-                                Total available extra hours:{" "}
-                                {extraHoursData.totalExtraHours.toFixed(2)}{" "}
-                                hours
-                              </span>
+                              <span>Total available extra hours: {extraHoursData.totalExtraHours.toFixed(2)} hours</span>
                             </div>
                           </div>
                         )}
@@ -1490,7 +1582,7 @@ const Attendance = () => {
                               setSelectedDateForLeave(e.target.value)
                             }
                             className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"
-                            min={new Date().toISOString().split("T")[0]}
+                            min={new Date().toISOString().split('T')[0]}
                           />
                         </div>
 
@@ -1522,11 +1614,7 @@ const Attendance = () => {
                         <div className="flex items-center gap-2 text-sm text-gray-600 bg-gray-50 p-2 rounded">
                           <Info size={14} />
                           <span>
-                            Using{" "}
-                            {extraHoursData.useMonthlyOnly
-                              ? "monthly"
-                              : "total"}{" "}
-                            extra hours for conversion
+                            Using {extraHoursData.useMonthlyOnly ? 'monthly' : 'total'} extra hours for conversion
                           </span>
                         </div>
 
@@ -1564,27 +1652,21 @@ const Attendance = () => {
 
                         <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded">
                           <AlertCircle size={12} className="inline mr-1" />
-                          Each leave day requires 9 extra working hours. After
-                          conversion, the leave day will be marked in attendance
-                          records.
+                          Each leave day requires 9 extra working hours. After conversion, the leave day will be marked in attendance records.
                         </div>
                       </div>
                     </div>
 
                     {/* Extra Hours Breakdown */}
-                    {extraHoursData.attendanceRecordsWithExtraHours.length >
-                      0 && (
+                    {extraHoursData.attendanceRecordsWithExtraHours.length > 0 && (
                       <div className="mt-4">
                         <h4 className="font-medium text-gray-700 mb-3 flex items-center gap-2">
                           <Calendar size={16} />
-                          {extraHoursData.useMonthlyOnly
-                            ? "Monthly"
-                            : "Total"}{" "}
-                          Extra Hours Breakdown
+                          {extraHoursData.useMonthlyOnly ? 'Monthly' : 'Total'} Extra Hours Breakdown
                         </h4>
                         <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
-                          {(extraHoursData.useMonthlyOnly
-                            ? extraHoursData.monthlyRecordsWithExtraHours
+                          {(extraHoursData.useMonthlyOnly 
+                            ? extraHoursData.monthlyRecordsWithExtraHours 
                             : extraHoursData.attendanceRecordsWithExtraHours
                           )
                             .slice(0, 10)
@@ -1603,10 +1685,7 @@ const Attendance = () => {
                                 </div>
                                 <div className="text-right">
                                   <span className="font-bold text-blue-700 text-lg">
-                                    +
-                                    {formatMinutesToTime(
-                                      record.extraHoursInMinutes
-                                    ).slice(0, 5)}
+                                    +{formatMinutesToTime(record.extraHoursInMinutes).slice(0, 5)}
                                   </span>
                                   <p className="text-xs text-gray-500 mt-1">
                                     Total: {record.totalTime}
@@ -1614,17 +1693,16 @@ const Attendance = () => {
                                 </div>
                               </div>
                             ))}
-                          {(extraHoursData.useMonthlyOnly
-                            ? extraHoursData.monthlyRecordsWithExtraHours.length
-                            : extraHoursData.attendanceRecordsWithExtraHours
-                                .length) > 10 && (
+                          {(extraHoursData.useMonthlyOnly 
+                            ? extraHoursData.monthlyRecordsWithExtraHours.length 
+                            : extraHoursData.attendanceRecordsWithExtraHours.length
+                          ) > 10 && (
                             <div className="text-center text-xs text-gray-500 bg-gray-100 p-2 rounded">
                               +
-                              {(extraHoursData.useMonthlyOnly
-                                ? extraHoursData.monthlyRecordsWithExtraHours
-                                    .length
-                                : extraHoursData.attendanceRecordsWithExtraHours
-                                    .length) - 10}{" "}
+                              {(extraHoursData.useMonthlyOnly 
+                                ? extraHoursData.monthlyRecordsWithExtraHours.length 
+                                : extraHoursData.attendanceRecordsWithExtraHours.length
+                              ) - 10}{" "}
                               more records
                             </div>
                           )}
@@ -1639,9 +1717,8 @@ const Attendance = () => {
                       No extra hours available
                     </p>
                     <p className="text-sm text-gray-400 mt-1 max-w-sm mx-auto">
-                      This MR hasn't worked beyond the standard 9-hour workday
-                      yet. Extra hours are calculated when working hours exceed
-                      9 hours per day.
+                      This MR hasn't worked beyond the standard 9-hour workday yet. 
+                      Extra hours are calculated when working hours exceed 9 hours per day.
                     </p>
                   </div>
                 )}
@@ -1659,8 +1736,7 @@ const Attendance = () => {
           {mrList.length > 0 && (
             <div className="flex items-center gap-4">
               <div className="bg-blue-100 text-blue-800 px-4 py-2 rounded-lg">
-                <span className="font-bold">{filteredMRList.length}</span> Total
-                MRs
+                <span className="font-bold">{filteredMRList.length}</span> Total MRs
               </div>
 
               <div className="relative w-72">
@@ -1738,8 +1814,7 @@ const Attendance = () => {
                 Record Attendance
               </button>
               <div className="text-sm text-gray-500">
-                Showing {Math.min(itemsPerPage, currentMRs.length)} of{" "}
-                {filteredMRList.length} MRs
+                Showing {Math.min(itemsPerPage, currentMRs.length)} of {filteredMRList.length} MRs
               </div>
             </div>
           )}
@@ -1799,15 +1874,13 @@ const Attendance = () => {
 
                       <td className="p-4">
                         <div className="relative">
-                          <span
-                            className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium ${
-                              parseFloat(attendanceStats.percentage) >= 80
-                                ? "bg-green-100 text-green-800"
-                                : parseFloat(attendanceStats.percentage) >= 60
-                                ? "bg-yellow-100 text-yellow-800"
-                                : "bg-red-100 text-red-800"
-                            }`}
-                          >
+                          <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium ${
+                            parseFloat(attendanceStats.percentage) >= 80 
+                              ? "bg-green-100 text-green-800"
+                              : parseFloat(attendanceStats.percentage) >= 60
+                              ? "bg-yellow-100 text-yellow-800"
+                              : "bg-red-100 text-red-800"
+                          }`}>
                             {attendanceStats.percentage}%
                           </span>
                           <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-1 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
@@ -1825,15 +1898,12 @@ const Attendance = () => {
                             </span>
                             {attendanceStats.extraLeaveDaysAvailable > 0 && (
                               <span className="text-xs text-green-600 mt-1">
-                                ({attendanceStats.extraLeaveDaysAvailable} leave
-                                days)
+                                ({attendanceStats.extraLeaveDaysAvailable} leave days)
                               </span>
                             )}
                           </div>
                         ) : (
-                          <span className="text-gray-400 text-sm">
-                            No extra hours
-                          </span>
+                          <span className="text-gray-400 text-sm">No extra hours</span>
                         )}
                       </td>
 
@@ -1855,9 +1925,7 @@ const Attendance = () => {
                     <div className="text-gray-400 mb-2">
                       <Search size={48} className="mx-auto" />
                     </div>
-                    <p className="text-gray-500 text-lg font-medium">
-                      No MR records found
-                    </p>
+                    <p className="text-gray-500 text-lg font-medium">No MR records found</p>
                     <p className="text-gray-400 text-sm mt-1">
                       Try adjusting your search criteria
                     </p>
@@ -1875,9 +1943,7 @@ const Attendance = () => {
               </div>
               <div className="flex gap-2">
                 <button
-                  onClick={() =>
-                    setCurrentPage((prev) => Math.max(prev - 1, 1))
-                  }
+                  onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
                   disabled={currentPage === 1}
                   className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 cursor-pointer transition-colors flex items-center gap-1"
                 >

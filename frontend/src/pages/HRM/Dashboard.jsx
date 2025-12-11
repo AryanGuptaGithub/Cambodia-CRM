@@ -635,7 +635,6 @@ const Dashboard = () => {
       showToast("error", "Failed to update MR status.");
     }
   };
-
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -662,15 +661,28 @@ const Dashboard = () => {
             cell.toString().trim().toLowerCase()
           );
 
-          if (
-            normalizedRow.includes("mr name") &&
-            normalizedRow.includes("team name") &&
-            normalizedRow.includes("contact no") &&
-            normalizedRow.includes("email") &&
-            (normalizedRow.includes("joining date") ||
-              normalizedRow.includes("instance of joining date")) &&
-            normalizedRow.includes("password") // <-- NEW REQUIRED FIELD
-          ) {
+          // Look for exact header names (case-insensitive)
+          const hasRequiredHeaders =
+            normalizedRow.some(
+              (h) =>
+                h.includes("mr name") ||
+                h.includes("medicalrepname") ||
+                h.includes("name")
+            ) &&
+            normalizedRow.some(
+              (h) => h.includes("team") && h.includes("name")
+            ) &&
+            normalizedRow.some(
+              (h) => h.includes("contact") || h.includes("phone")
+            ) &&
+            normalizedRow.some((h) => h.includes("email")) &&
+            (normalizedRow.some(
+              (h) => h.includes("joining") && h.includes("date")
+            ) ||
+              normalizedRow.some((h) => h.includes("instance"))) &&
+            normalizedRow.some((h) => h.includes("password"));
+
+          if (hasRequiredHeaders) {
             headerRowIndex = i;
             headersMap = normalizedRow.reduce((acc, header, index) => {
               acc[index] = header;
@@ -688,44 +700,123 @@ const Dashboard = () => {
           return;
         }
 
+        console.log("Headers found:", headersMap);
+
         const mappedData = rows
           .slice(headerRowIndex + 1)
-          .map((row) => {
+          .map((row, rowIndex) => {
+            // Log raw row data for debugging
+            console.log(`Row ${rowIndex + 1} raw:`, row);
+
             const item = {};
             Object.entries(headersMap).forEach(([index, key]) => {
               item[key] = row[index] || "";
             });
 
-            const joiningDateKey =
-              item["joining date"] !== undefined
-                ? "joining date"
-                : "instance of joining date";
+            console.log(`Row ${rowIndex + 1} mapped:`, item);
 
-            const rawDate = item[joiningDateKey];
-            const parsedDate = parseDateFromString(rawDate);
+            // Find joining date field (handle different column names)
+            let joiningDateKey = "";
+            if (
+              item["joining date"] !== undefined &&
+              item["joining date"] !== ""
+            ) {
+              joiningDateKey = "joining date";
+            } else if (
+              item["instance of joining date"] !== undefined &&
+              item["instance of joining date"] !== ""
+            ) {
+              joiningDateKey = "instance of joining date";
+            } else {
+              // Try to find any column containing "date"
+              const dateKey = Object.keys(item).find(
+                (key) => key.toLowerCase().includes("date") && item[key]
+              );
+              if (dateKey) joiningDateKey = dateKey;
+            }
 
-            return {
-              medicalRepName: item["mr name"]?.toString().trim() || "",
-              teamName: item["team name"]?.toString().trim() || "",
-              contactNo: item["contact no"]?.toString().trim() || "",
-              email: item["email"]?.toString().trim() || "",
-              password: item["password"]?.toString().trim() || "", 
-              date: parsedDate ? parsedDate.toISOString() : null,
+            const rawDate = joiningDateKey ? item[joiningDateKey] : "";
+
+            // Parse date - handle multiple formats
+            let parsedDate = null;
+            if (rawDate) {
+              if (rawDate instanceof Date) {
+                parsedDate = rawDate;
+              } else if (typeof rawDate === "string") {
+                // Try different date formats
+                const dateStr = rawDate.toString().trim();
+
+                // Format 1: YYYY-MM-DD
+                if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+                  parsedDate = new Date(dateStr);
+                }
+                // Format 2: MM/DD/YYYY
+                else if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(dateStr)) {
+                  const [month, day, year] = dateStr.split("/");
+                  parsedDate = new Date(
+                    `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`
+                  );
+                }
+                // Format 3: Excel serial number
+                else if (!isNaN(dateStr) && dateStr > 0) {
+                  // Excel dates are numbers where 1 = Jan 1, 1900
+                  const excelDate = parseInt(dateStr);
+                  const date = new Date((excelDate - 25569) * 86400 * 1000);
+                  if (!isNaN(date.getTime())) {
+                    parsedDate = date;
+                  }
+                }
+
+                // If parsing failed, try native Date parsing
+                if (!parsedDate || isNaN(parsedDate.getTime())) {
+                  parsedDate = new Date(dateStr);
+                }
+              }
+            }
+
+            // Map to backend expected format
+            // Based on your logs, backend expects tab-separated string format
+            // Or if sending JSON, use these field names
+            const result = {
+              name: (item["mr name"] || item["medicalrepname"] || "")
+                .toString()
+                .trim(),
+              teamName: (item["team name"] || "").toString().trim(),
+              phone: (
+                item["contact no"] ||
+                item["phone"] ||
+                item["contact"] ||
+                ""
+              )
+                .toString()
+                .trim(),
+              email: (item["email"] || "").toString().trim().toLowerCase(),
+              password: (item["password"] || "123456").toString().trim(), // Default password if empty
+              date:
+                parsedDate && !isNaN(parsedDate.getTime())
+                  ? parsedDate.toISOString().split("T")[0] // Format as YYYY-MM-DD
+                  : new Date().toISOString().split("T")[0], // Default to today
+              rawDate: rawDate, // For debugging
             };
+
+            console.log(`Row ${rowIndex + 1} final:`, result);
+            return result;
           })
           .filter(
             (entry) =>
-              entry.medicalRepName ||
-              entry.teamName ||
-              entry.contactNo ||
-              entry.email ||
-              entry.password
+              entry.name &&
+              entry.name.trim() !== "" &&
+              entry.teamName &&
+              entry.teamName.trim() !== ""
           );
+
+        console.log("Total valid records:", mappedData.length);
+        console.log("Sample record:", mappedData[0]);
 
         setParsedData(mappedData);
         showToast(
           "success",
-          `Parsed ${mappedData.length} records successfully`
+          `Parsed ${mappedData.length} valid records successfully`
         );
       } catch (error) {
         console.error("Error parsing file:", error);
@@ -746,32 +837,110 @@ const Dashboard = () => {
     }
     setIsUploading(true);
     try {
-      const validData = parsedData.filter(
-        (item) => item.medicalRepName && item.medicalRepName.trim() !== ""
-      );
+      // Validate all required fields
+      const validData = parsedData
+        .map((item) => {
+          // Map frontend field names to backend expected field names
+          return {
+            medicalRepName: item.name || item["MR Name"] || item["mr name"],
+            teamName: item.teamName || item["Team Name"] || item["team name"],
+            contactNo:
+              item.phone ||
+              item.contactNo ||
+              item["Contact No"] ||
+              item["contact no"],
+            email: item.email || item.Email,
+            password: item.password || item.Password || "123456",
+            date:
+              item.date ||
+              item.Date ||
+              item["Joining Date"] ||
+              item["joining date"],
+            enabled: item.enabled !== undefined ? item.enabled : true,
+          };
+        })
+        .filter(
+          (item) =>
+            item.medicalRepName &&
+            item.medicalRepName.trim() !== "" &&
+            item.teamName &&
+            item.teamName.trim() !== ""
+        );
 
       if (validData.length === 0) {
-        showToast("error", "No valid records found in the file");
+        showToast(
+          "error",
+          "No valid records found. Check that all required fields are filled."
+        );
+        setIsUploading(false);
         return;
       }
 
+      console.log("Sending data to backend:", validData);
+      console.log("Number of records:", validData.length);
+
+      // Send as direct array (not wrapped in data property)
       const res = await axios.post(
         `${backendUrl}/api/staffs/import`,
-        validData
+        validData, // Direct array
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
       );
 
-      if (res.status === 200) {
-        showToast("success", res.data.message || "MR imported successfully!");
+      if (res.data.success) {
+        showToast(
+          "success",
+          res.data.message || `${validData.length} MRs imported successfully!`
+        );
         setShowImportModal(false);
         setParsedData([]);
         await refreshMRList();
         await fetchTeams();
       }
     } catch (err) {
-      const cleanMessage =
-        err?.response?.data?.message?.replace(/<[^>]+>/g, "") ||
-        "Failed to import MR.";
-      showToast("error", cleanMessage);
+      console.error("Import error:", err);
+
+      let errorMessage = "Failed to import MRs.";
+
+      if (err.response) {
+        const data = err.response.data;
+
+        if (data.duplicates) {
+          // Handle duplicate errors
+          const duplicateMessages = [];
+          if (data.duplicates.names && data.duplicates.names.length > 0) {
+            duplicateMessages.push(
+              `Names: ${data.duplicates.names.join(", ")}`
+            );
+          }
+          if (data.duplicates.emails && data.duplicates.emails.length > 0) {
+            duplicateMessages.push(
+              `Emails: ${data.duplicates.emails.join(", ")}`
+            );
+          }
+          if (data.duplicates.contacts && data.duplicates.contacts.length > 0) {
+            duplicateMessages.push(
+              `Contacts: ${data.duplicates.contacts.join(", ")}`
+            );
+          }
+
+          errorMessage = `Duplicate entries found: ${duplicateMessages.join(
+            "; "
+          )}`;
+        } else if (data.message) {
+          errorMessage = data.message;
+        }
+      } else if (err.request) {
+        errorMessage =
+          "No response from server. Please check network connection.";
+      } else {
+        errorMessage = err.message;
+      }
+
+      showToast("error", errorMessage);
     } finally {
       setIsUploading(false);
     }

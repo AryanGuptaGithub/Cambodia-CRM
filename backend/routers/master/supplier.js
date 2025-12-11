@@ -133,10 +133,10 @@ router.delete("/suppliers/:id", async (req, res) => {
 router.delete("/suppliers", async (req, res) => {
   try {
     let ids = [];
-    
+
     // Handle both array of strings and array of objects with id property
     if (Array.isArray(req.body.ids)) {
-      if (req.body.ids.length > 0 && typeof req.body.ids[0] === 'object') {
+      if (req.body.ids.length > 0 && typeof req.body.ids[0] === "object") {
         // Array of objects with id property
         ids = req.body.ids.map((item) => item.id).filter(Boolean);
       } else {
@@ -184,7 +184,8 @@ const excelDateToJSDate = (value) => {
   return isNaN(parsed.getTime()) ? null : parsed;
 };
 
-// ✅ Import suppliers from Excel
+/* ----------------------------- EXCEL Import ----------------------------- */
+/* ----------------------------- EXCEL Import ----------------------------- */
 router.post("/suppliers/import", async (req, res) => {
   try {
     const suppliers = req.body;
@@ -196,81 +197,172 @@ router.post("/suppliers/import", async (req, res) => {
       });
     }
 
-    const requiredFields = [
-      "supplierName",
-      "address",
-      "siteRegistrationDate",
-      "siteRegistrationExpiryDate",
-    ];
-
     const results = [];
+    const importErrors = [];
+    const warnings = [];
 
-    for (let supplier of suppliers) {
-      // Normalize field names (to support both frontend naming styles)
-      const name =
-        supplier.supplierName?.toString().trim() ||
-        supplier.name?.toString().trim() ||
-        "";
-      const address = supplier.address?.toString().trim() || "";
-      const siteRegistrationDate = supplier.siteRegistrationDate
-        ? new Date(supplier.siteRegistrationDate)
-        : null;
-      const siteRegistrationExpiryDate = supplier.siteRegistrationExpiryDate
-        ? new Date(supplier.siteRegistrationExpiryDate)
-        : null;
+    for (let [index, supplier] of suppliers.entries()) {
+      try {
+        // Normalize field names for different Excel formats
+        const name = (
+          supplier.supplierName ||
+          supplier.name ||
+          supplier["Supplier Name"] ||
+          supplier["supplier name"] ||
+          supplier["Supplier"] ||
+          ""
+        )
+          .toString()
+          .trim();
 
-      // Validate required fields
-      const missing = [];
-      if (!name) missing.push("Supplier Name");
-      if (!address) missing.push("Address");
-      if (!siteRegistrationDate) missing.push("Site Registration Date");
-      if (!siteRegistrationExpiryDate)
-        missing.push("Site Registration Expiry Date");
+        const address = (
+          supplier.address ||
+          supplier.Address ||
+          supplier["Address"] ||
+          ""
+        )
+          .toString()
+          .trim();
 
-      if (missing.length > 0) {
-        results.push({
-          supplier: name || "Unnamed",
-          status: "failed",
-          message: `Missing required field(s): ${missing.join(", ")}.`,
+        // Handle missing siteRegistrationDate - set to current date with warning
+        let siteRegistrationDate = null;
+        if (supplier.siteRegistrationDate) {
+          siteRegistrationDate = new Date(supplier.siteRegistrationDate);
+          if (isNaN(siteRegistrationDate.getTime())) {
+            siteRegistrationDate = new Date(); // Default to current date
+            warnings.push(
+              `Row ${index + 1}: Invalid registration date, using current date`
+            );
+          }
+        } else {
+          siteRegistrationDate = new Date(); // Default to current date
+          warnings.push(
+            `Row ${
+              index + 1
+            }: Site registration date not provided, using current date`
+          );
+        }
+
+        // Handle siteRegistrationExpiryDate - allow empty but default to 1 year from now
+        let siteRegistrationExpiryDate = null;
+        if (supplier.siteRegistrationExpiryDate) {
+          const expiryStr = supplier.siteRegistrationExpiryDate
+            .toString()
+            .trim();
+
+          // Try different date formats
+          if (expiryStr.includes("/")) {
+            // DD/MM/YYYY format
+            const parts = expiryStr.split("/");
+            if (parts.length === 3) {
+              const day = parseInt(parts[0], 10);
+              const month = parseInt(parts[1], 10) - 1;
+              const year = parseInt(parts[2], 10);
+              siteRegistrationExpiryDate = new Date(year, month, day);
+            }
+          } else if (expiryStr.includes("-")) {
+            // YYYY-MM-DD format
+            siteRegistrationExpiryDate = new Date(expiryStr);
+          } else {
+            // Try parsing as is
+            siteRegistrationExpiryDate = new Date(expiryStr);
+          }
+
+          if (
+            !siteRegistrationExpiryDate ||
+            isNaN(siteRegistrationExpiryDate.getTime())
+          ) {
+            // Default to 1 year from registration date if invalid
+            siteRegistrationExpiryDate = new Date(siteRegistrationDate);
+            siteRegistrationExpiryDate.setFullYear(
+              siteRegistrationExpiryDate.getFullYear() + 1
+            );
+            warnings.push(
+              `Row ${
+                index + 1
+              }: Invalid expiry date, defaulting to 1 year from registration date`
+            );
+          }
+        } else {
+          // Default to 1 year from registration date if not provided
+          siteRegistrationExpiryDate = new Date(siteRegistrationDate);
+          siteRegistrationExpiryDate.setFullYear(
+            siteRegistrationExpiryDate.getFullYear() + 1
+          );
+          warnings.push(
+            `Row ${
+              index + 1
+            }: Expiry date not provided, defaulting to 1 year from registration date`
+          );
+        }
+
+        // Validate required fields
+        if (!name) {
+          importErrors.push(`Row ${index + 1}: Missing supplier name`);
+          continue;
+        }
+
+        if (!address) {
+          importErrors.push(`Row ${index + 1}: Missing address`);
+          continue;
+        }
+
+        const mappedSupplier = {
+          name,
+          address,
+          siteRegistrationDate,
+          siteRegistrationExpiryDate,
+          enabled: true,
+        };
+
+        // Check if supplier already exists (case-insensitive name match)
+        const exists = await Supplier.findOne({
+          name: { $regex: new RegExp(`^${mappedSupplier.name}$`, "i") },
         });
-        continue;
-      }
 
-      const mappedSupplier = {
-        name,
-        address,
-        siteRegistrationDate,
-        siteRegistrationExpiryDate,
-        enabled: true,
-      };
-
-      // Check if supplier already exists (case-insensitive name match)
-      const exists = await Supplier.findOne({
-        name: { $regex: new RegExp(`^${mappedSupplier.name}$`, "i") },
-        address: mappedSupplier.address,
-      });
-
-      if (exists) {
-        results.push({
-          supplier: mappedSupplier.name,
-          status: "skipped",
-          message: `Supplier "${mappedSupplier.name}" already exists.`,
-        });
-      } else {
-        await Supplier.create(mappedSupplier);
-        results.push({
-          supplier: mappedSupplier.name,
-          status: "created",
-          message: `Supplier "${mappedSupplier.name}" imported successfully.`,
-        });
+        if (exists) {
+          results.push({
+            supplier: mappedSupplier.name,
+            status: "skipped",
+            message: `Supplier "${mappedSupplier.name}" already exists.`,
+          });
+        } else {
+          await Supplier.create(mappedSupplier);
+          results.push({
+            supplier: mappedSupplier.name,
+            status: "created",
+            message: `Supplier "${mappedSupplier.name}" imported successfully.`,
+          });
+        }
+      } catch (err) {
+        importErrors.push(`Row ${index + 1}: ${err.message}`);
+        console.error(`Error importing row ${index + 1}:`, err);
       }
     }
 
+    const createdCount = results.filter((r) => r.status === "created").length;
+    const skippedCount = results.filter((r) => r.status === "skipped").length;
+
+    let message = `${createdCount} supplier(s) imported successfully.`;
+    if (skippedCount > 0) {
+      message += ` ${skippedCount} supplier(s) skipped (already exist).`;
+    }
+    if (warnings.length > 0) {
+      message += ` ${warnings.length} row(s) had missing/invalid dates - defaults applied.`;
+    }
+    if (importErrors.length > 0) {
+      message += ` ${importErrors.length} row(s) had errors.`;
+    }
+
     return res.status(200).json({
-      message: `${
-        results.filter((r) => r.status === "created").length
-      } supplier(s) imported successfully.`,
+      message,
       results,
+      warnings: warnings.slice(0, 10), // Limit warnings to first 10
+      errors: importErrors,
+      createdCount,
+      skippedCount,
+      warningCount: warnings.length,
+      errorCount: importErrors.length,
       ok: true,
     });
   } catch (err) {
@@ -282,6 +374,4 @@ router.post("/suppliers/import", async (req, res) => {
     });
   }
 });
-
-
 export default router;

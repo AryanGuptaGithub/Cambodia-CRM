@@ -16,8 +16,6 @@ router.post("/login", async (req, res) => {
   try {
     const { username, password } = req.body;
 
-    console.log("\n📥 LOGIN REQUEST:", req.body);
-
     if (!username || !password) {
       return res.status(400).json({
         success: false,
@@ -29,11 +27,9 @@ router.post("/login", async (req, res) => {
     const user = await User.findOne({
       $or: [
         { email: username.toLowerCase() },
-        { username: username.toLowerCase() }
+        { username: username.toLowerCase() },
       ],
     });
-
-    console.log("🔎 Found User:", user);
 
     if (!user) {
       return res.status(401).json({
@@ -42,11 +38,7 @@ router.post("/login", async (req, res) => {
       });
     }
 
-    // Compare hashed password
-    console.log('values of user', user.password);
-    console.log('values of pass', password);
     const isMatch = await bcrypt.compare(password, user.password);
-    console.log("🔐 Password Match:", isMatch);
 
     if (!isMatch) {
       return res.status(401).json({
@@ -77,7 +69,6 @@ router.post("/login", async (req, res) => {
       name: user.name,
       lastLogin: user.lastLogin,
     });
-
   } catch (error) {
     console.error("❌ Login error:", error);
     return res.status(500).json({
@@ -126,7 +117,6 @@ router.post("/verify", (req, res) => {
       success: true,
       user: decoded,
     });
-
   } catch (error) {
     console.error("❌ Token verify error:", error);
 

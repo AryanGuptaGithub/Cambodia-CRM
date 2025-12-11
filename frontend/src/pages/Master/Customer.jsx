@@ -334,23 +334,39 @@ const Customer = () => {
   /* ──────── Status toggle ──────── */
   const handleStatusToggle = async (id) => {
     try {
-      const customer = customers.find((c) => c._id === id);
-      const updated = { ...customer, enabled: !customer.enabled };
-      const res = await fetch(`${backendUrl}/api/customers/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: updated.enabled }),
-      });
-      if (!res.ok) throw new Error("Failed to update");
-      const data = await res.json();
-      setCustomers((prev) =>
-        prev.map((c) => (c._id === id ? { ...c, enabled: data.enabled } : c))
+      // Store original customers for rollback
+      const originalCustomers = [...customers];
+
+      // Find the customer to toggle
+      const customerToToggle = originalCustomers.find((c) => c._id === id);
+
+      if (!customerToToggle) {
+        showToast("error", "Customer not found");
+        return;
+      }
+
+      const newStatus = !customerToToggle.enabled;
+      const customerName = customerToToggle.name;
+
+      // Optimistic UI update
+      setCustomers(
+        customers.map((c) => (c._id === id ? { ...c, enabled: newStatus } : c))
       );
+
+      // API call
+      await axios.put(`${backendUrl}/api/customers/${id}`, {
+        enabled: newStatus,
+      });
+
       showToast(
         "success",
-        `Customer ${updated.enabled ? "enabled" : "disabled"} successfully`
+        `Customer <b>${customerName}</b> ${
+          newStatus ? "enabled" : "disabled"
+        } successfully`
       );
     } catch (err) {
+      // Revert on error
+      fetchCustomers();
       showToast("error", "Failed to update status");
     }
   };
@@ -447,6 +463,131 @@ const Customer = () => {
     setShowImportModal(true);
   };
 
+  /* ──────── Helper Functions for Date Parsing ──────── */
+
+  // Helper function to parse date from various string formats
+  const parseDateFromString = (dateStr) => {
+    if (!dateStr) return null;
+
+    // If it's already a Date object
+    if (dateStr instanceof Date) return dateStr;
+
+    // If it's a number (Excel serial)
+    if (typeof dateStr === "number") {
+      return parseExcelDate(dateStr);
+    }
+
+    // Convert to string for parsing
+    const str = dateStr.toString().trim();
+
+    // Try common date formats
+    const formats = [
+      // ISO format
+      (s) => {
+        const date = new Date(s);
+        return isNaN(date.getTime()) ? null : date;
+      },
+      // DD/MM/YYYY or DD-MM-YYYY
+      (s) => {
+        const match = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+        if (match) {
+          const day = parseInt(match[1], 10);
+          const month = parseInt(match[2], 10) - 1;
+          const year = parseInt(match[3], 10);
+          const date = new Date(year, month, day);
+          return date.getFullYear() === year &&
+            date.getMonth() === month &&
+            date.getDate() === day
+            ? date
+            : null;
+        }
+        return null;
+      },
+      // DD-MMM-YYYY or DD/MMM/YYYY (like 1-Jun-2021)
+      (s) => {
+        const months = {
+          jan: 0,
+          feb: 1,
+          mar: 2,
+          apr: 3,
+          may: 4,
+          jun: 5,
+          jul: 6,
+          aug: 7,
+          sep: 8,
+          oct: 9,
+          nov: 10,
+          dec: 11,
+          january: 0,
+          february: 1,
+          march: 2,
+          april: 3,
+          may: 4,
+          june: 5,
+          july: 6,
+          august: 7,
+          september: 8,
+          october: 9,
+          november: 10,
+          december: 11,
+        };
+
+        const match = s.match(/^(\d{1,2})[\/\- ]([a-z]+)[\/\- ](\d{4})$/i);
+        if (match) {
+          const day = parseInt(match[1], 10);
+          const monthName = match[2].toLowerCase();
+          const year = parseInt(match[3], 10);
+
+          const month = months[monthName];
+          if (month !== undefined) {
+            const date = new Date(year, month, day);
+            return date.getFullYear() === year &&
+              date.getMonth() === month &&
+              date.getDate() === day
+              ? date
+              : null;
+          }
+        }
+        return null;
+      },
+    ];
+
+    // Try each format
+    for (const format of formats) {
+      const date = format(str);
+      if (date) return date;
+    }
+
+    return null;
+  };
+
+  // Function to parse Excel serial numbers
+  const parseExcelDate = (excelDate) => {
+    if (!excelDate) return null;
+
+    if (excelDate instanceof Date) return excelDate;
+
+    if (typeof excelDate === "string") {
+      const parsed = new Date(excelDate);
+      if (!isNaN(parsed.getTime())) return parsed;
+    }
+
+    if (typeof excelDate === "number") {
+      // Excel serial date (days since 1900-01-00, with 1900 incorrectly treated as leap year)
+      const excelEpoch = new Date(1899, 11, 30); // December 30, 1899
+      const date = new Date(excelEpoch.getTime() + excelDate * 86400000);
+
+      // Adjust for Excel's leap year bug (1900 incorrectly considered a leap year)
+      if (excelDate > 59) {
+        date.setDate(date.getDate() - 1);
+      }
+
+      return date;
+    }
+
+    return null;
+  };
+
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -454,71 +595,145 @@ const Customer = () => {
     reader.onload = (evt) => {
       try {
         const data = new Uint8Array(evt.target.result);
-        const workbook = XLSX.read(data, { type: "array" });
+        const workbook = XLSX.read(data, { type: "array", cellDates: true }); // Enable cellDates
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+
+        // Get all rows including empty ones
+        const rows = XLSX.utils.sheet_to_json(sheet, {
+          header: 1,
+          defval: "",
+          blankrows: true,
+        });
+
         if (!rows.length) {
           showToast("warning", "Excel file is empty");
           return;
         }
-        const expectedHeaders = [
-          "date",
-          "medical representative name",
-          "customer name in english",
-          "types of business",
-          "customer number",
-          "customer address",
-          "zone",
-          "province",
-          "remark",
-        ];
+
+        // Find header row
         let headerIdx = -1;
-        for (let i = 0; i < rows.length; i++) {
-          const row = rows[i].map((c) => c.toString().trim().toLowerCase());
-          if (expectedHeaders.filter((h) => row.includes(h)).length >= 5) {
+        for (let i = 0; i < Math.min(rows.length, 10); i++) {
+          if (!rows[i] || !Array.isArray(rows[i])) continue;
+          const firstCell = rows[i][0]?.toString().trim().toLowerCase();
+          if (firstCell === "date") {
             headerIdx = i;
             break;
           }
         }
+
         if (headerIdx === -1) {
-          showToast("error", "Header row not found");
+          showToast("error", "Header row not found. Please check file format.");
           return;
         }
+
         const headers = rows[headerIdx].map((h) => h.toString().trim());
+
+        // Process all rows after header
         const dataRows = rows.slice(headerIdx + 1);
+
         const json = dataRows
-          .map((row) => {
+          .map((row, index) => {
             const obj = {};
-            headers.forEach((h, i) => (obj[h] = row[i] ?? ""));
+            headers.forEach((h, i) => {
+              obj[h] = row[i] !== undefined ? row[i] : "";
+            });
             return obj;
           })
-          .filter((o) => Object.values(o).some((v) => v !== ""));
-        const final = json.map((i) => {
-          const parsedDate = parseExcelDate(i["Date"] || i["date"]);
+          .filter((o) => {
+            return Object.values(o).some((v) => v.toString().trim() !== "");
+          });
+
+        const final = json.map((item) => {
+          // Helper to get value with case-insensitive matching
+          const getValue = (possibleKeys) => {
+            for (const key of possibleKeys) {
+              const lowerKey = key.toLowerCase();
+              for (const itemKey in item) {
+                if (
+                  itemKey.toLowerCase() === lowerKey &&
+                  item[itemKey] &&
+                  item[itemKey].toString().trim() !== ""
+                ) {
+                  return item[itemKey];
+                }
+              }
+            }
+            return "";
+          };
+
+          // Get date value and parse it
+          const dateVal = getValue(["Date", "date"]);
+          let parsedDate = null;
+
+          if (dateVal instanceof Date) {
+            // XLSX with cellDates: true returns Date objects
+            parsedDate = dateVal;
+          } else if (typeof dateVal === "number") {
+            // Handle Excel serial number (like 45486)
+            parsedDate = parseExcelDate(dateVal);
+          } else if (typeof dateVal === "string") {
+            // Handle string dates
+            parsedDate = parseDateFromString(dateVal);
+          }
+
           return {
-            date: parsedDate ? parsedDate.toISOString().split("T")[0] : "",
-            medicalRepName:
-              i["Medical Representative Name"] ||
-              i["medical representative name"] ||
-              "",
-            name:
-              i["Customer Name in English"] ||
-              i["customer name in english"] ||
-              "",
-            typeOfBusiness:
-              i["Types of Business"] || i["types of business"] || "",
-            customerNumber: i["Customer Number"] || i["customer number"] || "",
-            customerAddress:
-              i["Customer Address"] || i["customer address"] || "",
-            zone: i["Zone"] || i["zone"] || "",
-            province: i["Province"] || i["province"] || "",
-            remark: i["Remark"] || i["remark"] || "",
+            date: parsedDate
+              ? parsedDate.toISOString().split("T")[0]
+              : new Date().toISOString().split("T")[0], // Default to today
+            medicalRepName: getValue([
+              "Medical Representative Name",
+              "medical representative name",
+              "Medical Rep Name",
+              "medical rep name",
+            ]),
+            name: getValue([
+              "Customer Name in English",
+              "customer name in english",
+              "Customer Name",
+              "customer name",
+              "Name",
+            ]),
+            typeOfBusiness: getValue([
+              "Types of Business",
+              "types of business",
+              "Business Type",
+              "business type",
+              "Type",
+            ]),
+            customerNumber: getValue([
+              "Customer Number",
+              "customer number",
+              "Customer Phone Number",
+              "customer phone number",
+              "Phone",
+              "phone",
+            ]),
+            customerAddress: getValue([
+              "Customer Address",
+              "customer address",
+              "Address",
+              "address",
+            ]),
+            zone: getValue(["Zone", "zone"]),
+            province: getValue(["Province", "province"]),
+            remark: getValue(["Remark", "remark", "Notes", "notes"]),
           };
         });
-        setParsedData(final);
+
+        // Filter out rows missing essential information
+        const validData = final.filter(
+          (item) => item.name.trim() !== "" || item.customerNumber.trim() !== ""
+        );
+
+        if (validData.length === 0) {
+          showToast("warning", "No valid customer records found in the file");
+          return;
+        }
+
+        setParsedData(validData);
       } catch (err) {
-        console.error(err);
-        showToast("error", "Failed to parse file");
+        console.error("Error parsing file:", err);
+        showToast("error", "Failed to parse file: " + err.message);
       }
     };
     reader.readAsArrayBuffer(file);
@@ -529,25 +744,52 @@ const Customer = () => {
       showToast("warning", "Upload a valid file first");
       return;
     }
-    if (!mrList.length) {
-      showToast("error", "No MRs found – cannot import");
-      return;
-    }
+
     setIsUploading(true);
     try {
       const res = await axios.post(
         `${backendUrl}/api/customers/import`,
-        parsedData
+        parsedData,
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+          timeout: 300000, // 5 minutes timeout
+        }
       );
+
       if (res.status === 200) {
-        showToast("success", res.data.message || "Imported successfully");
+        showToast(
+          "success",
+          res.data.message ||
+            `Imported ${parsedData.length} records successfully`
+        );
         setShowImportModal(false);
         setParsedData([]);
         fetchCustomers();
       }
     } catch (err) {
-      const msg = err.response?.data?.message || "Import failed";
-      showToast("error", msg);
+      console.error("Import error:", err);
+
+      let errorMsg = "Import failed";
+      if (err.response) {
+        errorMsg =
+          err.response.data?.message || `Server error: ${err.response.status}`;
+
+        if (err.response.data?.errors) {
+          errorMsg += `. ${err.response.data.errors.length} records have validation issues.`;
+        }
+
+        if (err.response.data?.duplicates) {
+          errorMsg += ` ${err.response.data.duplicates.length} duplicate records found.`;
+        }
+      } else if (err.request) {
+        errorMsg = "No response from server. Check network connection.";
+      } else {
+        errorMsg = err.message || "Unknown error occurred";
+      }
+
+      showToast("error", errorMsg);
     } finally {
       setIsUploading(false);
     }
@@ -835,29 +1077,46 @@ const Customer = () => {
                     className="block w-full border rounded-lg px-3 py-2"
                   />
                 </div>
-                <div className="flex justify-end gap-3">
-                  <button
-                    onClick={() => setShowImportModal(false)}
-                    disabled={isUploading}
-                    className={`px-5 py-2 rounded-lg cursor-pointer ${
-                      isUploading
-                        ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                        : "bg-gray-300 hover:bg-gray-400 text-gray-700"
-                    }`}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleCustomerImport}
-                    disabled={isUploading}
-                    className={`px-5 py-2 rounded-lg cursor-pointer ${
-                      isUploading
-                        ? "bg-blue-400 text-white cursor-not-allowed"
-                        : "bg-blue-600 hover:bg-blue-700 text-white"
-                    }`}
-                  >
-                    {isUploading ? "Uploading…" : "Upload"}
-                  </button>
+                {/* Fixed: Row count on left, buttons on right with justify-between */}
+                <div className="flex justify-between items-center mt-6">
+                  <div className="text-gray-700">
+                    {parsedData.length > 0 ? (
+                      <>
+                        Rows to import:{" "}
+                        <span className="font-semibold text-blue-600">
+                          {parsedData.length}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-gray-500">No data to import</span>
+                    )}
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setShowImportModal(false)}
+                      disabled={isUploading}
+                      className={`px-5 py-2 rounded-lg cursor-pointer ${
+                        isUploading
+                          ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                          : "bg-gray-300 hover:bg-gray-400 text-gray-700"
+                      }`}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleCustomerImport}
+                      disabled={isUploading || parsedData.length === 0}
+                      className={`px-5 py-2 rounded-lg cursor-pointer ${
+                        isUploading || parsedData.length === 0
+                          ? "bg-blue-400 text-white cursor-not-allowed"
+                          : "bg-blue-600 hover:bg-blue-700 text-white"
+                      }`}
+                    >
+                      {isUploading
+                        ? "Uploading…"
+                        : `Upload (${parsedData.length})`}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>,

@@ -314,87 +314,236 @@ router.delete("/staff/:id", async (req, res) => {
 });
 
 // -----------------------------------------------------------
-// IMPORT STAFF
+// IMPORT STAFF - CORRECTED VERSION
 // -----------------------------------------------------------
 router.post("/staffs/import", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const list = req.body;
+    let list = req.body;
 
-    if (!Array.isArray(list)) {
-      throw new Error("Invalid import format");
+    if (req.body && req.body.data && Array.isArray(req.body.data)) {
+      list = req.body.data;
+    } else if (Array.isArray(req.body)) {
+      list = req.body;
+    } else if (req.body && Array.isArray(req.body.list)) {
+      list = req.body.list;
+    }
+
+    if (!Array.isArray(list) || list.length === 0) {
+      throw new Error("Invalid import format: Expected non-empty array");
     }
 
     const duplicateEmails = [];
     const duplicateNames = [];
     const duplicateContacts = [];
 
-    // Check duplicates
-    for (const row of list) {
-      const name = row.medicalRepName?.trim();
-      const email = row.email?.trim().toLowerCase() || null;
-      const contact = row.contactNo?.toString() || null;
+    for (let i = 0; i < list.length; i++) {
+      const row = list[i];
 
-      if (!name) throw new Error("medicalRepName is required in import row");
+      const medicalRepName =
+        row.medicalRepName || row.name || row["MR Name"] || row["mr name"];
+      const email = row.email || row.Email || "";
+      const contactNo =
+        row.contactNo ||
+        row.phone ||
+        row["Contact No"] ||
+        row["contact no"] ||
+        row["Contact"] ||
+        row["contact"];
 
-      if (await staffSchema.findOne({ medicalRepName: name }).session(session))
+      const name = medicalRepName?.trim();
+      const emailLower = email?.trim().toLowerCase() || null;
+      const contact = contactNo?.toString().trim() || null;
+
+      if (!name) {
+        throw new Error(`medicalRepName is required in row ${i + 1}`);
+      }
+
+      const existingStaffByName = await staffSchema
+        .findOne({ medicalRepName: name })
+        .session(session);
+      if (existingStaffByName) {
         duplicateNames.push(name);
+      }
 
-      if (email && (await User.findOne({ email }).session(session)))
-        duplicateEmails.push(email);
+      if (emailLower) {
+        const existingUser = await User.findOne({ email: emailLower }).session(
+          session
+        );
+        if (existingUser) {
+          duplicateEmails.push(emailLower);
+        }
+      }
 
-      if (contact && (await staffSchema.findOne({ contactNo: contact }).session(session)))
-        duplicateContacts.push(contact);
+      // Check duplicate contact
+      if (contact) {
+        const existingStaffByContact = await staffSchema
+          .findOne({ contactNo: contact })
+          .session(session);
+        if (existingStaffByContact) {
+          duplicateContacts.push(contact);
+        }
+      }
     }
 
-    if (duplicateNames.length || duplicateEmails.length || duplicateContacts.length) {
-      throw new Error("Duplicate entries found. Import aborted.");
+    // If any duplicates found → abort
+    if (
+      duplicateNames.length ||
+      duplicateEmails.length ||
+      duplicateContacts.length
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Duplicate entries found",
+        duplicates: {
+          names: duplicateNames,
+          emails: duplicateEmails,
+          contacts: duplicateContacts,
+        },
+      });
     }
 
-    for (const row of list) {
-      const name = row.medicalRepName.trim();
-      const emailLower = row.email?.trim().toLowerCase() || "";
-      const contact = row.contactNo?.toString().trim() || "";
+    const importedStaff = [];
+    const failedImports = [];
 
-      // Password hash
-      const plaintextPassword = row.password || "password123";
-      const hashedPassword = await bcrypt.hash(plaintextPassword, 10);
-    
-      // Final email
-      const finalEmail =
-        emailLower || `${name.toLowerCase().replace(/\s+/g, ".")}@company.com`;
-      
-      // Create user
-      const newUser = await new User({
-        name,
-        email: finalEmail,
-        password: hashedPassword,
-        role: "user",
-        isActive: row.enabled ?? true,
-      }).save({ session });
+    // Second Pass: Create Users + Staff
+    for (let i = 0; i < list.length; i++) {
+      const row = list[i];
 
-      // Create staff
-      const staff = await new staffSchema({
-        medicalRepName: name,
-        teamName: row.teamName,
-        contactNo: contact,
-        email: finalEmail,
-        date: row.date || new Date(),
-        userId: newUser._id,
-      }).save({ session });
+      try {
+        // Extract data with fallback for different property names
+        const medicalRepName =
+          row.medicalRepName || row.name || row["MR Name"] || row["mr name"];
+        const teamName =
+          row.teamName || row["Team Name"] || row["team name"] || row.team;
+        const email = row.email || row.Email || "";
+        const contactNo =
+          row.contactNo ||
+          row.phone ||
+          row["Contact No"] ||
+          row["contact no"] ||
+          row["Contact"] ||
+          row["contact"];
+        const password = row.password || row.Password || "123456";
+        const date =
+          row.date ||
+          row.Date ||
+          row["Joining Date"] ||
+          row["joining date"] ||
+          row["Instance of Joining Date"] ||
+          new Date();
+        const enabled = row.enabled !== undefined ? row.enabled : true;
 
-      // Link staff to user
-      newUser.staffId = staff._id;
-      await newUser.save({ session });
+        const name = medicalRepName.trim();
+        const team = teamName?.trim();
+
+        if (!team) {
+          failedImports.push({
+            row: i + 1,
+            name,
+            error: "Team name is required",
+          });
+          continue;
+        }
+
+        const plaintextPassword = password;
+
+        const hashedPassword = await bcrypt.hash(plaintextPassword, 10);
+
+        const emailLower = email?.trim().toLowerCase() || "";
+        const finalEmail =
+          emailLower ||
+          `${name.toLowerCase().replace(/\s+/g, ".")}@company.com`;
+
+        const contact = contactNo?.toString().trim() || "";
+
+        // Parse date
+        let joinDate;
+        try {
+          if (date instanceof Date) {
+            joinDate = date;
+          } else if (typeof date === "string") {
+            // Try parsing the date string
+            const parsed = new Date(date);
+            if (isNaN(parsed.getTime())) {
+              // Try Excel serial number
+              const excelNum = parseFloat(date);
+              if (!isNaN(excelNum) && excelNum > 0) {
+                // Excel date (days since 1900-01-01)
+                const excelDate = new Date((excelNum - 25569) * 86400 * 1000);
+                if (!isNaN(excelDate.getTime())) {
+                  joinDate = excelDate;
+                }
+              }
+            } else {
+              joinDate = parsed;
+            }
+          }
+        } catch (dateError) {
+          console.log(`Date parsing error for ${name}:`, dateError);
+        }
+
+        if (!joinDate || isNaN(joinDate.getTime())) {
+          joinDate = new Date();
+        }
+
+        // Create User
+        const newUser = new User({
+          name,
+          email: finalEmail,
+          password: hashedPassword,
+          role: "user",
+          isActive: enabled,
+        });
+        await newUser.save({ session });
+        
+
+        // Create Staff
+        const staff = new staffSchema({
+          medicalRepName: name,
+          teamName: team,
+          contactNo: contact,
+          email: finalEmail,
+          date: joinDate,
+          userId: newUser._id,
+        });
+        await staff.save({ session });
+        
+
+        // Link back
+        newUser.staffId = staff._id;
+        await newUser.save({ session });
+        
+
+        importedStaff.push({
+          name,
+          email: finalEmail,
+          team,
+          userId: newUser._id,
+          staffId: staff._id,
+        });
+      } catch (rowError) {
+        console.error(`Error processing row ${i + 1}:`, rowError);
+        failedImports.push({
+          row: i + 1,
+          name: row.medicalRepName || row.name || `Row ${i + 1}`,
+          error: rowError.message,
+        });
+      }
     }
 
     await session.commitTransaction();
 
     res.json({
       success: true,
-      message: "Staff imported successfully.",
+      message: `Successfully imported ${importedStaff.length} staff members.${
+        failedImports.length > 0 ? ` ${failedImports.length} failed.` : ""
+      }`,
+      count: importedStaff.length,
+      imported: importedStaff,
+      failed: failedImports.length > 0 ? failedImports : undefined,
     });
   } catch (error) {
     await session.abortTransaction();
