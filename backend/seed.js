@@ -1371,19 +1371,19 @@ async function runSeeders() {
 
   try {
     await seedUsers();
-    await seedSaleTypes();
-    await seedOrderStatuses();
-    await seedDestinations();
-    await seedCategoryTypes();
-    await seedTransactionTypes();
-    await seedProvinces();
-    await seedZones();
-    await seedBusinessTypes();
-    await seedProductTypes();
-    await seedProductPackingTypes();
-    await seedAllowanceTypes(); // Add allowance types seeding
-    await seedHTabs();
-    await seedMRCash();
+    // await seedSaleTypes();
+    // await seedOrderStatuses();
+    // await seedDestinations();
+    // await seedCategoryTypes();
+    // await seedTransactionTypes();
+    // await seedProvinces();
+    // await seedZones();
+    // await seedBusinessTypes();
+    // await seedProductTypes();
+    // await seedProductPackingTypes();
+    // await seedAllowanceTypes(); // Add allowance types seeding
+    // await seedHTabs();
+    // await seedMRCash();
   } catch (error) {
     console.error("❌ Seeding error:", error);
   } finally {

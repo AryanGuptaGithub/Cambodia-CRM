@@ -20,6 +20,70 @@ const handleDuplicateError = (res, err, entity = "supplier") => {
   });
 };
 
+// Convert Excel serial date to JS Date
+const excelDateToJSDate = (value) => {
+  if (!value) return null;
+  
+  if (typeof value === "number") {
+    // Excel dates start from 1899-12-30
+    const epoch = new Date(1899, 11, 30);
+    return new Date(epoch.getTime() + value * 86400000);
+  }
+  
+  const parsed = new Date(value);
+  return isNaN(parsed.getTime()) ? null : parsed;
+};
+
+// Parse date string in various formats
+const parseDateString = (dateStr) => {
+  if (!dateStr || typeof dateStr !== 'string') return null;
+  
+  const str = dateStr.trim();
+  if (str === '') return null;
+  
+  // Try DD/MM/YYYY format
+  if (str.includes('/')) {
+    const parts = str.split('/');
+    if (parts.length === 3) {
+      const day = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const year = parseInt(parts[2], 10);
+      
+      // Handle 2-digit year
+      const fullYear = year < 100 ? year + 2000 : year;
+      return new Date(fullYear, month, day);
+    }
+  }
+  
+  // Try MM/DD/YYYY format
+  if (str.includes('-')) {
+    const parts = str.split('-');
+    if (parts.length === 3) {
+      // Check if it's DD-MM-YYYY or MM-DD-YYYY
+      const first = parseInt(parts[0], 10);
+      const second = parseInt(parts[1], 10);
+      
+      if (first > 12) {
+        // DD-MM-YYYY
+        return new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
+      } else {
+        // MM-DD-YYYY or YYYY-MM-DD
+        if (parts[0].length === 4) {
+          // YYYY-MM-DD
+          return new Date(parts[0], parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+        } else {
+          // MM-DD-YYYY
+          return new Date(parseInt(parts[2], 10), parseInt(parts[0], 10) - 1, parseInt(parts[1], 10));
+        }
+      }
+    }
+  }
+  
+  // Try parsing as ISO date
+  const date = new Date(str);
+  return isNaN(date.getTime()) ? null : date;
+};
+
 /* ------------------------------- GET All ------------------------------- */
 router.get("/suppliers", async (_, res) => {
   try {
@@ -55,24 +119,39 @@ router.post("/suppliers", async (req, res) => {
     } = req.body;
 
     // ✅ Validation
-    if (
-      !name ||
-      !address ||
-      !siteRegistrationDate ||
-      !siteRegistrationExpiryDate
-    ) {
+    if (!name || !address) {
       return res
         .status(400)
-        .json({ message: "All required fields must be provided." });
+        .json({ message: "Name and Address are required fields." });
     }
 
     const payload = {
       name: name.trim(),
       address: address.trim(),
-      siteRegistrationDate: new Date(siteRegistrationDate),
-      siteRegistrationExpiryDate: new Date(siteRegistrationExpiryDate),
-      enabled: enabled === true || enabled === "enabled",
+      enabled: enabled === true || enabled === "enabled" || enabled === "true",
     };
+
+    // Set site registration date (default to current date if not provided)
+    if (siteRegistrationDate) {
+      const regDate = new Date(siteRegistrationDate);
+      payload.siteRegistrationDate = isNaN(regDate.getTime()) ? new Date() : regDate;
+    } else {
+      payload.siteRegistrationDate = new Date();
+    }
+
+    // Set site registration expiry date (default to 1 year from registration date if not provided)
+    if (siteRegistrationExpiryDate) {
+      const expiryDate = new Date(siteRegistrationExpiryDate);
+      if (isNaN(expiryDate.getTime())) {
+        payload.siteRegistrationExpiryDate = new Date(payload.siteRegistrationDate);
+        payload.siteRegistrationExpiryDate.setFullYear(payload.siteRegistrationExpiryDate.getFullYear() + 1);
+      } else {
+        payload.siteRegistrationExpiryDate = expiryDate;
+      }
+    } else {
+      payload.siteRegistrationExpiryDate = new Date(payload.siteRegistrationDate);
+      payload.siteRegistrationExpiryDate.setFullYear(payload.siteRegistrationExpiryDate.getFullYear() + 1);
+    }
 
     const newSupplier = new Supplier(payload);
     const savedSupplier = await newSupplier.save();
@@ -170,22 +249,6 @@ router.delete("/suppliers", async (req, res) => {
 });
 
 /* ----------------------------- EXCEL Import ----------------------------- */
-
-// ✅ Convert Excel serial date to JS Date safely
-const excelDateToJSDate = (value) => {
-  if (!value) return null;
-
-  if (typeof value === "number") {
-    const epoch = new Date(1899, 11, 30);
-    return new Date(epoch.getTime() + value * 86400000);
-  }
-
-  const parsed = new Date(value);
-  return isNaN(parsed.getTime()) ? null : parsed;
-};
-
-/* ----------------------------- EXCEL Import ----------------------------- */
-/* ----------------------------- EXCEL Import ----------------------------- */
 router.post("/suppliers/import", async (req, res) => {
   try {
     const suppliers = req.body;
@@ -203,7 +266,7 @@ router.post("/suppliers/import", async (req, res) => {
 
     for (let [index, supplier] of suppliers.entries()) {
       try {
-        // Normalize field names for different Excel formats
+        // Normalize field names
         const name = (
           supplier.supplierName ||
           supplier.name ||
@@ -224,78 +287,6 @@ router.post("/suppliers/import", async (req, res) => {
           .toString()
           .trim();
 
-        // Handle missing siteRegistrationDate - set to current date with warning
-        let siteRegistrationDate = null;
-        if (supplier.siteRegistrationDate) {
-          siteRegistrationDate = new Date(supplier.siteRegistrationDate);
-          if (isNaN(siteRegistrationDate.getTime())) {
-            siteRegistrationDate = new Date(); // Default to current date
-            warnings.push(
-              `Row ${index + 1}: Invalid registration date, using current date`
-            );
-          }
-        } else {
-          siteRegistrationDate = new Date(); // Default to current date
-          warnings.push(
-            `Row ${
-              index + 1
-            }: Site registration date not provided, using current date`
-          );
-        }
-
-        // Handle siteRegistrationExpiryDate - allow empty but default to 1 year from now
-        let siteRegistrationExpiryDate = null;
-        if (supplier.siteRegistrationExpiryDate) {
-          const expiryStr = supplier.siteRegistrationExpiryDate
-            .toString()
-            .trim();
-
-          // Try different date formats
-          if (expiryStr.includes("/")) {
-            // DD/MM/YYYY format
-            const parts = expiryStr.split("/");
-            if (parts.length === 3) {
-              const day = parseInt(parts[0], 10);
-              const month = parseInt(parts[1], 10) - 1;
-              const year = parseInt(parts[2], 10);
-              siteRegistrationExpiryDate = new Date(year, month, day);
-            }
-          } else if (expiryStr.includes("-")) {
-            // YYYY-MM-DD format
-            siteRegistrationExpiryDate = new Date(expiryStr);
-          } else {
-            // Try parsing as is
-            siteRegistrationExpiryDate = new Date(expiryStr);
-          }
-
-          if (
-            !siteRegistrationExpiryDate ||
-            isNaN(siteRegistrationExpiryDate.getTime())
-          ) {
-            // Default to 1 year from registration date if invalid
-            siteRegistrationExpiryDate = new Date(siteRegistrationDate);
-            siteRegistrationExpiryDate.setFullYear(
-              siteRegistrationExpiryDate.getFullYear() + 1
-            );
-            warnings.push(
-              `Row ${
-                index + 1
-              }: Invalid expiry date, defaulting to 1 year from registration date`
-            );
-          }
-        } else {
-          // Default to 1 year from registration date if not provided
-          siteRegistrationExpiryDate = new Date(siteRegistrationDate);
-          siteRegistrationExpiryDate.setFullYear(
-            siteRegistrationExpiryDate.getFullYear() + 1
-          );
-          warnings.push(
-            `Row ${
-              index + 1
-            }: Expiry date not provided, defaulting to 1 year from registration date`
-          );
-        }
-
         // Validate required fields
         if (!name) {
           importErrors.push(`Row ${index + 1}: Missing supplier name`);
@@ -305,6 +296,54 @@ router.post("/suppliers/import", async (req, res) => {
         if (!address) {
           importErrors.push(`Row ${index + 1}: Missing address`);
           continue;
+        }
+
+        // Parse dates
+        let siteRegistrationDate = null;
+        if (supplier.siteRegistrationDate) {
+          siteRegistrationDate = new Date(supplier.siteRegistrationDate);
+          if (isNaN(siteRegistrationDate.getTime())) {
+            // Try parsing as Excel serial date
+            if (typeof supplier.siteRegistrationDate === 'number') {
+              siteRegistrationDate = excelDateToJSDate(supplier.siteRegistrationDate);
+            } else {
+              siteRegistrationDate = parseDateString(supplier.siteRegistrationDate.toString());
+            }
+            
+            if (!siteRegistrationDate || isNaN(siteRegistrationDate.getTime())) {
+              siteRegistrationDate = new Date(); // Default to current date
+              warnings.push(`Row ${index + 1}: Invalid registration date, using current date`);
+            }
+          }
+        } else {
+          siteRegistrationDate = new Date(); // Default to current date
+          warnings.push(`Row ${index + 1}: Site registration date not provided, using current date`);
+        }
+
+        let siteRegistrationExpiryDate = null;
+        if (supplier.siteRegistrationExpiryDate) {
+          siteRegistrationExpiryDate = new Date(supplier.siteRegistrationExpiryDate);
+          
+          if (isNaN(siteRegistrationExpiryDate.getTime())) {
+            // Try different parsing methods
+            if (typeof supplier.siteRegistrationExpiryDate === 'number') {
+              siteRegistrationExpiryDate = excelDateToJSDate(supplier.siteRegistrationExpiryDate);
+            } else {
+              siteRegistrationExpiryDate = parseDateString(supplier.siteRegistrationExpiryDate.toString());
+            }
+            
+            if (!siteRegistrationExpiryDate || isNaN(siteRegistrationExpiryDate.getTime())) {
+              // Default to 1 year from registration date
+              siteRegistrationExpiryDate = new Date(siteRegistrationDate);
+              siteRegistrationExpiryDate.setFullYear(siteRegistrationExpiryDate.getFullYear() + 1);
+              warnings.push(`Row ${index + 1}: Invalid expiry date, defaulting to 1 year from registration date`);
+            }
+          }
+        } else {
+          // Default to 1 year from registration date
+          siteRegistrationExpiryDate = new Date(siteRegistrationDate);
+          siteRegistrationExpiryDate.setFullYear(siteRegistrationExpiryDate.getFullYear() + 1);
+          warnings.push(`Row ${index + 1}: Expiry date not provided, defaulting to 1 year from registration date`);
         }
 
         const mappedSupplier = {
@@ -348,7 +387,7 @@ router.post("/suppliers/import", async (req, res) => {
       message += ` ${skippedCount} supplier(s) skipped (already exist).`;
     }
     if (warnings.length > 0) {
-      message += ` ${warnings.length} row(s) had missing/invalid dates - defaults applied.`;
+      message += ` ${warnings.length} row(s) had date warnings.`;
     }
     if (importErrors.length > 0) {
       message += ` ${importErrors.length} row(s) had errors.`;
@@ -374,4 +413,5 @@ router.post("/suppliers/import", async (req, res) => {
     });
   }
 });
+
 export default router;

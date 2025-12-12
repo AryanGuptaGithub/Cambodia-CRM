@@ -22,7 +22,7 @@ import {
   fetchProductTypes,
   fetchSuppliers,
   fetchProductPackingType,
-} from "./common/fetchDropdown"; // Added fetchProductPackingType
+} from "./common/fetchDropdown";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import InputField from "../../components/common/InputField";
 import { parseExcelDate } from "../../utils/excelUtility";
@@ -47,7 +47,7 @@ const Product = () => {
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [productTypes, setProductTypes] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
-  const [packingOptions, setPackingOptions] = useState([]); // Added packing options state
+  const [packingOptions, setPackingOptions] = useState([]);
   const [error, setError] = useState(null);
   const inputRef = useRef(null);
 
@@ -72,11 +72,7 @@ const Product = () => {
     const fetchDropdownData = async () => {
       try {
         const [typesResult, suppliersResult, packingResult] = await Promise.all(
-          [
-            fetchProductTypes(),
-            fetchSuppliers(),
-            fetchProductPackingType(), // Added packing types fetch
-          ]
+          [fetchProductTypes(), fetchSuppliers(), fetchProductPackingType()]
         );
 
         if (typesResult.success) {
@@ -204,7 +200,7 @@ const Product = () => {
     [currentProducts]
   );
 
-  // ADDED: Import click handler with supplier validation
+  // Import click handler with supplier validation
   const handleImportClick = () => {
     if (!suppliers.length) {
       showToast(
@@ -222,7 +218,6 @@ const Product = () => {
       return;
     }
 
-    // ADDED: Double check suppliers before import
     if (!suppliers.length) {
       showToast("error", "No suppliers found – cannot import");
       return;
@@ -237,10 +232,42 @@ const Product = () => {
       );
 
       if (res.status === 200) {
-        showToast(
-          "success",
-          res.data.message || "Product imported successfully!"
-        );
+        // Success - all records imported
+        let message = `Imported ${res.data.importedCount} product(s) successfully`;
+        if (res.data.duplicateCount > 0) {
+          message += `, ${res.data.duplicateCount} duplicate record(s) found`;
+        }
+        showToast("success", message);
+        setShowImportModal(false);
+        setParsedData([]);
+        fetchProducts();
+      } else if (res.status === 207) {
+        // Partial success
+        let message = `Imported ${res.data.importedCount} product(s)`;
+        if (res.data.duplicateCount > 0) {
+          message += `, ${res.data.duplicateCount} duplicate record(s) found`;
+        }
+        if (res.data.failedCount > 0) {
+          message += `, ${res.data.failedCount} error(s) encountered`;
+        }
+        showToast("success", message);
+
+        // Show detailed errors if any
+        if (res.data.errors && res.data.errors.length > 0) {
+          console.log("Import errors:", res.data.errors);
+          if (res.data.errors.length <= 5) {
+            res.data.errors.forEach((error) => {
+              showToast("error", error, 5000);
+            });
+          } else {
+            showToast(
+              "error",
+              `First 5 errors: ${res.data.errors.slice(0, 5).join("; ")}`,
+              5000
+            );
+          }
+        }
+
         setShowImportModal(false);
         setParsedData([]);
         fetchProducts();
@@ -260,13 +287,19 @@ const Product = () => {
 
     reader.onload = (evt) => {
       const data = new Uint8Array(evt.target.result);
-      const workbook = XLSX.read(data, { type: "array" });
+      const workbook = XLSX.read(data, { 
+        type: "array", 
+        cellDates: true, 
+        cellNF: false, 
+        cellText: false 
+      });
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
 
       const rows = XLSX.utils.sheet_to_json(worksheet, {
         header: 1,
         defval: "",
+        raw: false,
       });
 
       if (rows.length === 0) {
@@ -274,21 +307,26 @@ const Product = () => {
         return;
       }
 
-      // Updated required headers list to include FOB (USD)
+      // Required headers
       const requiredHeaders = [
         "product name",
         "type",
         "packing",
         "selling price (usd)",
         "lc (usd)",
-        "fob (usd)", // NEW: Added FOB header
-        "tax selling price (usd)",
         "quantity per box/strip",
         "supplier name",
         "drug registration license #",
         "drug registration license validity date",
+      ];
+
+      const optionalHeaders = [
+        "fob (usd)",
+        "tax selling price (usd)",
         "remarks",
       ];
+
+      const allHeaders = [...requiredHeaders, ...optionalHeaders];
 
       // Find the header row dynamically
       let headerRowIndex = -1;
@@ -311,7 +349,7 @@ const Product = () => {
       }
 
       if (headerRowIndex === -1) {
-        showToast("error", "❌ Could not find header row in Excel file");
+        showToast("error", "❌ Could not find required headers in Excel file");
         return;
       }
 
@@ -319,7 +357,7 @@ const Product = () => {
       const headersMap = {};
       rows[headerRowIndex].forEach((headerText, colIndex) => {
         const cleaned = headerText.toString().trim().toLowerCase();
-        if (requiredHeaders.includes(cleaned)) {
+        if (allHeaders.includes(cleaned)) {
           headersMap[colIndex] = cleaned;
         }
       });
@@ -332,15 +370,27 @@ const Product = () => {
       }
 
       const mappedData = dataRows
-        .map((row) => {
+        .map((row, rowIndex) => {
           const item = {};
           Object.entries(headersMap).forEach(([colIndex, key]) => {
             item[key] = row[colIndex] || "";
           });
 
-          const licenseValidityDate = parseExcelDate(
-            item["drug registration license validity date"]
-          );
+          // Get the date value from Excel
+          let licenseValidityDate = "";
+          
+          if (item["drug registration license validity date"]) {
+            const dateStr = item["drug registration license validity date"].toString().trim();
+            
+            // Try to parse the date using parseExcelDate
+            const parsedDate = parseExcelDate(dateStr);
+            if (parsedDate) {
+              licenseValidityDate = parsedDate.toISOString().split("T")[0];
+            } else {
+              // If parseExcelDate fails, keep the raw string and let backend handle it
+              licenseValidityDate = dateStr;
+            }
+          }
 
           return {
             productName: item["product name"],
@@ -348,15 +398,13 @@ const Product = () => {
             packing: item["packing"],
             sellingPriceUSD: item["selling price (usd)"],
             lcUSD: item["lc (usd)"],
-            fobUSD: item["fob (usd)"], // NEW: Added FOB field
-            taxSellingPriceUSD: item["tax selling price (usd)"],
+            fobUSD: item["fob (usd)"] || "",
+            taxSellingPriceUSD: item["tax selling price (usd)"] || "",
             qtyPerBoxStrip: item["quantity per box/strip"],
             supplierName: item["supplier name"],
             drugLicense: item["drug registration license #"],
-            licenseValidityDate: licenseValidityDate
-              ? licenseValidityDate.toISOString().split("T")[0]
-              : "",
-            remarks: item["remarks"],
+            licenseValidityDate: licenseValidityDate,
+            remarks: item["remarks"] || "",
           };
         })
         .filter((entry) => entry.productName !== "");
@@ -515,7 +563,6 @@ const Product = () => {
     }));
   }, []);
 
-  // NEW: Handle packing dropdown selection
   const handlePackingChange = useCallback((selectedValue) => {
     setForm((prev) => ({
       ...prev,
@@ -532,12 +579,12 @@ const Product = () => {
     return form.supplierName;
   }, [form.supplierName]);
 
-  // NEW: Get selected packing value
   const getSelectedPacking = useMemo(() => {
     return form.packing;
   }, [form.packing]);
 
   if (loading) return <LoadingOverlay text="Loading products..." />;
+
   return (
     <div className="p-6">
       <div className="container">
@@ -550,7 +597,6 @@ const Product = () => {
               <UserPlus size={18} /> Add New Product
             </button>
 
-            {/* CHANGED: Added handleImportClick with supplier validation */}
             <button
               onClick={handleImportClick}
               className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
@@ -780,32 +826,56 @@ const Product = () => {
                   type="file"
                   accept=".csv, .xlsx"
                   onChange={handleFileUpload}
-                  className="block w-full border rounded-lg px-3 py-2 mb-6"
+                  className="block w-full border rounded-lg px-3 py-2 mb-4"
                 />
-                <div className="flex justify-end gap-3">
-                  <button
-                    onClick={() => setShowImportModal(false)}
-                    disabled={isUploading}
-                    className={`px-5 py-2 rounded-lg cursor-pointer ${
-                      isUploading
-                        ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                        : "bg-gray-300 hover:bg-gray-400 text-gray-700"
-                    }`}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleProductImport}
-                    disabled={isUploading || parsedData.length === 0}
-                    className={`px-5 py-2 rounded-lg cursor-pointer ${
-                      isUploading || parsedData.length === 0
-                        ? "bg-blue-400 text-white cursor-not-allowed"
-                        : "bg-blue-600 hover:bg-blue-700 text-white"
-                    }`}
-                  >
-                    {isUploading ? "Uploading…" : "Upload"}
-                  </button>
+
+                {/* Row count display */}
+                <div className="flex justify-between items-center mb-4">
+                  <div className="text-sm text-gray-600">
+                    {parsedData.length > 0 ? (
+                      <>
+                        Rows to import:{" "}
+                        <span className="font-semibold text-blue-600">
+                          {parsedData.length}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-gray-500">No data to import</span>
+                    )}
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setShowImportModal(false)}
+                      disabled={isUploading}
+                      className={`px-5 py-2 rounded-lg cursor-pointer ${
+                        isUploading
+                          ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                          : "bg-gray-300 hover:bg-gray-400 text-gray-700"
+                      }`}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleProductImport}
+                      disabled={isUploading || parsedData.length === 0}
+                      className={`px-5 py-2 rounded-lg cursor-pointer ${
+                        isUploading || parsedData.length === 0
+                          ? "bg-blue-400 text-white cursor-not-allowed"
+                          : "bg-blue-600 hover:bg-blue-700 text-white"
+                      }`}
+                    >
+                      {isUploading ? "Uploading…" : "Upload"}
+                    </button>
+                  </div>
                 </div>
+
+                {/* Optional fields note */}
+                {parsedData.length > 0 && (
+                  <div className="text-xs text-gray-500 mt-2">
+                    Note: FOB (USD) and Tax Selling Price (USD) are optional
+                    fields.
+                  </div>
+                )}
               </div>
             </div>,
             document.body
@@ -962,7 +1032,7 @@ const Product = () => {
                       </div>
                     </div>
 
-                    {/* Packing Dropdown - CHANGED FROM INPUT TO DROPDOWN */}
+                    {/* Packing Dropdown */}
                     <div>
                       <label className="block text-sm font-medium text-gray-600">
                         Packing

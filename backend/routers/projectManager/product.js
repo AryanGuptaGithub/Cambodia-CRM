@@ -23,53 +23,172 @@ const parseDate = (dateStr) => {
 
   // If it's a string
   if (typeof dateStr === "string") {
-    // Try different date formats
+    const cleanDateStr = dateStr.trim();
+
+    // Return null for empty or "N/A" strings
+    if (!cleanDateStr || cleanDateStr.toLowerCase() === "n/a") {
+      return null;
+    }
+
+    // Try different date formats in order
     const formats = [
-      // DD/MM/YYYY
+      // ISO format (YYYY-MM-DD) - from date inputs
       () => {
-        const [day, month, year] = dateStr
-          .split("/")
-          .map((part) => parseInt(part, 10));
-        if (day && month && year) {
-          return new Date(year, month - 1, day);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(cleanDateStr)) {
+          const date = new Date(cleanDateStr);
+          if (!isNaN(date.getTime())) {
+            date.setHours(12, 0, 0, 0);
+            return date;
+          }
         }
         return null;
       },
-      // YYYY-MM-DD (ISO format from date inputs)
+
+      // DD/MM/YYYY format (e.g., 31/07/2025)
       () => {
-        const date = new Date(dateStr);
-        return isNaN(date.getTime()) ? null : date;
+        const match = cleanDateStr.match(
+          /^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/
+        );
+        if (match) {
+          const day = parseInt(match[1], 10);
+          const month = parseInt(match[2], 10) - 1;
+          const year = parseInt(match[3], 10);
+
+          // Validate date components
+          if (day >= 1 && day <= 31 && month >= 0 && month <= 11) {
+            const date = new Date(year, month, day, 12, 0, 0);
+            if (
+              !isNaN(date.getTime()) &&
+              date.getDate() === day &&
+              date.getMonth() === month
+            ) {
+              return date;
+            }
+          }
+        }
+        return null;
       },
-      // MM/DD/YYYY
+
+      // MM/DD/YYYY format
       () => {
-        const [month, day, year] = dateStr
-          .split("/")
-          .map((part) => parseInt(part, 10));
-        if (month && day && year) {
-          return new Date(year, month - 1, day);
+        const match = cleanDateStr.match(
+          /^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/
+        );
+        if (match) {
+          const month = parseInt(match[1], 10) - 1;
+          const day = parseInt(match[2], 10);
+          const year = parseInt(match[3], 10);
+
+          if (day >= 1 && day <= 31 && month >= 0 && month <= 11) {
+            const date = new Date(year, month, day, 12, 0, 0);
+            if (
+              !isNaN(date.getTime()) &&
+              date.getDate() === day &&
+              date.getMonth() === month
+            ) {
+              return date;
+            }
+          }
+        }
+        return null;
+      },
+
+      // DD MMM YYYY format (e.g., 07 Sept 2198)
+      () => {
+        const match = cleanDateStr.match(
+          /^(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{4})$/
+        );
+        if (match) {
+          const day = parseInt(match[1], 10);
+          const monthStr = match[2].toLowerCase();
+          const year = parseInt(match[3], 10);
+
+          // Month names mapping
+          const monthNames = {
+            jan: 0,
+            january: 0,
+            feb: 1,
+            february: 1,
+            mar: 2,
+            march: 2,
+            apr: 3,
+            april: 3,
+            may: 4,
+            jun: 5,
+            june: 5,
+            jul: 6,
+            july: 6,
+            aug: 7,
+            august: 7,
+            sep: 8,
+            september: 8,
+            oct: 9,
+            october: 9,
+            nov: 10,
+            november: 10,
+            dec: 11,
+            december: 11,
+          };
+
+          let month = monthNames[monthStr];
+          if (month === undefined) {
+            // Try partial match
+            for (const [key, value] of Object.entries(monthNames)) {
+              if (key.startsWith(monthStr) || monthStr.startsWith(key)) {
+                month = value;
+                break;
+              }
+            }
+          }
+
+          if (month !== undefined && day >= 1 && day <= 31) {
+            const date = new Date(year, month, day, 12, 0, 0);
+            if (
+              !isNaN(date.getTime()) &&
+              date.getDate() === day &&
+              date.getMonth() === month
+            ) {
+              return date;
+            }
+          }
+        }
+        return null;
+      },
+
+      // Try JavaScript's built-in parser as a last resort
+      () => {
+        const date = new Date(cleanDateStr);
+        if (!isNaN(date.getTime())) {
+          date.setHours(12, 0, 0, 0);
+          return date;
         }
         return null;
       },
     ];
 
+    // Try each format until one succeeds
     for (const format of formats) {
       const parsedDate = format();
-      if (parsedDate && !isNaN(parsedDate.getTime())) {
+      if (parsedDate) {
         return parsedDate;
       }
     }
+    return null;
   }
 
-  console.warn(`Unable to parse date:`, dateStr);
   return null;
 };
 
 router.post("/product/import", async (req, res) => {
   try {
     const products = req.body;
+
     const errors = [];
     const successfulImports = [];
+    const duplicateProducts = [];
+    const uniqueProducts = new Set();
 
+    // First pass: identify duplicates in the import data itself
     for (const [index, productData] of products.entries()) {
       try {
         const {
@@ -88,8 +207,18 @@ router.post("/product/import", async (req, res) => {
         } = productData;
 
         // Validate required fields
-        if (!productName) {
+        if (!productName || productName.toString().trim() === "") {
           errors.push(`Row ${index + 1}: Product name is required`);
+          continue;
+        }
+
+        if (!type || type.toString().trim() === "") {
+          errors.push(`Row ${index + 1}: Product type is required`);
+          continue;
+        }
+
+        if (!packing || packing.toString().trim() === "") {
+          errors.push(`Row ${index + 1}: Packing is required`);
           continue;
         }
 
@@ -111,15 +240,15 @@ router.post("/product/import", async (req, res) => {
         if (!isNaN(qtyString) && qtyString !== "") {
           parsedQtyPerBoxStrip = parseInt(qtyString, 10);
         } else {
-          // Extract numbers from string (e.g., "100 tablets", "50 capsules", "25 ml")
-          const numericMatch = qtyString.match(/\d+/);
-          if (numericMatch) {
+          // Extract numbers from string
+          const numericMatch = qtyString.match(/\d+/g);
+          if (numericMatch && numericMatch.length > 0) {
             parsedQtyPerBoxStrip = parseInt(numericMatch[0], 10);
           } else {
             errors.push(
               `Row ${
                 index + 1
-              }: Quantity must be a number. Examples: "100", "50 tablets", "25ml". Received: "${qtyString}"`
+              }: Quantity must contain a number. Received: "${qtyString}"`
             );
             continue;
           }
@@ -135,64 +264,146 @@ router.post("/product/import", async (req, res) => {
           continue;
         }
 
-        // Parse other numeric fields
+        // Parse numeric fields
         const parseNumericField = (value, fieldName, defaultValue = 0) => {
-          if (value === undefined || value === null || value === "")
+          if (value === undefined || value === null || value === "") {
             return defaultValue;
+          }
 
-          const num = parseFloat(value);
+          const strValue = value.toString().trim();
+          if (strValue === "") {
+            return defaultValue;
+          }
+
+          // Remove any commas or currency symbols
+          const cleanValue = strValue.replace(/[$,]/g, "").trim();
+
+          const num = parseFloat(cleanValue);
           if (isNaN(num)) {
-            errors.push(
+            console.warn(
               `Row ${
                 index + 1
-              }: ${fieldName} must be a number. Using default value: ${defaultValue}`
+              }: ${fieldName} is not a valid number. Using default: ${defaultValue}`
             );
             return defaultValue;
           }
           return num;
         };
 
+        // Parse all numeric fields
         const parsedSellingPrice = parseNumericField(
           sellingPriceUSD,
-          "Selling Price"
+          "Selling Price",
+          0
         );
-        const parsedLc = parseNumericField(lcUSD, "LC Price");
-        const parsedFob = parseNumericField(fobUSD, "FOB Price");
+
+        const parsedLc = parseNumericField(lcUSD, "LC Price", 0);
+
+        const parsedFob = parseNumericField(fobUSD, "FOB Price", 0);
+
         const parsedTaxSellingPrice = parseNumericField(
           taxSellingPriceUSD,
-          "Tax Selling Price"
+          "Tax Selling Price",
+          0
         );
 
-        const parsedDate = parseDate(licenseValidityDate);
+        // Parse date - handle "N/A", empty, and various formats
+        let parsedDate = null;
+        if (
+          licenseValidityDate &&
+          licenseValidityDate.toString().trim() !== "" &&
+          licenseValidityDate.toString().trim().toLowerCase() !== "n/a"
+        ) {
+          parsedDate = parseDate(licenseValidityDate);
+          if (!parsedDate) {
+            console.warn(
+              `Row ${
+                index + 1
+              }: Could not parse date "${licenseValidityDate}", using null`
+            );
+          }
+        }
 
-        // Create and save product
+        // Clean up drug license
+        let cleanDrugLicense = drugLicense?.toString().trim() || "";
+        if (cleanDrugLicense.toLowerCase() === "n/a") {
+          cleanDrugLicense = "";
+        }
+
+        // Check for duplicate in current import batch
+        const productKey = `${productName
+          .toString()
+          .trim()
+          .toLowerCase()}_${type.toString().trim().toLowerCase()}_${packing
+          .toString()
+          .trim()
+          .toLowerCase()}_${(
+          supplierName?.toString().trim() || ""
+        ).toLowerCase()}`;
+
+        if (uniqueProducts.has(productKey)) {
+          // This is a duplicate within the import file
+          duplicateProducts.push({
+            name: productName,
+            row: index + 1,
+            reason: "Duplicate in import file",
+          });
+          continue;
+        }
+
+        uniqueProducts.add(productKey);
+
+        // Check for existing product in database
+        const existingProduct = await Product.findOne({
+          productName: {
+            $regex: new RegExp(`^${productName.toString().trim()}$`, "i"),
+          },
+          type: type.toString().trim(),
+          packing: packing.toString().trim(),
+          supplierName: supplierName?.toString().trim() || "",
+        });
+
+        if (existingProduct) {
+          // Duplicate found in database
+          duplicateProducts.push({
+            name: productName,
+            row: index + 1,
+            reason: "Already exists in database",
+          });
+          continue;
+        }
+
+        // Create new product
         const product = new Product({
           productName: productName.toString().trim(),
-          type: type?.toString().trim(),
-          packing: packing?.toString().trim(),
+          type: type.toString().trim(),
+          packing: packing.toString().trim(),
           sellingPrice: parsedSellingPrice,
           lc: parsedLc,
           fob: parsedFob,
           taxSellingPrice: parsedTaxSellingPrice,
           qtyPerBoxStrip: parsedQtyPerBoxStrip,
-          supplierName: supplierName?.toString().trim(),
-          drugLicense: drugLicense?.toString().trim(),
+          supplierName: supplierName?.toString().trim() || "",
+          drugLicense: cleanDrugLicense,
           licenseValidityDate: parsedDate,
-          remarks: remarks?.toString().trim(),
+          remarks: remarks?.toString().trim() || "",
         });
 
         await product.save();
         successfulImports.push({
           name: productName,
           row: index + 1,
+          action: "created",
         });
       } catch (productError) {
         console.error(
-          `Error importing product at row ${index + 1}:`,
-          productError
+          `Error processing product at row ${index + 1}:`,
+          productError.message || productError
         );
 
-        let errorMessage = `Row ${index + 1}: Failed to import product`;
+        let errorMessage = `Row ${index + 1}: Failed to process product "${
+          productData.productName
+        }"`;
 
         if (productError.name === "ValidationError") {
           const validationErrors = Object.values(productError.errors).map(
@@ -203,6 +414,11 @@ router.post("/product/import", async (req, res) => {
           errorMessage = `Row ${index + 1}: Product "${
             productData.productName
           }" already exists`;
+          duplicateProducts.push({
+            name: productData.productName,
+            row: index + 1,
+            reason: "Database constraint violation",
+          });
         } else {
           errorMessage = `Row ${index + 1}: ${productError.message}`;
         }
@@ -211,30 +427,48 @@ router.post("/product/import", async (req, res) => {
       }
     }
 
-    // Response logic remains the same as above
+    const totalProcessed =
+      successfulImports.length + duplicateProducts.length + errors.length;
+
+    // Build success message
+    let message = `Successfully imported ${successfulImports.length} product(s)`;
+    if (duplicateProducts.length > 0) {
+      message += `, ${duplicateProducts.length} duplicate record(s) found`;
+    }
+    if (errors.length > 0) {
+      message += `, ${errors.length} error(s) encountered`;
+    }
+
     if (errors.length > 0 && successfulImports.length === 0) {
       return res.status(400).json({
         success: false,
         message: "All products failed to import",
         errors: errors,
         importedCount: 0,
+        duplicateCount: duplicateProducts.length,
         failedCount: errors.length,
+        totalProcessed: totalProcessed,
       });
-    } else if (errors.length > 0) {
+    } else if (errors.length > 0 || duplicateProducts.length > 0) {
       return res.status(207).json({
         success: true,
-        message: `Successfully imported ${successfulImports.length} products, ${errors.length} failed`,
+        message: message,
         importedCount: successfulImports.length,
+        duplicateCount: duplicateProducts.length,
         failedCount: errors.length,
         importedProducts: successfulImports,
+        duplicateProducts: duplicateProducts,
         errors: errors,
+        totalProcessed: totalProcessed,
       });
     } else {
       return res.status(200).json({
         success: true,
-        message: `All ${successfulImports.length} products imported successfully!`,
+        message: message,
         importedCount: successfulImports.length,
+        duplicateCount: duplicateProducts.length,
         importedProducts: successfulImports,
+        totalProcessed: totalProcessed,
       });
     }
   } catch (err) {
@@ -247,6 +481,7 @@ router.post("/product/import", async (req, res) => {
     });
   }
 });
+
 router.get("/dropdown-products", async (req, res) => {
   try {
     // Get all product master data
@@ -287,7 +522,7 @@ router.get("/dropdown-products", async (req, res) => {
         updatedAt: product.updatedAt,
       };
     });
-  
+
     res.status(200).json({ success: true, data: finalList });
   } catch (err) {
     console.error("❌ Error fetching products with stock:", err);
@@ -296,16 +531,6 @@ router.get("/dropdown-products", async (req, res) => {
       .json({ success: false, message: "Failed to fetch products." });
   }
 });
-
-// router.get("/products", async (req, res) => {
-//   try {
-//     const products = await Product.find();
-//     res.status(200).json(products);
-//   } catch (err) {
-//     console.error("Error fetching products:", err);
-//     res.status(500).json({ message: "Failed to fetch products." });
-//   }
-// });
 
 router.get("/products", async (req, res) => {
   try {
@@ -432,7 +657,7 @@ router.post("/product/add", async (req, res) => {
       productName,
       type,
       packing,
-      qtyPerBoxStrip, // Changed from qtyPerBox
+      qtyPerBoxStrip,
       supplierName,
       drugLicense,
       licenseValidityDate,
@@ -460,14 +685,14 @@ router.post("/product/add", async (req, res) => {
       productName: productName.trim(),
       type: type.trim(),
       packing: packing.trim(),
-      qtyPerBoxStrip: qtyPerBoxStrip ? Number(qtyPerBoxStrip) : 0, // Updated field
+      qtyPerBoxStrip: qtyPerBoxStrip ? Number(qtyPerBoxStrip) : 0,
       supplierName: supplierName ? supplierName.trim() : "",
       drugLicense: drugLicense ? drugLicense.trim() : "",
       licenseValidityDate: parsedLicenseDate,
       remarks: remarks ? remarks.trim() : "",
       sellingPrice: sellingPrice ? Number(sellingPrice) : 0,
-      lc: lc ? Number(lc) : 0, // Changed to number for USD
-      fob: fob ? Number(fob) : 0, // Changed to number for USD
+      lc: lc ? Number(lc) : 0,
+      fob: fob ? Number(fob) : 0,
       taxSellingPrice: taxSellingPrice ? Number(taxSellingPrice) : 0,
     });
 

@@ -20,7 +20,7 @@ import * as XLSX from "xlsx";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
 import { confirmDialog } from "../../utils/confirmationDialog";
-import { formatDateToReadable, getTodayDate } from "../../utils/dateUtil";
+import { formatDateToReadable } from "../../utils/dateUtil";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import ReactDOM from "react-dom";
@@ -28,7 +28,6 @@ import { getVisiblePages } from "../../utils/useVisiblePages";
 import SampleExcelDownloadCustomer from "../../excels/SampleExcelDownloadCustomer";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import InputField from "../../components/common/InputField";
-import { parseExcelDate } from "../../utils/excelUtility";
 import LoadingOverlay from "../../components/Loading";
 
 // Import API functions
@@ -159,6 +158,64 @@ const Customer = () => {
 
   /* ──────── Helper: Display -- for empty values ──────── */
   const displayValue = (value) => (value ? value : "--");
+
+  /* ──────── Helper function to format date for display ──────── */
+  const formatDateForDisplay = (dateString) => {
+    if (!dateString) return "--";
+
+    try {
+      // If it's already in YYYY-MM-DD format
+      if (
+        typeof dateString === "string" &&
+        /^\d{4}-\d{2}-\d{2}$/.test(dateString)
+      ) {
+        const parts = dateString.split("-");
+        const year = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        const day = parseInt(parts[2], 10);
+
+        const monthNames = [
+          "Jan",
+          "Feb",
+          "Mar",
+          "Apr",
+          "May",
+          "Jun",
+          "Jul",
+          "Aug",
+          "Sep",
+          "Oct",
+          "Nov",
+          "Dec",
+        ];
+        return `${day} ${monthNames[month]} ${year}`;
+      }
+
+      return formatDateToReadable(dateString);
+    } catch (error) {
+      console.error("Error formatting date:", error);
+      return "--";
+    }
+  };
+
+  /* ──────── Helper function to format Date to YYYY-MM-DD ──────── */
+  const formatDateToYYYYMMDD = (date) => {
+    if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
+      return "";
+    }
+
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+
+    return `${year}-${month}-${day}`;
+  };
+
+  /* ──────── Date Parsing Functions ──────── */
+
+  // Convert Excel serial number to YYYY-MM-DD string (NO TIMEZONE ISSUES)
+
+  // Parse any Excel date value to YYYY-MM-DD
 
   /* ──────── Data fetching ──────── */
   useEffect(() => {
@@ -331,7 +388,6 @@ const Customer = () => {
     [mrList, setForm]
   );
 
-  /* ──────── Status toggle ──────── */
   const handleStatusToggle = async (id) => {
     try {
       // Store original customers for rollback
@@ -463,195 +519,144 @@ const Customer = () => {
     setShowImportModal(true);
   };
 
-  /* ──────── Helper Functions for Date Parsing ──────── */
+  /****
+  
+    
+   /* ──────── Date Parsing Functions ──────── */
 
-  // Helper function to parse date from various string formats
-  const parseDateFromString = (dateStr) => {
-    if (!dateStr) return null;
+  // Convert Excel serial number to YYYY-MM-DD string (NO TIMEZONE ISSUES)
+  const excelSerialToDateString = (serial) => {
+    if (!serial && serial !== 0) return "";
 
-    // If it's already a Date object
-    if (dateStr instanceof Date) return dateStr;
+    // Handle both number and string numbers
+    const num = typeof serial === "string" ? parseFloat(serial) : serial;
+    if (isNaN(num)) return "";
 
-    // If it's a number (Excel serial)
-    if (typeof dateStr === "number") {
-      return parseExcelDate(dateStr);
-    }
+    // Excel date system: 1 = Jan 1, 1900 (with bug for Feb 29, 1900)
+    // Important: Excel incorrectly treats 1900 as a leap year
+    // So we need to adjust for the phantom day (Feb 29, 1900)
 
-    // Convert to string for parsing
-    const str = dateStr.toString().trim();
+    // If it's 60 or above, it's on or after the phantom Feb 29, 1900
+    // So we need to subtract 1 to skip that phantom day
+    const adjustedNum = num >= 60 ? num - 1 : num;
 
-    // Try common date formats
-    const formats = [
-      // ISO format
-      (s) => {
-        const date = new Date(s);
-        return isNaN(date.getTime()) ? null : date;
-      },
-      // DD/MM/YYYY or DD-MM-YYYY
-      (s) => {
-        const match = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-        if (match) {
-          const day = parseInt(match[1], 10);
-          const month = parseInt(match[2], 10) - 1;
-          const year = parseInt(match[3], 10);
-          const date = new Date(year, month, day);
-          return date.getFullYear() === year &&
-            date.getMonth() === month &&
-            date.getDate() === day
-            ? date
-            : null;
-        }
-        return null;
-      },
-      // DD-MMM-YYYY or DD/MMM/YYYY (like 1-Jun-2021)
-      (s) => {
-        const months = {
-          jan: 0,
-          feb: 1,
-          mar: 2,
-          apr: 3,
-          may: 4,
-          jun: 5,
-          jul: 6,
-          aug: 7,
-          sep: 8,
-          oct: 9,
-          nov: 10,
-          dec: 11,
-          january: 0,
-          february: 1,
-          march: 2,
-          april: 3,
-          may: 4,
-          june: 5,
-          july: 6,
-          august: 7,
-          september: 8,
-          october: 9,
-          november: 10,
-          december: 11,
-        };
+    // JavaScript Date: Jan 1, 1900 is serial 2 (because Jan 0, 1900 = serial 1)
+    // So we use Jan 0, 1900 as our base
+    const excelEpoch = new Date(1900, 0, 0); // Jan 0, 1900 (same as Dec 31, 1899)
 
-        const match = s.match(/^(\d{1,2})[\/\- ]([a-z]+)[\/\- ](\d{4})$/i);
-        if (match) {
-          const day = parseInt(match[1], 10);
-          const monthName = match[2].toLowerCase();
-          const year = parseInt(match[3], 10);
+    // Calculate the date by adding days
+    const date = new Date(excelEpoch.getTime() + (adjustedNum - 1) * 86400000);
 
-          const month = months[monthName];
-          if (month !== undefined) {
-            const date = new Date(year, month, day);
-            return date.getFullYear() === year &&
-              date.getMonth() === month &&
-              date.getDate() === day
-              ? date
-              : null;
-          }
-        }
-        return null;
-      },
-    ];
+    // Format as YYYY-MM-DD
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
 
-    // Try each format
-    for (const format of formats) {
-      const date = format(str);
-      if (date) return date;
-    }
-
-    return null;
+    return `${year}-${month}-${day}`;
   };
 
-  // Function to parse Excel serial numbers
-  const parseExcelDate = (excelDate) => {
-    if (!excelDate) return null;
-
-    if (excelDate instanceof Date) return excelDate;
-
-    if (typeof excelDate === "string") {
-      const parsed = new Date(excelDate);
-      if (!isNaN(parsed.getTime())) return parsed;
-    }
-
-    if (typeof excelDate === "number") {
-      // Excel serial date (days since 1900-01-00, with 1900 incorrectly treated as leap year)
-      const excelEpoch = new Date(1899, 11, 30); // December 30, 1899
-      const date = new Date(excelEpoch.getTime() + excelDate * 86400000);
-
-      // Adjust for Excel's leap year bug (1900 incorrectly considered a leap year)
-      if (excelDate > 59) {
-        date.setDate(date.getDate() - 1);
-      }
-
-      return date;
-    }
-
-    return null;
-  };
+  // Parse any Excel date value to YYYY-MM-DD
 
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
     const reader = new FileReader();
+
     reader.onload = (evt) => {
       try {
         const data = new Uint8Array(evt.target.result);
-        const workbook = XLSX.read(data, { type: "array", cellDates: true }); // Enable cellDates
+        const workbook = XLSX.read(data, {
+          type: "array",
+          cellDates: true, // Let XLSX try to parse dates
+          cellNF: false,
+          cellText: false,
+        });
+
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
 
-        // Get all rows including empty ones
+        // Get ALL rows as they appear in Excel
         const rows = XLSX.utils.sheet_to_json(sheet, {
           header: 1,
           defval: "",
           blankrows: true,
+          raw: true, // Get raw values (numbers, dates)
         });
+
+        console.log("Raw Excel Data (first 3 rows):", rows.slice(0, 3));
 
         if (!rows.length) {
           showToast("warning", "Excel file is empty");
           return;
         }
 
-        // Find header row
+        // Find header row - check multiple columns for date header
         let headerIdx = -1;
         for (let i = 0; i < Math.min(rows.length, 10); i++) {
-          if (!rows[i] || !Array.isArray(rows[i])) continue;
-          const firstCell = rows[i][0]?.toString().trim().toLowerCase();
-          if (firstCell === "date") {
+          // Check the first column for "date"
+          const firstCell = rows[i]?.[0]?.toString().trim().toLowerCase();
+          if (firstCell === "date" || firstCell === "joining date") {
             headerIdx = i;
             break;
           }
+          // Also check other columns for date header
+          for (let j = 0; j < rows[i]?.length; j++) {
+            const cell = rows[i]?.[j]?.toString().trim().toLowerCase();
+            if (cell === "date" || cell === "joining date") {
+              headerIdx = i;
+              break;
+            }
+          }
+          if (headerIdx !== -1) break;
         }
 
         if (headerIdx === -1) {
-          showToast("error", "Header row not found. Please check file format.");
+          showToast("error", "Header row not found.");
           return;
         }
 
         const headers = rows[headerIdx].map((h) => h.toString().trim());
-
-        // Process all rows after header
         const dataRows = rows.slice(headerIdx + 1);
 
+        // Convert to objects
         const json = dataRows
-          .map((row, index) => {
+          .map((row) => {
             const obj = {};
             headers.forEach((h, i) => {
               obj[h] = row[i] !== undefined ? row[i] : "";
             });
             return obj;
           })
-          .filter((o) => {
-            return Object.values(o).some((v) => v.toString().trim() !== "");
-          });
+          .filter((o) =>
+            Object.values(o).some((v) => v.toString().trim() !== "")
+          );
+
+        // DEBUG: Log first few rows to see what we're getting
+        console.log(
+          "First 3 data rows:",
+          json.slice(0, 3).map((item) => {
+            const dateKey = Object.keys(item).find(
+              (key) =>
+                key.toLowerCase() === "date" ||
+                key.toLowerCase() === "joining date"
+            );
+            return {
+              rawDate: dateKey ? item[dateKey] : null,
+              type: typeof (dateKey ? item[dateKey] : null),
+              isDate: dateKey ? item[dateKey] instanceof Date : false,
+              allKeys: Object.keys(item),
+            };
+          })
+        );
 
         const final = json.map((item) => {
-          // Helper to get value with case-insensitive matching
-          const getValue = (possibleKeys) => {
-            for (const key of possibleKeys) {
-              const lowerKey = key.toLowerCase();
+          const getValue = (keys) => {
+            for (const key of keys) {
               for (const itemKey in item) {
                 if (
-                  itemKey.toLowerCase() === lowerKey &&
-                  item[itemKey] &&
+                  itemKey.toLowerCase() === key.toLowerCase() &&
+                  item[itemKey] !== undefined &&
+                  item[itemKey] !== null &&
                   item[itemKey].toString().trim() !== ""
                 ) {
                   return item[itemKey];
@@ -661,30 +666,34 @@ const Customer = () => {
             return "";
           };
 
-          // Get date value and parse it
-          const dateVal = getValue(["Date", "date"]);
-          let parsedDate = null;
+          const dateVal = getValue([
+            "Date",
+            "date",
+            "Joining Date",
+            "joining date",
+          ]);
 
-          if (dateVal instanceof Date) {
-            // XLSX with cellDates: true returns Date objects
-            parsedDate = dateVal;
-          } else if (typeof dateVal === "number") {
-            // Handle Excel serial number (like 45486)
-            parsedDate = parseExcelDate(dateVal);
-          } else if (typeof dateVal === "string") {
-            // Handle string dates
-            parsedDate = parseDateFromString(dateVal);
-          }
+          console.log(
+            "Raw date value:",
+            dateVal,
+            "Type:",
+            typeof dateVal,
+            "Is Date:",
+            dateVal instanceof Date
+          );
+
+          const formattedDate = parseExcelDateValue(dateVal);
+          console.log("Parsed date:", formattedDate);
 
           return {
-            date: parsedDate
-              ? parsedDate.toISOString().split("T")[0]
-              : new Date().toISOString().split("T")[0], // Default to today
+            date: formattedDate,
             medicalRepName: getValue([
               "Medical Representative Name",
               "medical representative name",
               "Medical Rep Name",
               "medical rep name",
+              "MR Name",
+              "mr name",
             ]),
             name: getValue([
               "Customer Name in English",
@@ -707,6 +716,8 @@ const Customer = () => {
               "customer phone number",
               "Phone",
               "phone",
+              "Contact",
+              "contact",
             ]),
             customerAddress: getValue([
               "Customer Address",
@@ -716,17 +727,23 @@ const Customer = () => {
             ]),
             zone: getValue(["Zone", "zone"]),
             province: getValue(["Province", "province"]),
-            remark: getValue(["Remark", "remark", "Notes", "notes"]),
+            remark: getValue([
+              "Remark",
+              "remark",
+              "Notes",
+              "notes",
+              "Comments",
+              "comments",
+            ]),
           };
         });
 
-        // Filter out rows missing essential information
         const validData = final.filter(
           (item) => item.name.trim() !== "" || item.customerNumber.trim() !== ""
         );
 
         if (validData.length === 0) {
-          showToast("warning", "No valid customer records found in the file");
+          showToast("warning", "No valid customer records found.");
           return;
         }
 
@@ -736,9 +753,153 @@ const Customer = () => {
         showToast("error", "Failed to parse file: " + err.message);
       }
     };
+
     reader.readAsArrayBuffer(file);
   };
 
+  const parseExcelDateValue = (dateValue) => {
+    if (!dateValue && dateValue !== 0 && dateValue !== "") {
+      // Return today's date if no date provided
+      const today = new Date();
+      return formatDateToYYYYMMDD(today);
+    }
+
+    // 1. If it's already a Date object (from XLSX with cellDates: true)
+    if (dateValue instanceof Date) {
+      // Get the Excel serial number equivalent
+      const excelEpoch = new Date(1899, 11, 30); // Dec 30, 1899 (Excel's zero date)
+      const diff = dateValue - excelEpoch;
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+
+      // Check if this is the Excel date bug (Feb 29, 1900)
+      const adjustedDays = days >= 60 ? days + 1 : days;
+
+      // Reconstruct the date from the serial number
+      const excelZero = new Date(1899, 11, 31); // Dec 31, 1899 (Excel's day 1)
+      const reconstructedDate = new Date(
+        excelZero.getTime() + (adjustedDays - 1) * 86400000
+      );
+
+      const year = reconstructedDate.getFullYear();
+      const month = String(reconstructedDate.getMonth() + 1).padStart(2, "0");
+      const day = String(reconstructedDate.getDate()).padStart(2, "0");
+
+      return `${year}-${month}-${day}`;
+    }
+
+    // 2. If it's a number (Excel serial date)
+    if (typeof dateValue === "number") {
+      return excelSerialToDateString(dateValue);
+    }
+
+    // 3. If it's a string
+    if (typeof dateValue === "string") {
+      const trimmed = dateValue.trim();
+      if (!trimmed) return "";
+
+      // Check if it's a string number (e.g., "44378" for Jun 1, 2021)
+      const asNumber = parseFloat(trimmed);
+      if (!isNaN(asNumber)) {
+        return excelSerialToDateString(asNumber);
+      }
+
+      // Try to parse common date formats
+      // First try: MM/DD/YY or MM/DD/YYYY (common in US Excel)
+      const usFormatMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+      if (usFormatMatch) {
+        let month = parseInt(usFormatMatch[1], 10);
+        let day = parseInt(usFormatMatch[2], 10);
+        let year = parseInt(usFormatMatch[3], 10);
+
+        if (year < 100) year += 2000;
+
+        return `${year}-${String(month).padStart(2, "0")}-${String(
+          day
+        ).padStart(2, "0")}`;
+      }
+
+      // Try other formats
+      const dateFormats = [
+        // "1-Jun-21", "01-Jun-2021"
+        /^(\d{1,2})[-/\s]([A-Za-z]{3,})[-/\s](\d{2,4})$/i,
+        // "2021-06-01", "2021/06/01"
+        /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/,
+        // "01-06-2021", "1-6-21" (DD-MM-YYYY)
+        /^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/,
+      ];
+
+      for (const format of dateFormats) {
+        const match = trimmed.match(format);
+        if (match) {
+          try {
+            let year, month, day;
+
+            if (format === dateFormats[0]) {
+              // "1-Jun-21" format
+              day = parseInt(match[1], 10);
+              const monthStr = match[2].toLowerCase().substring(0, 3);
+              year = parseInt(match[3], 10);
+
+              if (year < 100) year += 2000;
+
+              const monthMap = {
+                jan: 1,
+                feb: 2,
+                mar: 3,
+                apr: 4,
+                may: 5,
+                jun: 6,
+                jul: 7,
+                aug: 8,
+                sep: 9,
+                oct: 10,
+                nov: 11,
+                dec: 12,
+              };
+
+              month = monthMap[monthStr];
+              if (month === undefined) continue;
+            } else if (format === dateFormats[1]) {
+              // "2021-06-01" format
+              year = parseInt(match[1], 10);
+              month = parseInt(match[2], 10);
+              day = parseInt(match[3], 10);
+            } else {
+              // "01-06-2021" format - assume DD-MM-YYYY (international)
+              day = parseInt(match[1], 10);
+              month = parseInt(match[2], 10);
+              year = parseInt(match[3], 10);
+              if (year < 100) year += 2000;
+            }
+
+            return `${year}-${String(month).padStart(2, "0")}-${String(
+              day
+            ).padStart(2, "0")}`;
+          } catch (e) {
+            console.warn("Failed to parse date string:", trimmed, e);
+          }
+        }
+      }
+
+      // Last resort: try JavaScript Date constructor
+      try {
+        const date = new Date(trimmed);
+        if (!isNaN(date.getTime())) {
+          // For date strings with timezone, extract just the date
+          const year = date.getFullYear();
+          const month = String(date.getMonth() + 1).padStart(2, "0");
+          const day = String(date.getDate()).padStart(2, "0");
+          return `${year}-${month}-${day}`;
+        }
+      } catch (e) {
+        console.warn("JavaScript Date constructor failed for:", trimmed);
+      }
+    }
+
+    // Fallback: return today's date
+    const today = new Date();
+    return formatDateToYYYYMMDD(today);
+  };
   const handleCustomerImport = async () => {
     if (!parsedData.length) {
       showToast("warning", "Upload a valid file first");
@@ -972,7 +1133,9 @@ const Customer = () => {
                       {displayValue(customer.province)}
                     </td>
                     <td className="p-3">
-                      {formatDateToReadable(customer.date) || "--"}
+                      {customer.date
+                        ? formatDateForDisplay(customer.date)
+                        : "--"}
                     </td>
                     <td className="p-3">
                       <button
@@ -1015,22 +1178,23 @@ const Customer = () => {
             </tbody>
           </table>
 
-          {/* Pagination */}
-          {currentCustomers.length > 0 && (
-            <div className="mt-4 p-5 flex justify-start gap-2">
+          {/* Pagination - FIXED */}
+          {currentCustomers.length > 0 && totalPages > 1 && (
+            <div className="mt-4 p-5 flex justify-center items-center gap-2">
               <button
                 onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
                 disabled={currentPage === 1}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+                className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
               >
                 Prev
               </button>
+
               {visiblePages.map((p, index) => (
                 <button
                   key={index}
                   onClick={() => typeof p === "number" && setCurrentPage(p)}
                   disabled={p === "..."}
-                  className={`px-3 py-1 rounded ${
+                  className={`px-4 py-2 rounded ${
                     p === "..."
                       ? "bg-gray-200 cursor-not-allowed"
                       : currentPage === p
@@ -1041,12 +1205,13 @@ const Customer = () => {
                   {p}
                 </button>
               ))}
+
               <button
                 onClick={() =>
                   setCurrentPage((p) => Math.min(p + 1, totalPages))
                 }
                 disabled={currentPage === totalPages}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+                className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
               >
                 Next
               </button>
@@ -1077,7 +1242,6 @@ const Customer = () => {
                     className="block w-full border rounded-lg px-3 py-2"
                   />
                 </div>
-                {/* Fixed: Row count on left, buttons on right with justify-between */}
                 <div className="flex justify-between items-center mt-6">
                   <div className="text-gray-700">
                     {parsedData.length > 0 ? (
@@ -1171,8 +1335,6 @@ const Customer = () => {
                     </p>
                   </div>
 
-                  {/* ADDRESS as textarea (read-only) */}
-
                   <div>
                     <p className="text-gray-700 font-medium">Zone</p>
                     <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
@@ -1188,7 +1350,7 @@ const Customer = () => {
                   <div>
                     <p className="text-gray-700 font-medium">Joining Date</p>
                     <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
-                      {form.date ? formatDateToReadable(form.date) : "--"}
+                      {form.date ? formatDateForDisplay(form.date) : "--"}
                     </p>
                   </div>
                   <div className="md:col-span-2">
@@ -1360,11 +1522,13 @@ const Customer = () => {
                         Joining Date <span className="text-red-500">*</span>
                       </label>
                       <DatePicker
-                        selected={form.date ? new Date(form.date) : null}
+                        selected={
+                          form.date ? new Date(form.date + "T12:00:00") : null
+                        }
                         onChange={(date) =>
                           handleChange(
                             "date",
-                            date ? date.toISOString().split("T")[0] : ""
+                            date ? formatDateToYYYYMMDD(date) : ""
                           )
                         }
                         dateFormat="yyyy-MM-dd"

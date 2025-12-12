@@ -670,110 +670,178 @@ const Supplier = () => {
 
     const reader = new FileReader();
     reader.onload = (evt) => {
-      const data = new Uint8Array(evt.target.result);
-      const workbook = XLSX.read(data, { type: "array" });
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
-      const allRows = XLSX.utils.sheet_to_json(worksheet, {
-        header: 1,
-        defval: "",
-      });
+      try {
+        const data = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(data, { type: "array", cellDates: true });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
 
-      console.log("Raw Excel rows:", allRows);
+        // Convert entire sheet to array of arrays
+        const rawData = XLSX.utils.sheet_to_json(worksheet, {
+          header: 1,
+          defval: "",
+          raw: false,
+        });
 
-      // Remove empty rows
-      const cleanedRows = allRows.filter(
-        (row) =>
-          row.length > 0 &&
-          row.some((cell) => cell && cell.toString().trim() !== "")
-      );
+        console.log("Raw Excel data:", rawData);
 
-      // Check if first row is header
-      const firstRow = cleanedRows[0];
-      const hasHeader = firstRow.some(
-        (cell) =>
-          (typeof cell === "string" &&
-            cell.toLowerCase().includes("supplier")) ||
-          cell.toLowerCase().includes("name") ||
-          cell.toLowerCase().includes("address")
-      );
-
-      // If header exists, remove it
-      const dataRows = hasHeader ? cleanedRows.slice(1) : cleanedRows;
-
-      // Map the data correctly
-      const parsedData = dataRows.map((row, index) => {
-        const supplierName = (row[0] || "").toString().trim();
-        const address = (row[1] || "").toString().trim();
-        const siteRegistrationNumber = (row[2] || "").toString().trim();
-        const expiryDateStr = (row[3] || "").toString().trim();
-
-        // Parse expiry date if available
-        let parsedExpiryDate = null;
-        if (expiryDateStr) {
-          // Try DD/MM/YYYY format
-          const parts = expiryDateStr.split("/");
-          if (parts.length === 3) {
-            const day = parseInt(parts[0], 10);
-            const month = parseInt(parts[1], 10) - 1;
-            const year = parseInt(parts[2], 10);
-            parsedExpiryDate = new Date(year, month, day);
-          } else {
-            // Try other date formats
-            parsedExpiryDate = new Date(expiryDateStr);
+        // Find the header row (the row with "Supplier Name" in first column)
+        let headerRowIndex = -1;
+        for (let i = 0; i < rawData.length; i++) {
+          const firstCell =
+            rawData[i] && rawData[i][0] ? rawData[i][0].toString().trim() : "";
+          if (firstCell.toLowerCase() === "supplier name") {
+            headerRowIndex = i;
+            break;
           }
         }
 
-        // Prepare the data object
-        const dataObj = {
-          supplierName,
-          address,
-        };
+        console.log("Header row index:", headerRowIndex);
 
-        // Only add dates if they're valid
-        if (parsedExpiryDate && !isNaN(parsedExpiryDate.getTime())) {
-          dataObj.siteRegistrationExpiryDate = parsedExpiryDate.toISOString();
+        if (headerRowIndex === -1) {
+          showToast("error", "Could not find header row with 'Supplier Name'");
+          return;
         }
 
-        // Note: siteRegistrationDate will be set by the backend to current date if not provided
+        // Get data rows starting from the row after the header
+        const dataRows = rawData.slice(headerRowIndex + 1);
 
-        return dataObj;
-      });
+        console.log("Data rows after header:", dataRows);
 
-      // Filter out rows without supplier name
-      const validData = parsedData.filter(
-        (item) => item.supplierName && item.supplierName.trim() !== ""
-      );
+        // Parse data rows
+        const parsedData = dataRows
+          .map((row, index) => {
+            try {
+              // Skip empty rows
+              if (!row || !Array.isArray(row) || row.length === 0) {
+                return null;
+              }
 
-      console.log("Parsed data:", validData);
+              const supplierName = (row[0] || "").toString().trim();
+              const address = (row[1] || "").toString().trim();
+              const siteRegistrationDateStr = (row[2] || "").toString().trim();
+              const siteRegistrationExpiryDateStr = (row[3] || "")
+                .toString()
+                .trim();
 
-      // Count missing data for warning
-      const missingExpiryDates = validData.filter(
-        (item) => !item.siteRegistrationExpiryDate
-      ).length;
+              console.log(`Row ${index}:`, {
+                supplierName,
+                address,
+                siteRegistrationDateStr,
+                siteRegistrationExpiryDateStr,
+              });
 
-      if (missingExpiryDates > 0) {
-        showToast(
-          "warning",
-          `${missingExpiryDates} supplier(s) have missing/invalid expiry dates. Default values will be applied.`
+              // Skip rows without supplier name
+              if (!supplierName || supplierName.trim() === "") {
+                return null;
+              }
+
+              const dataObj = {
+                supplierName,
+                address,
+              };
+
+              // Helper function to parse date
+              const parseDateValue = (dateStr) => {
+                if (!dateStr || dateStr.trim() === "") {
+                  return null;
+                }
+
+                // Try parsing as Excel serial number
+                if (!isNaN(dateStr)) {
+                  const serialDate = parseFloat(dateStr);
+                  const date = parseExcelDate(serialDate);
+                  if (date && !isNaN(date.getTime())) {
+                    return date.toISOString();
+                  }
+                }
+
+                // Try parsing as DD/MM/YYYY format
+                if (dateStr.includes("/")) {
+                  const parts = dateStr.split("/");
+                  if (parts.length === 3) {
+                    const day = parseInt(parts[0], 10);
+                    const month = parseInt(parts[1], 10) - 1;
+                    const year = parseInt(parts[2], 10);
+                    // Handle 2-digit years
+                    const fullYear = year < 100 ? 2000 + year : year;
+                    const date = new Date(fullYear, month, day);
+                    if (!isNaN(date.getTime())) {
+                      return date.toISOString();
+                    }
+                  }
+                }
+
+                // Try standard Date parsing
+                const date = new Date(dateStr);
+                if (!isNaN(date.getTime())) {
+                  return date.toISOString();
+                }
+
+                return null;
+              };
+
+              // Parse site registration date
+              if (
+                siteRegistrationDateStr &&
+                siteRegistrationDateStr.trim() !== ""
+              ) {
+                const parsedDate = parseDateValue(siteRegistrationDateStr);
+                if (parsedDate) {
+                  dataObj.siteRegistrationDate = parsedDate;
+                }
+              }
+
+              // Parse site registration expiry date
+              if (
+                siteRegistrationExpiryDateStr &&
+                siteRegistrationExpiryDateStr.trim() !== ""
+              ) {
+                const parsedDate = parseDateValue(
+                  siteRegistrationExpiryDateStr
+                );
+                if (parsedDate) {
+                  dataObj.siteRegistrationExpiryDate = parsedDate;
+                }
+              }
+
+              return dataObj;
+            } catch (err) {
+              console.error(`Error parsing row ${index}:`, err);
+              return null;
+            }
+          })
+          .filter((item) => item !== null); // Remove null items
+
+        console.log("Parsed data:", parsedData);
+
+        // Filter out rows without supplier name (just in case)
+        const validData = parsedData.filter(
+          (item) => item.supplierName && item.supplierName.trim() !== ""
         );
-      }
 
-      setParsedData(validData);
+        console.log("Valid data to import:", validData);
 
-      if (validData.length === 0) {
-        showToast(
-          "warning",
-          "No valid data found in the Excel file. Please check the format."
-        );
+        if (validData.length === 0) {
+          showToast(
+            "warning",
+            "No valid data found in the Excel file. Please check the format."
+          );
+        }
+
+        setParsedData(validData);
+      } catch (error) {
+        console.error("Error processing file:", error);
+        showToast("error", "Error processing file. Please check the format.");
       }
     };
+
     reader.readAsArrayBuffer(file);
   };
 
   const handleImport = async () => {
     if (parsedData.length === 0) {
-      showToast("warning", "Excel File is Empty");
+      showToast("warning", "No valid data to import");
       return;
     }
 
@@ -784,47 +852,21 @@ const Supplier = () => {
         parsedData
       );
       if (res.status === 200) {
-        let toastMessage = res.data.message || "Suppliers imported successfully!";
-        
-        // Show warnings if any
-        if (res.data.warnings && res.data.warnings.length > 0) {
-          setImportWarnings(res.data.warnings);
-          toastMessage += " Some rows had warnings.";
-          
-          // Show first 3 warnings as a toast
-          if (res.data.warnings.length <= 3) {
-            res.data.warnings.forEach(warning => {
-              showToast("warning", warning);
-            });
-          } else {
-            showToast("warning", `${res.data.warnings.length} rows had warnings. Check console for details.`);
-            console.warn("Import warnings:", res.data.warnings);
-          }
-        }
-        
-        showToast("success", toastMessage);
-        
-        // Only close modal if no errors
-        if (res.data.errorCount === 0) {
-          setIsOpen(null);
-          setImportWarnings([]);
-        }
-        
+        showToast(
+          "success",
+          res.data.message || "Suppliers imported successfully!"
+        );
+
         // Refresh suppliers
         const updated = await fetch(`${backendUrl}/api/suppliers`);
         setSuppliers(await updated.json());
         setParsedData([]);
+        setIsOpen(null);
       }
     } catch (err) {
       const message =
-        err.response?.data?.message?.replace(/<[^>]+>/g, "") ||
-        "Failed to import suppliers.";
+        err.response?.data?.message || "Failed to import suppliers.";
       showToast("error", message);
-      
-      // Store warnings if any
-      if (err.response?.data?.warnings) {
-        setImportWarnings(err.response.data.warnings);
-      }
     } finally {
       setIsUploading(false);
     }

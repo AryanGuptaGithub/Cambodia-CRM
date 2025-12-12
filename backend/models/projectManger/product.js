@@ -2,21 +2,83 @@ import mongoose from "mongoose";
 
 const productSchema = new mongoose.Schema(
   {
-    productName: { type: String, required: true },
-    type: { type: String, required: true },
-    packing: { type: String, required: true },
-    sellingPrice: { type: Number },
-    lc: { type: Number }, // Changed to Number for USD
-    fob: { type: Number }, // Changed to Number for USD
-    taxSellingPrice: { type: Number },
-    qtyPerBoxStrip: { type: Number, required: true }, // Updated field name
-    supplierName: { type: String, required: false },
-    drugLicense: { type: String, required: false },
-    licenseValidityDate: { type: Date, required: false },
-    remarks: { type: String },
+    productName: { 
+      type: String, 
+      required: true,
+      trim: true
+    },
+    type: { 
+      type: String, 
+      required: true,
+      trim: true
+    },
+    packing: { 
+      type: String, 
+      required: true,
+      trim: true
+    },
+    sellingPrice: { 
+      type: Number,
+      default: 0
+    },
+    lc: { 
+      type: Number,
+      default: 0
+    },
+    fob: { 
+      type: Number,
+      default: 0
+    },
+    taxSellingPrice: { 
+      type: Number,
+      default: 0
+    },
+    qtyPerBoxStrip: { 
+      type: Number, 
+      required: true,
+      min: 1
+    },
+    supplierName: { 
+      type: String, 
+      default: "",
+      trim: true
+    },
+    drugLicense: { 
+      type: String, 
+      default: "",
+      trim: true
+    },
+    licenseValidityDate: { 
+      type: Date, 
+      default: null,
+      set: function(value) {
+        if (!value) return null;
+        
+        if (value instanceof Date) {
+          return value;
+        }
+        
+        if (typeof value === 'string') {
+          const date = new Date(value);
+          return isNaN(date.getTime()) ? null : date;
+        }
+        
+        return null;
+      }
+    },
+    remarks: { 
+      type: String,
+      default: "",
+      trim: true
+    },
   },
-  { timestamps: true }
+  { 
+    timestamps: true
+  }
 );
+
+// Create compound index
+productSchema.index({ productName: 1, type: 1, packing: 1, supplierName: 1 });
 
 const Product = mongoose.model("Product", productSchema);
 

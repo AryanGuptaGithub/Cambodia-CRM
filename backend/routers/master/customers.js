@@ -30,15 +30,61 @@ const handleDuplicateError = (res, err) => {
 
 const safeStr = (val) => (val == null ? "" : String(val).trim());
 
-// Helper to normalize MR name for matching
-const normalizeMRName = (name) => {
-  if (!name) return "";
-  return name
-    .toString()
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, " ") // Normalize multiple spaces
-    .replace(/[.,]/g, ""); // Remove dots and commas
+// Helper function to parse date and handle timezone issues
+const parseCustomerDate = (dateInput) => {
+  if (!dateInput) {
+    // Return current date at noon to avoid timezone issues
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0);
+  }
+  
+  if (dateInput instanceof Date) {
+    // If already a Date, ensure it's at noon
+    const year = dateInput.getFullYear();
+    const month = dateInput.getMonth();
+    const day = dateInput.getDate();
+    return new Date(year, month, day, 12, 0, 0);
+  }
+  
+  if (typeof dateInput === 'string') {
+    // If it's already in YYYY-MM-DD format
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+      const parts = dateInput.split('-');
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const day = parseInt(parts[2], 10);
+      
+      // Create date at noon to avoid timezone issues
+      return new Date(year, month, day, 12, 0, 0);
+    }
+    
+    // Try to parse other date formats
+    const parsedDate = new Date(dateInput);
+    if (!isNaN(parsedDate.getTime())) {
+      // Create a new date with the same year, month, day but at noon
+      const year = parsedDate.getFullYear();
+      const month = parsedDate.getMonth();
+      const day = parsedDate.getDate();
+      return new Date(year, month, day, 12, 0, 0);
+    }
+  }
+  
+  // Return current date at noon
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0);
+};
+
+// Helper function to format date for response
+const formatDateForResponse = (date) => {
+  if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
+    return '';
+  }
+  
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  
+  return `${year}-${month}-${day}`;
 };
 
 router.post("/customers/import", async (req, res) => {
@@ -52,12 +98,12 @@ router.post("/customers/import", async (req, res) => {
       });
     }
 
-    // Fetch all MRs including USER ID (important)
+    // Fetch all MRs including USER ID
     const mrList = await MedicalRep.find().select(
       "medicalRepName staffName userId"
     );
 
-    // Map MR Name → USER ID (NOT MR ID)
+    // Map MR Name → USER ID
     const mrMap = new Map();
     mrList.forEach((mr) => {
       const medRepName = safeStr(mr.medicalRepName);
@@ -83,72 +129,90 @@ router.post("/customers/import", async (req, res) => {
     }
 
     const newCustomers = [];
+    const errors = [];
+    const duplicates = [];
 
     for (let i = 0; i < customers.length; i++) {
       const item = customers[i];
 
-      let name = safeStr(item.name);
-      if (!name || name.trim() === "") {
-        name = `Customer_${nextCode + newCustomers.length}_${Date.now()}`;
-      }
-
-      let date = new Date();
-      if (item.date) {
-        const parsedDate = new Date(item.date);
-        if (!isNaN(parsedDate.getTime())) {
-          date = parsedDate;
+      try {
+        let name = safeStr(item.name);
+        if (!name || name.trim() === "") {
+          errors.push(`Row ${i + 1}: Customer name is required`);
+          continue;
         }
-      }
 
-      // MR Name → USER ID
-      let medicalRepId = null; // final field stored in DB
-      let mrName = safeStr(item.medicalRepName);
+        // Parse date using helper function
+        const parsedDate = parseCustomerDate(item.date);
+        
+        // MR Name → USER ID
+        let medicalRepId = null;
+        let mrName = safeStr(item.medicalRepName);
 
-      if (!mrName || mrName.trim() === "") {
-        mrName = "Not Provided";
-      } else {
-        const mrKey = mrName.toLowerCase();
-        medicalRepId = mrMap.get(mrKey);
+        if (!mrName || mrName.trim() === "") {
+          mrName = "Not Provided";
+        } else {
+          const mrKey = mrName.toLowerCase();
+          medicalRepId = mrMap.get(mrKey);
 
-        // Partial match fallback
-        if (!medicalRepId) {
-          for (const [key, value] of mrMap) {
-            if (key.includes(mrKey) || mrKey.includes(key)) {
-              medicalRepId = value;
-              break;
+          // Partial match fallback
+          if (!medicalRepId) {
+            for (const [key, value] of mrMap) {
+              if (key.includes(mrKey) || mrKey.includes(key)) {
+                medicalRepId = value;
+                break;
+              }
             }
           }
         }
+
+        const customerNumber = safeStr(item.customerNumber);
+
+        // Check for duplicates
+        const existingCustomer = await Customer.findOne({
+          $or: [
+            { customerNumber: customerNumber },
+            { name: name, customerNumber: customerNumber }
+          ]
+        });
+
+        if (existingCustomer) {
+          duplicates.push({
+            row: i + 1,
+            name: name,
+            reason: "Customer with same name or number already exists"
+          });
+          continue;
+        }
+
+        newCustomers.push({
+          customerCode: (nextCode + newCustomers.length)
+            .toString()
+            .padStart(4, "0"),
+          date: parsedDate,
+          medicalRepName: mrName,
+          medicalRepId,
+          name,
+          typeOfBusiness: safeStr(item.typeOfBusiness) || "Not Provided",
+          customerNumber: customerNumber || "",
+          address: safeStr(item.customerAddress) || "Not Provided",
+          zone: safeStr(item.zone) || "Not Provided",
+          province: safeStr(item.province) || "Not Provided",
+          remark: safeStr(item.remark) || "Not Provided",
+          enabled: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+      } catch (error) {
+        errors.push(`Row ${i + 1}: ${error.message}`);
       }
-
-      const customerNumber = safeStr(item.customerNumber);
-
-      newCustomers.push({
-        customerCode: (nextCode + newCustomers.length)
-          .toString()
-          .padStart(4, "0"),
-        date: date.toISOString().split("T")[0],
-        medicalRepName: mrName,
-
-        // ⭐ STORE USER ID HERE (NOT MR ID)
-        medicalRepId,
-
-        name,
-        typeOfBusiness: safeStr(item.typeOfBusiness) || "Not Provided",
-        customerNumber: customerNumber || "",
-        address: safeStr(item.customerAddress) || "Not Provided",
-        zone: safeStr(item.zone) || "Not Provided",
-        province: safeStr(item.province) || "Not Provided",
-        remark: safeStr(item.remark) || "Not Provided",
-        enabled: true,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
     }
 
     if (newCustomers.length === 0) {
       return res.status(400).json({
         message: "No valid customers to import.",
+        errors: errors,
+        duplicates: duplicates,
         ok: false,
       });
     }
@@ -157,10 +221,21 @@ router.post("/customers/import", async (req, res) => {
       ordered: false,
     });
 
+    let responseMessage = `Successfully imported ${inserted.length} customer(s).`;
+    if (errors.length > 0) {
+      responseMessage += ` ${errors.length} error(s) encountered.`;
+    }
+    if (duplicates.length > 0) {
+      responseMessage += ` ${duplicates.length} duplicate(s) skipped.`;
+    }
+
     res.status(200).json({
-      message: `Successfully imported ${inserted.length} customer(s).`,
+      message: responseMessage,
       importedCount: inserted.length,
-      skippedCount: 0,
+      errorCount: errors.length,
+      duplicateCount: duplicates.length,
+      errors: errors.length > 0 ? errors.slice(0, 5) : [],
+      duplicates: duplicates.length > 0 ? duplicates.slice(0, 5) : [],
       ok: true,
     });
   } catch (err) {
@@ -193,9 +268,12 @@ router.post("/customers/import", async (req, res) => {
 // 2. POST: Create new customer
 router.post("/customers", async (req, res) => {
   try {
-    const { customerNumber, ...data } = req.body;
+    const { customerNumber, date, ...data } = req.body;
 
     const cleanNumber = customerNumber ? safeStr(customerNumber) : "";
+    
+    // Parse date if provided
+    const parsedDate = date ? parseCustomerDate(date) : parseCustomerDate(null);
 
     if (cleanNumber) {
       const exists = await Customer.findOne({ customerNumber: cleanNumber });
@@ -209,12 +287,22 @@ router.post("/customers", async (req, res) => {
       }
     }
 
-    const customer = new Customer({ ...data, customerNumber: cleanNumber });
+    const customer = new Customer({ 
+      ...data, 
+      customerNumber: cleanNumber,
+      date: parsedDate 
+    });
     const saved = await customer.save();
+
+    // Format date for response
+    const formattedDate = formatDateForResponse(saved.date);
 
     res.status(201).json({
       message: `Customer <b>${saved.name}</b> created with code <b>${saved.customerCode}</b>`,
-      customer: saved,
+      customer: {
+        ...saved.toObject(),
+        date: formattedDate
+      },
       ok: true,
     });
   } catch (err) {
@@ -237,8 +325,13 @@ router.post("/customers", async (req, res) => {
 // 3. PUT: Update customer
 router.put("/customers/:id", async (req, res) => {
   try {
-    const { customerNumber, ...updateData } = req.body;
+    const { customerNumber, date, ...updateData } = req.body;
     const cleanNumber = customerNumber ? safeStr(customerNumber) : "";
+    
+    // Parse date if provided
+    if (date) {
+      updateData.date = parseCustomerDate(date);
+    }
 
     if (cleanNumber) {
       const exists = await Customer.findOne({
@@ -253,11 +346,12 @@ router.put("/customers/:id", async (req, res) => {
           ok: false,
         });
       }
+      updateData.customerNumber = cleanNumber;
     }
 
     const updated = await Customer.findByIdAndUpdate(
       req.params.id,
-      { ...updateData, customerNumber: cleanNumber },
+      updateData,
       { new: true, runValidators: true }
     );
 
@@ -265,7 +359,13 @@ router.put("/customers/:id", async (req, res) => {
       return res.status(404).json({ message: "Customer not found", ok: false });
     }
 
-    res.json({ customer: updated, ok: true });
+    // Format date for response
+    const responseCustomer = {
+      ...updated.toObject(),
+      date: formatDateForResponse(updated.date)
+    };
+
+    res.json({ customer: responseCustomer, ok: true });
   } catch (err) {
     if (err.code === 11000) {
       if (err.keyPattern?.customerNumber) {
@@ -288,6 +388,15 @@ router.get("/customers", async (req, res) => {
   try {
     const customers = await Customer.find().sort({ createdAt: -1 });
 
+    // Format dates for response
+    const formattedCustomers = customers.map(customer => {
+      const customerObj = customer.toObject();
+      return {
+        ...customerObj,
+        date: formatDateForResponse(customer.date)
+      };
+    });
+
     const agg = await Customer.aggregate([
       {
         $project: {
@@ -309,7 +418,7 @@ router.get("/customers", async (req, res) => {
     if (agg[0]?.codeNum) nextCode = agg[0].codeNum + 1;
 
     res.json({
-      customers,
+      customers: formattedCustomers,
       nextCustomerCode: nextCode.toString().padStart(4, "0"),
       ok: true,
     });
@@ -336,9 +445,18 @@ router.get("/customers/province/:province", async (req, res) => {
       province: new RegExp(province, "i"),
     });
 
+    // Format dates for response
+    const formattedCustomers = customers.map(customer => {
+      const customerObj = customer.toObject();
+      return {
+        ...customerObj,
+        date: formatDateForResponse(customer.date)
+      };
+    });
+
     res.json({
       success: true,
-      data: customers,
+      data: formattedCustomers,
       count: customers.length,
     });
   } catch (err) {
@@ -353,7 +471,14 @@ router.get("/customers/:id", async (req, res) => {
     if (!customer) {
       return res.status(404).json({ message: "Customer not found", ok: false });
     }
-    res.json({ customer, ok: true });
+    
+    // Format date for response
+    const responseCustomer = {
+      ...customer.toObject(),
+      date: formatDateForResponse(customer.date)
+    };
+    
+    res.json({ customer: responseCustomer, ok: true });
   } catch (err) {
     if (err.name === "CastError") {
       return res
