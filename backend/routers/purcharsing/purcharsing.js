@@ -23,6 +23,7 @@ const filterReportsWithBatches = (reports) => {
     (report) => Array.isArray(report.batches) && report.batches.length > 0
   );
 };
+
 const updateReportInHand = async (productData, operation = "add") => {
   try {
     const {
@@ -34,7 +35,6 @@ const updateReportInHand = async (productData, operation = "add") => {
       cif,
       expiryDate,
       type,
-      sellingPrice, // ADDED: Include sellingPrice
     } = productData;
 
     const qty = Number(quantityPerBoxStrip || 0);
@@ -42,9 +42,6 @@ const updateReportInHand = async (productData, operation = "add") => {
 
     let item = await ReportInHand.findOne({ productName });
 
-    // --------------------------------------------------------------
-    // CREATE NEW PRODUCT ENTRY IF NOT EXISTS
-    // --------------------------------------------------------------
     if (!item) {
       item = new ReportInHand({
         productName,
@@ -56,9 +53,6 @@ const updateReportInHand = async (productData, operation = "add") => {
       });
     }
 
-    // --------------------------------------------------------------
-    // ADD NEW BATCH
-    // --------------------------------------------------------------
     if (operation === "add") {
       const amount = qty * lc;
 
@@ -69,14 +63,10 @@ const updateReportInHand = async (productData, operation = "add") => {
         cif,
         amount,
         expiryDate,
-        sellingPrice: sellingPrice || 0, // ADDED: Store sellingPrice in batch
         date: new Date(),
       });
     }
 
-    // --------------------------------------------------------------
-    // SUBTRACT USING FIFO
-    // --------------------------------------------------------------
     if (operation === "subtract") {
       let qtyToRemove = qty;
 
@@ -94,19 +84,12 @@ const updateReportInHand = async (productData, operation = "add") => {
         }
       }
 
-      // Remove empty batches
       item.batches = item.batches.filter((b) => b.boxes > 0);
     }
 
-    // --------------------------------------------------------------
-    // UPDATE TOTALS
-    // --------------------------------------------------------------
     item.totalBoxes = item.batches.reduce((sum, b) => sum + b.boxes, 0);
     item.totalAmount = item.batches.reduce((sum, b) => sum + b.amount, 0);
 
-    // --------------------------------------------------------------
-    // UPDATE STATUS
-    // --------------------------------------------------------------
     if (item.totalBoxes <= 0) item.status = "Out of Stock";
     else if (item.totalBoxes < 10) item.status = "Critical";
     else if (item.totalBoxes < 25) item.status = "Low Stock";
@@ -135,19 +118,16 @@ router.get("/purchase", async (req, res) => {
   try {
     const purchases = await purchaseInventory.find().sort({ createdAt: -1 });
 
-    // Fetch all products once
     const productList = await Product.find(
       {},
       "productName type packing qtyPerBoxStrip sellingPrice"
     );
 
-    // Convert to Map for fast lookup
     const productMap = new Map();
     productList.forEach((p) => {
       productMap.set(p.productName, p);
     });
 
-    // Enhance each purchase invoice
     const enhancedPurchases = purchases.map((invoice) => {
       const enhancedProducts = invoice.products.map((p) => {
         const productInfo = productMap.get(p.productName);
@@ -157,7 +137,7 @@ router.get("/purchase", async (req, res) => {
           productType: p.type || productInfo?.type || "Tablet",
           productPacking: productInfo?.packing || "",
           productQtyPerBoxStrip: productInfo?.qtyPerBoxStrip || 0,
-          sellingPrice: p.sellingPrice || productInfo?.sellingPrice || 0, // MODIFIED: Use purchase sellingPrice first
+          sellingPrice: p.sellingPrice || productInfo?.sellingPrice || 0,
         };
       });
 
@@ -182,14 +162,11 @@ router.put("/purchase/:id", async (req, res) => {
   try {
     const id = req.params.id;
 
-    // Find the old invoice first
     const oldInvoice = await purchaseInventory.findById(id);
     if (!oldInvoice) return res.status(404).json({ message: "Not found" });
 
-    // Store old products for subtraction (make a deep copy)
     const oldProducts = JSON.parse(JSON.stringify(oldInvoice.products));
 
-    // Update the invoice with new data
     const updated = await purchaseInventory.findByIdAndUpdate(id, req.body, {
       new: true,
       runValidators: true,
@@ -201,7 +178,6 @@ router.put("/purchase/:id", async (req, res) => {
         .json({ message: "Invoice not found after update" });
     }
 
-    // Subtract old stock from ReportInHand using OLD product data
     for (const oldProduct of oldProducts) {
       await updateReportInHand(
         {
@@ -213,13 +189,11 @@ router.put("/purchase/:id", async (req, res) => {
           cif: oldProduct.cif,
           expiryDate: oldProduct.expiryDate,
           type: oldProduct.type,
-          sellingPrice: oldProduct.sellingPrice, // ADDED: Include sellingPrice
         },
         "subtract"
       );
     }
 
-    // Add new stock to ReportInHand using UPDATED product data
     for (const newProduct of updated.products) {
       await updateReportInHand(
         {
@@ -231,7 +205,6 @@ router.put("/purchase/:id", async (req, res) => {
           cif: newProduct.cif,
           expiryDate: newProduct.expiryDate,
           type: newProduct.type,
-          sellingPrice: newProduct.sellingPrice, // ADDED: Include sellingPrice
         },
         "add"
       );
@@ -297,7 +270,7 @@ router.delete("/purchase", async (req, res) => {
   }
 });
 
-/* IMPORT EXCEL WITH DUPLICATE CHECK */
+/* ADD SINGLE PURCHASE */
 router.post("/purchase", async (req, res) => {
   try {
     const data = req.body;
@@ -309,7 +282,6 @@ router.post("/purchase", async (req, res) => {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
-    // Prevent duplicates
     const existing = await purchaseInventory.findOne({
       invoiceNumber: data.invoiceNumber,
     });
@@ -323,7 +295,6 @@ router.post("/purchase", async (req, res) => {
 
     let totalAmount = 0;
 
-    // Fetch product types for all products in one query
     const productIds = data.products.map((p) => p.productId).filter((id) => id);
     const productsInfo = await Product.find(
       { _id: { $in: productIds } },
@@ -335,29 +306,26 @@ router.post("/purchase", async (req, res) => {
     });
 
     const products = data.products.map((p) => {
-      const qty = Number(p.qtyBox || 0);
-      const lc = Number(p.lc || p.lcNumber || 0);
+      const qty = Number(p.quantityPerBoxStrip || 0);
+      const lc = Number(p.lc || 0);
       const fob = Number(p.fob || 0);
       const cif = Number(p.cif || 0);
       const amount = qty * lc;
-      const sellingPrice = Number(p.sellingPrice) || 0; // ADDED: Extract sellingPrice
 
       totalAmount += amount;
 
       return {
         productName: p.productName,
         type: p.type || productTypeMap.get(p.productId) || "Tablet",
-        expiryDate: p.expiredDate ? new Date(p.expiredDate) : null,
+        expiryDate: p.expiryDate ? new Date(p.expiryDate) : null,
         quantityPerBoxStrip: qty,
         lc,
         fob,
         cif,
         amount,
-        sellingPrice, // ADDED: Include sellingPrice in product data
       };
     });
 
-    // Save purchase
     const invoice = await purchaseInventory.create({
       ...data,
       supplierName: data.supplierName.trim(),
@@ -365,7 +333,6 @@ router.post("/purchase", async (req, res) => {
       totalAmount,
     });
 
-    // Update batches in inventory
     for (const p of products) {
       await updateReportInHand(
         {
@@ -377,7 +344,6 @@ router.post("/purchase", async (req, res) => {
           cif: p.cif,
           expiryDate: p.expiryDate,
           type: p.type,
-          sellingPrice: p.sellingPrice, // ADDED: Pass sellingPrice to inventory
         },
         "add"
       );
@@ -402,101 +368,214 @@ router.post("/purchase", async (req, res) => {
   }
 });
 
+/* IMPORT PURCHASES - CORRECTED VERSION */
+/* IMPORT PURCHASES - FIXED VERSION */
+/* IMPORT PURCHASES - FIXED VERSION */
 router.post("/purchase/import", async (req, res) => {
   try {
-    const rows = req.body;
+    const rows = req.body; // This is array of product rows from Excel
 
-    if (!Array.isArray(rows))
-      return res.status(400).json({ message: "Invalid data" });
+    console.log("Received import request with", rows?.length, "rows");
 
-    const invoices = new Map();
+    if (!Array.isArray(rows)) {
+      return res.status(400).json({
+        message: "Invalid data format. Expected array of purchase items.",
+      });
+    }
+
+    if (rows.length === 0) {
+      return res.status(400).json({ message: "No data to import" });
+    }
+
     const skipped = [];
+    const importedInvoices = [];
 
-    for (const row of rows) {
-      if (!row.invoiceNumber) continue;
+    // Group rows by invoice number and delivery number
+    const invoiceMap = new Map();
 
-      const invoiceNumber = row.invoiceNumber.trim();
-
-      // Check duplicate invoice
-      const exists = await purchaseInventory.findOne({ invoiceNumber });
-      if (exists) {
-        skipped.push(invoiceNumber);
-        continue;
-      }
-
-      // Create invoice container if first time
-      if (!invoices.has(invoiceNumber)) {
-        invoices.set(invoiceNumber, {
-          invoiceNumber,
-          invoiceDate: row.invoiceDate ? new Date(row.invoiceDate) : null,
-          deliveryNumber: row.deliveryNumber?.toString().trim() || "",
-          receivedDate: row.receivedDate ? new Date(row.receivedDate) : null,
-          supplierName: row.supplierName?.trim() || "Unknown Supplier",
+    rows.forEach((row) => {
+      const invoiceKey = `${row.invoiceNumber}-${row.deliveryNumber}`;
+      if (!invoiceMap.has(invoiceKey)) {
+        invoiceMap.set(invoiceKey, {
+          invoiceNumber: row.invoiceNumber || "",
+          invoiceDate: row.invoiceDate || new Date(),
+          deliveryNumber: row.deliveryNumber || row.invoiceNumber || "",
+          receivedDate: row.receivedDate || new Date(),
+          supplierName: row.supplierName || "",
+          remarks: row.remarks || "",
           products: [],
-          totalAmount: 0,
         });
       }
 
-      const inv = invoices.get(invoiceNumber);
+      const invoice = invoiceMap.get(invoiceKey);
 
-      const qty = Number(row.quantityPerBoxStrip || 0);
-      const lc = Number(row.lc || 0);
-      const fob = Number(row.fob || 0);
-      const cif = Number(row.cif || 0);
-      const amount = qty * lc;
-      const sellingPrice = Number(row.sellingPrice) || 0; // ADDED: Extract sellingPrice
+      // Parse numeric values safely
+      const quantityPerBoxStrip = parseFloat(row.quantityPerBoxStrip) || 0;
+      const lc = parseFloat(row.lc) || parseFloat(row.lcNumber) || 0;
+      const fob = parseFloat(row.fob) || 0;
+      const cif = parseFloat(row.cif) || 0;
+      const amount = quantityPerBoxStrip * lc;
 
-      // push product purchase line
-      inv.products.push({
-        productName: row.productName?.trim() || "Unknown Product",
-        type: row.type || "Tablet",
+      invoice.products.push({
+        productName: row.productName || "",
+        type: row.type || "Tablet", // Assuming type is passed or default
         expiryDate: row.expiryDate ? new Date(row.expiryDate) : null,
-        quantityPerBoxStrip: qty,
-        lc,
-        fob,
-        cif,
-        amount,
-        sellingPrice, // ADDED: Include sellingPrice
+        quantityPerBoxStrip: quantityPerBoxStrip,
+        lc: lc,
+        fob: fob,
+        cif: cif,
+        amount: amount,
       });
+    });
 
-      inv.totalAmount += amount;
-    }
+    // Get product info for auto-filling missing values
+    const allProducts = await Product.find({});
+    const productMap = new Map();
+    allProducts.forEach((product) => {
+      if (
+        product.productName &&
+        product.batches &&
+        product.batches.length > 0
+      ) {
+        productMap.set(product.productName.toLowerCase(), {
+          type: product.type || "Tablet",
+        });
+      }
+    });
 
-    const finalInvoices = Array.from(invoices.values());
+    // Process each invoice
+    for (const [key, invoiceData] of invoiceMap) {
+      try {
+        console.log("Processing invoice:", invoiceData.invoiceNumber);
 
-    // Store invoices
-    if (finalInvoices.length > 0) {
-      await purchaseInventory.insertMany(finalInvoices);
+        // Validate required fields
+        if (!invoiceData.invoiceNumber || !invoiceData.supplierName) {
+          console.log("Skipping invoice - missing invoice number or supplier");
+          skipped.push(invoiceData.invoiceNumber || "Unknown");
+          continue;
+        }
 
-      // Update inventory batches
-      for (const inv of finalInvoices) {
-        for (const p of inv.products) {
+        if (!invoiceData.products || invoiceData.products.length === 0) {
+          console.log("Skipping invoice - no products");
+          skipped.push(invoiceData.invoiceNumber);
+          continue;
+        }
+
+        // Check for duplicate
+        const existing = await purchaseInventory.findOne({
+          invoiceNumber: invoiceData.invoiceNumber,
+          deliveryNumber: invoiceData.deliveryNumber,
+        });
+
+        if (existing) {
+          console.log("Skipping duplicate invoice:", invoiceData.invoiceNumber);
+          skipped.push(invoiceData.invoiceNumber);
+          continue;
+        }
+
+        // Calculate total amount and process products
+        let totalAmount = 0;
+        const processedProducts = [];
+
+        for (const product of invoiceData.products) {
+          if (!product.productName) {
+            console.log("Skipping product - no product name");
+            continue;
+          }
+
+          // Look up product type if not provided
+          const productKey = product.productName.toLowerCase().trim();
+          const productInfo = productMap.get(productKey) || { type: "Tablet" };
+
+          processedProducts.push({
+            productName: product.productName.trim(),
+            type: product.type || productInfo.type,
+            expiryDate: product.expiryDate,
+            quantityPerBoxStrip: product.quantityPerBoxStrip,
+            lc: product.lc,
+            fob: product.fob,
+            cif: product.cif,
+            amount: product.amount,
+          });
+
+          totalAmount += product.amount;
+        }
+
+        if (processedProducts.length === 0) {
+          console.log("Skipping invoice - no valid products");
+          skipped.push(invoiceData.invoiceNumber);
+          continue;
+        }
+
+        // Create invoice
+        const invoice = await purchaseInventory.create({
+          invoiceNumber: invoiceData.invoiceNumber,
+          invoiceDate: invoiceData.invoiceDate,
+          deliveryNumber: invoiceData.deliveryNumber,
+          receivedDate: invoiceData.receivedDate,
+          supplierName: invoiceData.supplierName.trim(),
+          remarks: invoiceData.remarks,
+          products: processedProducts,
+          totalAmount: totalAmount,
+        });
+
+        console.log("Created invoice:", invoice.invoiceNumber);
+
+        // Update inventory for each product
+        for (const product of processedProducts) {
           await updateReportInHand(
             {
-              productName: p.productName,
-              supplierName: inv.supplierName,
-              quantityPerBoxStrip: p.quantityPerBoxStrip,
-              lc: p.lc,
-              fob: p.fob,
-              cif: p.cif,
-              expiryDate: p.expiryDate,
-              type: p.type,
-              sellingPrice: p.sellingPrice, // ADDED: Pass sellingPrice
+              productName: product.productName,
+              supplierName: invoiceData.supplierName.trim(),
+              quantityPerBoxStrip: product.quantityPerBoxStrip,
+              lc: product.lc,
+              fob: product.fob,
+              cif: product.cif,
+              expiryDate: product.expiryDate,
+              type: product.type,
             },
             "add"
           );
         }
+
+        importedInvoices.push(invoice);
+      } catch (err) {
+        console.error(
+          `Error processing invoice ${invoiceData.invoiceNumber}:`,
+          err
+        );
+        skipped.push(invoiceData.invoiceNumber || "Unknown");
       }
     }
 
+    console.log(
+      `Import completed: ${importedInvoices.length} imported, ${skipped.length} skipped`
+    );
+
     res.json({
-      message: `Imported ${finalInvoices.length} invoices`,
-      importedCount: finalInvoices.length,
+      message: `Imported ${importedInvoices.length} invoices successfully`,
+      importedCount: importedInvoices.length,
       skippedInvoices: skipped,
+      details: {
+        imported: importedInvoices.map((inv) => inv.invoiceNumber),
+        skipped: skipped,
+      },
     });
   } catch (err) {
     console.error("Import error:", err);
-    res.status(500).json({ message: "Internal server error" });
+
+    if (err.code === 11000) {
+      return res.status(400).json({
+        message:
+          "Duplicate invoice number and delivery number combination found",
+        error: err.message,
+      });
+    }
+
+    res.status(500).json({
+      message: "Internal server error",
+      error: err.message,
+    });
   }
 });
 
@@ -547,15 +626,9 @@ router.post("/purchases/download-excel", async (req, res) => {
       });
     }
 
-    // ------------------------------
-    // Create Workbook
-    // ------------------------------
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Purchases");
 
-    // ------------------------------
-    // Header Row (ADDED Selling Price)
-    // ------------------------------
     const header = [
       "Invoice Number",
       "Invoice Date",
@@ -569,7 +642,6 @@ router.post("/purchases/download-excel", async (req, res) => {
       "FOB (USD)",
       "CIF (USD)",
       "LC (USD)",
-      "Selling Price (USD)", // ADDED: Selling Price column
       "Amount",
       "Remarks",
     ];
@@ -577,9 +649,6 @@ router.post("/purchases/download-excel", async (req, res) => {
     const headerRow = worksheet.addRow(header);
     headerRow.font = { bold: true };
 
-    // ------------------------------
-    // Column Widths (Updated for new column)
-    // ------------------------------
     worksheet.columns = [
       { width: 18 },
       { width: 15 },
@@ -593,14 +662,10 @@ router.post("/purchases/download-excel", async (req, res) => {
       { width: 12 },
       { width: 12 },
       { width: 12 },
-      { width: 15 }, // ADDED: Selling Price column width
       { width: 15 },
       { width: 20 },
     ];
 
-    // ------------------------------
-    // Add Data (INCLUDING Selling Price)
-    // ------------------------------
     purchases.forEach((purchase) => {
       purchase.products.forEach((p) => {
         worksheet.addRow([
@@ -611,21 +676,17 @@ router.post("/purchases/download-excel", async (req, res) => {
           p.productName,
           p.type || "Tablet",
           purchase.supplierName,
-          dayjs(p.expiryDate).format("DD/MM/YYYY"),
+          p.expiryDate ? dayjs(p.expiryDate).format("DD/MM/YYYY") : "",
           p.quantityPerBoxStrip,
           p.fob,
           p.cif,
           p.lc,
-          p.sellingPrice || 0, // ADDED: Selling Price data
           p.amount ?? Number(p.quantityPerBoxStrip) * Number(p.lc || 0),
           purchase.remarks || "",
         ]);
       });
     });
 
-    // ------------------------------
-    // Add borders
-    // ------------------------------
     worksheet.eachRow((row) => {
       row.eachCell((cell) => {
         cell.border = {
@@ -637,9 +698,6 @@ router.post("/purchases/download-excel", async (req, res) => {
       });
     });
 
-    // ------------------------------
-    // Download Excel File
-    // ------------------------------
     const fileName = `purchase_summary_${dayjs(startDate).format(
       "DD-MM-YYYY"
     )}_to_${dayjs(endDate).format("DD-MM-YYYY")}.xlsx`;

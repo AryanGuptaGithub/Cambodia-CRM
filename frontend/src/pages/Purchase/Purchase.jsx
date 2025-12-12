@@ -28,6 +28,7 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { confirmDialog } from "../../utils/confirmationDialog";
 import { useNavigate } from "react-router-dom";
+import dayjs from "dayjs";
 import {
   fetchProductDropdownPurchase as fetchProductsAPI,
   fetchSuppliers as fetchSuppliersAPI,
@@ -184,104 +185,290 @@ function Purchase() {
 
     const reader = new FileReader();
 
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
+        setIsUploading(true);
         const data = new Uint8Array(evt.target.result);
         const workbook = XLSX.read(data, { type: "array" });
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(worksheet, {
+
+        // Get all sheet data
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, {
           header: 1,
           defval: "",
+          raw: false,
         });
 
-        if (rows.length === 0) {
+        console.log("Excel raw data first few rows:", jsonData.slice(0, 5));
+
+        if (jsonData.length === 0) {
           showToast("warning", "Excel file is empty");
+          setIsUploading(false);
           return;
         }
 
-        const requiredHeaders = [
-          "invoice number",
-          "invoice date",
-          "delivery no.",
-          "received date",
-          "product name",
-          "supplier name",
-          "expiry date",
-          "quantity per box/strip",
-          "fob (usd)",
-          "cif (usd)",
-          "lc (usd)",
-          "remarks",
-        ];
-
-        // Step 1: Find header row
+        // Find header row by looking for common headers
         let headerRowIndex = -1;
-        for (let i = 0; i < Math.min(rows.length, 10); i++) {
-          const row = rows[i].map((cell) =>
-            (cell || "").toString().trim().toLowerCase()
-          );
-          const matched = requiredHeaders.filter((hdr) => row.includes(hdr));
-          if (matched.length >= 8) {
+        let headers = [];
+
+        for (let i = 0; i < Math.min(10, jsonData.length); i++) {
+          const row = jsonData[i];
+          if (!Array.isArray(row)) continue;
+
+          const rowText = row.join(" ").toLowerCase();
+          const hasInvoice = rowText.includes("invoice");
+          const hasProduct = rowText.includes("product");
+          const hasSupplier = rowText.includes("supplier");
+
+          if (
+            (hasInvoice && hasProduct) ||
+            (hasInvoice && hasSupplier) ||
+            (hasProduct && hasSupplier)
+          ) {
             headerRowIndex = i;
+            headers = row.map((h) => h?.toString().trim() || "");
+            console.log("Found headers at row", i, ":", headers);
             break;
           }
         }
 
         if (headerRowIndex === -1) {
-          showToast("error", "Header row not found or missing columns");
-          return;
+          // Use first row as headers
+          headerRowIndex = 0;
+          headers = jsonData[0].map((h) => h?.toString().trim() || "");
+          console.log("Using first row as headers:", headers);
         }
 
-        // Step 2: Map columns to headers
-        const rawHeaders = rows[headerRowIndex];
-        const headersMap = {};
-        rawHeaders.forEach((headerText, colIndex) => {
-          const cleaned = headerText?.toString().trim().toLowerCase();
-          if (requiredHeaders.includes(cleaned)) {
-            headersMap[colIndex] = cleaned;
+        // Create a mapping of column index to normalized header name
+        const headerMap = {};
+        headers.forEach((header, index) => {
+          if (!header) return;
+          const normalized = header.toLowerCase().trim();
+
+          // Map various header names to standard field names
+          if (
+            normalized.includes("invoice no") ||
+            normalized.includes("invoice number")
+          ) {
+            headerMap.invoiceNumber = index;
+          } else if (normalized.includes("invoice date")) {
+            headerMap.invoiceDate = index;
+          } else if (
+            normalized.includes("delivery") &&
+            (normalized.includes("no") || normalized.includes("number"))
+          ) {
+            headerMap.deliveryNumber = index;
+          } else if (normalized.includes("received date")) {
+            headerMap.receivedDate = index;
+          } else if (
+            normalized.includes("product name") ||
+            normalized.includes("product")
+          ) {
+            headerMap.productName = index;
+          } else if (
+            normalized.includes("supplier name") ||
+            normalized.includes("supplier")
+          ) {
+            headerMap.supplierName = index;
+          } else if (
+            normalized.includes("expiry date") ||
+            normalized.includes("expiry")
+          ) {
+            headerMap.expiryDate = index;
+          } else if (
+            normalized.includes("quantity") ||
+            normalized.includes("qty")
+          ) {
+            headerMap.quantityPerBoxStrip = index;
+          } else if (normalized.includes("fob")) {
+            headerMap.fob = index;
+          } else if (normalized.includes("cif")) {
+            headerMap.cif = index;
+          } else if (normalized.includes("lc")) {
+            headerMap.lc = index;
+          } else if (
+            normalized.includes("remarks") ||
+            normalized.includes("note")
+          ) {
+            headerMap.remarks = index;
           }
         });
 
-        // Step 3: Map rows to structured data
-        const dataRows = rows.slice(headerRowIndex + 1);
-        const mappedData = dataRows
-          .map((row) => {
-            const item = {};
-            Object.entries(headersMap).forEach(([colIndex, key]) => {
-              let cellVal = row[colIndex] || "";
-              if (typeof cellVal === "string") {
-                if (cellVal.toUpperCase() === "N/A" || cellVal.trim() === "") {
-                  cellVal = "";
-                }
-              }
-              item[key] = cellVal;
-            });
+        console.log("Header map:", headerMap);
 
-            return {
-              invoiceNumber: item["invoice number"] || "",
-              invoiceDate: parseExcelDate(item["invoice date"]),
-              deliveryNumber: item["delivery no."] || "",
-              receivedDate: parseExcelDate(item["received date"]),
-              productName: item["product name"] || "",
-              supplierName: item["supplier name"] || "",
-              expiryDate: parseExcelDate(item["expiry date"]),
-              quantityPerBoxStrip: parseNumber(item["quantity per box/strip"]),
-              fob: parseNumber(item["fob (usd)"]),
-              cif: parseNumber(item["cif (usd)"]),
-              lc: parseNumber(item["lc (usd)"]),
-              remarks: item["remarks"] || "",
-            };
-          })
-          .filter(
-            (entry) =>
-              entry.invoiceNumber !== "" ||
-              entry.productName !== "" ||
-              entry.deliveryNumber !== ""
+        // Process data rows
+        const mappedData = [];
+        const defaultInvoiceCounters = {};
+
+        for (let i = headerRowIndex + 1; i < jsonData.length; i++) {
+          const row = jsonData[i];
+          if (
+            !Array.isArray(row) ||
+            row.every((cell) => !cell || cell.toString().trim() === "")
+          ) {
+            continue;
+          }
+
+          const getValue = (field) => {
+            const index = headerMap[field];
+            return index !== undefined && row[index] !== undefined
+              ? row[index]
+              : "";
+          };
+
+          const parseDate = (value) => {
+            if (!value) return null;
+
+            // Handle Excel date numbers
+            if (typeof value === "number") {
+              try {
+                const excelEpoch = new Date(1899, 11, 30);
+                const date = new Date(excelEpoch.getTime() + value * 86400000);
+                return date.toISOString().split("T")[0];
+              } catch (e) {
+                return null;
+              }
+            }
+
+            // Handle string dates
+            const str = value.toString().trim();
+            if (!str) return null;
+
+            // Try common date formats
+            const formats = [
+              "YYYY-MM-DD",
+              "DD/MM/YYYY",
+              "MM/DD/YYYY",
+              "YYYY/MM/DD",
+              "DD-MM-YYYY",
+              "MM-DD-YYYY",
+            ];
+
+            for (const format of formats) {
+              try {
+                const parsed = dayjs(str, format);
+                if (parsed.isValid()) {
+                  return parsed.format("YYYY-MM-DD");
+                }
+              } catch (e) {
+                // Continue to next format
+              }
+            }
+
+            return null;
+          };
+
+          const parseNumber = (value) => {
+            if (!value && value !== 0) return 0;
+            if (typeof value === "number") return value;
+
+            const str = value.toString().trim();
+            if (!str || str.toLowerCase() === "n/a") return 0;
+
+            // Remove non-numeric characters except decimal point and minus
+            const cleaned = str.replace(/[^\d.-]/g, "");
+            if (cleaned === "") return 0;
+
+            const num = parseFloat(cleaned);
+            return isNaN(num) ? 0 : num;
+          };
+
+          // Get values from Excel
+          let invoiceNumber = getValue("invoiceNumber")?.toString().trim();
+          let invoiceDate = parseDate(getValue("invoiceDate"));
+          let deliveryNumber = getValue("deliveryNumber")?.toString().trim();
+          const receivedDate = parseDate(getValue("receivedDate"));
+          const productName = getValue("productName")?.toString().trim();
+          let supplierName = getValue("supplierName")?.toString().trim();
+          const expiryDate = parseDate(getValue("expiryDate"));
+          const quantityPerBoxStrip = parseNumber(
+            getValue("quantityPerBoxStrip")
           );
+          const fob = parseNumber(getValue("fob"));
+          const cif = parseNumber(getValue("cif"));
+          const lc = parseNumber(getValue("lc"));
+          const remarks = getValue("remarks")?.toString().trim() || "";
+
+          // Skip if essential fields are missing
+          if (!productName || !supplierName) {
+            console.log(
+              `Skipping row ${i}: Missing productName or supplierName`
+            );
+            continue;
+          }
+
+          // Generate default values for missing invoice fields
+          if (!invoiceNumber || !deliveryNumber || !invoiceDate) {
+            const key = `${supplierName || "Unknown"}-${dayjs().format(
+              "YYYY-MM-DD"
+            )}`;
+            if (!defaultInvoiceCounters[key]) {
+              defaultInvoiceCounters[key] = {
+                count: 1,
+                invoiceDate: invoiceDate || dayjs().format("YYYY-MM-DD"),
+                deliveryNumber:
+                  deliveryNumber || `DEL-${dayjs().format("YYYYMMDD")}-001`,
+              };
+            }
+
+            if (!invoiceNumber) {
+              invoiceNumber = `INV-${dayjs().format("YYYYMMDD")}-${String(
+                defaultInvoiceCounters[key].count
+              ).padStart(3, "0")}`;
+            }
+            if (!deliveryNumber) {
+              deliveryNumber = `DEL-${dayjs().format("YYYYMMDD")}-${String(
+                defaultInvoiceCounters[key].count
+              ).padStart(3, "0")}`;
+            }
+            if (!invoiceDate) {
+              invoiceDate = dayjs().format("YYYY-MM-DD");
+            }
+
+            defaultInvoiceCounters[key].count++;
+          }
+
+          // Calculate amount if not provided
+          const amount = quantityPerBoxStrip * lc;
+
+          mappedData.push({
+            invoiceNumber,
+            invoiceDate,
+            deliveryNumber: deliveryNumber || invoiceNumber,
+            receivedDate: receivedDate || invoiceDate,
+            productName,
+            supplierName,
+            expiryDate,
+            quantityPerBoxStrip,
+            fob,
+            cif,
+            lc,
+            lcNumber: lc,
+            remarks,
+            type: "Tablet",
+            amount,
+          });
+        }
+
+        console.log("Mapped data for import:", mappedData.slice(0, 3));
         setParsedData(mappedData);
+
+        if (mappedData.length === 0) {
+          showToast(
+            "warning",
+            "No valid data found in the file. Please check the format."
+          );
+        } else {
+          showToast(
+            "success",
+            `Found ${mappedData.length} purchase items to import`
+          );
+        }
       } catch (error) {
         console.error("Error reading Excel file:", error);
-        showToast("error", "Failed to process the file.");
+        showToast("error", `Failed to process the file: ${error.message}`);
+      } finally {
+        setIsUploading(false);
       }
     };
 
@@ -289,20 +476,27 @@ function Purchase() {
   };
 
   const parseNumber = (numStr) => {
-    if (!numStr) return 0;
+    if (!numStr && numStr !== 0) return 0;
     if (typeof numStr === "number") return numStr;
-    const cleaned = numStr.toString().replace(/[^0-9.-]/g, "");
+
+    // Handle string representations
+    const str = numStr.toString().trim();
+    if (str === "" || str.toLowerCase() === "n/a") return 0;
+
+    // Remove non-numeric characters except decimal point and minus sign
+    const cleaned = str.replace(/[^\d.-]/g, "");
     const num = parseFloat(cleaned);
     return isNaN(num) ? 0 : num;
   };
 
+  // Add this function to utils or in the Purchase component
   const handlePurchaseImport = async () => {
     if (parsedData.length === 0) {
       showToast("warning", "Please upload a valid file first");
       return;
     }
 
-    // ADDED: Validation before import
+    // Validation before import
     if (!validateSuppliersAndProducts()) {
       return;
     }
@@ -310,6 +504,7 @@ function Purchase() {
     setIsUploading(true);
 
     try {
+      console.log("Sending import data:", parsedData);
       const res = await axios.post(
         `${backendUrl}/api/purchase/import`,
         parsedData
@@ -2194,21 +2389,23 @@ function Purchase() {
             document.body
           )}
 
-        {/* IMPORT MODAL */}
         {showImportModal &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 flex justify-center items-center z-50">
               {/* Background Overlay */}
               <div
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setShowImportModal(false)}
+                onClick={() => !isUploading && setShowImportModal(false)}
               />
 
               {/* Modal Content */}
-              <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative z-10">
+              <div
+                className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative z-10"
+                onClick={(e) => e.stopPropagation()}
+              >
                 {/* Close Button */}
                 <button
-                  onClick={() => setShowImportModal(false)}
+                  onClick={() => !isUploading && setShowImportModal(false)}
                   className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
                   disabled={isUploading}
                 >
@@ -2219,6 +2416,23 @@ function Purchase() {
                 <h2 className="text-lg font-semibold mb-4">Import Purchase</h2>
                 {isSampleFile && <PurchaseSampleExcelDownload />}
 
+                {/* Debug info */}
+                {parsedData.length > 0 && (
+                  <div className="mb-4 p-3 bg-blue-50 rounded-lg">
+                    <p className="text-sm text-blue-700">
+                      Found {parsedData.length} items to import
+                    </p>
+                    <details className="mt-2">
+                      <summary className="text-sm cursor-pointer">
+                        View sample data
+                      </summary>
+                      <pre className="text-xs mt-2 p-2 bg-white border rounded overflow-auto max-h-32">
+                        {JSON.stringify(parsedData[0], null, 2)}
+                      </pre>
+                    </details>
+                  </div>
+                )}
+
                 {/* File Input */}
                 <div className="mb-6">
                   <label className="block text-gray-700 mb-2">
@@ -2226,16 +2440,21 @@ function Purchase() {
                   </label>
                   <input
                     type="file"
-                    accept=".csv, .xlsx"
+                    accept=".csv, .xlsx, .xls"
                     onChange={handleFileUpload}
                     className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
+                    onClick={(e) => e.stopPropagation()}
+                    disabled={isUploading}
                   />
+                  <p className="text-sm text-gray-500 mt-1">
+                    Supported formats: Excel (.xlsx, .xls) or CSV
+                  </p>
                 </div>
 
                 {/* Action Buttons */}
                 <div className="flex justify-end gap-3">
                   <button
-                    onClick={() => setShowImportModal(false)}
+                    onClick={() => !isUploading && setShowImportModal(false)}
                     disabled={isUploading}
                     className={`px-5 py-2 rounded-lg cursor-pointer ${
                       isUploading
@@ -2254,7 +2473,9 @@ function Purchase() {
                         : "bg-blue-600 hover:bg-blue-700 text-white"
                     }`}
                   >
-                    {isUploading ? "Uploading…" : "Upload"}
+                    {isUploading
+                      ? "Uploading…"
+                      : `Import (${parsedData.length})`}
                   </button>
                 </div>
               </div>
