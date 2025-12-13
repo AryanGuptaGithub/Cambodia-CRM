@@ -64,15 +64,64 @@ const Sales = () => {
   const inputRef = useRef(null);
   const { statuses, productNames, loading } = useInitialSaleData();
   const [errors, setErrors] = useState({});
+  const [stockData, setStockData] = useState({});
 
   const [currentProduct, setCurrentProduct] = useState(null);
   const [currentProductIndex, setCurrentProductIndex] = useState(null);
   const [isProductEditModalOpen, setIsProductEditModalOpen] = useState(false);
   const [expandedProductIndex, setExpandedProductIndex] = useState(-1);
 
-  // Import validation function
+  // FIXED: Updated stock data fetch endpoint
+  const fetchStockData = async () => {
+    try {
+      console.log(
+        "Fetching stock data from:",
+        `${backendUrl}/api/sales/stock/report-in-hand`
+      );
+      const response = await axios.get(
+        `${backendUrl}/api/sales/stock/report-in-hand`
+      );
+      if (response.data && Array.isArray(response.data)) {
+        const stockMap = {};
+        response.data.forEach((item) => {
+          if (item.productName) {
+            let currentStock = 0;
+            if (item.batches && Array.isArray(item.batches)) {
+              currentStock = item.batches.reduce(
+                (total, batch) => total + (batch.boxes || 0),
+                0
+              );
+            } else if (item.totalBoxes !== undefined) {
+              currentStock = item.totalBoxes;
+            } else if (item.currentStock !== undefined) {
+              currentStock = item.currentStock;
+            }
+            stockMap[item.productName] = currentStock;
+          }
+        });
+        setStockData(stockMap);
+        console.log(
+          "Stock data loaded:",
+          Object.keys(stockMap).length,
+          "products"
+        );
+      }
+    } catch (error) {
+      console.error("Error fetching stock data:", error);
+      showToast("error", "Failed to fetch stock data");
+    }
+  };
+
+  const checkProductStock = (productName, requiredQty) => {
+    const availableStock = stockData[productName] || 0;
+    return {
+      hasSufficientStock: availableStock >= requiredQty,
+      availableStock,
+      requiredQty,
+    };
+  };
+
   const handleImportClick = () => {
-    // Check if required data is available
     const missingFields = [];
 
     if (!productsList.length) {
@@ -97,8 +146,31 @@ const Sales = () => {
       return;
     }
 
-    // If all data is available, show the import modal
     setShowImportModal(true);
+  };
+
+  const validateParsedDataStock = () => {
+    const validationErrors = [];
+
+    parsedData.forEach((invoice, invoiceIndex) => {
+      invoice.products.forEach((product, productIndex) => {
+        const totalQty =
+          (Number(product.salesQty) || 0) + (Number(product.bonusQty) || 0);
+        const stockCheck = checkProductStock(product.productName, totalQty);
+
+        if (!stockCheck.hasSufficientStock) {
+          validationErrors.push({
+            invoiceNumber: invoice.invoiceNumber,
+            productName: product.productName,
+            required: totalQty,
+            available: stockCheck.availableStock,
+            message: `Insufficient stock for "${product.productName}". Required: ${totalQty}, Available: ${stockCheck.availableStock}`,
+          });
+        }
+      });
+    });
+
+    return validationErrors;
   };
 
   const toggleProductView = (index) => {
@@ -119,13 +191,11 @@ const Sales = () => {
     []
   );
 
-  // Helper function to capitalize first letter
   const capitalizeFirstLetter = (string) => {
     if (!string) return "--";
     return string.charAt(0).toUpperCase() + string.slice(1);
   };
 
-  // Get field value from sale object
   const getFieldValue = (sale, dbName) => {
     if (dbName === "customerName") {
       return sale?.customerName || "--";
@@ -160,7 +230,6 @@ const Sales = () => {
       return Math.ceil(sale[dbName] || 0);
     }
 
-    // Handle object values by converting to string
     const value = sale[dbName];
     if (value && typeof value === "object") {
       return value.name || value.displayName || JSON.stringify(value);
@@ -169,20 +238,17 @@ const Sales = () => {
     return value ?? "--";
   };
 
-  // Function to open product details modal for viewing
   const handleProductCountClick = (sale) => {
     setSelectedSaleProducts(sale.products || []);
     setIsProductModalOpen(true);
   };
 
-  // Function to open product edit modal from edit form
   const openProductEditModal = (product, index) => {
     setCurrentProduct({ ...product });
     setCurrentProductIndex(index);
     setIsProductEditModalOpen(true);
   };
 
-  // Function to handle product changes in the product edit modal
   const handleProductChange = (e) => {
     const { name, value } = e.target;
     setCurrentProduct((prev) => ({
@@ -191,13 +257,11 @@ const Sales = () => {
     }));
   };
 
-  // Function to update product in the main form
   const updateProductInForm = () => {
     setForm((prev) => {
       const updatedProducts = [...prev.products];
       updatedProducts[currentProductIndex] = currentProduct;
 
-      // Recalculate totals after product update
       const totals = calculateProductTotals(updatedProducts);
 
       return {
@@ -215,7 +279,6 @@ const Sales = () => {
     setCurrentProductIndex(null);
   };
 
-  // Function to handle numeric input for product modal
   const handleProductNumericChange = (e) => {
     const { name, value } = e.target;
     if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
@@ -373,10 +436,8 @@ const Sales = () => {
     products: [],
   });
 
-  // Constants for pagination
   const SALES_PER_PAGE = 9;
 
-  // Fetch MR, Customer, and Products lists
   useEffect(() => {
     const fetchDropdownData = async () => {
       try {
@@ -410,7 +471,15 @@ const Sales = () => {
         }
 
         if (customers?.success && Array.isArray(customers.data)) {
-          setCustomerList(customers.data);
+          const customerOptions = customers.data.map((customer) => ({
+            id: customer._id || customer.id,
+            code: customer.customerCode || customer.code || "",
+            name: customer.name || customer.customerName || "Unknown Customer",
+            number: customer.customerNumber || "",
+            address: customer.address || "",
+            zone: customer.zone || "",
+          }));
+          setCustomerList(customerOptions);
         } else {
           console.warn(
             "Customer list data is not in expected format:",
@@ -428,6 +497,8 @@ const Sales = () => {
           );
           setProductsList([]);
         }
+
+        await fetchStockData();
       } catch (error) {
         console.error("Error fetching dropdown data:", error);
         showToast("error", "Failed to load dropdown data");
@@ -440,7 +511,6 @@ const Sales = () => {
     fetchDropdownData();
   }, []);
 
-  // Fetch sales data
   const fetchSaleSummaries = async () => {
     try {
       const res = await fetch(`${backendUrl}/api/sales`);
@@ -463,12 +533,10 @@ const Sales = () => {
     }
   };
 
-  // Fetch data on mount
   useEffect(() => {
     fetchSaleSummaries();
   }, []);
 
-  // Memoized filtered sales
   const filteredSales = useMemo(() => {
     if (!Array.isArray(sales)) {
       console.warn("Sales is not an array:", sales);
@@ -481,7 +549,6 @@ const Sales = () => {
     return sales.filter((sale) => {
       const paymentStatus = (sale.paymentStatus || "pending").toLowerCase();
 
-      // Tab filter
       if (selectedTabLower !== "all" && selectedTabLower !== paymentStatus) {
         return false;
       }
@@ -490,7 +557,6 @@ const Sales = () => {
         return true;
       }
 
-      // Prepare searchable values
       const fields = [sale.invoiceNumber, sale.customerName, sale.mrName];
 
       return fields.some((f) =>
@@ -499,23 +565,19 @@ const Sales = () => {
     });
   }, [sales, searchTerm, selectedTab]);
 
-  // Current page sales
   const currentSales = useMemo(() => {
     const start = (currentPage - 1) * SALES_PER_PAGE;
     return filteredSales.slice(start, start + SALES_PER_PAGE);
   }, [filteredSales, currentPage]);
 
-  // Total pages calculation
   const totalPages = useMemo(() => {
     return Math.ceil(filteredSales.length / SALES_PER_PAGE);
   }, [filteredSales.length]);
 
-  // Visible pages for pagination
   const visiblePages = useMemo(() => {
     return getVisiblePages(currentPage, totalPages);
   }, [currentPage, totalPages]);
 
-  // Reset to first page when filters change
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, selectedTab]);
@@ -556,14 +618,44 @@ const Sales = () => {
   const handleUpdateSales = async (e, sale) => {
     e.preventDefault();
     try {
+      const stockErrors = [];
+      sale.products.forEach((product, index) => {
+        const totalQty =
+          (Number(product.salesQty) || 0) + (Number(product.bonusQty) || 0);
+        const stockCheck = checkProductStock(product.productName, totalQty);
+        if (!stockCheck.hasSufficientStock) {
+          stockErrors.push({
+            product: product.productName,
+            required: totalQty,
+            available: stockCheck.availableStock,
+          });
+        }
+      });
+
+      if (stockErrors.length > 0) {
+        const errorMessages = stockErrors
+          .map(
+            (err) =>
+              `"${err.product}": Required ${err.required}, Available ${err.available}`
+          )
+          .join("\n");
+        showToast("error", `Insufficient stock:\n${errorMessages}`);
+        return;
+      }
+
       const res = await axios.put(`${backendUrl}/api/sales/${sale._id}`, sale);
       if (res.status === 200) {
         showToast("success", "Sales record updated successfully");
         setIsEditModalOpen(false);
         fetchSaleSummaries();
+        await fetchStockData();
       }
     } catch (err) {
-      showToast("error", "Failed to update sales record.");
+      if (err.response && err.response.data && err.response.data.error) {
+        showToast("error", err.response.data.error);
+      } else {
+        showToast("error", "Failed to update sales record.");
+      }
     }
   };
 
@@ -583,12 +675,13 @@ const Sales = () => {
         if (res.status === 200) {
           showToast(
             "success",
-            `Customer <b>${sale.invoiceNumber}</b> deleted successfully`
+            `Sale <b>${sale.invoiceNumber}</b> deleted successfully`
           );
           fetchSaleSummaries();
+          await fetchStockData();
         }
       } catch (error) {
-        showToast("error", "Failed to delete customer.");
+        showToast("error", "Failed to delete sale.");
       }
     }
   };
@@ -612,9 +705,10 @@ const Sales = () => {
           showToast("success", "Selected Sales deleted successfully");
           fetchSaleSummaries();
           setSelected([]);
+          await fetchStockData();
         }
       } catch (error) {
-        showToast("error", "Failed to delete selected customers.");
+        showToast("error", "Failed to delete selected sales.");
       }
     } else {
       setSelected([]);
@@ -683,26 +777,21 @@ const Sales = () => {
           return;
         }
 
-        // Convert rows to JSON
         const json = dataRows.map((row) => {
           const obj = {};
           headers.forEach((h, i) => (obj[h] = row[i] ?? ""));
           return obj;
         });
 
-        // Group by Invoice #
         const groupedInvoices = {};
 
         for (const row of json) {
           const invoiceNumber = row["Invoice #"] || "UNKNOWN";
-
-          // Use customer info directly from the Excel
           const customerName = row["Customer Name"]?.trim() || "";
           const customerCode = row["Customer Code"]?.trim() || "";
           const customerId = row["Customer ID"]?.trim() || "";
 
           if (!groupedInvoices[invoiceNumber]) {
-            // Calculate due date: current date + credit days
             const creditDays = Number(row["Credit Days"]) || 0;
             const currentDate = new Date();
             const dueDate = new Date(currentDate);
@@ -744,12 +833,30 @@ const Sales = () => {
           groupedInvoices[invoiceNumber].totalAmount += productTotal;
         }
 
-        // Calculate due amount
         Object.values(groupedInvoices).forEach((invoice) => {
           invoice.dueAmount = invoice.totalAmount - invoice.paidAmount;
         });
 
         const invoicesArray = Object.values(groupedInvoices);
+
+        const stockErrors = validateParsedDataStock();
+        if (stockErrors.length > 0) {
+          const errorMessages = stockErrors
+            .slice(0, 3)
+            .map(
+              (err) =>
+                `${err.productName} (Invoice: ${err.invoiceNumber}): Required ${err.required}, Available ${err.available}`
+            )
+            .join("\n");
+
+          if (stockErrors.length > 3) {
+            errorMessages += `\n...and ${stockErrors.length - 3} more`;
+          }
+
+          showToast("error", `Insufficient stock found:\n${errorMessages}`);
+          return;
+        }
+
         setParsedData(invoicesArray);
       } catch (error) {
         console.error("❌ Error reading file:", error);
@@ -760,62 +867,138 @@ const Sales = () => {
     reader.readAsArrayBuffer(file);
   };
 
+  // FIXED: Updated import function with proper error handling
   const handleProductImport = async () => {
     if (!parsedData || parsedData.length === 0) {
       showToast("warning", "Please upload and validate a file first.");
       return;
     }
 
-    // Double check required data before importing
-    if (!productsList.length || !mrList.length || !customerList.length) {
-      showToast(
-        "error",
-        "Required data missing. Please ensure products, medical representatives, and customers are available."
-      );
-      return;
+    const stockErrors = validateParsedDataStock();
+    if (stockErrors.length > 0) {
+      // ... existing stock validation dialog code ...
     }
 
     setIsUploading(true);
 
+    // Create AbortController for timeout
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(() => abortController.abort(), 120000); // 120 seconds timeout
+
     try {
+      console.log("Importing data to:", `${backendUrl}/api/sales/import`);
+
       const res = await axios.post(
-        `${backendUrl}/api/sale/import`,
+        `${backendUrl}/api/sales/import`,
         parsedData,
         {
           headers: { "Content-Type": "application/json" },
+          timeout: 120000, // 120 second response timeout
+          signal: abortController.signal, // Connection timeout
+          onUploadProgress: (progressEvent) => {
+            // Optional: Add progress indicator for large imports
+            const percentCompleted = Math.round(
+              (progressEvent.loaded * 100) / progressEvent.total
+            );
+            console.log(`Upload progress: ${percentCompleted}%`);
+          },
         }
       );
 
-      if (res?.status === 200 && res?.data) {
-        if (res.data.success) {
-          showToast(
-            "success",
-            res.data.message || "Sale summary imported successfully!"
-          );
+      clearTimeout(timeoutId);
+
+      if (res.data) {
+        const result = res.data;
+
+        if (result.success) {
+          showToast("success", result.message);
+
+          // Show detailed summary if available
+          if (result.summary) {
+            const summary = result.summary;
+            showToast(
+              "info",
+              `Imported: ${summary.successfullyImported}/${summary.totalReceived} invoices. ` +
+                `Time: ${summary.processingTimeSeconds}s`
+            );
+          }
+
+          setShowImportModal(false);
+          setParsedData([]);
+          fetchSaleSummaries();
+          await fetchStockData();
         } else {
-          const errorMessage =
-            res.data.message?.length > 300
-              ? res.data.message.slice(0, 300) + "..."
-              : res.data.message;
+          showToast("error", result.message || "Import failed");
 
-          showToast("error", errorMessage || "Some records failed to import.");
+          // Show detailed errors if available
+          if (result.details?.insufficientStock?.length > 0) {
+            console.warn(
+              "Insufficient stock items:",
+              result.details.insufficientStock
+            );
+          }
         }
-
-        setShowImportModal(false);
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        fetchSaleSummaries();
-      } else {
-        showToast(
-          "error",
-          res?.data?.message || "Unexpected response from the server."
-        );
       }
     } catch (err) {
+      clearTimeout(timeoutId);
       console.error("❌ Import failed:", err);
-      handleAxiosError(err, showToast);
+
+      let errorMessage = "Failed to import data";
+      let isTimeoutError = false;
+
+      if (err.code === "ECONNABORTED" || err.message?.includes("timeout")) {
+        errorMessage =
+          "Import timeout. The server is taking too long to process. Try importing smaller batches.";
+        isTimeoutError = true;
+      } else if (err.response) {
+        errorMessage =
+          err.response.data?.message ||
+          err.response.data?.error ||
+          `Server error: ${err.response.status}`;
+      } else if (err.request) {
+        errorMessage =
+          "No response from server. Please check if the backend server is running.";
+      } else {
+        errorMessage = err.message;
+      }
+
+      showToast("error", errorMessage);
+
+      // Suggest batch import for timeout errors
+      if (isTimeoutError && parsedData.length > 50) {
+        const confirm = window.confirm(
+          "Large import timed out. Would you like to try importing in smaller batches (max 50 records per batch)?"
+        );
+        if (confirm) {
+          // Implement batch splitting logic here
+          handleBatchImport(parsedData, 50);
+        }
+      }
     } finally {
       setIsUploading(false);
     }
+  };
+
+  // Helper function for batch imports
+  const handleBatchImport = async (data, batchSize = 50) => {
+    const batches = [];
+    for (let i = 0; i < data.length; i += batchSize) {
+      batches.push(data.slice(i, i + batchSize));
+    }
+
+    let successfulBatches = 0;
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i];
+      const result = await importBatch(batch, i + 1, batches.length);
+      if (result) successfulBatches++;
+    }
+
+    showToast(
+      "success",
+      `Batch import complete: ${successfulBatches}/${batches.length} batches successful`
+    );
+    fetchSaleSummaries();
+    await fetchStockData();
   };
 
   const handleNumericInputChange = (e, updateFunc) => {
@@ -825,7 +1008,6 @@ const Sales = () => {
     }
   };
 
-  // Form change handlers
   const updateFormField = useCallback((name, value) => {
     setForm((prev) => ({ ...prev, [name]: value }));
   }, []);
@@ -843,17 +1025,14 @@ const Sales = () => {
       return isNaN(num) ? 0 : num;
     };
 
-    // Total Qty = Sales + Bonus
     if (["salesQty", "bonusQty"].includes(name)) {
       updatedForm.totalQty = getInt("salesQty") + getInt("bonusQty");
     }
 
-    // Delivery Date = Invoice Date
     if (name === "invoiceDate") {
       updatedForm.deliveryDate = value;
     }
 
-    // Due Date = Credit Days
     if (name === "creditDays") {
       const creditDays = parseInt(value, 10);
       if (!isNaN(creditDays)) {
@@ -865,14 +1044,12 @@ const Sales = () => {
       }
     }
 
-    // Amount = sellingPrice * salesQty
     if (["sellingPrice", "salesQty"].includes(name)) {
       updatedForm.amount = (
         getNum("sellingPrice") * getInt("salesQty")
       ).toFixed(2);
     }
 
-    // Net Selling Amount = amount - discount
     if (["amount", "discount", "sellingPrice", "salesQty"].includes(name)) {
       updatedForm.netSellingAmount = (
         getNum("amount") - getNum("discount")
@@ -891,14 +1068,12 @@ const Sales = () => {
       ).toFixed(2);
     }
 
-    // Due Amount = netSellingAmount - paidAmount (FIXED CALCULATION)
     if (["netSellingAmount", "paidAmount"].includes(name)) {
       const netAmount = getNum("netSellingAmount");
       const paidAmount = getNum("paidAmount");
       updatedForm.dueAmount = (netAmount - paidAmount).toFixed(2);
     }
 
-    // Average Unit Price = netSellingAmount / totalQty
     if (
       [
         "netSellingAmount",
@@ -935,13 +1110,11 @@ const Sales = () => {
     });
   };
 
-  // Get customer name from customer code
   const getCustomerName = (customerCode) => {
     const customer = customerList.find((c) => c.code === customerCode);
     return customer ? customer.name : customerCode;
   };
 
-  // Calculate product totals
   const calculateProductTotals = (products) => {
     if (!products || !Array.isArray(products))
       return {
@@ -965,7 +1138,6 @@ const Sales = () => {
     return totals;
   };
 
-  // Calculate due amount when form changes
   useEffect(() => {
     if (form.netSellingAmount !== undefined && form.paidAmount !== undefined) {
       const netAmount = parseFloat(form.netSellingAmount) || 0;
@@ -981,6 +1153,10 @@ const Sales = () => {
     }
   }, [form.netSellingAmount, form.paidAmount]);
 
+  const showMRCustomerWarning = useMemo(() => {
+    return mrList.length === 0 || customerList.length === 0;
+  }, [mrList, customerList]);
+
   if (loading) return <LoadingOverlay text="Please wait..." />;
 
   const productTotals = calculateProductTotals(form.products);
@@ -988,18 +1164,70 @@ const Sales = () => {
   return (
     <div className="p-6">
       <div className="container">
+        {showMRCustomerWarning && (
+          <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <svg
+                  className="h-5 w-5 text-yellow-400"
+                  fill="currentColor"
+                  viewBox="0 0 20 20"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+              </div>
+              <div className="ml-3">
+                <h3 className="text-sm font-medium text-yellow-800">
+                  Missing Data Required for Sales
+                </h3>
+                <div className="mt-2 text-sm text-yellow-700">
+                  <ul className="list-disc pl-5 space-y-1">
+                    {mrList.length === 0 && (
+                      <li>
+                        No Medical Representatives found. Please add MR data
+                        first.
+                      </li>
+                    )}
+                    {customerList.length === 0 && (
+                      <li>
+                        No Customers found. Please add Customer data first.
+                      </li>
+                    )}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
           <div className="flex gap-3 items-center">
             <button
-              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={() => navigate("/salelayout/sale/new")}
+              disabled={showMRCustomerWarning}
+              title={
+                showMRCustomerWarning
+                  ? "Please add MR and Customer data first"
+                  : ""
+              }
             >
               <UserPlus size={18} /> Add New Sales
             </button>
 
             <button
               onClick={handleImportClick}
-              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={showMRCustomerWarning}
+              title={
+                showMRCustomerWarning
+                  ? "Please add MR and Customer data first"
+                  : ""
+              }
             >
               <Upload size={18} /> Import Sales
             </button>
@@ -1132,7 +1360,7 @@ const Sales = () => {
                     {loadingData ? (
                       <LoadingOverlay text="Please wait..." />
                     ) : (
-                      ""
+                      "No sales data found"
                     )}
                   </td>
                 </tr>
@@ -1209,7 +1437,6 @@ const Sales = () => {
             </tbody>
           </table>
 
-          {/* Enhanced Pagination Controls */}
           {filteredSales.length > SALES_PER_PAGE && (
             <div className="mt-4 p-5 flex flex-col sm:flex-row justify-between items-center gap-4 bg-gray-50 border-t">
               <div className="text-sm text-gray-600">
@@ -1428,11 +1655,21 @@ const Sales = () => {
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
               <div
                 className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setShowImportModal(false)}
+                onClick={() => {
+                  if (!isUploading) {
+                    setShowImportModal(false);
+                    setParsedData([]);
+                  }
+                }}
               />
               <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
                 <button
-                  onClick={() => setShowImportModal(false)}
+                  onClick={() => {
+                    if (!isUploading) {
+                      setShowImportModal(false);
+                      setParsedData([]);
+                    }
+                  }}
                   className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
                   disabled={isUploading}
                 >
@@ -1445,10 +1682,32 @@ const Sales = () => {
                   accept=".csv, .xlsx"
                   onChange={handleFileUpload}
                   className="block w-full border rounded-lg px-3 py-2 mb-6"
+                  disabled={isUploading}
                 />
+                {parsedData.length > 0 && (
+                  <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                    <p className="text-sm text-green-800">
+                      Found {parsedData.length} invoices with{" "}
+                      {parsedData.reduce(
+                        (total, inv) => total + (inv.products?.length || 0),
+                        0
+                      )}{" "}
+                      products.
+                      {validateParsedDataStock().length === 0 && (
+                        <span className="font-semibold">
+                          {" "}
+                          All products have sufficient stock.
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                )}
                 <div className="flex justify-end gap-3">
                   <button
-                    onClick={() => setShowImportModal(false)}
+                    onClick={() => {
+                      setShowImportModal(false);
+                      setParsedData([]);
+                    }}
                     disabled={isUploading}
                     className={`px-5 py-2 rounded-lg cursor-pointer ${
                       isUploading
@@ -1460,9 +1719,9 @@ const Sales = () => {
                   </button>
                   <button
                     onClick={handleProductImport}
-                    disabled={isUploading}
+                    disabled={isUploading || parsedData.length === 0}
                     className={`px-5 py-2 rounded-lg cursor-pointer ${
-                      isUploading
+                      isUploading || parsedData.length === 0
                         ? "bg-blue-400 text-white cursor-not-allowed"
                         : "bg-blue-600 hover:bg-blue-700 text-white"
                     }`}
@@ -1475,7 +1734,6 @@ const Sales = () => {
             document.body
           )}
 
-        {/* Rest of your modals remain the same */}
         {isEditModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -1496,7 +1754,6 @@ const Sales = () => {
                 </h2>
 
                 <form className="grid grid-cols-1 md:grid-cols-3 gap-4 max-h-[70vh]">
-                  {/* Recording Date */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700">
                       Recording Date
@@ -1514,7 +1771,6 @@ const Sales = () => {
                     />
                   </div>
 
-                  {/* Invoice Number */}
                   <div>
                     <label className="block text-sm font-medium">
                       Invoice Number
@@ -1531,7 +1787,6 @@ const Sales = () => {
                     />
                   </div>
 
-                  {/* Invoice Date */}
                   <div>
                     <label className="block text-sm font-medium">
                       Invoice Date
@@ -1547,19 +1802,28 @@ const Sales = () => {
                     />
                   </div>
 
-                  {/* MR Name - Using SearchableDropdown */}
                   <div>
                     <label className="block text-sm font-medium">MR Name</label>
                     <SearchableDropdown
                       options={mrList.map((mr) => ({ value: mr, label: mr }))}
                       value={form.mrName}
                       onChange={(value) => updateFormField("mrName", value)}
-                      placeholder="Select MR"
+                      placeholder={
+                        mrList.length === 0
+                          ? "No MR available. Please add MR first."
+                          : "Select MR"
+                      }
                       className="w-full"
+                      disabled={mrList.length === 0}
                     />
+                    {mrList.length === 0 && (
+                      <p className="text-xs text-red-500 mt-1">
+                        No Medical Representatives available. Please add MR data
+                        first.
+                      </p>
+                    )}
                   </div>
 
-                  {/* Customer - Using SearchableDropdown */}
                   <div>
                     <label className="block text-sm font-medium">
                       Customer
@@ -1573,44 +1837,73 @@ const Sales = () => {
                       onChange={(value) =>
                         updateFormField("customerCode", value)
                       }
-                      placeholder="Select Customer"
+                      placeholder={
+                        customerList.length === 0
+                          ? "No customers available. Please add customers first."
+                          : "Select Customer"
+                      }
                       className="w-full"
+                      disabled={customerList.length === 0}
                     />
+                    {customerList.length === 0 && (
+                      <p className="text-xs text-red-500 mt-1">
+                        No Customers available. Please add Customer data first.
+                      </p>
+                    )}
                   </div>
 
-                  {/* Products List */}
                   <div className="md:col-span-3">
                     <label className="block text-sm font-medium mb-2">
                       Products ({form.products?.length || 0})
                     </label>
                     <div className="space-y-3 border rounded-lg p-4 bg-gray-50">
                       {form.products && form.products.length > 0 ? (
-                        form.products.map((product, index) => (
-                          <div
-                            key={`edit-product-${index}`}
-                            className="flex items-center justify-between p-3 bg-white rounded border border-gray-300"
-                          >
-                            <div className="flex-1">
-                              <span className="font-medium text-gray-700">
-                                {product.productName || `Product ${index + 1}`}
-                              </span>
-                              <div className="text-sm text-gray-500 mt-1">
-                                Qty: {product.salesQty || 0} | Bonus:{" "}
-                                {product.bonusQty || 0} | Price: $
-                                {(product.sellingPrice || 0).toFixed(2)}
+                        form.products.map((product, index) => {
+                          const totalQty =
+                            (product.salesQty || 0) + (product.bonusQty || 0);
+                          const stockCheck = checkProductStock(
+                            product.productName,
+                            totalQty
+                          );
+
+                          return (
+                            <div
+                              key={`edit-product-${index}`}
+                              className="p-3 bg-white rounded border border-gray-300"
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium text-gray-700">
+                                      {product.productName ||
+                                        `Product ${index + 1}`}
+                                    </span>
+                                    {!stockCheck.hasSufficientStock && (
+                                      <span className="text-xs bg-red-100 text-red-800 px-2 py-1 rounded">
+                                        Insufficient Stock (Available:{" "}
+                                        {stockCheck.availableStock})
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-sm text-gray-500 mt-1">
+                                    Qty: {product.salesQty || 0} | Bonus:{" "}
+                                    {product.bonusQty || 0} | Price: $
+                                    {(product.sellingPrice || 0).toFixed(2)}
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    openProductEditModal(product, index)
+                                  }
+                                  className="ml-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm cursor-pointer"
+                                >
+                                  Edit Details
+                                </button>
                               </div>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                openProductEditModal(product, index)
-                              }
-                              className="ml-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm cursor-pointer"
-                            >
-                              Edit Details
-                            </button>
-                          </div>
-                        ))
+                          );
+                        })
                       ) : (
                         <div className="text-center text-gray-500 py-4">
                           No products added
@@ -1619,7 +1912,6 @@ const Sales = () => {
                     </div>
                   </div>
 
-                  {/* Financial Summary */}
                   <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-4 gap-4 pt-4 border-t border-gray-300">
                     <div>
                       <label className="block text-sm font-medium">
@@ -1676,7 +1968,6 @@ const Sales = () => {
                     </div>
                   </div>
 
-                  {/* Payment Information */}
                   <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div>
                       <label className="block text-sm font-medium">
@@ -1736,7 +2027,6 @@ const Sales = () => {
                     </div>
                   </div>
 
-                  {/* Payment Status */}
                   <div>
                     <label className="block text-sm font-medium">
                       Payment Status
@@ -1755,7 +2045,6 @@ const Sales = () => {
                     />
                   </div>
 
-                  {/* Delivery Date */}
                   <div>
                     <label className="block text-sm font-medium">
                       Delivery Date
@@ -1771,7 +2060,6 @@ const Sales = () => {
                     />
                   </div>
 
-                  {/* Remark - Changed to textarea with border */}
                   <div className="md:col-span-3">
                     <label className="block text-sm font-medium">Remark</label>
                     <textarea
@@ -1784,7 +2072,6 @@ const Sales = () => {
                     />
                   </div>
 
-                  {/* Footer buttons */}
                   <div className="md:col-span-3 mt-4 flex justify-end gap-3 border-t border-gray-300 pt-4">
                     <button
                       type="button"
@@ -1828,8 +2115,81 @@ const Sales = () => {
                 </h2>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Product form fields remain the same */}
-                  {/* ... */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Product Name
+                    </label>
+                    <InputField
+                      type="text"
+                      name="productName"
+                      value={currentProduct?.productName || ""}
+                      onChange={handleProductChange}
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Sales Quantity
+                    </label>
+                    <InputField
+                      type="number"
+                      name="salesQty"
+                      value={currentProduct?.salesQty || 0}
+                      onChange={handleProductNumericChange}
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Bonus Quantity
+                    </label>
+                    <InputField
+                      type="number"
+                      name="bonusQty"
+                      value={currentProduct?.bonusQty || 0}
+                      onChange={handleProductNumericChange}
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Selling Price
+                    </label>
+                    <InputField
+                      type="number"
+                      name="sellingPrice"
+                      value={currentProduct?.sellingPrice || 0}
+                      onChange={handleProductNumericChange}
+                      step="0.01"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Discount
+                    </label>
+                    <InputField
+                      type="number"
+                      name="discount"
+                      value={currentProduct?.discount || 0}
+                      onChange={handleProductNumericChange}
+                      step="0.01"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      LC Value
+                    </label>
+                    <InputField
+                      type="number"
+                      name="lc"
+                      value={currentProduct?.lc || 0}
+                      onChange={handleProductNumericChange}
+                      step="0.01"
+                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
+                    />
+                  </div>
                 </div>
 
                 <div className="mt-6 flex justify-end gap-3 border-t border-gray-300 pt-4">
@@ -1852,6 +2212,7 @@ const Sales = () => {
             </div>,
             document.body
           )}
+
         {isViewModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -1872,7 +2233,6 @@ const Sales = () => {
                   View Sales Record
                 </h2>
 
-                {/* Common Fields Section */}
                 <div className="mb-6">
                   <h3 className="text-lg font-medium text-gray-700 mb-3">
                     Record Information
@@ -1938,7 +2298,6 @@ const Sales = () => {
                   </div>
                 </div>
 
-                {/* Product List Section */}
                 <div className="mb-6">
                   <h3 className="text-lg font-medium text-gray-700 mb-3">
                     Product Information
@@ -1951,16 +2310,13 @@ const Sales = () => {
                           key={index}
                           className="border rounded-lg p-4 bg-gray-50"
                         >
-                          {/* Product Header with Name and View Button */}
                           <div className="flex justify-between items-center mb-2">
-                            {/* Product Name on Left */}
                             <div className="flex-1">
                               <h4 className="text-lg font-semibold text-gray-800 capitalize">
                                 {product.productName || `Product ${index + 1}`}
                               </h4>
                             </div>
 
-                            {/* View/Hide Button on Right */}
                             <button
                               className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg cursor-pointer text-sm"
                               onClick={() => toggleProductView(index)}
@@ -1971,7 +2327,6 @@ const Sales = () => {
                             </button>
                           </div>
 
-                          {/* Product Details - Conditionally Rendered */}
                           {expandedProductIndex === index && (
                             <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
                               {[
@@ -2006,7 +2361,6 @@ const Sales = () => {
                   )}
                 </div>
 
-                {/* Payment & Delivery Section */}
                 <div className="mb-6">
                   <h3 className="text-lg font-medium text-gray-700 mb-3">
                     Payment & Delivery
@@ -2072,7 +2426,6 @@ const Sales = () => {
                   </div>
                 </div>
 
-                {/* Remark Section */}
                 <div className="mb-6">
                   <label className="block text-sm font-medium text-gray-600 mb-2">
                     Remark

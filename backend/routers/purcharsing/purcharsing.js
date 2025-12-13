@@ -37,45 +37,79 @@ const updateReportInHand = async (productData, operation = "add") => {
       type,
     } = productData;
 
+    // Validate required fields
+    if (!productName || productName.trim() === "") {
+      console.warn(
+        "Skipping updateReportInHand: productName is missing or empty"
+      );
+      return;
+    }
+
     const qty = Number(quantityPerBoxStrip || 0);
     const validSupplier = supplierName?.trim() || "Unknown Supplier";
+    const validProductName = productName.trim();
 
-    let item = await ReportInHand.findOne({ productName });
+    let item = await ReportInHand.findOne({ productName: validProductName });
 
-    if (!item) {
+    // If subtracting and item doesn't exist, nothing to do
+    if (operation === "subtract" && !item) {
+      console.warn(
+        `Cannot subtract: Product "${validProductName}" not found in ReportInHand`
+      );
+      return;
+    }
+
+    // If adding and item doesn't exist, create new
+    if (operation === "add" && !item) {
       item = new ReportInHand({
-        productName,
+        productName: validProductName,
         supplierName: validSupplier,
         type: type || "Tablet",
         batches: [],
         totalBoxes: 0,
         totalAmount: 0,
+        status: "Out of Stock",
       });
     }
 
     if (operation === "add") {
-      const amount = qty * lc;
+      const amount = qty * (lc || 0);
 
       item.batches.push({
         boxes: qty,
-        lc,
-        fob,
-        cif,
+        lc: lc || 0,
+        fob: fob || 0,
+        cif: cif || 0,
         amount,
-        expiryDate,
+        expiryDate: expiryDate ? new Date(expiryDate) : null,
         date: new Date(),
       });
     }
 
     if (operation === "subtract") {
+      if (!item || !Array.isArray(item.batches) || item.batches.length === 0) {
+        console.warn(
+          `No batches found for product "${validProductName}" to subtract from`
+        );
+        return;
+      }
+
       let qtyToRemove = qty;
 
-      for (const batch of item.batches) {
+      // Sort batches by date (FIFO: First In First Out)
+      item.batches.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+      // Create a copy of batches to avoid mutation during iteration
+      const batchesCopy = [...item.batches];
+
+      for (let i = 0; i < batchesCopy.length; i++) {
         if (qtyToRemove <= 0) break;
+
+        const batch = batchesCopy[i];
 
         if (batch.boxes > qtyToRemove) {
           batch.boxes -= qtyToRemove;
-          batch.amount = batch.boxes * batch.lc;
+          batch.amount = batch.boxes * (batch.lc || 0);
           qtyToRemove = 0;
         } else {
           qtyToRemove -= batch.boxes;
@@ -84,23 +118,44 @@ const updateReportInHand = async (productData, operation = "add") => {
         }
       }
 
-      item.batches = item.batches.filter((b) => b.boxes > 0);
+      // Remove batches with 0 boxes
+      item.batches = batchesCopy.filter((b) => b.boxes > 0);
     }
 
-    item.totalBoxes = item.batches.reduce((sum, b) => sum + b.boxes, 0);
-    item.totalAmount = item.batches.reduce((sum, b) => sum + b.amount, 0);
+    // Recalculate totals
+    item.totalBoxes = item.batches.reduce((sum, b) => sum + (b.boxes || 0), 0);
+    item.totalAmount = item.batches.reduce(
+      (sum, b) => sum + (b.amount || 0),
+      0
+    );
 
-    if (item.totalBoxes <= 0) item.status = "Out of Stock";
-    else if (item.totalBoxes < 10) item.status = "Critical";
-    else if (item.totalBoxes < 25) item.status = "Low Stock";
-    else item.status = "In Stock";
+    // Update status based on total boxes
+    if (item.totalBoxes <= 0) {
+      item.status = "Out of Stock";
+    } else if (item.totalBoxes < 10) {
+      item.status = "Critical";
+    } else if (item.totalBoxes < 25) {
+      item.status = "Low Stock";
+    } else {
+      item.status = "In Stock";
+    }
 
-    await item.save();
+    // If no boxes left, remove the item completely
+    if (item.totalBoxes <= 0) {
+      await ReportInHand.findByIdAndDelete(item._id);
+    } else {
+      await item.save();
+    }
   } catch (err) {
-    console.error("updateReportInHand ERROR:", err);
+    console.error("updateReportInHand ERROR:", err.message || err);
+    // Don't throw the error here, just log it
   }
 };
+/* ------------------------------------------------------ */
+/* PURCHASE ROUTES */
+/* ------------------------------------------------------ */
 
+// Get purchase invoices
 router.get("/purchase-invoice", async (req, res) => {
   try {
     const invoices = await purchaseInventory
@@ -114,23 +169,24 @@ router.get("/purchase-invoice", async (req, res) => {
   }
 });
 
+// Get all purchases
 router.get("/purchase", async (req, res) => {
   try {
     const purchases = await purchaseInventory.find().sort({ createdAt: -1 });
 
     const productList = await Product.find(
       {},
-      "productName type packing qtyPerBoxStrip sellingPrice"
+      "productName type packing qtyPerBoxStrip sellingPrice batches"
     );
 
     const productMap = new Map();
     productList.forEach((p) => {
-      productMap.set(p.productName, p);
+      productMap.set(p.productName.toLowerCase(), p);
     });
 
     const enhancedPurchases = purchases.map((invoice) => {
       const enhancedProducts = invoice.products.map((p) => {
-        const productInfo = productMap.get(p.productName);
+        const productInfo = productMap.get(p.productName.toLowerCase());
 
         return {
           ...p.toObject(),
@@ -138,6 +194,9 @@ router.get("/purchase", async (req, res) => {
           productPacking: productInfo?.packing || "",
           productQtyPerBoxStrip: productInfo?.qtyPerBoxStrip || 0,
           sellingPrice: p.sellingPrice || productInfo?.sellingPrice || 0,
+          fob: p.fob || productInfo?.batches?.[0]?.fob || 0,
+          cif: p.cif || productInfo?.batches?.[0]?.cif || 0,
+          lc: p.lc || productInfo?.batches?.[0]?.lc || 0,
         };
       });
 
@@ -158,6 +217,8 @@ router.get("/purchase", async (req, res) => {
   }
 });
 
+// Update purchase
+// Update purchase
 router.put("/purchase/:id", async (req, res) => {
   try {
     const id = req.params.id;
@@ -178,33 +239,35 @@ router.put("/purchase/:id", async (req, res) => {
         .json({ message: "Invoice not found after update" });
     }
 
+    // Subtract old products
     for (const oldProduct of oldProducts) {
       await updateReportInHand(
         {
-          productName: oldProduct.productName,
-          supplierName: oldInvoice.supplierName,
-          quantityPerBoxStrip: oldProduct.quantityPerBoxStrip,
-          lc: oldProduct.lc,
-          fob: oldProduct.fob,
-          cif: oldProduct.cif,
+          productName: oldProduct.productName || "",
+          supplierName: oldInvoice.supplierName || "Unknown Supplier",
+          quantityPerBoxStrip: oldProduct.quantityPerBoxStrip || 0,
+          lc: oldProduct.lc || 0,
+          fob: oldProduct.fob || 0,
+          cif: oldProduct.cif || 0,
           expiryDate: oldProduct.expiryDate,
-          type: oldProduct.type,
+          type: oldProduct.type || "Tablet",
         },
         "subtract"
       );
     }
 
+    // Add new products
     for (const newProduct of updated.products) {
       await updateReportInHand(
         {
-          productName: newProduct.productName,
-          supplierName: updated.supplierName,
-          quantityPerBoxStrip: newProduct.quantityPerBoxStrip,
-          lc: newProduct.lc,
-          fob: newProduct.fob,
-          cif: newProduct.cif,
+          productName: newProduct.productName || "",
+          supplierName: updated.supplierName || "Unknown Supplier",
+          quantityPerBoxStrip: newProduct.quantityPerBoxStrip || 0,
+          lc: newProduct.lc || 0,
+          fob: newProduct.fob || 0,
+          cif: newProduct.cif || 0,
           expiryDate: newProduct.expiryDate,
-          type: newProduct.type,
+          type: newProduct.type || "Tablet",
         },
         "add"
       );
@@ -217,6 +280,7 @@ router.put("/purchase/:id", async (req, res) => {
   }
 });
 
+// Delete single purchase
 router.delete("/purchase/:id", async (req, res) => {
   try {
     const invoice = await purchaseInventory.findById(req.params.id);
@@ -225,9 +289,14 @@ router.delete("/purchase/:id", async (req, res) => {
     for (const p of invoice.products) {
       await updateReportInHand(
         {
-          ...p,
-          supplierName: invoice.supplierName,
-          type: p.type,
+          productName: p.productName || "", // Explicitly pass productName
+          supplierName: invoice.supplierName || "Unknown Supplier",
+          quantityPerBoxStrip: p.quantityPerBoxStrip || 0,
+          lc: p.lc || 0,
+          fob: p.fob || 0,
+          cif: p.cif || 0,
+          expiryDate: p.expiryDate,
+          type: p.type || "Tablet",
         },
         "subtract"
       );
@@ -236,41 +305,83 @@ router.delete("/purchase/:id", async (req, res) => {
     await purchaseInventory.findByIdAndDelete(invoice._id);
     res.json({ message: "Deleted successfully" });
   } catch (err) {
-    res.status(500).json({ error: "Server error" });
+    console.error("Delete purchase error:", err);
+    res.status(500).json({
+      error: "Server error",
+      details: process.env.NODE_ENV === "development" ? err.message : undefined,
+    });
   }
 });
 
+// Delete multiple purchases
+// Delete multiple purchases
 router.delete("/purchase", async (req, res) => {
   try {
     const { ids } = req.body;
 
-    const invoices = await purchaseInventory.find({ _id: { $in: ids } });
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({
+        error: "No purchase IDs provided for deletion",
+      });
+    }
+
+    // Find all invoices to be deleted
+    const invoices = await purchaseInventory.find({
+      _id: { $in: ids },
+    });
+
+    if (invoices.length === 0) {
+      return res.status(404).json({
+        error: "No purchases found with the provided IDs",
+      });
+    }
 
     for (const inv of invoices) {
       for (const p of inv.products) {
-        await updateReportInHand(
-          {
-            ...p,
-            supplierName: inv.supplierName,
-            type: p.type,
-          },
-          "subtract"
-        );
+        try {
+          await updateReportInHand(
+            {
+              productName: p.productName || "", // Explicitly pass productName
+              supplierName: inv.supplierName || "Unknown Supplier",
+              quantityPerBoxStrip: p.quantityPerBoxStrip || 0,
+              lc: p.lc || 0,
+              fob: p.fob || 0,
+              cif: p.cif || 0,
+              expiryDate: p.expiryDate,
+              type: p.type || "Tablet",
+            },
+            "subtract"
+          );
+        } catch (productError) {
+          console.error(
+            `Error processing product ${p.productName}:`,
+            productError
+          );
+          // Continue with other products even if one fails
+        }
       }
     }
 
-    const result = await purchaseInventory.deleteMany({ _id: { $in: ids } });
+    // Delete all invoices
+    const result = await purchaseInventory.deleteMany({
+      _id: { $in: ids },
+    });
 
     res.json({
-      message: `Deleted ${result.deletedCount} invoices`,
+      success: true,
+      message: `Deleted ${result.deletedCount} invoices successfully`,
       deletedCount: result.deletedCount,
     });
   } catch (err) {
-    res.status(500).json({ error: "Server error" });
+    console.error("Delete multiple purchases error:", err);
+    res.status(500).json({
+      error: "Server error",
+      details: process.env.NODE_ENV === "development" ? err.message : undefined,
+    });
   }
 });
 
-/* ADD SINGLE PURCHASE */
+// Add single purchase
 router.post("/purchase", async (req, res) => {
   try {
     const data = req.body;
@@ -298,18 +409,27 @@ router.post("/purchase", async (req, res) => {
     const productIds = data.products.map((p) => p.productId).filter((id) => id);
     const productsInfo = await Product.find(
       { _id: { $in: productIds } },
-      "type"
+      "type batches"
     );
+
     const productTypeMap = new Map();
+    const productBatchMap = new Map();
+
     productsInfo.forEach((p) => {
-      productTypeMap.set(p._id.toString(), p.type);
+      productTypeMap.set(p._id.toString(), p.type || "Tablet");
+      if (p.batches && p.batches.length > 0) {
+        productBatchMap.set(p._id.toString(), p.batches[0]);
+      }
     });
 
     const products = data.products.map((p) => {
       const qty = Number(p.quantityPerBoxStrip || 0);
-      const lc = Number(p.lc || 0);
-      const fob = Number(p.fob || 0);
-      const cif = Number(p.cif || 0);
+      const productBatch = productBatchMap.get(p.productId);
+
+      // Use provided values or fetch from product batches
+      const lc = Number(p.lc) || productBatch?.lc || 0;
+      const fob = Number(p.fob) || productBatch?.fob || 0;
+      const cif = Number(p.cif) || productBatch?.cif || 0;
       const amount = qty * lc;
 
       totalAmount += amount;
@@ -368,18 +488,14 @@ router.post("/purchase", async (req, res) => {
   }
 });
 
-/* IMPORT PURCHASES - CORRECTED VERSION */
-/* IMPORT PURCHASES - FIXED VERSION */
-/* IMPORT PURCHASES - FIXED VERSION */
+// Import purchases
 router.post("/purchase/import", async (req, res) => {
   try {
-    const rows = req.body; // This is array of product rows from Excel
-
-    console.log("Received import request with", rows?.length, "rows");
+    const rows = req.body;
 
     if (!Array.isArray(rows)) {
       return res.status(400).json({
-        message: "Invalid data format. Expected array of purchase items.",
+        message: "Invalid data format. Expected array of invoices.",
       });
     }
 
@@ -387,146 +503,141 @@ router.post("/purchase/import", async (req, res) => {
       return res.status(400).json({ message: "No data to import" });
     }
 
+    // Fetch all products for auto-filling missing values
+    const allProducts = await Product.find({}, "productName type batches");
+    const productMap = new Map();
+
+    allProducts.forEach((product) => {
+      if (product.productName) {
+        const firstBatch =
+          product.batches && product.batches.length > 0
+            ? product.batches[0]
+            : {};
+
+        productMap.set(product.productName.toLowerCase(), {
+          type: product.type || "Tablet",
+          lc: firstBatch.lc || 0,
+          fob: firstBatch.fob || 0,
+          cif: firstBatch.cif || 0,
+        });
+      }
+    });
+
     const skipped = [];
     const importedInvoices = [];
 
-    // Group rows by invoice number and delivery number
-    const invoiceMap = new Map();
+    // Get the last invoice number from database to start incrementing from there
+    const lastInvoice = await purchaseInventory
+      .findOne({}, { invoiceNumber: 1 })
+      .sort({ createdAt: -1 });
 
-    rows.forEach((row) => {
-      const invoiceKey = `${row.invoiceNumber}-${row.deliveryNumber}`;
-      if (!invoiceMap.has(invoiceKey)) {
-        invoiceMap.set(invoiceKey, {
-          invoiceNumber: row.invoiceNumber || "",
-          invoiceDate: row.invoiceDate || new Date(),
-          deliveryNumber: row.deliveryNumber || row.invoiceNumber || "",
-          receivedDate: row.receivedDate || new Date(),
-          supplierName: row.supplierName || "",
-          remarks: row.remarks || "",
-          products: [],
-        });
+    let invoiceCounter = 1;
+    if (lastInvoice && lastInvoice.invoiceNumber) {
+      const match = lastInvoice.invoiceNumber.match(/INC(\d+)/);
+      if (match) {
+        invoiceCounter = parseInt(match[1]) + 1;
       }
+    }
 
-      const invoice = invoiceMap.get(invoiceKey);
-
-      // Parse numeric values safely
-      const quantityPerBoxStrip = parseFloat(row.quantityPerBoxStrip) || 0;
-      const lc = parseFloat(row.lc) || parseFloat(row.lcNumber) || 0;
-      const fob = parseFloat(row.fob) || 0;
-      const cif = parseFloat(row.cif) || 0;
-      const amount = quantityPerBoxStrip * lc;
-
-      invoice.products.push({
-        productName: row.productName || "",
-        type: row.type || "Tablet", // Assuming type is passed or default
-        expiryDate: row.expiryDate ? new Date(row.expiryDate) : null,
-        quantityPerBoxStrip: quantityPerBoxStrip,
-        lc: lc,
-        fob: fob,
-        cif: cif,
-        amount: amount,
-      });
-    });
-
-    // Get product info for auto-filling missing values
-    const allProducts = await Product.find({});
-    const productMap = new Map();
-    allProducts.forEach((product) => {
-      if (
-        product.productName &&
-        product.batches &&
-        product.batches.length > 0
-      ) {
-        productMap.set(product.productName.toLowerCase(), {
-          type: product.type || "Tablet",
-        });
-      }
-    });
-
-    // Process each invoice
-    for (const [key, invoiceData] of invoiceMap) {
+    // Process each invoice (already grouped by frontend)
+    for (const invoiceData of rows) {
       try {
-        console.log("Processing invoice:", invoiceData.invoiceNumber);
-
-        // Validate required fields
-        if (!invoiceData.invoiceNumber || !invoiceData.supplierName) {
-          console.log("Skipping invoice - missing invoice number or supplier");
+        if (!invoiceData.products || invoiceData.products.length === 0) {
           skipped.push(invoiceData.invoiceNumber || "Unknown");
           continue;
         }
 
-        if (!invoiceData.products || invoiceData.products.length === 0) {
-          console.log("Skipping invoice - no products");
-          skipped.push(invoiceData.invoiceNumber);
-          continue;
-        }
+        // Generate or validate invoice number
+        let invoiceNumber = invoiceData.invoiceNumber;
 
-        // Check for duplicate
-        const existing = await purchaseInventory.findOne({
-          invoiceNumber: invoiceData.invoiceNumber,
-          deliveryNumber: invoiceData.deliveryNumber,
-        });
-
-        if (existing) {
-          console.log("Skipping duplicate invoice:", invoiceData.invoiceNumber);
-          skipped.push(invoiceData.invoiceNumber);
-          continue;
-        }
-
-        // Calculate total amount and process products
-        let totalAmount = 0;
-        const processedProducts = [];
-
-        for (const product of invoiceData.products) {
-          if (!product.productName) {
-            console.log("Skipping product - no product name");
-            continue;
-          }
-
-          // Look up product type if not provided
-          const productKey = product.productName.toLowerCase().trim();
-          const productInfo = productMap.get(productKey) || { type: "Tablet" };
-
-          processedProducts.push({
-            productName: product.productName.trim(),
-            type: product.type || productInfo.type,
-            expiryDate: product.expiryDate,
-            quantityPerBoxStrip: product.quantityPerBoxStrip,
-            lc: product.lc,
-            fob: product.fob,
-            cif: product.cif,
-            amount: product.amount,
+        // Check if this invoice number already exists in database
+        if (invoiceNumber) {
+          const existingInvoice = await purchaseInventory.findOne({
+            invoiceNumber: invoiceNumber,
           });
 
-          totalAmount += product.amount;
+          if (existingInvoice) {
+            // Generate new unique invoice number
+            invoiceNumber = `INC${String(invoiceCounter).padStart(5, "0")}`;
+            invoiceCounter++;
+          }
+        } else {
+          // Generate new invoice number if not provided
+          invoiceNumber = `INC${String(invoiceCounter).padStart(5, "0")}`;
+          invoiceCounter++;
         }
 
-        if (processedProducts.length === 0) {
-          console.log("Skipping invoice - no valid products");
-          skipped.push(invoiceData.invoiceNumber);
-          continue;
+        // Also check if we already processed this invoice number in this import batch
+        const alreadyProcessedInThisBatch = importedInvoices.some(
+          (inv) => inv.invoiceNumber === invoiceNumber
+        );
+
+        if (alreadyProcessedInThisBatch) {
+          // If duplicate in same batch, generate new one
+          invoiceNumber = `INC${String(invoiceCounter).padStart(5, "0")}`;
+          invoiceCounter++;
         }
+
+        const deliveryNumber = invoiceData.deliveryNumber || invoiceNumber;
+
+        // Process each product in the invoice
+        const processedProducts = invoiceData.products.map((product) => {
+          const quantityPerBoxStrip =
+            parseFloat(product.quantityPerBoxStrip) || 0;
+          let lc = parseFloat(product.lc) || parseFloat(product.lcNumber) || 0;
+          let fob = parseFloat(product.fob) || 0;
+          let cif = parseFloat(product.cif) || 0;
+
+          // If FOB, CIF, or LC is 0, try to get from product database
+          const productName = product.productName?.toLowerCase().trim();
+          const productInfo = productMap.get(productName);
+
+          if (productInfo) {
+            if (fob === 0) fob = productInfo.fob;
+            if (cif === 0) cif = productInfo.cif;
+            if (lc === 0) lc = productInfo.lc;
+          }
+
+          const amount = quantityPerBoxStrip * lc;
+
+          return {
+            productName: product.productName || "",
+            type: product.type || productInfo?.type || "Tablet",
+            expiryDate: product.expiryDate
+              ? new Date(product.expiryDate)
+              : null,
+            quantityPerBoxStrip,
+            lc,
+            fob,
+            cif,
+            amount,
+          };
+        });
+
+        // Calculate total amount
+        const totalAmount = processedProducts.reduce(
+          (sum, product) => sum + (product.amount || 0),
+          0
+        );
 
         // Create invoice
         const invoice = await purchaseInventory.create({
-          invoiceNumber: invoiceData.invoiceNumber,
+          invoiceNumber: invoiceNumber,
           invoiceDate: invoiceData.invoiceDate,
-          deliveryNumber: invoiceData.deliveryNumber,
+          deliveryNumber: deliveryNumber,
           receivedDate: invoiceData.receivedDate,
-          supplierName: invoiceData.supplierName.trim(),
+          supplierName: invoiceData.supplierName,
           remarks: invoiceData.remarks,
           products: processedProducts,
           totalAmount: totalAmount,
         });
-
-        console.log("Created invoice:", invoice.invoiceNumber);
 
         // Update inventory for each product
         for (const product of processedProducts) {
           await updateReportInHand(
             {
               productName: product.productName,
-              supplierName: invoiceData.supplierName.trim(),
+              supplierName: invoiceData.supplierName,
               quantityPerBoxStrip: product.quantityPerBoxStrip,
               lc: product.lc,
               fob: product.fob,
@@ -548,10 +659,6 @@ router.post("/purchase/import", async (req, res) => {
       }
     }
 
-    console.log(
-      `Import completed: ${importedInvoices.length} imported, ${skipped.length} skipped`
-    );
-
     res.json({
       message: `Imported ${importedInvoices.length} invoices successfully`,
       importedCount: importedInvoices.length,
@@ -566,8 +673,7 @@ router.post("/purchase/import", async (req, res) => {
 
     if (err.code === 11000) {
       return res.status(400).json({
-        message:
-          "Duplicate invoice number and delivery number combination found",
+        message: "Duplicate invoice number found",
         error: err.message,
       });
     }
@@ -579,6 +685,7 @@ router.post("/purchase/import", async (req, res) => {
   }
 });
 
+// Get reports in hand
 router.get("/reports-in-hand", async (req, res) => {
   try {
     const reports = await ReportInHand.find().sort({ createdAt: -1 });
@@ -599,6 +706,265 @@ router.get("/reports-in-hand", async (req, res) => {
   }
 });
 
+// Download reports in hand Excel
+router.post("/reports-in-hand/download-excel", async (req, res) => {
+  try {
+    const { startDate, endDate } = req.body;
+
+    // Build query
+    let query = {};
+
+    if (startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+
+      // We need to filter batches by date, so we'll fetch all and filter in memory
+      // or use aggregation to filter batches
+      query = {};
+    }
+
+    // Fetch reports with batches
+    const reports = await ReportInHand.find(query).lean();
+
+    // Filter out reports with no batches
+    const filteredReports = reports.filter(
+      (report) => Array.isArray(report.batches) && report.batches.length > 0
+    );
+
+    // If date range is provided, filter batches within that range
+    let finalData = [];
+    if (startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999); // End of day
+
+      filteredReports.forEach((report) => {
+        const filteredBatches = report.batches.filter((batch) => {
+          const batchDate = new Date(batch.date);
+          return batchDate >= start && batchDate <= end;
+        });
+
+        if (filteredBatches.length > 0) {
+          // Calculate totals for filtered batches only
+          const totalBoxes = filteredBatches.reduce(
+            (sum, b) => sum + b.boxes,
+            0
+          );
+          const totalAmount = filteredBatches.reduce(
+            (sum, b) => sum + b.amount,
+            0
+          );
+
+          filteredBatches.forEach((batch) => {
+            finalData.push({
+              ...report,
+              batchData: batch,
+              filteredTotalBoxes: totalBoxes,
+              filteredTotalAmount: totalAmount,
+              filteredStatus: calculateStockStatus(totalBoxes),
+            });
+          });
+        }
+      });
+    } else {
+      // No date filter - include all batches
+      filteredReports.forEach((report) => {
+        report.batches.forEach((batch) => {
+          finalData.push({
+            ...report,
+            batchData: batch,
+            filteredTotalBoxes: report.totalBoxes,
+            filteredTotalAmount: report.totalAmount,
+            filteredStatus: report.status,
+          });
+        });
+      });
+    }
+
+    if (finalData.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No reports found for selected criteria",
+      });
+    }
+
+    // Create Excel workbook
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Reports in Hand");
+
+    // Define headers
+    const headers = [
+      "Product Name",
+      "Supplier Name",
+      "Type",
+      "Batch Date",
+      "Expiry Date",
+      "Boxes in Batch",
+      "LC (USD per box)",
+      "FOB (USD per box)",
+      "CIF (USD per box)",
+      "Batch Amount (USD)",
+      "Total Boxes (Product)",
+      "Total Amount (Product)",
+      "Stock Status",
+    ];
+
+    // Add headers
+    const headerRow = worksheet.addRow(headers);
+    headerRow.font = { bold: true };
+    headerRow.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FFE0E0E0" },
+    };
+
+    // Set column widths
+    worksheet.columns = [
+      { width: 25 }, // Product Name
+      { width: 25 }, // Supplier Name
+      { width: 15 }, // Type
+      { width: 15 }, // Batch Date
+      { width: 15 }, // Expiry Date
+      { width: 15 }, // Boxes in Batch
+      { width: 15 }, // LC
+      { width: 15 }, // FOB
+      { width: 15 }, // CIF
+      { width: 18 }, // Batch Amount
+      { width: 20 }, // Total Boxes
+      { width: 20 }, // Total Amount
+      { width: 15 }, // Stock Status
+    ];
+
+    // Add data rows
+    finalData.forEach((item) => {
+      const row = worksheet.addRow([
+        item.productName,
+        item.supplierName,
+        item.type || "Tablet",
+        item.batchData.date
+          ? dayjs(item.batchData.date).format("DD/MM/YYYY")
+          : "",
+        item.batchData.expiryDate
+          ? dayjs(item.batchData.expiryDate).format("DD/MM/YYYY")
+          : "",
+        item.batchData.boxes,
+        item.batchData.lc,
+        item.batchData.fob,
+        item.batchData.cif,
+        item.batchData.amount,
+        item.filteredTotalBoxes,
+        item.filteredTotalAmount,
+        item.filteredStatus,
+      ]);
+
+      // Color code based on status
+      let statusColor = "FFFFFF"; // Default white
+      switch (item.filteredStatus) {
+        case "Out of Stock":
+          statusColor = "FFCCCC"; // Light red
+          break;
+        case "Critical":
+          statusColor = "FFE5CC"; // Light orange
+          break;
+        case "Low Stock":
+          statusColor = "FFFFCC"; // Light yellow
+          break;
+        case "In Stock":
+          statusColor = "CCFFCC"; // Light green
+          break;
+      }
+
+      // Apply color to status cell
+      const statusCell = row.getCell(13);
+      statusCell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: statusColor },
+      };
+    });
+
+    // Apply borders to all cells
+    worksheet.eachRow((row) => {
+      row.eachCell((cell) => {
+        cell.border = {
+          top: { style: "thin" },
+          left: { style: "thin" },
+          right: { style: "thin" },
+          bottom: { style: "thin" },
+        };
+        cell.alignment = { vertical: "middle", horizontal: "center" };
+      });
+    });
+
+    // Format number cells
+    const numberColumns = [6, 7, 8, 9, 10, 11, 12]; // Columns with numbers
+    worksheet.eachRow((row, rowNumber) => {
+      if (rowNumber > 1) {
+        // Skip header
+        numberColumns.forEach((col) => {
+          const cell = row.getCell(col);
+          cell.numFmt = "#,##0.00";
+        });
+      }
+    });
+
+    // Add a summary row
+    const totalRow = worksheet.addRow([]);
+    totalRow.getCell(1).value = "TOTAL";
+    totalRow.getCell(1).font = { bold: true };
+
+    // Calculate totals
+    const totalBoxes = finalData.reduce(
+      (sum, item) => sum + item.batchData.boxes,
+      0
+    );
+    const totalAmount = finalData.reduce(
+      (sum, item) => sum + item.batchData.amount,
+      0
+    );
+
+    totalRow.getCell(6).value = totalBoxes;
+    totalRow.getCell(10).value = totalAmount;
+    totalRow.getCell(10).numFmt = "#,##0.00";
+    totalRow.font = { bold: true };
+    totalRow.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FFDDEBF7" },
+    };
+
+    // Generate filename
+    let fileName = "reports_in_hand";
+    if (startDate && endDate) {
+      fileName += `_${dayjs(startDate).format("DD-MM-YYYY")}_to_${dayjs(
+        endDate
+      ).format("DD-MM-YYYY")}`;
+    } else {
+      fileName += `_${dayjs().format("DD-MM-YYYY")}`;
+    }
+    fileName += ".xlsx";
+
+    // Set response headers
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+
+    // Send the file
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error("Error generating reports in hand Excel:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to generate reports excel file",
+      error: error.message,
+    });
+  }
+});
+
+// Download purchase excel
 router.post("/purchases/download-excel", async (req, res) => {
   try {
     const { startDate, endDate } = req.body;

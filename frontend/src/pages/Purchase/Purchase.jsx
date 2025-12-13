@@ -296,10 +296,29 @@ function Purchase() {
 
         console.log("Header map:", headerMap);
 
-        // Process data rows
-        const mappedData = [];
-        const defaultInvoiceCounters = {};
+        // Create product map for looking up FOB, CIF, LC values
+        const productMap = new Map();
+        productOptions.forEach((product) => {
+          if (product.productName) {
+            const key = product.productName.toLowerCase().trim();
+            const firstBatch =
+              product.batches && product.batches.length > 0
+                ? product.batches[0]
+                : {};
 
+            productMap.set(key, {
+              lc: firstBatch.lc || product.lc || 0,
+              fob: firstBatch.fob || product.fob || 0,
+              cif: firstBatch.cif || product.cif || 0,
+              type: product.type || "Tablet",
+            });
+          }
+        });
+
+        // Object to group by invoice number and supplier
+        const invoiceGroups = {};
+
+        // Process data rows and group by invoice number + supplier
         for (let i = headerRowIndex + 1; i < jsonData.length; i++) {
           const row = jsonData[i];
           if (
@@ -384,60 +403,86 @@ function Purchase() {
           const quantityPerBoxStrip = parseNumber(
             getValue("quantityPerBoxStrip")
           );
-          const fob = parseNumber(getValue("fob"));
-          const cif = parseNumber(getValue("cif"));
-          const lc = parseNumber(getValue("lc"));
+          let fob = parseNumber(getValue("fob"));
+          let cif = parseNumber(getValue("cif"));
+          let lc = parseNumber(getValue("lc"));
           const remarks = getValue("remarks")?.toString().trim() || "";
 
-          // Skip if essential fields are missing
-          if (!productName || !supplierName) {
-            console.log(
-              `Skipping row ${i}: Missing productName or supplierName`
-            );
+          // Skip only if product name is missing (essential field)
+          if (!productName) {
+            console.log(`Skipping row ${i}: Missing productName`);
             continue;
           }
 
-          // Generate default values for missing invoice fields
-          if (!invoiceNumber || !deliveryNumber || !invoiceDate) {
-            const key = `${supplierName || "Unknown"}-${dayjs().format(
-              "YYYY-MM-DD"
-            )}`;
-            if (!defaultInvoiceCounters[key]) {
-              defaultInvoiceCounters[key] = {
-                count: 1,
-                invoiceDate: invoiceDate || dayjs().format("YYYY-MM-DD"),
-                deliveryNumber:
-                  deliveryNumber || `DEL-${dayjs().format("YYYYMMDD")}-001`,
-              };
-            }
+          // If FOB, CIF, or LC is 0, try to fetch from product database
+          if (fob === 0 || cif === 0 || lc === 0) {
+            const productKey = productName.toLowerCase().trim();
+            const productInfo = productMap.get(productKey);
 
-            if (!invoiceNumber) {
-              invoiceNumber = `INV-${dayjs().format("YYYYMMDD")}-${String(
-                defaultInvoiceCounters[key].count
-              ).padStart(3, "0")}`;
+            if (productInfo) {
+              if (fob === 0) fob = productInfo.fob;
+              if (cif === 0) cif = productInfo.cif;
+              if (lc === 0) lc = productInfo.lc;
             }
-            if (!deliveryNumber) {
-              deliveryNumber = `DEL-${dayjs().format("YYYYMMDD")}-${String(
-                defaultInvoiceCounters[key].count
-              ).padStart(3, "0")}`;
-            }
-            if (!invoiceDate) {
-              invoiceDate = dayjs().format("YYYY-MM-DD");
-            }
-
-            defaultInvoiceCounters[key].count++;
           }
 
-          // Calculate amount if not provided
+          // Handle missing supplier name
+          if (!supplierName) {
+            supplierName = "Not Provided";
+          }
+
+          // Generate invoice number if missing
+          if (!invoiceNumber) {
+            // Create a unique key for supplier without invoice
+            const supplierKey = supplierName;
+            if (!invoiceGroups[`NO_INVOICE_${supplierKey}`]) {
+              // Generate invoice number for this supplier
+              const lastInvoiceNumber = Object.keys(invoiceGroups).filter(
+                (key) => key.startsWith(`INC_${supplierKey}`)
+              ).length;
+
+              invoiceNumber = `INC${String(lastInvoiceNumber + 1).padStart(
+                5,
+                "0"
+              )}`;
+            } else {
+              // Use existing generated invoice number for this supplier
+              invoiceNumber =
+                invoiceGroups[`NO_INVOICE_${supplierKey}`].invoiceNumber;
+            }
+          }
+
+          if (!deliveryNumber) {
+            deliveryNumber = invoiceNumber;
+          }
+
+          if (!invoiceDate) {
+            invoiceDate = dayjs().format("YYYY-MM-DD");
+          }
+
+          // Calculate amount
           const amount = quantityPerBoxStrip * lc;
 
-          mappedData.push({
-            invoiceNumber,
-            invoiceDate,
-            deliveryNumber: deliveryNumber || invoiceNumber,
-            receivedDate: receivedDate || invoiceDate,
+          // Create a unique key for grouping: invoiceNumber + supplierName
+          const groupKey = `${invoiceNumber}_${supplierName}`;
+
+          // Initialize invoice group if not exists
+          if (!invoiceGroups[groupKey]) {
+            invoiceGroups[groupKey] = {
+              invoiceNumber,
+              invoiceDate: invoiceDate || dayjs().format("YYYY-MM-DD"),
+              deliveryNumber: deliveryNumber || invoiceNumber,
+              receivedDate:
+                receivedDate || invoiceDate || dayjs().format("YYYY-MM-DD"),
+              supplierName,
+              remarks,
+              products: [],
+            };
+          }
+
+          // Add product to the invoice group
+          invoiceGroups[groupKey].products.push({
             productName,
-            supplierName,
             expiryDate,
             quantityPerBoxStrip,
             fob,
@@ -450,18 +495,25 @@ function Purchase() {
           });
         }
 
-        console.log("Mapped data for import:", mappedData.slice(0, 3));
-        setParsedData(mappedData);
+        // Convert grouped data to array
+        const groupedData = Object.values(invoiceGroups);
 
-        if (mappedData.length === 0) {
+        console.log("Grouped data for import:", groupedData.slice(0, 3));
+        setParsedData(groupedData);
+
+        if (groupedData.length === 0) {
           showToast(
             "warning",
             "No valid data found in the file. Please check the format."
           );
         } else {
+          const totalProducts = groupedData.reduce(
+            (sum, invoice) => sum + invoice.products.length,
+            0
+          );
           showToast(
             "success",
-            `Found ${mappedData.length} purchase items to import`
+            `Found ${groupedData.length} invoices with ${totalProducts} products to import`
           );
         }
       } catch (error) {
@@ -489,8 +541,9 @@ function Purchase() {
     return isNaN(num) ? 0 : num;
   };
 
-  // Add this function to utils or in the Purchase component
+  // Handle purchase import
   const handlePurchaseImport = async () => {
+    console.log("values of pare", parsedData);
     if (parsedData.length === 0) {
       showToast("warning", "Please upload a valid file first");
       return;
@@ -621,7 +674,6 @@ function Purchase() {
     }
   };
 
-  // Fixed fetchPurchaseDetails function
   const fetchPurchaseDetails = async () => {
     try {
       setLoading(true);
@@ -630,9 +682,25 @@ function Purchase() {
       if (!purchaseRes.ok) throw new Error("Failed to fetch purchase details");
       const purchaseData = await purchaseRes.json();
 
+      console.log("Purchase API Response:", purchaseData);
+
       // Handle different response structures safely
-      const purchaseArray =
-        purchaseData.purchases || purchaseData.data || purchaseData || [];
+      let purchaseArray = [];
+
+      if (Array.isArray(purchaseData)) {
+        purchaseArray = purchaseData;
+      } else if (
+        purchaseData.purchases &&
+        Array.isArray(purchaseData.purchases)
+      ) {
+        purchaseArray = purchaseData.purchases;
+      } else if (purchaseData.data && Array.isArray(purchaseData.data)) {
+        purchaseArray = purchaseData.data;
+      } else if (purchaseData.result && Array.isArray(purchaseData.result)) {
+        purchaseArray = purchaseData.result;
+      }
+
+      console.log(`Total records fetched: ${purchaseArray.length}`);
 
       const typeSet = new Set();
       if (Array.isArray(purchaseArray) && purchaseArray.length > 0) {
@@ -651,10 +719,11 @@ function Purchase() {
 
       setPurchases(purchaseArray);
       setTypes(["All", ...Array.from(typeSet).sort()]);
+
+      console.log(`Purchases state set with: ${purchaseArray.length} records`);
     } catch (error) {
       console.error("❌ Fetch error:", error);
       showToast("error", error.message || "Error fetching purchase details");
-      // Set empty arrays to prevent further errors
       setTypes(["All"]);
       setPurchases([]);
     } finally {
@@ -673,7 +742,7 @@ function Purchase() {
     setCurrentPage(1);
   };
 
-  // Filter purchases based on tab + search - FIXED VERSION
+  // Filter purchases based on tab + search
   const filteredPurchases = useMemo(() => {
     return purchases.filter((purchase) => {
       if (searchTerm.trim() === "") return true;
@@ -687,7 +756,6 @@ function Purchase() {
         purchase.deliveryNumber?.toLowerCase().includes(lowerSearch) ||
         purchase.lcNumber?.toLowerCase().includes(lowerSearch) ||
         purchase.supplierName?.toLowerCase().includes(lowerSearch) ||
-        // Also search in product names
         (purchase.products &&
           Array.isArray(purchase.products) &&
           purchase.products.some((product) =>
@@ -800,7 +868,6 @@ function Purchase() {
       }
     }
   };
-
   const handleDeleteSelected = async () => {
     const confirm = await confirmDialog({
       text: `Are you sure you want to delete <b>${selected.length}</b> purchase(s)?`,
@@ -811,10 +878,15 @@ function Purchase() {
 
     if (confirm.isConfirmed) {
       try {
+        // Extract just the ID strings from the selected array
+        const selectedIds = selected.map((item) => item.id);
+        console.log("Deleting purchases with IDs:", selectedIds);
+
         const res = await axios.delete(`${backendUrl}/api/purchase`, {
-          data: { ids: selected },
+          data: { ids: selectedIds }, // Send array of ID strings
         });
 
+        console.log("values of res", res);
         if (res.status === 200) {
           showToast(
             "success",
@@ -824,13 +896,50 @@ function Purchase() {
           setSelected([]);
         }
       } catch (error) {
+        console.error("Delete error:", error);
         showToast("error", "Failed to delete selected purchases.");
       }
     } else {
       setSelected([]);
     }
   };
+  const deleteSelectedPurchases = async () => {
+    try {
+      // Ensure selected is an array of IDs
+      const selectedIds = selected.map((item) => item.id);
 
+      if (!selectedIds || selectedIds.length === 0) {
+        alert("No purchases selected");
+        return;
+      }
+
+      console.log("Deleting purchases with IDs:", selectedIds);
+
+      const response = await fetch(`${backendUrl}/api/purchase`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ ids: selectedIds }), // Ensure this is { ids: [...] }
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to delete purchases");
+      }
+
+      console.log("Delete response:", data);
+      alert(data.message);
+
+      // Refresh purchases list
+      fetchPurchaseDetails();
+      setSelected([]); // Clear selection
+    } catch (error) {
+      console.error("Delete error:", error);
+      alert(`Failed to delete purchases: ${error.message}`);
+    }
+  };
   // Form handlers
   const enhancedHandleChange = useCallback((e) => {
     const { name, value } = e.target;
@@ -955,13 +1064,12 @@ function Purchase() {
     setExpandedProductIndex(expandedProductIndex === index ? -1 : index);
   };
 
-  // Product edit modal functions - UPDATED
+  // Product edit modal functions
   const openProductEditModal = (product, index) => {
     setCurrentProduct({
       ...product,
-      // Ensure productId is set correctly - use productId first, then _id as fallback
       productId: product.productId || product._id,
-      _id: product.productId || product._id, // For backward compatibility
+      _id: product.productId || product._id,
       lc: product.lc || 0,
       fob: product.fob || 0,
       cif: product.cif || 0,
@@ -983,7 +1091,6 @@ function Purchase() {
   const handleProductNumericChange = (e) => {
     const { name, value } = e.target;
 
-    // For quantity fields (integers only)
     if (name === "quantityPerBoxStrip") {
       if (value === "" || /^\d*$/.test(value)) {
         const processedValue = value === "" ? "" : parseInt(value) || 0;
@@ -993,7 +1100,6 @@ function Purchase() {
             [name]: processedValue,
           };
 
-          // Auto-calculate amount when quantity changes
           const lcValue = parseFloat(updatedProduct.lc) || 0;
           const quantityValue =
             parseFloat(updatedProduct.quantityPerBoxStrip) || 0;
@@ -1003,9 +1109,7 @@ function Purchase() {
           return updatedProduct;
         });
       }
-    }
-    // For decimal fields (LC, FOB, CIF, amount)
-    else if (["lc", "fob", "cif", "amount"].includes(name)) {
+    } else if (["lc", "fob", "cif", "amount"].includes(name)) {
       if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
         const processedValue = value === "" ? "" : parseFloat(value) || 0;
         setCurrentProduct((prev) => {
@@ -1014,7 +1118,6 @@ function Purchase() {
             [name]: processedValue,
           };
 
-          // Auto-calculate amount when lc changes
           if (name === "lc") {
             const lcValue = parseFloat(updatedProduct.lc) || 0;
             const quantityValue =
@@ -1026,9 +1129,7 @@ function Purchase() {
           return updatedProduct;
         });
       }
-    }
-    // For other fields
-    else {
+    } else {
       setCurrentProduct((prev) => ({
         ...prev,
         [name]: value,
@@ -1036,7 +1137,6 @@ function Purchase() {
     }
   };
 
-  // UPDATED: Fixed product update function
   const updateProductInForm = () => {
     if (!currentProduct?.productName) {
       showToast("error", "Please select a product name");
@@ -1046,13 +1146,10 @@ function Purchase() {
     setForm((prev) => {
       const updatedProducts = [...prev.products];
 
-      // Update the product with current values including LC, FOB, CIF
       const updatedProduct = {
         ...currentProduct,
-        // Ensure IDs are properly set - use productId as primary
         productId: currentProduct.productId || currentProduct._id,
-        _id: currentProduct.productId || currentProduct._id, // For consistency
-        // Ensure all numeric values are properly set
+        _id: currentProduct.productId || currentProduct._id,
         lc: parseFloat(currentProduct.lc) || 0,
         fob: parseFloat(currentProduct.fob) || 0,
         cif: parseFloat(currentProduct.cif) || 0,
@@ -1091,7 +1188,7 @@ function Purchase() {
 
   const productTotals = calculateProductTotals(form.products);
 
-  // Add this useMemo hook for filtered products in modal
+  // Filtered products in modal
   const filteredProductsInModal = useMemo(() => {
     if (!selectedPurchaseProduct || !selectedPurchaseProduct.products) {
       return [];
@@ -1099,13 +1196,11 @@ function Purchase() {
 
     const invoiceProducts = selectedPurchaseProduct.products || [];
 
-    // Apply type filter
     let filtered = invoiceProducts;
     if (selectedTab !== "All") {
       filtered = invoiceProducts.filter((p) => p.productType === selectedTab);
     }
 
-    // Apply search filter
     if (searchTerm.trim() !== "") {
       const lowerSearch = searchTerm.toLowerCase();
       filtered = filtered.filter(
@@ -1160,13 +1255,6 @@ function Purchase() {
                 <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
                   {filteredPurchases.length}
                 </span>
-                {filteredPurchases.length > PURCHASES_PER_PAGE && (
-                  <span className="ml-2 text-sm text-gray-600">
-                    (Showing{" "}
-                    {Math.min(PURCHASES_PER_PAGE, currentPurchases.length)} of{" "}
-                    {filteredPurchases.length} on page {currentPage})
-                  </span>
-                )}
               </p>
 
               {purchases.length > 0 && (
@@ -1324,15 +1412,6 @@ function Purchase() {
           {/* Enhanced Pagination Controls */}
           {filteredPurchases.length > PURCHASES_PER_PAGE && (
             <div className="mt-4 p-5 flex flex-col sm:flex-row justify-between items-center gap-4 bg-gray-50 border-t">
-              <div className="text-sm text-gray-600">
-                Showing {(currentPage - 1) * PURCHASES_PER_PAGE + 1} to{" "}
-                {Math.min(
-                  currentPage * PURCHASES_PER_PAGE,
-                  filteredPurchases.length
-                )}{" "}
-                of {filteredPurchases.length} entries
-              </div>
-
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => {
@@ -2011,7 +2090,7 @@ function Purchase() {
             document.body
           )}
 
-        {/* PRODUCT EDIT MODAL - COMPLETELY FIXED VERSION */}
+        {/* PRODUCT EDIT MODAL */}
         {isProductEditModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
@@ -2027,7 +2106,6 @@ function Purchase() {
                   <X size={20} />
                 </button>
 
-                {/* FIXED: Dynamic title */}
                 <h2 className="text-xl font-semibold text-gray-800 mb-4">
                   {currentProduct?.productName
                     ? `Edit Product - ${currentProduct.productName}`
@@ -2035,14 +2113,14 @@ function Purchase() {
                 </h2>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Product Name - Using SearchableDropdown - FIXED */}
+                  {/* Product Name - Using SearchableDropdown */}
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-gray-700">
                       Product Name <span className="text-red-500">*</span>
                     </label>
                     <SearchableDropdown
                       options={productOptions.map((product) => ({
-                        value: product.id, // Use id instead of _id
+                        value: product.id,
                         label: product.productName || product.label,
                         ...product,
                       }))}
@@ -2050,14 +2128,12 @@ function Purchase() {
                         currentProduct?.productId || currentProduct?.id || ""
                       }
                       onChange={(selectedValue) => {
-                        // FIXED: Use id instead of _id for lookup
                         const selectedProduct = productOptions.find(
                           (product) => product.id === selectedValue
                         );
 
                         if (selectedProduct) {
                           setCurrentProduct((prev) => {
-                            // Get the first batch if available, otherwise use product directly
                             const firstBatch =
                               selectedProduct.batches &&
                               selectedProduct.batches.length > 0
@@ -2065,10 +2141,9 @@ function Purchase() {
                                 : {};
 
                             const updatedProduct = {
-                              // Reset to new product structure
                               productId: selectedProduct.id,
-                              id: selectedProduct.id, // For consistency
-                              _id: selectedProduct.id, // For backward compatibility
+                              id: selectedProduct.id,
+                              _id: selectedProduct.id,
                               productName:
                                 selectedProduct.productName ||
                                 selectedProduct.label,
@@ -2079,7 +2154,6 @@ function Purchase() {
                                 "",
                               quantityPerBoxStrip:
                                 prev?.quantityPerBoxStrip || 0,
-                              // Use batch values first, then product values, then previous values
                               lc:
                                 firstBatch.lc ||
                                 selectedProduct.lc ||
@@ -2100,7 +2174,6 @@ function Purchase() {
                               amount: prev?.amount || 0,
                             };
 
-                            // Auto-calculate amount based on LC and quantity
                             const lcValue = parseFloat(updatedProduct.lc) || 0;
                             const quantityValue =
                               parseFloat(updatedProduct.quantityPerBoxStrip) ||
@@ -2111,7 +2184,6 @@ function Purchase() {
                             return updatedProduct;
                           });
                         } else {
-                          // If no product selected, clear the product-specific fields but keep quantity
                           setCurrentProduct((prev) => ({
                             ...prev,
                             productId: "",
@@ -2122,7 +2194,6 @@ function Purchase() {
                             lc: 0,
                             fob: 0,
                             cif: 0,
-                            // Don't reset quantityPerBoxStrip and amount as they might be manually entered
                           }));
                         }
                       }}
@@ -2155,7 +2226,6 @@ function Purchase() {
                       name="quantityPerBoxStrip"
                       value={currentProduct?.quantityPerBoxStrip || ""}
                       onChange={(e) => {
-                        // Only allow numbers
                         const value = e.target.value;
                         if (value === "" || /^\d*$/.test(value)) {
                           const validatedEvent = {
@@ -2166,7 +2236,6 @@ function Purchase() {
                           };
                           handleProductEditChange(validatedEvent);
 
-                          // Recalculate amount when quantity changes
                           setTimeout(() => {
                             setCurrentProduct((prev) => {
                               if (!prev) return prev;
@@ -2199,7 +2268,6 @@ function Purchase() {
                       name="lc"
                       value={currentProduct?.lc || ""}
                       onChange={(e) => {
-                        // Only allow numbers and decimal point
                         const value = e.target.value;
                         if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
                           const validatedEvent = {
@@ -2210,7 +2278,6 @@ function Purchase() {
                           };
                           handleProductEditChange(validatedEvent);
 
-                          // Recalculate amount when LC changes
                           setTimeout(() => {
                             setCurrentProduct((prev) => {
                               if (!prev) return prev;
@@ -2243,7 +2310,6 @@ function Purchase() {
                       name="fob"
                       value={currentProduct?.fob || ""}
                       onChange={(e) => {
-                        // Only allow numbers and decimal point
                         const value = e.target.value;
                         if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
                           handleProductEditChange({
@@ -2270,7 +2336,6 @@ function Purchase() {
                       name="cif"
                       value={currentProduct?.cif || ""}
                       onChange={(e) => {
-                        // Only allow numbers and decimal point
                         const value = e.target.value;
                         if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
                           handleProductEditChange({
@@ -2416,23 +2481,6 @@ function Purchase() {
                 <h2 className="text-lg font-semibold mb-4">Import Purchase</h2>
                 {isSampleFile && <PurchaseSampleExcelDownload />}
 
-                {/* Debug info */}
-                {parsedData.length > 0 && (
-                  <div className="mb-4 p-3 bg-blue-50 rounded-lg">
-                    <p className="text-sm text-blue-700">
-                      Found {parsedData.length} items to import
-                    </p>
-                    <details className="mt-2">
-                      <summary className="text-sm cursor-pointer">
-                        View sample data
-                      </summary>
-                      <pre className="text-xs mt-2 p-2 bg-white border rounded overflow-auto max-h-32">
-                        {JSON.stringify(parsedData[0], null, 2)}
-                      </pre>
-                    </details>
-                  </div>
-                )}
-
                 {/* File Input */}
                 <div className="mb-6">
                   <label className="block text-gray-700 mb-2">
@@ -2451,32 +2499,46 @@ function Purchase() {
                   </p>
                 </div>
 
-                {/* Action Buttons */}
-                <div className="flex justify-end gap-3">
-                  <button
-                    onClick={() => !isUploading && setShowImportModal(false)}
-                    disabled={isUploading}
-                    className={`px-5 py-2 rounded-lg cursor-pointer ${
-                      isUploading
-                        ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                        : "bg-gray-300 hover:bg-gray-400 text-gray-700"
-                    }`}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handlePurchaseImport}
-                    disabled={isUploading || parsedData.length === 0}
-                    className={`px-5 py-2 rounded-lg cursor-pointer ${
-                      isUploading || parsedData.length === 0
-                        ? "bg-blue-400 text-white cursor-not-allowed"
-                        : "bg-blue-600 hover:bg-blue-700 text-white"
-                    }`}
-                  >
-                    {isUploading
-                      ? "Uploading…"
-                      : `Import (${parsedData.length})`}
-                  </button>
+                {/* Row Count Display */}
+                <div className="flex justify-between items-center mb-6">
+                  <div className="text-gray-700">
+                    {parsedData.length > 0 ? (
+                      <>
+                        Rows to import:{" "}
+                        <span className="font-semibold text-blue-600">
+                          {parsedData.length}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-gray-500">No data to import</span>
+                    )}
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setShowImportModal(false)}
+                      disabled={isUploading}
+                      className={`px-5 py-2 rounded-lg cursor-pointer ${
+                        isUploading
+                          ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                          : "bg-gray-300 hover:bg-gray-400 text-gray-700"
+                      }`}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handlePurchaseImport}
+                      disabled={isUploading || parsedData.length === 0}
+                      className={`px-5 py-2 rounded-lg cursor-pointer ${
+                        isUploading || parsedData.length === 0
+                          ? "bg-blue-400 text-white cursor-not-allowed"
+                          : "bg-blue-600 hover:bg-blue-700 text-white"
+                      }`}
+                    >
+                      {isUploading
+                        ? "Uploading…"
+                        : `Upload (${parsedData.length})`}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>,
