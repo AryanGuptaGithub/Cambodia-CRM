@@ -1670,23 +1670,6 @@ const Sales = () => {
                 </h2>
 
                 <div className="mb-6">
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                    <h3 className="font-medium text-blue-800 mb-2">
-                      Import Guidelines:
-                    </h3>
-                    <ul className="text-sm text-blue-700 space-y-1">
-                      <li>• Maximum file size: 20MB</li>
-                      <li>
-                        • Supports unlimited rows (optimized for large datasets)
-                      </li>
-                      <li>• Stock validation performed during import</li>
-                      <li>
-                        • Ensure all product names match inventory exactly
-                      </li>
-                      <li>• Check for duplicate invoice numbers</li>
-                    </ul>
-                  </div>
-
                   {isSampleFile && <SampleExcelDownloadSale />}
 
                   <input
