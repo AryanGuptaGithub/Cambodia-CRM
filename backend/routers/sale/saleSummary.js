@@ -9,8 +9,6 @@ import Customer from "../../models/master/customer.js";
 
 const router = express.Router();
 
-
-
 const parseDateString = (dateStr) => {
   if (!dateStr) return null;
 
