@@ -199,8 +199,6 @@ function Purchase() {
           raw: false,
         });
 
-        console.log("Excel raw data first few rows:", jsonData.slice(0, 5));
-
         if (jsonData.length === 0) {
           showToast("warning", "Excel file is empty");
           setIsUploading(false);
@@ -227,7 +225,6 @@ function Purchase() {
           ) {
             headerRowIndex = i;
             headers = row.map((h) => h?.toString().trim() || "");
-            console.log("Found headers at row", i, ":", headers);
             break;
           }
         }
@@ -236,7 +233,6 @@ function Purchase() {
           // Use first row as headers
           headerRowIndex = 0;
           headers = jsonData[0].map((h) => h?.toString().trim() || "");
-          console.log("Using first row as headers:", headers);
         }
 
         // Create a mapping of column index to normalized header name
@@ -293,8 +289,6 @@ function Purchase() {
             headerMap.remarks = index;
           }
         });
-
-        console.log("Header map:", headerMap);
 
         // Create product map for looking up FOB, CIF, LC values
         const productMap = new Map();
@@ -410,7 +404,6 @@ function Purchase() {
 
           // Skip only if product name is missing (essential field)
           if (!productName) {
-            console.log(`Skipping row ${i}: Missing productName`);
             continue;
           }
 
@@ -497,8 +490,6 @@ function Purchase() {
 
         // Convert grouped data to array
         const groupedData = Object.values(invoiceGroups);
-
-        console.log("Grouped data for import:", groupedData.slice(0, 3));
         setParsedData(groupedData);
 
         if (groupedData.length === 0) {
@@ -543,7 +534,6 @@ function Purchase() {
 
   // Handle purchase import
   const handlePurchaseImport = async () => {
-    console.log("values of pare", parsedData);
     if (parsedData.length === 0) {
       showToast("warning", "Please upload a valid file first");
       return;
@@ -557,7 +547,6 @@ function Purchase() {
     setIsUploading(true);
 
     try {
-      console.log("Sending import data:", parsedData);
       const res = await axios.post(
         `${backendUrl}/api/purchase/import`,
         parsedData
@@ -682,8 +671,6 @@ function Purchase() {
       if (!purchaseRes.ok) throw new Error("Failed to fetch purchase details");
       const purchaseData = await purchaseRes.json();
 
-      console.log("Purchase API Response:", purchaseData);
-
       // Handle different response structures safely
       let purchaseArray = [];
 
@@ -699,8 +686,6 @@ function Purchase() {
       } else if (purchaseData.result && Array.isArray(purchaseData.result)) {
         purchaseArray = purchaseData.result;
       }
-
-      console.log(`Total records fetched: ${purchaseArray.length}`);
 
       const typeSet = new Set();
       if (Array.isArray(purchaseArray) && purchaseArray.length > 0) {
@@ -719,8 +704,6 @@ function Purchase() {
 
       setPurchases(purchaseArray);
       setTypes(["All", ...Array.from(typeSet).sort()]);
-
-      console.log(`Purchases state set with: ${purchaseArray.length} records`);
     } catch (error) {
       console.error("❌ Fetch error:", error);
       showToast("error", error.message || "Error fetching purchase details");
@@ -880,13 +863,10 @@ function Purchase() {
       try {
         // Extract just the ID strings from the selected array
         const selectedIds = selected.map((item) => item.id);
-        console.log("Deleting purchases with IDs:", selectedIds);
 
         const res = await axios.delete(`${backendUrl}/api/purchase`, {
           data: { ids: selectedIds }, // Send array of ID strings
         });
-
-        console.log("values of res", res);
         if (res.status === 200) {
           showToast(
             "success",
@@ -913,8 +893,6 @@ function Purchase() {
         return;
       }
 
-      console.log("Deleting purchases with IDs:", selectedIds);
-
       const response = await fetch(`${backendUrl}/api/purchase`, {
         method: "DELETE",
         headers: {
@@ -929,7 +907,6 @@ function Purchase() {
         throw new Error(data.error || "Failed to delete purchases");
       }
 
-      console.log("Delete response:", data);
       alert(data.message);
 
       // Refresh purchases list

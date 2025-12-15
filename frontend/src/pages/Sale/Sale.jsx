@@ -41,6 +41,47 @@ import LoadingOverlay from "../../components/Loading";
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
+// Progress modal component
+const ImportProgressModal = ({ progress, message, onCancel }) => {
+  if (!progress) return null;
+
+  return ReactDOM.createPortal(
+    <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-[100]">
+      <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
+        <div className="mb-4">
+          <h3 className="text-lg font-semibold text-gray-800 mb-2">
+            Importing Sales Data
+          </h3>
+          <p className="text-sm text-gray-600 mb-4">{message}</p>
+
+          <div className="w-full bg-gray-200 rounded-full h-2.5">
+            <div
+              className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+              style={{ width: `${progress}%` }}
+            ></div>
+          </div>
+
+          <div className="flex justify-between text-xs text-gray-500 mt-2">
+            <span>{Math.round(progress)}% Complete</span>
+            <span>Processing...</span>
+          </div>
+        </div>
+
+        <div className="flex justify-end">
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 text-sm bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-md transition-colors cursor-pointer"
+            disabled={progress >= 100}
+          >
+            Cancel Import
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+};
+
 const Sales = () => {
   const navigate = useNavigate();
   const [sales, setSales] = useState([]);
@@ -55,7 +96,6 @@ const Sales = () => {
   const [loadingData, setLoadingData] = useState(true);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  const [isOpen, setIsOpen] = useState(false);
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [selectedSaleProducts, setSelectedSaleProducts] = useState([]);
   const [mrList, setMrList] = useState([]);
@@ -65,21 +105,50 @@ const Sales = () => {
   const { statuses, productNames, loading } = useInitialSaleData();
   const [errors, setErrors] = useState({});
   const [stockData, setStockData] = useState({});
+  const [importProgress, setImportProgress] = useState(null);
+  const [importMessage, setImportMessage] = useState("");
+  const [abortController, setAbortController] = useState(null);
 
   const [currentProduct, setCurrentProduct] = useState(null);
   const [currentProductIndex, setCurrentProductIndex] = useState(null);
   const [isProductEditModalOpen, setIsProductEditModalOpen] = useState(false);
   const [expandedProductIndex, setExpandedProductIndex] = useState(-1);
 
-  // FIXED: Updated stock data fetch endpoint
+  const [form, setForm] = useState({
+    _id: null,
+    recordingDate: "",
+    invoiceNumber: "",
+    invoiceDate: "",
+    mrName: "",
+    customerCode: "",
+    productName: "",
+    salesQty: 0,
+    bonusQty: 0,
+    totalQty: 0,
+    sellingPrice: 0.0,
+    amount: 0,
+    discount: 0,
+    netSellingAmount: 0,
+    averageUnitPrice: 0,
+    profitLoss: 0,
+    creditDays: 0,
+    dueDate: "",
+    deliveryDate: "",
+    paidAmount: 0,
+    dueAmount: 0,
+    paymentStatus: "",
+    remark: "",
+    products: [],
+  });
+
+  const SALES_PER_PAGE = 9; // Keep this for frontend pagination
+
+  // Fetch stock data
   const fetchStockData = async () => {
     try {
-      console.log(
-        "Fetching stock data from:",
-        `${backendUrl}/api/sales/stock/report-in-hand`
-      );
       const response = await axios.get(
-        `${backendUrl}/api/sales/stock/report-in-hand`
+        `${backendUrl}/api/sales/stock/report-in-hand`,
+        { timeout: 30000 }
       );
       if (response.data && Array.isArray(response.data)) {
         const stockMap = {};
@@ -100,15 +169,12 @@ const Sales = () => {
           }
         });
         setStockData(stockMap);
-        console.log(
-          "Stock data loaded:",
-          Object.keys(stockMap).length,
-          "products"
-        );
       }
     } catch (error) {
       console.error("Error fetching stock data:", error);
-      showToast("error", "Failed to fetch stock data");
+      if (error.code !== "ECONNABORTED") {
+        showToast("error", "Failed to fetch stock data");
+      }
     }
   };
 
@@ -149,295 +215,52 @@ const Sales = () => {
     setShowImportModal(true);
   };
 
-  const validateParsedDataStock = () => {
-    const validationErrors = [];
+  // Fetch sale summaries - UPDATED TO GET ALL DATA
+  const fetchSaleSummaries = async () => {
+    try {
+      setLoadingData(true);
+      // Fetch without pagination to get all data
+      const res = await fetch(`${backendUrl}/api/sales/all`);
+      if (!res.ok) {
+        // Fallback to paginated endpoint if all endpoint doesn't exist
+        const fallbackRes = await fetch(
+          `${backendUrl}/api/sales?page=1&limit=1000`
+        );
+        if (!fallbackRes.ok) throw new Error("Failed to fetch sale summaries");
 
-    parsedData.forEach((invoice, invoiceIndex) => {
-      invoice.products.forEach((product, productIndex) => {
-        const totalQty =
-          (Number(product.salesQty) || 0) + (Number(product.bonusQty) || 0);
-        const stockCheck = checkProductStock(product.productName, totalQty);
+        const data = await fallbackRes.json();
+        const salesData = data.summaries || data.data || data;
 
-        if (!stockCheck.hasSufficientStock) {
-          validationErrors.push({
-            invoiceNumber: invoice.invoiceNumber,
-            productName: product.productName,
-            required: totalQty,
-            available: stockCheck.availableStock,
-            message: `Insufficient stock for "${product.productName}". Required: ${totalQty}, Available: ${stockCheck.availableStock}`,
-          });
-        }
-      });
-    });
+        const uniqueTypes = Array.from(
+          new Set(salesData.map((item) => item.paymentStatus?.toLowerCase()))
+        ).filter(Boolean);
 
-    return validationErrors;
-  };
+        setTypes(["All", ...uniqueTypes]);
+        setSales(salesData);
+      } else {
+        const data = await res.json();
+        const salesData = data.summaries || data.data || data;
 
-  const toggleProductView = (index) => {
-    setExpandedProductIndex(expandedProductIndex === index ? -1 : index);
-  };
+        const uniqueTypes = Array.from(
+          new Set(salesData.map((item) => item.paymentStatus?.toLowerCase()))
+        ).filter(Boolean);
 
-  const tableColumns = useMemo(
-    () => [
-      "invoiceNumber",
-      "invoiceDate",
-      "productCount",
-      "mrName",
-      "customerName",
-      "totalAmount",
-      "paymentStatus",
-      "actions",
-    ],
-    []
-  );
-
-  const capitalizeFirstLetter = (string) => {
-    if (!string) return "--";
-    return string.charAt(0).toUpperCase() + string.slice(1);
-  };
-
-  const getFieldValue = (sale, dbName) => {
-    if (dbName === "customerName") {
-      return sale?.customerName || "--";
-    }
-
-    if (dbName === "products") {
-      const productCount = sale.products?.length || 0;
-      return productCount;
-    }
-
-    if (
-      ["recordingDate", "dueDate", "deliveryDate", "invoiceDate"].includes(
-        dbName
-      )
-    ) {
-      return formatDateToReadable(sale[dbName]) || "--";
-    }
-
-    if (dbName === "amount") {
-      return Math.ceil(sale.amount || 0);
-    }
-
-    if (dbName === "totalAmount") {
-      return `${Math.ceil(sale.totalAmount || 0).toLocaleString()}`;
-    }
-
-    if (
-      dbName === "salesQty" ||
-      dbName === "totalQty" ||
-      dbName === "bonusQty"
-    ) {
-      return Math.ceil(sale[dbName] || 0);
-    }
-
-    const value = sale[dbName];
-    if (value && typeof value === "object") {
-      return value.name || value.displayName || JSON.stringify(value);
-    }
-
-    return value ?? "--";
-  };
-
-  const handleProductCountClick = (sale) => {
-    setSelectedSaleProducts(sale.products || []);
-    setIsProductModalOpen(true);
-  };
-
-  const openProductEditModal = (product, index) => {
-    setCurrentProduct({ ...product });
-    setCurrentProductIndex(index);
-    setIsProductEditModalOpen(true);
-  };
-
-  const handleProductChange = (e) => {
-    const { name, value } = e.target;
-    setCurrentProduct((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
-  };
-
-  const updateProductInForm = () => {
-    setForm((prev) => {
-      const updatedProducts = [...prev.products];
-      updatedProducts[currentProductIndex] = currentProduct;
-
-      const totals = calculateProductTotals(updatedProducts);
-
-      return {
-        ...prev,
-        products: updatedProducts,
-        totalAmount: totals.totalAmount,
-        netSellingAmount: totals.netAmount,
-        dueAmount: (
-          totals.netAmount - parseFloat(prev.paidAmount || 0)
-        ).toFixed(2),
-      };
-    });
-    setIsProductEditModalOpen(false);
-    setCurrentProduct(null);
-    setCurrentProductIndex(null);
-  };
-
-  const handleProductNumericChange = (e) => {
-    const { name, value } = e.target;
-    if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
-      setCurrentProduct((prev) => ({
-        ...prev,
-        [name]: value,
-      }));
+        setTypes(["All", ...uniqueTypes]);
+        setSales(salesData);
+      }
+    } catch (error) {
+      console.error("❌ Fetch error:", error);
+      showToast("error", error.message || "Error fetching sale summaries");
+    } finally {
+      setLoadingData(false);
     }
   };
 
-  const allFields = useMemo(
-    () => [
-      {
-        id: "invoiceNumber",
-        name: "Invoice No",
-        dbName: "invoiceNumber",
-      },
-      {
-        id: "invoiceDate",
-        name: "Invoice Date",
-        dbName: "invoiceDate",
-      },
-      {
-        id: "productCount",
-        name: "Products",
-        dbName: "products",
-      },
-      { id: "mrName", name: "MR Name", dbName: "mrName" },
-      {
-        id: "customerName",
-        name: "Customer Name",
-        dbName: "customerName",
-      },
-      {
-        id: "totalAmount",
-        name: "Total Amount ($)",
-        dbName: "totalAmount",
-      },
-      {
-        id: "salesQty",
-        name: "Sales Qty",
-        dbName: "salesQty",
-      },
-      {
-        id: "totalQty",
-        name: "Total Qty",
-        dbName: "totalQty",
-      },
-      {
-        id: "bonusQty",
-        name: "Bonus Qty",
-        dbName: "bonusQty",
-      },
-      {
-        id: "sellingPrice",
-        name: "Selling Price (USD)",
-        dbName: "sellingPrice",
-      },
-      {
-        id: "averageUnitPrice",
-        name: "Average Unit Price (USD)",
-        dbName: "averageUnitPrice",
-      },
-      {
-        id: "discount",
-        name: "Discount (USD)",
-        dbName: "discount",
-      },
-      {
-        id: "netSellingAmount",
-        name: "Net Selling Amount (USD)",
-        dbName: "netSellingAmount",
-      },
-      {
-        id: "amount",
-        name: "Product Amount ($)",
-        dbName: "amount",
-      },
-      {
-        id: "profitLoss",
-        name: "Prof/Loss",
-        dbName: "profitLoss",
-      },
-      { id: "lc", name: "LC", dbName: "lc" },
-      {
-        id: "paidAmount",
-        name: "Paid Amount",
-        dbName: "paidAmount",
-      },
-      {
-        id: "dueAmount",
-        name: "Due Amount",
-        dbName: "dueAmount",
-      },
-      {
-        id: "paymentStatus",
-        name: "Payment Status",
-        dbName: "paymentStatus",
-      },
-      {
-        id: "creditDays",
-        name: "Credit (Days)",
-        dbName: "creditDays",
-      },
-      {
-        id: "recordingDate",
-        name: "Recording Date",
-        dbName: "recordingDate",
-      },
-      { id: "dueDate", name: "Due Date", dbName: "dueDate" },
-      {
-        id: "deliveryDate",
-        name: "Delivery Date",
-        dbName: "deliveryDate",
-      },
-      { id: "remark", name: "Remark", dbName: "remark" },
-      {
-        id: "customerCode",
-        name: "Customer Code",
-        dbName: "customerCode",
-      },
-      {
-        id: "actions",
-        name: "Actions",
-        dbName: "actions",
-      },
-    ],
-    []
-  );
+  useEffect(() => {
+    fetchSaleSummaries();
+  }, []);
 
-  const [form, setForm] = useState({
-    _id: null,
-    recordingDate: "",
-    invoiceNumber: "",
-    invoiceDate: "",
-    mrName: "",
-    customerCode: "",
-    productName: "",
-    salesQty: 0,
-    bonusQty: 0,
-    totalQty: 0,
-    sellingPrice: 0.0,
-    amount: 0,
-    discount: 0,
-    netSellingAmount: 0,
-    averageUnitPrice: 0,
-    profitLoss: 0,
-    creditDays: 0,
-    dueDate: "",
-    deliveryDate: "",
-    paidAmount: 0,
-    dueAmount: 0,
-    paymentStatus: "",
-    remark: "",
-    products: [],
-  });
-
-  const SALES_PER_PAGE = 9;
-
+  // Fetch dropdown data
   useEffect(() => {
     const fetchDropdownData = async () => {
       try {
@@ -511,32 +334,610 @@ const Sales = () => {
     fetchDropdownData();
   }, []);
 
-  const fetchSaleSummaries = async () => {
+  // 🔥 OPTIMIZED FILE UPLOAD FOR LARGE DATASETS
+  // 🔥 OPTIMIZED FILE UPLOAD FOR LARGE DATASETS
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Check file size (max 20MB)
+    if (file.size > 20 * 1024 * 1024) {
+      showToast("error", "File size too large. Maximum size is 20MB.");
+      return;
+    }
+
+    setImportMessage("Reading file...");
+    setImportProgress(10);
+    setIsUploading(true);
+
     try {
-      const res = await fetch(`${backendUrl}/api/sales`);
-      if (!res.ok) throw new Error("Failed to fetch sale summaries");
+      // Read file as array buffer
+      const data = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (evt) => resolve(evt.target.result);
+        reader.onerror = reject;
+        reader.readAsArrayBuffer(file);
+      });
 
-      const data = await res.json();
-      const salesData = data.summaries || data;
+      setImportProgress(30);
+      setImportMessage("Processing Excel data...");
 
-      const uniqueTypes = Array.from(
-        new Set(salesData.map((item) => item.paymentStatus?.toLowerCase()))
-      );
+      // Parse Excel file
+      const workbook = XLSX.read(new Uint8Array(data), { type: "array" });
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(worksheet, {
+        header: 1,
+        defval: "",
+      });
 
-      setTypes(["All", ...uniqueTypes]);
-      setSales(salesData);
+      setImportProgress(50);
+      setImportMessage("Parsing data...");
+
+      // Find header row
+      const expectedHeaders = [
+        "Recording Date",
+        "Invoice #",
+        "Invoice Date",
+        "MR Name",
+        "Customer Name",
+        "Customer Code",
+        "Customer ID",
+        "Product Name",
+        "Sales Qty",
+        "Bonus Qty",
+        "Selling Price (USD)",
+        "Discount (USD)",
+        "Credit Days",
+        "Paid Amount",
+        "Payment Status",
+        "Remarks",
+      ];
+
+      let headerIdx = -1;
+      for (let i = 0; i < Math.min(rows.length, 20); i++) {
+        const row = rows[i].map((c) => String(c || "").trim());
+        const normalized = row.map((c) => c.toLowerCase());
+        const matchCount = expectedHeaders.filter((h) =>
+          normalized.includes(h.toLowerCase())
+        ).length;
+        if (matchCount >= 5) {
+          headerIdx = i;
+          break;
+        }
+      }
+
+      if (headerIdx === -1) {
+        showToast("error", "Header row not found in first 20 rows");
+        setImportProgress(null);
+        setIsUploading(false);
+        return;
+      }
+
+      const headers = rows[headerIdx].map((h) => String(h || "").trim());
+      const dataRows = rows
+        .slice(headerIdx + 1)
+        .filter((row) =>
+          row.some(
+            (cell) =>
+              cell !== null && cell !== undefined && String(cell).trim() !== ""
+          )
+        );
+
+      // 🔥 FIXED DATE PARSING FUNCTION
+      const parseExcelDate = (dateValue) => {
+        if (!dateValue) return new Date();
+
+        // If it's already a Date object
+        if (dateValue instanceof Date) {
+          return dateValue;
+        }
+
+        // If it's an Excel serial number
+        if (typeof dateValue === "number") {
+          const excelEpoch = new Date(1899, 11, 30); // Excel epoch is Dec 30, 1899
+          const date = new Date(excelEpoch.getTime() + dateValue * 86400000);
+          return date;
+        }
+
+        // If it's a string, try to parse it
+        if (typeof dateValue === "string") {
+          // Remove any whitespace
+          const dateStr = dateValue.trim();
+
+          // Try different date formats
+          const dateFormats = [
+            // Try DD-MMM-YY (like 8-Jun-21)
+            /^(\d{1,2})-([a-zA-Z]{3})-(\d{2})$/i,
+            // Try DD/MM/YYYY or DD-MM-YYYY
+            /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/,
+            // Try DD/MM/YY or DD-MM-YY
+            /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2})$/,
+            // Try YYYY-MM-DD
+            /^(\d{4})-(\d{1,2})-(\d{1,2})$/,
+          ];
+
+          for (const format of dateFormats) {
+            const match = dateStr.match(format);
+            if (match) {
+              if (format.toString().includes("[a-zA-Z]{3}")) {
+                // Handle DD-MMM-YY format (like 8-Jun-21)
+                const day = parseInt(match[1], 10);
+                const monthStr = match[2].toLowerCase();
+                const year = parseInt(match[3], 10);
+
+                const monthMap = {
+                  jan: 0,
+                  feb: 1,
+                  mar: 2,
+                  apr: 3,
+                  may: 4,
+                  jun: 5,
+                  jul: 6,
+                  aug: 7,
+                  sep: 8,
+                  oct: 9,
+                  nov: 10,
+                  dec: 11,
+                };
+
+                const month = monthMap[monthStr];
+                if (month !== undefined) {
+                  const fullYear = year < 100 ? 2000 + year : year;
+                  return new Date(fullYear, month, day);
+                }
+              } else {
+                const parts = dateStr.split(/[\/-]/);
+                let day, month, year;
+
+                if (format.toString().includes("YYYY-MM-DD")) {
+                  // YYYY-MM-DD format
+                  year = parseInt(parts[0], 10);
+                  month = parseInt(parts[1], 10) - 1;
+                  day = parseInt(parts[2], 10);
+                } else {
+                  // DD/MM/YYYY or similar
+                  day = parseInt(parts[0], 10);
+                  month = parseInt(parts[1], 10) - 1;
+                  year = parseInt(parts[2], 10);
+
+                  // Handle 2-digit years
+                  if (year < 100) {
+                    year = 2000 + year;
+                  }
+                }
+
+                return new Date(year, month, day);
+              }
+            }
+          }
+
+          // Last resort: try JavaScript Date parsing
+          const parsed = new Date(dateStr);
+          if (!isNaN(parsed.getTime())) {
+            return parsed;
+          }
+        }
+
+        // Default to today's date
+        return new Date();
+      };
+
+      // Group by invoice number
+      const groupedInvoices = {};
+      const validationErrors = [];
+      let rowCount = 0;
+
+      for (const row of dataRows) {
+        rowCount++;
+        if (rowCount % 1000 === 0) {
+          setImportMessage(
+            `Processing row ${rowCount} of ${dataRows.length}...`
+          );
+        }
+
+        const invoiceNumber = String(
+          row[headers.indexOf("Invoice #")] || ""
+        ).trim();
+        const customerName = String(
+          row[headers.indexOf("Customer Name")] || ""
+        ).trim();
+        const customerCode = String(
+          row[headers.indexOf("Customer Code")] || ""
+        ).trim();
+        const productName = String(
+          row[headers.indexOf("Product Name")] || ""
+        ).trim();
+        const salesQty = Number(row[headers.indexOf("Sales Qty")]) || 0;
+        const sellingPrice =
+          Number(row[headers.indexOf("Selling Price (USD)")]) || 0;
+
+        // Basic validation
+        if (!invoiceNumber) {
+          validationErrors.push(
+            `Row ${rowCount + headerIdx + 1}: Invoice number is required`
+          );
+          continue;
+        }
+
+        if (!customerName) {
+          validationErrors.push(
+            `Row ${rowCount + headerIdx + 1}: Customer name is required`
+          );
+          continue;
+        }
+
+        if (!productName) {
+          validationErrors.push(
+            `Row ${rowCount + headerIdx + 1}: Product name is required`
+          );
+          continue;
+        }
+
+        if (salesQty <= 0) {
+          validationErrors.push(
+            `Row ${
+              rowCount + headerIdx + 1
+            }: Sales quantity must be greater than 0`
+          );
+          continue;
+        }
+
+        if (sellingPrice <= 0) {
+          validationErrors.push(
+            `Row ${
+              rowCount + headerIdx + 1
+            }: Selling price must be greater than 0`
+          );
+          continue;
+        }
+
+        // Find customer
+        let customer = null;
+        if (customerCode) {
+          customer = customerList.find((c) => c.code === customerCode);
+        } else if (customerName) {
+          customer = customerList.find(
+            (c) => c.name.toLowerCase() === customerName.toLowerCase()
+          );
+        }
+
+        if (!groupedInvoices[invoiceNumber]) {
+          const creditDays = Number(row[headers.indexOf("Credit Days")]) || 0;
+          const currentDate = new Date();
+          const dueDate = new Date(currentDate);
+          dueDate.setDate(currentDate.getDate() + creditDays);
+
+          // 🔥 FIXED: Use the new parseExcelDate function for dates
+          let recordingDateStr = row[headers.indexOf("Recording Date")] || "";
+          let recordingDate = recordingDateStr
+            ? parseExcelDate(recordingDateStr)
+            : new Date();
+
+          let invoiceDateStr =
+            row[headers.indexOf("Invoice Date")] || recordingDateStr;
+          let invoiceDate = invoiceDateStr
+            ? parseExcelDate(invoiceDateStr)
+            : new Date();
+
+          // Validate dates
+          if (isNaN(recordingDate.getTime())) {
+            recordingDate = new Date();
+          }
+          if (isNaN(invoiceDate.getTime())) {
+            invoiceDate = new Date();
+          }
+
+          groupedInvoices[invoiceNumber] = {
+            recordingDate: recordingDate.toISOString().split("T")[0],
+            invoiceNumber,
+            invoiceDate: invoiceDate.toISOString().split("T")[0],
+            mrName: String(row[headers.indexOf("MR Name")] || "").trim(),
+            customerName: customerName,
+            customerCode: customer?.code || customerCode || "",
+            customerId: customer?.id || "",
+            creditDays: creditDays,
+            paidAmount: Number(row[headers.indexOf("Paid Amount")]) || 0,
+            paymentStatus: String(
+              row[headers.indexOf("Payment Status")] || "Credit"
+            ).trim(),
+            remark: String(row[headers.indexOf("Remarks")] || "").trim(),
+            products: [],
+            totalAmount: 0,
+            dueAmount: 0,
+            dueDate: dueDate.toISOString().split("T")[0],
+            deliveryDate: invoiceDate.toISOString().split("T")[0],
+          };
+        }
+
+        const bonusQty = Number(row[headers.indexOf("Bonus Qty")]) || 0;
+        const discount = Number(row[headers.indexOf("Discount (USD)")]) || 0;
+        const totalQty = salesQty + bonusQty;
+        const amount = sellingPrice * salesQty;
+        const netSellingAmount = amount - discount;
+        const averageUnitPrice = totalQty > 0 ? netSellingAmount / totalQty : 0;
+
+        groupedInvoices[invoiceNumber].products.push({
+          productName: productName,
+          salesQty: salesQty,
+          bonusQty: bonusQty,
+          totalQty: totalQty,
+          sellingPrice: sellingPrice,
+          amount: amount,
+          discount: discount,
+          netSellingAmount: netSellingAmount,
+          averageUnitPrice: averageUnitPrice,
+          lc: 0, // Will be populated from stock during import
+          profitLoss: 0, // Will be calculated during import
+          isProductAccept: true,
+        });
+
+        groupedInvoices[invoiceNumber].totalAmount += netSellingAmount;
+      }
+
+      // Calculate due amounts
+      Object.values(groupedInvoices).forEach((invoice) => {
+        invoice.dueAmount = invoice.totalAmount - invoice.paidAmount;
+
+        // Default values
+        if (!invoice.mrName && mrList.length > 0) {
+          invoice.mrName = mrList[0];
+        }
+
+        if (!invoice.paymentStatus) {
+          invoice.paymentStatus = "Credit";
+        }
+      });
+
+      const invoicesArray = Object.values(groupedInvoices);
+
+      setImportProgress(100);
+
+      if (validationErrors.length > 0) {
+        showToast(
+          "warning",
+          `Found ${invoicesArray.length} invoices with ${rowCount} products, but ${validationErrors.length} rows had errors`
+        );
+
+        // Show first 3 errors
+        const errorMessage = validationErrors.slice(0, 3).join("\n");
+        if (validationErrors.length > 3) {
+          showToast(
+            "warning",
+            `${errorMessage}\n...and ${validationErrors.length - 3} more errors`
+          );
+        }
+      } else {
+        showToast(
+          "success",
+          `Found ${invoicesArray.length} invoices with ${rowCount} products`
+        );
+      }
+
+      setParsedData(invoicesArray);
+
+      if (invoicesArray.length > 0) {
+      }
     } catch (error) {
-      console.error("❌ Fetch error:", error);
-      showToast("error", error.message || "Error fetching sale summaries");
+      console.error("❌ Error processing file:", error);
+      showToast("error", "Failed to process Excel file: " + error.message);
     } finally {
-      setLoadingData(false);
+      setImportProgress(null);
+      setIsUploading(false);
     }
   };
 
-  useEffect(() => {
-    fetchSaleSummaries();
-  }, []);
+  // 🔥 OPTIMIZED IMPORT FUNCTION
+  const handleProductImport = async () => {
+    if (!parsedData || parsedData.length === 0) {
+      showToast("warning", "Please upload and validate a file first.");
+      return;
+    }
 
+    const controller = new AbortController();
+    setAbortController(controller);
+    setIsUploading(true);
+    setImportProgress(0);
+    setImportMessage("Preparing import...");
+
+    try {
+      // Upload data
+      const res = await axios.post(
+        `${backendUrl}/api/sales/import`,
+        parsedData,
+        {
+          headers: { "Content-Type": "application/json" },
+          timeout: 300000, // 5 minutes timeout
+          signal: controller.signal,
+          onUploadProgress: (progressEvent) => {
+            if (progressEvent.total) {
+              const percentComplete = Math.round(
+                (progressEvent.loaded * 100) / progressEvent.total
+              );
+              setImportProgress(Math.min(percentComplete, 90));
+              setImportMessage("Uploading data to server...");
+            }
+          },
+        }
+      );
+
+      setImportProgress(95);
+      setImportMessage("Processing import...");
+
+      // Check response
+      if (res.data) {
+        const result = res.data;
+
+        if (result.success) {
+          const summary = result.summary;
+
+          showToast(
+            "success",
+            `Import completed!\n` +
+              `✓ ${summary.successfullyImported} invoices imported successfully\n` +
+              `✗ ${summary.failed} invoices failed\n` +
+              `Time: ${summary.processingTimeSeconds}s`
+          );
+
+          setTimeout(() => {
+            setShowImportModal(false);
+            setParsedData([]);
+            setImportProgress(null);
+            fetchSaleSummaries();
+            fetchStockData();
+          }, 1000);
+        } else {
+          showToast("error", result.message || "Import failed");
+          setImportProgress(null);
+        }
+      }
+    } catch (err) {
+      console.error("❌ Import failed:", err);
+
+      let errorMessage = "Failed to import data";
+
+      if (err.code === "ECONNABORTED") {
+        errorMessage =
+          "Import timeout. Please try with a smaller file or split into multiple imports.";
+      } else if (err.response) {
+        errorMessage =
+          err.response.data?.message || `Server error: ${err.response.status}`;
+      } else if (err.request) {
+        errorMessage = "No response from server. Please check your connection.";
+      } else {
+        errorMessage = err.message;
+      }
+
+      showToast("error", errorMessage);
+      setImportProgress(null);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // Cancel import
+  const cancelImport = () => {
+    if (abortController) {
+      abortController.abort();
+      setAbortController(null);
+    }
+    setImportProgress(null);
+    setIsUploading(false);
+    showToast("info", "Import cancelled");
+  };
+
+  // Handle batch delete
+  const handleDeleteSelected = async () => {
+    if (selected.length === 0) return;
+
+    const confirm = await confirmDialog({
+      text: `Are you sure you want to delete <b>${selected.length}</b> sales?`,
+      icon: "warning",
+      confirmButtonText: "Yes, delete",
+      cancelButtonText: "Cancel",
+    });
+
+    if (confirm.isConfirmed) {
+      try {
+        setImportProgress(0);
+        setImportMessage("Deleting selected sales...");
+
+        const res = await axios.delete(`${backendUrl}/api/sales/delete-batch`, {
+          data: { ids: selected.map((s) => s.id) },
+          timeout: 120000,
+        });
+
+        if (res.status === 200) {
+          showToast("success", "Selected Sales deleted successfully");
+          fetchSaleSummaries();
+          setSelected([]);
+          await fetchStockData();
+        }
+      } catch (error) {
+        console.error("Delete batch error:", error);
+        showToast("error", "Failed to delete selected sales");
+      } finally {
+        setImportProgress(null);
+      }
+    }
+  };
+
+  const validateParsedDataStock = () => {
+    const validationErrors = [];
+
+    parsedData.forEach((invoice, invoiceIndex) => {
+      invoice.products.forEach((product, productIndex) => {
+        const totalQty =
+          (Number(product.salesQty) || 0) + (Number(product.bonusQty) || 0);
+        const stockCheck = checkProductStock(product.productName, totalQty);
+
+        if (!stockCheck.hasSufficientStock) {
+          validationErrors.push({
+            invoiceNumber: invoice.invoiceNumber,
+            productName: product.productName,
+            required: totalQty,
+            available: stockCheck.availableStock,
+            message: `Insufficient stock for "${product.productName}". Required: ${totalQty}, Available: ${stockCheck.availableStock}`,
+          });
+        }
+      });
+    });
+
+    return validationErrors;
+  };
+
+  // Table columns and fields
+  const tableColumns = useMemo(
+    () => [
+      "invoiceNumber",
+      "invoiceDate",
+      "productCount",
+      "mrName",
+      "customerName",
+      "totalAmount",
+      "paymentStatus",
+      "actions",
+    ],
+    []
+  );
+
+  const allFields = useMemo(
+    () => [
+      {
+        id: "invoiceNumber",
+        name: "Invoice No",
+        dbName: "invoiceNumber",
+      },
+      {
+        id: "invoiceDate",
+        name: "Invoice Date",
+        dbName: "invoiceDate",
+      },
+      {
+        id: "productCount",
+        name: "Products",
+        dbName: "products",
+      },
+      { id: "mrName", name: "MR Name", dbName: "mrName" },
+      {
+        id: "customerName",
+        name: "Customer Name",
+        dbName: "customerName",
+      },
+      {
+        id: "totalAmount",
+        name: "Total Amount ($)",
+        dbName: "totalAmount",
+      },
+      {
+        id: "actions",
+        name: "Actions",
+        dbName: "actions",
+      },
+    ],
+    []
+  );
+
+  // Filtered sales - Now showing all data with frontend pagination
   const filteredSales = useMemo(() => {
     if (!Array.isArray(sales)) {
       console.warn("Sales is not an array:", sales);
@@ -565,6 +966,7 @@ const Sales = () => {
     });
   }, [sales, searchTerm, selectedTab]);
 
+  // Current sales for pagination
   const currentSales = useMemo(() => {
     const start = (currentPage - 1) * SALES_PER_PAGE;
     return filteredSales.slice(start, start + SALES_PER_PAGE);
@@ -581,6 +983,54 @@ const Sales = () => {
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, selectedTab]);
+
+  // Helper functions
+  const capitalizeFirstLetter = (string) => {
+    if (!string) return "--";
+    return string.charAt(0).toUpperCase() + string.slice(1);
+  };
+
+  const getFieldValue = (sale, dbName) => {
+    if (dbName === "customerName") {
+      return sale?.customerName || "--";
+    }
+
+    if (dbName === "products") {
+      const productCount = sale.products?.length || 0;
+      return productCount;
+    }
+
+    if (
+      ["recordingDate", "dueDate", "deliveryDate", "invoiceDate"].includes(
+        dbName
+      )
+    ) {
+      return formatDateToReadable(sale[dbName]) || "--";
+    }
+
+    if (dbName === "amount") {
+      return Math.ceil(sale.amount || 0);
+    }
+
+    if (dbName === "totalAmount") {
+      return `${Math.ceil(sale.totalAmount || 0).toLocaleString()}`;
+    }
+
+    if (
+      dbName === "salesQty" ||
+      dbName === "totalQty" ||
+      dbName === "bonusQty"
+    ) {
+      return Math.ceil(sale[dbName] || 0);
+    }
+
+    const value = sale[dbName];
+    if (value && typeof value === "object") {
+      return value.name || value.displayName || JSON.stringify(value);
+    }
+
+    return value ?? "--";
+  };
 
   const toggleSelect = (sale) => {
     setSelected((prev) => {
@@ -603,16 +1053,50 @@ const Sales = () => {
     }
   };
 
+  const handleProductCountClick = (sale) => {
+    setSelectedSaleProducts(sale.products || []);
+    setIsProductModalOpen(true);
+  };
+
+  const toggleProductView = (index) => {
+    setExpandedProductIndex(expandedProductIndex === index ? -1 : index);
+  };
+
   const handleView = (sale) => {
     setForm({ ...sale });
-    setIsOpen(true);
     setIsViewModalOpen(true);
   };
 
   const editSale = (sale) => {
     setForm({ ...sale });
-    setIsOpen(true);
     setIsEditModalOpen(true);
+  };
+
+  const deleteSale = async (sale) => {
+    if (!sale._id) return;
+    const confirmDelete = await confirmDialog({
+      title: "Delete",
+      text: `Are you sure you want to delete <b>${sale.invoiceNumber}</b>?`,
+      icon: "warning",
+      confirmButtonText: "Yes, delete",
+      cancelButtonText: "Cancel",
+    });
+
+    if (confirmDelete.isConfirmed) {
+      try {
+        const res = await axios.delete(`${backendUrl}/api/sales/${sale._id}`);
+        if (res.status === 200) {
+          showToast(
+            "success",
+            `Sale <b>${sale.invoiceNumber}</b> deleted successfully`
+          );
+          fetchSaleSummaries();
+          await fetchStockData();
+        }
+      } catch (error) {
+        showToast("error", "Failed to delete sale.");
+      }
+    }
   };
 
   const handleUpdateSales = async (e, sale) => {
@@ -659,348 +1143,54 @@ const Sales = () => {
     }
   };
 
-  const deleteSale = async (sale) => {
-    if (!sale._id) return;
-    const confirmDelete = await confirmDialog({
-      title: "Delete",
-      text: `Are you sure you want to delete <b>${sale.invoiceNumber}</b>?`,
-      icon: "warning",
-      confirmButtonText: "Yes, delete",
-      cancelButtonText: "Cancel",
+  // Product edit modal functions
+  const openProductEditModal = (product, index) => {
+    setCurrentProduct({ ...product });
+    setCurrentProductIndex(index);
+    setIsProductEditModalOpen(true);
+  };
+
+  const handleProductChange = (e) => {
+    const { name, value } = e.target;
+    setCurrentProduct((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  };
+
+  const handleProductNumericChange = (e) => {
+    const { name, value } = e.target;
+    if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+      setCurrentProduct((prev) => ({
+        ...prev,
+        [name]: value,
+      }));
+    }
+  };
+
+  const updateProductInForm = () => {
+    setForm((prev) => {
+      const updatedProducts = [...prev.products];
+      updatedProducts[currentProductIndex] = currentProduct;
+
+      const totals = calculateProductTotals(updatedProducts);
+
+      return {
+        ...prev,
+        products: updatedProducts,
+        totalAmount: totals.totalAmount,
+        netSellingAmount: totals.netAmount,
+        dueAmount: (
+          totals.netAmount - parseFloat(prev.paidAmount || 0)
+        ).toFixed(2),
+      };
     });
-
-    if (confirmDelete.isConfirmed) {
-      try {
-        const res = await axios.delete(`${backendUrl}/api/sales/${sale._id}`);
-        if (res.status === 200) {
-          showToast(
-            "success",
-            `Sale <b>${sale.invoiceNumber}</b> deleted successfully`
-          );
-          fetchSaleSummaries();
-          await fetchStockData();
-        }
-      } catch (error) {
-        showToast("error", "Failed to delete sale.");
-      }
-    }
+    setIsProductEditModalOpen(false);
+    setCurrentProduct(null);
+    setCurrentProductIndex(null);
   };
 
-  const handleDeleteSelected = async () => {
-    const confirm = await confirmDialog({
-      text: `Are you sure you want to delete <b>${selected.length}</b> sales`,
-      icon: "warning",
-      confirmButtonText: "Yes, delete",
-      cancelButtonText: "Cancel",
-      selected,
-    });
-
-    if (confirm.isConfirmed) {
-      try {
-        const res = await axios.delete(`${backendUrl}/api/sales`, {
-          data: { ids: selected },
-        });
-
-        if (res.status === 200) {
-          showToast("success", "Selected Sales deleted successfully");
-          fetchSaleSummaries();
-          setSelected([]);
-          await fetchStockData();
-        }
-      } catch (error) {
-        showToast("error", "Failed to delete selected sales.");
-      }
-    } else {
-      setSelected([]);
-    }
-  };
-
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-
-    reader.onload = async (evt) => {
-      try {
-        const data = new Uint8Array(evt.target.result);
-        const workbook = XLSX.read(data, { type: "array" });
-        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-
-        const expectedHeaders = [
-          "Recording Date",
-          "Invoice #",
-          "Invoice Date",
-          "MR Name",
-          "Customer Name",
-          "Product Name",
-          "Sales Qty",
-          "Bonus Qty",
-          "Selling Price (USD)",
-          "Discount (USD)",
-          "Credit Days",
-          "Paid Amount",
-          "Payment Status",
-          "Remarks",
-        ];
-
-        let headerIdx = -1;
-        for (let i = 0; i < rows.length; i++) {
-          const row = rows[i].map((c) => c?.toString().trim());
-          const normalized = row.map((c) => c.toLowerCase());
-          const matchCount = expectedHeaders.filter((h) =>
-            normalized.includes(h.toLowerCase())
-          ).length;
-          if (matchCount >= 5) {
-            headerIdx = i;
-            break;
-          }
-        }
-
-        if (headerIdx === -1) {
-          showToast("error", "Header row not found");
-          return;
-        }
-
-        const headers = rows[headerIdx].map((h) => h?.toString().trim());
-        const dataRows = rows.slice(headerIdx + 1);
-
-        const missingHeaders = expectedHeaders.filter(
-          (h) => !headers.includes(h)
-        );
-        if (missingHeaders.length > 0) {
-          showToast(
-            "error",
-            `Missing headers in file: ${missingHeaders.join(", ")}`
-          );
-          return;
-        }
-
-        const json = dataRows.map((row) => {
-          const obj = {};
-          headers.forEach((h, i) => (obj[h] = row[i] ?? ""));
-          return obj;
-        });
-
-        const groupedInvoices = {};
-
-        for (const row of json) {
-          const invoiceNumber = row["Invoice #"] || "UNKNOWN";
-          const customerName = row["Customer Name"]?.trim() || "";
-          const customerCode = row["Customer Code"]?.trim() || "";
-          const customerId = row["Customer ID"]?.trim() || "";
-
-          if (!groupedInvoices[invoiceNumber]) {
-            const creditDays = Number(row["Credit Days"]) || 0;
-            const currentDate = new Date();
-            const dueDate = new Date(currentDate);
-            dueDate.setDate(currentDate.getDate() + creditDays);
-
-            groupedInvoices[invoiceNumber] = {
-              recordingDate: row["Recording Date"] || "",
-              invoiceNumber,
-              invoiceDate: row["Invoice Date"] || "",
-              mrName: row["MR Name"] || "",
-              customerName,
-              customerCode,
-              customerId,
-              creditDays: creditDays,
-              paidAmount: Number(row["Paid Amount"]) || 0,
-              paymentStatus: row["Payment Status"] || "",
-              remarks: row["Remarks"] || "",
-              products: [],
-              totalAmount: 0,
-              dueAmount: 0,
-              dueDate: dueDate.toISOString().split("T")[0],
-            };
-          }
-
-          const salesQty = Number(row["Sales Qty"]) || 0;
-          const sellingPrice = Number(row["Selling Price (USD)"]) || 0;
-          const discount = Number(row["Discount (USD)"]) || 0;
-          const productTotal = sellingPrice * salesQty - discount;
-
-          groupedInvoices[invoiceNumber].products.push({
-            productName: row["Product Name"] || "",
-            salesQty,
-            bonusQty: Number(row["Bonus Qty"]) || 0,
-            sellingPrice,
-            discount,
-            productTotal,
-          });
-
-          groupedInvoices[invoiceNumber].totalAmount += productTotal;
-        }
-
-        Object.values(groupedInvoices).forEach((invoice) => {
-          invoice.dueAmount = invoice.totalAmount - invoice.paidAmount;
-        });
-
-        const invoicesArray = Object.values(groupedInvoices);
-
-        const stockErrors = validateParsedDataStock();
-        if (stockErrors.length > 0) {
-          const errorMessages = stockErrors
-            .slice(0, 3)
-            .map(
-              (err) =>
-                `${err.productName} (Invoice: ${err.invoiceNumber}): Required ${err.required}, Available ${err.available}`
-            )
-            .join("\n");
-
-          if (stockErrors.length > 3) {
-            errorMessages += `\n...and ${stockErrors.length - 3} more`;
-          }
-
-          showToast("error", `Insufficient stock found:\n${errorMessages}`);
-          return;
-        }
-
-        setParsedData(invoicesArray);
-      } catch (error) {
-        console.error("❌ Error reading file:", error);
-        showToast("error", "Failed to process Excel file");
-      }
-    };
-
-    reader.readAsArrayBuffer(file);
-  };
-
-  // FIXED: Updated import function with proper error handling
-  const handleProductImport = async () => {
-    if (!parsedData || parsedData.length === 0) {
-      showToast("warning", "Please upload and validate a file first.");
-      return;
-    }
-
-    const stockErrors = validateParsedDataStock();
-    if (stockErrors.length > 0) {
-      // ... existing stock validation dialog code ...
-    }
-
-    setIsUploading(true);
-
-    // Create AbortController for timeout
-    const abortController = new AbortController();
-    const timeoutId = setTimeout(() => abortController.abort(), 120000); // 120 seconds timeout
-
-    try {
-      console.log("Importing data to:", `${backendUrl}/api/sales/import`);
-
-      const res = await axios.post(
-        `${backendUrl}/api/sales/import`,
-        parsedData,
-        {
-          headers: { "Content-Type": "application/json" },
-          timeout: 120000, // 120 second response timeout
-          signal: abortController.signal, // Connection timeout
-          onUploadProgress: (progressEvent) => {
-            // Optional: Add progress indicator for large imports
-            const percentCompleted = Math.round(
-              (progressEvent.loaded * 100) / progressEvent.total
-            );
-            console.log(`Upload progress: ${percentCompleted}%`);
-          },
-        }
-      );
-
-      clearTimeout(timeoutId);
-
-      if (res.data) {
-        const result = res.data;
-
-        if (result.success) {
-          showToast("success", result.message);
-
-          // Show detailed summary if available
-          if (result.summary) {
-            const summary = result.summary;
-            showToast(
-              "info",
-              `Imported: ${summary.successfullyImported}/${summary.totalReceived} invoices. ` +
-                `Time: ${summary.processingTimeSeconds}s`
-            );
-          }
-
-          setShowImportModal(false);
-          setParsedData([]);
-          fetchSaleSummaries();
-          await fetchStockData();
-        } else {
-          showToast("error", result.message || "Import failed");
-
-          // Show detailed errors if available
-          if (result.details?.insufficientStock?.length > 0) {
-            console.warn(
-              "Insufficient stock items:",
-              result.details.insufficientStock
-            );
-          }
-        }
-      }
-    } catch (err) {
-      clearTimeout(timeoutId);
-      console.error("❌ Import failed:", err);
-
-      let errorMessage = "Failed to import data";
-      let isTimeoutError = false;
-
-      if (err.code === "ECONNABORTED" || err.message?.includes("timeout")) {
-        errorMessage =
-          "Import timeout. The server is taking too long to process. Try importing smaller batches.";
-        isTimeoutError = true;
-      } else if (err.response) {
-        errorMessage =
-          err.response.data?.message ||
-          err.response.data?.error ||
-          `Server error: ${err.response.status}`;
-      } else if (err.request) {
-        errorMessage =
-          "No response from server. Please check if the backend server is running.";
-      } else {
-        errorMessage = err.message;
-      }
-
-      showToast("error", errorMessage);
-
-      // Suggest batch import for timeout errors
-      if (isTimeoutError && parsedData.length > 50) {
-        const confirm = window.confirm(
-          "Large import timed out. Would you like to try importing in smaller batches (max 50 records per batch)?"
-        );
-        if (confirm) {
-          // Implement batch splitting logic here
-          handleBatchImport(parsedData, 50);
-        }
-      }
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
-  // Helper function for batch imports
-  const handleBatchImport = async (data, batchSize = 50) => {
-    const batches = [];
-    for (let i = 0; i < data.length; i += batchSize) {
-      batches.push(data.slice(i, i + batchSize));
-    }
-
-    let successfulBatches = 0;
-    for (let i = 0; i < batches.length; i++) {
-      const batch = batches[i];
-      const result = await importBatch(batch, i + 1, batches.length);
-      if (result) successfulBatches++;
-    }
-
-    showToast(
-      "success",
-      `Batch import complete: ${successfulBatches}/${batches.length} batches successful`
-    );
-    fetchSaleSummaries();
-    await fetchStockData();
-  };
-
+  // Form handlers
   const handleNumericInputChange = (e, updateFunc) => {
     const value = e.target.value;
     if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
@@ -1110,11 +1300,6 @@ const Sales = () => {
     });
   };
 
-  const getCustomerName = (customerCode) => {
-    const customer = customerList.find((c) => c.code === customerCode);
-    return customer ? customer.name : customerCode;
-  };
-
   const calculateProductTotals = (products) => {
     if (!products || !Array.isArray(products))
       return {
@@ -1163,47 +1348,14 @@ const Sales = () => {
 
   return (
     <div className="p-6">
-      <div className="container">
-        {showMRCustomerWarning && (
-          <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <svg
-                  className="h-5 w-5 text-yellow-400"
-                  fill="currentColor"
-                  viewBox="0 0 20 20"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-              </div>
-              <div className="ml-3">
-                <h3 className="text-sm font-medium text-yellow-800">
-                  Missing Data Required for Sales
-                </h3>
-                <div className="mt-2 text-sm text-yellow-700">
-                  <ul className="list-disc pl-5 space-y-1">
-                    {mrList.length === 0 && (
-                      <li>
-                        No Medical Representatives found. Please add MR data
-                        first.
-                      </li>
-                    )}
-                    {customerList.length === 0 && (
-                      <li>
-                        No Customers found. Please add Customer data first.
-                      </li>
-                    )}
-                  </ul>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+      {/* Import Progress Modal */}
+      <ImportProgressModal
+        progress={importProgress}
+        message={importMessage}
+        onCancel={cancelImport}
+      />
 
+      <div className="container">
         <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
           <div className="flex gap-3 items-center">
             <button
@@ -1222,7 +1374,7 @@ const Sales = () => {
             <button
               onClick={handleImportClick}
               className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={showMRCustomerWarning}
+              disabled={showMRCustomerWarning || isUploading}
               title={
                 showMRCustomerWarning
                   ? "Please add MR and Customer data first"
@@ -1236,8 +1388,9 @@ const Sales = () => {
               <button
                 onClick={handleDeleteSelected}
                 className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+                disabled={isUploading}
               >
-                <Trash2 size={18} /> Delete
+                <Trash2 size={18} /> Delete Selected
               </button>
             )}
           </div>
@@ -1251,6 +1404,7 @@ const Sales = () => {
             />
           )}
         </div>
+
         <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
           {sales.length > 0 ? (
             <div className="flex items-center gap-6">
@@ -1285,12 +1439,6 @@ const Sales = () => {
                 <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
                   {filteredSales.length}{" "}
                 </span>
-                {filteredSales.length > SALES_PER_PAGE && (
-                  <span className="ml-2 text-sm text-gray-600">
-                    (Showing {Math.min(SALES_PER_PAGE, currentSales.length)} of{" "}
-                    {filteredSales.length} on page {currentPage})
-                  </span>
-                )}
               </p>
 
               <div className="relative w-full md:w-72">
@@ -1302,7 +1450,7 @@ const Sales = () => {
                 <input
                   ref={inputRef}
                   type="text"
-                  placeholder="Search invoice,MR name, Customer name..."
+                  placeholder="Search invoice, MR name, Customer name..."
                   value={searchTerm}
                   onChange={(e) => {
                     setSearchTerm(e.target.value);
@@ -1315,6 +1463,7 @@ const Sales = () => {
           )}
         </div>
 
+        {/* Main Table */}
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
           <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
             <thead className="bg-gray-100 text-gray-700 border-b">
@@ -1405,11 +1554,11 @@ const Sales = () => {
                             </button>
                           ) : item.id === "actions" ? (
                             <div className="flex items-center justify-center gap-3 min-w-[150px]">
-                              <button className="text-blue-600 hover:text-blue-800 cursor-pointer">
-                                <Eye
-                                  onClick={() => handleView(sale)}
-                                  size={18}
-                                />
+                              <button
+                                className="text-blue-600 hover:text-blue-800 cursor-pointer"
+                                onClick={() => handleView(sale)}
+                              >
+                                <Eye size={18} />
                               </button>
                               <button
                                 className="text-green-600 hover:text-green-800 cursor-pointer"
@@ -1439,12 +1588,6 @@ const Sales = () => {
 
           {filteredSales.length > SALES_PER_PAGE && (
             <div className="mt-4 p-5 flex flex-col sm:flex-row justify-between items-center gap-4 bg-gray-50 border-t">
-              <div className="text-sm text-gray-600">
-                Showing {(currentPage - 1) * SALES_PER_PAGE + 1} to{" "}
-                {Math.min(currentPage * SALES_PER_PAGE, filteredSales.length)}{" "}
-                of {filteredSales.length} entries
-              </div>
-
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => {
@@ -1504,12 +1647,115 @@ const Sales = () => {
           )}
         </div>
 
+        {/* Import Modal */}
+        {showImportModal &&
+          ReactDOM.createPortal(
+            <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
+              <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+                <button
+                  onClick={() => {
+                    if (!isUploading) {
+                      setShowImportModal(false);
+                      setParsedData([]);
+                    }
+                  }}
+                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                  disabled={isUploading}
+                >
+                  <X size={20} />
+                </button>
+
+                <h2 className="text-xl font-semibold text-gray-800 mb-4">
+                  Import Sales Data
+                </h2>
+
+                <div className="mb-6">
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                    <h3 className="font-medium text-blue-800 mb-2">
+                      Import Guidelines:
+                    </h3>
+                    <ul className="text-sm text-blue-700 space-y-1">
+                      <li>• Maximum file size: 20MB</li>
+                      <li>
+                        • Supports unlimited rows (optimized for large datasets)
+                      </li>
+                      <li>• Stock validation performed during import</li>
+                      <li>
+                        • Ensure all product names match inventory exactly
+                      </li>
+                      <li>• Check for duplicate invoice numbers</li>
+                    </ul>
+                  </div>
+
+                  {isSampleFile && <SampleExcelDownloadSale />}
+
+                  <input
+                    type="file"
+                    accept=".csv, .xlsx"
+                    onChange={handleFileUpload}
+                    className="block w-full border rounded-lg px-3 py-2 mb-6"
+                    disabled={isUploading}
+                  />
+                </div>
+
+                {parsedData.length > 0 && (
+                  <div className="mb-6">
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <h3 className="font-medium text-green-800">
+                            File Ready for Import
+                          </h3>
+                          <p className="text-sm text-green-700">
+                            {parsedData.length} invoices with{" "}
+                            {parsedData.reduce(
+                              (total, inv) =>
+                                total + (inv.products?.length || 0),
+                              0
+                            )}{" "}
+                            products
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <button
+                            onClick={handleProductImport}
+                            disabled={isUploading}
+                            className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer disabled:opacity-50"
+                          >
+                            {isUploading ? "Importing..." : "Start Import"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-3">
+                  <button
+                    onClick={() => {
+                      if (!isUploading) {
+                        setShowImportModal(false);
+                        setParsedData([]);
+                      }
+                    }}
+                    disabled={isUploading}
+                    className="px-5 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer disabled:opacity-50"
+                  >
+                    {isUploading ? "Cancel" : "Close"}
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+        {/* Product Details Modal */}
         {isProductModalOpen &&
           ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
               <div
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setIsOpen(false)}
+                className="absolute inset-0"
+                onClick={() => setIsProductModalOpen(false)}
               />
               <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
                 <button
@@ -1649,97 +1895,13 @@ const Sales = () => {
             document.body
           )}
 
-        {/* Import Modal */}
-        {showImportModal &&
-          ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-              <div
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => {
-                  if (!isUploading) {
-                    setShowImportModal(false);
-                    setParsedData([]);
-                  }
-                }}
-              />
-              <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
-                <button
-                  onClick={() => {
-                    if (!isUploading) {
-                      setShowImportModal(false);
-                      setParsedData([]);
-                    }
-                  }}
-                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-                  disabled={isUploading}
-                >
-                  <X size={20} />
-                </button>
-                <h2 className="text-lg font-semibold mb-4">Import Sales</h2>
-                {isSampleFile && <SampleExcelDownloadSale />}
-                <input
-                  type="file"
-                  accept=".csv, .xlsx"
-                  onChange={handleFileUpload}
-                  className="block w-full border rounded-lg px-3 py-2 mb-6"
-                  disabled={isUploading}
-                />
-                {parsedData.length > 0 && (
-                  <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-                    <p className="text-sm text-green-800">
-                      Found {parsedData.length} invoices with{" "}
-                      {parsedData.reduce(
-                        (total, inv) => total + (inv.products?.length || 0),
-                        0
-                      )}{" "}
-                      products.
-                      {validateParsedDataStock().length === 0 && (
-                        <span className="font-semibold">
-                          {" "}
-                          All products have sufficient stock.
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                )}
-                <div className="flex justify-end gap-3">
-                  <button
-                    onClick={() => {
-                      setShowImportModal(false);
-                      setParsedData([]);
-                    }}
-                    disabled={isUploading}
-                    className={`px-5 py-2 rounded-lg cursor-pointer ${
-                      isUploading
-                        ? "bg-gray-300 text-gray-500 cursor-not-allowed"
-                        : "bg-gray-300 hover:bg-gray-400 text-gray-700"
-                    }`}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleProductImport}
-                    disabled={isUploading || parsedData.length === 0}
-                    className={`px-5 py-2 rounded-lg cursor-pointer ${
-                      isUploading || parsedData.length === 0
-                        ? "bg-blue-400 text-white cursor-not-allowed"
-                        : "bg-blue-600 hover:bg-blue-700 text-white"
-                    }`}
-                  >
-                    {isUploading ? "Uploading…" : "Upload"}
-                  </button>
-                </div>
-              </div>
-            </div>,
-            document.body
-          )}
-
+        {/* Edit Sales Modal */}
         {isEditModalOpen &&
           ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
               <div
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={() => setIsOpen(false)}
+                className="absolute inset-0"
+                onClick={() => setIsEditModalOpen(false)}
               />
               <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
                 <button
@@ -1753,7 +1915,10 @@ const Sales = () => {
                   Edit Sales Record
                 </h2>
 
-                <form className="grid grid-cols-1 md:grid-cols-3 gap-4 max-h-[70vh]">
+                <form
+                  onSubmit={(e) => handleUpdateSales(e, form)}
+                  className="grid grid-cols-1 md:grid-cols-3 gap-4 max-h-[70vh]"
+                >
                   <div>
                     <label className="block text-sm font-medium text-gray-700">
                       Recording Date
@@ -2083,7 +2248,6 @@ const Sales = () => {
                     <button
                       type="submit"
                       className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
-                      onClick={(e) => handleUpdateSales(e, form)}
                     >
                       Update
                     </button>
@@ -2097,9 +2261,9 @@ const Sales = () => {
         {/* Product Edit Modal */}
         {isProductEditModalOpen &&
           ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
               <div
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                className="absolute inset-0"
                 onClick={() => setIsProductEditModalOpen(false)}
               />
               <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative">
@@ -2213,11 +2377,12 @@ const Sales = () => {
             document.body
           )}
 
+        {/* View Modal */}
         {isViewModalOpen &&
           ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
               <div
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                className="absolute inset-0"
                 onClick={() => setIsViewModalOpen(false)}
               />
 

@@ -8,6 +8,244 @@ import ReportInHand from "../../models/reports/reportsInHand.js";
 import Customer from "../../models/master/customer.js";
 
 const router = express.Router();
+
+// 🔥 REMOVED MR ID - Updated import function
+async function processImportInBatches(sales, batchSize) {
+  const results = {
+    success: 0,
+    failed: 0,
+    errors: [],
+  };
+
+  for (let i = 0; i < sales.length; i += batchSize) {
+    const batch = sales.slice(i, i + batchSize);
+
+    for (let j = 0; j < batch.length; j++) {
+      const sale = { ...batch[j] };
+
+      try {
+        // 🔥 REMOVED MR ID COMPLETELY
+        delete sale.mrId;
+
+        const doc = new SaleSummary(sale);
+        await doc.save();
+
+        results.success++;
+      } catch (error) {
+        console.error("❌ Save failed:", sale.invoiceNumber, error.message);
+
+        results.failed++;
+        results.errors.push({
+          invoiceNumber: sale.invoiceNumber,
+          error: error.message,
+        });
+      }
+    }
+  }
+
+  return results;
+}
+
+// 🔥 OPTIMIZED BATCH PROCESSING FOR LARGE DATASETS
+const processImportBatch = async (batch, batchIndex) => {
+  const batchResults = {
+    success: 0,
+    failed: 0,
+    errors: [],
+    inventoryUpdates: [],
+  };
+
+  // Pre-fetch all unique product names for batch
+  const allProductNames = [
+    ...new Set(
+      batch.flatMap((sale) => sale.products.map((p) => p.productName))
+    ),
+  ];
+
+  // Bulk fetch stock data for all products
+  const stockData = await ReportInHand.find({
+    productName: {
+      $in: allProductNames.map((name) => new RegExp(`^${name}$`, "i")),
+    },
+  }).lean();
+
+  // Create stock lookup map
+  const stockMap = new Map();
+  stockData.forEach((item) => {
+    const key = item.productName.toLowerCase();
+    let currentStock = 0;
+
+    if (item.batches && Array.isArray(item.batches)) {
+      currentStock = item.batches.reduce(
+        (total, batch) => total + (batch.boxes || 0),
+        0
+      );
+    } else if (item.totalBoxes !== undefined) {
+      currentStock = item.totalBoxes;
+    } else if (item.currentStock !== undefined) {
+      currentStock = item.currentStock;
+    } else {
+      currentStock = item.boxes || 0;
+    }
+
+    stockMap.set(key, {
+      productName: item.productName,
+      stock: currentStock,
+      lcValue: item.batches?.[0]?.lc || item.lc || 0,
+    });
+  });
+
+  // Process batch in parallel
+  const promises = batch.map(async (saleData, index) => {
+    const globalIndex = batchIndex + index;
+
+    try {
+      // Quick validation
+      if (!saleData.invoiceNumber) {
+        throw new Error("Invoice number is missing");
+      }
+
+      if (!Array.isArray(saleData.products) || saleData.products.length === 0) {
+        throw new Error("No products found");
+      }
+
+      // Check duplicate invoice number
+      const exists = await SaleSummary.findOne({
+        invoiceNumber: saleData.invoiceNumber,
+      });
+      if (exists) {
+        throw new Error(`Invoice number already exists`);
+      }
+
+      // Validate stock for all products in this invoice
+      const productUpdates = [];
+      for (const product of saleData.products) {
+        const totalQty =
+          (Number(product.salesQty) || 0) + (Number(product.bonusQty) || 0);
+
+        if (totalQty > 0) {
+          const productKey = product.productName.toLowerCase();
+          const stockInfo = stockMap.get(productKey);
+
+          if (!stockInfo) {
+            throw new Error(
+              `Product "${product.productName}" not found in inventory`
+            );
+          }
+
+          if (stockInfo.stock < totalQty) {
+            throw new Error(
+              `Insufficient stock for ${product.productName}: Available ${stockInfo.stock}, Required ${totalQty}`
+            );
+          }
+
+          productUpdates.push({
+            productName: stockInfo.productName,
+            totalQty,
+            lcValue: stockInfo.lcValue,
+          });
+        }
+      }
+
+      // Create sale record WITHOUT MR ID
+      const newSale = new SaleSummary({
+        recordingDate: new Date(saleData.recordingDate),
+        invoiceNumber: saleData.invoiceNumber,
+        invoiceDate: new Date(saleData.invoiceDate),
+        mrName: saleData.mrName || "",
+        // 🔥 NO MR ID FIELD
+        customerName: saleData.customerName || "",
+        customerCode: saleData.customerCode || "",
+        customerId: saleData.customerId || "",
+        products: saleData.products.map((p) => ({
+          productName: p.productName,
+          salesQty: Number(p.salesQty),
+          bonusQty: Number(p.bonusQty) || 0,
+          totalQty: Number(p.totalQty),
+          sellingPrice: Number(p.sellingPrice),
+          amount: Number(p.amount),
+          discount: Number(p.discount) || 0,
+          netSellingAmount: Number(p.netSellingAmount),
+          averageUnitPrice: Number(p.averageUnitPrice),
+          lc: Number(p.lc) || 0,
+          profitLoss: Number(p.profitLoss) || 0,
+          isProductAccept:
+            p.isProductAccept !== undefined ? p.isProductAccept : true,
+        })),
+        creditDays: saleData.creditDays ? Number(saleData.creditDays) : 0,
+        dueDate: saleData.dueDate ? new Date(saleData.dueDate) : null,
+        deliveryDate: saleData.deliveryDate
+          ? new Date(saleData.deliveryDate)
+          : null,
+        paidAmount: Number(saleData.paidAmount) || 0,
+        dueAmount: Number(saleData.dueAmount) || 0,
+        totalAmount: Number(saleData.totalAmount) || 0,
+        paymentStatus: saleData.paymentStatus || "Credit",
+        remark: saleData.remark || "",
+        importBatchId: batchIndex,
+        importStatus: "imported",
+      });
+
+      await newSale.save();
+
+      // Bulk inventory update after saving all sales
+      for (const update of productUpdates) {
+        batchResults.inventoryUpdates.push({
+          invoiceNumber: saleData.invoiceNumber,
+          productName: update.productName,
+          qty: update.totalQty,
+        });
+      }
+
+      batchResults.success++;
+    } catch (error) {
+      batchResults.failed++;
+      batchResults.errors.push({
+        index: globalIndex,
+        invoiceNumber: saleData.invoiceNumber || `Invoice-${globalIndex}`,
+        error: error.message,
+      });
+    }
+  });
+
+  // Wait for all promises in batch
+  await Promise.allSettled(promises);
+
+  // Bulk update inventory after processing batch
+  if (batchResults.inventoryUpdates.length > 0) {
+    await updateInventoryInBulk(batchResults.inventoryUpdates);
+  }
+
+  return batchResults;
+};
+
+// 🔥 BULK INVENTORY UPDATE FOR PERFORMANCE
+async function updateInventoryInBulk(inventoryUpdates) {
+  try {
+    // Group updates by product name
+    const productUpdates = new Map();
+
+    inventoryUpdates.forEach((update) => {
+      const key = update.productName.toLowerCase();
+      if (!productUpdates.has(key)) {
+        productUpdates.set(key, {
+          productName: update.productName,
+          totalQty: 0,
+        });
+      }
+      productUpdates.get(key).totalQty += update.qty;
+    });
+
+    // Process each product update
+    for (const [_, update] of productUpdates) {
+      await updateReportInHandAfterSale(update.productName, update.totalQty, 0);
+    }
+  } catch (error) {
+    console.error("❌ Bulk inventory update failed:", error.message);
+    throw error;
+  }
+}
+
 const excelDateToJSDate = (serial) => {
   if (typeof serial === "number") {
     const utc_days = Math.floor(serial - 25569);
@@ -68,23 +306,74 @@ const getTableDateRanges = (period) => {
   }
 };
 
-// 🔧 INVENTORY MANAGEMENT FUNCTIONS
+// 🔥 OPTIMIZED STOCK CHECK WITH BULK OPERATIONS
 const checkStockAvailability = async (productName, requiredQty) => {
   try {
-    const existingProduct = await ReportInHand.findOne({ productName });
+    // Use case-insensitive search for product names
+    const existingProduct = await ReportInHand.findOne({
+      productName: { $regex: new RegExp(`^${productName}$`, "i") },
+    });
 
     if (!existingProduct) {
+      // Try different variations of product name
+      const altProducts = await ReportInHand.find({
+        productName: { $regex: productName, $options: "i" },
+      });
+
+      if (altProducts.length === 0) {
+        return {
+          available: 0,
+          required: requiredQty,
+          isAvailable: false,
+          message: `Product "${productName}" not found in inventory.`,
+        };
+      }
+
+      // Take the first matching product
+      const matchedProduct = altProducts[0];
+
+      let currentStock = 0;
+      if (
+        matchedProduct.batches &&
+        Array.isArray(matchedProduct.batches) &&
+        matchedProduct.batches.length > 0
+      ) {
+        currentStock = matchedProduct.batches.reduce(
+          (total, batch) => total + (batch.boxes || 0),
+          0
+        );
+      } else if (matchedProduct.totalBoxes !== undefined) {
+        currentStock = matchedProduct.totalBoxes;
+      } else if (matchedProduct.currentStock !== undefined) {
+        currentStock = matchedProduct.currentStock;
+      } else {
+        currentStock = matchedProduct.boxes || 0;
+      }
+
+      const isAvailable = currentStock >= requiredQty;
+
       return {
-        available: 0,
+        available: currentStock,
         required: requiredQty,
-        isAvailable: false,
-        message: `Product "${productName}" not found in inventory.`,
+        isAvailable,
+        message: isAvailable
+          ? `Sufficient stock for "${matchedProduct.productName}"`
+          : `Insufficient stock for "${matchedProduct.productName}". Available: ${currentStock}, Required: ${requiredQty}`,
+        actualProductName: matchedProduct.productName,
+        lcValue:
+          matchedProduct.batches &&
+          Array.isArray(matchedProduct.batches) &&
+          matchedProduct.batches.length > 0
+            ? matchedProduct.batches[0].lc || 0
+            : matchedProduct.batches &&
+              typeof matchedProduct.batches === "object"
+            ? matchedProduct.batches.lc || 0
+            : matchedProduct.lc || 0,
       };
     }
 
-    // Determine current stock
+    // Determine current stock for exact match
     let currentStock = 0;
-
     if (
       existingProduct.batches &&
       Array.isArray(existingProduct.batches) &&
@@ -96,18 +385,8 @@ const checkStockAvailability = async (productName, requiredQty) => {
       );
     } else if (existingProduct.totalBoxes !== undefined) {
       currentStock = existingProduct.totalBoxes;
-    } else if (
-      existingProduct.batches &&
-      typeof existingProduct.batches === "object" &&
-      existingProduct.batches.boxes !== undefined
-    ) {
-      currentStock = existingProduct.batches.boxes;
-    } else if (typeof existingProduct.quantity === "number") {
-      currentStock = existingProduct.quantity;
     } else if (existingProduct.currentStock !== undefined) {
       currentStock = existingProduct.currentStock;
-    } else if (existingProduct.stock !== undefined) {
-      currentStock = existingProduct.stock;
     } else {
       currentStock = existingProduct.boxes || 0;
     }
@@ -145,6 +424,7 @@ const checkStockAvailability = async (productName, requiredQty) => {
   }
 };
 
+// 🔥 IMPROVED INVENTORY UPDATE WITH BATCH SUPPORT
 const updateReportInHandAfterSale = async (productName, salesQty, bonusQty) => {
   try {
     const totalQtyToDeduct = salesQty + bonusQty;
@@ -152,7 +432,10 @@ const updateReportInHandAfterSale = async (productName, salesQty, bonusQty) => {
       return 0;
     }
 
-    const existingProduct = await ReportInHand.findOne({ productName });
+    // Use case-insensitive search for product names
+    const existingProduct = await ReportInHand.findOne({
+      productName: { $regex: new RegExp(`^${productName}$`, "i") },
+    });
 
     if (!existingProduct) {
       throw new Error(`Product "${productName}" not found in inventory.`);
@@ -160,7 +443,6 @@ const updateReportInHandAfterSale = async (productName, salesQty, bonusQty) => {
 
     // Determine current stock
     let currentStock = 0;
-
     if (
       existingProduct.batches &&
       Array.isArray(existingProduct.batches) &&
@@ -172,33 +454,21 @@ const updateReportInHandAfterSale = async (productName, salesQty, bonusQty) => {
       );
     } else if (existingProduct.totalBoxes !== undefined) {
       currentStock = existingProduct.totalBoxes;
-    } else if (
-      existingProduct.batches &&
-      typeof existingProduct.batches === "object" &&
-      existingProduct.batches.boxes !== undefined
-    ) {
-      currentStock = existingProduct.batches.boxes;
-    } else if (typeof existingProduct.quantity === "number") {
-      currentStock = existingProduct.quantity;
     } else if (existingProduct.currentStock !== undefined) {
       currentStock = existingProduct.currentStock;
-    } else if (existingProduct.stock !== undefined) {
-      currentStock = existingProduct.stock;
     } else {
       currentStock = existingProduct.boxes || 0;
     }
 
     if (currentStock < totalQtyToDeduct) {
       throw new Error(
-        `Insufficient stock for "${productName}". Available: ${currentStock}, Required: ${totalQtyToDeduct}`
+        `Insufficient stock for "${existingProduct.productName}". Available: ${currentStock}, Required: ${totalQtyToDeduct}`
       );
     }
 
     const updatedStock = currentStock - totalQtyToDeduct;
 
     let updateFields = {};
-
-    // Update based on data structure
     if (
       existingProduct.batches &&
       Array.isArray(existingProduct.batches) &&
@@ -226,21 +496,11 @@ const updateReportInHandAfterSale = async (productName, salesQty, bonusQty) => {
       updateFields = { batches: updatedBatches, totalBoxes: updatedStock };
     } else if (existingProduct.totalBoxes !== undefined) {
       updateFields = { totalBoxes: updatedStock };
-    } else if (
-      existingProduct.batches &&
-      typeof existingProduct.batches === "object"
-    ) {
-      updateFields = { "batches.boxes": updatedStock };
-    } else if (typeof existingProduct.quantity === "number") {
-      updateFields = { quantity: updatedStock };
-    } else if (existingProduct.currentStock !== undefined) {
-      updateFields = { currentStock: updatedStock };
-    } else if (existingProduct.stock !== undefined) {
-      updateFields = { stock: updatedStock };
     } else {
-      updateFields = { boxes: updatedStock };
+      updateFields = { currentStock: updatedStock };
     }
 
+    // Update status based on new stock level
     let updatedStatus = "In Stock";
     if (updatedStock === 0) updatedStatus = "Out of Stock";
     else if (updatedStock < 5) updatedStatus = "Critical";
@@ -260,11 +520,6 @@ const updateReportInHandAfterSale = async (productName, salesQty, bonusQty) => {
       existingProduct.batches.length > 0
     ) {
       lcValue = existingProduct.batches[0].lc || 0;
-    } else if (
-      existingProduct.batches &&
-      typeof existingProduct.batches === "object"
-    ) {
-      lcValue = existingProduct.batches.lc || 0;
     } else {
       lcValue = existingProduct.lc || 0;
     }
@@ -310,18 +565,8 @@ const restoreReportInHandAfterSaleDeletion = async (
       );
     } else if (existingProduct.totalBoxes !== undefined) {
       currentStock = existingProduct.totalBoxes;
-    } else if (
-      existingProduct.batches &&
-      typeof existingProduct.batches === "object" &&
-      existingProduct.batches.boxes !== undefined
-    ) {
-      currentStock = existingProduct.batches.boxes;
-    } else if (typeof existingProduct.quantity === "number") {
-      currentStock = existingProduct.quantity;
     } else if (existingProduct.currentStock !== undefined) {
       currentStock = existingProduct.currentStock;
-    } else if (existingProduct.stock !== undefined) {
-      currentStock = existingProduct.stock;
     } else {
       currentStock = existingProduct.boxes || 0;
     }
@@ -340,17 +585,8 @@ const restoreReportInHandAfterSaleDeletion = async (
       updateFields = { batches: updatedBatches, totalBoxes: updatedStock };
     } else if (existingProduct.totalBoxes !== undefined) {
       updateFields = { totalBoxes: updatedStock };
-    } else if (
-      existingProduct.batches &&
-      typeof existingProduct.batches === "object"
-    ) {
-      updateFields = { "batches.boxes": updatedStock };
-    } else if (typeof existingProduct.quantity === "number") {
-      updateFields = { quantity: updatedStock };
     } else if (existingProduct.currentStock !== undefined) {
       updateFields = { currentStock: updatedStock };
-    } else if (existingProduct.stock !== undefined) {
-      updateFields = { stock: updatedStock };
     } else {
       updateFields = { boxes: updatedStock };
     }
@@ -423,7 +659,7 @@ router.get("/sales/pending-collection-today", async (req, res) => {
       ],
     })
       .select(
-        "invoiceNumber invoiceDate mrName mrId customerName customerId products creditDays dueDate deliveryDate paidAmount dueAmount totalAmount paymentStatus remark"
+        "invoiceNumber invoiceDate mrName customerName customerId products creditDays dueDate deliveryDate paidAmount dueAmount totalAmount paymentStatus remark"
       )
       .sort({ dueDate: 1 })
       .lean();
@@ -2058,12 +2294,13 @@ router.post("/sales", async (req, res) => {
     const paidAmount = parseFloat(saleData.paidAmount) || 0;
     const dueAmount = totalAmount - paidAmount;
 
+    // 🔥 CREATING SALE WITHOUT MR ID
     const newSaleData = {
       recordingDate: new Date(saleData.recordingDate),
       invoiceNumber: saleData.invoiceNumber,
       invoiceDate: new Date(saleData.invoiceDate),
       mrName: saleData.mrName,
-      mrId: saleData.mrId || "",
+      // 🔥 NO MR ID FIELD
       customerName,
       customerCode: saleData.customerCode,
       customerId: saleData.customerId || "",
@@ -2148,225 +2385,299 @@ router.post("/sales", async (req, res) => {
   }
 });
 
-// **IMPORT ENDPOINT WITH PROPER STOCK VALIDATION**
-// Replace your current POST "/sales/import" endpoint with this optimized version
+// 🔥 OPTIMIZED IMPORT ENDPOINT FOR LARGE DATASETS
 router.post("/sales/import", async (req, res) => {
+  const startTime = Date.now();
+  const batchSize = 50;
+
   try {
     const salesData = req.body;
-    const startTime = Date.now();
-    
-    console.log(`Import started: ${salesData.length} invoices at ${new Date().toISOString()}`);
-    
-    // Early validation
+
     if (!Array.isArray(salesData) || salesData.length === 0) {
       return res.status(400).json({
         success: false,
-        message: "No data to import"
+        message: "No data to import",
       });
     }
-    
-    // 1. Batch stock check for ALL products first
-    const allProducts = [];
-    salesData.forEach((sale, saleIndex) => {
-      sale.products?.forEach((product, productIndex) => {
-        const totalQty = (Number(product.salesQty) || 0) + (Number(product.bonusQty) || 0);
-        if (totalQty > 0) {
-          allProducts.push({
-            saleIndex,
-            productIndex,
-            productName: product.productName,
-            requiredQty: totalQty,
-            invoiceNumber: sale.invoiceNumber || `INV-${saleIndex}`
-          });
-        }
+
+    // Step 1: Collect all unique invoice numbers for duplicate check
+    const invoiceNumbers = salesData
+      .map((sale) => sale.invoiceNumber)
+      .filter(Boolean);
+    const uniqueInvoiceNumbers = [...new Set(invoiceNumbers)];
+
+    // Bulk check for existing invoices
+    const existingInvoices = await SaleSummary.find({
+      invoiceNumber: { $in: uniqueInvoiceNumbers },
+    })
+      .select("invoiceNumber")
+      .lean();
+
+    const existingInvoiceSet = new Set(
+      existingInvoices.map((inv) => inv.invoiceNumber)
+    );
+
+    // Step 2: Collect all product names for stock validation
+    const allProductNames = [
+      ...new Set(
+        salesData.flatMap((sale) =>
+          (sale.products || []).map((p) => p.productName).filter(Boolean)
+        )
+      ),
+    ];
+
+    // Bulk fetch stock data
+    const stockData = await ReportInHand.find({
+      productName: {
+        $in: allProductNames.map((name) => new RegExp(`^${name}$`, "i")),
+      },
+    }).lean();
+
+    // Create stock lookup map
+    const stockMap = new Map();
+    stockData.forEach((item) => {
+      const key = item.productName.toLowerCase();
+      let currentStock = 0;
+
+      if (item.batches && Array.isArray(item.batches)) {
+        currentStock = item.batches.reduce(
+          (total, batch) => total + (batch.boxes || 0),
+          0
+        );
+      } else if (item.totalBoxes !== undefined) {
+        currentStock = item.totalBoxes;
+      } else if (item.currentStock !== undefined) {
+        currentStock = item.currentStock;
+      } else {
+        currentStock = item.boxes || 0;
+      }
+
+      stockMap.set(key, {
+        productName: item.productName,
+        stock: currentStock,
+        lcValue: item.batches?.[0]?.lc || item.lc || 0,
       });
     });
-    
-    // Batch stock check - much faster than individual checks
-    const stockCheckPromises = allProducts.map(async (item) => {
-      try {
-        const stockCheck = await checkStockAvailability(item.productName, item.requiredQty);
-        return {
-          ...item,
-          stockCheck,
-          hasSufficientStock: stockCheck.isAvailable
-        };
-      } catch (error) {
-        return {
-          ...item,
-          stockCheck: null,
-          hasSufficientStock: false,
-          error: error.message
-        };
+
+    // Step 3: Process all invoices with validation
+    const validationErrors = [];
+    const stockErrors = [];
+    const validForImport = [];
+
+    salesData.forEach((sale, index) => {
+      const errors = [];
+
+      // Basic validation
+      if (!sale.invoiceNumber) errors.push("Invoice number is required");
+      if (!Array.isArray(sale.products) || sale.products.length === 0) {
+        errors.push("Products array is required");
       }
-    });
-    
-    const stockResults = await Promise.all(stockCheckPromises);
-    
-    // 2. Identify invoices with insufficient stock
-    const invoicesWithInsufficientStock = new Map();
-    stockResults.forEach(result => {
-      if (!result.hasSufficientStock) {
-        if (!invoicesWithInsufficientStock.has(result.saleIndex)) {
-          invoicesWithInsufficientStock.set(result.saleIndex, {
-            invoiceNumber: result.invoiceNumber,
-            errors: []
-          });
-        }
-        const invoice = invoicesWithInsufficientStock.get(result.saleIndex);
-        invoice.errors.push({
-          productName: result.productName,
-          required: result.requiredQty,
-          available: result.stockCheck?.available || 0
+
+      // Check for duplicate in import file
+      const invoiceIndex = invoiceNumbers.indexOf(sale.invoiceNumber);
+      if (invoiceIndex !== index) {
+        errors.push("Duplicate invoice number in import file");
+      }
+
+      // Check against existing invoices
+      if (existingInvoiceSet.has(sale.invoiceNumber)) {
+        errors.push("Invoice number already exists in database");
+      }
+
+      // Product validation
+      if (Array.isArray(sale.products)) {
+        sale.products.forEach((product, pIndex) => {
+          if (!product.productName)
+            errors.push(`Product ${pIndex + 1}: Product name required`);
+          if (
+            product.salesQty === undefined ||
+            product.salesQty === null ||
+            product.salesQty < 0
+          )
+            errors.push(`Product ${pIndex + 1}: Valid sales quantity required`);
+          if (
+            product.sellingPrice === undefined ||
+            product.sellingPrice === null ||
+            product.sellingPrice < 0
+          )
+            errors.push(`Product ${pIndex + 1}: Valid selling price required`);
         });
       }
-    });
-    
-    // 3. Filter out invoices with insufficient stock
-    const validSalesData = salesData.filter((_, index) => !invoicesWithInsufficientStock.has(index));
-    
-    console.log(`Stock check complete: ${validSalesData.length} valid invoices out of ${salesData.length}`);
-    
-    // 4. Process valid invoices concurrently
-    let successfulImports = 0;
-    const importErrors = [];
-    
-    const processSale = async (saleData, index) => {
-      try {
-        // Check for duplicate invoice number
-        const invoiceExists = await checkInvoiceNumberExists(saleData.invoiceNumber);
-        if (invoiceExists) {
-          throw new Error(`Invoice number "${saleData.invoiceNumber}" already exists`);
-        }
-        
-        // Process products and update inventory
-        const inventoryUpdates = [];
-        for (const product of saleData.products) {
-          const salesQty = Number(product.salesQty) || 0;
-          const bonusQty = Number(product.bonusQty) || 0;
-          
-          if (salesQty > 0 || bonusQty > 0) {
-            try {
-              const lcValue = await updateReportInHandAfterSale(
-                product.productName,
-                salesQty,
-                bonusQty
-              );
-              
-              product.lc = lcValue;
-              product.profitLoss = product.netSellingAmount - product.totalQty * lcValue;
-              
-              inventoryUpdates.push({
+
+      if (errors.length) {
+        validationErrors.push({
+          index,
+          invoiceNumber: sale.invoiceNumber || `Row-${index + 1}`,
+          errors,
+        });
+        return;
+      }
+
+      // Stock validation
+      const saleStockErrors = [];
+      let hasStockErrors = false;
+
+      if (Array.isArray(sale.products)) {
+        sale.products.forEach((product) => {
+          const totalQty =
+            (Number(product.salesQty) || 0) + (Number(product.bonusQty) || 0);
+          if (totalQty > 0) {
+            const productKey = product.productName.toLowerCase();
+            const stockInfo = stockMap.get(productKey);
+
+            if (!stockInfo) {
+              saleStockErrors.push({
                 productName: product.productName,
-                status: "success",
-                deducted: salesQty + bonusQty
+                required: totalQty,
+                available: 0,
+                message: `Product "${product.productName}" not found in inventory`,
               });
-            } catch (error) {
-              throw new Error(`Inventory update failed for ${product.productName}: ${error.message}`);
+              hasStockErrors = true;
+            } else if (stockInfo.stock < totalQty) {
+              saleStockErrors.push({
+                productName: product.productName,
+                required: totalQty,
+                available: stockInfo.stock,
+                message: `Insufficient stock for "${product.productName}"`,
+              });
+              hasStockErrors = true;
             }
           }
-        }
-        
-        // Create the sale record
-        const newSale = new SaleSummary({
-          ...saleData,
-          recordingDate: new Date(saleData.recordingDate),
-          invoiceDate: new Date(saleData.invoiceDate),
-          dueDate: saleData.dueDate ? new Date(saleData.dueDate) : null,
-          deliveryDate: saleData.deliveryDate ? new Date(saleData.deliveryDate) : null,
-          products: saleData.products.map(p => ({
-            ...p,
-            salesQty: Number(p.salesQty),
-            bonusQty: Number(p.bonusQty) || 0,
-            totalQty: Number(p.totalQty),
-            sellingPrice: Number(p.sellingPrice),
-            amount: Number(p.amount),
-            discount: Number(p.discount) || 0,
-            netSellingAmount: Number(p.netSellingAmount),
-            averageUnitPrice: Number(p.averageUnitPrice),
-            lc: Number(p.lc) || 0,
-            profitLoss: Number(p.profitLoss) || 0
-          }))
         });
-        
-        await newSale.save();
-        successfulImports++;
-        
-        return {
-          success: true,
-          invoiceNumber: saleData.invoiceNumber,
-          inventoryUpdates
-        };
-      } catch (error) {
-        importErrors.push({
-          invoiceNumber: saleData.invoiceNumber || `Invoice-${index}`,
-          error: error.message,
-          index
-        });
-        
-        // Restore inventory for any partially processed products
-        // This should be implemented based on your restore logic
-        return {
-          success: false,
-          invoiceNumber: saleData.invoiceNumber,
-          error: error.message
-        };
       }
-    };
-    
-    // Process valid sales with concurrency limit of 3
-    const concurrencyLimit = 3;
-    const importResults = [];
-    
-    for (let i = 0; i < validSalesData.length; i += concurrencyLimit) {
-      const batch = validSalesData.slice(i, i + concurrencyLimit);
-      const batchPromises = batch.map((sale, idx) => processSale(sale, i + idx));
-      const batchResults = await Promise.all(batchPromises);
-      importResults.push(...batchResults);
-      
-      // Log progress
-      console.log(`Processed batch ${Math.floor(i/concurrencyLimit) + 1}/${Math.ceil(validSalesData.length/concurrencyLimit)}`);
+
+      if (hasStockErrors) {
+        stockErrors.push({
+          invoiceNumber: sale.invoiceNumber,
+          errors: saleStockErrors,
+        });
+        return;
+      }
+
+      // Prepare validated sale
+      const validatedProducts = (sale.products || []).map((product) => {
+        const totalQty =
+          (Number(product.salesQty) || 0) + (Number(product.bonusQty) || 0);
+        const productKey = product.productName.toLowerCase();
+        const stockInfo = stockMap.get(productKey);
+
+        return {
+          productName: stockInfo?.productName || product.productName,
+          salesQty: Number(product.salesQty) || 0,
+          bonusQty: Number(product.bonusQty) || 0,
+          totalQty: totalQty,
+          sellingPrice: Number(product.sellingPrice) || 0,
+          amount:
+            Number(product.amount) ||
+            (Number(product.sellingPrice) || 0) *
+              (Number(product.salesQty) || 0),
+          discount: Number(product.discount) || 0,
+          netSellingAmount:
+            Number(product.netSellingAmount) ||
+            (Number(product.sellingPrice) || 0) *
+              (Number(product.salesQty) || 0) -
+              (Number(product.discount) || 0),
+          averageUnitPrice:
+            Number(product.averageUnitPrice) ||
+            (totalQty > 0
+              ? ((Number(product.sellingPrice) || 0) *
+                  (Number(product.salesQty) || 0) -
+                  (Number(product.discount) || 0)) /
+                totalQty
+              : 0),
+          lc: Number(product.lc) || stockInfo?.lcValue || 0,
+          profitLoss: Number(product.profitLoss) || 0,
+          isProductAccept:
+            product.isProductAccept !== undefined
+              ? product.isProductAccept
+              : true,
+        };
+      });
+
+      const totalAmount = validatedProducts.reduce(
+        (sum, p) => sum + (p.netSellingAmount || 0),
+        0
+      );
+      const paidAmount = Number(sale.paidAmount) || 0;
+
+      const cleanedSale = {
+        recordingDate:
+          sale.recordingDate || new Date().toISOString().split("T")[0],
+        invoiceNumber: sale.invoiceNumber,
+        invoiceDate: sale.invoiceDate || new Date().toISOString().split("T")[0],
+        mrName: sale.mrName || "",
+        // 🔥 NO MR ID FIELD
+        customerName: sale.customerName || "",
+        customerCode: sale.customerCode || "",
+        customerId: sale.customerId || null,
+        products: validatedProducts,
+        creditDays: Number(sale.creditDays) || 0,
+        dueDate: sale.dueDate || null,
+        deliveryDate:
+          sale.deliveryDate ||
+          sale.invoiceDate ||
+          new Date().toISOString().split("T")[0],
+        paidAmount: paidAmount,
+        dueAmount: totalAmount - paidAmount,
+        totalAmount: totalAmount,
+        paymentStatus:
+          sale.paymentStatus === "Paid"
+            ? "Cash"
+            : sale.paymentStatus || "Credit",
+        remark: sale.remark || "",
+      };
+
+      validForImport.push(cleanedSale);
+    });
+
+    if (!validForImport.length) {
+      return res.status(400).json({
+        success: false,
+        message: "No valid invoices to import",
+        validationErrors,
+        stockErrors,
+      });
     }
-    
-    const endTime = Date.now();
-    const processingTime = ((endTime - startTime) / 1000).toFixed(2);
-    
-    // Prepare response
-    const insufficientStockList = Array.from(invoicesWithInsufficientStock.values());
-    
+
+    // Step 4: Import in batches
+    const importResults = await processImportInBatches(
+      validForImport,
+      batchSize
+    );
+
+    const processingTime = ((Date.now() - startTime) / 1000).toFixed(2);
+
     res.status(200).json({
-      success: successfulImports > 0,
-      message: `Import completed in ${processingTime}s. ${successfulImports} invoices imported successfully.`,
+      success: true,
+      message: `Import completed in ${processingTime}s`,
       summary: {
         totalReceived: salesData.length,
-        validForImport: validSalesData.length,
-        successfullyImported: successfulImports,
-        failedDueToStock: insufficientStockList.length,
-        failedDueToErrors: importErrors.length,
-        processingTimeSeconds: processingTime
+        successfullyImported: importResults.success,
+        failed:
+          importResults.failed + validationErrors.length + stockErrors.length,
+        validationErrors: validationErrors.length,
+        stockErrors: stockErrors.length,
+        processingTimeSeconds: processingTime,
+        errors: [
+          ...importResults.errors,
+          ...validationErrors.map((ve) => ({
+            invoiceNumber: ve.invoiceNumber,
+            error: ve.errors.join(", "),
+          })),
+          ...stockErrors.map((se) => ({
+            invoiceNumber: se.invoiceNumber,
+            error: se.errors.map((e) => e.message).join(", "),
+          })),
+        ].slice(0, 50), // Limit error output
       },
-      details: {
-        insufficientStock: insufficientStockList,
-        importErrors: importErrors.slice(0, 10), // Limit error details
-        successfulInvoices: importResults
-          .filter(r => r.success)
-          .map(r => r.invoiceNumber)
-          .slice(0, 20)
-      },
-      recommendations: validSalesData.length > 50 ? [
-        "Consider splitting large imports into smaller batches",
-        "Review stock levels before large imports",
-        "Monitor server performance during large imports"
-      ] : []
     });
-    
   } catch (error) {
-    console.error("Critical import error:", error);
+    console.error("🔥 CRITICAL ERROR:", error);
     res.status(500).json({
       success: false,
-      message: "Import failed due to server error",
+      message: "Server error during import",
       error: error.message,
-      timestamp: new Date().toISOString()
+      stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
     });
   }
 });
@@ -2444,6 +2755,60 @@ router.put("/sales/:id", async (req, res) => {
   }
 });
 
+// 🔥 NEW ENDPOINT TO GET ALL SALES WITHOUT PAGINATION
+router.get("/sales/all", async (req, res) => {
+  try {
+    const { search = "", tab = "All" } = req.query;
+
+    const matchConditions = {};
+
+    if (search && search.trim() !== "") {
+      const searchRegex = new RegExp(search.trim(), "i");
+      matchConditions.$or = [
+        { invoiceNumber: searchRegex },
+        { customerName: searchRegex },
+        { "products.productName": searchRegex },
+      ];
+    }
+
+    if (tab && tab !== "All") {
+      matchConditions.paymentStatus = new RegExp(`^${tab}$`, "i");
+    }
+
+    const summaries = await SaleSummary.find(matchConditions)
+      .sort({ recordingDate: -1 })
+      .select({
+        recordingDate: 1,
+        invoiceNumber: 1,
+        invoiceDate: 1,
+        mrName: 1,
+        customerCode: 1,
+        customerId: 1,
+        customerName: 1,
+        paymentStatus: 1,
+        remark: 1,
+        creditDays: 1,
+        dueDate: 1,
+        deliveryDate: 1,
+        paidAmount: 1,
+        dueAmount: 1,
+        totalAmount: 1,
+        products: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      });
+
+    res.status(200).json({
+      summaries,
+      count: summaries.length,
+    });
+  } catch (error) {
+    console.error("❌ Error fetching all sale summaries:", error);
+    res.status(500).json({ message: "Failed to fetch sale summaries." });
+  }
+});
+
+// 🔥 ORIGINAL PAGINATED ENDPOINT (keep for backward compatibility)
 router.get("/sales", async (req, res) => {
   try {
     const { page = 1, limit = 9, search = "", tab = "All" } = req.query;
@@ -2479,7 +2844,6 @@ router.get("/sales", async (req, res) => {
         invoiceNumber: 1,
         invoiceDate: 1,
         mrName: 1,
-        mrId: 1,
         customerCode: 1,
         customerId: 1,
         customerName: 1,
@@ -2823,7 +3187,6 @@ router.get("/sales/unique-names", async (req, res) => {
   }
 });
 
-// Add this route after your other routes in the backend file
 router.get("/sales/stock/report-in-hand", async (req, res) => {
   try {
     const reports = await ReportInHand.find({});
@@ -2831,6 +3194,79 @@ router.get("/sales/stock/report-in-hand", async (req, res) => {
   } catch (error) {
     console.error("Error fetching report in hand:", error);
     res.status(500).json({ error: "Failed to fetch report in hand data." });
+  }
+});
+
+router.post("/sales/delete-batch", async (req, res) => {
+  try {
+    const { ids } = req.body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No sale IDs provided",
+      });
+    }
+
+    const deletedSales = [];
+    const errors = [];
+
+    // Process in smaller batches
+    const batchSize = 10;
+    for (let i = 0; i < ids.length; i += batchSize) {
+      const batch = ids.slice(i, i + batchSize);
+
+      const batchPromises = batch.map(async (id) => {
+        try {
+          const saleToDelete = await SaleSummary.findById(id);
+
+          if (!saleToDelete) {
+            errors.push({ id, error: "Not found" });
+            return;
+          }
+
+          // Restore inventory
+          for (const product of saleToDelete.products) {
+            if (product.salesQty > 0 || product.bonusQty > 0) {
+              await restoreReportInHandAfterSaleDeletion(
+                product.productName,
+                product.salesQty,
+                product.bonusQty
+              );
+            }
+          }
+
+          // Delete the sale
+          await SaleSummary.findByIdAndDelete(id);
+
+          deletedSales.push({
+            id,
+            invoiceNumber: saleToDelete.invoiceNumber,
+          });
+        } catch (error) {
+          errors.push({
+            id,
+            error: error.message,
+          });
+        }
+      });
+
+      await Promise.allSettled(batchPromises);
+    }
+
+    res.json({
+      success: true,
+      deletedCount: deletedSales.length,
+      deletedSales,
+      errors: errors.length > 0 ? errors : undefined,
+    });
+  } catch (error) {
+    console.error("Batch delete error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete sales",
+      error: error.message,
+    });
   }
 });
 

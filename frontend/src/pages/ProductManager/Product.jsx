@@ -254,7 +254,6 @@ const Product = () => {
 
         // Show detailed errors if any
         if (res.data.errors && res.data.errors.length > 0) {
-          console.log("Import errors:", res.data.errors);
           if (res.data.errors.length <= 5) {
             res.data.errors.forEach((error) => {
               showToast("error", error, 5000);
@@ -287,11 +286,11 @@ const Product = () => {
 
     reader.onload = (evt) => {
       const data = new Uint8Array(evt.target.result);
-      const workbook = XLSX.read(data, { 
-        type: "array", 
-        cellDates: true, 
-        cellNF: false, 
-        cellText: false 
+      const workbook = XLSX.read(data, {
+        type: "array",
+        cellDates: true,
+        cellNF: false,
+        cellText: false,
       });
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
@@ -378,10 +377,12 @@ const Product = () => {
 
           // Get the date value from Excel
           let licenseValidityDate = "";
-          
+
           if (item["drug registration license validity date"]) {
-            const dateStr = item["drug registration license validity date"].toString().trim();
-            
+            const dateStr = item["drug registration license validity date"]
+              .toString()
+              .trim();
+
             // Try to parse the date using parseExcelDate
             const parsedDate = parseExcelDate(dateStr);
             if (parsedDate) {

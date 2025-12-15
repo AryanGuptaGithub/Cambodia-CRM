@@ -683,8 +683,6 @@ const Supplier = () => {
           raw: false,
         });
 
-        console.log("Raw Excel data:", rawData);
-
         // Find the header row (the row with "Supplier Name" in first column)
         let headerRowIndex = -1;
         for (let i = 0; i < rawData.length; i++) {
@@ -696,8 +694,6 @@ const Supplier = () => {
           }
         }
 
-        console.log("Header row index:", headerRowIndex);
-
         if (headerRowIndex === -1) {
           showToast("error", "Could not find header row with 'Supplier Name'");
           return;
@@ -705,8 +701,6 @@ const Supplier = () => {
 
         // Get data rows starting from the row after the header
         const dataRows = rawData.slice(headerRowIndex + 1);
-
-        console.log("Data rows after header:", dataRows);
 
         // Parse data rows
         const parsedData = dataRows
@@ -723,13 +717,6 @@ const Supplier = () => {
               const siteRegistrationExpiryDateStr = (row[3] || "")
                 .toString()
                 .trim();
-
-              console.log(`Row ${index}:`, {
-                supplierName,
-                address,
-                siteRegistrationDateStr,
-                siteRegistrationExpiryDateStr,
-              });
 
               // Skip rows without supplier name
               if (!supplierName || supplierName.trim() === "") {
@@ -813,14 +800,10 @@ const Supplier = () => {
           })
           .filter((item) => item !== null); // Remove null items
 
-        console.log("Parsed data:", parsedData);
-
         // Filter out rows without supplier name (just in case)
         const validData = parsedData.filter(
           (item) => item.supplierName && item.supplierName.trim() !== ""
         );
-
-        console.log("Valid data to import:", validData);
 
         if (validData.length === 0) {
           showToast(

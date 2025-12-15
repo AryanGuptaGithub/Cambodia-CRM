@@ -700,20 +700,15 @@ const Dashboard = () => {
           return;
         }
 
-        console.log("Headers found:", headersMap);
-
         const mappedData = rows
           .slice(headerRowIndex + 1)
           .map((row, rowIndex) => {
             // Log raw row data for debugging
-            console.log(`Row ${rowIndex + 1} raw:`, row);
 
             const item = {};
             Object.entries(headersMap).forEach(([index, key]) => {
               item[key] = row[index] || "";
             });
-
-            console.log(`Row ${rowIndex + 1} mapped:`, item);
 
             // Find joining date field (handle different column names)
             let joiningDateKey = "";
@@ -799,7 +794,6 @@ const Dashboard = () => {
               rawDate: rawDate, // For debugging
             };
 
-            console.log(`Row ${rowIndex + 1} final:`, result);
             return result;
           })
           .filter(
@@ -809,9 +803,6 @@ const Dashboard = () => {
               entry.teamName &&
               entry.teamName.trim() !== ""
           );
-
-        console.log("Total valid records:", mappedData.length);
-        console.log("Sample record:", mappedData[0]);
 
         setParsedData(mappedData);
         showToast(
@@ -875,9 +866,6 @@ const Dashboard = () => {
         setIsUploading(false);
         return;
       }
-
-      console.log("Sending data to backend:", validData);
-      console.log("Number of records:", validData.length);
 
       // Send as direct array (not wrapped in data property)
       const res = await axios.post(

@@ -583,8 +583,6 @@ const Customer = () => {
           raw: true, // Get raw values (numbers, dates)
         });
 
-        console.log("Raw Excel Data (first 3 rows):", rows.slice(0, 3));
-
         if (!rows.length) {
           showToast("warning", "Excel file is empty");
           return;
@@ -631,24 +629,6 @@ const Customer = () => {
             Object.values(o).some((v) => v.toString().trim() !== "")
           );
 
-        // DEBUG: Log first few rows to see what we're getting
-        console.log(
-          "First 3 data rows:",
-          json.slice(0, 3).map((item) => {
-            const dateKey = Object.keys(item).find(
-              (key) =>
-                key.toLowerCase() === "date" ||
-                key.toLowerCase() === "joining date"
-            );
-            return {
-              rawDate: dateKey ? item[dateKey] : null,
-              type: typeof (dateKey ? item[dateKey] : null),
-              isDate: dateKey ? item[dateKey] instanceof Date : false,
-              allKeys: Object.keys(item),
-            };
-          })
-        );
-
         const final = json.map((item) => {
           const getValue = (keys) => {
             for (const key of keys) {
@@ -673,17 +653,7 @@ const Customer = () => {
             "joining date",
           ]);
 
-          console.log(
-            "Raw date value:",
-            dateVal,
-            "Type:",
-            typeof dateVal,
-            "Is Date:",
-            dateVal instanceof Date
-          );
-
           const formattedDate = parseExcelDateValue(dateVal);
-          console.log("Parsed date:", formattedDate);
 
           return {
             date: formattedDate,

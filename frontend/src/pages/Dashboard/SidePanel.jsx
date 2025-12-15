@@ -881,7 +881,7 @@ const RecentActivityPendingCollection = ({
             </div>
           </div>
         </div>
-      )}  
+      )}
     </div>
   );
 };
@@ -916,15 +916,6 @@ export const SidePanel = ({
   creditSaleTableData = [], // ADD THIS: Credit sale data prop
   loadingCreditSaleData = false, // ADD THIS: Credit sale loading prop
 }) => {
-  console.log("🚀 SidePanel - activeTab:", activeTab);
-  console.log("📊 SidePanel - pendingCollectionData:", pendingCollectionData);
-  console.log(
-    "📊 SidePanel - loadingPendingCollectionData:",
-    loadingPendingCollectionData
-  );
-  console.log("📊 SidePanel - creditSaleTableData:", creditSaleTableData); // ADD THIS
-  console.log("📊 SidePanel - loadingCreditSaleData:", loadingCreditSaleData); // ADD THIS
-
   const getPanelConfig = () => {
     const configs = {
       Sales: {
@@ -1017,13 +1008,6 @@ export const SidePanel = ({
         ),
       },
     };
-
-    // Debug which config is being selected
-    console.log("🔍 SidePanel - Selected config for:", activeTab);
-    console.log(
-      "🔍 SidePanel - Config exists:",
-      configs[activeTab] !== undefined
-    );
 
     return (
       configs[activeTab] || {

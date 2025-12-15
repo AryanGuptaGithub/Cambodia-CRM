@@ -610,7 +610,7 @@ const Dashboard = () => {
       const response = await axios.get(
         `${backendUrl}/api/sales/pending-collection-today`
       );
-      console.log("responst", response);
+
       if (response.data.success) {
         const data = response.data.data || [];
 
