@@ -9,6 +9,24 @@ import Customer from "../../models/master/customer.js";
 
 const router = express.Router();
 
+
+
+const parseDateString = (dateStr) => {
+  if (!dateStr) return null;
+
+  const isoDate = new Date(dateStr);
+  if (!isNaN(isoDate)) return isoDate;
+
+  const parts = dateStr.split("/");
+  if (parts.length === 3) {
+    const [day, month, year] = parts;
+    const formatted = new Date(`${year}-${month}-${day}`);
+    if (!isNaN(formatted)) return formatted;
+  }
+
+  return null;
+};
+
 // 🔥 REMOVED MR ID - Updated import function
 async function processImportInBatches(sales, batchSize) {
   const results = {
@@ -24,9 +42,7 @@ async function processImportInBatches(sales, batchSize) {
       const sale = { ...batch[j] };
 
       try {
-        // 🔥 REMOVED MR ID COMPLETELY
-        delete sale.mrId;
-
+        // 🔥 REMOVED MR ID COMPLETELY - No need to delete as it won't exist
         const doc = new SaleSummary(sale);
         await doc.save();
 
@@ -157,22 +173,39 @@ const processImportBatch = async (batch, batchIndex) => {
         }
       }
 
-      // 🔥 FIXED: Use date objects directly (they should already be Date objects from parseDate function)
+      // 🔥 CRITICAL FIX: Update inventory BEFORE saving the sale
+      for (const update of productUpdates) {
+        try {
+          await updateReportInHandAfterSale(
+            update.productName,
+            update.totalQty,
+            0,
+            false
+          );
+
+          batchResults.inventoryUpdates.push({
+            invoiceNumber: saleData.invoiceNumber,
+            productName: update.productName,
+            qty: update.totalQty,
+            status: "deducted",
+          });
+        } catch (inventoryError) {
+          throw new Error(
+            `Inventory update failed for ${update.productName}: ${inventoryError.message}`
+          );
+        }
+      }
+
+      // 🔥 FIXED: Use parseDateString function to parse dates
       const newSale = new SaleSummary({
-        recordingDate:
-          saleData.recordingDate instanceof Date
-            ? saleData.recordingDate
-            : new Date(saleData.recordingDate),
+        recordingDate: parseDateString(saleData.recordingDate) || new Date(),
         invoiceNumber: saleData.invoiceNumber,
-        invoiceDate:
-          saleData.invoiceDate instanceof Date
-            ? saleData.invoiceDate
-            : new Date(saleData.invoiceDate),
+        invoiceDate: parseDateString(saleData.invoiceDate) || new Date(),
         mrName: saleData.mrName || "",
-        // 🔥 NO MR ID FIELD
+        // 🔥 NO MR ID FIELD - Completely removed
         customerName: saleData.customerName || "",
         customerCode: saleData.customerCode || "",
-        customerId: saleData.customerId || "",
+        customerId: saleData.customerId || null,
         products: saleData.products.map((p) => ({
           productName: p.productName,
           salesQty: Number(p.salesQty),
@@ -189,16 +222,8 @@ const processImportBatch = async (batch, batchIndex) => {
             p.isProductAccept !== undefined ? p.isProductAccept : true,
         })),
         creditDays: saleData.creditDays ? Number(saleData.creditDays) : 0,
-        dueDate:
-          saleData.dueDate instanceof Date
-            ? saleData.dueDate
-            : saleData.dueDate
-            ? new Date(saleData.dueDate)
-            : null,
-        deliveryDate:
-          saleData.deliveryDate instanceof Date
-            ? saleData.deliveryDate
-            : new Date(saleData.deliveryDate),
+        dueDate: saleData.dueDate ? parseDateString(saleData.dueDate) : null,
+        deliveryDate: parseDateString(saleData.deliveryDate) || new Date(),
         paidAmount: Number(saleData.paidAmount) || 0,
         dueAmount: Number(saleData.dueAmount) || 0,
         totalAmount: Number(saleData.totalAmount) || 0,
@@ -209,16 +234,6 @@ const processImportBatch = async (batch, batchIndex) => {
       });
 
       await newSale.save();
-
-      // Bulk inventory update after saving all sales
-      for (const update of productUpdates) {
-        batchResults.inventoryUpdates.push({
-          invoiceNumber: saleData.invoiceNumber,
-          productName: update.productName,
-          qty: update.totalQty,
-        });
-      }
-
       batchResults.success++;
     } catch (error) {
       console.error(
@@ -235,26 +250,13 @@ const processImportBatch = async (batch, batchIndex) => {
     }
   });
 
-  // Wait for all promises in batch
   await Promise.allSettled(promises);
-
-  // Bulk update inventory after processing batch
-  if (batchResults.inventoryUpdates.length > 0) {
-    try {
-      await updateInventoryInBulk(batchResults.inventoryUpdates);
-    } catch (inventoryError) {
-      console.error("❌ Bulk inventory update failed:", inventoryError.message);
-      // Don't fail the entire batch due to inventory update errors
-    }
-  }
-
   return batchResults;
 };
 
 // 🔥 BULK INVENTORY UPDATE FOR PERFORMANCE
 async function updateInventoryInBulk(inventoryUpdates) {
   try {
-    // Group updates by product name
     const productUpdates = new Map();
 
     inventoryUpdates.forEach((update) => {
@@ -268,9 +270,13 @@ async function updateInventoryInBulk(inventoryUpdates) {
       productUpdates.get(key).totalQty += update.qty;
     });
 
-    // Process each product update
     for (const [_, update] of productUpdates) {
-      await updateReportInHandAfterSale(update.productName, update.totalQty, 0, false);
+      await updateReportInHandAfterSale(
+        update.productName,
+        update.totalQty,
+        0,
+        false
+      );
     }
   } catch (error) {
     console.error("❌ Bulk inventory update failed:", error.message);
@@ -279,14 +285,18 @@ async function updateInventoryInBulk(inventoryUpdates) {
 }
 
 // 🔥 CORRECTED INVENTORY UPDATE FUNCTION
-const updateReportInHandAfterSale = async (productName, salesQty, bonusQty, isRestore = false) => {
+const updateReportInHandAfterSale = async (
+  productName,
+  salesQty,
+  bonusQty,
+  isRestore = false
+) => {
   try {
     const totalQtyToUpdate = salesQty + bonusQty;
     if (totalQtyToUpdate <= 0) {
       return 0;
     }
 
-    // Use case-insensitive search for product names
     const existingProduct = await ReportInHand.findOne({
       productName: { $regex: new RegExp(`^${productName}$`, "i") },
     });
@@ -295,7 +305,6 @@ const updateReportInHandAfterSale = async (productName, salesQty, bonusQty, isRe
       throw new Error(`Product "${productName}" not found in inventory.`);
     }
 
-    // Determine current stock
     let currentStock = 0;
     if (
       existingProduct.batches &&
@@ -314,13 +323,10 @@ const updateReportInHandAfterSale = async (productName, salesQty, bonusQty, isRe
       currentStock = existingProduct.boxes || 0;
     }
 
-    // Calculate updated stock based on operation type
     let updatedStock;
     if (isRestore) {
-      // Restore stock (add back)
       updatedStock = currentStock + totalQtyToUpdate;
     } else {
-      // Deduct stock
       if (currentStock < totalQtyToUpdate) {
         throw new Error(
           `Insufficient stock for "${existingProduct.productName}". Available: ${currentStock}, Required: ${totalQtyToUpdate}`
@@ -336,35 +342,30 @@ const updateReportInHandAfterSale = async (productName, salesQty, bonusQty, isRe
       existingProduct.batches.length > 0
     ) {
       const updatedBatches = [...existingProduct.batches];
-      
+
       if (updatedBatches[0].boxes !== undefined) {
         if (isRestore) {
           updatedBatches[0].boxes += totalQtyToUpdate;
         } else {
-          if (updatedBatches[0].boxes >= totalQtyToUpdate) {
-            updatedBatches[0].boxes -= totalQtyToUpdate;
-          } else {
-            let remainingDeduction = totalQtyToUpdate;
-            for (
-              let i = 0;
-              i < updatedBatches.length && remainingDeduction > 0;
-              i++
-            ) {
-              if (updatedBatches[i].boxes >= remainingDeduction) {
-                updatedBatches[i].boxes -= remainingDeduction;
-                remainingDeduction = 0;
-              } else {
-                remainingDeduction -= updatedBatches[i].boxes;
-                updatedBatches[i].boxes = 0;
-              }
+          let remainingDeduction = totalQtyToUpdate;
+          for (
+            let i = 0;
+            i < updatedBatches.length && remainingDeduction > 0;
+            i++
+          ) {
+            if (updatedBatches[i].boxes >= remainingDeduction) {
+              updatedBatches[i].boxes -= remainingDeduction;
+              remainingDeduction = 0;
+            } else {
+              remainingDeduction -= updatedBatches[i].boxes;
+              updatedBatches[i].boxes = 0;
             }
           }
         }
       }
-      
+
       updateFields = { batches: updatedBatches };
-      
-      // Also update totalBoxes if the field exists
+
       if (existingProduct.totalBoxes !== undefined) {
         updateFields.totalBoxes = updatedStock;
       }
@@ -376,7 +377,6 @@ const updateReportInHandAfterSale = async (productName, salesQty, bonusQty, isRe
       updateFields = { boxes: updatedStock };
     }
 
-    // Update status based on new stock level
     let updatedStatus = "In Stock";
     if (updatedStock === 0) updatedStatus = "Out of Stock";
     else if (updatedStock < 5) updatedStatus = "Critical";
@@ -388,7 +388,6 @@ const updateReportInHandAfterSale = async (productName, salesQty, bonusQty, isRe
       $set: updateFields,
     });
 
-    // Get LC value
     let lcValue = 0;
     if (
       existingProduct.batches &&
@@ -417,7 +416,6 @@ const restoreReportInHandAfterSaleDeletion = async (
   bonusQty
 ) => {
   try {
-    // Use the main update function with isRestore = true
     await updateReportInHandAfterSale(productName, salesQty, bonusQty, true);
   } catch (error) {
     console.error(
@@ -491,13 +489,11 @@ const getTableDateRanges = (period) => {
 // 🔥 OPTIMIZED STOCK CHECK WITH BULK OPERATIONS
 const checkStockAvailability = async (productName, requiredQty) => {
   try {
-    // Use case-insensitive search for product names
     const existingProduct = await ReportInHand.findOne({
       productName: { $regex: new RegExp(`^${productName}$`, "i") },
     });
 
     if (!existingProduct) {
-      // Try different variations of product name
       const altProducts = await ReportInHand.find({
         productName: { $regex: productName, $options: "i" },
       });
@@ -511,7 +507,6 @@ const checkStockAvailability = async (productName, requiredQty) => {
         };
       }
 
-      // Take the first matching product
       const matchedProduct = altProducts[0];
 
       let currentStock = 0;
@@ -554,7 +549,6 @@ const checkStockAvailability = async (productName, requiredQty) => {
       };
     }
 
-    // Determine current stock for exact match
     let currentStock = 0;
     if (
       existingProduct.batches &&
@@ -615,22 +609,6 @@ const checkInvoiceNumberExists = async (invoiceNumber, excludeId = null) => {
   return !!existingSale;
 };
 
-const parseDateString = (dateStr) => {
-  if (!dateStr) return null;
-
-  const isoDate = new Date(dateStr);
-  if (!isNaN(isoDate)) return isoDate;
-
-  const parts = dateStr.split("/");
-  if (parts.length === 3) {
-    const [day, month, year] = parts;
-    const formatted = new Date(`${year}-${month}-${day}`);
-    if (!isNaN(formatted)) return formatted;
-  }
-
-  return null;
-};
-
 // ============================================================================
 // ✅ NEW ENDPOINTS FOR CREDIT SALES NOT RECEIVED
 // ============================================================================
@@ -677,6 +655,7 @@ router.get("/sales/pending-collection-today", async (req, res) => {
   }
 });
 
+// 🔥 FIXED: Correct the payment status filter for credit sales
 router.get("/sales/credit-sale-not-received", async (req, res) => {
   try {
     const creditSales = await SaleSummary.find({
@@ -685,7 +664,7 @@ router.get("/sales/credit-sale-not-received", async (req, res) => {
         { saleReturn: false },
         { saleReturn: null },
       ],
-      paymentStatus: { $ne: "Cash" },
+      paymentStatus: { $in: ["Credit", "Partial Paid"] },
       $or: [
         { dueAmount: { $gt: 0 } },
         { $expr: { $gt: [{ $subtract: ["$totalAmount", "$paidAmount"] }, 0] } },
@@ -1078,6 +1057,7 @@ router.get("/outstanding/custom-range", async (req, res) => {
           invoiceNumber: 1,
           invoiceDate: 1,
           mrName: 1,
+          // 🔥 NO MR ID FIELD
           customerName: 1,
           customerCode: 1,
           customerId: 1,
@@ -1290,6 +1270,7 @@ router.get("/outstanding/table-data", async (req, res) => {
           invoiceNumber: 1,
           invoiceDate: 1,
           mrName: 1,
+          // 🔥 NO MR ID FIELD
           customerName: 1,
           customerCode: 1,
           customerId: 1,
@@ -1991,6 +1972,7 @@ router.get("/sales/product-wise", async (req, res) => {
             invoiceNumber: 1,
             invoiceDate: 1,
             mrName: 1,
+            // 🔥 NO MR ID FIELD
             customerCode: 1,
             "customerInfo.name": 1,
             "customerInfo.customerNumber": 1,
@@ -2122,6 +2104,7 @@ router.get("/sales/product/:productName", async (req, res) => {
           invoiceNumber: 1,
           invoiceDate: 1,
           mrName: 1,
+          // 🔥 NO MR ID FIELD
           customerCode: 1,
           "customerInfo.name": 1,
           "customerInfo.customerNumber": 1,
@@ -2296,7 +2279,7 @@ router.post("/sales", async (req, res) => {
       invoiceNumber: saleData.invoiceNumber,
       invoiceDate: new Date(saleData.invoiceDate),
       mrName: saleData.mrName,
-      // 🔥 NO MR ID FIELD
+      // 🔥 NO MR ID FIELD - Completely removed
       customerName,
       customerCode: saleData.customerCode,
       customerId: saleData.customerId || "",
@@ -2383,10 +2366,9 @@ router.post("/sales", async (req, res) => {
 });
 
 // 🔥 OPTIMIZED IMPORT ENDPOINT FOR LARGE DATASETS
-// 🔥 OPTIMIZED IMPORT ENDPOINT FOR LARGE DATASETS
 router.post("/sales/import", async (req, res) => {
   const startTime = Date.now();
-  const batchSize = 100; // Increased batch size for better performance
+  const batchSize = 100;
 
   try {
     const salesData = req.body;
@@ -2635,99 +2617,48 @@ router.post("/sales/import", async (req, res) => {
       );
       const paidAmount = Number(sale.paidAmount) || 0;
 
-      // 🔥 FIXED DATE PARSING - Use parseDateString function
-      const parseDate = (dateStr) => {
-        if (!dateStr) return null;
-
-        // Try to parse as ISO date first
-        const date = new Date(dateStr);
-        if (!isNaN(date.getTime())) {
-          return date;
-        }
-
-        // Try to parse DD-MMM-YY format (like 8-Jun-21)
-        const match = String(dateStr).match(
-          /^(\d{1,2})-([a-zA-Z]{3})-(\d{2,4})$/i
-        );
-        if (match) {
-          const day = parseInt(match[1], 10);
-          const monthStr = match[2].toLowerCase();
-          const year = parseInt(match[3], 10);
-
-          const monthMap = {
-            jan: 0,
-            feb: 1,
-            mar: 2,
-            apr: 3,
-            may: 4,
-            jun: 5,
-            jul: 6,
-            aug: 7,
-            sep: 8,
-            oct: 9,
-            nov: 10,
-            dec: 11,
-          };
-
-          const month = monthMap[monthStr];
-          if (month !== undefined) {
-            const fullYear = year < 100 ? 2000 + year : year;
-            return new Date(fullYear, month, day);
-          }
-        }
-
-        // Try other common formats
-        const formats = [
-          /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/,
-          /^(\d{1,2})\/(\d{1,2})\/(\d{2})$/,
-          /^(\d{4})-(\d{1,2})-(\d{1,2})$/,
-        ];
-
-        for (const format of formats) {
-          const match = String(dateStr).match(format);
-          if (match) {
-            let day, month, year;
-            if (format.toString().includes("YYYY-MM-DD")) {
-              year = parseInt(match[1], 10);
-              month = parseInt(match[2], 10) - 1;
-              day = parseInt(match[3], 10);
-            } else {
-              day = parseInt(match[1], 10);
-              month = parseInt(match[2], 10) - 1;
-              year = parseInt(match[3], 10);
-
-              if (year < 100) {
-                year = 2000 + year;
-              }
-            }
-
-            return new Date(year, month, day);
-          }
-        }
-
-        return null;
-      };
-
-      const recordingDate = parseDate(sale.recordingDate) || new Date();
-      const invoiceDate = parseDate(sale.invoiceDate) || recordingDate;
+      // 🔥 FIXED: Use parseDateString function for date parsing
+      const recordingDate = parseDateString(sale.recordingDate) || new Date();
+      const invoiceDate = parseDateString(sale.invoiceDate) || recordingDate;
       const dueDate =
-        parseDate(sale.dueDate) ||
+        parseDateString(sale.dueDate) ||
         (sale.creditDays
           ? new Date(
               invoiceDate.getTime() + sale.creditDays * 24 * 60 * 60 * 1000
             )
           : null);
-      const deliveryDate = parseDate(sale.deliveryDate) || invoiceDate;
+      const deliveryDate = parseDateString(sale.deliveryDate) || invoiceDate;
+
+      // 🔥 FIXED PAYMENT STATUS LOGIC
+      const getPaymentStatus = (status) => {
+        if (!status) return "Credit";
+
+        const statusLower = String(status).toLowerCase().trim();
+
+        if (statusLower === "pending") return "Credit";
+        if (statusLower === "paid") return "Cash";
+        if (statusLower === "cash") return "Cash";
+        if (statusLower === "credit") return "Credit";
+        if (statusLower === "partial paid") return "Partial Paid";
+
+        return "Credit";
+      };
+
+      // 🔥 FIX: Handle empty customerId properly
+      let customerId = sale.customerId;
+      if (!customerId || customerId.trim() === "") {
+        customerId = null;
+      }
 
       const cleanedSale = {
         recordingDate: recordingDate,
         invoiceNumber: sale.invoiceNumber,
         invoiceDate: invoiceDate,
         mrName: sale.mrName || "",
-        // 🔥 NO MR ID FIELD
+        // 🔥 NO MR ID FIELD - Completely removed
         customerName: sale.customerName || "",
         customerCode: sale.customerCode || "",
-        customerId: sale.customerId || null,
+        customerId: customerId,
         products: validatedProducts,
         creditDays: Number(sale.creditDays) || 0,
         dueDate: dueDate,
@@ -2735,10 +2666,7 @@ router.post("/sales/import", async (req, res) => {
         paidAmount: paidAmount,
         dueAmount: totalAmount - paidAmount,
         totalAmount: totalAmount,
-        paymentStatus:
-          sale.paymentStatus === "Paid"
-            ? "Cash"
-            : sale.paymentStatus || "Credit",
+        paymentStatus: getPaymentStatus(sale.paymentStatus),
         remark: sale.remark || "",
       };
 
@@ -2769,13 +2697,19 @@ router.post("/sales/import", async (req, res) => {
     let totalFailed = 0;
     const allErrors = [];
 
-    // Process in batches
+    // Process in batches with progress tracking
+    const totalBatches = Math.ceil(validForImport.length / batchSize);
+
     for (let i = 0; i < validForImport.length; i += batchSize) {
+      const batchNumber = Math.floor(i / batchSize) + 1;
       const batch = validForImport.slice(i, i + batchSize);
+
+      const progress = Math.min(
+        Math.round((i / validForImport.length) * 100),
+        95
+      );
       console.log(
-        `📊 Processing batch ${Math.floor(i / batchSize) + 1} of ${Math.ceil(
-          validForImport.length / batchSize
-        )}`
+        `📊 Processing batch ${batchNumber} of ${totalBatches} (${progress}%)`
       );
 
       try {
@@ -2785,16 +2719,16 @@ router.post("/sales/import", async (req, res) => {
         totalFailed += batchResults.failed;
         allErrors.push(...batchResults.errors);
 
+        const currentProgress = Math.min(
+          Math.round(((i + batchSize) / validForImport.length) * 100),
+          95
+        );
+
         console.log(
-          `📊 Batch ${Math.floor(i / batchSize) + 1}: ${
-            batchResults.success
-          } success, ${batchResults.failed} failed`
+          `📊 Batch ${batchNumber}: ${batchResults.success} success, ${batchResults.failed} failed (${currentProgress}%)`
         );
       } catch (batchError) {
-        console.error(
-          `❌ Batch ${Math.floor(i / batchSize) + 1} failed:`,
-          batchError
-        );
+        console.error(`❌ Batch ${batchNumber} failed:`, batchError);
         totalFailed += batch.length;
         batch.forEach((sale, index) => {
           allErrors.push({
@@ -2893,14 +2827,13 @@ router.put("/sales/:id", async (req, res) => {
             `❌ Failed to restore inventory for ${product.productName}:`,
             inventoryError.message
           );
-          // Continue with other products
         }
       }
     }
 
     // Process the updated sale data
     const saleData = req.body;
-    
+
     // Validate and calculate LC/profit for new products
     const updatedProducts = await Promise.all(
       saleData.products.map(async (product) => {
@@ -2915,7 +2848,7 @@ router.put("/sales/:id", async (req, res) => {
               product.productName,
               Number(product.salesQty),
               Number(product.bonusQty),
-              false // false means deduct, not restore
+              false
             );
 
             return {
@@ -2964,6 +2897,7 @@ router.put("/sales/:id", async (req, res) => {
       invoiceNumber: saleData.invoiceNumber,
       invoiceDate: new Date(saleData.invoiceDate),
       mrName: saleData.mrName,
+      // 🔥 NO MR ID FIELD
       customerName: saleData.customerName,
       customerCode: saleData.customerCode,
       customerId: saleData.customerId || "",
@@ -3028,9 +2962,9 @@ router.put("/sales/:id", async (req, res) => {
       });
     }
 
-    res.status(500).json({ 
+    res.status(500).json({
       error: "Failed to update sales record.",
-      details: err.message 
+      details: err.message,
     });
   }
 });
@@ -3062,6 +2996,7 @@ router.get("/sales/all", async (req, res) => {
         invoiceNumber: 1,
         invoiceDate: 1,
         mrName: 1,
+        // 🔥 NO MR ID FIELD
         customerCode: 1,
         customerId: 1,
         customerName: 1,
@@ -3124,6 +3059,7 @@ router.get("/sales", async (req, res) => {
         invoiceNumber: 1,
         invoiceDate: 1,
         mrName: 1,
+        // 🔥 NO MR ID FIELD
         customerCode: 1,
         customerId: 1,
         customerName: 1,
@@ -3181,7 +3117,6 @@ router.delete("/sales/:id", async (req, res) => {
             `❌ Failed to restore inventory for ${product.productName}:`,
             inventoryError.message
           );
-          // Continue with other products even if one fails
         }
       }
     }
@@ -3569,7 +3504,7 @@ router.get("/sales/inventory-check/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const sale = await SaleSummary.findById(id);
-    
+
     if (!sale) {
       return res.status(404).json({ error: "Sale not found" });
     }
@@ -3583,7 +3518,11 @@ router.get("/sales/inventory-check/:id", async (req, res) => {
         return {
           productName: product.productName,
           saleQty: product.totalQty,
-          currentStock: existingProduct?.totalBoxes || existingProduct?.currentStock || existingProduct?.boxes || 0,
+          currentStock:
+            existingProduct?.totalBoxes ||
+            existingProduct?.currentStock ||
+            existingProduct?.boxes ||
+            0,
           hasStock: existingProduct ? "Yes" : "No",
           productId: existingProduct?._id,
         };
