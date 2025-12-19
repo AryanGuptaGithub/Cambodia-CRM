@@ -14,6 +14,12 @@ import {
   Eye,
   Search,
   Package,
+  AlertCircle,
+  Download,
+  RefreshCw,
+  ArrowLeftRight,
+  FileText,
+  CheckCircle,
 } from "lucide-react";
 import ReactDOM from "react-dom";
 import SampleExcelDownloadSale from "../../excels/SampleExcelDownloadSale";
@@ -41,78 +47,292 @@ import LoadingOverlay from "../../components/Loading";
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
-// Progress modal component - UPDATED TO SHOW DETAILED PROGRESS
-const ImportProgressModal = ({
-  progress,
-  message,
-  onCancel,
-  detailedProgress,
+// Use React's built-in <progress> element for better accessibility
+const AccessibleProgressBar = ({ value, max = 100 }) => (
+  <progress
+    value={value}
+    max={max}
+    className="w-full h-2 rounded"
+    aria-label="Import progress"
+  />
+);
+
+const parseDateString = (dateStr) => {
+  if (!dateStr) return new Date();
+
+  if (dateStr instanceof Date) {
+    return dateStr;
+  }
+
+  if (typeof dateStr === "string") {
+    const isoDate = new Date(dateStr);
+    if (!isNaN(isoDate.getTime())) {
+      return isoDate;
+    }
+
+    const formats = [
+      /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/,
+      /^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/,
+      /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2})$/,
+    ];
+
+    for (const format of formats) {
+      const match = dateStr.match(format);
+      if (match) {
+        let day, month, year;
+
+        if (match[1].length === 4) {
+          year = parseInt(match[1], 10);
+          month = parseInt(match[2], 10) - 1;
+          day = parseInt(match[3], 10);
+        } else {
+          day = parseInt(match[1], 10);
+          month = parseInt(match[2], 10) - 1;
+          year = parseInt(match[3], 10);
+
+          if (year < 100) {
+            year += 2000;
+          }
+        }
+
+        const date = new Date(year, month, day);
+        if (!isNaN(date.getTime())) {
+          return date;
+        }
+      }
+    }
+  }
+
+  return new Date();
+};
+
+// View Issues Button Component
+const ViewIssuesButton = ({ failedCount, onClick }) => {
+  if (!failedCount || failedCount === 0) return null;
+
+  return (
+    <button
+      onClick={onClick}
+      className="flex items-center gap-2 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg cursor-pointer"
+      title={`View ${failedCount} failed invoices`}
+    >
+      <FileText size={16} />
+      View Issues ({failedCount} failed)
+    </button>
+  );
+};
+
+// Progress Breakdown Modal
+const ProgressBreakdownModal = ({
+  importResult,
+  onClose,
+  onDownloadFailedReport,
 }) => {
-  if (!progress) return null;
+  if (!importResult) return null;
+
+  const {
+    summary = {},
+    insufficientStockProducts = [],
+    detailedErrors = {},
+  } = importResult;
+
+  const failedInvoices = [
+    ...(detailedErrors.importErrors || []),
+    ...(detailedErrors.validationErrors || []),
+  ];
 
   return ReactDOM.createPortal(
     <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-[100]">
-      <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
-        <div className="mb-4">
-          <h3 className="text-lg font-semibold text-gray-800 mb-2">
-            Importing Sales Data
-          </h3>
-          <p className="text-sm text-gray-600 mb-4">{message}</p>
+      <div className="bg-white w-full max-w-4xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+        <button
+          onClick={onClose}
+          className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+        >
+          <X size={20} />
+        </button>
 
-          <div className="w-full bg-gray-200 rounded-full h-2.5">
-            <div
-              className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
-              style={{ width: `${progress}%` }}
-            ></div>
+        <div className="mb-6">
+          <h2 className="text-xl font-semibold text-gray-800 mb-2">
+            Import Summary
+          </h2>
+          <p className="text-sm text-gray-600 mb-4">
+            Complete breakdown of the import process
+          </p>
+
+          {/* Summary Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <div className="text-sm font-medium text-green-800 mb-1">
+                Successful
+              </div>
+              <div className="text-2xl font-bold text-green-600">
+                {summary.successfullyImported || 0}
+              </div>
+              <div className="text-xs text-green-700">Invoices imported</div>
+            </div>
+
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <div className="text-sm font-medium text-red-800 mb-1">
+                Failed
+              </div>
+              <div className="text-2xl font-bold text-red-600">
+                {summary.failed || 0}
+              </div>
+              <div className="text-xs text-red-700">Invoices failed</div>
+            </div>
+
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="text-sm font-medium text-blue-800 mb-1">
+                Regular Sales
+              </div>
+              <div className="text-2xl font-bold text-blue-600">
+                {summary.regularTransactions || 0}
+              </div>
+              <div className="text-xs text-blue-700">Regular transactions</div>
+            </div>
           </div>
 
-          <div className="flex justify-between text-xs text-gray-500 mt-2">
-            <span>{Math.round(progress)}% Complete</span>
-            <span>Processing...</span>
+          {/* Transaction Type Breakdown */}
+          <div className="mb-6">
+            <h3 className="text-lg font-medium text-gray-700 mb-3">
+              Transaction Types
+            </h3>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                  <span className="text-sm text-gray-700">Regular Sales</span>
+                </div>
+                <span className="font-medium text-gray-900">
+                  {summary.regularTransactions || 0}
+                </span>
+              </div>
+            </div>
           </div>
 
-          {/* Add detailed progress info */}
-          {detailedProgress && (
-            <div className="mt-4 text-xs text-gray-600">
-              <div className="grid grid-cols-2 gap-2">
-                {detailedProgress.currentBatch > 0 && (
-                  <>
-                    <span>Current Batch:</span>
-                    <span>
-                      {detailedProgress.currentBatch} of{" "}
-                      {detailedProgress.totalBatches}
-                    </span>
-                  </>
+          {/* Stock Issues */}
+          {insufficientStockProducts.length > 0 && (
+            <div className="mb-6">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-medium text-gray-700">
+                  Stock Issues ({insufficientStockProducts.length} products)
+                </h3>
+                <span className="text-sm text-orange-600 font-medium">
+                  Requires attention
+                </span>
+              </div>
+              <div className="space-y-2">
+                {insufficientStockProducts.slice(0, 5).map((product, idx) => (
+                  <div
+                    key={`stock-${idx}`}
+                    className="p-3 bg-orange-50 border border-orange-200 rounded-lg"
+                  >
+                    <div className="flex justify-between items-start mb-1">
+                      <span className="font-medium text-gray-700">
+                        {product.productName}
+                      </span>
+                      <span className="px-2 py-1 bg-orange-100 text-orange-800 text-xs rounded-full">
+                        Deficit: {product.deficit || product.shortage || 0}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div>
+                        <span className="text-gray-600">Required:</span>
+                        <span className="ml-2 font-medium">
+                          {product.requiredForImport || product.required || 0}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Available:</span>
+                        <span className="ml-2 font-medium">
+                          {product.currentStock || product.available || 0}
+                        </span>
+                      </div>
+                    </div>
+                    {product.affectedInvoices && (
+                      <div className="text-xs text-gray-500 mt-2">
+                        Affects {product.affectedInvoices} invoice(s)
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {insufficientStockProducts.length > 5 && (
+                  <p className="text-sm text-gray-500 mt-2">
+                    ... and {insufficientStockProducts.length - 5} more products
+                    with stock issues
+                  </p>
                 )}
-                {detailedProgress.successfulImports > 0 && (
-                  <>
-                    <span>Successful:</span>
-                    <span className="text-green-600">
-                      {detailedProgress.successfulImports}
-                    </span>
-                  </>
-                )}
-                {detailedProgress.failedImports > 0 && (
-                  <>
-                    <span>Failed:</span>
-                    <span className="text-red-600">
-                      {detailedProgress.failedImports}
-                    </span>
-                  </>
+              </div>
+            </div>
+          )}
+
+          {/* Failed Invoices Preview */}
+          {failedInvoices.length > 0 && (
+            <div className="mb-6">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-medium text-gray-700">
+                  Failed Invoices ({failedInvoices.length})
+                </h3>
+                <button
+                  onClick={onDownloadFailedReport}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-red-500 text-white rounded-lg hover:bg-red-600 cursor-pointer text-sm"
+                >
+                  <FileText size={14} />
+                  Download Failed Report
+                </button>
+              </div>
+              <div className="space-y-2">
+                {failedInvoices.slice(0, 3).map((error, idx) => (
+                  <div
+                    key={`error-preview-${idx}`}
+                    className="p-3 bg-red-50 border border-red-200 rounded-lg"
+                  >
+                    <div className="flex justify-between items-start mb-1">
+                      <span className="font-medium text-gray-700">
+                        {error.invoiceNumber || `Error ${idx + 1}`}
+                      </span>
+                      <span className="px-2 py-1 bg-red-100 text-red-800 text-xs rounded-full">
+                        {error.type === "insufficient_stock"
+                          ? "Stock"
+                          : "Validation"}
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-600 truncate">
+                      {error.error || error.message || "Unknown error"}
+                    </p>
+                    {error.row && (
+                      <div className="text-xs text-gray-500 mt-1">
+                        Row: {error.row}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {failedInvoices.length > 3 && (
+                  <p className="text-sm text-gray-500 mt-2">
+                    ... and {failedInvoices.length - 3} more failed invoices
+                  </p>
                 )}
               </div>
             </div>
           )}
         </div>
 
-        <div className="flex justify-end">
+        <div className="mt-6 flex justify-between border-t border-gray-300 pt-4">
           <button
-            onClick={onCancel}
-            className="px-4 py-2 text-sm bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-md transition-colors cursor-pointer"
-            disabled={progress >= 100}
+            onClick={onClose}
+            className="px-5 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer"
           >
-            Cancel Import
+            Close Summary
           </button>
+          {failedInvoices.length > 0 && (
+            <button
+              onClick={onDownloadFailedReport}
+              className="flex items-center gap-2 px-5 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg cursor-pointer"
+            >
+              <Download size={16} />
+              Download Full Report
+            </button>
+          )}
         </div>
       </div>
     </div>,
@@ -120,6 +340,961 @@ const ImportProgressModal = ({
   );
 };
 
+// Import Sales Modal Component
+const ImportSalesModal = ({
+  isOpen,
+  onClose,
+  onImportSuccess,
+  mrList = [],
+  customerList = [],
+  productsList = [],
+  stockData = {},
+}) => {
+  const [isUploading, setIsUploading] = useState(false);
+  const [parsedData, setParsedData] = useState([]);
+  const [importProgress, setImportProgress] = useState(null);
+  const [importMessage, setImportMessage] = useState("");
+  const [importErrorDetails, setImportErrorDetails] = useState([]);
+  const [validParsedData, setValidParsedData] = useState([]);
+  const [failedInvoices, setFailedInvoices] = useState([]);
+  const [importResult, setImportResult] = useState(null);
+  const [showProgressBreakdown, setShowProgressBreakdown] = useState(false);
+  const [importSessionId, setImportSessionId] = useState(null);
+  const [abortController, setAbortController] = useState(null);
+  const [progressInterval, setProgressInterval] = useState(null);
+  const [detailedProgress, setDetailedProgress] = useState(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importComplete, setImportComplete] = useState(false);
+  const [importSummary, setImportSummary] = useState(null);
+
+  // Clean up interval on unmount
+  useEffect(() => {
+    return () => {
+      if (progressInterval) {
+        clearInterval(progressInterval);
+        setProgressInterval(null);
+      }
+    };
+  }, [progressInterval]);
+
+  // Parse quantity from Excel
+  const parseExcelQuantity = (value) => {
+    if (value === null || value === undefined) return 0;
+
+    const str = String(value).trim();
+
+    // Regular positive number only
+    const num = parseFloat(str.replace(/,/g, ""));
+    return isNaN(num) ? 0 : Math.abs(num);
+  };
+
+  // Handle file upload
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (file.size > 20 * 1024 * 1024) {
+      showToast("error", "File size too large. Maximum size is 20MB.");
+      return;
+    }
+
+    setImportMessage("Reading file...");
+    setImportProgress(10);
+    setIsUploading(true);
+    setImportErrorDetails([]);
+    setValidParsedData([]);
+    setFailedInvoices([]);
+    setImportResult(null);
+    setImportComplete(false);
+
+    try {
+      const data = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (evt) => resolve(evt.target.result);
+        reader.onerror = reject;
+        reader.readAsArrayBuffer(file);
+      });
+
+      setImportProgress(30);
+      setImportMessage("Processing Excel data...");
+
+      const workbook = XLSX.read(new Uint8Array(data), { type: "array" });
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(worksheet, {
+        header: 1,
+        defval: "",
+        raw: false,
+      });
+
+      setImportProgress(50);
+      setImportMessage("Parsing data...");
+
+      // Find header row
+      let headerIdx = -1;
+      for (let i = 0; i < Math.min(rows.length, 20); i++) {
+        const row = rows[i].map((c) => String(c || "").trim());
+        if (row.some((cell) => cell.toLowerCase().includes("invoice"))) {
+          headerIdx = i;
+          break;
+        }
+      }
+
+      if (headerIdx === -1) {
+        showToast("error", "Header row not found in first 20 rows");
+        setImportProgress(null);
+        setIsUploading(false);
+        return;
+      }
+
+      const headers = rows[headerIdx].map((h) => String(h || "").trim());
+      const dataRows = rows
+        .slice(headerIdx + 1)
+        .filter((row) =>
+          row.some(
+            (cell) =>
+              cell !== null && cell !== undefined && String(cell).trim() !== ""
+          )
+        );
+
+      // Helper function to get column index
+      const getColIndex = (colName) => {
+        const lowerColName = colName.toLowerCase();
+        return headers.findIndex((h) => h.toLowerCase().includes(lowerColName));
+      };
+
+      // Group by invoice number
+      const groupedInvoices = {};
+      const validationErrors = [];
+      let rowCount = 0;
+
+      for (const row of dataRows) {
+        rowCount++;
+        if (rowCount % 1000 === 0) {
+          setImportMessage(
+            `Processing row ${rowCount} of ${dataRows.length}...`
+          );
+        }
+
+        const invoiceNumber = String(
+          row[getColIndex("Invoice #")] || row[getColIndex("Invoice")] || ""
+        ).trim();
+
+        const customerName = String(
+          row[getColIndex("Customer Name")] || ""
+        ).trim();
+
+        const customerCode = String(
+          row[getColIndex("Customer Code")] || ""
+        ).trim();
+
+        const productName = String(
+          row[getColIndex("Product Name")] || ""
+        ).trim();
+
+        const salesQty = parseExcelQuantity(row[getColIndex("Sales Qty")]);
+        const sellingPrice = Number(row[getColIndex("Selling Price")]) || 0;
+        const remark = String(row[getColIndex("Remarks")] || "").trim();
+        const paymentStatus = String(
+          row[getColIndex("Payment Status")] || ""
+        ).trim();
+
+        // Basic validation
+        const rowErrors = [];
+        if (!invoiceNumber) {
+          rowErrors.push("Invoice number is required");
+        }
+        if (!customerName) {
+          rowErrors.push("Customer name is required");
+        }
+        if (!productName) {
+          rowErrors.push("Product name is required");
+        }
+
+        // Validate quantity and price
+        if (salesQty <= 0) {
+          rowErrors.push(
+            `Sales quantity must be greater than 0 (found: ${salesQty})`
+          );
+        }
+        if (sellingPrice < 0) {
+          rowErrors.push(
+            `Selling price cannot be negative (found: ${sellingPrice})`
+          );
+        }
+
+        if (rowErrors.length > 0) {
+          validationErrors.push({
+            row: rowCount + headerIdx + 1,
+            type: "Validation Error",
+            message: rowErrors.join(", "),
+            invoiceNumber: invoiceNumber,
+            customerName: customerName,
+            productName: productName,
+          });
+          continue;
+        }
+
+        // Initialize invoice if not exists
+        if (!groupedInvoices[invoiceNumber]) {
+          const creditDays = Number(row[getColIndex("Credit Days")]) || 0;
+          const currentDate = new Date();
+          const dueDate = new Date(currentDate);
+          dueDate.setDate(currentDate.getDate() + creditDays);
+
+          groupedInvoices[invoiceNumber] = {
+            recordingDate: new Date().toISOString().split("T")[0],
+            invoiceNumber,
+            invoiceDate: new Date().toISOString().split("T")[0],
+            mrName: String(row[getColIndex("MR Name")] || "").trim(),
+            customerName: customerName,
+            customerCode: customerCode || "",
+            customerId: "",
+            creditDays: creditDays,
+            paidAmount: Number(row[getColIndex("Paid Amount")]) || 0,
+            paymentStatus: paymentStatus || "Credit",
+            remark: remark,
+            products: [],
+            totalAmount: 0,
+            dueAmount: 0,
+            dueDate: dueDate.toISOString().split("T")[0],
+            deliveryDate: new Date().toISOString().split("T")[0],
+          };
+        }
+
+        const bonusQty = parseExcelQuantity(row[getColIndex("Bonus Qty")]) || 0;
+        const discount = Number(row[getColIndex("Discount")]) || 0;
+
+        const finalSalesQty = salesQty;
+        const finalBonusQty = bonusQty;
+
+        const totalQty = finalSalesQty + finalBonusQty;
+        const amount = sellingPrice * Math.abs(salesQty);
+        const netSellingAmount = amount - discount;
+        const averageUnitPrice =
+          totalQty !== 0 ? netSellingAmount / Math.abs(totalQty) : 0;
+
+        groupedInvoices[invoiceNumber].products.push({
+          productName: productName,
+          salesQty: finalSalesQty,
+          bonusQty: finalBonusQty,
+          totalQty: totalQty,
+          sellingPrice: sellingPrice,
+          amount: amount,
+          discount: discount,
+          netSellingAmount: netSellingAmount,
+          averageUnitPrice: averageUnitPrice,
+          lc: 0,
+          profitLoss: 0,
+          isProductAccept: true,
+          remark: "",
+        });
+
+        groupedInvoices[invoiceNumber].totalAmount += netSellingAmount;
+      }
+
+      // Calculate due amounts for valid invoices
+      Object.values(groupedInvoices).forEach((invoice) => {
+        invoice.dueAmount = invoice.totalAmount - invoice.paidAmount;
+      });
+
+      const invoicesArray = Object.values(groupedInvoices);
+      setImportProgress(100);
+
+      // Store valid data
+      setValidParsedData(
+        invoicesArray.filter(
+          (inv) =>
+            !validationErrors.some(
+              (error) => error.invoiceNumber === inv.invoiceNumber
+            )
+        )
+      );
+
+      setImportErrorDetails(validationErrors);
+
+      if (validationErrors.length > 0) {
+        showToast(
+          "info",
+          `Found ${invoicesArray.length} invoices with ${invoicesArray.reduce(
+            (total, inv) => total + (inv.products?.length || 0),
+            0
+          )} products. ${validationErrors.length} validation issues found.`
+        );
+      } else {
+        showToast(
+          "success",
+          `Successfully parsed ${
+            invoicesArray.length
+          } invoices with ${invoicesArray.reduce(
+            (total, inv) => total + (inv.products?.length || 0),
+            0
+          )} products`
+        );
+      }
+
+      setParsedData(invoicesArray);
+    } catch (error) {
+      console.error("❌ Error processing file:", error);
+      showToast("error", "Failed to process Excel file: " + error.message);
+    } finally {
+      setImportProgress(null);
+      setIsUploading(false);
+    }
+  };
+
+  // Start progress polling
+  const startProgressPolling = (sessionId) => {
+    setImportSessionId(sessionId);
+    setIsImporting(true);
+    setImportProgress(0);
+    setImportMessage("Starting import...");
+
+    // Clear any existing interval
+    if (progressInterval) {
+      clearInterval(progressInterval);
+    }
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const response = await axios.get(
+          `${backendUrl}/api/import/progress/${sessionId}`
+        );
+
+        if (response.data.success) {
+          const progress = response.data;
+
+          const progressPercentage = Math.max(
+            0,
+            Math.min(100, progress.progressPercentage || 0)
+          );
+
+          setImportProgress(progressPercentage);
+          setDetailedProgress(progress);
+
+          if (progress.message) {
+            setImportMessage(progress.message);
+          }
+
+          if (progress.completed) {
+            clearInterval(pollInterval);
+            setProgressInterval(null);
+            setIsImporting(false);
+            setImportComplete(true);
+
+            const importResult = {
+              success: true,
+              message: "Import completed",
+              summary: {
+                totalReceived: progress.totalInvoices || 0,
+                successfullyImported: progress.successful || 0,
+                failed: progress.failed || 0,
+                regularTransactions: progress.transactionTypes?.regular || 0,
+              },
+              insufficientStockProducts:
+                progress.insufficientStockProducts || [],
+              detailedErrors: progress.errors || [],
+            };
+
+            processImportResult(importResult);
+
+            // Auto-close modal after 3 seconds if successful and no failures
+            if (progress.failed === 0) {
+              setTimeout(() => {
+                onClose();
+              }, 3000);
+            }
+          }
+        } else {
+          if (response.data.completed || response.data.error) {
+            clearInterval(pollInterval);
+            setProgressInterval(null);
+            setIsImporting(false);
+            setImportComplete(true);
+            setImportMessage("Import completed or failed");
+          }
+        }
+      } catch (error) {
+        console.error("Progress polling error:", error);
+        if (error.response?.status === 404) {
+          clearInterval(pollInterval);
+          setProgressInterval(null);
+          setIsImporting(false);
+          setImportComplete(true);
+          setImportMessage("Import session expired or completed");
+        } else {
+          setImportMessage("Error checking progress. Please refresh.");
+        }
+      }
+    }, 1000);
+
+    setProgressInterval(pollInterval);
+  };
+
+  // Process import result
+  const processImportResult = (importResult) => {
+    setImportResult(importResult);
+    setImportProgress(100);
+
+    // Process failed invoices
+    const failed = processFailedInvoices(importResult);
+    setFailedInvoices(failed);
+
+    // Show success message
+    let message = `Import completed!\n`;
+
+    if (importResult.summary) {
+      const summary = importResult.summary;
+      message += `✓ ${
+        summary.successfullyImported || 0
+      } invoices imported successfully\n`;
+      message += `✗ ${summary.failed || 0} invoices failed\n`;
+
+      if (summary.regularTransactions > 0) {
+        message += `✅ ${summary.regularTransactions} regular sales\n`;
+      }
+    }
+
+    showToast("success", message);
+    setImportSummary(importResult.summary);
+
+    // Refresh sales data
+    if (onImportSuccess) {
+      onImportSuccess();
+    }
+  };
+
+  // Process failed invoices
+  const processFailedInvoices = (importResult) => {
+    const failed = [];
+
+    // Process errors from the errors array
+    if (
+      importResult.detailedErrors &&
+      Array.isArray(importResult.detailedErrors)
+    ) {
+      importResult.detailedErrors.forEach((error) => {
+        let type = "validation";
+        const errorMsg = error.error.toLowerCase();
+        if (errorMsg.includes("insufficient stock")) {
+          type = "insufficient_stock";
+        } else if (errorMsg.includes("already exists")) {
+          type = "duplicate";
+        }
+        failed.push({
+          invoiceNumber: error.invoiceNumber,
+          row: error.index + 1,
+          error: error.error,
+          type: type,
+          customerName: error.customerName,
+          products: error.products || [], // Use empty array if products is undefined
+        });
+      });
+    }
+
+    return failed;
+  };
+
+  // Handle product import
+  const handleProductImport = async (dataToImport = null) => {
+    const importData = dataToImport || parsedData;
+
+    if (!importData || importData.length === 0) {
+      showToast("warning", "Please upload and validate a file first.");
+      return;
+    }
+
+    setIsImporting(true);
+    setImportProgress(0);
+    setImportMessage("Preparing import...");
+    setFailedInvoices([]);
+    setImportResult(null);
+    setImportComplete(false);
+
+    try {
+      const res = await axios.post(
+        `${backendUrl}/api/sales/import`,
+        importData,
+        {
+          headers: { "Content-Type": "application/json" },
+          timeout: 300000,
+        }
+      );
+
+      if (res.data.sessionId) {
+        // Async import with session ID
+        startProgressPolling(res.data.sessionId);
+      } else if (res.data.summary) {
+        // Direct import result
+        processImportResult(res.data);
+        setIsImporting(false);
+        setImportComplete(true);
+      } else {
+        // Legacy response structure
+        const importResult = {
+          success: res.data.success || false,
+          message: res.data.message || "Import completed",
+          summary: {
+            totalReceived: importData.length,
+            successfullyImported:
+              res.data.successfullyImported || res.data.successful || 0,
+            failed: res.data.failed || 0,
+            validationErrors: res.data.validationErrors || 0,
+            importErrors: res.data.importErrors || 0,
+            processingTimeSeconds: res.data.processingTimeSeconds || 0,
+            regularTransactions:
+              res.data.regularTransactions ||
+              res.data.summary?.regularTransactions ||
+              0,
+          },
+          insufficientStockProducts: res.data.insufficientStockProducts || [],
+          detailedErrors: res.data.detailedErrors || {},
+        };
+
+        processImportResult(importResult);
+        setIsImporting(false);
+        setImportComplete(true);
+      }
+    } catch (err) {
+      console.error("❌ Import failed:", err);
+      showToast("error", "Failed to import data");
+      setIsImporting(false);
+      setImportComplete(true);
+    }
+  };
+
+  // Import only valid rows
+  const handleImportValidOnly = async () => {
+    if (validParsedData.length === 0) {
+      showToast("warning", "No valid rows to import.");
+      return;
+    }
+
+    await handleProductImport(validParsedData);
+  };
+
+  // Download failed invoices report - FIXED
+  const downloadFailedInvoicesReport = () => {
+    if (!failedInvoices || failedInvoices.length === 0) {
+      showToast("warning", "No failed invoices to download");
+      return;
+    }
+
+    try {
+      // Create headers for the CSV
+      const headers = [
+        "Row",
+        "Invoice Number",
+        "Customer Name",
+        "Error Type",
+        "Error Message",
+        "Products",
+        "Sales Qty",
+        "Bonus Qty",
+      ];
+
+      // Create CSV content
+      const csvRows = [];
+
+      // Add headers
+      csvRows.push(headers.join(","));
+
+      // Add data rows
+      failedInvoices.forEach((invoice) => {
+        // Calculate product info
+        const productNames =
+          invoice.products
+            ?.map((p) => p.name || "")
+            .filter(Boolean)
+            .join("; ") || "";
+        const totalSalesQty =
+          invoice.products?.reduce(
+            (sum, p) => sum + (parseFloat(p.salesQty) || 0),
+            0
+          ) || 0;
+        const totalBonusQty =
+          invoice.products?.reduce(
+            (sum, p) => sum + (parseFloat(p.bonusQty) || 0),
+            0
+          ) || 0;
+
+        const row = [
+          invoice.row || "",
+          `"${invoice.invoiceNumber || ""}"`,
+          `"${invoice.customerName || ""}"`,
+          `"${invoice.type || "validation"}"`,
+          `"${(invoice.error || "").replace(/"/g, '""')}"`,
+          `"${productNames}"`,
+          totalSalesQty,
+          totalBonusQty,
+        ];
+
+        csvRows.push(row.join(","));
+      });
+
+      // Create CSV content
+      const csvContent = csvRows.join("\n");
+
+      // Create blob and download
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+
+      // Set filename with timestamp
+      const timestamp = new Date()
+        .toISOString()
+        .split("T")[0]
+        .replace(/-/g, "");
+      const filename = `failed_invoices_${timestamp}.csv`;
+
+      link.href = url;
+      link.setAttribute("download", filename);
+      link.style.visibility = "hidden";
+
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      // Clean up
+      setTimeout(() => {
+        URL.revokeObjectURL(url);
+      }, 100);
+
+      showToast(
+        "success",
+        `Downloaded ${failedInvoices.length} failed invoices report`
+      );
+    } catch (error) {
+      console.error("Error downloading failed invoices report:", error);
+      showToast("error", "Failed to download report: " + error.message);
+    }
+  };
+
+  // Cancel import
+  const cancelImport = () => {
+    if (abortController) {
+      abortController.abort();
+      setAbortController(null);
+    }
+
+    // Clear progress interval
+    if (progressInterval) {
+      clearInterval(progressInterval);
+      setProgressInterval(null);
+    }
+
+    setImportProgress(null);
+    setIsImporting(false);
+    showToast("info", "Import cancelled");
+  };
+
+  // Reset modal state
+  const resetModal = () => {
+    setParsedData([]);
+    setValidParsedData([]);
+    setImportErrorDetails([]);
+    setFailedInvoices([]);
+    setImportResult(null);
+    setImportComplete(false);
+    setImportProgress(null);
+    setIsImporting(false);
+    setDetailedProgress(null);
+    setImportSummary(null);
+  };
+
+  const handleClose = () => {
+    resetModal();
+    onClose();
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <>
+      {/* Progress Breakdown Modal */}
+      {showProgressBreakdown && (
+        <ProgressBreakdownModal
+          importResult={importResult}
+          onClose={() => setShowProgressBreakdown(false)}
+          onDownloadFailedReport={downloadFailedInvoicesReport}
+        />
+      )}
+
+      {/* Main Import Modal */}
+      {ReactDOM.createPortal(
+        <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
+          <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+            <button
+              onClick={handleClose}
+              className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+              disabled={isImporting}
+            >
+              <X size={20} />
+            </button>
+
+            <h2 className="text-xl font-semibold text-gray-800 mb-4">
+              Import Sales Data
+            </h2>
+
+            {/* Import Complete Summary */}
+            {importComplete && importSummary && (
+              <div className="mb-6">
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                  <div className="flex items-center gap-3 mb-3">
+                    <CheckCircle className="text-green-500" size={24} />
+                    <h3 className="font-medium text-green-800">
+                      Import Completed Successfully!
+                    </h3>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-sm text-green-700">
+                        Total Invoices:
+                      </span>
+                      <span className="font-medium">
+                        {importSummary.totalReceived || 0}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-sm text-green-700">
+                        Successful:
+                      </span>
+                      <span className="font-medium text-green-600">
+                        {importSummary.successfullyImported || 0}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-sm text-red-700">Failed:</span>
+                      <span className="font-medium text-red-600">
+                        {importSummary.failed || 0}
+                      </span>
+                    </div>
+                  </div>
+
+                  {importSummary.failed > 0 && (
+                    <div className="mt-4 pt-3 border-t border-green-200">
+                      <button
+                        onClick={downloadFailedInvoicesReport}
+                        className="flex items-center gap-2 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg cursor-pointer w-full justify-center"
+                      >
+                        <Download size={16} />
+                        Download Failed Invoices Report ({importSummary.failed})
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="mt-4 pt-3 border-t border-green-200">
+                    <button
+                      onClick={() => setShowProgressBreakdown(true)}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg cursor-pointer w-full justify-center"
+                    >
+                      <FileText size={16} />
+                      View Detailed Import Summary
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Import Progress Section */}
+            {isImporting && (
+              <div className="mb-6">
+                <h3 className="text-lg font-medium text-gray-700 mb-3">
+                  Importing Sales Data
+                </h3>
+
+                <div className="mb-4">
+                  <div className="flex justify-between mb-1">
+                    <span className="text-sm font-medium text-blue-700">
+                      {importMessage || "Processing..."}
+                    </span>
+                    <span className="text-sm font-medium text-blue-700">
+                      {importProgress}%
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2.5">
+                    <div
+                      className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                      style={{ width: `${importProgress}%` }}
+                    ></div>
+                  </div>
+                </div>
+
+                {detailedProgress && (
+                  <div className="text-sm text-gray-600 mb-4 space-y-2">
+                    <div className="flex justify-between">
+                      <span>Processed Invoices:</span>
+                      <span className="font-medium">
+                        {detailedProgress.processedInvoices} /{" "}
+                        {detailedProgress.totalInvoices}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Current Batch:</span>
+                      <span className="font-medium">
+                        {detailedProgress.currentBatch} /{" "}
+                        {detailedProgress.totalBatches}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Successful:</span>
+                      <span className="font-medium text-green-600">
+                        {detailedProgress.successful}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Failed:</span>
+                      <span className="font-medium text-red-600">
+                        {detailedProgress.failed}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex justify-end">
+                  <button
+                    onClick={cancelImport}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 cursor-pointer"
+                  >
+                    Cancel Import
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* File Upload Section (only show when not importing and not complete) */}
+            {!isImporting && !importComplete && (
+              <>
+                <div className="mb-6">
+                  {isSampleFile && <SampleExcelDownloadSale />}
+
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Upload Excel/CSV File
+                    </label>
+                    <input
+                      type="file"
+                      accept=".csv, .xlsx, .xls"
+                      onChange={handleFileUpload}
+                      className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
+                      disabled={isUploading}
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Supports .csv, .xlsx, .xls files (Max 20MB)
+                    </p>
+                  </div>
+                </div>
+
+                {/* Show data validation results */}
+                {parsedData.length > 0 && !isUploading && (
+                  <div className="mb-6">
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <h3 className="font-medium text-green-800 mb-1">
+                            File Successfully Parsed
+                          </h3>
+                          <p className="text-sm text-green-700 mb-2">
+                            Found {parsedData.length} invoices with{" "}
+                            {parsedData.reduce(
+                              (total, inv) =>
+                                total + (inv.products?.length || 0),
+                              0
+                            )}{" "}
+                            products
+                          </p>
+                          {importErrorDetails.length > 0 && (
+                            <div className="text-sm text-yellow-700 bg-yellow-50 p-2 rounded">
+                              ⚠️ Found {importErrorDetails.length} validation
+                              issues
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          <button
+                            onClick={() => handleProductImport(parsedData)}
+                            disabled={isUploading}
+                            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg cursor-pointer text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            Import All Data
+                          </button>
+                          {importErrorDetails.length > 0 && (
+                            <button
+                              onClick={() => handleImportValidOnly()}
+                              disabled={
+                                isUploading || validParsedData.length === 0
+                              }
+                              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg cursor-pointer text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              Import Valid Only ({validParsedData.length})
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Show upload progress */}
+                {isUploading && (
+                  <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium text-blue-800">
+                        Uploading...
+                      </span>
+                      {importProgress !== null && (
+                        <span className="text-sm text-blue-700">
+                          {Math.round(importProgress)}%
+                        </span>
+                      )}
+                    </div>
+                    {importProgress !== null && (
+                      <div className="w-full bg-blue-200 rounded-full h-2">
+                        <div
+                          className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                          style={{ width: `${importProgress}%` }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex justify-between items-center gap-3">
+                  <div className="text-sm text-gray-500">
+                    Ensure your Excel file has the correct columns
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleClose}
+                      disabled={isUploading}
+                      className="px-5 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer disabled:opacity-50"
+                    >
+                      {isUploading ? "Processing..." : "Cancel"}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Close button when import is complete */}
+            {importComplete && (
+              <div className="flex justify-end mt-6 pt-4 border-t border-gray-300">
+                <button
+                  onClick={handleClose}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
+  );
+};
+
+// Main Sales Component
 const Sales = () => {
   const navigate = useNavigate();
   const [sales, setSales] = useState([]);
@@ -128,9 +1303,6 @@ const Sales = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState("");
   const [showImportModal, setShowImportModal] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [parsedData, setParsedData] = useState([]);
-  const [types, setTypes] = useState([]);
   const [loadingData, setLoadingData] = useState(true);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
@@ -143,16 +1315,12 @@ const Sales = () => {
   const { statuses, productNames, loading } = useInitialSaleData();
   const [errors, setErrors] = useState({});
   const [stockData, setStockData] = useState({});
-  const [importProgress, setImportProgress] = useState(null);
-  const [importMessage, setImportMessage] = useState("");
-  const [abortController, setAbortController] = useState(null);
-  const [detailedProgress, setDetailedProgress] = useState(null); // NEW: for detailed progress
-  const [progressInterval, setProgressInterval] = useState(null); // NEW: for polling
-
   const [currentProduct, setCurrentProduct] = useState(null);
   const [currentProductIndex, setCurrentProductIndex] = useState(null);
   const [isProductEditModalOpen, setIsProductEditModalOpen] = useState(false);
   const [expandedProductIndex, setExpandedProductIndex] = useState(-1);
+  const [failedInvoices, setFailedInvoices] = useState([]);
+  const [importResult, setImportResult] = useState(null);
 
   const [form, setForm] = useState({
     _id: null,
@@ -228,26 +1396,13 @@ const Sales = () => {
   };
 
   const handleImportClick = () => {
-    const missingFields = [];
-
-    if (!productsList.length) {
-      missingFields.push("product names");
-    }
-
-    if (!mrList.length) {
-      missingFields.push("medical representatives");
-    }
-
-    if (!customerList.length) {
-      missingFields.push("customers");
-    }
-
-    if (missingFields.length > 0) {
+    if (!mrList.length || !customerList.length || !productsList.length) {
       showToast(
         "error",
-        `Please upload ${missingFields.join(
-          ", "
-        )} first before importing sales data.`
+        `Please ensure all required data is loaded before importing sales:
+      ${!mrList.length ? "\n• Medical Representatives" : ""}
+      ${!customerList.length ? "\n• Customers" : ""}
+      ${!productsList.length ? "\n• Products" : ""}`
       );
       return;
     }
@@ -255,14 +1410,13 @@ const Sales = () => {
     setShowImportModal(true);
   };
 
-  // Fetch sale summaries
   const fetchSaleSummaries = async () => {
     try {
       setLoadingData(true);
-      // Try to fetch all data
-      const res = await fetch(`${backendUrl}/api/sales/all`);
+      let url = `${backendUrl}/api/sales/all`;
+
+      const res = await fetch(url);
       if (!res.ok) {
-        // Fallback to paginated endpoint
         const fallbackRes = await fetch(
           `${backendUrl}/api/sales?page=1&limit=1000`
         );
@@ -271,22 +1425,22 @@ const Sales = () => {
         const data = await fallbackRes.json();
         const salesData = data.summaries || data.data || data;
 
-        const uniqueTypes = Array.from(
-          new Set(salesData.map((item) => item.paymentStatus?.toLowerCase()))
-        ).filter(Boolean);
+        // Filter out any return or exchange transactions
+        const filteredData = salesData.filter(
+          (sale) => !sale.isReturn && !sale.isExchange
+        );
 
-        setTypes(["All", ...uniqueTypes]);
-        setSales(salesData);
+        setSales(filteredData);
       } else {
         const data = await res.json();
         const salesData = data.summaries || data.data || data;
 
-        const uniqueTypes = Array.from(
-          new Set(salesData.map((item) => item.paymentStatus?.toLowerCase()))
-        ).filter(Boolean);
+        // Filter out any return or exchange transactions
+        const filteredData = salesData.filter(
+          (sale) => !sale.isReturn && !sale.isExchange
+        );
 
-        setTypes(["All", ...uniqueTypes]);
-        setSales(salesData);
+        setSales(filteredData);
       }
     } catch (error) {
       console.error("❌ Fetch error:", error);
@@ -300,7 +1454,6 @@ const Sales = () => {
     fetchSaleSummaries();
   }, []);
 
-  // Fetch dropdown data
   useEffect(() => {
     const fetchDropdownData = async () => {
       try {
@@ -374,567 +1527,12 @@ const Sales = () => {
     fetchDropdownData();
   }, []);
 
-  // File upload handler
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    // Check file size (max 20MB)
-    if (file.size > 20 * 1024 * 1024) {
-      showToast("error", "File size too large. Maximum size is 20MB.");
-      return;
-    }
-
-    setImportMessage("Reading file...");
-    setImportProgress(10);
-    setIsUploading(true);
-
-    try {
-      // Read file as array buffer
-      const data = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (evt) => resolve(evt.target.result);
-        reader.onerror = reject;
-        reader.readAsArrayBuffer(file);
-      });
-
-      setImportProgress(30);
-      setImportMessage("Processing Excel data...");
-
-      // Parse Excel file
-      const workbook = XLSX.read(new Uint8Array(data), { type: "array" });
-      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(worksheet, {
-        header: 1,
-        defval: "",
-      });
-
-      setImportProgress(50);
-      setImportMessage("Parsing data...");
-
-      // Find header row
-      const expectedHeaders = [
-        "Recording Date",
-        "Invoice #",
-        "Invoice Date",
-        "MR Name",
-        "Customer Name",
-        "Customer Code",
-        "Customer ID",
-        "Product Name",
-        "Sales Qty",
-        "Bonus Qty",
-        "Selling Price (USD)",
-        "Discount (USD)",
-        "Credit Days",
-        "Paid Amount",
-        "Payment Status",
-        "Remarks",
-      ];
-
-      let headerIdx = -1;
-      for (let i = 0; i < Math.min(rows.length, 20); i++) {
-        const row = rows[i].map((c) => String(c || "").trim());
-        const normalized = row.map((c) => c.toLowerCase());
-        const matchCount = expectedHeaders.filter((h) =>
-          normalized.includes(h.toLowerCase())
-        ).length;
-        if (matchCount >= 5) {
-          headerIdx = i;
-          break;
-        }
-      }
-
-      if (headerIdx === -1) {
-        showToast("error", "Header row not found in first 20 rows");
-        setImportProgress(null);
-        setIsUploading(false);
-        return;
-      }
-
-      const headers = rows[headerIdx].map((h) => String(h || "").trim());
-      const dataRows = rows
-        .slice(headerIdx + 1)
-        .filter((row) =>
-          row.some(
-            (cell) =>
-              cell !== null && cell !== undefined && String(cell).trim() !== ""
-          )
-        );
-
-      // Date parsing function
-      const parseExcelDate = (dateValue) => {
-        if (!dateValue) return new Date();
-
-        // If it's already a Date object
-        if (dateValue instanceof Date) {
-          return dateValue;
-        }
-
-        // If it's an Excel serial number
-        if (typeof dateValue === "number") {
-          const excelEpoch = new Date(1899, 11, 30);
-          const date = new Date(excelEpoch.getTime() + dateValue * 86400000);
-          return date;
-        }
-
-        // If it's a string, try to parse it
-        if (typeof dateValue === "string") {
-          const dateStr = dateValue.trim();
-
-          // Try different date formats
-          const dateFormats = [
-            /^(\d{1,2})-([a-zA-Z]{3})-(\d{2})$/i,
-            /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/,
-            /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2})$/,
-            /^(\d{4})-(\d{1,2})-(\d{1,2})$/,
-          ];
-
-          for (const format of dateFormats) {
-            const match = dateStr.match(format);
-            if (match) {
-              if (format.toString().includes("[a-zA-Z]{3}")) {
-                // Handle DD-MMM-YY format
-                const day = parseInt(match[1], 10);
-                const monthStr = match[2].toLowerCase();
-                const year = parseInt(match[3], 10);
-
-                const monthMap = {
-                  jan: 0,
-                  feb: 1,
-                  mar: 2,
-                  apr: 3,
-                  may: 4,
-                  jun: 5,
-                  jul: 6,
-                  aug: 7,
-                  sep: 8,
-                  oct: 9,
-                  nov: 10,
-                  dec: 11,
-                };
-
-                const month = monthMap[monthStr];
-                if (month !== undefined) {
-                  const fullYear = year < 100 ? 2000 + year : year;
-                  return new Date(fullYear, month, day);
-                }
-              } else {
-                const parts = dateStr.split(/[\/-]/);
-                let day, month, year;
-
-                if (format.toString().includes("YYYY-MM-DD")) {
-                  year = parseInt(parts[0], 10);
-                  month = parseInt(parts[1], 10) - 1;
-                  day = parseInt(parts[2], 10);
-                } else {
-                  day = parseInt(parts[0], 10);
-                  month = parseInt(parts[1], 10) - 1;
-                  year = parseInt(parts[2], 10);
-
-                  if (year < 100) {
-                    year = 2000 + year;
-                  }
-                }
-
-                return new Date(year, month, day);
-              }
-            }
-          }
-
-          // Try JavaScript Date parsing
-          const parsed = new Date(dateStr);
-          if (!isNaN(parsed.getTime())) {
-            return parsed;
-          }
-        }
-
-        // Default to today's date
-        return new Date();
-      };
-
-      // Group by invoice number
-      const groupedInvoices = {};
-      const validationErrors = [];
-      let rowCount = 0;
-
-      for (const row of dataRows) {
-        rowCount++;
-        if (rowCount % 1000 === 0) {
-          setImportMessage(
-            `Processing row ${rowCount} of ${dataRows.length}...`
-          );
-        }
-
-        const invoiceNumber = String(
-          row[headers.indexOf("Invoice #")] || ""
-        ).trim();
-        const customerName = String(
-          row[headers.indexOf("Customer Name")] || ""
-        ).trim();
-        const customerCode = String(
-          row[headers.indexOf("Customer Code")] || ""
-        ).trim();
-        const productName = String(
-          row[headers.indexOf("Product Name")] || ""
-        ).trim();
-        const salesQty = Number(row[headers.indexOf("Sales Qty")]) || 0;
-        const sellingPrice =
-          Number(row[headers.indexOf("Selling Price (USD)")]) || 0;
-
-        // Basic validation
-        if (!invoiceNumber) {
-          validationErrors.push(
-            `Row ${rowCount + headerIdx + 1}: Invoice number is required`
-          );
-          continue;
-        }
-
-        if (!customerName) {
-          validationErrors.push(
-            `Row ${rowCount + headerIdx + 1}: Customer name is required`
-          );
-          continue;
-        }
-
-        if (!productName) {
-          validationErrors.push(
-            `Row ${rowCount + headerIdx + 1}: Product name is required`
-          );
-          continue;
-        }
-
-        if (salesQty <= 0) {
-          validationErrors.push(
-            `Row ${
-              rowCount + headerIdx + 1
-            }: Sales quantity must be greater than 0`
-          );
-          continue;
-        }
-
-        if (sellingPrice <= 0) {
-          validationErrors.push(
-            `Row ${
-              rowCount + headerIdx + 1
-            }: Selling price must be greater than 0`
-          );
-          continue;
-        }
-
-        // Find customer
-        let customer = null;
-        if (customerCode) {
-          customer = customerList.find((c) => c.code === customerCode);
-        } else if (customerName) {
-          customer = customerList.find(
-            (c) => c.name.toLowerCase() === customerName.toLowerCase()
-          );
-        }
-
-        if (!groupedInvoices[invoiceNumber]) {
-          const creditDays = Number(row[headers.indexOf("Credit Days")]) || 0;
-          const currentDate = new Date();
-          const dueDate = new Date(currentDate);
-          dueDate.setDate(currentDate.getDate() + creditDays);
-
-          let recordingDateStr = row[headers.indexOf("Recording Date")] || "";
-          let recordingDate = recordingDateStr
-            ? parseExcelDate(recordingDateStr)
-            : new Date();
-
-          let invoiceDateStr =
-            row[headers.indexOf("Invoice Date")] || recordingDateStr;
-          let invoiceDate = invoiceDateStr
-            ? parseExcelDate(invoiceDateStr)
-            : new Date();
-
-          // Validate dates
-          if (isNaN(recordingDate.getTime())) {
-            recordingDate = new Date();
-          }
-          if (isNaN(invoiceDate.getTime())) {
-            invoiceDate = new Date();
-          }
-
-          groupedInvoices[invoiceNumber] = {
-            recordingDate: recordingDate.toISOString().split("T")[0],
-            invoiceNumber,
-            invoiceDate: invoiceDate.toISOString().split("T")[0],
-            mrName: String(row[headers.indexOf("MR Name")] || "").trim(),
-            customerName: customerName,
-            customerCode: customer?.code || customerCode || "",
-            customerId: customer?.id || "",
-            creditDays: creditDays,
-            paidAmount: Number(row[headers.indexOf("Paid Amount")]) || 0,
-            paymentStatus: String(
-              row[headers.indexOf("Payment Status")] || "Credit"
-            ).trim(),
-            remark: String(row[headers.indexOf("Remarks")] || "").trim(),
-            products: [],
-            totalAmount: 0,
-            dueAmount: 0,
-            dueDate: dueDate.toISOString().split("T")[0],
-            deliveryDate: invoiceDate.toISOString().split("T")[0],
-          };
-        }
-
-        const bonusQty = Number(row[headers.indexOf("Bonus Qty")]) || 0;
-        const discount = Number(row[headers.indexOf("Discount (USD)")]) || 0;
-        const totalQty = salesQty + bonusQty;
-        const amount = sellingPrice * salesQty;
-        const netSellingAmount = amount - discount;
-        const averageUnitPrice = totalQty > 0 ? netSellingAmount / totalQty : 0;
-
-        groupedInvoices[invoiceNumber].products.push({
-          productName: productName,
-          salesQty: salesQty,
-          bonusQty: bonusQty,
-          totalQty: totalQty,
-          sellingPrice: sellingPrice,
-          amount: amount,
-          discount: discount,
-          netSellingAmount: netSellingAmount,
-          averageUnitPrice: averageUnitPrice,
-          lc: 0,
-          profitLoss: 0,
-          isProductAccept: true,
-        });
-
-        groupedInvoices[invoiceNumber].totalAmount += netSellingAmount;
-      }
-
-      // Calculate due amounts
-      Object.values(groupedInvoices).forEach((invoice) => {
-        invoice.dueAmount = invoice.totalAmount - invoice.paidAmount;
-
-        // Default values
-        if (!invoice.mrName && mrList.length > 0) {
-          invoice.mrName = mrList[0];
-        }
-
-        if (!invoice.paymentStatus) {
-          invoice.paymentStatus = "Credit";
-        }
-      });
-
-      const invoicesArray = Object.values(groupedInvoices);
-
-      setImportProgress(100);
-
-      if (validationErrors.length > 0) {
-        showToast(
-          "warning",
-          `Found ${invoicesArray.length} invoices with ${rowCount} products, but ${validationErrors.length} rows had errors`
-        );
-
-        // Show first 3 errors
-        const errorMessage = validationErrors.slice(0, 3).join("\n");
-        if (validationErrors.length > 3) {
-          showToast(
-            "warning",
-            `${errorMessage}\n...and ${validationErrors.length - 3} more errors`
-          );
-        }
-      } else {
-        showToast(
-          "success",
-          `Found ${invoicesArray.length} invoices with ${rowCount} products`
-        );
-      }
-
-      setParsedData(invoicesArray);
-    } catch (error) {
-      console.error("❌ Error processing file:", error);
-      showToast("error", "Failed to process Excel file: " + error.message);
-    } finally {
-      setImportProgress(null);
-      setIsUploading(false);
-    }
+  // Handle import success
+  const handleImportSuccess = () => {
+    fetchSaleSummaries();
+    fetchStockData();
   };
 
-  // Clean up interval on unmount
-  useEffect(() => {
-    return () => {
-      if (progressInterval) {
-        clearInterval(progressInterval);
-      }
-    };
-  }, [progressInterval]);
-
-  // Function to poll for progress updates - SIMULATED VERSION
-  const pollProgressUpdates = () => {
-    // In a real app, you would:
-    // 1. Have a WebSocket connection
-    // 2. Or have a progress endpoint on the backend
-    // 3. Or use Server-Sent Events (SSE)
-
-    // For now, we'll simulate progress based on time
-    let simulatedProgress = 0;
-    const interval = setInterval(() => {
-      simulatedProgress += 5;
-      if (simulatedProgress <= 95) {
-        setImportProgress(simulatedProgress);
-        setImportMessage(
-          `Processing batch ${Math.floor(simulatedProgress / 5)}...`
-        );
-
-        // Simulate detailed progress
-        setDetailedProgress({
-          currentBatch: Math.floor(simulatedProgress / 5),
-          totalBatches: 20,
-          successfulImports: Math.floor(simulatedProgress * 4.3),
-          failedImports: Math.floor(simulatedProgress * 0.1),
-        });
-      } else {
-        clearInterval(interval);
-      }
-    }, 1000);
-
-    return interval;
-  };
-
-  // Import function - UPDATED WITH BETTER PROGRESS HANDLING
-  const handleProductImport = async () => {
-    if (!parsedData || parsedData.length === 0) {
-      showToast("warning", "Please upload and validate a file first.");
-      return;
-    }
-
-    const controller = new AbortController();
-    setAbortController(controller);
-    setIsUploading(true);
-    setImportProgress(0);
-    setImportMessage("Preparing import...");
-    setDetailedProgress(null);
-
-    // Start progress polling
-    const pollInterval = pollProgressUpdates();
-    setProgressInterval(pollInterval);
-
-    try {
-      // Upload data
-      const res = await axios.post(
-        `${backendUrl}/api/sales/import`,
-        parsedData,
-        {
-          headers: { "Content-Type": "application/json" },
-          timeout: 300000,
-          signal: controller.signal,
-          onUploadProgress: (progressEvent) => {
-            if (progressEvent.total) {
-              const percentComplete = Math.round(
-                (progressEvent.loaded * 100) / progressEvent.total
-              );
-              const uploadProgress = Math.min(percentComplete, 90);
-              setImportProgress(uploadProgress);
-              setImportMessage("Uploading data to server...");
-            }
-          },
-        }
-      );
-
-      // Clear the polling interval
-      if (pollInterval) {
-        clearInterval(pollInterval);
-        setProgressInterval(null);
-      }
-
-      setImportProgress(95);
-      setImportMessage("Finalizing import...");
-
-      // Check response
-      if (res.data) {
-        const result = res.data;
-
-        if (result.success) {
-          const summary = result.summary;
-
-          // Show final progress
-          setImportProgress(100);
-          setImportMessage("Import completed!");
-
-          // Update detailed progress with final numbers
-          setDetailedProgress({
-            currentBatch: summary.successfullyImported + summary.failed,
-            totalBatches: summary.successfullyImported + summary.failed,
-            successfulImports: summary.successfullyImported,
-            failedImports: summary.failed,
-          });
-
-          showToast(
-            "success",
-            `Import completed!\n` +
-              `✓ ${summary.successfullyImported} invoices imported successfully\n` +
-              `✗ ${summary.failed} invoices failed\n` +
-              `Time: ${summary.processingTimeSeconds}s`
-          );
-
-          setTimeout(() => {
-            setShowImportModal(false);
-            setParsedData([]);
-            setImportProgress(null);
-            setDetailedProgress(null);
-            fetchSaleSummaries();
-            fetchStockData();
-          }, 2000);
-        } else {
-          showToast("error", result.message || "Import failed");
-          setImportProgress(null);
-          setDetailedProgress(null);
-        }
-      }
-    } catch (err) {
-      console.error("❌ Import failed:", err);
-
-      // Clear polling interval on error
-      if (pollInterval) {
-        clearInterval(pollInterval);
-        setProgressInterval(null);
-      }
-
-      let errorMessage = "Failed to import data";
-
-      if (err.code === "ECONNABORTED") {
-        errorMessage =
-          "Import timeout. Please try with a smaller file or split into multiple imports.";
-      } else if (err.response) {
-        errorMessage =
-          err.response.data?.message || `Server error: ${err.response.status}`;
-      } else if (err.request) {
-        errorMessage = "No response from server. Please check your connection.";
-      } else {
-        errorMessage = err.message;
-      }
-
-      showToast("error", errorMessage);
-      setImportProgress(null);
-      setDetailedProgress(null);
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
-  // Cancel import
-  const cancelImport = () => {
-    if (abortController) {
-      abortController.abort();
-      setAbortController(null);
-    }
-
-    // Clear progress interval
-    if (progressInterval) {
-      clearInterval(progressInterval);
-      setProgressInterval(null);
-    }
-
-    setImportProgress(null);
-    setDetailedProgress(null);
-    setIsUploading(false);
-    showToast("info", "Import cancelled");
-  };
-
-  // Handle batch delete
   const handleDeleteSelected = async () => {
     if (selected.length === 0) return;
 
@@ -947,9 +1545,6 @@ const Sales = () => {
 
     if (confirm.isConfirmed) {
       try {
-        setImportProgress(0);
-        setImportMessage("Deleting selected sales...");
-
         const res = await axios.delete(`${backendUrl}/api/sales/delete-batch`, {
           data: { ids: selected.map((s) => s.id) },
           timeout: 120000,
@@ -964,34 +1559,8 @@ const Sales = () => {
       } catch (error) {
         console.error("Delete batch error:", error);
         showToast("error", "Failed to delete selected sales");
-      } finally {
-        setImportProgress(null);
       }
     }
-  };
-
-  const validateParsedDataStock = () => {
-    const validationErrors = [];
-
-    parsedData.forEach((invoice, invoiceIndex) => {
-      invoice.products.forEach((product, productIndex) => {
-        const totalQty =
-          (Number(product.salesQty) || 0) + (Number(product.bonusQty) || 0);
-        const stockCheck = checkProductStock(product.productName, totalQty);
-
-        if (!stockCheck.hasSufficientStock) {
-          validationErrors.push({
-            invoiceNumber: invoice.invoiceNumber,
-            productName: product.productName,
-            required: totalQty,
-            available: stockCheck.availableStock,
-            message: `Insufficient stock for "${product.productName}". Required: ${totalQty}, Available: ${stockCheck.availableStock}`,
-          });
-        }
-      });
-    });
-
-    return validationErrors;
   };
 
   // Table columns and fields
@@ -1038,6 +1607,11 @@ const Sales = () => {
         dbName: "totalAmount",
       },
       {
+        id: "paymentStatus",
+        name: "Payment Status",
+        dbName: "paymentStatus",
+      },
+      {
         id: "actions",
         name: "Actions",
         dbName: "actions",
@@ -1046,7 +1620,6 @@ const Sales = () => {
     []
   );
 
-  // Filtered sales
   const filteredSales = useMemo(() => {
     if (!Array.isArray(sales)) {
       console.warn("Sales is not an array:", sales);
@@ -1075,7 +1648,6 @@ const Sales = () => {
     });
   }, [sales, searchTerm, selectedTab]);
 
-  // Current sales for pagination
   const currentSales = useMemo(() => {
     const start = (currentPage - 1) * SALES_PER_PAGE;
     return filteredSales.slice(start, start + SALES_PER_PAGE);
@@ -1093,7 +1665,6 @@ const Sales = () => {
     setCurrentPage(1);
   }, [searchTerm, selectedTab]);
 
-  // Helper functions
   const capitalizeFirstLetter = (string) => {
     if (!string) return "--";
     return string.charAt(0).toUpperCase() + string.slice(1);
@@ -1133,6 +1704,10 @@ const Sales = () => {
       return Math.ceil(sale[dbName] || 0);
     }
 
+    if (dbName === "paymentStatus") {
+      return sale.paymentStatus || "--";
+    }
+
     const value = sale[dbName];
     if (value && typeof value === "object") {
       return value.name || value.displayName || JSON.stringify(value);
@@ -1165,10 +1740,6 @@ const Sales = () => {
   const handleProductCountClick = (sale) => {
     setSelectedSaleProducts(sale.products || []);
     setIsProductModalOpen(true);
-  };
-
-  const toggleProductView = (index) => {
-    setExpandedProductIndex(expandedProductIndex === index ? -1 : index);
   };
 
   const handleView = (sale) => {
@@ -1208,261 +1779,23 @@ const Sales = () => {
     }
   };
 
-  const handleUpdateSales = async (e, sale) => {
-    e.preventDefault();
-    try {
-      const stockErrors = [];
-      sale.products.forEach((product, index) => {
-        const totalQty =
-          (Number(product.salesQty) || 0) + (Number(product.bonusQty) || 0);
-        const stockCheck = checkProductStock(product.productName, totalQty);
-        if (!stockCheck.hasSufficientStock) {
-          stockErrors.push({
-            product: product.productName,
-            required: totalQty,
-            available: stockCheck.availableStock,
-          });
-        }
-      });
-
-      if (stockErrors.length > 0) {
-        const errorMessages = stockErrors
-          .map(
-            (err) =>
-              `"${err.product}": Required ${err.required}, Available ${err.available}`
-          )
-          .join("\n");
-        showToast("error", `Insufficient stock:\n${errorMessages}`);
-        return;
-      }
-
-      const res = await axios.put(`${backendUrl}/api/sales/${sale._id}`, sale);
-      if (res.status === 200) {
-        showToast("success", "Sales record updated successfully");
-        setIsEditModalOpen(false);
-        fetchSaleSummaries();
-        await fetchStockData();
-      }
-    } catch (err) {
-      if (err.response && err.response.data && err.response.data.error) {
-        showToast("error", err.response.data.error);
-      } else {
-        showToast("error", "Failed to update sales record.");
-      }
-    }
-  };
-
-  // Product edit modal functions
-  const openProductEditModal = (product, index) => {
-    setCurrentProduct({ ...product });
-    setCurrentProductIndex(index);
-    setIsProductEditModalOpen(true);
-  };
-
-  const handleProductChange = (e) => {
-    const { name, value } = e.target;
-    setCurrentProduct((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
-  };
-
-  const handleProductNumericChange = (e) => {
-    const { name, value } = e.target;
-    if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
-      setCurrentProduct((prev) => ({
-        ...prev,
-        [name]: value,
-      }));
-    }
-  };
-
-  const updateProductInForm = () => {
-    setForm((prev) => {
-      const updatedProducts = [...prev.products];
-      updatedProducts[currentProductIndex] = currentProduct;
-
-      const totals = calculateProductTotals(updatedProducts);
-
-      return {
-        ...prev,
-        products: updatedProducts,
-        totalAmount: totals.totalAmount,
-        netSellingAmount: totals.netAmount,
-        dueAmount: (
-          totals.netAmount - parseFloat(prev.paidAmount || 0)
-        ).toFixed(2),
-      };
-    });
-    setIsProductEditModalOpen(false);
-    setCurrentProduct(null);
-    setCurrentProductIndex(null);
-  };
-
-  // Form handlers
-  const handleNumericInputChange = (e, updateFunc) => {
-    const value = e.target.value;
-    if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
-      updateFunc(e);
-    }
-  };
-
-  const updateFormField = useCallback((name, value) => {
-    setForm((prev) => ({ ...prev, [name]: value }));
-  }, []);
-
-  const handleChangeEvent = (name, value, prevForm) => {
-    const updatedForm = { ...prevForm, [name]: value };
-
-    const getNum = (field) => {
-      const num = parseFloat(updatedForm[field]);
-      return isNaN(num) ? 0 : num;
-    };
-
-    const getInt = (field) => {
-      const num = parseInt(updatedForm[field], 10);
-      return isNaN(num) ? 0 : num;
-    };
-
-    if (["salesQty", "bonusQty"].includes(name)) {
-      updatedForm.totalQty = getInt("salesQty") + getInt("bonusQty");
-    }
-
-    if (name === "invoiceDate") {
-      updatedForm.deliveryDate = value;
-    }
-
-    if (name === "creditDays") {
-      const creditDays = parseInt(value, 10);
-      if (!isNaN(creditDays)) {
-        const due = new Date();
-        due.setDate(due.getDate() + creditDays);
-        updatedForm.dueDate = due.toISOString().split("T")[0];
-      } else {
-        updatedForm.dueDate = "";
-      }
-    }
-
-    if (["sellingPrice", "salesQty"].includes(name)) {
-      updatedForm.amount = (
-        getNum("sellingPrice") * getInt("salesQty")
-      ).toFixed(2);
-    }
-
-    if (["amount", "discount", "sellingPrice", "salesQty"].includes(name)) {
-      updatedForm.netSellingAmount = (
-        getNum("amount") - getNum("discount")
-      ).toFixed(2);
-    }
-
-    if (
-      ["amount", "discount", "lc", "totalQty", "salesQty", "bonusQty"].includes(
-        name
-      )
-    ) {
-      updatedForm.profitLoss = (
-        getNum("amount") -
-        getNum("discount") -
-        getNum("lc") * getInt("totalQty")
-      ).toFixed(2);
-    }
-
-    if (["netSellingAmount", "paidAmount"].includes(name)) {
-      const netAmount = getNum("netSellingAmount");
-      const paidAmount = getNum("paidAmount");
-      updatedForm.dueAmount = (netAmount - paidAmount).toFixed(2);
-    }
-
-    if (
-      [
-        "netSellingAmount",
-        "salesQty",
-        "bonusQty",
-        "discount",
-        "sellingPrice",
-      ].includes(name)
-    ) {
-      const totalQty = getInt("totalQty");
-      updatedForm.averageUnitPrice =
-        totalQty > 0 ? (getNum("netSellingAmount") / totalQty).toFixed(2) : "";
-    }
-
-    return updatedForm;
-  };
-
-  const enhancedHandleChange = useCallback((e) => {
-    const { name, value } = e.target;
-    setForm((prev) => handleChangeEvent(name, value, prev));
-  }, []);
-
-  const handleDateChange = (date, fieldName) => {
-    setForm((prev) => {
-      const updatedForm = {
-        ...prev,
-        [fieldName]: date ? date.toISOString().split("T")[0] : "",
-      };
-      if (fieldName === "invoiceDate" && date) {
-        updatedForm.deliveryDate = date.toISOString().split("T")[0];
-      }
-
-      return updatedForm;
-    });
-  };
-
-  const calculateProductTotals = (products) => {
-    if (!products || !Array.isArray(products))
-      return {
-        totalAmount: 0,
-        totalDiscount: 0,
-        netAmount: 0,
-        totalProfitLoss: 0,
-      };
-
-    const totals = products.reduce(
-      (acc, product) => {
-        acc.totalAmount += parseFloat(product.amount || 0);
-        acc.totalDiscount += parseFloat(product.discount || 0);
-        acc.netAmount += parseFloat(product.netSellingAmount || 0);
-        acc.totalProfitLoss += parseFloat(product.profitLoss || 0);
-        return acc;
-      },
-      { totalAmount: 0, totalDiscount: 0, netAmount: 0, totalProfitLoss: 0 }
-    );
-
-    return totals;
-  };
-
-  useEffect(() => {
-    if (form.netSellingAmount !== undefined && form.paidAmount !== undefined) {
-      const netAmount = parseFloat(form.netSellingAmount) || 0;
-      const paidAmount = parseFloat(form.paidAmount) || 0;
-      const dueAmount = (netAmount - paidAmount).toFixed(2);
-
-      if (parseFloat(form.dueAmount || 0) !== parseFloat(dueAmount)) {
-        setForm((prev) => ({
-          ...prev,
-          dueAmount: dueAmount,
-        }));
-      }
-    }
-  }, [form.netSellingAmount, form.paidAmount]);
-
   const showMRCustomerWarning = useMemo(() => {
     return mrList.length === 0 || customerList.length === 0;
   }, [mrList, customerList]);
 
   if (loading) return <LoadingOverlay text="Please wait..." />;
 
-  const productTotals = calculateProductTotals(form.products);
-
   return (
     <div className="p-6">
-      {/* Import Progress Modal - UPDATED */}
-      <ImportProgressModal
-        progress={importProgress}
-        message={importMessage}
-        onCancel={cancelImport}
-        detailedProgress={detailedProgress}
+      {/* Import Sales Modal */}
+      <ImportSalesModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        onImportSuccess={handleImportSuccess}
+        mrList={mrList}
+        customerList={customerList}
+        productsList={productsList}
+        stockData={stockData}
       />
 
       <div className="container">
@@ -1484,7 +1817,7 @@ const Sales = () => {
             <button
               onClick={handleImportClick}
               className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={showMRCustomerWarning || isUploading}
+              disabled={showMRCustomerWarning}
               title={
                 showMRCustomerWarning
                   ? "Please add MR and Customer data first"
@@ -1498,7 +1831,6 @@ const Sales = () => {
               <button
                 onClick={handleDeleteSelected}
                 className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-                disabled={isUploading}
               >
                 <Trash2 size={18} /> Delete Selected
               </button>
@@ -1518,8 +1850,8 @@ const Sales = () => {
         <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
           {sales.length > 0 ? (
             <div className="flex items-center gap-6">
-              <div className="flex gap-4">
-                {types.map((tab) => (
+              <div className="flex gap-4 flex-wrap">
+                {["All", "Paid", "Credit"].map((tab) => (
                   <button
                     key={`tab-${tab}`}
                     onClick={() => {
@@ -1543,7 +1875,7 @@ const Sales = () => {
           )}
 
           {sales.length > 0 && (
-            <div className="flex items-center gap-8">
+            <div className="flex items-center gap-8 flex-wrap">
               <p className="text-lg font-semibold text-gray-700">
                 Total Count:{" "}
                 <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
@@ -1698,7 +2030,7 @@ const Sales = () => {
 
           {filteredSales.length > SALES_PER_PAGE && (
             <div className="mt-4 p-5 flex flex-col sm:flex-row justify-between items-center gap-4 bg-gray-50 border-t">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <button
                   onClick={() => {
                     setCurrentPage((prev) => {
@@ -1756,954 +2088,6 @@ const Sales = () => {
             </div>
           )}
         </div>
-
-        {/* Import Modal */}
-        {showImportModal &&
-          ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
-              <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
-                <button
-                  onClick={() => {
-                    if (!isUploading) {
-                      setShowImportModal(false);
-                      setParsedData([]);
-                    }
-                  }}
-                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-                  disabled={isUploading}
-                >
-                  <X size={20} />
-                </button>
-
-                <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                  Import Sales Data
-                </h2>
-
-                <div className="mb-6">
-                  {isSampleFile && <SampleExcelDownloadSale />}
-
-                  <input
-                    type="file"
-                    accept=".csv, .xlsx"
-                    onChange={handleFileUpload}
-                    className="block w-full border rounded-lg px-3 py-2 mb-6"
-                    disabled={isUploading}
-                  />
-                </div>
-
-                {parsedData.length > 0 && (
-                  <div className="mb-6">
-                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                      <div className="flex justify-between items-center">
-                        <div>
-                          <h3 className="font-medium text-green-800">
-                            File Ready for Import
-                          </h3>
-                          <p className="text-sm text-green-700">
-                            {parsedData.length} invoices with{" "}
-                            {parsedData.reduce(
-                              (total, inv) =>
-                                total + (inv.products?.length || 0),
-                              0
-                            )}{" "}
-                            products
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <button
-                            onClick={handleProductImport}
-                            disabled={isUploading}
-                            className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer disabled:opacity-50"
-                          >
-                            {isUploading ? "Importing..." : "Start Import"}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex justify-end gap-3">
-                  <button
-                    onClick={() => {
-                      if (!isUploading) {
-                        setShowImportModal(false);
-                        setParsedData([]);
-                      }
-                    }}
-                    disabled={isUploading}
-                    className="px-5 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer disabled:opacity-50"
-                  >
-                    {isUploading ? "Cancel" : "Close"}
-                  </button>
-                </div>
-              </div>
-            </div>,
-            document.body
-          )}
-
-        {/* Product Details Modal */}
-        {isProductModalOpen &&
-          ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
-              <div
-                className="absolute inset-0"
-                onClick={() => setIsProductModalOpen(false)}
-              />
-              <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
-                <button
-                  onClick={() => setIsProductModalOpen(false)}
-                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-                >
-                  <X size={20} />
-                </button>
-
-                <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                  Product Details
-                </h2>
-
-                {selectedSaleProducts.length === 0 ? (
-                  <p className="text-gray-500 text-center py-8">
-                    No products found for this sale.
-                  </p>
-                ) : (
-                  <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-                    <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
-                      <thead className="bg-gray-100 text-gray-700 border-b">
-                        <tr>
-                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
-                            Product Name
-                          </th>
-                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
-                            Sales Qty
-                          </th>
-                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
-                            Bonus Qty
-                          </th>
-                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
-                            Total Qty
-                          </th>
-                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
-                            Selling Price ($)
-                          </th>
-                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
-                            Amount ($)
-                          </th>
-                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
-                            Discount ($)
-                          </th>
-                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
-                            Net Amount ($)
-                          </th>
-                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
-                            Avg Unit Price ($)
-                          </th>
-                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
-                            Profit/Loss ($)
-                          </th>
-                          <th className="p-3 whitespace-nowrap min-w-[120px] text-sm font-medium">
-                            LC ($)
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {selectedSaleProducts.length === 0 ? (
-                          <tr>
-                            <td
-                              colSpan={11}
-                              className="p-4 text-center text-gray-500"
-                            >
-                              No products found.
-                            </td>
-                          </tr>
-                        ) : (
-                          selectedSaleProducts.map((product, index) => (
-                            <tr
-                              key={`product-${product._id || index}`}
-                              className={`hover:bg-gray-50 ${
-                                index < selectedSaleProducts.length - 1
-                                  ? "border-b"
-                                  : ""
-                              }`}
-                            >
-                              <td className="p-3 whitespace-nowrap min-w-[120px] capitalize">
-                                {product.productName || "--"}
-                              </td>
-                              <td className="p-3 whitespace-nowrap min-w-[120px]">
-                                {Math.ceil(product.salesQty || 0)}
-                              </td>
-                              <td className="p-3 whitespace-nowrap min-w-[120px]">
-                                {Math.ceil(product.bonusQty || 0)}
-                              </td>
-                              <td className="p-3 whitespace-nowrap min-w-[120px]">
-                                {Math.ceil(product.totalQty || 0)}
-                              </td>
-                              <td className="p-3 whitespace-nowrap min-w-[120px]">
-                                {(product.sellingPrice || 0).toFixed(2)}
-                              </td>
-                              <td className="p-3 whitespace-nowrap min-w-[120px]">
-                                {(product.amount || 0).toFixed(2)}
-                              </td>
-                              <td className="p-3 whitespace-nowrap min-w-[120px]">
-                                {(product.discount || 0).toFixed(2)}
-                              </td>
-                              <td className="p-3 whitespace-nowrap min-w-[120px]">
-                                {(product.netSellingAmount || 0).toFixed(2)}
-                              </td>
-                              <td className="p-3 whitespace-nowrap min-w-[120px]">
-                                {(product.averageUnitPrice || 0).toFixed(2)}
-                              </td>
-                              <td
-                                className={`p-3 whitespace-nowrap min-w-[120px] font-semibold ${
-                                  (product.profitLoss || 0) > 0
-                                    ? "text-green-600"
-                                    : (product.profitLoss || 0) < 0
-                                    ? "text-red-600"
-                                    : "text-gray-600"
-                                }`}
-                              >
-                                {(product.profitLoss || 0).toFixed(2)}
-                              </td>
-                              <td className="p-3 whitespace-nowrap min-w-[120px]">
-                                {(product.lc || 0).toFixed(2)}
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-
-                <div className="mt-6 flex justify-end">
-                  <button
-                    onClick={() => setIsProductModalOpen(false)}
-                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            </div>,
-            document.body
-          )}
-        {isEditModalOpen &&
-          ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
-              <div
-                className="absolute inset-0"
-                onClick={() => setIsEditModalOpen(false)}
-              />
-              <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
-                <button
-                  onClick={() => setIsEditModalOpen(false)}
-                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-                >
-                  <X size={20} />
-                </button>
-
-                <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                  Edit Sales Record
-                </h2>
-
-                <form
-                  onSubmit={(e) => handleUpdateSales(e, form)}
-                  className="grid grid-cols-1 md:grid-cols-3 gap-4 max-h-[70vh]"
-                >
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">
-                      Recording Date
-                    </label>
-                    <DatePicker
-                      selected={
-                        form.recordingDate ? new Date(form.recordingDate) : null
-                      }
-                      onChange={(date) =>
-                        handleDateChange(date, "recordingDate")
-                      }
-                      dateFormat="yyyy-MM-dd"
-                      placeholderText="Select a date"
-                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Invoice Number
-                    </label>
-                    <InputField
-                      type="text"
-                      name="invoiceNumber"
-                      value={form.invoiceNumber}
-                      onChange={(e) =>
-                        handleNumericInputChange(e, enhancedHandleChange)
-                      }
-                      className="w-full border px-3 py-2 rounded-lg capitalize border-gray-300"
-                      autoComplete="off"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Invoice Date
-                    </label>
-                    <DatePicker
-                      selected={
-                        form.invoiceDate ? new Date(form.invoiceDate) : null
-                      }
-                      onChange={(date) => handleDateChange(date, "invoiceDate")}
-                      dateFormat="yyyy-MM-dd"
-                      placeholderText="Select a date"
-                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">MR Name</label>
-                    <SearchableDropdown
-                      options={mrList.map((mr) => ({ value: mr, label: mr }))}
-                      value={form.mrName}
-                      onChange={(value) => updateFormField("mrName", value)}
-                      placeholder={
-                        mrList.length === 0
-                          ? "No MR available. Please add MR first."
-                          : "Select MR"
-                      }
-                      className="w-full"
-                      disabled={mrList.length === 0}
-                    />
-                    {mrList.length === 0 && (
-                      <p className="text-xs text-red-500 mt-1">
-                        No Medical Representatives available. Please add MR data
-                        first.
-                      </p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Customer
-                    </label>
-                    <SearchableDropdown
-                      options={customerList.map((customer) => ({
-                        value: customer.code,
-                        label: customer.name,
-                      }))}
-                      value={form.customerCode}
-                      onChange={(value) =>
-                        updateFormField("customerCode", value)
-                      }
-                      placeholder={
-                        customerList.length === 0
-                          ? "No customers available. Please add customers first."
-                          : "Select Customer"
-                      }
-                      className="w-full"
-                      disabled={customerList.length === 0}
-                    />
-                    {customerList.length === 0 && (
-                      <p className="text-xs text-red-500 mt-1">
-                        No Customers available. Please add Customer data first.
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="md:col-span-3">
-                    <label className="block text-sm font-medium mb-2">
-                      Products ({form.products?.length || 0})
-                    </label>
-                    <div className="space-y-3 border rounded-lg p-4 bg-gray-50">
-                      {form.products && form.products.length > 0 ? (
-                        form.products.map((product, index) => {
-                          const totalQty =
-                            (product.salesQty || 0) + (product.bonusQty || 0);
-                          const stockCheck = checkProductStock(
-                            product.productName,
-                            totalQty
-                          );
-
-                          return (
-                            <div
-                              key={`edit-product-${index}`}
-                              className="p-3 bg-white rounded border border-gray-300"
-                            >
-                              <div className="flex items-center justify-between">
-                                <div className="flex-1">
-                                  <div className="flex items-center gap-2">
-                                    <span className="font-medium text-gray-700">
-                                      {product.productName ||
-                                        `Product ${index + 1}`}
-                                    </span>
-                                    {!stockCheck.hasSufficientStock && (
-                                      <span className="text-xs bg-red-100 text-red-800 px-2 py-1 rounded">
-                                        Insufficient Stock (Available:{" "}
-                                        {stockCheck.availableStock})
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="text-sm text-gray-500 mt-1">
-                                    Qty: {product.salesQty || 0} | Bonus:{" "}
-                                    {product.bonusQty || 0} | Price: $
-                                    {(product.sellingPrice || 0).toFixed(2)}
-                                  </div>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    openProductEditModal(product, index)
-                                  }
-                                  className="ml-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm cursor-pointer"
-                                >
-                                  Edit Details
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })
-                      ) : (
-                        <div className="text-center text-gray-500 py-4">
-                          No products added
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-4 gap-4 pt-4 border-t border-gray-300">
-                    <div>
-                      <label className="block text-sm font-medium">
-                        Total Amount
-                      </label>
-                      <InputField
-                        type="text"
-                        value={productTotals.totalAmount.toFixed(2)}
-                        className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700 border-gray-300"
-                        disabled
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium">
-                        Total Discount
-                      </label>
-                      <InputField
-                        type="text"
-                        value={productTotals.totalDiscount.toFixed(2)}
-                        className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700 border-gray-300"
-                        disabled
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium">
-                        Net Amount
-                      </label>
-                      <InputField
-                        type="text"
-                        value={productTotals.netAmount.toFixed(2)}
-                        className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700 border-gray-300"
-                        disabled
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium">
-                        Profit / Loss
-                      </label>
-                      <InputField
-                        type="text"
-                        value={productTotals.totalProfitLoss.toFixed(2)}
-                        disabled
-                        className={`w-full border px-3 py-2 rounded-lg bg-gray-200 border-gray-300 ${
-                          productTotals?.totalProfitLoss > 0
-                            ? "text-green-600"
-                            : productTotals?.totalProfitLoss < 0
-                            ? "text-red-600"
-                            : "text-gray-700"
-                        }`}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium">
-                        Credit Days
-                      </label>
-                      <InputField
-                        type="text"
-                        name="creditDays"
-                        value={form.creditDays}
-                        onChange={(e) =>
-                          handleNumericInputChange(e, enhancedHandleChange)
-                        }
-                        className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                        autoComplete="off"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium">
-                        Due Date
-                      </label>
-                      <DatePicker
-                        selected={form.dueDate ? new Date(form.dueDate) : null}
-                        dateFormat="yyyy-MM-dd"
-                        placeholderText="Select a date"
-                        className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700 border-gray-300"
-                        disabled
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium">
-                        Paid Amount
-                      </label>
-                      <InputField
-                        type="text"
-                        name="paidAmount"
-                        value={form.paidAmount}
-                        onChange={(e) =>
-                          handleNumericInputChange(e, enhancedHandleChange)
-                        }
-                        className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                        autoComplete="off"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium">
-                        Due Amount
-                      </label>
-                      <InputField
-                        type="text"
-                        value={form.dueAmount}
-                        className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700 border-gray-300"
-                        disabled
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Payment Status
-                    </label>
-                    <SearchableDropdown
-                      options={statuses.map((status) => ({
-                        value: status.type,
-                        label: status.type,
-                      }))}
-                      value={form.paymentStatus}
-                      onChange={(value) =>
-                        updateFormField("paymentStatus", value)
-                      }
-                      placeholder="Select Status"
-                      className="w-full"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium">
-                      Delivery Date
-                    </label>
-                    <DatePicker
-                      selected={
-                        form.deliveryDate ? new Date(form.deliveryDate) : null
-                      }
-                      dateFormat="yyyy-MM-dd"
-                      placeholderText="Select a date"
-                      className="w-full border px-3 py-2 rounded-lg bg-gray-200 text-gray-700 border-gray-300"
-                      disabled
-                    />
-                  </div>
-
-                  <div className="md:col-span-3">
-                    <label className="block text-sm font-medium">Remark</label>
-                    <textarea
-                      name="remark"
-                      value={form.remark}
-                      onChange={enhancedHandleChange}
-                      className="w-full border border-gray-300 px-3 py-2 rounded-lg capitalize"
-                      rows={3}
-                      placeholder="Enter remarks..."
-                    />
-                  </div>
-
-                  <div className="md:col-span-3 mt-4 flex justify-end gap-3 border-t border-gray-300 pt-4">
-                    <button
-                      type="button"
-                      onClick={() => setIsEditModalOpen(false)}
-                      className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg cursor-pointer"
-                    >
-                      Update
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>,
-            document.body
-          )}
-
-        {isProductEditModalOpen &&
-          ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
-              <div
-                className="absolute inset-0"
-                onClick={() => setIsProductEditModalOpen(false)}
-              />
-              <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative">
-                <button
-                  onClick={() => setIsProductEditModalOpen(false)}
-                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-                >
-                  <X size={20} />
-                </button>
-
-                <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                  Edit Product - {currentProduct?.productName || "Product"}
-                </h2>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">
-                      Product Name
-                    </label>
-                    <InputField
-                      type="text"
-                      name="productName"
-                      value={currentProduct?.productName || ""}
-                      onChange={handleProductChange}
-                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">
-                      Sales Quantity
-                    </label>
-                    <InputField
-                      type="number"
-                      name="salesQty"
-                      value={currentProduct?.salesQty || 0}
-                      onChange={handleProductNumericChange}
-                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">
-                      Bonus Quantity
-                    </label>
-                    <InputField
-                      type="number"
-                      name="bonusQty"
-                      value={currentProduct?.bonusQty || 0}
-                      onChange={handleProductNumericChange}
-                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">
-                      Selling Price
-                    </label>
-                    <InputField
-                      type="number"
-                      name="sellingPrice"
-                      value={currentProduct?.sellingPrice || 0}
-                      onChange={handleProductNumericChange}
-                      step="0.01"
-                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">
-                      Discount
-                    </label>
-                    <InputField
-                      type="number"
-                      name="discount"
-                      value={currentProduct?.discount || 0}
-                      onChange={handleProductNumericChange}
-                      step="0.01"
-                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">
-                      LC Value
-                    </label>
-                    <InputField
-                      type="number"
-                      name="lc"
-                      value={currentProduct?.lc || 0}
-                      onChange={handleProductNumericChange}
-                      step="0.01"
-                      className="w-full border px-3 py-2 rounded-lg border-gray-300"
-                    />
-                  </div>
-                </div>
-
-                <div className="mt-6 flex justify-end gap-3 border-t border-gray-300 pt-4">
-                  <button
-                    type="button"
-                    onClick={() => setIsProductEditModalOpen(false)}
-                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg cursor-pointer"
-                    onClick={updateProductInForm}
-                  >
-                    Update Product
-                  </button>
-                </div>
-              </div>
-            </div>,
-            document.body
-          )}
-
-        {isViewModalOpen &&
-          ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
-              <div
-                className="absolute inset-0"
-                onClick={() => setIsViewModalOpen(false)}
-              />
-
-              <div className="bg-white w-full max-w-4xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
-                <button
-                  onClick={() => setIsViewModalOpen(false)}
-                  className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
-                >
-                  <X size={20} />
-                </button>
-
-                <h2 className="text-xl font-semibold text-gray-800 mb-4">
-                  View Sales Record
-                </h2>
-
-                <div className="mb-6">
-                  <h3 className="text-lg font-medium text-gray-700 mb-3">
-                    Record Information
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600">
-                        Recording Date
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                        {form.recordingDate
-                          ? formatDateToReadable(form.recordingDate)
-                          : "-"}
-                      </p>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600">
-                        Invoice Number
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                        {form.invoiceNumber || "-"}
-                      </p>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600">
-                        Invoice Date
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                        {form.invoiceDate
-                          ? formatDateToReadable(form.invoiceDate)
-                          : "-"}
-                      </p>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600">
-                        MR Name
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                        {form.mrName || "-"}
-                      </p>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600">
-                        Customer Name
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                        {form?.customerName || "-"}
-                      </p>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600">
-                        Payment Status
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                        {form.paymentStatus || "-"}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mb-6">
-                  <h3 className="text-lg font-medium text-gray-700 mb-3">
-                    Product Information
-                  </h3>
-
-                  {form.products && form.products.length > 0 ? (
-                    <div className="space-y-4">
-                      {form.products.map((product, index) => (
-                        <div
-                          key={index}
-                          className="border rounded-lg p-4 bg-gray-50"
-                        >
-                          <div className="flex justify-between items-center mb-2">
-                            <div className="flex-1">
-                              <h4 className="text-lg font-semibold text-gray-800 capitalize">
-                                {product.productName || `Product ${index + 1}`}
-                              </h4>
-                            </div>
-
-                            <button
-                              className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg cursor-pointer text-sm"
-                              onClick={() => toggleProductView(index)}
-                            >
-                              {expandedProductIndex === index
-                                ? "Hide Details"
-                                : "View Details"}
-                            </button>
-                          </div>
-
-                          {expandedProductIndex === index && (
-                            <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-                              {[
-                                ["Sales Quantity", "salesQty"],
-                                ["Bonus Quantity", "bonusQty"],
-                                ["Total Quantity", "totalQty"],
-                                ["Selling Price", "sellingPrice"],
-                                ["Amount", "amount"],
-                                ["Discount", "discount"],
-                                ["Net Selling Amount", "netSellingAmount"],
-                                ["Average Unit Price", "averageUnitPrice"],
-                                ["Profit / Loss", "profitLoss"],
-                              ].map(([label, key]) => (
-                                <div key={key}>
-                                  <label className="block text-sm font-medium text-gray-600">
-                                    {label}
-                                  </label>
-                                  <p className="border px-3 py-2 rounded-lg bg-white">
-                                    {product[key] ?? 0}
-                                  </p>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="border rounded-lg p-4 bg-gray-50 text-center text-gray-500">
-                      No products found
-                    </div>
-                  )}
-                </div>
-
-                <div className="mb-6">
-                  <h3 className="text-lg font-medium text-gray-700 mb-3">
-                    Payment & Delivery
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600">
-                        Credit Days
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                        {form.creditDays ?? 0}
-                      </p>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600">
-                        Paid Amount
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                        {form.paidAmount ?? 0}
-                      </p>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600">
-                        Due Amount
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                        {form.dueAmount ?? 0}
-                      </p>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600">
-                        Due Date
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                        {form.dueDate
-                          ? formatDateToReadable(form.dueDate)
-                          : "-"}
-                      </p>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600">
-                        Delivery Date
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                        {form.deliveryDate
-                          ? formatDateToReadable(form.deliveryDate)
-                          : "-"}
-                      </p>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-600">
-                        Total Amount
-                      </label>
-                      <p className="border px-3 py-2 rounded-lg bg-gray-100">
-                        {form.totalAmount ?? 0}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mb-6">
-                  <label className="block text-sm font-medium text-gray-600 mb-2">
-                    Remark
-                  </label>
-                  <textarea
-                    value={form.remark || "-"}
-                    className="w-full border border-gray-300 px-3 py-2 rounded-lg bg-gray-100 capitalize"
-                    rows={3}
-                    disabled
-                  />
-                </div>
-
-                <div className="mt-6 flex justify-end border-t border-gray-300 pt-4">
-                  <button
-                    onClick={() => setIsViewModalOpen(false)}
-                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            </div>,
-            document.body
-          )}
       </div>
     </div>
   );

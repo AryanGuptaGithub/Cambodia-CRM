@@ -502,10 +502,6 @@ function Purchase() {
             (sum, invoice) => sum + invoice.products.length,
             0
           );
-          showToast(
-            "success",
-            `Found ${groupedData.length} invoices with ${totalProducts} products to import`
-          );
         }
       } catch (error) {
         console.error("Error reading Excel file:", error);
