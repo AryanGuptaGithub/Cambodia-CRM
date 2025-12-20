@@ -20,6 +20,17 @@ import {
   ArrowLeftRight,
   FileText,
   CheckCircle,
+  Save,
+  Calendar,
+  DollarSign,
+  ShoppingCart,
+  User,
+  ClipboardList,
+  CreditCard,
+  Truck,
+  Clock,
+  Percent,
+  Calculator,
 } from "lucide-react";
 import ReactDOM from "react-dom";
 import SampleExcelDownloadSale from "../../excels/SampleExcelDownloadSale";
@@ -47,82 +58,7 @@ import LoadingOverlay from "../../components/Loading";
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
-// Use React's built-in <progress> element for better accessibility
-const AccessibleProgressBar = ({ value, max = 100 }) => (
-  <progress
-    value={value}
-    max={max}
-    className="w-full h-2 rounded"
-    aria-label="Import progress"
-  />
-);
-
-const parseDateString = (dateStr) => {
-  if (!dateStr) return new Date();
-
-  if (dateStr instanceof Date) {
-    return dateStr;
-  }
-
-  if (typeof dateStr === "string") {
-    const isoDate = new Date(dateStr);
-    if (!isNaN(isoDate.getTime())) {
-      return isoDate;
-    }
-
-    const formats = [
-      /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/,
-      /^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/,
-      /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2})$/,
-    ];
-
-    for (const format of formats) {
-      const match = dateStr.match(format);
-      if (match) {
-        let day, month, year;
-
-        if (match[1].length === 4) {
-          year = parseInt(match[1], 10);
-          month = parseInt(match[2], 10) - 1;
-          day = parseInt(match[3], 10);
-        } else {
-          day = parseInt(match[1], 10);
-          month = parseInt(match[2], 10) - 1;
-          year = parseInt(match[3], 10);
-
-          if (year < 100) {
-            year += 2000;
-          }
-        }
-
-        const date = new Date(year, month, day);
-        if (!isNaN(date.getTime())) {
-          return date;
-        }
-      }
-    }
-  }
-
-  return new Date();
-};
-
-// View Issues Button Component
-const ViewIssuesButton = ({ failedCount, onClick }) => {
-  if (!failedCount || failedCount === 0) return null;
-
-  return (
-    <button
-      onClick={onClick}
-      className="flex items-center gap-2 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg cursor-pointer"
-      title={`View ${failedCount} failed invoices`}
-    >
-      <FileText size={16} />
-      View Issues ({failedCount} failed)
-    </button>
-  );
-};
-
-// Progress Breakdown Modal
+// Progress Breakdown Modal Component
 const ProgressBreakdownModal = ({
   importResult,
   onClose,
@@ -136,10 +72,38 @@ const ProgressBreakdownModal = ({
     detailedErrors = {},
   } = importResult;
 
-  const failedInvoices = [
-    ...(detailedErrors.importErrors || []),
-    ...(detailedErrors.validationErrors || []),
-  ];
+  // Collect all failed invoices
+  const failedInvoices = [];
+
+  // Add validation errors
+  if (Array.isArray(detailedErrors.validationErrors)) {
+    failedInvoices.push(...detailedErrors.validationErrors);
+  }
+
+  // Add import errors
+  if (Array.isArray(detailedErrors.importErrors)) {
+    failedInvoices.push(...detailedErrors.importErrors);
+  }
+
+  // Add stock issues as failed invoices
+  if (Array.isArray(insufficientStockProducts)) {
+    insufficientStockProducts.forEach((stockIssue, index) => {
+      failedInvoices.push({
+        invoiceNumber:
+          stockIssue.affectedInvoiceNumbers?.[0] || `Stock-Error-${index + 1}`,
+        row: stockIssue.row || index + 1,
+        error: `Insufficient stock for ${stockIssue.productName}. Required: ${
+          stockIssue.requiredForImport || stockIssue.required
+        }, Available: ${stockIssue.currentStock || stockIssue.available}`,
+        type: "insufficient_stock",
+        productName: stockIssue.productName,
+        requiredQty: stockIssue.requiredForImport || stockIssue.required,
+        availableQty: stockIssue.currentStock || stockIssue.available,
+        deficit: stockIssue.deficit || stockIssue.shortage,
+        affectedInvoices: stockIssue.affectedInvoices || 1,
+      });
+    });
+  }
 
   return ReactDOM.createPortal(
     <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-[100]">
@@ -176,9 +140,22 @@ const ProgressBreakdownModal = ({
                 Failed
               </div>
               <div className="text-2xl font-bold text-red-600">
-                {summary.failed || 0}
+                {failedInvoices.length || summary.failed || 0}
               </div>
-              <div className="text-xs text-red-700">Invoices failed</div>
+              <div className="text-xs text-red-700">
+                {
+                  failedInvoices.filter(
+                    (inv) => inv.type === "insufficient_stock"
+                  ).length
+                }{" "}
+                stock issues
+                <br />
+                {
+                  failedInvoices.filter((inv) => inv.type === "validation")
+                    .length
+                }{" "}
+                validation errors
+              </div>
             </div>
 
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
@@ -189,24 +166,6 @@ const ProgressBreakdownModal = ({
                 {summary.regularTransactions || 0}
               </div>
               <div className="text-xs text-blue-700">Regular transactions</div>
-            </div>
-          </div>
-
-          {/* Transaction Type Breakdown */}
-          <div className="mb-6">
-            <h3 className="text-lg font-medium text-gray-700 mb-3">
-              Transaction Types
-            </h3>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                  <span className="text-sm text-gray-700">Regular Sales</span>
-                </div>
-                <span className="font-medium text-gray-900">
-                  {summary.regularTransactions || 0}
-                </span>
-              </div>
             </div>
           </div>
 
@@ -271,15 +230,19 @@ const ProgressBreakdownModal = ({
             <div className="mb-6">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-lg font-medium text-gray-700">
-                  Failed Invoices ({failedInvoices.length})
+                  Failed Invoices ({failedInvoices.length} total)
                 </h3>
                 <button
                   onClick={onDownloadFailedReport}
                   className="flex items-center gap-2 px-3 py-1.5 bg-red-500 text-white rounded-lg hover:bg-red-600 cursor-pointer text-sm"
                 >
                   <FileText size={14} />
-                  Download Failed Report
+                  Download Full Report ({failedInvoices.length})
                 </button>
+              </div>
+              <div className="text-sm text-gray-600 mb-3">
+                Showing first {Math.min(3, failedInvoices.length)} of{" "}
+                {failedInvoices.length} failed invoices
               </div>
               <div className="space-y-2">
                 {failedInvoices.slice(0, 3).map((error, idx) => (
@@ -330,7 +293,7 @@ const ProgressBreakdownModal = ({
               className="flex items-center gap-2 px-5 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg cursor-pointer"
             >
               <Download size={16} />
-              Download Full Report
+              Download Full Report ({failedInvoices.length})
             </button>
           )}
         </div>
@@ -642,6 +605,42 @@ const ImportSalesModal = ({
     }
   };
 
+  // Function to fetch ALL failed invoices from backend
+  const fetchAllFailedInvoices = async (sessionId) => {
+    try {
+      if (!sessionId) {
+        console.warn("No session ID provided");
+        return [];
+      }
+
+      const response = await axios.get(
+        `${backendUrl}/api/import/failed-invoices/${sessionId}`,
+        {
+          timeout: 60000, // 60 second timeout for large data
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (response.data.success && response.data.failedInvoices) {
+        console.log(
+          `Fetched ${response.data.failedInvoices.length} failed invoices from backend`
+        );
+        return response.data.failedInvoices;
+      } else {
+        console.warn("Backend response not in expected format:", response.data);
+        return [];
+      }
+    } catch (error) {
+      console.error("Error fetching failed invoices from backend:", error);
+      if (error.response?.status === 404) {
+        console.warn("Session not found or expired");
+      }
+      return [];
+    }
+  };
+
   // Start progress polling
   const startProgressPolling = (sessionId) => {
     setImportSessionId(sessionId);
@@ -657,7 +656,8 @@ const ImportSalesModal = ({
     const pollInterval = setInterval(async () => {
       try {
         const response = await axios.get(
-          `${backendUrl}/api/import/progress/${sessionId}`
+          `${backendUrl}/api/import/progress/${sessionId}`,
+          { timeout: 30000 }
         );
 
         if (response.data.success) {
@@ -681,24 +681,29 @@ const ImportSalesModal = ({
             setIsImporting(false);
             setImportComplete(true);
 
+            // 🔥 IMPORTANT: Fetch ALL failed invoices from backend when import completes
+            const allFailedInvoices = await fetchAllFailedInvoices(sessionId);
+
             const importResult = {
               success: true,
               message: "Import completed",
               summary: {
                 totalReceived: progress.totalInvoices || 0,
                 successfullyImported: progress.successful || 0,
-                failed: progress.failed || 0,
+                failed: allFailedInvoices.length || progress.failed || 0,
                 regularTransactions: progress.transactionTypes?.regular || 0,
               },
               insufficientStockProducts:
                 progress.insufficientStockProducts || [],
-              detailedErrors: progress.errors || [],
+              detailedErrors: allFailedInvoices,
             };
 
+            // Update local state with ALL failed invoices
+            setFailedInvoices(allFailedInvoices);
             processImportResult(importResult);
 
             // Auto-close modal after 3 seconds if successful and no failures
-            if (progress.failed === 0) {
+            if (allFailedInvoices.length === 0) {
               setTimeout(() => {
                 onClose();
               }, 3000);
@@ -731,13 +736,35 @@ const ImportSalesModal = ({
   };
 
   // Process import result
-  const processImportResult = (importResult) => {
+  const processImportResult = async (importResult) => {
     setImportResult(importResult);
     setImportProgress(100);
 
-    // Process failed invoices
-    const failed = processFailedInvoices(importResult);
-    setFailedInvoices(failed);
+    // Use the detailedErrors which should now contain ALL failed invoices
+    let allFailedInvoices = importResult.detailedErrors || [];
+
+    // Also check if we have validation errors from file parsing
+    if (importErrorDetails && importErrorDetails.length > 0) {
+      importErrorDetails.forEach((error) => {
+        allFailedInvoices.push({
+          row: error.row || 0,
+          invoiceNumber: error.invoiceNumber || "Validation Error",
+          customerName: error.customerName || "Unknown",
+          error: error.message || "Validation failed",
+          type: "validation",
+          products: [
+            {
+              name: error.productName,
+              salesQty: 0,
+              bonusQty: 0,
+            },
+          ],
+          timestamp: new Date().toISOString(),
+        });
+      });
+    }
+
+    setFailedInvoices(allFailedInvoices);
 
     // Show success message
     let message = `Import completed!\n`;
@@ -747,7 +774,9 @@ const ImportSalesModal = ({
       message += `✓ ${
         summary.successfullyImported || 0
       } invoices imported successfully\n`;
-      message += `✗ ${summary.failed || 0} invoices failed\n`;
+      message += `✗ ${
+        allFailedInvoices.length || summary.failed || 0
+      } invoices failed\n`;
 
       if (summary.regularTransactions > 0) {
         message += `✅ ${summary.regularTransactions} regular sales\n`;
@@ -761,37 +790,6 @@ const ImportSalesModal = ({
     if (onImportSuccess) {
       onImportSuccess();
     }
-  };
-
-  // Process failed invoices
-  const processFailedInvoices = (importResult) => {
-    const failed = [];
-
-    // Process errors from the errors array
-    if (
-      importResult.detailedErrors &&
-      Array.isArray(importResult.detailedErrors)
-    ) {
-      importResult.detailedErrors.forEach((error) => {
-        let type = "validation";
-        const errorMsg = error.error.toLowerCase();
-        if (errorMsg.includes("insufficient stock")) {
-          type = "insufficient_stock";
-        } else if (errorMsg.includes("already exists")) {
-          type = "duplicate";
-        }
-        failed.push({
-          invoiceNumber: error.invoiceNumber,
-          row: error.index + 1,
-          error: error.error,
-          type: type,
-          customerName: error.customerName,
-          products: error.products || [], // Use empty array if products is undefined
-        });
-      });
-    }
-
-    return failed;
   };
 
   // Handle product import
@@ -825,7 +823,24 @@ const ImportSalesModal = ({
         startProgressPolling(res.data.sessionId);
       } else if (res.data.summary) {
         // Direct import result
-        processImportResult(res.data);
+        const result = {
+          ...res.data,
+          validationErrors:
+            res.data.validationErrors || importErrorDetails || [],
+          importErrors: res.data.importErrors || [],
+          insufficientStockProducts: res.data.insufficientStockProducts || [],
+        };
+
+        // Try to fetch failed invoices if we have a session ID
+        if (res.data.sessionId) {
+          const allFailedInvoices = await fetchAllFailedInvoices(
+            res.data.sessionId
+          );
+          result.detailedErrors = allFailedInvoices;
+          setFailedInvoices(allFailedInvoices);
+        }
+
+        processImportResult(result);
         setIsImporting(false);
         setImportComplete(true);
       } else {
@@ -838,7 +853,8 @@ const ImportSalesModal = ({
             successfullyImported:
               res.data.successfullyImported || res.data.successful || 0,
             failed: res.data.failed || 0,
-            validationErrors: res.data.validationErrors || 0,
+            validationErrors:
+              res.data.validationErrors || importErrorDetails.length || 0,
             importErrors: res.data.importErrors || 0,
             processingTimeSeconds: res.data.processingTimeSeconds || 0,
             regularTransactions:
@@ -846,8 +862,11 @@ const ImportSalesModal = ({
               res.data.summary?.regularTransactions ||
               0,
           },
+          validationErrors:
+            res.data.validationErrors || importErrorDetails || [],
+          importErrors: res.data.importErrors || [],
           insufficientStockProducts: res.data.insufficientStockProducts || [],
-          detailedErrors: res.data.detailedErrors || {},
+          detailedErrors: res.data.detailedErrors || [],
         };
 
         processImportResult(importResult);
@@ -856,7 +875,33 @@ const ImportSalesModal = ({
       }
     } catch (err) {
       console.error("❌ Import failed:", err);
-      showToast("error", "Failed to import data");
+
+      // Create an error result even if the import fails
+      const errorResult = {
+        success: false,
+        message: "Failed to import data",
+        summary: {
+          totalReceived: importData.length,
+          successfullyImported: 0,
+          failed: importData.length,
+          validationErrors: importErrorDetails.length || 0,
+          importErrors: 1,
+          regularTransactions: 0,
+        },
+        validationErrors: importErrorDetails || [],
+        importErrors: [
+          {
+            error: err.message || "Import failed",
+            row: 0,
+            invoiceNumber: "Import Error",
+            customerName: "System",
+          },
+        ],
+        insufficientStockProducts: [],
+        detailedErrors: [],
+      };
+
+      processImportResult(errorResult);
       setIsImporting(false);
       setImportComplete(true);
     }
@@ -872,15 +917,143 @@ const ImportSalesModal = ({
     await handleProductImport(validParsedData);
   };
 
-  // Download failed invoices report - FIXED
-  const downloadFailedInvoicesReport = () => {
-    if (!failedInvoices || failedInvoices.length === 0) {
-      showToast("warning", "No failed invoices to download");
-      return;
-    }
-
+  // 🔥 FIXED: Download failed invoices report function - fetches ALL from backend
+  const downloadFailedInvoicesReport = async () => {
     try {
-      // Create headers for the CSV
+      // If we have a session ID, fetch ALL failed invoices from backend
+      if (importSessionId) {
+        try {
+          showToast("info", "Fetching all failed invoices from server...");
+
+          // Fetch ALL failed invoices from backend
+          const response = await axios.get(
+            `${backendUrl}/api/import/failed-invoices/${importSessionId}`,
+            {
+              timeout: 60000, // 60 second timeout for large data
+              headers: {
+                "Content-Type": "application/json",
+              },
+            }
+          );
+
+          if (response.data.success && response.data.failedInvoices) {
+            const allFailedInvoices = response.data.failedInvoices;
+            const count = allFailedInvoices.length;
+
+            showToast(
+              "info",
+              `Found ${count} failed invoices, preparing download...`
+            );
+
+            if (count === 0) {
+              showToast("warning", "No failed invoices to download");
+              return;
+            }
+
+            // Generate CSV content
+            const headers = [
+              "Row",
+              "Invoice Number",
+              "Customer Name",
+              "Error Type",
+              "Error Message",
+              "Products",
+              "Sales Qty",
+              "Bonus Qty",
+              "Timestamp",
+            ];
+
+            const csvRows = [headers.join(",")];
+
+            allFailedInvoices.forEach((invoice, index) => {
+              // Handle different product formats
+              let productNames = "";
+              let totalSalesQty = 0;
+              let totalBonusQty = 0;
+
+              if (invoice.products && Array.isArray(invoice.products)) {
+                productNames = invoice.products
+                  .map((p) => p.name || p.productName || "")
+                  .filter(Boolean)
+                  .join("; ");
+
+                totalSalesQty = invoice.products.reduce(
+                  (sum, p) => sum + (parseFloat(p.salesQty) || 0),
+                  0
+                );
+
+                totalBonusQty = invoice.products.reduce(
+                  (sum, p) => sum + (parseFloat(p.bonusQty) || 0),
+                  0
+                );
+              }
+
+              const row = [
+                invoice.row || index + 1,
+                `"${invoice.invoiceNumber || ""}"`,
+                `"${invoice.customerName || ""}"`,
+                `"${invoice.type || "validation"}"`,
+                `"${(invoice.error || "").replace(/"/g, '""')}"`,
+                `"${productNames}"`,
+                totalSalesQty,
+                totalBonusQty,
+                `"${invoice.timestamp || new Date().toISOString()}"`,
+              ];
+
+              csvRows.push(row.join(","));
+            });
+
+            const csvContent = csvRows.join("\n");
+            const blob = new Blob([csvContent], {
+              type: "text/csv;charset=utf-8;",
+            });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            const timestamp = new Date()
+              .toISOString()
+              .split("T")[0]
+              .replace(/-/g, "");
+            const filename = `failed_invoices_${importSessionId}_${timestamp}.csv`;
+
+            link.href = url;
+            link.setAttribute("download", filename);
+            link.style.visibility = "hidden";
+
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+            // Clean up
+            setTimeout(() => {
+              URL.revokeObjectURL(url);
+            }, 100);
+
+            showToast("success", `Downloaded ${count} failed invoices report`);
+            setFailedInvoices(allFailedInvoices); // Update local state
+            return;
+          }
+        } catch (fetchError) {
+          console.error(
+            "Error downloading failed invoices from backend:",
+            fetchError
+          );
+          showToast(
+            "error",
+            `Failed to fetch from server: ${fetchError.message}`
+          );
+          // Fall through to local data generation
+        }
+      }
+
+      // Fallback: Use local failedInvoices if backend fetch fails
+      if (!failedInvoices || failedInvoices.length === 0) {
+        showToast("warning", "No failed invoices to download");
+        return;
+      }
+
+      showToast("info", `Using local data (${failedInvoices.length} invoices)`);
+
+      // Generate CSV from local data
       const headers = [
         "Row",
         "Invoice Number",
@@ -890,35 +1063,36 @@ const ImportSalesModal = ({
         "Products",
         "Sales Qty",
         "Bonus Qty",
+        "Timestamp",
       ];
 
-      // Create CSV content
-      const csvRows = [];
+      const csvRows = [headers.join(",")];
 
-      // Add headers
-      csvRows.push(headers.join(","));
+      failedInvoices.forEach((invoice, index) => {
+        // Handle different product formats
+        let productNames = "";
+        let totalSalesQty = 0;
+        let totalBonusQty = 0;
 
-      // Add data rows
-      failedInvoices.forEach((invoice) => {
-        // Calculate product info
-        const productNames =
-          invoice.products
-            ?.map((p) => p.name || "")
+        if (invoice.products && Array.isArray(invoice.products)) {
+          productNames = invoice.products
+            .map((p) => p.name || p.productName || "")
             .filter(Boolean)
-            .join("; ") || "";
-        const totalSalesQty =
-          invoice.products?.reduce(
+            .join("; ");
+
+          totalSalesQty = invoice.products.reduce(
             (sum, p) => sum + (parseFloat(p.salesQty) || 0),
             0
-          ) || 0;
-        const totalBonusQty =
-          invoice.products?.reduce(
+          );
+
+          totalBonusQty = invoice.products.reduce(
             (sum, p) => sum + (parseFloat(p.bonusQty) || 0),
             0
-          ) || 0;
+          );
+        }
 
         const row = [
-          invoice.row || "",
+          invoice.row || index + 1,
           `"${invoice.invoiceNumber || ""}"`,
           `"${invoice.customerName || ""}"`,
           `"${invoice.type || "validation"}"`,
@@ -926,20 +1100,16 @@ const ImportSalesModal = ({
           `"${productNames}"`,
           totalSalesQty,
           totalBonusQty,
+          `"${invoice.timestamp || new Date().toISOString()}"`,
         ];
 
         csvRows.push(row.join(","));
       });
 
-      // Create CSV content
       const csvContent = csvRows.join("\n");
-
-      // Create blob and download
       const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
-
-      // Set filename with timestamp
       const timestamp = new Date()
         .toISOString()
         .split("T")[0]
@@ -954,7 +1124,6 @@ const ImportSalesModal = ({
       link.click();
       document.body.removeChild(link);
 
-      // Clean up
       setTimeout(() => {
         URL.revokeObjectURL(url);
       }, 100);
@@ -1294,6 +1463,229 @@ const ImportSalesModal = ({
   );
 };
 
+// Product Details Modal Component
+const ProductDetailsModal = ({
+  isOpen,
+  onClose,
+  products,
+  title = "Product Details",
+}) => {
+  if (!isOpen) return null;
+
+  // ✅ Calculate totals (Profit/Loss computed, not taken from backend)
+  const calculateTotals = () => {
+    return products.reduce(
+      (acc, product) => {
+        const salesQty = Number(product.salesQty) || 0;
+        const bonusQty = Number(product.bonusQty) || 0;
+        const totalQty = salesQty + bonusQty;
+        const amount = Number(product.amount) || 0;
+        const discount = Number(product.discount) || 0;
+        const netAmount = Number(product.netSellingAmount) || 0;
+        const lc = Number(product.lc) || 0;
+
+        const profitLoss = netAmount - totalQty * lc;
+
+        acc.totalSalesQty += salesQty;
+        acc.totalBonusQty += bonusQty;
+        acc.totalAmount += amount;
+        acc.totalDiscount += discount;
+        acc.totalNetAmount += netAmount;
+        acc.totalProfitLoss += profitLoss;
+
+        return acc;
+      },
+      {
+        totalSalesQty: 0,
+        totalBonusQty: 0,
+        totalAmount: 0,
+        totalDiscount: 0,
+        totalNetAmount: 0,
+        totalProfitLoss: 0,
+      }
+    );
+  };
+
+  const totals = calculateTotals();
+
+  return ReactDOM.createPortal(
+    <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
+      <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+        {/* Close Button */}
+        <button
+          onClick={onClose}
+          className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+        >
+          <X size={20} />
+        </button>
+
+        {/* Title */}
+        <h2 className="text-xl font-semibold text-gray-800 mb-6">
+          {title} ({products?.length || 0} items)
+        </h2>
+
+        {!products || products.length === 0 ? (
+          <div className="text-center py-8 text-gray-500">
+            No products found
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="bg-gray-100">
+                  <th className="p-3 text-sm font-medium text-gray-700 border-b text-left">
+                    Product Name
+                  </th>
+                  <th className="p-3 text-sm font-medium text-gray-700 border-b text-center">
+                    Sales Qty
+                  </th>
+                  <th className="p-3 text-sm font-medium text-gray-700 border-b text-center">
+                    Bonus Qty
+                  </th>
+                  <th className="p-3 text-sm font-medium text-gray-700 border-b text-center">
+                    Total Qty
+                  </th>
+                  <th className="p-3 text-sm font-medium text-gray-700 border-b text-center">
+                    Selling Price
+                  </th>
+                  <th className="p-3 text-sm font-medium text-gray-700 border-b text-center">
+                    Amount ($)
+                  </th>
+                  <th className="p-3 text-sm font-medium text-gray-700 border-b text-center">
+                    Discount ($)
+                  </th>
+                  <th className="p-3 text-sm font-medium text-gray-700 border-b text-center">
+                    Net Amount ($)
+                  </th>
+                  <th className="p-3 text-sm font-medium text-gray-700 border-b text-center">
+                    Avg. Price
+                  </th>
+                  <th className="p-3 text-sm font-medium text-gray-700 border-b text-center">
+                    LC ($)
+                  </th>
+                  <th className="p-3 text-sm font-medium text-gray-700 border-b text-center">
+                    Profit / Loss ($)
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {products.map((product, index) => {
+                  const salesQty = Number(product.salesQty) || 0;
+                  const bonusQty = Number(product.bonusQty) || 0;
+                  const totalQty = salesQty + bonusQty;
+                  const netAmount = Number(product.netSellingAmount) || 0;
+                  const lc = Number(product.lc) || 0;
+
+                  const avgUnitPrice = totalQty > 0 ? netAmount / totalQty : 0;
+
+                  // ✅ PROFIT / LOSS FORMULA
+                  const profitLoss = netAmount - totalQty * lc;
+
+                  return (
+                    <tr
+                      key={`product-${index}`}
+                      className="hover:bg-gray-50 border-b"
+                    >
+                      <td className="p-3 text-left">
+                        <span className="font-medium capitalize">
+                          {product.productName || product.name || "N/A"}
+                        </span>
+                      </td>
+
+                      <td className="p-3 text-center">{salesQty}</td>
+                      <td className="p-3 text-center">{bonusQty}</td>
+                      <td className="p-3 text-center font-medium">
+                        {totalQty}
+                      </td>
+
+                      <td className="p-3 text-center">
+                        ${Number(product.sellingPrice || 0).toFixed(2)}
+                      </td>
+
+                      <td className="p-3 text-center">
+                        ${Number(product.amount || 0).toFixed(2)}
+                      </td>
+
+                      <td className="p-3 text-center">
+                        ${Number(product.discount || 0).toFixed(2)}
+                      </td>
+
+                      <td className="p-3 text-center">
+                        ${netAmount.toFixed(2)}
+                      </td>
+
+                      <td className="p-3 text-center">
+                        ${avgUnitPrice.toFixed(2)}
+                      </td>
+
+                      <td className="p-3 text-center">${lc.toFixed(2)}</td>
+
+                      <td className="p-3 text-center">
+                        <span
+                          className={`font-medium ${
+                            profitLoss >= 0 ? "text-green-600" : "text-red-600"
+                          }`}
+                        >
+                          ${profitLoss.toFixed(2)}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {/* ✅ TOTAL ROW */}
+                <tr className="bg-gray-50 font-medium">
+                  <td className="p-3 text-left">Total</td>
+                  <td className="p-3 text-center">{totals.totalSalesQty}</td>
+                  <td className="p-3 text-center">{totals.totalBonusQty}</td>
+                  <td className="p-3 text-center">
+                    {totals.totalSalesQty + totals.totalBonusQty}
+                  </td>
+                  <td className="p-3 text-center">-</td>
+                  <td className="p-3 text-center">
+                    ${totals.totalAmount.toFixed(2)}
+                  </td>
+                  <td className="p-3 text-center">
+                    ${totals.totalDiscount.toFixed(2)}
+                  </td>
+                  <td className="p-3 text-center">
+                    ${totals.totalNetAmount.toFixed(2)}
+                  </td>
+                  <td className="p-3 text-center">-</td>
+                  <td className="p-3 text-center">-</td>
+                  <td className="p-3 text-center">
+                    <span
+                      className={`${
+                        totals.totalProfitLoss >= 0
+                          ? "text-green-600"
+                          : "text-red-600"
+                      }`}
+                    >
+                      ${totals.totalProfitLoss.toFixed(2)}
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Footer */}
+        <div className="mt-6 pt-4 border-t border-gray-300 flex justify-end">
+          <button
+            onClick={onClose}
+            className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+};
+
 // Main Sales Component
 const Sales = () => {
   const navigate = useNavigate();
@@ -1328,7 +1720,9 @@ const Sales = () => {
     invoiceNumber: "",
     invoiceDate: "",
     mrName: "",
+    customerName: "",
     customerCode: "",
+    customerId: "",
     productName: "",
     salesQty: 0,
     bonusQty: 0,
@@ -1338,12 +1732,14 @@ const Sales = () => {
     discount: 0,
     netSellingAmount: 0,
     averageUnitPrice: 0,
+    lc: 0,
     profitLoss: 0,
     creditDays: 0,
     dueDate: "",
     deliveryDate: "",
     paidAmount: 0,
     dueAmount: 0,
+    totalAmount: 0,
     paymentStatus: "",
     remark: "",
     products: [],
@@ -1743,12 +2139,24 @@ const Sales = () => {
   };
 
   const handleView = (sale) => {
-    setForm({ ...sale });
+    setForm({
+      ...sale,
+      products: sale.products || [],
+      customerName: sale.customerName || "--",
+      customerCode: sale.customerCode || "",
+      customerId: sale.customerId || "",
+    });
     setIsViewModalOpen(true);
   };
 
   const editSale = (sale) => {
-    setForm({ ...sale });
+    setForm({
+      ...sale,
+      products: sale.products || [],
+      customerName: sale.customerName || "--",
+      customerCode: sale.customerCode || "",
+      customerId: sale.customerId || "",
+    });
     setIsEditModalOpen(true);
   };
 
@@ -1779,6 +2187,142 @@ const Sales = () => {
     }
   };
 
+  // Calculate totals for products
+  const calculateProductTotals = (products) => {
+    if (!products || !Array.isArray(products))
+      return {
+        totalAmount: 0,
+        totalDiscount: 0,
+        netAmount: 0,
+        totalProfitLoss: 0,
+      };
+
+    const totals = products.reduce(
+      (acc, product) => {
+        acc.totalAmount += parseFloat(product.amount || 0);
+        acc.totalDiscount += parseFloat(product.discount || 0);
+        acc.netAmount += parseFloat(product.netSellingAmount || 0);
+        acc.totalProfitLoss += parseFloat(product.profitLoss || 0);
+        return acc;
+      },
+      { totalAmount: 0, totalDiscount: 0, netAmount: 0, totalProfitLoss: 0 }
+    );
+
+    return totals;
+  };
+
+  // Handle update sale
+  const handleUpdateSale = async (e) => {
+    e.preventDefault();
+    try {
+      // Validate stock for each product
+      const stockErrors = [];
+      form.products.forEach((product, index) => {
+        const totalQty =
+          (Number(product.salesQty) || 0) + (Number(product.bonusQty) || 0);
+        const stockCheck = checkProductStock(product.productName, totalQty);
+        if (!stockCheck.hasSufficientStock) {
+          stockErrors.push({
+            product: product.productName,
+            required: totalQty,
+            available: stockCheck.availableStock,
+          });
+        }
+      });
+
+      if (stockErrors.length > 0) {
+        const errorMessages = stockErrors
+          .map(
+            (err) =>
+              `"${err.product}": Required ${err.required}, Available ${err.available}`
+          )
+          .join("\n");
+        showToast("error", `Insufficient stock:\n${errorMessages}`);
+        return;
+      }
+
+      // Calculate totals
+      const totals = calculateProductTotals(form.products);
+      const updatedForm = {
+        ...form,
+        totalAmount: totals.totalAmount,
+        netSellingAmount: totals.netAmount,
+        dueAmount: (
+          totals.netAmount - parseFloat(form.paidAmount || 0)
+        ).toFixed(2),
+      };
+
+      // Make API call
+      const res = await axios.put(
+        `${backendUrl}/api/sales/${form._id}`,
+        updatedForm
+      );
+      if (res.status === 200) {
+        showToast("success", "Sales record updated successfully");
+        setIsEditModalOpen(false);
+        fetchSaleSummaries();
+        await fetchStockData();
+      }
+    } catch (err) {
+      if (err.response && err.response.data && err.response.data.error) {
+        showToast("error", err.response.data.error);
+      } else {
+        showToast("error", "Failed to update sales record.");
+      }
+    }
+  };
+
+  // Handle form field changes
+  const handleFormChange = (e) => {
+    const { name, value } = e.target;
+    setForm((prev) => ({ ...prev, [name]: value }));
+  };
+
+  // Handle product editing
+  const openProductEditModal = (product, index) => {
+    setCurrentProduct({ ...product });
+    setCurrentProductIndex(index);
+    setIsProductEditModalOpen(true);
+  };
+
+  const handleProductChange = (e) => {
+    const { name, value } = e.target;
+    setCurrentProduct((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  };
+
+  const updateProductInForm = () => {
+    if (currentProductIndex === null || !currentProduct) return;
+
+    setForm((prev) => {
+      const updatedProducts = [...prev.products];
+      updatedProducts[currentProductIndex] = currentProduct;
+
+      const totals = calculateProductTotals(updatedProducts);
+
+      return {
+        ...prev,
+        products: updatedProducts,
+        totalAmount: totals.totalAmount,
+        netSellingAmount: totals.netAmount,
+        dueAmount: (
+          totals.netAmount - parseFloat(prev.paidAmount || 0)
+        ).toFixed(2),
+      };
+    });
+
+    setIsProductEditModalOpen(false);
+    setCurrentProduct(null);
+    setCurrentProductIndex(null);
+  };
+
+  // Calculate form totals
+  const formTotals = useMemo(() => {
+    return calculateProductTotals(form.products);
+  }, [form.products]);
+
   const showMRCustomerWarning = useMemo(() => {
     return mrList.length === 0 || customerList.length === 0;
   }, [mrList, customerList]);
@@ -1798,6 +2342,652 @@ const Sales = () => {
         stockData={stockData}
       />
 
+      {/* Product Details Modal */}
+      <ProductDetailsModal
+        isOpen={isProductModalOpen}
+        onClose={() => setIsProductModalOpen(false)}
+        products={selectedSaleProducts}
+        title="Product Details"
+      />
+
+      {/* Product Edit Modal */}
+      {isProductEditModalOpen && (
+        <ProductDetailsModal
+          isOpen={isProductEditModalOpen}
+          onClose={() => {
+            setIsProductEditModalOpen(false);
+            setCurrentProduct(null);
+            setCurrentProductIndex(null);
+          }}
+          products={currentProduct ? [currentProduct] : []}
+          title="Edit Product"
+        />
+      )}
+
+      {/* Edit Modal */}
+      {isEditModalOpen &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
+            <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+              <button
+                onClick={() => setIsEditModalOpen(false)}
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+
+              <h2 className="text-xl font-semibold text-gray-800 mb-6 flex items-center gap-2">
+                <Edit size={20} /> Edit Sales Record
+              </h2>
+
+              <form onSubmit={handleUpdateSale} className="space-y-6">
+                {/* Header Information */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <Calendar size={14} className="inline mr-1" />
+                      Recording Date
+                    </label>
+                    <DatePicker
+                      selected={
+                        form.recordingDate ? new Date(form.recordingDate) : null
+                      }
+                      onChange={(date) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          recordingDate: date
+                            ? date.toISOString().split("T")[0]
+                            : "",
+                        }))
+                      }
+                      dateFormat="yyyy-MM-dd"
+                      placeholderText="Select date"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Invoice Number
+                    </label>
+                    <InputField
+                      type="text"
+                      name="invoiceNumber"
+                      value={form.invoiceNumber || ""}
+                      onChange={handleFormChange}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <Calendar size={14} className="inline mr-1" />
+                      Invoice Date
+                    </label>
+                    <DatePicker
+                      selected={
+                        form.invoiceDate ? new Date(form.invoiceDate) : null
+                      }
+                      onChange={(date) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          invoiceDate: date
+                            ? date.toISOString().split("T")[0]
+                            : "",
+                        }))
+                      }
+                      dateFormat="yyyy-MM-dd"
+                      placeholderText="Select date"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <User size={14} className="inline mr-1" />
+                      MR Name
+                    </label>
+                    <select
+                      name="mrName"
+                      value={form.mrName || ""}
+                      onChange={handleFormChange}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    >
+                      <option value="">Select MR</option>
+                      {mrList.map((mr, index) => (
+                        <option key={index} value={mr}>
+                          {mr}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <User size={14} className="inline mr-1" />
+                      Customer Name
+                    </label>
+                    <InputField
+                      type="text"
+                      name="customerName"
+                      value={form.customerName || ""}
+                      onChange={handleFormChange}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Customer Code
+                    </label>
+                    <InputField
+                      type="text"
+                      name="customerCode"
+                      value={form.customerCode || ""}
+                      onChange={handleFormChange}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    />
+                  </div>
+                </div>
+
+                {/* Products Section */}
+                <div className="border border-gray-200 rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-medium text-gray-700 flex items-center gap-2">
+                      <ShoppingCart size={18} /> Products (
+                      {form.products?.length || 0})
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setIsProductModalOpen(true)}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer"
+                    >
+                      View All Products
+                    </button>
+                  </div>
+
+                  {form.products && form.products.length > 0 ? (
+                    <div className="space-y-3">
+                      {form.products.map((product, index) => (
+                        <div
+                          key={index}
+                          className="border border-gray-200 rounded-lg p-3"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <h4 className="font-medium text-gray-800">
+                                {product.productName || `Product ${index + 1}`}
+                              </h4>
+                              <div className="text-sm text-gray-600 mt-1">
+                                Qty: {product.salesQty || 0} | Bonus:{" "}
+                                {product.bonusQty || 0} | Price: $
+                                {(product.sellingPrice || 0).toFixed(2)}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openProductEditModal(product, index)
+                              }
+                              className="px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer text-sm"
+                            >
+                              Edit
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center text-gray-500 py-4">
+                      No products found
+                    </div>
+                  )}
+                </div>
+
+                {/* Financial Summary */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 border border-gray-200 rounded-lg p-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">
+                      Total Amount
+                    </label>
+                    <div className="text-lg font-semibold text-gray-800">
+                      ${formTotals.totalAmount.toFixed(2)}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">
+                      Total Discount
+                    </label>
+                    <div className="text-lg font-semibold text-gray-800">
+                      ${formTotals.totalDiscount.toFixed(2)}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">
+                      Net Amount
+                    </label>
+                    <div className="text-lg font-semibold text-gray-800">
+                      ${formTotals.netAmount.toFixed(2)}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">
+                      Profit/Loss
+                    </label>
+                    <div
+                      className={`text-lg font-semibold ${
+                        formTotals.totalProfitLoss >= 0
+                          ? "text-green-600"
+                          : "text-red-600"
+                      }`}
+                    >
+                      ${formTotals.totalProfitLoss.toFixed(2)}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Payment Information */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <Clock size={14} className="inline mr-1" />
+                      Credit Days
+                    </label>
+                    <InputField
+                      type="number"
+                      name="creditDays"
+                      value={form.creditDays || 0}
+                      onChange={handleFormChange}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <Calendar size={14} className="inline mr-1" />
+                      Due Date
+                    </label>
+                    <DatePicker
+                      selected={form.dueDate ? new Date(form.dueDate) : null}
+                      onChange={(date) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          dueDate: date ? date.toISOString().split("T")[0] : "",
+                        }))
+                      }
+                      dateFormat="yyyy-MM-dd"
+                      placeholderText="Select date"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <DollarSign size={14} className="inline mr-1" />
+                      Paid Amount
+                    </label>
+                    <InputField
+                      type="number"
+                      name="paidAmount"
+                      value={form.paidAmount || 0}
+                      onChange={handleFormChange}
+                      step="0.01"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <DollarSign size={14} className="inline mr-1" />
+                      Due Amount
+                    </label>
+                    <InputField
+                      type="text"
+                      value={form.dueAmount || 0}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-100"
+                      disabled
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <CreditCard size={14} className="inline mr-1" />
+                      Payment Status
+                    </label>
+                    <select
+                      name="paymentStatus"
+                      value={form.paymentStatus || ""}
+                      onChange={handleFormChange}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    >
+                      <option value="">Select Status</option>
+                      {statuses.map((status, index) => (
+                        <option key={index} value={status.type}>
+                          {status.type}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <Truck size={14} className="inline mr-1" />
+                      Delivery Date
+                    </label>
+                    <DatePicker
+                      selected={
+                        form.deliveryDate ? new Date(form.deliveryDate) : null
+                      }
+                      onChange={(date) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          deliveryDate: date
+                            ? date.toISOString().split("T")[0]
+                            : "",
+                        }))
+                      }
+                      dateFormat="yyyy-MM-dd"
+                      placeholderText="Select date"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    />
+                  </div>
+                </div>
+
+                {/* Remarks */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <ClipboardList size={14} className="inline mr-1" />
+                    Remarks
+                  </label>
+                  <textarea
+                    name="remark"
+                    value={form.remark || ""}
+                    onChange={handleFormChange}
+                    rows={3}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    placeholder="Enter any remarks..."
+                  />
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditModalOpen(false)}
+                    className="px-5 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg cursor-pointer flex items-center gap-2"
+                  >
+                    <Save size={18} /> Update Sale
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {/* View Modal */}
+      {isViewModalOpen &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
+            <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+              <button
+                onClick={() => setIsViewModalOpen(false)}
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+
+              <h2 className="text-xl font-semibold text-gray-800 mb-6 flex items-center gap-2">
+                <Eye size={20} /> View Sales Record
+              </h2>
+
+              {/* Header Information */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div className="bg-gray-50 p-3 rounded-lg">
+                  <label className="block text-xs font-medium text-gray-500 mb-1">
+                    Recording Date
+                  </label>
+                  <div className="text-sm font-medium text-gray-800">
+                    {formatDateToReadable(form.recordingDate) || "-"}
+                  </div>
+                </div>
+
+                <div className="bg-gray-50 p-3 rounded-lg">
+                  <label className="block text-xs font-medium text-gray-500 mb-1">
+                    Invoice Number
+                  </label>
+                  <div className="text-sm font-medium text-gray-800">
+                    {form.invoiceNumber || "-"}
+                  </div>
+                </div>
+
+                <div className="bg-gray-50 p-3 rounded-lg">
+                  <label className="block text-xs font-medium text-gray-500 mb-1">
+                    Invoice Date
+                  </label>
+                  <div className="text-sm font-medium text-gray-800">
+                    {formatDateToReadable(form.invoiceDate) || "-"}
+                  </div>
+                </div>
+
+                <div className="bg-gray-50 p-3 rounded-lg">
+                  <label className="block text-xs font-medium text-gray-500 mb-1">
+                    MR Name
+                  </label>
+                  <div className="text-sm font-medium text-gray-800">
+                    {form.mrName || "-"}
+                  </div>
+                </div>
+
+                <div className="bg-gray-50 p-3 rounded-lg">
+                  <label className="block text-xs font-medium text-gray-500 mb-1">
+                    Customer Name
+                  </label>
+                  <div className="text-sm font-medium text-gray-800">
+                    {form.customerName || "-"}
+                  </div>
+                </div>
+
+                <div className="bg-gray-50 p-3 rounded-lg">
+                  <label className="block text-xs font-medium text-gray-500 mb-1">
+                    Customer Code
+                  </label>
+                  <div className="text-sm font-medium text-gray-800">
+                    {form.customerCode || "-"}
+                  </div>
+                </div>
+              </div>
+
+              {/* Products Section */}
+              <div className="border border-gray-200 rounded-lg p-4 mb-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium text-gray-700">
+                    Products ({form.products?.length || 0})
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedSaleProducts(form.products || []);
+                      setIsProductModalOpen(true);
+                    }}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer"
+                  >
+                    View Details
+                  </button>
+                </div>
+
+                {form.products && form.products.length > 0 ? (
+                  <div className="space-y-3">
+                    {form.products.slice(0, 3).map((product, index) => (
+                      <div
+                        key={index}
+                        className="border border-gray-200 rounded-lg p-3"
+                      >
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <h4 className="font-medium text-gray-800">
+                              {product.productName || `Product ${index + 1}`}
+                            </h4>
+                            <div className="text-sm text-gray-600 mt-1">
+                              Quantity: {product.salesQty || 0} | Bonus:{" "}
+                              {product.bonusQty || 0} | Price: $
+                              {(product.sellingPrice || 0).toFixed(2)} | Amount:
+                              ${(product.amount || 0).toFixed(2)}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {form.products.length > 3 && (
+                      <div className="text-center text-gray-500 text-sm">
+                        ... and {form.products.length - 3} more products
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center text-gray-500 py-4">
+                    No products found
+                  </div>
+                )}
+              </div>
+
+              {/* Financial Summary */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 border border-gray-200 rounded-lg p-4 mb-6">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">
+                    Total Amount
+                  </label>
+                  <div className="text-lg font-semibold text-gray-800">
+                    ${formTotals.totalAmount.toFixed(2)}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">
+                    Total Discount
+                  </label>
+                  <div className="text-lg font-semibold text-gray-800">
+                    ${formTotals.totalDiscount.toFixed(2)}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">
+                    Net Amount
+                  </label>
+                  <div className="text-lg font-semibold text-gray-800">
+                    ${formTotals.netAmount.toFixed(2)}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">
+                    Profit/Loss
+                  </label>
+                  <div
+                    className={`text-lg font-semibold ${
+                      formTotals.totalProfitLoss >= 0
+                        ? "text-green-600"
+                        : "text-red-600"
+                    }`}
+                  >
+                    ${formTotals.totalProfitLoss.toFixed(2)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Payment Information */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div className="bg-gray-50 p-3 rounded-lg">
+                  <label className="block text-xs font-medium text-gray-500 mb-1">
+                    Credit Days
+                  </label>
+                  <div className="text-sm font-medium text-gray-800">
+                    {form.creditDays || 0} days
+                  </div>
+                </div>
+
+                <div className="bg-gray-50 p-3 rounded-lg">
+                  <label className="block text-xs font-medium text-gray-500 mb-1">
+                    Due Date
+                  </label>
+                  <div className="text-sm font-medium text-gray-800">
+                    {formatDateToReadable(form.dueDate) || "-"}
+                  </div>
+                </div>
+
+                <div className="bg-gray-50 p-3 rounded-lg">
+                  <label className="block text-xs font-medium text-gray-500 mb-1">
+                    Paid Amount
+                  </label>
+                  <div className="text-sm font-medium text-gray-800">
+                    ${(form.paidAmount || 0).toFixed(2)}
+                  </div>
+                </div>
+
+                <div className="bg-gray-50 p-3 rounded-lg">
+                  <label className="block text-xs font-medium text-gray-500 mb-1">
+                    Due Amount
+                  </label>
+                  <div className="text-sm font-medium text-gray-800">
+                    ${(form.dueAmount || 0).toFixed(2)}
+                  </div>
+                </div>
+
+                <div className="bg-gray-50 p-3 rounded-lg">
+                  <label className="block text-xs font-medium text-gray-500 mb-1">
+                    Payment Status
+                  </label>
+                  <div
+                    className={`text-sm font-medium ${
+                      form.paymentStatus === "Paid"
+                        ? "text-green-600"
+                        : "text-red-600"
+                    }`}
+                  >
+                    {form.paymentStatus || "-"}
+                  </div>
+                </div>
+
+                <div className="bg-gray-50 p-3 rounded-lg">
+                  <label className="block text-xs font-medium text-gray-500 mb-1">
+                    Delivery Date
+                  </label>
+                  <div className="text-sm font-medium text-gray-800">
+                    {formatDateToReadable(form.deliveryDate) || "-"}
+                  </div>
+                </div>
+              </div>
+
+              {/* Remarks */}
+              <div className="border border-gray-200 rounded-lg p-4 mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Remarks
+                </label>
+                <div className="text-gray-600 bg-gray-50 p-3 rounded">
+                  {form.remark || "No remarks provided"}
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex justify-end pt-4 border-t border-gray-200">
+                <button
+                  type="button"
+                  onClick={() => setIsViewModalOpen(false)}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {/* Main Content */}
       <div className="container">
         <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
           <div className="flex gap-3 items-center">
@@ -1851,7 +3041,7 @@ const Sales = () => {
           {sales.length > 0 ? (
             <div className="flex items-center gap-6">
               <div className="flex gap-4 flex-wrap">
-                {["All", "Paid", "Credit"].map((tab) => (
+                {["All", "Cash", "Credit"].map((tab) => (
                   <button
                     key={`tab-${tab}`}
                     onClick={() => {

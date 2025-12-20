@@ -18,16 +18,18 @@ const createSessionId = () =>
 // 🔥 ENHANCED: Better product name normalization
 const normalizeProductName = (name) => {
   if (!name) return "";
+  
   return name
     .trim()
     .toLowerCase()
     .replace(/\s+/g, " ") // Replace multiple spaces with single space
-    .replace(/[^a-z0-9\s+]/g, "") // Remove special characters except +
+    .replace(/[^a-z0-9\s]/g, "") // Remove special characters
     .trim();
 };
 
-// 🔥 NEW: Product name mapping for common variations
+// 🔥 ENHANCED: Product name mapping for common variations
 const productNameFixMap = {
+  // Existing mappings
   "n-lycopene + wheatgerm oil": "N-LYCOPENE + WHEATGERM OIL",
   "n-lycopene+wheatgerm oil": "N-LYCOPENE + WHEATGERM OIL",
   "n-lycopene +wheatgerm oil": "N-LYCOPENE + WHEATGERM OIL",
@@ -38,7 +40,7 @@ const productNameFixMap = {
   "n evening primrose oil": "N-EVENING PRIMROSE OIL",
   "evening primrose oil": "N-EVENING PRIMROSE OIL",
   "n multiz": "N-MULTIZ",
-  "multiz": "N-MULTIZ",
+  multiz: "N-MULTIZ",
   "n garlic oil": "N-GARLIC OIL",
   "garlic oil": "N-GARLIC OIL",
   "n fenugreek oil": "N-FENUGREEK OIL",
@@ -49,78 +51,110 @@ const productNameFixMap = {
   "krill oil": "N-KRILL OIL",
   "n sea buckthorn & oil lutein extract": "N-SEA BUCKTHORN & OIL LUTEIN EXTRACT",
   "sea buckthorn & oil lutein extract": "N-SEA BUCKTHORN & OIL LUTEIN EXTRACT",
+  
+  // 🔥 NEW: ECOMOL variations
+  "ecomol 500": "ECOMOL 500",
+  "ecomol500": "ECOMOL 500",
+  "ecomol-500": "ECOMOL 500",
+  "ecomol": "ECOMOL 500",
+  
+  // 🔥 NEW: General pattern for products with numbers
+  "500mg": "500 MG",
+  "500 mg": "500 MG",
+  "500": "500 MG",
 };
 
-// 🔥 NEW: Find product in inventory with better matching
+// 🔥 NEW: Function to remove all spaces and special characters for comparison
+const getStrictNormalizedProductName = (name) => {
+  if (!name) return "";
+  
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "") // Remove all non-alphanumeric characters
+    .trim();
+};
+
+// 🔥 ENHANCED: Find product in inventory with better matching
 const findProductInInventory = async (productName) => {
   try {
     const normalizedProductName = normalizeProductName(productName);
-    const fixedProductName = productNameFixMap[normalizedProductName] || productName;
+    const strictNormalizedProductName = getStrictNormalizedProductName(productName);
     
-    // Try exact match first
-    const exactMatch = await ReportInHand.findOne({
-      productName: { $regex: new RegExp(`^${fixedProductName}$`, "i") },
-    });
+    // First, check the fix map
+    const fixedProductName = productNameFixMap[normalizedProductName] || productNameFixMap[strictNormalizedProductName];
     
-    if (exactMatch) {
-      return exactMatch;
-    }
-    
-    // Try normalized match
-    const normalizedMatch = await ReportInHand.findOne({
-      $or: [
-        { productName: { $regex: new RegExp(`^${normalizedProductName}$`, "i") } },
-        { productName: { $regex: new RegExp(normalizedProductName, "i") } }
-      ]
-    });
-    
-    if (normalizedMatch) {
-      return normalizedMatch;
-    }
-    
-    // Try removing "N-" prefix
-    const withoutNPrefix = productName.replace(/^N-/i, "").trim();
-    if (withoutNPrefix !== productName) {
-      const withoutNPrefixMatch = await ReportInHand.findOne({
-        productName: { $regex: new RegExp(withoutNPrefix, "i") }
+    if (fixedProductName) {
+      // Try exact match with the fixed name
+      const exactMatchWithFixed = await ReportInHand.findOne({
+        productName: { $regex: new RegExp(`^${fixedProductName}$`, "i") },
       });
       
-      if (withoutNPrefixMatch) {
-        return withoutNPrefixMatch;
+      if (exactMatchWithFixed) {
+        return exactMatchWithFixed;
       }
     }
     
-    // Try adding "N-" prefix
-    if (!productName.toUpperCase().startsWith("N-")) {
-      const withNPrefix = "N-" + productName;
-      const withNPrefixMatch = await ReportInHand.findOne({
-        productName: { $regex: new RegExp(withNPrefix, "i") }
-      });
-      
-      if (withNPrefixMatch) {
-        return withNPrefixMatch;
-      }
-    }
-    
-    // Search by partial match
-    const partialMatch = await ReportInHand.findOne({
-      productName: { $regex: new RegExp(productName.replace(/[^a-zA-Z0-9\s+]/g, ""), "i") }
-    });
-    
-    if (partialMatch) {
-      return partialMatch;
-    }
-    
-    // Last resort: search in all products for similar names
+    // 🔥 NEW: Get all products from inventory for better matching
     const allProducts = await ReportInHand.find({});
-    const similarProduct = allProducts.find(p => 
-      normalizeProductName(p.productName) === normalizedProductName ||
-      normalizeProductName(p.productName).includes(normalizedProductName) ||
-      normalizedProductName.includes(normalizeProductName(p.productName))
-    );
     
-    if (similarProduct) {
-      return similarProduct;
+    // 🔥 NEW: Try multiple matching strategies
+    for (const product of allProducts) {
+      const inventoryNormalized = normalizeProductName(product.productName);
+      const inventoryStrict = getStrictNormalizedProductName(product.productName);
+      
+      // Strategy 1: Exact match (case-insensitive)
+      if (product.productName.toLowerCase() === productName.toLowerCase()) {
+        return product;
+      }
+      
+      // Strategy 2: Normalized match
+      if (inventoryNormalized === normalizedProductName) {
+        return product;
+      }
+      
+      // Strategy 3: Strict normalized match (remove all non-alphanumeric)
+      if (inventoryStrict === strictNormalizedProductName) {
+        return product;
+      }
+      
+      // Strategy 4: Contains match
+      if (product.productName.toLowerCase().includes(productName.toLowerCase()) ||
+          productName.toLowerCase().includes(product.productName.toLowerCase())) {
+        return product;
+      }
+      
+      // Strategy 5: Handle ECOMOL specifically
+      if (productName.toLowerCase().includes("ecomol") && 
+          product.productName.toLowerCase().includes("ecomol")) {
+        
+        // Extract numbers from both names
+        const inputNumber = productName.replace(/\D/g, "") || "500";
+        const productNumber = product.productName.replace(/\D/g, "") || "500";
+        
+        if (inputNumber === productNumber) {
+          return product;
+        }
+      }
+    }
+    
+    // 🔥 NEW: Try fuzzy matching for common product patterns
+    const searchTerm = productName.toLowerCase();
+    
+    for (const product of allProducts) {
+      const productTerm = product.productName.toLowerCase();
+      
+      // Check for common patterns
+      if (productTerm.includes("ecomol") && searchTerm.includes("ecomol")) {
+        return product;
+      }
+      
+      // Check for same base name with different numbers
+      const baseName = searchTerm.replace(/\d+/g, "").trim();
+      const productBaseName = productTerm.replace(/\d+/g, "").trim();
+      
+      if (baseName === productBaseName && baseName.length > 3) {
+        return product;
+      }
     }
     
     return null;
@@ -201,29 +235,36 @@ const updateReportInHandAfterSale = async (productName, salesQty, bonusQty) => {
         productName.replace(/\+/g, "+"),
         productName.replace(/\s+/g, " "),
         productName.replace(/N-/g, "").trim(),
-        "N-" + productName.replace(/N-/g, "").trim()
+        "N-" + productName.replace(/N-/g, "").trim(),
       ];
-      
+
       for (const altName of altNames) {
         if (altName !== productName) {
           const altProduct = await findProductInInventory(altName);
           if (altProduct) {
-            console.log(`⚠️ Found product with alternative name: "${altProduct.productName}" for "${productName}"`);
-            return await updateReportInHandAfterSale(altProduct.productName, salesQty, bonusQty);
+            return await updateReportInHandAfterSale(
+              altProduct.productName,
+              salesQty,
+              bonusQty
+            );
           }
         }
       }
-      
+
       // Log available products for debugging
       const allProducts = await ReportInHand.find({});
-      const availableProducts = allProducts.map(p => p.productName);
-      
-      throw new Error(`Product "${productName}" not found in inventory. Available products: ${availableProducts.join(", ")}`);
+      const availableProducts = allProducts.map((p) => p.productName);
+
+      throw new Error(
+        `Product "${productName}" not found in inventory. Available products: ${availableProducts.join(
+          ", "
+        )}`
+      );
     }
 
     let currentStock = 0;
     let lcValue = 0;
-    
+
     // Real ReportInHand document
     if (
       existingProduct.batches &&
@@ -467,25 +508,13 @@ const restoreReportInHandAfterSaleDeletion = async (
       );
     } else if (isExchange && isIncoming) {
       // For exchange incoming, we added to inventory, now deduct
-      await updateReportInHandAfterSale(
-        productName,
-        -Math.abs(totalQty),
-        0
-      );
+      await updateReportInHandAfterSale(productName, -Math.abs(totalQty), 0);
     } else if (isExchange && !isIncoming) {
       // For exchange outgoing, we deducted from inventory, now add back
-      await updateReportInHandAfterSale(
-        productName,
-        Math.abs(totalQty),
-        0
-      );
+      await updateReportInHandAfterSale(productName, Math.abs(totalQty), 0);
     } else {
       // For regular sales, restore inventory
-      await updateReportInHandAfterSale(
-        productName,
-        salesQty,
-        bonusQty
-      );
+      await updateReportInHandAfterSale(productName, salesQty, bonusQty);
     }
   } catch (error) {
     console.error(
@@ -665,6 +694,11 @@ const processImportBatch = async (
         throw new Error("No products found");
       }
 
+      // 🔥 FIX: Ensure mrName has a default value
+      if (!saleData.mrName || saleData.mrName.trim() === "") {
+        saleData.mrName = "No MR Name Provided";
+      }
+
       // Check duplicate invoice number
       const exists = await SaleSummary.findOne({
         invoiceNumber: saleData.invoiceNumber,
@@ -729,14 +763,14 @@ const processImportBatch = async (
         }
 
         // 🔥 FIXED: Use enhanced product finder
-        const existingProduct = await findProductInInventory(product.productName);
+        const existingProduct = await findProductInInventory(
+          product.productName
+        );
 
         if (!existingProduct) {
           // For returns, we can proceed without inventory check
           if (isReturn) {
-            console.log(
-              `⚠️ Product "${product.productName}" not found for return - will create sale without inventory update`
-            );
+          
             productUpdates.push({
               productName: product.productName,
               originalProductName: product.productName,
@@ -750,13 +784,13 @@ const processImportBatch = async (
             });
           } else {
             // Try to debug why product not found
-            console.log(`🔍 Searching for product: "${product.productName}"`);
-            const allProducts = await ReportInHand.find({});
-            const availableProducts = allProducts.map(p => p.productName);
             
+            const allProducts = await ReportInHand.find({});
+            const availableProducts = allProducts.map((p) => p.productName);
+
             throw new Error(
               `Product "${product.productName}" not found in inventory. ` +
-              `Available products: ${availableProducts.join(', ')}`
+                `Available products: ${availableProducts.join(", ")}`
             );
           }
         } else {
@@ -809,7 +843,8 @@ const processImportBatch = async (
               salesQty: salesQty,
               bonusQty: bonusQty,
               totalQty: totalQty,
-              lcValue: existingProduct.lc || existingProduct.batches?.[0]?.lc || 0,
+              lcValue:
+                existingProduct.lc || existingProduct.batches?.[0]?.lc || 0,
               isOutgoing: totalQty > 0,
               isReturn: isReturn,
               isExchange: isExchange,
@@ -890,7 +925,7 @@ const processImportBatch = async (
         recordingDate: parseDateString(saleData.recordingDate) || new Date(),
         invoiceNumber: saleData.invoiceNumber,
         invoiceDate: parseDateString(saleData.invoiceDate) || new Date(),
-        mrName: saleData.mrName || "",
+        mrName: saleData.mrName || "No MR Name Provided", // 🔥 FIXED: Added default value
         customerName: customerInfo.customerName,
         customerCode: customerInfo.customerCode,
         customerId: customerInfo.customerId,
@@ -947,7 +982,7 @@ const processImportBatch = async (
       }
     } catch (error) {
       console.error(
-        `❌ Save failed for invoice ${saleData?.invoiceNumber || 'Unknown'}:`,
+        `❌ Save failed for invoice ${saleData?.invoiceNumber || "Unknown"}:`,
         error.message
       );
 
@@ -1088,7 +1123,7 @@ const processImportAsync = async (sessionId, salesData, batchSize) => {
   }
 };
 
-// 🔥 MODIFIED: VALIDATION FUNCTION WITH PARENTHESIS SUPPORT
+// 🔥 MODIFIED: VALIDATION FUNCTION WITH PARENTHESIS SUPPORT AND MR NAME FIX
 const validateImportData = async (salesData) => {
   const errors = [];
   const validData = [];
@@ -1096,6 +1131,11 @@ const validateImportData = async (salesData) => {
   for (let i = 0; i < salesData.length; i++) {
     const sale = salesData[i];
     const saleErrors = [];
+
+    // 🔥 FIX: Ensure mrName has a default value
+    if (!sale.mrName || sale.mrName.trim() === "") {
+      sale.mrName = "No MR Name Provided";
+    }
 
     // Check for parenthesis quantities
     const hasParenthesisQuantity = sale.products?.some((product) => {
@@ -1247,6 +1287,13 @@ router.post("/sales/import", async (req, res) => {
       });
     }
 
+    // 🔥 FIX: Ensure all sales data have mrName
+    salesData.forEach(sale => {
+      if (!sale.mrName || sale.mrName.trim() === "") {
+        sale.mrName = "No MR Name Provided";
+      }
+    });
+
     // Initialize progress tracking (your existing function)
     initializeImportProgress(sessionId, salesData.length, batchSize);
 
@@ -1295,21 +1342,31 @@ router.get("/import/progress/:sessionId", async (req, res) => {
       );
     }
 
-    // Format progress for response
+    // 🔥 FIXED: Return full error count but limit error details for performance
     const response = {
       success: true,
       sessionId,
-      ...progress,
+      totalBatches: progress.totalBatches,
+      currentBatch: progress.currentBatch,
+      processedInvoices: progress.processedInvoices,
+      totalInvoices: progress.totalInvoices,
+      successful: progress.successful,
+      failed: progress.failed,
+      insufficientStockProducts: progress.insufficientStockProducts
+        ? Array.from(progress.insufficientStockProducts.values()).slice(0, 20)
+        : [],
+      errorsCount: progress.errors.length, // 🔥 Return count instead of full array
+      startTime: progress.startTime,
+      transactionTypes: progress.transactionTypes,
+      currentBatchProgress: progress.currentBatchProgress,
+      processedInCurrentBatch: progress.processedInCurrentBatch,
+      progressPercentage: progress.progressPercentage || 0,
       elapsedTime,
       estimatedTimeRemaining,
-      insufficientStockProducts: Array.from(
-        progress.insufficientStockProducts.values()
-      ),
-      progressPercentage: progress.progressPercentage || 0,
-      // Convert Map to Array for JSON serialization
-      errors: progress.errors.slice(-50), // Only last 50 errors
       errorTypes: progress.errorTypes || {},
       completed: progress.completed || false,
+      // Sample of errors for preview
+      errorSamples: progress.errors.slice(0, 5), // 🔥 Only send first 5 for preview
     };
 
     res.json(response);
@@ -1318,6 +1375,140 @@ router.get("/import/progress/:sessionId", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Error getting progress",
+      error: error.message,
+    });
+  }
+});
+
+// 🔥 MODIFIED: Endpoint to get ALL failed invoices for a session
+router.get("/import/failed-invoices/:sessionId", async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    if (!importProgressMap.has(sessionId)) {
+      return res.status(404).json({
+        success: false,
+        message: "Session not found",
+      });
+    }
+
+    const progress = importProgressMap.get(sessionId);
+    const errors = progress.errors || [];
+
+    // 🔥 FIXED: Return ALL errors, not just last 50
+    const failedInvoices = errors.map((error, index) => ({
+      row: error.index + 1,
+      invoiceNumber: error.invoiceNumber || `Error-${index + 1}`,
+      customerName: error.customerName || "Unknown",
+      error: error.error || "Unknown error",
+      type: error.type || error.errorType || "import_error",
+      products: error.products || [],
+      timestamp: error.timestamp || new Date().toISOString(),
+    }));
+
+    res.json({
+      success: true,
+      failedInvoices,
+      count: failedInvoices.length,
+      sessionId,
+      summary: {
+        totalInvoices: progress.totalInvoices || 0,
+        successful: progress.successful || 0,
+        failed: progress.failed || 0,
+        progressPercentage: progress.progressPercentage || 0,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching failed invoices:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching failed invoices",
+      error: error.message,
+    });
+  }
+});
+
+// 🔥 NEW: Endpoint to download ALL failed invoices as CSV
+router.get("/import/download-failed-invoices/:sessionId", async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    if (!importProgressMap.has(sessionId)) {
+      return res.status(404).json({
+        success: false,
+        message: "Session not found",
+      });
+    }
+
+    const progress = importProgressMap.get(sessionId);
+    const errors = progress.errors || [];
+
+    if (errors.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No failed invoices found for this session",
+      });
+    }
+
+    // Format errors for CSV
+    const csvRows = [];
+
+    // Add headers
+    csvRows.push(
+      [
+        "Row",
+        "Invoice Number",
+        "Customer Name",
+        "Error Type",
+        "Error Message",
+        "Products",
+        "Sales Quantity",
+        "Bonus Quantity",
+        "Timestamp",
+      ].join(",")
+    );
+
+    // Add data rows
+    errors.forEach((error, index) => {
+      const products = error.products || [];
+      const productNames = products.map((p) => p.name || "").join("; ");
+      const totalSalesQty = products.reduce(
+        (sum, p) => sum + (parseFloat(p.salesQty) || 0),
+        0
+      );
+      const totalBonusQty = products.reduce(
+        (sum, p) => sum + (parseFloat(p.bonusQty) || 0),
+        0
+      );
+
+      const row = [
+        index + 1,
+        `"${error.invoiceNumber || ""}"`,
+        `"${error.customerName || ""}"`,
+        `"${error.type || error.errorType || "import_error"}"`,
+        `"${(error.error || "").replace(/"/g, '""')}"`,
+        `"${productNames}"`,
+        totalSalesQty,
+        totalBonusQty,
+        `"${error.timestamp || new Date().toISOString()}"`,
+      ];
+
+      csvRows.push(row.join(","));
+    });
+
+    const csvContent = csvRows.join("\n");
+    const timestamp = new Date().toISOString().split("T")[0].replace(/-/g, "");
+    const filename = `failed_invoices_${sessionId}_${timestamp}.csv`;
+
+    // Set headers for CSV download
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(csvContent);
+  } catch (error) {
+    console.error("Error downloading failed invoices:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error downloading failed invoices",
       error: error.message,
     });
   }
@@ -3006,6 +3197,11 @@ router.post("/sales", async (req, res) => {
       });
     }
 
+    // 🔥 FIX: Ensure mrName has a default value
+    if (!saleData.mrName || saleData.mrName.trim() === "") {
+      saleData.mrName = "No MR Name Provided";
+    }
+
     // Check if this is a return transaction
     const isReturn = isReturnTransaction(
       saleData.remark,
@@ -3044,15 +3240,17 @@ router.post("/sales", async (req, res) => {
         const totalQty = salesQty + bonusQty;
 
         // 🔥 FIXED: Use enhanced product finder
-        const existingProduct = await findProductInInventory(product.productName);
+        const existingProduct = await findProductInInventory(
+          product.productName
+        );
 
         let lcValue = 0;
         let actualProductName = product.productName;
-        
+
         if (existingProduct) {
           lcValue = existingProduct.lc || existingProduct.batches?.[0]?.lc || 0;
           actualProductName = existingProduct.productName; // Use the actual name from database
-          
+
           // Update inventory if not return and quantity is positive
           if (!isReturn && totalQty > 0) {
             await updateReportInHandAfterSale(
@@ -3074,8 +3272,7 @@ router.post("/sales", async (req, res) => {
             Number(product.netSellingAmount) - Math.abs(totalQty) * lcValue
           );
         } else {
-          profitLoss =
-            Number(product.netSellingAmount) - totalQty * lcValue;
+          profitLoss = Number(product.netSellingAmount) - totalQty * lcValue;
         }
 
         return {
@@ -3105,7 +3302,7 @@ router.post("/sales", async (req, res) => {
       recordingDate: new Date(saleData.recordingDate),
       invoiceNumber: saleData.invoiceNumber,
       invoiceDate: new Date(saleData.invoiceDate),
-      mrName: saleData.mrName,
+      mrName: saleData.mrName || "No MR Name Provided", // 🔥 FIXED: Added default value
       customerName,
       customerCode: saleData.customerCode,
       customerId: saleData.customerId || "",
@@ -3215,6 +3412,11 @@ router.put("/sales/:id", async (req, res) => {
     // Process the updated sale data
     const saleData = req.body;
 
+    // 🔥 FIX: Ensure mrName has a default value
+    if (!saleData.mrName || saleData.mrName.trim() === "") {
+      saleData.mrName = originalSale.mrName || "No MR Name Provided";
+    }
+
     // Validate and calculate LC/profit for new products
     const updatedProducts = await Promise.all(
       saleData.products.map(async (product) => {
@@ -3232,7 +3434,9 @@ router.put("/sales/:id", async (req, res) => {
         const totalQty = salesQty + bonusQty;
 
         // 🔥 FIXED: Use enhanced product finder
-        const existingProduct = await findProductInInventory(product.productName);
+        const existingProduct = await findProductInInventory(
+          product.productName
+        );
 
         if (!existingProduct && !isReturn && totalQty > 0) {
           throw new Error(
@@ -3242,7 +3446,7 @@ router.put("/sales/:id", async (req, res) => {
 
         let lcValue = 0;
         let actualProductName = product.productName;
-        
+
         if (existingProduct) {
           lcValue = existingProduct.lc || existingProduct.batches?.[0]?.lc || 0;
           actualProductName = existingProduct.productName; // Use the actual name from database
@@ -3294,8 +3498,7 @@ router.put("/sales/:id", async (req, res) => {
             Number(product.netSellingAmount) - Math.abs(totalQty) * lcValue
           );
         } else {
-          profitLoss =
-            Number(product.netSellingAmount) - totalQty * lcValue;
+          profitLoss = Number(product.netSellingAmount) - totalQty * lcValue;
         }
 
         return {
@@ -3334,7 +3537,7 @@ router.put("/sales/:id", async (req, res) => {
       recordingDate: new Date(saleData.recordingDate),
       invoiceNumber: saleData.invoiceNumber,
       invoiceDate: new Date(saleData.invoiceDate),
-      mrName: saleData.mrName,
+      mrName: saleData.mrName || originalSale.mrName || "No MR Name Provided", // 🔥 FIXED: Added default value
       customerName: saleData.customerName,
       customerCode: saleData.customerCode,
       customerId: saleData.customerId || "",
@@ -4017,7 +4220,9 @@ router.get("/sales/inventory-check/:id", async (req, res) => {
 
     const inventoryChecks = await Promise.all(
       sale.products.map(async (product) => {
-        const existingProduct = await findProductInInventory(product.productName);
+        const existingProduct = await findProductInInventory(
+          product.productName
+        );
 
         return {
           productName: product.productName,
@@ -4260,32 +4465,45 @@ router.get("/debug/product-match/:productName", async (req, res) => {
   try {
     const { productName } = req.params;
     const normalized = normalizeProductName(productName);
-    
+
     // Search in ReportInHand
     const reportProducts = await ReportInHand.find({
-      productName: { $regex: productName, $options: "i" }
+      productName: { $regex: productName, $options: "i" },
     });
-    
+
     // Search with enhanced finder
     const foundProduct = await findProductInInventory(productName);
-    
+
     res.json({
       searchTerm: productName,
       normalizedTerm: normalized,
       fixedName: productNameFixMap[normalized] || "Not in fix map",
-      reportInHandMatches: reportProducts.map(p => ({
+      reportInHandMatches: reportProducts.map((p) => ({
         id: p._id,
         productName: p.productName,
-        totalBoxes: p.totalBoxes || p.batches?.reduce((sum, b) => sum + (b.boxes || 0), 0) || 0,
-        supplierName: p.supplierName
+        totalBoxes:
+          p.totalBoxes ||
+          p.batches?.reduce((sum, b) => sum + (b.boxes || 0), 0) ||
+          0,
+        supplierName: p.supplierName,
       })),
-      foundByEnhancedFinder: foundProduct ? {
-        id: foundProduct._id,
-        productName: foundProduct.productName,
-        totalBoxes: foundProduct.totalBoxes || foundProduct.batches?.reduce((sum, b) => sum + (b.boxes || 0), 0) || 0,
-        supplierName: foundProduct.supplierName
-      } : null,
-      allProductsInInventory: (await ReportInHand.find({})).map(p => p.productName).slice(0, 20) // First 20 products
+      foundByEnhancedFinder: foundProduct
+        ? {
+            id: foundProduct._id,
+            productName: foundProduct.productName,
+            totalBoxes:
+              foundProduct.totalBoxes ||
+              foundProduct.batches?.reduce(
+                (sum, b) => sum + (b.boxes || 0),
+                0
+              ) ||
+              0,
+            supplierName: foundProduct.supplierName,
+          }
+        : null,
+      allProductsInInventory: (await ReportInHand.find({}))
+        .map((p) => p.productName)
+        .slice(0, 20), // First 20 products
     });
   } catch (error) {
     console.error("Debug error:", error);
