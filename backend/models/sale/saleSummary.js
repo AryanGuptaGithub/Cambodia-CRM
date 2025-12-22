@@ -8,6 +8,7 @@ const roundToTwo = (value) =>
 // Product Subschema
 const productSchema = new Schema({
   productName: { type: String, required: true },
+  originalProductName: { type: String }, // Store the original name from import
   salesQty: { type: Number, required: true }, // Allow negative for returns
   bonusQty: { type: Number, default: 0 },
   totalQty: { type: Number, required: true },
@@ -19,28 +20,31 @@ const productSchema = new Schema({
   lc: { type: Number, required: true, set: roundToTwo },
   profitLoss: { type: Number, default: 0, set: roundToTwo },
   isProductAccept: { type: Boolean, default: true },
+  isExchangeProduct: { type: Boolean, default: false },
+  isReturnProduct: { type: Boolean, default: false },
 });
 
 // Sale Summary Schema
 const saleSummarySchema = new Schema(
   {
     recordingDate: { type: Date, required: true },
-    invoiceNumber: { type: String, required: true, trim: true },
+    invoiceNumber: { type: String, required: true, trim: true, unique: true },
     invoiceDate: { type: Date, required: true },
     mrName: { type: String, required: true, trim: true },
     mrId: {
       type: Schema.Types.ObjectId,
-      ref: "MedicalRepresentative",
+      ref: "Staff",
       required: false,
     },
     customerName: { type: String, required: true, trim: true },
     customerId: {
       type: Schema.Types.ObjectId,
       ref: "Customer",
-      required: true,
+      required: false, // Changed to false for imports
     },
+    customerCode: { type: String, trim: true },
     products: [productSchema],
-    creditDays: { type: Number, default: null, min: 0 },
+    creditDays: { type: Number, default: 0, min: 0 },
     dueDate: { type: Date },
     deliveryDate: { type: Date },
     paidAmount: { type: Number, default: 0, min: 0, set: roundToTwo },
@@ -48,18 +52,14 @@ const saleSummarySchema = new Schema(
     totalAmount: { type: Number, required: true, set: roundToTwo },
     paymentStatus: {
       type: String,
-      enum: ["Cash", "Credit", "Partial Paid", "Overdue"],
+      enum: ["Cash", "Credit", "Partial Paid", "Paid", "Return"],
       default: "Credit",
     },
     remark: { type: String, default: "", trim: true },
-
-    // NEW FIELD: To classify transaction type
-    transactionType: {
-      type: String,
-      enum: ["regular", "return", "exchange"],
-      default: "regular",
-      index: true,
-    },
+    isExchange: { type: Boolean, default: false },
+    isReturn: { type: Boolean, default: false },
+    importBatchId: { type: Number },
+    importStatus: { type: String, default: "pending" },
   },
   {
     timestamps: true,
@@ -72,7 +72,9 @@ const saleSummarySchema = new Schema(
 saleSummarySchema.index({ invoiceNumber: 1 }, { unique: true });
 saleSummarySchema.index({ customerId: 1, invoiceDate: -1 });
 saleSummarySchema.index({ mrId: 1, recordingDate: -1 });
-saleSummarySchema.index({ transactionType: 1 }); // For fast filtering
+saleSummarySchema.index({ isExchange: 1 });
+saleSummarySchema.index({ isReturn: 1 });
+saleSummarySchema.index({ paymentStatus: 1 });
 
 const SaleSummary = mongoose.model("SaleSummary", saleSummarySchema);
 export default SaleSummary;

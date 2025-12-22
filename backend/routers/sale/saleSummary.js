@@ -6,19 +6,21 @@ import ExcelJS from "exceljs";
 import SalesReturn from "../../models/sale/saleReturn.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
 import Customer from "../../models/master/customer.js";
+import MRCash from "../../models/accounts/MRCash.js";
+import Staff from "../../models/staffMember/staff.js"; // Added Staff import
+import mongoose from "mongoose";
 
 const router = express.Router();
 
 let importProgressMap = new Map(); // Store progress per session
 
-// NEW: Function to create unique session ID
 const createSessionId = () =>
   `import_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
 // 🔥 ENHANCED: Better product name normalization
 const normalizeProductName = (name) => {
   if (!name) return "";
-  
+
   return name
     .trim()
     .toLowerCase()
@@ -27,7 +29,201 @@ const normalizeProductName = (name) => {
     .trim();
 };
 
-// 🔥 ENHANCED: Product name mapping for common variations
+// 🔥 CORRECTED: Function to add cash to MR for cash/paid sales
+const addCashToMR = async (saleData, existingCashAmount = 0) => {
+  try {
+    const {
+      mrName,
+      mrId,
+      paidAmount,
+      invoiceNumber,
+      invoiceDate,
+      customerName,
+      paymentStatus,
+      recordingDate,
+    } = saleData;
+
+    console.log(`💰 Attempting to add cash to MR for invoice ${invoiceNumber}`);
+    console.log(`MR Name: ${mrName}, MR ID: ${mrId}, Amount: $${paidAmount}`);
+
+    // Only add to MR cash if payment is Cash or Paid and has positive paid amount
+    if (
+      (paymentStatus === "Cash" || paymentStatus === "Paid") &&
+      paidAmount > 0
+    ) {
+      // First, try to find the MR (staff member) by name or ID
+      let mrStaff = null;
+
+      if (mrId) {
+        mrStaff = await Staff.findById(mrId);
+        console.log(`Found MR by ID: ${mrId}, Name: ${mrStaff?.name || 'Not found'}`);
+      }
+
+      if (!mrStaff && mrName) {
+        // Try to find by name
+        mrStaff = await Staff.findOne({
+          $or: [
+            { name: { $regex: new RegExp(mrName.trim(), "i") } },
+            { email: { $regex: new RegExp(mrName.trim(), "i") } },
+          ],
+        });
+        console.log(`Found MR by name "${mrName}": ${mrStaff?.name || 'Not found'}`);
+      }
+
+      if (!mrStaff) {
+        console.log(`⚠️ MR not found: ${mrName}, cash will not be recorded`);
+        return { success: false, reason: "MR not found" };
+      }
+
+      console.log(`✅ MR found: ${mrStaff.name}, ID: ${mrStaff._id}`);
+
+      // Find or create MR cash record
+      let mrCash = await MRCash.findOne({ mrId: mrStaff._id });
+      console.log(`MRCASH record found: ${mrCash ? 'Yes' : 'No'}`);
+
+      const cashDate = invoiceDate || new Date();
+
+      if (!mrCash) {
+        // Create new MR cash record
+        mrCash = new MRCash({
+          mrId: mrStaff._id,
+          mrName: mrStaff.name || mrName.trim(),
+          currentCash: parseFloat(paidAmount) || 0,
+          cashTransferredToAdmin: 0,
+          lastTransferDate: null,
+          notes: `Initial cash from sale invoice ${invoiceNumber}`,
+          isActive: true,
+        });
+        await mrCash.save();
+        console.log(
+          `💰 Created new cash record for MR ${
+            mrStaff.name || mrName
+          }: $${paidAmount}, ID: ${mrCash._id}`
+        );
+      } else {
+        // Update existing MR cash record
+        const currentTotal = parseFloat(mrCash.currentCash) || 0;
+        const newAmount = parseFloat(paidAmount) || 0;
+
+        // If editing and we have existing cash amount, adjust accordingly
+        let netAmount = newAmount;
+        if (existingCashAmount > 0) {
+          netAmount = newAmount - existingCashAmount;
+        }
+
+        mrCash.currentCash = currentTotal + netAmount;
+
+        // Add note about the transaction
+        mrCash.notes = `Added $${netAmount} from sale invoice ${invoiceNumber} (customer: ${
+          customerName || "Unknown"
+        })`;
+
+        mrCash.updatedAt = new Date();
+        await mrCash.save();
+        console.log(
+          `💰 Updated cash for MR ${
+            mrStaff.name || mrName
+          }: Added $${netAmount} (Total: $${mrCash.currentCash})`
+        );
+      }
+
+      return {
+        success: true,
+        mrName: mrStaff.name || mrName,
+        mrId: mrStaff._id,
+        amountAdded: parseFloat(paidAmount) || 0,
+        currentCash: mrCash.currentCash,
+      };
+    }
+
+    console.log(`ℹ️ Not a cash/paid sale or zero amount: ${paymentStatus}, $${paidAmount}`);
+    return { success: false, reason: "Not a cash/paid sale or zero amount" };
+  } catch (error) {
+    console.error("❌ Error adding cash to MR:", error);
+    throw error;
+  }
+};
+
+// 🔥 CORRECTED: Function to remove cash from MR (for returns/edits/deletes)
+const removeCashFromMR = async (saleData) => {
+  try {
+    const { mrName, mrId, paidAmount, invoiceNumber } = saleData;
+
+    console.log(`💰 Attempting to remove cash from MR for invoice ${invoiceNumber}`);
+    console.log(`MR Name: ${mrName}, MR ID: ${mrId}, Amount: $${paidAmount}`);
+
+    // Only remove if there was cash involved
+    if (
+      (saleData.paymentStatus === "Cash" ||
+        saleData.paymentStatus === "Paid") &&
+      paidAmount > 0
+    ) {
+      // Try to find MR first
+      let mrStaff = null;
+
+      if (mrId) {
+        mrStaff = await Staff.findById(mrId);
+        console.log(`Found MR by ID: ${mrId}, Name: ${mrStaff?.name || 'Not found'}`);
+      }
+
+      if (!mrStaff && mrName) {
+        mrStaff = await Staff.findOne({
+          $or: [
+            { name: { $regex: new RegExp(mrName.trim(), "i") } },
+            { email: { $regex: new RegExp(mrName.trim(), "i") } },
+          ],
+        });
+        console.log(`Found MR by name "${mrName}": ${mrStaff?.name || 'Not found'}`);
+      }
+
+      if (!mrStaff) {
+        console.log(`⚠️ MR not found for cash removal: ${mrName}`);
+        return { success: false, reason: "MR not found" };
+      }
+
+      const mrCash = await MRCash.findOne({ mrId: mrStaff._id });
+      console.log(`MRCASH record found: ${mrCash ? 'Yes' : 'No'}`);
+
+      if (mrCash) {
+        const removeAmount = parseFloat(paidAmount) || 0;
+        mrCash.currentCash = Math.max(
+          0,
+          (parseFloat(mrCash.currentCash) || 0) - removeAmount
+        );
+
+        // Add note about the removal
+        mrCash.notes = `Removed $${removeAmount} due to sale deletion/return (invoice: ${invoiceNumber})`;
+
+        mrCash.updatedAt = new Date();
+        await mrCash.save();
+        console.log(
+          `💰 Removed cash for MR ${
+            mrStaff.name || mrName
+          }: Deducted $${removeAmount} (Total: $${mrCash.currentCash})`
+        );
+
+        return {
+          success: true,
+          mrName: mrStaff.name || mrName,
+          amountRemoved: removeAmount,
+          currentCash: mrCash.currentCash,
+        };
+      } else {
+        console.log(
+          `⚠️ No cash record found for MR: ${mrStaff.name || mrName}`
+        );
+        return { success: false, reason: "No cash record found" };
+      }
+    }
+
+    console.log(`ℹ️ No cash to remove: ${saleData.paymentStatus}, $${paidAmount}`);
+    return { success: false, reason: "No cash to remove" };
+  } catch (error) {
+    console.error("❌ Error removing cash from MR:", error);
+    throw error;
+  }
+};
+
 const productNameFixMap = {
   // Existing mappings
   "n-lycopene + wheatgerm oil": "N-LYCOPENE + WHEATGERM OIL",
@@ -49,25 +245,26 @@ const productNameFixMap = {
   "nigella oil": "N-NIGELLA OIL",
   "n krill oil": "N-KRILL OIL",
   "krill oil": "N-KRILL OIL",
-  "n sea buckthorn & oil lutein extract": "N-SEA BUCKTHORN & OIL LUTEIN EXTRACT",
+  "n sea buckthorn & oil lutein extract":
+    "N-SEA BUCKTHORN & OIL LUTEIN EXTRACT",
   "sea buckthorn & oil lutein extract": "N-SEA BUCKTHORN & OIL LUTEIN EXTRACT",
-  
+
   // 🔥 NEW: ECOMOL variations
   "ecomol 500": "ECOMOL 500",
-  "ecomol500": "ECOMOL 500",
+  ecomol500: "ECOMOL 500",
   "ecomol-500": "ECOMOL 500",
-  "ecomol": "ECOMOL 500",
-  
+  ecomol: "ECOMOL 500",
+
   // 🔥 NEW: General pattern for products with numbers
   "500mg": "500 MG",
   "500 mg": "500 MG",
-  "500": "500 MG",
+  500: "500 MG",
 };
 
 // 🔥 NEW: Function to remove all spaces and special characters for comparison
 const getStrictNormalizedProductName = (name) => {
   if (!name) return "";
-  
+
   return name
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "") // Remove all non-alphanumeric characters
@@ -78,85 +275,93 @@ const getStrictNormalizedProductName = (name) => {
 const findProductInInventory = async (productName) => {
   try {
     const normalizedProductName = normalizeProductName(productName);
-    const strictNormalizedProductName = getStrictNormalizedProductName(productName);
-    
+    const strictNormalizedProductName =
+      getStrictNormalizedProductName(productName);
+
     // First, check the fix map
-    const fixedProductName = productNameFixMap[normalizedProductName] || productNameFixMap[strictNormalizedProductName];
-    
+    const fixedProductName =
+      productNameFixMap[normalizedProductName] ||
+      productNameFixMap[strictNormalizedProductName];
+
     if (fixedProductName) {
       // Try exact match with the fixed name
       const exactMatchWithFixed = await ReportInHand.findOne({
         productName: { $regex: new RegExp(`^${fixedProductName}$`, "i") },
       });
-      
+
       if (exactMatchWithFixed) {
         return exactMatchWithFixed;
       }
     }
-    
+
     // 🔥 NEW: Get all products from inventory for better matching
     const allProducts = await ReportInHand.find({});
-    
+
     // 🔥 NEW: Try multiple matching strategies
     for (const product of allProducts) {
       const inventoryNormalized = normalizeProductName(product.productName);
-      const inventoryStrict = getStrictNormalizedProductName(product.productName);
-      
+      const inventoryStrict = getStrictNormalizedProductName(
+        product.productName
+      );
+
       // Strategy 1: Exact match (case-insensitive)
       if (product.productName.toLowerCase() === productName.toLowerCase()) {
         return product;
       }
-      
+
       // Strategy 2: Normalized match
       if (inventoryNormalized === normalizedProductName) {
         return product;
       }
-      
+
       // Strategy 3: Strict normalized match (remove all non-alphanumeric)
       if (inventoryStrict === strictNormalizedProductName) {
         return product;
       }
-      
+
       // Strategy 4: Contains match
-      if (product.productName.toLowerCase().includes(productName.toLowerCase()) ||
-          productName.toLowerCase().includes(product.productName.toLowerCase())) {
+      if (
+        product.productName.toLowerCase().includes(productName.toLowerCase()) ||
+        productName.toLowerCase().includes(product.productName.toLowerCase())
+      ) {
         return product;
       }
-      
+
       // Strategy 5: Handle ECOMOL specifically
-      if (productName.toLowerCase().includes("ecomol") && 
-          product.productName.toLowerCase().includes("ecomol")) {
-        
+      if (
+        productName.toLowerCase().includes("ecomol") &&
+        product.productName.toLowerCase().includes("ecomol")
+      ) {
         // Extract numbers from both names
         const inputNumber = productName.replace(/\D/g, "") || "500";
         const productNumber = product.productName.replace(/\D/g, "") || "500";
-        
+
         if (inputNumber === productNumber) {
           return product;
         }
       }
     }
-    
+
     // 🔥 NEW: Try fuzzy matching for common product patterns
     const searchTerm = productName.toLowerCase();
-    
+
     for (const product of allProducts) {
       const productTerm = product.productName.toLowerCase();
-      
+
       // Check for common patterns
       if (productTerm.includes("ecomol") && searchTerm.includes("ecomol")) {
         return product;
       }
-      
+
       // Check for same base name with different numbers
       const baseName = searchTerm.replace(/\d+/g, "").trim();
       const productBaseName = productTerm.replace(/\d+/g, "").trim();
-      
+
       if (baseName === productBaseName && baseName.length > 3) {
         return product;
       }
     }
-    
+
     return null;
   } catch (error) {
     console.error(`Error finding product "${productName}":`, error);
@@ -216,7 +421,6 @@ const isReturnTransaction = (remark, paymentStatus) => {
   return hasReturnKeyword || isReturnStatus;
 };
 
-// 🔥 MODIFIED: Enhanced updateReportInHandAfterSale function
 const updateReportInHandAfterSale = async (productName, salesQty, bonusQty) => {
   try {
     const totalQtyToUpdate = salesQty + bonusQty;
@@ -355,7 +559,6 @@ const updateReportInHandAfterSale = async (productName, salesQty, bonusQty) => {
   }
 };
 
-// 🔥 MODIFIED: Function to handle exchange transactions specifically
 const updateInventoryForExchange = async (
   productName,
   salesQty,
@@ -645,6 +848,8 @@ const parseQuantityWithParenthesis = (quantity) => {
   return 0;
 };
 
+
+// 🔥 FIXED: CRITICAL FIX - Update the processImportBatch function
 const processImportBatch = async (
   batch,
   batchIndex,
@@ -662,6 +867,7 @@ const processImportBatch = async (
     failed: 0,
     errors: [],
     inventoryUpdates: [],
+    cashUpdates: [],
     batchIndex,
     totalBatches,
   };
@@ -672,20 +878,22 @@ const processImportBatch = async (
   importProgress.processedInCurrentBatch = 0;
   importProgress.lastUpdated = Date.now();
 
-  // 🔥 FIXED: Process batch sequentially to avoid race conditions
+  // Process each sale in the batch
   for (let i = 0; i < batch.length; i++) {
     const saleData = batch[i];
     const globalIndex = importProgress.processedInvoices + i + 1;
 
     try {
-      // 🔥 IMPORTANT: Update progress for each record
+      // Update progress for each record
       importProgress.currentBatchProgress = Math.round(
         ((i + 1) / batch.length) * 100
       );
       importProgress.processedInCurrentBatch = i + 1;
       importProgress.lastUpdated = Date.now();
 
-      // Quick validation
+      console.log(`\n🔵 Processing invoice ${i + 1}: ${saleData.invoiceNumber}`);
+
+      // Basic validation
       if (!saleData.invoiceNumber || saleData.invoiceNumber.trim() === "") {
         throw new Error("Invoice number is missing");
       }
@@ -709,335 +917,474 @@ const processImportBatch = async (
         );
       }
 
-      // Check for parenthesis in sales quantity
-      let hasParenthesisQuantity = false;
-      saleData.products.forEach((product) => {
-        const salesQtyStr = String(product.salesQty || "");
-        if (
-          salesQtyStr.trim().startsWith("(") &&
-          salesQtyStr.trim().endsWith(")")
-        ) {
-          hasParenthesisQuantity = true;
-        }
-      });
-
-      // Check if this is a return transaction
-      const isReturn =
-        isReturnTransaction(saleData.remark, saleData.paymentStatus) ||
-        hasParenthesisQuantity;
-
-      // Check if this is an exchange transaction
-      const isExchange =
-        saleData.remark?.toLowerCase().includes("exchange") ||
-        saleData.products.some((p) =>
-          (p.remark || "").toLowerCase().includes("exchange")
-        ) ||
-        saleData.isExchange;
-
-      // 🔥 NEW REQUIREMENT: If quantity has parenthesis but remark doesn't have return/returns keywords
-      if (hasParenthesisQuantity && !isReturn && !isExchange) {
-        throw new Error(
-          `Invalid transaction: Quantity in parenthesis found but remarks don't contain return/returns keywords for invoice ${saleData.invoiceNumber}`
+      // Get or create customer
+      let customerInfo;
+      try {
+        customerInfo = await getOrCreateCustomer({
+          customerId: saleData.customerId,
+          customerName: saleData.customerName,
+          customerCode: saleData.customerCode,
+        });
+      } catch (customerError) {
+        console.error(
+          `Customer error for invoice ${saleData.invoiceNumber}:`,
+          customerError.message
         );
+        // Use default customer
+        customerInfo = {
+          customerId: new mongoose.Types.ObjectId(),
+          customerName: saleData.customerName || "Unknown Customer",
+          customerCode: saleData.customerCode || "UNKNOWN",
+        };
       }
 
-      // Handle customer data
-      const customerInfo = await getOrCreateCustomer({
-        customerId: saleData.customerId,
-        customerName: saleData.customerName,
-        customerCode: saleData.customerCode,
-      });
+      console.log(`Customer: ${customerInfo.customerName}`);
 
-      let productUpdates = [];
-      let stockErrors = [];
+      // Determine transaction type
+      const isReturn = isReturnTransaction(
+        saleData.remark,
+        saleData.paymentStatus
+      );
+      const isExchange =
+        saleData.remark?.toLowerCase().includes("exchange") ||
+        (Array.isArray(saleData.products) &&
+          saleData.products.some((p) =>
+            (p.remark || "").toLowerCase().includes("exchange")
+          ));
 
-      // 🔥 MODIFIED: Process each product with better error handling
+      console.log(`Transaction Type - Return: ${isReturn}, Exchange: ${isExchange}`);
+
+      // Process products and calculate totals
+      const processedProducts = [];
+      let totalAmount = 0;
+
       for (const product of saleData.products) {
-        let salesQty = parseQuantityWithParenthesis(product.salesQty);
-        let bonusQty = parseQuantityWithParenthesis(product.bonusQty);
+        const salesQty = parseQuantityWithParenthesis(product.salesQty);
+        const bonusQty = parseQuantityWithParenthesis(product.bonusQty) || 0;
         const totalQty = salesQty + bonusQty;
 
-        // Skip zero quantity products
         if (totalQty === 0) {
-          continue;
+          continue; // Skip zero quantity products
         }
 
-        // 🔥 FIXED: Use enhanced product finder
+        // Find product in inventory
         const existingProduct = await findProductInInventory(
           product.productName
         );
 
         if (!existingProduct) {
-          // For returns, we can proceed without inventory check
-          if (isReturn) {
-          
-            productUpdates.push({
-              productName: product.productName,
-              originalProductName: product.productName,
-              salesQty: salesQty,
-              bonusQty: bonusQty,
-              totalQty: totalQty,
-              lcValue: 0,
-              isOutgoing: false,
-              isReturn: isReturn,
-              isExchange: isExchange,
-            });
-          } else {
-            // Try to debug why product not found
-            
-            const allProducts = await ReportInHand.find({});
-            const availableProducts = allProducts.map((p) => p.productName);
+          throw new Error(
+            `Product "${product.productName}" not found in inventory`
+          );
+        }
 
-            throw new Error(
-              `Product "${product.productName}" not found in inventory. ` +
-                `Available products: ${availableProducts.join(", ")}`
-            );
-          }
+        console.log(`✓ Product found: ${product.productName} -> ${existingProduct.productName}`);
+
+        let lcValue = 0;
+        let actualProductName = existingProduct.productName;
+
+        if (existingProduct) {
+          lcValue = existingProduct.lc || existingProduct.batches?.[0]?.lc || 0;
+        }
+
+        // Update inventory based on transaction type
+        if (isReturn) {
+          // Returns add stock back to inventory
+          await updateReportInHandAfterSale(
+            actualProductName,
+            -Math.abs(salesQty),
+            -Math.abs(bonusQty)
+          );
+        } else if (isExchange && totalQty < 0) {
+          // Exchange incoming (negative quantity) - add to inventory
+          await updateInventoryForExchange(
+            actualProductName,
+            salesQty,
+            bonusQty,
+            true
+          );
+        } else if (isExchange && totalQty > 0) {
+          // Exchange outgoing (positive quantity) - deduct from inventory
+          await updateInventoryForExchange(
+            actualProductName,
+            salesQty,
+            bonusQty,
+            false
+          );
         } else {
-          // 🔥 FIXED: Calculate current stock correctly
-          let currentStock = 0;
-          if (
-            existingProduct.batches &&
-            Array.isArray(existingProduct.batches) &&
-            existingProduct.batches.length > 0
-          ) {
-            currentStock = existingProduct.batches.reduce(
-              (total, batch) => total + (batch.boxes || 0),
-              0
-            );
-          } else if (existingProduct.totalBoxes !== undefined) {
-            currentStock = existingProduct.totalBoxes;
-          } else if (existingProduct.currentStock !== undefined) {
-            currentStock = existingProduct.currentStock;
-          } else {
-            currentStock = existingProduct.boxes || 0;
-          }
+          // Regular sale - deduct from inventory
+          await updateReportInHandAfterSale(
+            actualProductName,
+            salesQty,
+            bonusQty
+          );
+        }
 
-          // 🔥 FIXED: Stock validation logic
-          if (!isReturn && !isExchange) {
-            // For regular sales (non-return, non-exchange)
-            if (totalQty > 0 && currentStock < totalQty) {
-              stockErrors.push({
-                product: product.productName,
-                error: `Insufficient stock: Available ${currentStock}, Required ${totalQty}, Deficit: ${
-                  totalQty - currentStock
-                }`,
-              });
-            }
-          } else if (isExchange && totalQty > 0) {
-            // For outgoing exchanges (positive quantities)
-            if (currentStock < totalQty) {
-              stockErrors.push({
-                product: product.productName,
-                error: `Insufficient stock for exchange: Available ${currentStock}, Required ${totalQty}, Deficit: ${
-                  totalQty - currentStock
-                }`,
-              });
-            }
-          }
+        // Calculate profit/loss
+        const netSellingAmount = Number(product.netSellingAmount) || 0;
+        const profitLoss =
+          (isReturn ? -1 : 1) *
+          (netSellingAmount - Math.abs(totalQty) * lcValue);
 
-          if (stockErrors.length === 0) {
-            productUpdates.push({
-              productName: existingProduct.productName || product.productName,
-              originalProductName: product.productName,
-              salesQty: salesQty,
-              bonusQty: bonusQty,
-              totalQty: totalQty,
-              lcValue:
-                existingProduct.lc || existingProduct.batches?.[0]?.lc || 0,
-              isOutgoing: totalQty > 0,
-              isReturn: isReturn,
-              isExchange: isExchange,
-            });
-          }
+        processedProducts.push({
+          productName: actualProductName,
+          originalProductName: product.productName,
+          salesQty: salesQty,
+          bonusQty: bonusQty,
+          totalQty: totalQty,
+          sellingPrice: Number(product.sellingPrice) || 0,
+          amount: Number(product.amount) || 0,
+          discount: Number(product.discount) || 0,
+          netSellingAmount: netSellingAmount,
+          averageUnitPrice: Number(product.averageUnitPrice) || 0,
+          lc: lcValue,
+          profitLoss: profitLoss,
+          isProductAccept:
+            product.isProductAccept !== undefined
+              ? product.isProductAccept
+              : true,
+          isExchangeProduct: isExchange,
+          isReturnProduct: isReturn,
+        });
+
+        totalAmount += netSellingAmount;
+      }
+
+      if (processedProducts.length === 0) {
+        throw new Error("No valid products to import");
+      }
+
+      // Calculate totals
+      const paidAmount = Number(saleData.paidAmount) || 0;
+      const dueAmount = totalAmount - paidAmount;
+
+      // Find MR (staff)
+      let mrStaff = null;
+      if (saleData.mrName && saleData.mrName.trim() !== "No MR Name Provided") {
+        mrStaff = await Staff.findOne({
+          $or: [
+            { name: { $regex: new RegExp(saleData.mrName.trim(), "i") } },
+            { email: { $regex: new RegExp(saleData.mrName.trim(), "i") } },
+          ],
+        });
+
+        if (mrStaff) {
+          console.log(`✅ MR found: ${mrStaff.name}, ID: ${mrStaff._id}`);
+        } else {
+          console.log(`⚠️ MR not found by name: ${saleData.mrName}`);
         }
       }
 
-      if (stockErrors.length > 0) {
-        throw new Error(
-          `Stock validation failed: ${stockErrors
-            .map((e) => e.error)
-            .join(", ")}`
-        );
-      }
+      // Parse dates
+      const recordingDate =
+        parseDateString(saleData.recordingDate) || new Date();
+      const invoiceDate = parseDateString(saleData.invoiceDate) || new Date();
+      const dueDate = saleData.dueDate
+        ? parseDateString(saleData.dueDate)
+        : null;
+      const deliveryDate = parseDateString(saleData.deliveryDate) || new Date();
 
-      // If no products after filtering zero quantities, skip this invoice
-      if (productUpdates.length === 0) {
-        console.log(
-          `⚠️ Invoice ${saleData.invoiceNumber} has only zero-quantity products, skipping`
-        );
-        batchResults.success++;
-        importProgress.successful++;
-        importProgress.processedInvoices++;
-        importProgress.lastUpdated = Date.now();
-        continue;
-      }
-
-      // 🔥 CRITICAL FIX: Update inventory AFTER validation but BEFORE saving
-      for (const update of productUpdates) {
-        try {
-          if (update.isExchange) {
-            await updateInventoryForExchange(
-              update.productName,
-              update.salesQty,
-              update.bonusQty,
-              update.totalQty <= 0
-            );
-          } else {
-            await updateReportInHandAfterSale(
-              update.productName,
-              update.salesQty,
-              update.bonusQty
-            );
-          }
-
-          batchResults.inventoryUpdates.push({
-            invoiceNumber: saleData.invoiceNumber,
-            productName: update.productName,
-            originalProductName: update.originalProductName,
-            qty: update.totalQty,
-            status:
-              update.totalQty < 0
-                ? "added_to_inventory"
-                : "deducted_from_inventory",
-            transactionType: update.isExchange
-              ? "exchange"
-              : update.isReturn
-              ? "return"
-              : "sale",
-          });
-        } catch (inventoryError) {
-          // 🔥 FIXED: For return transactions, don't fail on inventory update
-          if (update.isReturn) {
-            console.warn(
-              `⚠️ Could not update inventory for return: ${inventoryError.message}`
-            );
-          } else {
-            throw new Error(
-              `Inventory update failed for ${update.productName}: ${inventoryError.message}`
-            );
-          }
-        }
-      }
-
-      // Create the sale record
-      const newSale = new SaleSummary({
-        recordingDate: parseDateString(saleData.recordingDate) || new Date(),
-        invoiceNumber: saleData.invoiceNumber,
-        invoiceDate: parseDateString(saleData.invoiceDate) || new Date(),
-        mrName: saleData.mrName || "No MR Name Provided", // 🔥 FIXED: Added default value
+      // 🔥 CRITICAL FIX: Create the sale record with proper data
+      const newSaleData = {
+        recordingDate: recordingDate,
+        invoiceNumber: saleData.invoiceNumber.toString().trim(),
+        invoiceDate: invoiceDate,
+        mrName: saleData.mrName || "No MR Name Provided",
+        mrId: mrStaff ? mrStaff._id : null,
         customerName: customerInfo.customerName,
         customerCode: customerInfo.customerCode,
         customerId: customerInfo.customerId,
-        products: productUpdates.map((update, idx) => {
-          const originalProduct = saleData.products[idx];
-          return {
-            productName: update.productName,
-            originalProductName: update.originalProductName,
-            salesQty: update.salesQty,
-            bonusQty: update.bonusQty,
-            totalQty: update.totalQty,
-            sellingPrice: Number(originalProduct.sellingPrice) || 0,
-            amount: Number(originalProduct.amount) || 0,
-            discount: Number(originalProduct.discount) || 0,
-            netSellingAmount: Number(originalProduct.netSellingAmount) || 0,
-            averageUnitPrice: Number(originalProduct.averageUnitPrice) || 0,
-            lc: update.lcValue || 0,
-            profitLoss: Number(originalProduct.profitLoss) || 0,
-            isProductAccept:
-              originalProduct.isProductAccept !== undefined
-                ? originalProduct.isProductAccept
-                : true,
-            isExchangeProduct: update.isExchange,
-            isReturnProduct: update.isReturn,
-          };
-        }),
+        products: processedProducts,
         creditDays: saleData.creditDays ? Number(saleData.creditDays) : 0,
-        dueDate: saleData.dueDate ? parseDateString(saleData.dueDate) : null,
-        deliveryDate: parseDateString(saleData.deliveryDate) || new Date(),
-        paidAmount: Number(saleData.paidAmount) || 0,
-        dueAmount: Number(saleData.dueAmount) || 0,
-        totalAmount: Number(saleData.totalAmount) || 0,
+        dueDate: dueDate,
+        deliveryDate: deliveryDate,
+        paidAmount: paidAmount,
+        dueAmount: dueAmount,
+        totalAmount: totalAmount,
         paymentStatus: mapPaymentStatus(saleData.paymentStatus),
         remark: saleData.remark || "",
         importBatchId: batchIndex,
         importStatus: "imported",
         isExchange: isExchange,
         isReturn: isReturn,
+      };
+
+      console.log("Creating sale with data:", {
+        invoiceNumber: newSaleData.invoiceNumber,
+        customerName: newSaleData.customerName,
+        productCount: newSaleData.products.length,
+        totalAmount: newSaleData.totalAmount,
+        paymentStatus: newSaleData.paymentStatus,
+        paidAmount: newSaleData.paidAmount,
       });
 
+      // Save to database
+      const newSale = new SaleSummary(newSaleData);
       await newSale.save();
+
+      console.log(`✅ Successfully saved sale: ${newSale.invoiceNumber}, ID: ${newSale._id}`);
+
+      // Handle MR cash if payment is Cash/Paid
+      if (
+        (newSale.paymentStatus === "Cash" ||
+          newSale.paymentStatus === "Paid") &&
+        newSale.paidAmount > 0
+      ) {
+        try {
+          const cashResult = await addCashToMR({
+            mrName: newSale.mrName,
+            mrId: mrStaff ? mrStaff._id : null,
+            paidAmount: newSale.paidAmount,
+            invoiceNumber: newSale.invoiceNumber,
+            invoiceDate: newSale.invoiceDate,
+            customerName: newSale.customerName,
+            paymentStatus: newSale.paymentStatus,
+            recordingDate: newSale.recordingDate,
+          });
+
+          if (cashResult.success) {
+            batchResults.cashUpdates.push({
+              invoiceNumber: newSale.invoiceNumber,
+              mrName: newSale.mrName,
+              amount: newSale.paidAmount,
+              status: "added_to_mr_cash",
+            });
+            console.log(`💰 Cash added to MR: $${newSale.paidAmount}`);
+          } else {
+            console.log(`⚠️ Cash not added: ${cashResult.reason}`);
+          }
+        } catch (cashError) {
+          console.error(`⚠️ Failed to add cash to MR: ${cashError.message}`);
+        }
+      }
+
       batchResults.success++;
       importProgress.successful++;
       importProgress.processedInvoices++;
       importProgress.lastUpdated = Date.now();
 
-      // Update transaction type counters
-      if (isReturn) {
-        importProgress.transactionTypes.return++;
-      } else if (isExchange) {
-        importProgress.transactionTypes.exchange++;
-      } else {
-        importProgress.transactionTypes.regular++;
-      }
     } catch (error) {
       console.error(
-        `❌ Save failed for invoice ${saleData?.invoiceNumber || "Unknown"}:`,
+        `❌ Failed to import invoice ${saleData.invoiceNumber || "Unknown"}:`,
         error.message
       );
 
       batchResults.failed++;
+      batchResults.errors.push({
+        index: globalIndex - 1,
+        invoiceNumber: saleData.invoiceNumber || `Row-${globalIndex}`,
+        customerName: saleData.customerName || "Unknown",
+        error: error.message,
+        type: "import_error",
+        timestamp: new Date().toISOString(),
+      });
+
       importProgress.failed++;
       importProgress.processedInvoices++;
       importProgress.lastUpdated = Date.now();
-
-      const errorDetails = {
-        index: globalIndex,
-        invoiceNumber: saleData?.invoiceNumber || `Invoice-${globalIndex}`,
-        error: error.message,
-        customerName: saleData?.customerName || "Unknown",
-        products:
-          saleData?.products?.map((p) => ({
-            name: p.productName,
-            salesQty: p.salesQty,
-            bonusQty: p.bonusQty,
-          })) || [],
-        timestamp: new Date().toISOString(),
-      };
-
-      batchResults.errors.push(errorDetails);
-      importProgress.errors.push(errorDetails);
-
-      // 🔥 NEW: Track specific error types
-      if (error.message.includes("Insufficient stock")) {
-        importProgress.errorTypes = importProgress.errorTypes || {};
-        importProgress.errorTypes.insufficientStock =
-          (importProgress.errorTypes.insufficientStock || 0) + 1;
-      }
-      if (error.message.includes("already exists")) {
-        importProgress.errorTypes = importProgress.errorTypes || {};
-        importProgress.errorTypes.duplicate =
-          (importProgress.errorTypes.duplicate || 0) + 1;
-      }
-      if (error.message.includes("not found in inventory")) {
-        importProgress.errorTypes = importProgress.errorTypes || {};
-        importProgress.errorTypes.productNotFound =
-          (importProgress.errorTypes.productNotFound || 0) + 1;
-      }
     }
-
-    // 🔥 UPDATE PROGRESS BAR: Calculate overall progress
-    const overallProgress = Math.round(
-      (importProgress.processedInvoices / importProgress.totalInvoices) * 100
-    );
-    importProgress.progressPercentage = overallProgress;
   }
 
   // Final batch progress
   importProgress.currentBatchProgress = 100;
+  importProgressMap.set(sessionId, importProgress);
 
   return batchResults;
 };
+// Debug endpoint to check database status
+router.get("/debug/database-status", async (req, res) => {
+  try {
+    // Check connection
+    const dbStatus = mongoose.connection.readyState;
+    const dbStates = {
+      0: "disconnected",
+      1: "connected",
+      2: "connecting",
+      3: "disconnecting",
+    };
+
+    // Get collection counts
+    const saleCount = await SaleSummary.countDocuments();
+    const mrcashCount = await MRCash.countDocuments();
+    const staffCount = await Staff.countDocuments();
+    const customerCount = await Customer.countDocuments();
+
+    // Get sample data
+    const sampleSale = await SaleSummary.findOne().sort({ createdAt: -1 });
+    const sampleMRCASH = await MRCash.findOne().sort({ createdAt: -1 });
+
+    // Check indexes
+    const saleIndexes = await SaleSummary.collection.indexes();
+    const mrcashIndexes = await MRCash.collection.indexes();
+
+    res.json({
+      success: true,
+      database: {
+        status: dbStates[dbStatus],
+        name: mongoose.connection.name,
+        host: mongoose.connection.host,
+      },
+      collections: {
+        SaleSummary: {
+          count: saleCount,
+          collectionName: SaleSummary.collection.name,
+        },
+        MRCash: {
+          count: mrcashCount,
+          collectionName: MRCash.collection.name,
+        },
+        Staff: { count: staffCount },
+        Customer: { count: customerCount },
+      },
+      sampleData: {
+        latestSale: sampleSale
+          ? {
+              _id: sampleSale._id,
+              invoiceNumber: sampleSale.invoiceNumber,
+              mrName: sampleSale.mrName,
+              mrId: sampleSale.mrId,
+              paymentStatus: sampleSale.paymentStatus,
+              paidAmount: sampleSale.paidAmount,
+              createdAt: sampleSale.createdAt,
+            }
+          : null,
+        latestMRCASH: sampleMRCASH
+          ? {
+              _id: sampleMRCASH._id,
+              mrName: sampleMRCASH.mrName,
+              mrId: sampleMRCASH.mrId,
+              currentCash: sampleMRCASH.currentCash,
+              createdAt: sampleMRCASH.createdAt,
+            }
+          : null,
+      },
+      indexes: {
+        SaleSummary: saleIndexes.map(idx => ({
+          name: idx.name,
+          key: idx.key,
+          unique: idx.unique || false,
+        })),
+        MRCash: mrcashIndexes.map(idx => ({
+          name: idx.name,
+          key: idx.key,
+          unique: idx.unique || false,
+        })),
+      },
+    });
+  } catch (error) {
+    console.error("Database status error:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      stack: error.stack 
+    });
+  }
+});
+
+// Test endpoint to create a test sale with MR cash
+router.post("/debug/test-sale-with-cash", async (req, res) => {
+  try {
+    // Create test data
+    const testSaleData = {
+      recordingDate: new Date().toISOString().split("T")[0],
+      invoiceNumber: `TEST-CASH-${Date.now()}`,
+      invoiceDate: new Date().toISOString().split("T")[0],
+      mrName: "Test MR",
+      customerName: "Test Customer",
+      customerCode: "TEST001",
+      products: [
+        {
+          productName: "N-LYCOPENE + WHEATGERM OIL",
+          salesQty: 5,
+          bonusQty: 0,
+          sellingPrice: 100,
+          amount: 500,
+          discount: 0,
+          netSellingAmount: 500,
+          averageUnitPrice: 100,
+          lc: 50,
+          profitLoss: 250,
+          isProductAccept: true,
+        },
+      ],
+      creditDays: 0,
+      dueDate: new Date().toISOString().split("T")[0],
+      deliveryDate: new Date().toISOString().split("T")[0],
+      paidAmount: 500,
+      dueAmount: 0,
+      totalAmount: 500,
+      paymentStatus: "Cash",
+      remark: "Test cash sale",
+    };
+
+    // First check if MR exists
+    let mrStaff = await Staff.findOne({ name: "Test MR" });
+    if (!mrStaff) {
+      // Create test MR if doesn't exist
+      mrStaff = new Staff({
+        name: "Test MR",
+        email: `test.mr${Date.now()}@test.com`,
+        role: "Medical Representative",
+        isActive: true,
+      });
+      await mrStaff.save();
+      console.log(`✅ Created test MR: ${mrStaff.name}, ID: ${mrStaff._id}`);
+    }
+
+    // Create sale
+    const sale = new SaleSummary({
+      ...testSaleData,
+      mrId: mrStaff._id,
+      customerId: new mongoose.Types.ObjectId(),
+    });
+
+    await sale.save();
+    console.log(`✅ Created test sale: ${sale.invoiceNumber}, ID: ${sale._id}`);
+
+    // Add cash to MR
+    const cashResult = await addCashToMR({
+      mrName: sale.mrName,
+      mrId: sale.mrId,
+      paidAmount: sale.paidAmount,
+      invoiceNumber: sale.invoiceNumber,
+      invoiceDate: sale.invoiceDate,
+      customerName: sale.customerName,
+      paymentStatus: sale.paymentStatus,
+      recordingDate: sale.recordingDate,
+    });
+
+    // Verify cash was added
+    const mrCashRecord = await MRCash.findOne({ mrId: mrStaff._id });
+    
+    res.json({
+      success: true,
+      message: "Test sale created",
+      sale: {
+        id: sale._id,
+        invoiceNumber: sale.invoiceNumber,
+        mrName: sale.mrName,
+        mrId: sale.mrId,
+        paidAmount: sale.paidAmount,
+        paymentStatus: sale.paymentStatus,
+      },
+      cashResult,
+      mrCashRecord: mrCashRecord ? {
+        id: mrCashRecord._id,
+        mrName: mrCashRecord.mrName,
+        mrId: mrCashRecord.mrId,
+        currentCash: mrCashRecord.currentCash,
+        notes: mrCashRecord.notes,
+      } : null,
+    });
+  } catch (error) {
+    console.error("Test sale error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      stack: error.stack,
+    });
+  }
+});
 
 const initializeImportProgress = (sessionId, totalInvoices, batchSize) => {
   importProgressMap.set(sessionId, {
@@ -1059,67 +1406,140 @@ const initializeImportProgress = (sessionId, totalInvoices, batchSize) => {
     completed: false,
     errorTypes: {}, // Track types of errors
     estimatedTimeRemaining: null,
+    cashSalesCount: 0,
+    cashAmountAdded: 0,
+    result: null,
   });
 
   return sessionId;
 };
 
-const processImportAsync = async (sessionId, salesData, batchSize) => {
-  try {
-    // Validation
-    const validationResults = await validateImportData(salesData);
-    const validData = validationResults.validData;
+// 🔥 FIXED: Missing function - Add this after initializeImportProgress
+const updateImportProgress = (sessionId, updates) => {
+  const progress = importProgressMap.get(sessionId);
+  if (!progress) {
+    console.warn(`No progress found for session: ${sessionId}`);
+    return;
+  }
 
-    if (validData.length === 0) {
-      if (importProgressMap.has(sessionId)) {
-        const progress = importProgressMap.get(sessionId);
-        progress.errors = validationResults.errors;
-        progress.failed = salesData.length;
-        progress.completed = true;
-        progress.endTime = Date.now();
-        importProgressMap.set(sessionId, progress);
-      }
-      return;
+  // Update progress with new data
+  Object.assign(progress, updates, {
+    lastUpdated: Date.now(),
+  });
+
+  // Calculate progress percentage
+  if (progress.totalInvoices > 0) {
+    progress.progressPercentage = Math.round(
+      (progress.processedInvoices / progress.totalInvoices) * 100
+    );
+  }
+
+  importProgressMap.set(sessionId, progress);
+};
+
+const processImportAsync = async (sessionId, salesData, batchSize) => {
+  let importedCount = 0;
+  let failedCount = 0;
+  let failedInvoices = [];
+  let cashSalesCount = 0;
+  let totalCashAdded = 0;
+
+  try {
+    const importProgress = importProgressMap.get(sessionId);
+    if (!importProgress) {
+      throw new Error("Import progress not initialized");
     }
 
-    // Process in batches with progress tracking
-    for (let i = 0; i < validData.length; i += batchSize) {
-      const batchNumber = Math.floor(i / batchSize) + 1;
-      const batch = validData.slice(i, i + batchSize);
+    // Process in batches
+    for (let i = 0; i < salesData.length; i += batchSize) {
+      const batch = salesData.slice(i, i + batchSize);
 
-      // Update batch progress before processing
-      if (importProgressMap.has(sessionId)) {
-        const progress = importProgressMap.get(sessionId);
-        progress.currentBatchProgress = 0;
-        progress.processedInCurrentBatch = 0;
-        importProgressMap.set(sessionId, progress);
-      }
-
-      const batchResults = await processImportBatch(
+      const batchResult = await processImportBatch(
         batch,
-        batchNumber - 1,
-        Math.ceil(validData.length / batchSize),
+        Math.floor(i / batchSize),
+        Math.ceil(salesData.length / batchSize),
         sessionId
       );
+
+      importedCount += batchResult.success;
+      failedCount += batchResult.failed;
+      failedInvoices.push(...batchResult.errors);
+
+      // Track cash sales from batch
+      if (batchResult.cashUpdates && batchResult.cashUpdates.length > 0) {
+        cashSalesCount += batchResult.cashUpdates.length;
+        totalCashAdded += batchResult.cashUpdates.reduce(
+          (sum, update) => sum + update.amount,
+          0
+        );
+      }
+
+      // Update progress after each batch
+      const overallProgress = Math.round(
+        (importProgress.processedInvoices / importProgress.totalInvoices) * 100
+      );
+
+      updateImportProgress(sessionId, {
+        processedInvoices: importProgress.processedInvoices,
+        progressPercentage: overallProgress,
+        cashSalesCount: cashSalesCount,
+        cashAmountAdded: totalCashAdded,
+        successful: importedCount,
+        failed: failedCount,
+        transactionTypes: importProgress.transactionTypes || {
+          return: 0,
+          exchange: 0,
+          regular: 0,
+        },
+      });
     }
 
-    // Mark as complete
-    if (importProgressMap.has(sessionId)) {
-      const progress = importProgressMap.get(sessionId);
-      progress.completed = true;
-      progress.endTime = Date.now();
-      importProgressMap.set(sessionId, progress);
+    // Final progress update
+    updateImportProgress(sessionId, {
+      completed: true,
+      result: {
+        successfullyImported: importedCount,
+        failed: failedCount,
+        failedInvoices: failedInvoices,
+        cashSales: cashSalesCount,
+        cashAmount: totalCashAdded,
+        summary: {
+          total: salesData.length,
+          successful: importedCount,
+          failed: failedCount,
+          regularTransactions:
+            importedCount -
+            (importProgress.transactionTypes?.return || 0) -
+            (importProgress.transactionTypes?.exchange || 0),
+          returnTransactions: importProgress.transactionTypes?.return || 0,
+          exchangeTransactions: importProgress.transactionTypes?.exchange || 0,
+          cashSales: cashSalesCount,
+          cashAmount: totalCashAdded,
+        },
+      },
+    });
+
+    console.log(
+      `🎉 Import completed: ${importedCount} successful, ${failedCount} failed`
+    );
+    if (cashSalesCount > 0) {
+      console.log(
+        `💰 ${cashSalesCount} cash sales added to MR accounts: $${totalCashAdded}`
+      );
     }
   } catch (error) {
-    console.error(`❌ Async import failed for session ${sessionId}:`, error);
-    if (importProgressMap.has(sessionId)) {
-      const progress = importProgressMap.get(sessionId);
-      progress.errors.push({ error: error.message });
-      progress.failed = progress.totalInvoices - progress.successful;
-      progress.completed = true;
-      progress.endTime = Date.now();
-      importProgressMap.set(sessionId, progress);
-    }
+    console.error("🔥 Fatal error in import process:", error);
+    updateImportProgress(sessionId, {
+      completed: true,
+      error: error.message,
+      result: {
+        successfullyImported: importedCount,
+        failed: failedCount,
+        failedInvoices: failedInvoices,
+        cashSales: cashSalesCount,
+        cashAmount: totalCashAdded,
+      },
+    });
   }
 };
 
@@ -1273,6 +1693,7 @@ const validateImportData = async (salesData) => {
 // ============================================================================
 
 // NEW: Enhanced import endpoint with session support
+// NEW: Enhanced import endpoint with session support
 router.post("/sales/import", async (req, res) => {
   const sessionId = createSessionId();
   const batchSize = 50;
@@ -1280,33 +1701,103 @@ router.post("/sales/import", async (req, res) => {
   try {
     const salesData = req.body;
 
-    if (!Array.isArray(salesData) || salesData.length === 0) {
+    console.log("📥 Import request received");
+    console.log("Request body type:", typeof salesData);
+    console.log("Is array?", Array.isArray(salesData));
+    
+    if (salesData && typeof salesData === 'object' && !Array.isArray(salesData)) {
+      console.log("Request body keys:", Object.keys(salesData));
+    }
+
+    // ✅ CORRECTED: Check if it's an object with invoices property
+    let invoices = [];
+    if (Array.isArray(salesData)) {
+      invoices = salesData;
+      console.log(`Processing as array: ${invoices.length} items`);
+    } else if (salesData && Array.isArray(salesData.invoices)) {
+      invoices = salesData.invoices;
+      console.log(`Processing invoices array: ${invoices.length} items`);
+    } else if (salesData && salesData.invoices) {
+      invoices = [salesData.invoices];
+      console.log(`Processing single invoice`);
+    }
+
+    if (!invoices || invoices.length === 0) {
+      console.error("❌ No invoices to import");
       return res.status(400).json({
         success: false,
         message: "No data to import",
       });
     }
 
-    // 🔥 FIX: Ensure all sales data have mrName
-    salesData.forEach(sale => {
-      if (!sale.mrName || sale.mrName.trim() === "") {
-        sale.mrName = "No MR Name Provided";
-      }
+    console.log(`📊 Importing ${invoices.length} invoices...`);
+
+    // 🔥 FIX: Ensure all sales data have required fields
+    const validatedInvoices = invoices.map((sale, index) => {
+      // Ensure required fields exist
+      const invoiceNumber = sale.invoiceNumber || 
+        `IMPORT-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 9)}`;
+      
+      return {
+        recordingDate:
+          sale.recordingDate || new Date().toISOString().split("T")[0],
+        invoiceNumber: invoiceNumber,
+        invoiceDate: sale.invoiceDate || new Date().toISOString().split("T")[0],
+        mrName: sale.mrName || "No MR Name Provided",
+        customerName: sale.customerName || "Unknown Customer",
+        customerId: sale.customerId || new mongoose.Types.ObjectId(),
+        products: Array.isArray(sale.products)
+          ? sale.products.map((product) => ({
+              productName: product.productName || "Unknown Product",
+              salesQty: Number(product.salesQty) || 0,
+              bonusQty: Number(product.bonusQty) || 0,
+              totalQty:
+                (Number(product.salesQty) || 0) +
+                (Number(product.bonusQty) || 0),
+              sellingPrice: Number(product.sellingPrice) || 0,
+              amount: Number(product.amount) || 0,
+              discount: Number(product.discount) || 0,
+              netSellingAmount: Number(product.netSellingAmount) || 0,
+              averageUnitPrice: Number(product.averageUnitPrice) || 0,
+              lc: Number(product.lc) || 0,
+              profitLoss: Number(product.profitLoss) || 0,
+              isProductAccept: product.isProductAccept !== false,
+            }))
+          : [],
+        creditDays: Number(sale.creditDays) || 0,
+        dueDate:
+          sale.dueDate ||
+          new Date(
+            Date.now() + (Number(sale.creditDays) || 0) * 24 * 60 * 60 * 1000
+          )
+            .toISOString()
+            .split("T")[0],
+        deliveryDate:
+          sale.deliveryDate || new Date().toISOString().split("T")[0],
+        paidAmount: Number(sale.paidAmount) || 0,
+        dueAmount: Number(sale.dueAmount) || 0,
+        totalAmount: Number(sale.totalAmount) || 0,
+        paymentStatus: sale.paymentStatus || "Credit",
+        remark: sale.remark || "",
+        transactionType: sale.transactionType || "regular",
+      };
     });
 
-    // Initialize progress tracking (your existing function)
-    initializeImportProgress(sessionId, salesData.length, batchSize);
+    console.log(`✅ Validated ${validatedInvoices.length} invoices for import`);
+
+    // Initialize progress tracking
+    initializeImportProgress(sessionId, validatedInvoices.length, batchSize);
 
     // Respond immediately with session ID
     res.json({
       success: true,
       sessionId,
       message: "Import started",
-      totalInvoices: salesData.length,
+      totalInvoices: validatedInvoices.length,
     });
 
     // Process in background
-    processImportAsync(sessionId, salesData, batchSize);
+    processImportAsync(sessionId, validatedInvoices, batchSize);
   } catch (error) {
     console.error("🔥 Import initialization error:", error);
     res.status(500).json({
@@ -1317,7 +1808,7 @@ router.post("/sales/import", async (req, res) => {
   }
 });
 
-router.get("/import/progress/:sessionId", async (req, res) => {
+router.get("/sales/import/progress/:sessionId", async (req, res) => {
   try {
     const { sessionId } = req.params;
 
@@ -1342,32 +1833,45 @@ router.get("/import/progress/:sessionId", async (req, res) => {
       );
     }
 
-    // 🔥 FIXED: Return full error count but limit error details for performance
+    // 🔥 FIXED: Return the exact format expected by frontend
     const response = {
       success: true,
+      progress: {
+        percentage: progress.progressPercentage || 0,
+        processed: progress.processedInvoices || 0,
+        total: progress.totalInvoices || 0,
+        status: progress.completed ? "Import completed" : "Processing...",
+        completed: progress.completed || false,
+        result: progress.result || null,
+        // Additional fields for frontend
+        successful: progress.successful || 0,
+        failed: progress.failed || 0,
+        cashSales: progress.cashSalesCount || 0,
+        cashAmount: progress.cashAmountAdded || 0,
+        summary: {
+          successfullyImported: progress.successful || 0,
+          failed: progress.failed || 0,
+          regularTransactions: progress.transactionTypes?.regular || 0,
+          returnTransactions: progress.transactionTypes?.return || 0,
+          exchangeTransactions: progress.transactionTypes?.exchange || 0,
+          cashSales: progress.cashSalesCount || 0,
+          cashAmount: progress.cashAmountAdded || 0,
+        },
+      },
       sessionId,
       totalBatches: progress.totalBatches,
       currentBatch: progress.currentBatch,
-      processedInvoices: progress.processedInvoices,
-      totalInvoices: progress.totalInvoices,
-      successful: progress.successful,
-      failed: progress.failed,
-      insufficientStockProducts: progress.insufficientStockProducts
-        ? Array.from(progress.insufficientStockProducts.values()).slice(0, 20)
-        : [],
-      errorsCount: progress.errors.length, // 🔥 Return count instead of full array
-      startTime: progress.startTime,
-      transactionTypes: progress.transactionTypes,
       currentBatchProgress: progress.currentBatchProgress,
-      processedInCurrentBatch: progress.processedInCurrentBatch,
-      progressPercentage: progress.progressPercentage || 0,
       elapsedTime,
       estimatedTimeRemaining,
       errorTypes: progress.errorTypes || {},
-      completed: progress.completed || false,
-      // Sample of errors for preview
-      errorSamples: progress.errors.slice(0, 5), // 🔥 Only send first 5 for preview
     };
+
+    // 🔥 ADD THIS: Clean up old sessions (after 1 hour)
+    if (progress.completed && Date.now() - progress.lastUpdated > 3600000) {
+      importProgressMap.delete(sessionId);
+      console.log(`🗑️ Cleaned up old session: ${sessionId}`);
+    }
 
     res.json(response);
   } catch (error) {
@@ -1379,6 +1883,22 @@ router.get("/import/progress/:sessionId", async (req, res) => {
     });
   }
 });
+
+// 🔥 NEW: Clean up old sessions periodically
+const cleanupOldSessions = () => {
+  const now = Date.now();
+  const oneHourAgo = now - 3600000; // 1 hour in milliseconds
+
+  for (const [sessionId, progress] of importProgressMap.entries()) {
+    if (progress.completed && progress.lastUpdated < oneHourAgo) {
+      importProgressMap.delete(sessionId);
+      console.log(`🗑️ Cleaned up completed session: ${sessionId}`);
+    }
+  }
+};
+
+// Run cleanup every 30 minutes
+setInterval(cleanupOldSessions, 1800000);
 
 // 🔥 MODIFIED: Endpoint to get ALL failed invoices for a session
 router.get("/import/failed-invoices/:sessionId", async (req, res) => {
@@ -3177,29 +3697,20 @@ router.post("/sales", async (req, res) => {
       });
     }
 
-    let customerName = saleData.customerName;
-    if ((!customerName || customerName.trim() === "") && saleData.customerId) {
-      const customer = await Customer.findById(saleData.customerId).select(
-        "name"
-      );
-      if (customer) {
-        customerName = customer.name;
-      } else {
-        return res.status(400).json({
-          error: `Customer not found for ID: ${saleData.customerId}`,
-        });
-      }
-    }
-
-    if (!customerName) {
-      return res.status(400).json({
-        error: "Missing customerName and no valid customerId provided",
-      });
-    }
-
     // 🔥 FIX: Ensure mrName has a default value
     if (!saleData.mrName || saleData.mrName.trim() === "") {
       saleData.mrName = "No MR Name Provided";
+    }
+
+    // Try to find MR (staff) by name
+    let mrStaff = null;
+    if (saleData.mrName) {
+      mrStaff = await Staff.findOne({
+        $or: [
+          { name: { $regex: new RegExp(saleData.mrName.trim(), "i") } },
+          { email: { $regex: new RegExp(saleData.mrName.trim(), "i") } },
+        ],
+      });
     }
 
     // Check if this is a return transaction
@@ -3223,13 +3734,14 @@ router.post("/sales", async (req, res) => {
     const paidAmount = parseFloat(saleData.paidAmount) || 0;
     const dueAmount = totalAmount - paidAmount;
 
+    const paymentStatus = mapPaymentStatus(saleData.paymentStatus);
+
     // 🔥 MODIFIED: Process products with enhanced product finder
     const processedProducts = await Promise.all(
       saleData.products.map(async (product) => {
-        let salesQty = Number(product.salesQty);
+        let salesQty = Number(product.salesQty) || 0;
         let bonusQty = Number(product.bonusQty) || 0;
 
-        // For return transactions, ensure quantities are negative
         if (isReturn && salesQty > 0) {
           salesQty = -salesQty;
         }
@@ -3239,35 +3751,61 @@ router.post("/sales", async (req, res) => {
 
         const totalQty = salesQty + bonusQty;
 
-        // 🔥 FIXED: Use enhanced product finder
         const existingProduct = await findProductInInventory(
           product.productName
         );
+
+        if (!existingProduct && !isReturn && totalQty > 0) {
+          throw new Error(
+            `Product "${product.productName}" not found in inventory`
+          );
+        }
 
         let lcValue = 0;
         let actualProductName = product.productName;
 
         if (existingProduct) {
           lcValue = existingProduct.lc || existingProduct.batches?.[0]?.lc || 0;
-          actualProductName = existingProduct.productName; // Use the actual name from database
+          actualProductName = existingProduct.productName;
+        }
 
-          // Update inventory if not return and quantity is positive
-          if (!isReturn && totalQty > 0) {
+        if (totalQty > 0 && existingProduct) {
+          try {
+            if (isExchange) {
+              await updateInventoryForExchange(
+                actualProductName,
+                salesQty,
+                bonusQty,
+                false
+              );
+            } else {
+              await updateReportInHandAfterSale(
+                actualProductName,
+                salesQty,
+                bonusQty
+              );
+            }
+          } catch (inventoryError) {
+            throw new Error(
+              `Insufficient stock for ${product.productName}: ${inventoryError.message}`
+            );
+          }
+        } else if (totalQty < 0 && existingProduct) {
+          try {
             await updateReportInHandAfterSale(
               actualProductName,
               salesQty,
               bonusQty
             );
+          } catch (inventoryError) {
+            throw new Error(
+              `Failed to process return for ${product.productName}: ${inventoryError.message}`
+            );
           }
-        } else if (!isReturn && totalQty > 0) {
-          throw new Error(
-            `Product "${product.productName}" not found in inventory`
-          );
         }
 
         let profitLoss;
         if (isReturn) {
-          // For returns, profit/loss is typically negative (refund)
           profitLoss = -Math.abs(
             Number(product.netSellingAmount) - Math.abs(totalQty) * lcValue
           );
@@ -3298,11 +3836,21 @@ router.post("/sales", async (req, res) => {
       })
     );
 
+    // Get customer information
+    let customerName = saleData.customerName || "";
+    const customer = await Customer.findOne({
+      customerCode: saleData.customerCode,
+    });
+    if (customer) {
+      customerName = customer.name;
+    }
+
     const newSaleData = {
       recordingDate: new Date(saleData.recordingDate),
       invoiceNumber: saleData.invoiceNumber,
       invoiceDate: new Date(saleData.invoiceDate),
-      mrName: saleData.mrName || "No MR Name Provided", // 🔥 FIXED: Added default value
+      mrName: saleData.mrName || "No MR Name Provided",
+      mrId: mrStaff ? mrStaff._id : null, // Add MR ID if found
       customerName,
       customerCode: saleData.customerCode,
       customerId: saleData.customerId || "",
@@ -3315,13 +3863,47 @@ router.post("/sales", async (req, res) => {
       paidAmount,
       dueAmount,
       totalAmount,
-      paymentStatus: mapPaymentStatus(saleData.paymentStatus),
+      paymentStatus: paymentStatus,
       remark: saleData.remark || saleData.remarks || "",
       isExchange: isExchange,
       isReturn: isReturn,
     };
 
     const savedSale = await SaleSummary.create(newSaleData);
+
+    // 🔥 CORRECTED: Add cash to MR if payment is Cash or Paid
+    let cashResult = null;
+    if (paymentStatus === "Cash" || paymentStatus === "Paid") {
+      if (paidAmount > 0) {
+        try {
+          cashResult = await addCashToMR({
+            _id: savedSale._id,
+            mrName: savedSale.mrName,
+            mrId: mrStaff ? mrStaff._id : null,
+            paidAmount: savedSale.paidAmount,
+            invoiceNumber: savedSale.invoiceNumber,
+            invoiceDate: savedSale.invoiceDate,
+            customerName: savedSale.customerName,
+            paymentStatus: savedSale.paymentStatus,
+            recordingDate: savedSale.recordingDate,
+          });
+
+          if (cashResult.success) {
+            console.log(
+              `💰 Added $${paidAmount} to MR ${savedSale.mrName}'s cash for sale ${savedSale.invoiceNumber}`
+            );
+          } else {
+            console.log(`⚠️ Cash not added: ${cashResult.reason}`);
+          }
+        } catch (cashError) {
+          console.error(
+            `❌ Failed to add cash to MR for sale ${savedSale.invoiceNumber}:`,
+            cashError.message
+          );
+          // Don't fail the sale creation because of cash tracking error
+        }
+      }
+    }
 
     res.status(201).json({
       message: `Sale with ${
@@ -3330,6 +3912,14 @@ router.post("/sales", async (req, res) => {
         isExchange ? " (Exchange Transaction)" : ""
       }${isReturn ? " (Return Transaction)" : ""}`,
       sale: savedSale,
+      cashAdded: cashResult
+        ? {
+            success: true,
+            mrName: cashResult.mrName,
+            amount: cashResult.amountAdded,
+            currentCash: cashResult.currentCash,
+          }
+        : null,
     });
   } catch (error) {
     console.error("❌ Sale creation error:", error);
@@ -3391,7 +3981,6 @@ router.put("/sales/:id", async (req, res) => {
       const totalQty = product.salesQty + product.bonusQty;
       if (totalQty !== 0) {
         try {
-          // Restore the original quantities
           await restoreReportInHandAfterSaleDeletion(
             product.productName,
             product.salesQty,
@@ -3417,13 +4006,22 @@ router.put("/sales/:id", async (req, res) => {
       saleData.mrName = originalSale.mrName || "No MR Name Provided";
     }
 
-    // Validate and calculate LC/profit for new products
+    // Try to find MR (staff) by name
+    let mrStaff = null;
+    if (saleData.mrName) {
+      mrStaff = await Staff.findOne({
+        $or: [
+          { name: { $regex: new RegExp(saleData.mrName.trim(), "i") } },
+          { email: { $regex: new RegExp(saleData.mrName.trim(), "i") } },
+        ],
+      });
+    }
+
     const updatedProducts = await Promise.all(
       saleData.products.map(async (product) => {
         let salesQty = Number(product.salesQty) || 0;
         let bonusQty = Number(product.bonusQty) || 0;
 
-        // For return transactions, ensure quantities are negative
         if (isReturn && salesQty > 0) {
           salesQty = -salesQty;
         }
@@ -3433,7 +4031,6 @@ router.put("/sales/:id", async (req, res) => {
 
         const totalQty = salesQty + bonusQty;
 
-        // 🔥 FIXED: Use enhanced product finder
         const existingProduct = await findProductInInventory(
           product.productName
         );
@@ -3449,22 +4046,19 @@ router.put("/sales/:id", async (req, res) => {
 
         if (existingProduct) {
           lcValue = existingProduct.lc || existingProduct.batches?.[0]?.lc || 0;
-          actualProductName = existingProduct.productName; // Use the actual name from database
+          actualProductName = existingProduct.productName;
         }
 
-        // Check stock availability for the new quantities (only for positive quantities)
         if (totalQty > 0 && existingProduct) {
           try {
             if (isExchange) {
-              // For exchange transactions
               await updateInventoryForExchange(
                 actualProductName,
                 salesQty,
                 bonusQty,
-                false // isIncoming = false for outgoing
+                false
               );
             } else {
-              // For regular sales
               await updateReportInHandAfterSale(
                 actualProductName,
                 salesQty,
@@ -3477,7 +4071,6 @@ router.put("/sales/:id", async (req, res) => {
             );
           }
         } else if (totalQty < 0 && existingProduct) {
-          // For return transactions (negative quantities), update inventory
           try {
             await updateReportInHandAfterSale(
               actualProductName,
@@ -3493,7 +4086,6 @@ router.put("/sales/:id", async (req, res) => {
 
         let profitLoss;
         if (isReturn) {
-          // For returns, profit/loss is typically negative (refund)
           profitLoss = -Math.abs(
             Number(product.netSellingAmount) - Math.abs(totalQty) * lcValue
           );
@@ -3524,7 +4116,6 @@ router.put("/sales/:id", async (req, res) => {
       })
     );
 
-    // Calculate totals
     const totalAmount = updatedProducts.reduce(
       (total, product) => total + (parseFloat(product.netSellingAmount) || 0),
       0
@@ -3532,12 +4123,12 @@ router.put("/sales/:id", async (req, res) => {
     const paidAmount = parseFloat(saleData.paidAmount) || 0;
     const dueAmount = totalAmount - paidAmount;
 
-    // Prepare the updated sale document
     const updatedSaleData = {
       recordingDate: new Date(saleData.recordingDate),
       invoiceNumber: saleData.invoiceNumber,
       invoiceDate: new Date(saleData.invoiceDate),
-      mrName: saleData.mrName || originalSale.mrName || "No MR Name Provided", // 🔥 FIXED: Added default value
+      mrName: saleData.mrName || originalSale.mrName || "No MR Name Provided",
+      mrId: mrStaff ? mrStaff._id : originalSale.mrId, // Update MR ID
       customerName: saleData.customerName,
       customerCode: saleData.customerCode,
       customerId: saleData.customerId || "",
@@ -3571,23 +4162,110 @@ router.put("/sales/:id", async (req, res) => {
       return res.status(404).json({ error: "Sales record not found." });
     }
 
+    // 🔥 CORRECTED: Handle MR cash updates during sale edit
+    let cashUpdated = false;
+    let cashAmount = 0;
+    let cashResult = null;
+
+    // Check if payment status changed
+    const wasCashPaid = ["Cash", "Paid"].includes(originalSale.paymentStatus);
+    const nowCashPaid = ["Cash", "Paid"].includes(updatedSale.paymentStatus);
+
+    if (!wasCashPaid && nowCashPaid) {
+      // Changed from non-cash to cash - add cash
+      try {
+        cashResult = await addCashToMR({
+          mrName: updatedSale.mrName,
+          mrId: mrStaff ? mrStaff._id : updatedSale.mrId,
+          paidAmount: updatedSale.paidAmount,
+          invoiceNumber: updatedSale.invoiceNumber,
+          invoiceDate: updatedSale.invoiceDate,
+          customerName: updatedSale.customerName,
+          paymentStatus: updatedSale.paymentStatus,
+        });
+
+        if (cashResult.success) {
+          cashUpdated = true;
+          cashAmount = cashResult.amountAdded;
+        }
+      } catch (cashError) {
+        console.error(`⚠️ Failed to add cash to MR: ${cashError.message}`);
+      }
+    } else if (wasCashPaid && !nowCashPaid) {
+      // Changed from cash to non-cash - remove cash
+      try {
+        cashResult = await removeCashFromMR({
+          mrName: originalSale.mrName,
+          mrId: originalSale.mrId,
+          paidAmount: originalSale.paidAmount,
+          invoiceNumber: originalSale.invoiceNumber,
+          paymentStatus: originalSale.paymentStatus,
+        });
+
+        if (cashResult.success) {
+          cashUpdated = true;
+          cashAmount = -cashResult.amountRemoved;
+        }
+      } catch (cashError) {
+        console.error(`⚠️ Failed to remove cash from MR: ${cashError.message}`);
+      }
+    } else if (wasCashPaid && nowCashPaid) {
+      // Still cash, but amount might have changed
+      if (updatedSale.paidAmount !== originalSale.paidAmount) {
+        try {
+          // First remove old amount
+          await removeCashFromMR({
+            mrName: originalSale.mrName,
+            mrId: originalSale.mrId,
+            paidAmount: originalSale.paidAmount,
+            invoiceNumber: originalSale.invoiceNumber,
+            paymentStatus: originalSale.paymentStatus,
+          });
+
+          // Then add new amount
+          cashResult = await addCashToMR({
+            mrName: updatedSale.mrName,
+            mrId: mrStaff ? mrStaff._id : updatedSale.mrId,
+            paidAmount: updatedSale.paidAmount,
+            invoiceNumber: updatedSale.invoiceNumber,
+            invoiceDate: updatedSale.invoiceDate,
+            customerName: updatedSale.customerName,
+            paymentStatus: updatedSale.paymentStatus,
+          });
+
+          if (cashResult.success) {
+            cashUpdated = true;
+            cashAmount = cashResult.amountAdded - originalSale.paidAmount;
+          }
+        } catch (cashError) {
+          console.error(
+            `⚠️ Failed to update cash amount: ${cashError.message}`
+          );
+        }
+      }
+    }
+
     res.status(200).json({
-      message: `Sale updated successfully with inventory adjustments${
-        isExchange ? " (Exchange Transaction)" : ""
-      }${isReturn ? " (Return Transaction)" : ""}`,
+      message: `Sale updated successfully${
+        cashUpdated
+          ? ` and $${cashAmount} ${
+              cashAmount > 0 ? "added to" : "removed from"
+            } MR ${updatedSale.mrName}'s cash account`
+          : ""
+      }`,
       sale: updatedSale,
+      cashUpdated,
+      cashAmount,
     });
   } catch (err) {
     console.error("Error updating sale:", err);
 
-    // 🔥 IMPORTANT: If update fails, try to restore the original inventory state
     try {
       const originalSale = await SaleSummary.findById(id);
       if (originalSale) {
         for (const product of originalSale.products) {
           const totalQty = product.salesQty + product.bonusQty;
           if (totalQty !== 0) {
-            // Re-deduct what we restored earlier (since the update failed)
             if (originalSale.isExchange) {
               await updateInventoryForExchange(
                 product.productName,
@@ -3649,6 +4327,7 @@ router.get("/sales/all", async (req, res) => {
         invoiceNumber: 1,
         invoiceDate: 1,
         mrName: 1,
+        mrId: 1,
         customerCode: 1,
         customerId: 1,
         customerName: 1,
@@ -3713,6 +4392,7 @@ router.get("/sales", async (req, res) => {
         invoiceNumber: 1,
         invoiceDate: 1,
         mrName: 1,
+        mrId: 1,
         customerCode: 1,
         customerId: 1,
         customerName: 1,
@@ -3756,6 +4436,29 @@ router.delete("/sales/:id", async (req, res) => {
 
     if (!saleToDelete) {
       return res.status(404).json({ error: "Sales record not found." });
+    }
+
+    // 🔥 CORRECTED: Remove cash from MR if it was a cash/paid sale
+    if (
+      (saleToDelete.paymentStatus === "Cash" ||
+        saleToDelete.paymentStatus === "Paid") &&
+      saleToDelete.paidAmount > 0
+    ) {
+      try {
+        await removeCashFromMR({
+          mrName: saleToDelete.mrName,
+          mrId: saleToDelete.mrId,
+          paidAmount: saleToDelete.paidAmount,
+          invoiceNumber: saleToDelete.invoiceNumber,
+          paymentStatus: saleToDelete.paymentStatus,
+        });
+      } catch (cashError) {
+        console.error(
+          `❌ Failed to remove cash from MR for deletion:`,
+          cashError.message
+        );
+        // Continue with deletion even if cash removal fails
+      }
     }
 
     // Restore inventory for all products in the sale
@@ -4545,5 +5248,148 @@ router.get("/import/debug/:sessionId", async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// 🔥 ADD THESE DEBUG ENDPOINTS TO YOUR ROUTER:
+
+// Debug endpoint to check current import data structure
+router.post("/debug/check-import-data", async (req, res) => {
+  try {
+    const salesData = req.body;
+
+    // Log the structure
+    console.log("=== DEBUG: Import Data Structure ===");
+    console.log(
+      "Total records:",
+      Array.isArray(salesData) ? salesData.length : "Not an array"
+    );
+
+    if (Array.isArray(salesData) && salesData.length > 0) {
+      const sample = salesData[0];
+      console.log("Sample record keys:", Object.keys(sample));
+      console.log("Sample MR Name:", sample.mrName);
+      console.log("Sample Customer Name:", sample.customerName);
+      console.log("Sample Invoice Number:", sample.invoiceNumber);
+      console.log(
+        "Sample Products count:",
+        Array.isArray(sample.products) ? sample.products.length : "Not an array"
+      );
+
+      if (Array.isArray(sample.products) && sample.products.length > 0) {
+        console.log("Sample product:", sample.products[0]);
+      }
+    }
+
+    // Try to validate with existing function
+    const validationResult = await validateImportData(
+      Array.isArray(salesData) ? salesData : []
+    );
+
+    res.json({
+      success: true,
+      dataStructure: {
+        isArray: Array.isArray(salesData),
+        count: Array.isArray(salesData) ? salesData.length : 0,
+        sampleKeys:
+          Array.isArray(salesData) && salesData.length > 0
+            ? Object.keys(salesData[0])
+            : [],
+      },
+      validationResult,
+      message: "Check console for detailed logs",
+    });
+  } catch (error) {
+    console.error("Debug error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Test endpoint to create a single sale
+
+const logError = (error, context = "") => {
+  console.error(`❌ ${context} Error:`, error.message);
+  console.error("Error stack:", error.stack);
+  if (error.errors) {
+    Object.keys(error.errors).forEach((key) => {
+      console.error(`Field error ${key}:`, error.errors[key].message);
+    });
+  }
+};
+
+// Wrap your main endpoints with better error handling
+const wrapAsync = (fn) => {
+  return (req, res, next) => {
+    Promise.resolve(fn(req, res, next)).catch((error) => {
+      logError(error, `${req.method} ${req.path}`);
+      next(error);
+    });
+  };
+};
+// Check database collections
+router.get("/debug/check-collections", async (req, res) => {
+  try {
+    const saleCount = await SaleSummary.countDocuments();
+    const mrcashCount = await MRCash.countDocuments();
+    const staffCount = await Staff.countDocuments();
+    const customerCount = await Customer.countDocuments();
+    const reportInHandCount = await ReportInHand.countDocuments();
+
+    // Get sample data
+    const sampleSale = await SaleSummary.findOne().limit(1);
+    const sampleMRCASH = await MRCash.findOne().limit(1);
+
+    res.json({
+      success: true,
+      collections: {
+        SaleSummary: saleCount,
+        MRCashes: mrcashCount,
+        Staff: staffCount,
+        Customer: customerCount,
+        ReportInHand: reportInHandCount,
+      },
+      sampleSale: sampleSale
+        ? {
+            _id: sampleSale._id,
+            invoiceNumber: sampleSale.invoiceNumber,
+            mrName: sampleSale.mrName,
+            mrId: sampleSale.mrId,
+            createdAt: sampleSale.createdAt,
+          }
+        : null,
+      sampleMRCASH: sampleMRCASH
+        ? {
+            _id: sampleMRCASH._id,
+            mrName: sampleMRCASH.mrName,
+            mrId: sampleMRCASH.mrId,
+            currentCash: sampleMRCASH.currentCash,
+            createdAt: sampleMRCASH.createdAt,
+          }
+        : null,
+    });
+  } catch (error) {
+    console.error("Check collections error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Export the router and utility functions
+export {
+  router as saleRouter,
+  importProgressMap,
+  initializeImportProgress,
+  updateImportProgress,
+  processImportAsync,
+  validateImportData,
+  findProductInInventory,
+  normalizeProductName,
+  mapPaymentStatus,
+  parseDateString,
+  isReturnTransaction,
+  updateReportInHandAfterSale,
+  addCashToMR,
+  removeCashFromMR,
+  restoreReportInHandAfterSaleDeletion,
+  checkInvoiceNumberExists,
+  parseQuantityWithParenthesis,
+};
 
 export default router;
