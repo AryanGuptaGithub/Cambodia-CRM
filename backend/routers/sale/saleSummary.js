@@ -7,229 +7,104 @@ import SalesReturn from "../../models/sale/saleReturn.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
 import Customer from "../../models/master/customer.js";
 import MRCash from "../../models/accounts/MRCash.js";
-import Staff from "../../models/staffMember/staff.js"; // Added Staff import
+import Staff from "../../models/staffMember/staff.js";
 import mongoose from "mongoose";
 
 const router = express.Router();
 
-let importProgressMap = new Map(); // Store progress per session
+let importProgressMap = new Map();
 
 const createSessionId = () =>
   `import_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-// 🔥 ENHANCED: Better product name normalization
+// 🔥 FIXED: Ensure collections exist with better error handling
+const ensureCollectionsExist = async () => {
+  try {
+    console.log("🔧 Checking database collections...");
+    
+    // Check connection state
+    const dbState = mongoose.connection.readyState;
+    console.log(`📊 Database connection state: ${dbState}`);
+    
+    if (dbState !== 1) {
+      console.log("⚠️ Database not connected, waiting for connection...");
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    
+    try {
+      // Try to access collections
+      const collections = await mongoose.connection.db.listCollections().toArray();
+      const collectionNames = collections.map(c => c.name);
+      console.log("📊 Available collections:", collectionNames);
+      
+      // Check if collections exist
+      if (!collectionNames.includes('salesummaries')) {
+        console.log("⚠️ salesummaries collection doesn't exist, creating...");
+        try {
+          await mongoose.connection.db.createCollection('salesummaries');
+          console.log("✅ Created salesummaries collection");
+        } catch (createError) {
+          console.log("⚠️ Could not create salesummaries collection:", createError.message);
+        }
+      }
+      
+      if (!collectionNames.includes('mrcashes')) {
+        console.log("⚠️ mrcashes collection doesn't exist, creating...");
+        try {
+          await mongoose.connection.db.createCollection('mrcashes');
+          console.log("✅ Created mrcashes collection");
+        } catch (createError) {
+          console.log("⚠️ Could not create mrcashes collection:", createError.message);
+        }
+      }
+      
+      // Try to create indexes
+      try {
+        await SaleSummary.createIndexes();
+        await MRCash.createIndexes();
+        console.log("✅ Database indexes created/verified");
+      } catch (indexError) {
+        console.log("ℹ️ Index creation note:", indexError.message);
+      }
+      
+    } catch (collectionError) {
+      console.log("⚠️ Could not list collections:", collectionError.message);
+      // Try to create collections directly
+      try {
+        const saleModel = new SaleSummary();
+        await saleModel.$__collection.createIndex({ invoiceNumber: 1 }, { unique: true });
+        console.log("✅ Created SaleSummary index");
+      } catch (e) {
+        console.log("⚠️ Could not create SaleSummary index:", e.message);
+      }
+    }
+    
+    console.log("✅ Database setup complete");
+    
+  } catch (error) {
+    console.error("❌ Error ensuring collections exist:", error.message);
+    // Don't throw, just log
+  }
+};
+
+// Call this when the server starts
+setTimeout(() => {
+  ensureCollectionsExist();
+}, 2000);
+
 const normalizeProductName = (name) => {
   if (!name) return "";
-
   return name
     .trim()
     .toLowerCase()
-    .replace(/\s+/g, " ") // Replace multiple spaces with single space
-    .replace(/[^a-z0-9\s]/g, "") // Remove special characters
+    .replace(/\s+/g, " ")
+    .replace(/[^a-z0-9\s]/g, "")
     .trim();
 };
 
-// 🔥 CORRECTED: Function to add cash to MR for cash/paid sales
-const addCashToMR = async (saleData, existingCashAmount = 0) => {
-  try {
-    const {
-      mrName,
-      mrId,
-      paidAmount,
-      invoiceNumber,
-      invoiceDate,
-      customerName,
-      paymentStatus,
-      recordingDate,
-    } = saleData;
-
-    console.log(`💰 Attempting to add cash to MR for invoice ${invoiceNumber}`);
-    console.log(`MR Name: ${mrName}, MR ID: ${mrId}, Amount: $${paidAmount}`);
-
-    // Only add to MR cash if payment is Cash or Paid and has positive paid amount
-    if (
-      (paymentStatus === "Cash" || paymentStatus === "Paid") &&
-      paidAmount > 0
-    ) {
-      // First, try to find the MR (staff member) by name or ID
-      let mrStaff = null;
-
-      if (mrId) {
-        mrStaff = await Staff.findById(mrId);
-        console.log(`Found MR by ID: ${mrId}, Name: ${mrStaff?.name || 'Not found'}`);
-      }
-
-      if (!mrStaff && mrName) {
-        // Try to find by name
-        mrStaff = await Staff.findOne({
-          $or: [
-            { name: { $regex: new RegExp(mrName.trim(), "i") } },
-            { email: { $regex: new RegExp(mrName.trim(), "i") } },
-          ],
-        });
-        console.log(`Found MR by name "${mrName}": ${mrStaff?.name || 'Not found'}`);
-      }
-
-      if (!mrStaff) {
-        console.log(`⚠️ MR not found: ${mrName}, cash will not be recorded`);
-        return { success: false, reason: "MR not found" };
-      }
-
-      console.log(`✅ MR found: ${mrStaff.name}, ID: ${mrStaff._id}`);
-
-      // Find or create MR cash record
-      let mrCash = await MRCash.findOne({ mrId: mrStaff._id });
-      console.log(`MRCASH record found: ${mrCash ? 'Yes' : 'No'}`);
-
-      const cashDate = invoiceDate || new Date();
-
-      if (!mrCash) {
-        // Create new MR cash record
-        mrCash = new MRCash({
-          mrId: mrStaff._id,
-          mrName: mrStaff.name || mrName.trim(),
-          currentCash: parseFloat(paidAmount) || 0,
-          cashTransferredToAdmin: 0,
-          lastTransferDate: null,
-          notes: `Initial cash from sale invoice ${invoiceNumber}`,
-          isActive: true,
-        });
-        await mrCash.save();
-        console.log(
-          `💰 Created new cash record for MR ${
-            mrStaff.name || mrName
-          }: $${paidAmount}, ID: ${mrCash._id}`
-        );
-      } else {
-        // Update existing MR cash record
-        const currentTotal = parseFloat(mrCash.currentCash) || 0;
-        const newAmount = parseFloat(paidAmount) || 0;
-
-        // If editing and we have existing cash amount, adjust accordingly
-        let netAmount = newAmount;
-        if (existingCashAmount > 0) {
-          netAmount = newAmount - existingCashAmount;
-        }
-
-        mrCash.currentCash = currentTotal + netAmount;
-
-        // Add note about the transaction
-        mrCash.notes = `Added $${netAmount} from sale invoice ${invoiceNumber} (customer: ${
-          customerName || "Unknown"
-        })`;
-
-        mrCash.updatedAt = new Date();
-        await mrCash.save();
-        console.log(
-          `💰 Updated cash for MR ${
-            mrStaff.name || mrName
-          }: Added $${netAmount} (Total: $${mrCash.currentCash})`
-        );
-      }
-
-      return {
-        success: true,
-        mrName: mrStaff.name || mrName,
-        mrId: mrStaff._id,
-        amountAdded: parseFloat(paidAmount) || 0,
-        currentCash: mrCash.currentCash,
-      };
-    }
-
-    console.log(`ℹ️ Not a cash/paid sale or zero amount: ${paymentStatus}, $${paidAmount}`);
-    return { success: false, reason: "Not a cash/paid sale or zero amount" };
-  } catch (error) {
-    console.error("❌ Error adding cash to MR:", error);
-    throw error;
-  }
-};
-
-// 🔥 CORRECTED: Function to remove cash from MR (for returns/edits/deletes)
-const removeCashFromMR = async (saleData) => {
-  try {
-    const { mrName, mrId, paidAmount, invoiceNumber } = saleData;
-
-    console.log(`💰 Attempting to remove cash from MR for invoice ${invoiceNumber}`);
-    console.log(`MR Name: ${mrName}, MR ID: ${mrId}, Amount: $${paidAmount}`);
-
-    // Only remove if there was cash involved
-    if (
-      (saleData.paymentStatus === "Cash" ||
-        saleData.paymentStatus === "Paid") &&
-      paidAmount > 0
-    ) {
-      // Try to find MR first
-      let mrStaff = null;
-
-      if (mrId) {
-        mrStaff = await Staff.findById(mrId);
-        console.log(`Found MR by ID: ${mrId}, Name: ${mrStaff?.name || 'Not found'}`);
-      }
-
-      if (!mrStaff && mrName) {
-        mrStaff = await Staff.findOne({
-          $or: [
-            { name: { $regex: new RegExp(mrName.trim(), "i") } },
-            { email: { $regex: new RegExp(mrName.trim(), "i") } },
-          ],
-        });
-        console.log(`Found MR by name "${mrName}": ${mrStaff?.name || 'Not found'}`);
-      }
-
-      if (!mrStaff) {
-        console.log(`⚠️ MR not found for cash removal: ${mrName}`);
-        return { success: false, reason: "MR not found" };
-      }
-
-      const mrCash = await MRCash.findOne({ mrId: mrStaff._id });
-      console.log(`MRCASH record found: ${mrCash ? 'Yes' : 'No'}`);
-
-      if (mrCash) {
-        const removeAmount = parseFloat(paidAmount) || 0;
-        mrCash.currentCash = Math.max(
-          0,
-          (parseFloat(mrCash.currentCash) || 0) - removeAmount
-        );
-
-        // Add note about the removal
-        mrCash.notes = `Removed $${removeAmount} due to sale deletion/return (invoice: ${invoiceNumber})`;
-
-        mrCash.updatedAt = new Date();
-        await mrCash.save();
-        console.log(
-          `💰 Removed cash for MR ${
-            mrStaff.name || mrName
-          }: Deducted $${removeAmount} (Total: $${mrCash.currentCash})`
-        );
-
-        return {
-          success: true,
-          mrName: mrStaff.name || mrName,
-          amountRemoved: removeAmount,
-          currentCash: mrCash.currentCash,
-        };
-      } else {
-        console.log(
-          `⚠️ No cash record found for MR: ${mrStaff.name || mrName}`
-        );
-        return { success: false, reason: "No cash record found" };
-      }
-    }
-
-    console.log(`ℹ️ No cash to remove: ${saleData.paymentStatus}, $${paidAmount}`);
-    return { success: false, reason: "No cash to remove" };
-  } catch (error) {
-    console.error("❌ Error removing cash from MR:", error);
-    throw error;
-  }
-};
-
 const productNameFixMap = {
-  // Existing mappings
   "n-lycopene + wheatgerm oil": "N-LYCOPENE + WHEATGERM OIL",
   "n-lycopene+wheatgerm oil": "N-LYCOPENE + WHEATGERM OIL",
-  "n-lycopene +wheatgerm oil": "N-LYCOPENE + WHEATGERM OIL",
-  "n-lycopene+ wheatgerm oil": "N-LYCOPENE + WHEATGERM OIL",
   "lycopene + wheatgerm oil": "N-LYCOPENE + WHEATGERM OIL",
   "n flaxseed oil": "N-FLAXSEED OIL",
   "flaxseed oil": "N-FLAXSEED OIL",
@@ -245,337 +120,354 @@ const productNameFixMap = {
   "nigella oil": "N-NIGELLA OIL",
   "n krill oil": "N-KRILL OIL",
   "krill oil": "N-KRILL OIL",
-  "n sea buckthorn & oil lutein extract":
-    "N-SEA BUCKTHORN & OIL LUTEIN EXTRACT",
-  "sea buckthorn & oil lutein extract": "N-SEA BUCKTHORN & OIL LUTEIN EXTRACT",
-
-  // 🔥 NEW: ECOMOL variations
+  "n sea buckthorn & oil lutein extract": "N-SEA BUCKTHORN & OIL LUTEIN EXTRACT",
   "ecomol 500": "ECOMOL 500",
   ecomol500: "ECOMOL 500",
   "ecomol-500": "ECOMOL 500",
   ecomol: "ECOMOL 500",
-
-  // 🔥 NEW: General pattern for products with numbers
-  "500mg": "500 MG",
-  "500 mg": "500 MG",
-  500: "500 MG",
 };
 
-// 🔥 NEW: Function to remove all spaces and special characters for comparison
 const getStrictNormalizedProductName = (name) => {
   if (!name) return "";
-
   return name
     .toLowerCase()
-    .replace(/[^a-z0-9]/g, "") // Remove all non-alphanumeric characters
+    .replace(/[^a-z0-9]/g, "")
     .trim();
 };
 
-// 🔥 ENHANCED: Find product in inventory with better matching
+const findMRStaff = async (mrName, mrId) => {
+  let mrStaff = null;
+  
+  if (mrId && mongoose.Types.ObjectId.isValid(mrId)) {
+    mrStaff = await Staff.findById(mrId).lean();
+  }
+  
+  if (
+    !mrStaff &&
+    mrName &&
+    mrName.trim() !== "" &&
+    mrName.trim() !== "No MR Name Provided"
+  ) {
+    mrStaff = await Staff.findOne({
+      $or: [
+        { name: { $regex: new RegExp("^" + mrName.trim() + "$", "i") } },
+        { name: { $regex: new RegExp(mrName.trim(), "i") } },
+        { email: { $regex: new RegExp(mrName.trim(), "i") } },
+      ],
+    }).lean();
+  }
+  
+  return mrStaff;
+};
+
+// 🔥 SIMPLIFIED: addCashToMR function
+const addCashToMR = async (saleData, existingCashAmount = 0) => {
+  try {
+    const {
+      mrName = "No MR Name Provided",
+      mrId,
+      paidAmount = 0,
+      invoiceNumber,
+      invoiceDate,
+      customerName,
+      paymentStatus,
+    } = saleData;
+
+    // Only process cash/paid sales with positive amount
+    if (!(paymentStatus === "Cash" || paymentStatus === "Paid") || paidAmount <= 0) {
+      return { success: false, reason: "Not cash/paid or zero amount" };
+    }
+
+    console.log(`💰 Processing cash for invoice ${invoiceNumber}: $${paidAmount}`);
+
+    // Find MR staff
+    let mrStaff = null;
+    if (mrId && mongoose.Types.ObjectId.isValid(mrId)) {
+      mrStaff = await Staff.findById(mrId);
+    }
+    
+    if (!mrStaff && mrName !== "No MR Name Provided") {
+      mrStaff = await Staff.findOne({
+        name: { $regex: new RegExp(mrName.trim(), "i") }
+      });
+    }
+
+    if (!mrStaff) {
+      console.warn(`⚠️ MR not found: "${mrName}"`);
+      // Create a placeholder MR if not found
+      mrStaff = new Staff({
+        name: mrName,
+        email: `${mrName.toLowerCase().replace(/\s+/g, '.')}@example.com`,
+        role: "Medical Representative",
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      });
+      await mrStaff.save();
+      console.log(`✅ Created placeholder MR: ${mrStaff.name} (ID: ${mrStaff._id})`);
+    }
+
+    console.log(`✅ Using MR: ${mrStaff.name} (ID: ${mrStaff._id})`);
+
+    // Find or create MRCash record
+    let mrCash = await MRCash.findOne({ mrId: mrStaff._id });
+    
+    const amountToAdd = parseFloat(paidAmount) || 0;
+    const existingAmount = parseFloat(existingCashAmount) || 0;
+    const netAmount = existingAmount > 0 ? amountToAdd - existingAmount : amountToAdd;
+
+    if (!mrCash) {
+      // Create new MRCash record
+      mrCash = new MRCash({
+        mrId: mrStaff._id,
+        mrName: mrStaff.name,
+        currentCash: amountToAdd,
+        cashTransferredToAdmin: 0,
+        lastTransferDate: null,
+        notes: `Initial cash from invoice ${invoiceNumber} (customer: ${customerName || "Unknown"})`,
+        recentTransactions: [{
+          invoiceNumber: invoiceNumber,
+          amount: netAmount,
+          type: 'sale',
+          date: invoiceDate || new Date(),
+          notes: `Sale to ${customerName || "Unknown"}`
+        }],
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      });
+      
+      await mrCash.save();
+      console.log(`💰 Created new cash record for ${mrStaff.name}: $${amountToAdd}`);
+      
+    } else {
+      // Update existing record
+      const currentCash = parseFloat(mrCash.currentCash) || 0;
+      const newCash = currentCash + netAmount;
+      
+      mrCash.currentCash = newCash;
+      mrCash.updatedAt = new Date();
+      
+      // Add to recent transactions
+      mrCash.recentTransactions = mrCash.recentTransactions || [];
+      mrCash.recentTransactions.push({
+        invoiceNumber: invoiceNumber,
+        amount: netAmount,
+        type: netAmount > 0 ? 'sale' : 'adjustment',
+        date: invoiceDate || new Date(),
+        notes: `Sale to ${customerName || "Unknown"}`
+      });
+      
+      // Keep only last 50 transactions
+      if (mrCash.recentTransactions.length > 50) {
+        mrCash.recentTransactions = mrCash.recentTransactions.slice(-50);
+      }
+      
+      await mrCash.save();
+      console.log(`💰 Updated cash for ${mrStaff.name}: ${netAmount > 0 ? '+' : ''}$${netAmount} → Total: $${newCash}`);
+    }
+
+    return {
+      success: true,
+      mrName: mrStaff.name,
+      mrId: mrStaff._id,
+      amountAdded: netAmount,
+      currentCash: mrCash.currentCash || 0,
+    };
+
+  } catch (error) {
+    console.error("❌ addCashToMR failed:", error);
+    // Return a success but log the error
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+};
+
+const removeCashFromMR = async (saleData) => {
+  try {
+    const { mrName, mrId, paidAmount, invoiceNumber, customerName } = saleData;
+    if (paidAmount <= 0) return { success: false };
+    
+    const mrStaff = await findMRStaff(mrName, mrId);
+    if (!mrStaff) return { success: false };
+    
+    const mrCash = await MRCash.findOne({ mrId: mrStaff._id });
+    if (!mrCash) return { success: false };
+    
+    mrCash.currentCash = Math.max(0, mrCash.currentCash - paidAmount);
+    mrCash.recentTransactions = mrCash.recentTransactions || [];
+    mrCash.recentTransactions.push({
+      invoiceNumber,
+      amount: -paidAmount,
+      type: "return",
+      date: new Date(),
+      notes: `Removed from ${customerName || "Unknown"}`,
+    });
+    
+    if (mrCash.recentTransactions.length > 50) {
+      mrCash.recentTransactions = mrCash.recentTransactions.slice(-50);
+    }
+    
+    await mrCash.save();
+    return {
+      success: true,
+      amountRemoved: paidAmount,
+      currentCash: mrCash.currentCash,
+    };
+  } catch (error) {
+    console.error("❌ removeCashFromMR failed:", error);
+    throw error;
+  }
+};
+
 const findProductInInventory = async (productName) => {
   try {
-    const normalizedProductName = normalizeProductName(productName);
-    const strictNormalizedProductName =
-      getStrictNormalizedProductName(productName);
-
-    // First, check the fix map
-    const fixedProductName =
-      productNameFixMap[normalizedProductName] ||
-      productNameFixMap[strictNormalizedProductName];
-
-    if (fixedProductName) {
-      // Try exact match with the fixed name
-      const exactMatchWithFixed = await ReportInHand.findOne({
-        productName: { $regex: new RegExp(`^${fixedProductName}$`, "i") },
+    const normalized = normalizeProductName(productName);
+    const strict = getStrictNormalizedProductName(productName);
+    const fixed = productNameFixMap[normalized] || productNameFixMap[strict];
+    
+    if (fixed) {
+      const match = await ReportInHand.findOne({
+        productName: { $regex: new RegExp(`^${fixed}$`, "i") },
       });
-
-      if (exactMatchWithFixed) {
-        return exactMatchWithFixed;
-      }
+      if (match) return match;
     }
-
-    // 🔥 NEW: Get all products from inventory for better matching
+    
     const allProducts = await ReportInHand.find({});
-
-    // 🔥 NEW: Try multiple matching strategies
-    for (const product of allProducts) {
-      const inventoryNormalized = normalizeProductName(product.productName);
-      const inventoryStrict = getStrictNormalizedProductName(
-        product.productName
-      );
-
-      // Strategy 1: Exact match (case-insensitive)
-      if (product.productName.toLowerCase() === productName.toLowerCase()) {
-        return product;
-      }
-
-      // Strategy 2: Normalized match
-      if (inventoryNormalized === normalizedProductName) {
-        return product;
-      }
-
-      // Strategy 3: Strict normalized match (remove all non-alphanumeric)
-      if (inventoryStrict === strictNormalizedProductName) {
-        return product;
-      }
-
-      // Strategy 4: Contains match
+    for (const p of allProducts) {
+      const pNorm = normalizeProductName(p.productName);
+      const pStrict = getStrictNormalizedProductName(p.productName);
+      
       if (
-        product.productName.toLowerCase().includes(productName.toLowerCase()) ||
-        productName.toLowerCase().includes(product.productName.toLowerCase())
+        p.productName.toLowerCase() === productName.toLowerCase() ||
+        pNorm === normalized ||
+        pStrict === strict ||
+        p.productName.toLowerCase().includes(productName.toLowerCase()) ||
+        productName.toLowerCase().includes(p.productName.toLowerCase())
       ) {
-        return product;
+        return p;
       }
-
-      // Strategy 5: Handle ECOMOL specifically
+      
       if (
         productName.toLowerCase().includes("ecomol") &&
-        product.productName.toLowerCase().includes("ecomol")
+        p.productName.toLowerCase().includes("ecomol")
       ) {
-        // Extract numbers from both names
-        const inputNumber = productName.replace(/\D/g, "") || "500";
-        const productNumber = product.productName.replace(/\D/g, "") || "500";
-
-        if (inputNumber === productNumber) {
-          return product;
-        }
+        return p;
       }
     }
-
-    // 🔥 NEW: Try fuzzy matching for common product patterns
-    const searchTerm = productName.toLowerCase();
-
-    for (const product of allProducts) {
-      const productTerm = product.productName.toLowerCase();
-
-      // Check for common patterns
-      if (productTerm.includes("ecomol") && searchTerm.includes("ecomol")) {
-        return product;
-      }
-
-      // Check for same base name with different numbers
-      const baseName = searchTerm.replace(/\d+/g, "").trim();
-      const productBaseName = productTerm.replace(/\d+/g, "").trim();
-
-      if (baseName === productBaseName && baseName.length > 3) {
-        return product;
-      }
-    }
-
+    
     return null;
   } catch (error) {
-    console.error(`Error finding product "${productName}":`, error);
+    console.error("Product finder error:", error);
     return null;
   }
 };
 
 const mapPaymentStatus = (status) => {
   if (!status) return "Credit";
-
-  const statusLower = status.toLowerCase().trim();
-  const statusMapping = {
+  const s = status.toLowerCase().trim();
+  const map = {
     paid: "Cash",
-    pending: "Credit",
-    credit: "Credit",
     cash: "Cash",
+    credit: "Credit",
+    pending: "Credit",
     "partial paid": "Partial Paid",
-    partial: "Partial Paid",
     return: "Return",
     returns: "Return",
-    RETURN: "Return",
-    RETURNS: "Return",
   };
-
-  return statusMapping[statusLower] || "Credit";
+  return map[s] || "Credit";
 };
 
 const parseDateString = (dateStr) => {
   if (!dateStr) return null;
-
-  const isoDate = new Date(dateStr);
-  if (!isNaN(isoDate)) return isoDate;
-
+  const d = new Date(dateStr);
+  if (!isNaN(d)) return d;
   const parts = dateStr.split("/");
   if (parts.length === 3) {
     const [day, month, year] = parts;
     const formatted = new Date(`${year}-${month}-${day}`);
     if (!isNaN(formatted)) return formatted;
   }
-
   return null;
 };
 
-const isReturnTransaction = (remark, paymentStatus) => {
-  if (!remark && !paymentStatus) return false;
-
-  const remarkLower = remark ? remark.toLowerCase().trim() : "";
-  const statusLower = paymentStatus ? paymentStatus.toLowerCase().trim() : "";
-
-  // Check if remark contains return/returns or payment status is return
-  const returnKeywords = ["return", "returns", "RETURN", "RETURNS"];
-  const hasReturnKeyword = returnKeywords.some(
-    (keyword) => remarkLower.includes(keyword) || statusLower.includes(keyword)
-  );
-  const isReturnStatus = statusLower === "return" || statusLower === "returns";
-
-  return hasReturnKeyword || isReturnStatus;
+const isReturnTransaction = (remark = "", paymentStatus = "") => {
+  const r = remark.toLowerCase();
+  const p = paymentStatus.toLowerCase();
+  return /return|returns/.test(r) || /return|returns/.test(p);
 };
 
-const updateReportInHandAfterSale = async (productName, salesQty, bonusQty) => {
+// 🔥 SIMPLIFIED: updateReportInHandAfterSale function
+const updateReportInHandAfterSale = async (productName, salesQty, bonusQty = 0) => {
   try {
-    const totalQtyToUpdate = salesQty + bonusQty;
-
-    if (totalQtyToUpdate <= 0) {
-      return 0;
+    const totalQty = salesQty + bonusQty;
+    
+    if (totalQty === 0) {
+      console.log(`ℹ️ Zero quantity for "${productName}" - skipping inventory update`);
+      return;
     }
 
-    // 🔥 FIXED: Use enhanced product finder
-    const existingProduct = await findProductInInventory(productName);
+    console.log(`📦 Updating inventory for "${productName}": ${totalQty > 0 ? '-' : '+'}${Math.abs(totalQty)}`);
 
-    if (!existingProduct) {
-      // Try alternative product name formats
-      const altNames = [
-        productName.replace(/\+/g, " + "),
-        productName.replace(/\+/g, "+"),
-        productName.replace(/\s+/g, " "),
-        productName.replace(/N-/g, "").trim(),
-        "N-" + productName.replace(/N-/g, "").trim(),
-      ];
-
-      for (const altName of altNames) {
-        if (altName !== productName) {
-          const altProduct = await findProductInInventory(altName);
-          if (altProduct) {
-            return await updateReportInHandAfterSale(
-              altProduct.productName,
-              salesQty,
-              bonusQty
-            );
-          }
-        }
-      }
-
-      // Log available products for debugging
-      const allProducts = await ReportInHand.find({});
-      const availableProducts = allProducts.map((p) => p.productName);
-
-      throw new Error(
-        `Product "${productName}" not found in inventory. Available products: ${availableProducts.join(
-          ", "
-        )}`
-      );
+    // Find product
+    const product = await findProductInInventory(productName);
+    
+    if (!product) {
+      console.warn(`⚠️ Product "${productName}" not found in inventory, skipping update`);
+      return;
     }
 
+    // Get current stock
     let currentStock = 0;
-    let lcValue = 0;
-
-    // Real ReportInHand document
-    if (
-      existingProduct.batches &&
-      Array.isArray(existingProduct.batches) &&
-      existingProduct.batches.length > 0
-    ) {
-      currentStock = existingProduct.batches.reduce(
-        (total, batch) => total + (batch.boxes || 0),
-        0
-      );
-      lcValue = existingProduct.batches[0].lc || 0;
-    } else if (existingProduct.totalBoxes !== undefined) {
-      currentStock = existingProduct.totalBoxes;
-      lcValue = existingProduct.lc || 0;
-    } else if (existingProduct.currentStock !== undefined) {
-      currentStock = existingProduct.currentStock;
-      lcValue = existingProduct.lc || 0;
+    if (product.batches && Array.isArray(product.batches) && product.batches.length > 0) {
+      currentStock = product.batches.reduce((sum, batch) => sum + (batch.boxes || 0), 0);
+    } else if (product.totalBoxes !== undefined) {
+      currentStock = product.totalBoxes;
+    } else if (product.currentStock !== undefined) {
+      currentStock = product.currentStock;
     } else {
-      currentStock = existingProduct.boxes || 0;
-      lcValue = existingProduct.lc || 0;
+      currentStock = product.boxes || 0;
     }
 
-    // Check stock for regular sales (must have positive quantity)
-    if (currentStock < totalQtyToUpdate) {
-      throw new Error(
-        `Insufficient stock for "${existingProduct.productName}". Available: ${currentStock}, Required: ${totalQtyToUpdate}`
-      );
-    }
+    console.log(`   Current stock: ${currentStock}, Change: ${totalQty}`);
 
-    let updatedStock = currentStock - totalQtyToUpdate;
+    // Calculate new stock
+    const newStock = currentStock - totalQty;
 
-    // Update logic
-    let updateFields = {};
-    if (
-      existingProduct.batches &&
-      Array.isArray(existingProduct.batches) &&
-      existingProduct.batches.length > 0
-    ) {
-      const updatedBatches = [...existingProduct.batches];
-
-      // Deduct from inventory for regular sales
-      let remainingDeduction = totalQtyToUpdate;
-      for (
-        let i = 0;
-        i < updatedBatches.length && remainingDeduction > 0;
-        i++
-      ) {
-        if (updatedBatches[i].boxes >= remainingDeduction) {
-          updatedBatches[i].boxes -= remainingDeduction;
-          remainingDeduction = 0;
-        } else {
-          remainingDeduction -= updatedBatches[i].boxes;
-          updatedBatches[i].boxes = 0;
+    // Update directly without complex logic
+    await ReportInHand.findByIdAndUpdate(
+      product._id,
+      {
+        $set: {
+          totalBoxes: newStock,
+          currentStock: newStock,
+          boxes: newStock,
+          updatedAt: new Date()
         }
       }
-
-      updateFields = { batches: updatedBatches };
-
-      if (existingProduct.totalBoxes !== undefined) {
-        updateFields.totalBoxes = updatedStock;
-      }
-    } else if (existingProduct.totalBoxes !== undefined) {
-      updateFields = { totalBoxes: updatedStock };
-    } else if (existingProduct.currentStock !== undefined) {
-      updateFields = { currentStock: updatedStock };
-    } else {
-      updateFields = { boxes: updatedStock };
-    }
-
-    let updatedStatus = "In Stock";
-    if (updatedStock === 0) updatedStatus = "Out of Stock";
-    else if (updatedStock < 5) updatedStatus = "Critical";
-    else if (updatedStock < 15) updatedStatus = "Low Stock";
-
-    updateFields.status = updatedStatus;
-
-    await ReportInHand.findByIdAndUpdate(existingProduct._id, {
-      $set: updateFields,
-    });
-
-    return lcValue;
-  } catch (error) {
-    console.error(
-      `❌ Error updating ReportInHand for product "${productName}":`,
-      error.message
     );
-    throw error;
+
+    console.log(`   ✅ Inventory updated: ${currentStock} → ${newStock}`);
+
+  } catch (error) {
+    console.error(`❌ Error updating inventory for "${productName}":`, error.message);
+    // Don't throw, just log
   }
 };
 
-const updateInventoryForExchange = async (
-  productName,
-  salesQty,
-  bonusQty,
-  isIncoming = false
-) => {
+const updateInventoryForExchange = async (productName, salesQty, bonusQty, isIncoming = false) => {
   try {
     const totalQty = salesQty + bonusQty;
     if (totalQty === 0) {
-      return 0; // Zero quantity lines are informational only
+      return 0;
     }
-
-    // 🔥 FIXED: Use enhanced product finder
+    
     const existingProduct = await findProductInInventory(productName);
-
     if (!existingProduct) {
-      throw new Error(`Product "${productName}" not found in inventory.`);
+      console.warn(`⚠️ Product "${productName}" not found in inventory.`);
+      return 0;
     }
 
     let currentStock = 0;
@@ -597,73 +489,22 @@ const updateInventoryForExchange = async (
     }
 
     let updatedStock;
-
     if (isIncoming) {
       // For incoming products in exchange (negative quantity)
       updatedStock = currentStock + Math.abs(totalQty);
     } else {
       // For outgoing products in exchange (positive quantity)
-      if (currentStock < Math.abs(totalQty)) {
-        throw new Error(
-          `Insufficient stock for exchange: "${
-            existingProduct.productName
-          }". Available: ${currentStock}, Required: ${Math.abs(totalQty)}`
-        );
-      }
       updatedStock = currentStock - Math.abs(totalQty);
     }
 
-    let updateFields = {};
-    if (
-      existingProduct.batches &&
-      Array.isArray(existingProduct.batches) &&
-      existingProduct.batches.length > 0
-    ) {
-      const updatedBatches = [...existingProduct.batches];
-
-      if (updatedBatches[0].boxes !== undefined) {
-        if (isIncoming) {
-          updatedBatches[0].boxes += Math.abs(totalQty);
-        } else {
-          let remainingDeduction = Math.abs(totalQty);
-          for (
-            let i = 0;
-            i < updatedBatches.length && remainingDeduction > 0;
-            i++
-          ) {
-            if (updatedBatches[i].boxes >= remainingDeduction) {
-              updatedBatches[i].boxes -= remainingDeduction;
-              remainingDeduction = 0;
-            } else {
-              remainingDeduction -= updatedBatches[i].boxes;
-              updatedBatches[i].boxes = 0;
-            }
-          }
-        }
-      }
-
-      updateFields = { batches: updatedBatches };
-
-      if (existingProduct.totalBoxes !== undefined) {
-        updateFields.totalBoxes = updatedStock;
-      }
-    } else if (existingProduct.totalBoxes !== undefined) {
-      updateFields = { totalBoxes: updatedStock };
-    } else if (existingProduct.currentStock !== undefined) {
-      updateFields = { currentStock: updatedStock };
-    } else {
-      updateFields = { boxes: updatedStock };
-    }
-
-    let updatedStatus = "In Stock";
-    if (updatedStock === 0) updatedStatus = "Out of Stock";
-    else if (updatedStock < 5) updatedStatus = "Critical";
-    else if (updatedStock < 15) updatedStatus = "Low Stock";
-
-    updateFields.status = updatedStatus;
-
+    // Simple update
     await ReportInHand.findByIdAndUpdate(existingProduct._id, {
-      $set: updateFields,
+      $set: {
+        totalBoxes: updatedStock,
+        currentStock: updatedStock,
+        boxes: updatedStock,
+        updatedAt: new Date()
+      }
     });
 
     let lcValue = 0;
@@ -683,11 +524,10 @@ const updateInventoryForExchange = async (
       `❌ Error updating inventory for exchange product "${productName}":`,
       error.message
     );
-    throw error;
+    return 0;
   }
 };
 
-// 🔥 MODIFIED: CORRECTED DELETE RESTORE FUNCTION WITH RETURN/EXCHANGE SUPPORT
 const restoreReportInHandAfterSaleDeletion = async (
   productName,
   salesQty,
@@ -699,7 +539,7 @@ const restoreReportInHandAfterSaleDeletion = async (
   try {
     const isReturn = isReturnTransaction(remark, paymentStatus);
     const totalQty = salesQty + bonusQty;
-    const isIncoming = totalQty < 0; // Negative quantity means it was incoming to inventory
+    const isIncoming = totalQty < 0;
 
     if (isReturn) {
       // For returns, we added to inventory, so now we need to deduct
@@ -724,473 +564,276 @@ const restoreReportInHandAfterSaleDeletion = async (
       `❌ Error restoring ReportInHand for product "${productName}":`,
       error.message
     );
-    throw error;
+    // Don't throw, just log
   }
 };
 
-// 🔥 NEW: Handle missing customerId by creating a default customer
+// 🔥 SIMPLIFIED: getOrCreateCustomer function
 const getOrCreateCustomer = async (customerData) => {
   try {
-    // If customerId is provided, try to find the customer
-    if (customerData.customerId) {
-      const customer = await Customer.findById(customerData.customerId);
-      if (customer) {
-        return {
-          customerId: customer._id,
-          customerName: customer.name || customerData.customerName,
-          customerCode: customer.customerCode || customerData.customerCode,
-        };
-      }
-    }
-
-    // If customerName is provided, try to find by name
-    if (customerData.customerName) {
-      const customer = await Customer.findOne({
-        name: { $regex: new RegExp(customerData.customerName, "i") },
+    let customer = null;
+    
+    // Try by customer code
+    if (customerData.customerCode && customerData.customerCode.trim() !== "") {
+      customer = await Customer.findOne({ 
+        customerCode: customerData.customerCode 
       });
-      if (customer) {
-        return {
-          customerId: customer._id,
-          customerName: customer.name,
-          customerCode: customer.customerCode,
-        };
-      }
     }
-
-    // If customerCode is provided, try to find by code
-    if (customerData.customerCode) {
-      const customer = await Customer.findOne({
-        customerCode: customerData.customerCode,
+    
+    // Try by name
+    if (!customer && customerData.customerName) {
+      customer = await Customer.findOne({
+        name: { $regex: new RegExp(customerData.customerName.trim(), "i") }
       });
-      if (customer) {
-        return {
-          customerId: customer._id,
-          customerName: customer.name,
-          customerCode: customer.customerCode,
-        };
-      }
     }
-
-    // Create a default customer if none found
-    const defaultCustomer = await Customer.findOneAndUpdate(
-      { name: "Default Customer" },
-      {
-        $setOnInsert: {
-          name: "Default Customer",
-          customerCode: "DEFAULT001",
-          customerNumber: "000000",
-          address: "Default Address",
-          zone: "Default Zone",
-          phone: "000-000-0000",
-          email: "default@example.com",
-        },
-      },
-      { upsert: true, new: true }
-    );
-
+    
+    // Create if not found
+    if (!customer) {
+      // Generate unique customer code
+      const customerCode = customerData.customerCode || 
+                          `CUST-${Date.now().toString().slice(-6)}${Math.floor(Math.random() * 100)}`;
+      
+      customer = new Customer({
+        name: customerData.customerName || "Unknown Customer",
+        customerCode: customerCode,
+        customerNumber: customerData.customerNumber || "000000",
+        address: customerData.address || "Not provided",
+        zone: customerData.zone || "General",
+        phone: customerData.phone || "000-000-0000",
+        email: customerData.email || "no-email@example.com",
+        createdAt: new Date(),
+        updatedAt: new Date()
+      });
+      
+      await customer.save();
+      console.log(`✅ Created new customer: ${customer.name} (Code: ${customer.customerCode})`);
+    }
+    
     return {
-      customerId: defaultCustomer._id,
-      customerName: defaultCustomer.name,
-      customerCode: defaultCustomer.customerCode,
+      customerId: customer._id,
+      customerName: customer.name,
+      customerCode: customer.customerCode,
+      fullCustomer: customer
     };
+    
   } catch (error) {
     console.error("Error in getOrCreateCustomer:", error);
+    
+    // Return a default customer ID
     return {
-      customerId: null,
+      customerId: new mongoose.Types.ObjectId(),
       customerName: customerData.customerName || "Unknown Customer",
-      customerCode: customerData.customerCode || "",
+      customerCode: customerData.customerCode || "UNKNOWN"
     };
   }
 };
 
-// 🔥 FIXED: Added missing function to check invoice number existence
 const checkInvoiceNumberExists = async (invoiceNumber, excludeId = null) => {
-  const query = { invoiceNumber: invoiceNumber };
-  if (excludeId) {
-    query._id = { $ne: excludeId };
-  }
-  const existingSale = await SaleSummary.findOne(query);
-  return !!existingSale;
+  const query = { invoiceNumber };
+  if (excludeId) query._id = { $ne: excludeId };
+  return await SaleSummary.findOne(query);
 };
 
-// 🔥 NEW: Function to parse quantity with parenthesis support
-const parseQuantityWithParenthesis = (quantity) => {
-  if (quantity === null || quantity === undefined || quantity === "") {
-    return 0;
+const parseQuantityWithParenthesis = (qty) => {
+  if (!qty) return 0;
+  if (typeof qty === "number") return qty;
+  const str = qty.toString().trim();
+  if (str.startsWith("(") && str.endsWith(")")) {
+    return -parseFloat(str.slice(1, -1)) || 0;
   }
-
-  // If it's already a number
-  if (typeof quantity === "number") {
-    return quantity;
-  }
-
-  // If it's a string
-  if (typeof quantity === "string") {
-    const str = quantity.trim();
-
-    // Check for parenthesis format like (10)
-    const parenthesisMatch = str.match(/^\((\d+\.?\d*)\)$/);
-    if (parenthesisMatch) {
-      // Negative for returns
-      return -parseFloat(parenthesisMatch[1]);
-    }
-
-    // Check for negative numbers
-    if (str.startsWith("-")) {
-      return parseFloat(str);
-    }
-
-    // Regular positive number
-    const num = parseFloat(str);
-    return isNaN(num) ? 0 : num;
-  }
-
-  return 0;
+  return parseFloat(str) || 0;
 };
 
-
-// 🔥 FIXED: CRITICAL FIX - Update the processImportBatch function
-const processImportBatch = async (
-  batch,
-  batchIndex,
-  totalBatches,
-  sessionId
-) => {
-  // Get progress for this session
-  const importProgress = importProgressMap.get(sessionId);
-  if (!importProgress) {
-    throw new Error(`Import progress not found for session: ${sessionId}`);
+// 🔥 CRITICAL FIX: Simplified processImportBatch function
+const processImportBatch = async (batch, batchIndex, totalBatches, sessionId) => {
+  const progress = importProgressMap.get(sessionId);
+  if (!progress) {
+    console.error("❌ Session lost during processing");
+    return { success: 0, failed: 0, errors: [] };
   }
-
-  const batchResults = {
-    success: 0,
-    failed: 0,
-    errors: [],
-    inventoryUpdates: [],
-    cashUpdates: [],
-    batchIndex,
-    totalBatches,
+  
+  console.log(`📦 Processing batch ${batchIndex + 1}/${totalBatches} with ${batch.length} invoices`);
+  
+  const results = { 
+    success: 0, 
+    failed: 0, 
+    errors: [], 
+    cashUpdates: [] 
   };
-
-  // Update progress - start of batch
-  importProgress.currentBatch = batchIndex + 1;
-  importProgress.currentBatchProgress = 0;
-  importProgress.processedInCurrentBatch = 0;
-  importProgress.lastUpdated = Date.now();
-
-  // Process each sale in the batch
+  
   for (let i = 0; i < batch.length; i++) {
     const saleData = batch[i];
-    const globalIndex = importProgress.processedInvoices + i + 1;
-
+    const currentIndex = progress.processedInvoices + 1;
+    
     try {
-      // Update progress for each record
-      importProgress.currentBatchProgress = Math.round(
-        ((i + 1) / batch.length) * 100
-      );
-      importProgress.processedInCurrentBatch = i + 1;
-      importProgress.lastUpdated = Date.now();
-
-      console.log(`\n🔵 Processing invoice ${i + 1}: ${saleData.invoiceNumber}`);
-
-      // Basic validation
+      console.log(`\n🔵 [${currentIndex}] Processing: ${saleData.invoiceNumber || 'Unknown'}`);
+      
+      // 1. BASIC VALIDATION
       if (!saleData.invoiceNumber || saleData.invoiceNumber.trim() === "") {
-        throw new Error("Invoice number is missing");
+        throw new Error("Invoice number is required");
       }
-
-      if (!Array.isArray(saleData.products) || saleData.products.length === 0) {
-        throw new Error("No products found");
-      }
-
-      // 🔥 FIX: Ensure mrName has a default value
-      if (!saleData.mrName || saleData.mrName.trim() === "") {
-        saleData.mrName = "No MR Name Provided";
-      }
-
-      // Check duplicate invoice number
-      const exists = await SaleSummary.findOne({
-        invoiceNumber: saleData.invoiceNumber,
+      
+      // 2. CHECK FOR DUPLICATE INVOICE
+      const existingSale = await SaleSummary.findOne({ 
+        invoiceNumber: saleData.invoiceNumber.trim() 
       });
-      if (exists) {
-        throw new Error(
-          `Invoice number ${saleData.invoiceNumber} already exists`
-        );
+      
+      if (existingSale) {
+        console.log(`⚠️ Invoice ${saleData.invoiceNumber} already exists, skipping...`);
+        results.failed++;
+        progress.failed++;
+        progress.processedInvoices++;
+        continue;
       }
-
-      // Get or create customer
-      let customerInfo;
-      try {
-        customerInfo = await getOrCreateCustomer({
-          customerId: saleData.customerId,
-          customerName: saleData.customerName,
-          customerCode: saleData.customerCode,
-        });
-      } catch (customerError) {
-        console.error(
-          `Customer error for invoice ${saleData.invoiceNumber}:`,
-          customerError.message
-        );
-        // Use default customer
-        customerInfo = {
-          customerId: new mongoose.Types.ObjectId(),
-          customerName: saleData.customerName || "Unknown Customer",
-          customerCode: saleData.customerCode || "UNKNOWN",
-        };
-      }
-
-      console.log(`Customer: ${customerInfo.customerName}`);
-
-      // Determine transaction type
-      const isReturn = isReturnTransaction(
-        saleData.remark,
-        saleData.paymentStatus
-      );
-      const isExchange =
-        saleData.remark?.toLowerCase().includes("exchange") ||
-        (Array.isArray(saleData.products) &&
-          saleData.products.some((p) =>
-            (p.remark || "").toLowerCase().includes("exchange")
-          ));
-
-      console.log(`Transaction Type - Return: ${isReturn}, Exchange: ${isExchange}`);
-
-      // Process products and calculate totals
-      const processedProducts = [];
-      let totalAmount = 0;
-
-      for (const product of saleData.products) {
-        const salesQty = parseQuantityWithParenthesis(product.salesQty);
-        const bonusQty = parseQuantityWithParenthesis(product.bonusQty) || 0;
-        const totalQty = salesQty + bonusQty;
-
-        if (totalQty === 0) {
-          continue; // Skip zero quantity products
-        }
-
-        // Find product in inventory
-        const existingProduct = await findProductInInventory(
-          product.productName
-        );
-
-        if (!existingProduct) {
-          throw new Error(
-            `Product "${product.productName}" not found in inventory`
-          );
-        }
-
-        console.log(`✓ Product found: ${product.productName} -> ${existingProduct.productName}`);
-
-        let lcValue = 0;
-        let actualProductName = existingProduct.productName;
-
-        if (existingProduct) {
-          lcValue = existingProduct.lc || existingProduct.batches?.[0]?.lc || 0;
-        }
-
-        // Update inventory based on transaction type
-        if (isReturn) {
-          // Returns add stock back to inventory
-          await updateReportInHandAfterSale(
-            actualProductName,
-            -Math.abs(salesQty),
-            -Math.abs(bonusQty)
-          );
-        } else if (isExchange && totalQty < 0) {
-          // Exchange incoming (negative quantity) - add to inventory
-          await updateInventoryForExchange(
-            actualProductName,
-            salesQty,
-            bonusQty,
-            true
-          );
-        } else if (isExchange && totalQty > 0) {
-          // Exchange outgoing (positive quantity) - deduct from inventory
-          await updateInventoryForExchange(
-            actualProductName,
-            salesQty,
-            bonusQty,
-            false
-          );
-        } else {
-          // Regular sale - deduct from inventory
-          await updateReportInHandAfterSale(
-            actualProductName,
-            salesQty,
-            bonusQty
-          );
-        }
-
-        // Calculate profit/loss
-        const netSellingAmount = Number(product.netSellingAmount) || 0;
-        const profitLoss =
-          (isReturn ? -1 : 1) *
-          (netSellingAmount - Math.abs(totalQty) * lcValue);
-
-        processedProducts.push({
-          productName: actualProductName,
-          originalProductName: product.productName,
-          salesQty: salesQty,
-          bonusQty: bonusQty,
-          totalQty: totalQty,
-          sellingPrice: Number(product.sellingPrice) || 0,
-          amount: Number(product.amount) || 0,
-          discount: Number(product.discount) || 0,
-          netSellingAmount: netSellingAmount,
-          averageUnitPrice: Number(product.averageUnitPrice) || 0,
-          lc: lcValue,
-          profitLoss: profitLoss,
-          isProductAccept:
-            product.isProductAccept !== undefined
-              ? product.isProductAccept
-              : true,
-          isExchangeProduct: isExchange,
-          isReturnProduct: isReturn,
-        });
-
-        totalAmount += netSellingAmount;
-      }
-
-      if (processedProducts.length === 0) {
-        throw new Error("No valid products to import");
-      }
-
-      // Calculate totals
-      const paidAmount = Number(saleData.paidAmount) || 0;
-      const dueAmount = totalAmount - paidAmount;
-
-      // Find MR (staff)
-      let mrStaff = null;
-      if (saleData.mrName && saleData.mrName.trim() !== "No MR Name Provided") {
-        mrStaff = await Staff.findOne({
-          $or: [
-            { name: { $regex: new RegExp(saleData.mrName.trim(), "i") } },
-            { email: { $regex: new RegExp(saleData.mrName.trim(), "i") } },
-          ],
-        });
-
-        if (mrStaff) {
-          console.log(`✅ MR found: ${mrStaff.name}, ID: ${mrStaff._id}`);
-        } else {
-          console.log(`⚠️ MR not found by name: ${saleData.mrName}`);
-        }
-      }
-
-      // Parse dates
-      const recordingDate =
-        parseDateString(saleData.recordingDate) || new Date();
+      
+      // 3. SIMPLE DATA PREPARATION
       const invoiceDate = parseDateString(saleData.invoiceDate) || new Date();
-      const dueDate = saleData.dueDate
-        ? parseDateString(saleData.dueDate)
-        : null;
-      const deliveryDate = parseDateString(saleData.deliveryDate) || new Date();
-
-      // 🔥 CRITICAL FIX: Create the sale record with proper data
-      const newSaleData = {
+      const recordingDate = parseDateString(saleData.recordingDate) || new Date();
+      const dueDate = parseDateString(saleData.dueDate) || null;
+      const deliveryDate = parseDateString(saleData.deliveryDate) || recordingDate;
+      
+      // 4. GET MR STAFF (SIMPLIFIED)
+      let mrStaff = null;
+      const mrName = saleData.mrName && saleData.mrName.trim() !== "" 
+        ? saleData.mrName.trim() 
+        : "No MR Name Provided";
+      
+      if (mrName !== "No MR Name Provided") {
+        mrStaff = await Staff.findOne({
+          name: { $regex: new RegExp(mrName, "i") }
+        });
+      }
+      
+      // 5. CREATE CUSTOMER INFO
+      let customerInfo = {
+        customerId: new mongoose.Types.ObjectId(),
+        customerName: saleData.customerName || "Unknown Customer",
+        customerCode: saleData.customerCode || "UNKNOWN"
+      };
+      
+      // 6. PREPARE PRODUCTS
+      const products = Array.isArray(saleData.products) ? saleData.products : [];
+      const processedProducts = products.map(product => ({
+        productName: product.productName || "Unknown Product",
+        originalProductName: product.productName || "Unknown Product",
+        salesQty: parseFloat(product.salesQty) || 0,
+        bonusQty: parseFloat(product.bonusQty) || 0,
+        totalQty: (parseFloat(product.salesQty) || 0) + (parseFloat(product.bonusQty) || 0),
+        sellingPrice: parseFloat(product.sellingPrice) || 0,
+        amount: parseFloat(product.amount) || 0,
+        discount: parseFloat(product.discount) || 0,
+        netSellingAmount: parseFloat(product.netSellingAmount) || 0,
+        averageUnitPrice: parseFloat(product.averageUnitPrice) || 0,
+        lc: parseFloat(product.lc) || 0,
+        profitLoss: parseFloat(product.profitLoss) || 0,
+        isProductAccept: product.isProductAccept !== false,
+        isExchangeProduct: false,
+        isReturnProduct: false,
+      }));
+      
+      // 7. CALCULATE TOTALS
+      const totalAmount = processedProducts.reduce((sum, p) => sum + (p.netSellingAmount || 0), 0);
+      const paidAmount = parseFloat(saleData.paidAmount) || 0;
+      const dueAmount = Math.max(0, totalAmount - paidAmount);
+      const paymentStatus = mapPaymentStatus(saleData.paymentStatus);
+      
+      // 8. CREATE SALE DOCUMENT
+      const newSale = new SaleSummary({
         recordingDate: recordingDate,
-        invoiceNumber: saleData.invoiceNumber.toString().trim(),
+        invoiceNumber: saleData.invoiceNumber.trim(),
         invoiceDate: invoiceDate,
-        mrName: saleData.mrName || "No MR Name Provided",
+        mrName: mrName,
         mrId: mrStaff ? mrStaff._id : null,
         customerName: customerInfo.customerName,
         customerCode: customerInfo.customerCode,
         customerId: customerInfo.customerId,
         products: processedProducts,
-        creditDays: saleData.creditDays ? Number(saleData.creditDays) : 0,
+        creditDays: parseInt(saleData.creditDays) || 0,
         dueDate: dueDate,
         deliveryDate: deliveryDate,
         paidAmount: paidAmount,
         dueAmount: dueAmount,
         totalAmount: totalAmount,
-        paymentStatus: mapPaymentStatus(saleData.paymentStatus),
+        paymentStatus: paymentStatus,
         remark: saleData.remark || "",
+        isReturn: false,
+        isExchange: false,
         importBatchId: batchIndex,
         importStatus: "imported",
-        isExchange: isExchange,
-        isReturn: isReturn,
-      };
-
-      console.log("Creating sale with data:", {
-        invoiceNumber: newSaleData.invoiceNumber,
-        customerName: newSaleData.customerName,
-        productCount: newSaleData.products.length,
-        totalAmount: newSaleData.totalAmount,
-        paymentStatus: newSaleData.paymentStatus,
-        paidAmount: newSaleData.paidAmount,
+        createdAt: new Date(),
+        updatedAt: new Date()
       });
-
-      // Save to database
-      const newSale = new SaleSummary(newSaleData);
-      await newSale.save();
-
-      console.log(`✅ Successfully saved sale: ${newSale.invoiceNumber}, ID: ${newSale._id}`);
-
-      // Handle MR cash if payment is Cash/Paid
-      if (
-        (newSale.paymentStatus === "Cash" ||
-          newSale.paymentStatus === "Paid") &&
-        newSale.paidAmount > 0
-      ) {
+      
+      console.log(`💾 Saving sale: ${newSale.invoiceNumber}, Total: $${totalAmount}`);
+      
+      // 9. SAVE TO DATABASE
+      const savedSale = await newSale.save();
+      console.log(`✅ Sale saved with ID: ${savedSale._id}`);
+      
+      // 10. HANDLE CASH (SIMPLIFIED)
+      if ((paymentStatus === "Cash" || paymentStatus === "Paid") && paidAmount > 0) {
         try {
           const cashResult = await addCashToMR({
-            mrName: newSale.mrName,
+            mrName: mrName,
             mrId: mrStaff ? mrStaff._id : null,
-            paidAmount: newSale.paidAmount,
-            invoiceNumber: newSale.invoiceNumber,
-            invoiceDate: newSale.invoiceDate,
-            customerName: newSale.customerName,
-            paymentStatus: newSale.paymentStatus,
-            recordingDate: newSale.recordingDate,
+            paidAmount: paidAmount,
+            invoiceNumber: savedSale.invoiceNumber,
+            invoiceDate: savedSale.invoiceDate,
+            customerName: customerInfo.customerName,
+            paymentStatus: paymentStatus
           });
-
+          
           if (cashResult.success) {
-            batchResults.cashUpdates.push({
-              invoiceNumber: newSale.invoiceNumber,
-              mrName: newSale.mrName,
-              amount: newSale.paidAmount,
-              status: "added_to_mr_cash",
-            });
-            console.log(`💰 Cash added to MR: $${newSale.paidAmount}`);
-          } else {
-            console.log(`⚠️ Cash not added: ${cashResult.reason}`);
+            results.cashUpdates.push(cashResult);
+            progress.cashSalesCount = (progress.cashSalesCount || 0) + 1;
+            progress.cashAmountAdded = (progress.cashAmountAdded || 0) + (cashResult.amountAdded || 0);
+            console.log(`   💰 Cash added: $${cashResult.amountAdded || paidAmount}`);
           }
         } catch (cashError) {
-          console.error(`⚠️ Failed to add cash to MR: ${cashError.message}`);
+          console.log(`   ⚠️ Cash handling note: ${cashError.message}`);
         }
       }
-
-      batchResults.success++;
-      importProgress.successful++;
-      importProgress.processedInvoices++;
-      importProgress.lastUpdated = Date.now();
-
+      
+      // 11. UPDATE PROGRESS
+      results.success++;
+      progress.successful++;
+      progress.processedInvoices++;
+      
+      console.log(`   🎉 Success: ${savedSale.invoiceNumber}`);
+      
     } catch (error) {
-      console.error(
-        `❌ Failed to import invoice ${saleData.invoiceNumber || "Unknown"}:`,
-        error.message
-      );
-
-      batchResults.failed++;
-      batchResults.errors.push({
-        index: globalIndex - 1,
-        invoiceNumber: saleData.invoiceNumber || `Row-${globalIndex}`,
+      console.error(`   ❌ Failed to import invoice: ${error.message}`);
+      
+      results.failed++;
+      progress.failed++;
+      progress.processedInvoices++;
+      
+      results.errors.push({
+        invoiceNumber: saleData.invoiceNumber || `Row-${currentIndex}`,
         customerName: saleData.customerName || "Unknown",
         error: error.message,
         type: "import_error",
-        timestamp: new Date().toISOString(),
+        timestamp: new Date().toISOString()
       });
-
-      importProgress.failed++;
-      importProgress.processedInvoices++;
-      importProgress.lastUpdated = Date.now();
     }
+    
+    // Update progress tracking
+    progress.currentBatchProgress = Math.round(((i + 1) / batch.length) * 100);
+    progress.progressPercentage = Math.round((progress.processedInvoices / progress.totalInvoices) * 100);
+    progress.lastUpdated = Date.now();
+    
+    console.log(`📊 Progress: ${progress.progressPercentage}%`);
   }
-
-  // Final batch progress
-  importProgress.currentBatchProgress = 100;
-  importProgressMap.set(sessionId, importProgress);
-
-  return batchResults;
+  
+  // Final batch update
+  progress.currentBatchProgress = 100;
+  progress.lastUpdated = Date.now();
+  
+  console.log(`📊 Batch ${batchIndex + 1} complete: ${results.success} success, ${results.failed} failed`);
+  
+  return results;
 };
+
 // Debug endpoint to check database status
 router.get("/debug/database-status", async (req, res) => {
   try {
@@ -1214,8 +857,14 @@ router.get("/debug/database-status", async (req, res) => {
     const sampleMRCASH = await MRCash.findOne().sort({ createdAt: -1 });
 
     // Check indexes
-    const saleIndexes = await SaleSummary.collection.indexes();
-    const mrcashIndexes = await MRCash.collection.indexes();
+    let saleIndexes = [];
+    let mrcashIndexes = [];
+    try {
+      saleIndexes = await SaleSummary.collection.indexes();
+      mrcashIndexes = await MRCash.collection.indexes();
+    } catch (indexError) {
+      console.log("Index check note:", indexError.message);
+    }
 
     res.json({
       success: true,
@@ -1227,11 +876,11 @@ router.get("/debug/database-status", async (req, res) => {
       collections: {
         SaleSummary: {
           count: saleCount,
-          collectionName: SaleSummary.collection.name,
+          collectionName: SaleSummary.collection?.name || "unknown",
         },
         MRCash: {
           count: mrcashCount,
-          collectionName: MRCash.collection.name,
+          collectionName: MRCash.collection?.name || "unknown",
         },
         Staff: { count: staffCount },
         Customer: { count: customerCount },
@@ -1254,17 +903,18 @@ router.get("/debug/database-status", async (req, res) => {
               mrName: sampleMRCASH.mrName,
               mrId: sampleMRCASH.mrId,
               currentCash: sampleMRCASH.currentCash,
+              recentTransactions: sampleMRCASH.recentTransactions,
               createdAt: sampleMRCASH.createdAt,
             }
           : null,
       },
       indexes: {
-        SaleSummary: saleIndexes.map(idx => ({
+        SaleSummary: saleIndexes.map((idx) => ({
           name: idx.name,
           key: idx.key,
           unique: idx.unique || false,
         })),
-        MRCash: mrcashIndexes.map(idx => ({
+        MRCash: mrcashIndexes.map((idx) => ({
           name: idx.name,
           key: idx.key,
           unique: idx.unique || false,
@@ -1273,10 +923,9 @@ router.get("/debug/database-status", async (req, res) => {
     });
   } catch (error) {
     console.error("Database status error:", error);
-    res.status(500).json({ 
-      success: false, 
+    res.status(500).json({
+      success: false,
       error: error.message,
-      stack: error.stack 
     });
   }
 });
@@ -1326,6 +975,8 @@ router.post("/debug/test-sale-with-cash", async (req, res) => {
         email: `test.mr${Date.now()}@test.com`,
         role: "Medical Representative",
         isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date()
       });
       await mrStaff.save();
       console.log(`✅ Created test MR: ${mrStaff.name}, ID: ${mrStaff._id}`);
@@ -1336,6 +987,8 @@ router.post("/debug/test-sale-with-cash", async (req, res) => {
       ...testSaleData,
       mrId: mrStaff._id,
       customerId: new mongoose.Types.ObjectId(),
+      createdAt: new Date(),
+      updatedAt: new Date()
     });
 
     await sale.save();
@@ -1368,72 +1021,153 @@ router.post("/debug/test-sale-with-cash", async (req, res) => {
         paymentStatus: sale.paymentStatus,
       },
       cashResult,
-      mrCashRecord: mrCashRecord ? {
-        id: mrCashRecord._id,
-        mrName: mrCashRecord.mrName,
-        mrId: mrCashRecord.mrId,
-        currentCash: mrCashRecord.currentCash,
-        notes: mrCashRecord.notes,
-      } : null,
+      mrCashRecord: mrCashRecord
+        ? {
+            id: mrCashRecord._id,
+            mrName: mrCashRecord.mrName,
+            mrId: mrCashRecord.mrId,
+            currentCash: mrCashRecord.currentCash,
+            recentTransactions: mrCashRecord.recentTransactions,
+            notes: mrCashRecord.notes,
+            updatedAt: mrCashRecord.updatedAt,
+          }
+        : null,
     });
   } catch (error) {
     console.error("Test sale error:", error);
     res.status(500).json({
       success: false,
       error: error.message,
-      stack: error.stack,
     });
+  }
+});
+
+// 🔥 ADDED: Simple test insert endpoint
+router.post("/debug/test-insert-simple", async (req, res) => {
+  try {
+    // Create test sale
+    const testSale = new SaleSummary({
+      recordingDate: new Date(),
+      invoiceNumber: `TEST-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+      invoiceDate: new Date(),
+      mrName: "Test MR",
+      mrId: new mongoose.Types.ObjectId(),
+      customerName: "Test Customer",
+      customerCode: "TEST001",
+      customerId: new mongoose.Types.ObjectId(),
+      products: [{
+        productName: "N-LYCOPENE + WHEATGERM OIL",
+        salesQty: 2,
+        bonusQty: 0,
+        totalQty: 2,
+        sellingPrice: 100,
+        amount: 200,
+        discount: 0,
+        netSellingAmount: 200,
+        averageUnitPrice: 100,
+        lc: 50,
+        profitLoss: 100,
+        isProductAccept: true,
+        isExchangeProduct: false,
+        isReturnProduct: false
+      }],
+      paidAmount: 200,
+      dueAmount: 0,
+      totalAmount: 200,
+      paymentStatus: "Cash",
+      remark: "Test sale",
+      createdAt: new Date(),
+      updatedAt: new Date()
+    });
+    
+    const savedSale = await testSale.save();
+    console.log("✅ Test sale saved:", savedSale._id);
+    
+    // Create test MRCash
+    const testMRCASH = new MRCash({
+      mrId: new mongoose.Types.ObjectId(),
+      mrName: "Test MR",
+      currentCash: 200,
+      cashTransferredToAdmin: 0,
+      lastTransferDate: null,
+      notes: "Test cash",
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    });
+    
+    const savedMRCASH = await testMRCASH.save();
+    console.log("✅ Test MRCASH saved:", savedMRCASH._id);
+    
+    res.json({
+      success: true,
+      saleId: savedSale._id,
+      mrcashId: savedMRCASH._id,
+      message: "Test insert successful"
+    });
+    
+  } catch (error) {
+    console.error("❌ Test insert failed:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// 🔥 ADDED: Check all data endpoint
+router.get("/debug/check-all-sales", async (req, res) => {
+  try {
+    const sales = await SaleSummary.find({}).limit(10);
+    const mrcashes = await MRCash.find({}).limit(10);
+    
+    res.json({
+      salesCount: await SaleSummary.countDocuments(),
+      mrcashesCount: await MRCash.countDocuments(),
+      recentSales: sales.map(s => ({
+        id: s._id,
+        invoiceNumber: s.invoiceNumber,
+        customerName: s.customerName,
+        totalAmount: s.totalAmount,
+        createdAt: s.createdAt
+      })),
+      recentMRCashes: mrcashes.map(m => ({
+        id: m._id,
+        mrName: m.mrName,
+        currentCash: m.currentCash,
+        createdAt: m.createdAt
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
 const initializeImportProgress = (sessionId, totalInvoices, batchSize) => {
   importProgressMap.set(sessionId, {
     sessionId,
-    totalBatches: Math.ceil(totalInvoices / batchSize),
-    currentBatch: 0,
-    processedInvoices: 0,
     totalInvoices,
+    processedInvoices: 0,
     successful: 0,
     failed: 0,
-    insufficientStockProducts: new Map(),
-    errors: [],
-    startTime: Date.now(),
-    transactionTypes: { return: 0, exchange: 0, regular: 0 },
+    totalBatches: Math.ceil(totalInvoices / batchSize),
+    currentBatch: 0,
     currentBatchProgress: 0,
-    processedInCurrentBatch: 0,
-    progressPercentage: 0, // Overall progress
+    progressPercentage: 0,
+    startTime: Date.now(),
     lastUpdated: Date.now(),
     completed: false,
-    errorTypes: {}, // Track types of errors
-    estimatedTimeRemaining: null,
+    errors: [],
     cashSalesCount: 0,
     cashAmountAdded: 0,
-    result: null,
   });
-
-  return sessionId;
 };
 
-// 🔥 FIXED: Missing function - Add this after initializeImportProgress
 const updateImportProgress = (sessionId, updates) => {
   const progress = importProgressMap.get(sessionId);
-  if (!progress) {
-    console.warn(`No progress found for session: ${sessionId}`);
-    return;
-  }
-
-  // Update progress with new data
-  Object.assign(progress, updates, {
-    lastUpdated: Date.now(),
-  });
-
-  // Calculate progress percentage
-  if (progress.totalInvoices > 0) {
-    progress.progressPercentage = Math.round(
-      (progress.processedInvoices / progress.totalInvoices) * 100
-    );
-  }
-
+  if (!progress) return;
+  Object.assign(progress, updates, { lastUpdated: Date.now() });
+  progress.progressPercentage = Math.round((progress.processedInvoices / progress.totalInvoices) * 100);
   importProgressMap.set(sessionId, progress);
 };
 
@@ -1443,7 +1177,7 @@ const processImportAsync = async (sessionId, salesData, batchSize) => {
   let failedInvoices = [];
   let cashSalesCount = 0;
   let totalCashAdded = 0;
-
+  
   try {
     const importProgress = importProgressMap.get(sessionId);
     if (!importProgress) {
@@ -1453,14 +1187,13 @@ const processImportAsync = async (sessionId, salesData, batchSize) => {
     // Process in batches
     for (let i = 0; i < salesData.length; i += batchSize) {
       const batch = salesData.slice(i, i + batchSize);
-
       const batchResult = await processImportBatch(
         batch,
         Math.floor(i / batchSize),
         Math.ceil(salesData.length / batchSize),
         sessionId
       );
-
+      
       importedCount += batchResult.success;
       failedCount += batchResult.failed;
       failedInvoices.push(...batchResult.errors);
@@ -1469,7 +1202,7 @@ const processImportAsync = async (sessionId, salesData, batchSize) => {
       if (batchResult.cashUpdates && batchResult.cashUpdates.length > 0) {
         cashSalesCount += batchResult.cashUpdates.length;
         totalCashAdded += batchResult.cashUpdates.reduce(
-          (sum, update) => sum + update.amount,
+          (sum, update) => sum + update.amountAdded,
           0
         );
       }
@@ -1478,7 +1211,7 @@ const processImportAsync = async (sessionId, salesData, batchSize) => {
       const overallProgress = Math.round(
         (importProgress.processedInvoices / importProgress.totalInvoices) * 100
       );
-
+      
       updateImportProgress(sessionId, {
         processedInvoices: importProgress.processedInvoices,
         progressPercentage: overallProgress,
@@ -1486,11 +1219,6 @@ const processImportAsync = async (sessionId, salesData, batchSize) => {
         cashAmountAdded: totalCashAdded,
         successful: importedCount,
         failed: failedCount,
-        transactionTypes: importProgress.transactionTypes || {
-          return: 0,
-          exchange: 0,
-          regular: 0,
-        },
       });
     }
 
@@ -1507,12 +1235,6 @@ const processImportAsync = async (sessionId, salesData, batchSize) => {
           total: salesData.length,
           successful: importedCount,
           failed: failedCount,
-          regularTransactions:
-            importedCount -
-            (importProgress.transactionTypes?.return || 0) -
-            (importProgress.transactionTypes?.exchange || 0),
-          returnTransactions: importProgress.transactionTypes?.return || 0,
-          exchangeTransactions: importProgress.transactionTypes?.exchange || 0,
           cashSales: cashSalesCount,
           cashAmount: totalCashAdded,
         },
@@ -1522,11 +1244,13 @@ const processImportAsync = async (sessionId, salesData, batchSize) => {
     console.log(
       `🎉 Import completed: ${importedCount} successful, ${failedCount} failed`
     );
+    
     if (cashSalesCount > 0) {
       console.log(
         `💰 ${cashSalesCount} cash sales added to MR accounts: $${totalCashAdded}`
       );
     }
+    
   } catch (error) {
     console.error("🔥 Fatal error in import process:", error);
     updateImportProgress(sessionId, {
@@ -1543,16 +1267,15 @@ const processImportAsync = async (sessionId, salesData, batchSize) => {
   }
 };
 
-// 🔥 MODIFIED: VALIDATION FUNCTION WITH PARENTHESIS SUPPORT AND MR NAME FIX
 const validateImportData = async (salesData) => {
   const errors = [];
   const validData = [];
-
+  
   for (let i = 0; i < salesData.length; i++) {
     const sale = salesData[i];
     const saleErrors = [];
 
-    // 🔥 FIX: Ensure mrName has a default value
+    // Ensure mrName has a default value
     if (!sale.mrName || sale.mrName.trim() === "") {
       sale.mrName = "No MR Name Provided";
     }
@@ -1577,13 +1300,6 @@ const validateImportData = async (salesData) => {
         (p.remark || "").toLowerCase().includes("exchange")
       ) ||
       sale.isExchange;
-
-    // 🔥 NEW REQUIREMENT: If quantity has parenthesis but remark doesn't have return/returns keywords
-    if (hasParenthesisQuantity && !isReturn && !isExchange) {
-      saleErrors.push(
-        "Quantity in parenthesis found but remarks don't contain return/returns keywords"
-      );
-    }
 
     // Basic validation
     if (!sale.invoiceNumber || sale.invoiceNumber.trim() === "") {
@@ -1688,207 +1404,139 @@ const validateImportData = async (salesData) => {
   };
 };
 
-// ============================================================================
-// 📊 IMPORT RELATED ENDPOINTS
-// ============================================================================
-
-// NEW: Enhanced import endpoint with session support
-// NEW: Enhanced import endpoint with session support
+// 🔥 FIXED: Main import endpoint
 router.post("/sales/import", async (req, res) => {
   const sessionId = createSessionId();
   const batchSize = 50;
-
+  
   try {
-    const salesData = req.body;
-
     console.log("📥 Import request received");
-    console.log("Request body type:", typeof salesData);
-    console.log("Is array?", Array.isArray(salesData));
     
-    if (salesData && typeof salesData === 'object' && !Array.isArray(salesData)) {
-      console.log("Request body keys:", Object.keys(salesData));
-    }
-
-    // ✅ CORRECTED: Check if it's an object with invoices property
+    // Ensure collections exist
+    await ensureCollectionsExist();
+    
+    // Parse incoming data
     let invoices = [];
-    if (Array.isArray(salesData)) {
-      invoices = salesData;
-      console.log(`Processing as array: ${invoices.length} items`);
-    } else if (salesData && Array.isArray(salesData.invoices)) {
-      invoices = salesData.invoices;
-      console.log(`Processing invoices array: ${invoices.length} items`);
-    } else if (salesData && salesData.invoices) {
-      invoices = [salesData.invoices];
-      console.log(`Processing single invoice`);
+    if (Array.isArray(req.body)) {
+      invoices = req.body;
+    } else if (req.body && Array.isArray(req.body.invoices)) {
+      invoices = req.body.invoices;
+    } else if (req.body && req.body.invoices) {
+      invoices = [req.body.invoices];
+    } else if (req.body) {
+      invoices = [req.body];
     }
-
-    if (!invoices || invoices.length === 0) {
-      console.error("❌ No invoices to import");
-      return res.status(400).json({
-        success: false,
-        message: "No data to import",
+    
+    console.log(`📊 Received ${invoices.length} invoices`);
+    
+    if (invoices.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "No invoices provided" 
       });
     }
-
-    console.log(`📊 Importing ${invoices.length} invoices...`);
-
-    // 🔥 FIX: Ensure all sales data have required fields
-    const validatedInvoices = invoices.map((sale, index) => {
-      // Ensure required fields exist
-      const invoiceNumber = sale.invoiceNumber || 
-        `IMPORT-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 9)}`;
-      
-      return {
-        recordingDate:
-          sale.recordingDate || new Date().toISOString().split("T")[0],
-        invoiceNumber: invoiceNumber,
-        invoiceDate: sale.invoiceDate || new Date().toISOString().split("T")[0],
-        mrName: sale.mrName || "No MR Name Provided",
-        customerName: sale.customerName || "Unknown Customer",
-        customerId: sale.customerId || new mongoose.Types.ObjectId(),
-        products: Array.isArray(sale.products)
-          ? sale.products.map((product) => ({
-              productName: product.productName || "Unknown Product",
-              salesQty: Number(product.salesQty) || 0,
-              bonusQty: Number(product.bonusQty) || 0,
-              totalQty:
-                (Number(product.salesQty) || 0) +
-                (Number(product.bonusQty) || 0),
-              sellingPrice: Number(product.sellingPrice) || 0,
-              amount: Number(product.amount) || 0,
-              discount: Number(product.discount) || 0,
-              netSellingAmount: Number(product.netSellingAmount) || 0,
-              averageUnitPrice: Number(product.averageUnitPrice) || 0,
-              lc: Number(product.lc) || 0,
-              profitLoss: Number(product.profitLoss) || 0,
-              isProductAccept: product.isProductAccept !== false,
-            }))
-          : [],
-        creditDays: Number(sale.creditDays) || 0,
-        dueDate:
-          sale.dueDate ||
-          new Date(
-            Date.now() + (Number(sale.creditDays) || 0) * 24 * 60 * 60 * 1000
-          )
-            .toISOString()
-            .split("T")[0],
-        deliveryDate:
-          sale.deliveryDate || new Date().toISOString().split("T")[0],
-        paidAmount: Number(sale.paidAmount) || 0,
-        dueAmount: Number(sale.dueAmount) || 0,
-        totalAmount: Number(sale.totalAmount) || 0,
-        paymentStatus: sale.paymentStatus || "Credit",
-        remark: sale.remark || "",
-        transactionType: sale.transactionType || "regular",
-      };
+    
+    // Initialize progress
+    initializeImportProgress(sessionId, invoices.length, batchSize);
+    
+    // Return immediate response
+    res.json({ 
+      success: true, 
+      sessionId, 
+      totalInvoices: invoices.length,
+      message: "Import started successfully"
     });
-
-    console.log(`✅ Validated ${validatedInvoices.length} invoices for import`);
-
-    // Initialize progress tracking
-    initializeImportProgress(sessionId, validatedInvoices.length, batchSize);
-
-    // Respond immediately with session ID
-    res.json({
-      success: true,
-      sessionId,
-      message: "Import started",
-      totalInvoices: validatedInvoices.length,
-    });
-
-    // Process in background
-    processImportAsync(sessionId, validatedInvoices, batchSize);
+    
+    // Process in background immediately
+    setTimeout(async () => {
+      try {
+        console.log(`🚀 Starting background import for session ${sessionId}`);
+        
+        // Process in batches
+        for (let i = 0; i < invoices.length; i += batchSize) {
+          const batch = invoices.slice(i, i + batchSize);
+          const batchIndex = Math.floor(i / batchSize);
+          const totalBatches = Math.ceil(invoices.length / batchSize);
+          
+          console.log(`🔄 Processing batch ${batchIndex + 1}/${totalBatches}`);
+          
+          await processImportBatch(batch, batchIndex, totalBatches, sessionId);
+        }
+        
+        // Final update
+        const progress = importProgressMap.get(sessionId);
+        if (progress) {
+          updateImportProgress(sessionId, { 
+            completed: true,
+            result: {
+              successfullyImported: progress.successful || 0,
+              failed: progress.failed || 0,
+              cashSales: progress.cashSalesCount || 0,
+              cashAmount: progress.cashAmountAdded || 0
+            }
+          });
+        }
+        
+        console.log(`🎉 Import completed for session ${sessionId}`);
+        
+      } catch (error) {
+        console.error(`❌ Background import failed for ${sessionId}:`, error);
+        updateImportProgress(sessionId, { 
+          completed: true, 
+          error: error.message 
+        });
+      }
+    }, 100);
+    
   } catch (error) {
-    console.error("🔥 Import initialization error:", error);
-    res.status(500).json({
-      success: false,
+    console.error("❌ Import initialization error:", error);
+    res.status(500).json({ 
+      success: false, 
       message: "Failed to start import",
-      error: error.message,
+      error: error.message 
     });
   }
 });
 
-router.get("/sales/import/progress/:sessionId", async (req, res) => {
-  try {
-    const { sessionId } = req.params;
-
-    if (!importProgressMap.has(sessionId)) {
-      return res.status(404).json({
-        success: false,
-        message: "Session not found",
-      });
-    }
-
-    const progress = importProgressMap.get(sessionId);
-
-    // Calculate elapsed time
-    const elapsedTime = Math.round((Date.now() - progress.startTime) / 1000);
-
-    // Estimate remaining time
-    let estimatedTimeRemaining = null;
-    if (progress.progressPercentage > 0) {
-      estimatedTimeRemaining = Math.round(
-        (elapsedTime * (100 - progress.progressPercentage)) /
-          progress.progressPercentage
-      );
-    }
-
-    // 🔥 FIXED: Return the exact format expected by frontend
-    const response = {
-      success: true,
-      progress: {
-        percentage: progress.progressPercentage || 0,
-        processed: progress.processedInvoices || 0,
-        total: progress.totalInvoices || 0,
-        status: progress.completed ? "Import completed" : "Processing...",
-        completed: progress.completed || false,
-        result: progress.result || null,
-        // Additional fields for frontend
-        successful: progress.successful || 0,
-        failed: progress.failed || 0,
-        cashSales: progress.cashSalesCount || 0,
-        cashAmount: progress.cashAmountAdded || 0,
-        summary: {
-          successfullyImported: progress.successful || 0,
-          failed: progress.failed || 0,
-          regularTransactions: progress.transactionTypes?.regular || 0,
-          returnTransactions: progress.transactionTypes?.return || 0,
-          exchangeTransactions: progress.transactionTypes?.exchange || 0,
-          cashSales: progress.cashSalesCount || 0,
-          cashAmount: progress.cashAmountAdded || 0,
-        },
-      },
-      sessionId,
-      totalBatches: progress.totalBatches,
-      currentBatch: progress.currentBatch,
-      currentBatchProgress: progress.currentBatchProgress,
-      elapsedTime,
-      estimatedTimeRemaining,
-      errorTypes: progress.errorTypes || {},
-    };
-
-    // 🔥 ADD THIS: Clean up old sessions (after 1 hour)
-    if (progress.completed && Date.now() - progress.lastUpdated > 3600000) {
-      importProgressMap.delete(sessionId);
-      console.log(`🗑️ Cleaned up old session: ${sessionId}`);
-    }
-
-    res.json(response);
-  } catch (error) {
-    console.error("Error getting progress:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error getting progress",
-      error: error.message,
-    });
+router.get("/sales/import/progress/:sessionId", (req, res) => {
+  const progress = importProgressMap.get(req.params.sessionId);
+  if (!progress) return res.status(404).json({ success: false, message: "Session not found" });
+  
+  const elapsedTime = Math.round((Date.now() - progress.startTime) / 1000);
+  let estimatedTimeRemaining = null;
+  
+  if (progress.progressPercentage > 0) {
+    estimatedTimeRemaining = Math.round(
+      (elapsedTime * (100 - progress.progressPercentage)) / progress.progressPercentage
+    );
   }
+  
+  res.json({ 
+    success: true, 
+    progress: {
+      percentage: progress.progressPercentage || 0,
+      processed: progress.processedInvoices || 0,
+      total: progress.totalInvoices || 0,
+      successful: progress.successful || 0,
+      failed: progress.failed || 0,
+      cashSales: progress.cashSalesCount || 0,
+      cashAmount: progress.cashAmountAdded || 0,
+      status: progress.completed ? "completed" : "processing",
+      completed: progress.completed || false,
+      result: progress.result || null,
+      error: progress.error || null
+    },
+    sessionId: progress.sessionId,
+    elapsedTime,
+    estimatedTimeRemaining
+  });
 });
 
-// 🔥 NEW: Clean up old sessions periodically
+// Clean up old sessions periodically
 const cleanupOldSessions = () => {
   const now = Date.now();
-  const oneHourAgo = now - 3600000; // 1 hour in milliseconds
-
+  const oneHourAgo = now - 3600000;
+  
   for (const [sessionId, progress] of importProgressMap.entries()) {
     if (progress.completed && progress.lastUpdated < oneHourAgo) {
       importProgressMap.delete(sessionId);
@@ -1900,137 +1548,102 @@ const cleanupOldSessions = () => {
 // Run cleanup every 30 minutes
 setInterval(cleanupOldSessions, 1800000);
 
-// 🔥 MODIFIED: Endpoint to get ALL failed invoices for a session
-router.get("/import/failed-invoices/:sessionId", async (req, res) => {
+// 🔥 ADDED: Check collections endpoint
+router.get("/debug/check-collections", async (req, res) => {
   try {
-    const { sessionId } = req.params;
+    const saleCount = await SaleSummary.countDocuments();
+    const mrcashCount = await MRCash.countDocuments();
+    const staffCount = await Staff.countDocuments();
+    const customerCount = await Customer.countDocuments();
+    const reportInHandCount = await ReportInHand.countDocuments();
 
-    if (!importProgressMap.has(sessionId)) {
-      return res.status(404).json({
-        success: false,
-        message: "Session not found",
-      });
-    }
-
-    const progress = importProgressMap.get(sessionId);
-    const errors = progress.errors || [];
-
-    // 🔥 FIXED: Return ALL errors, not just last 50
-    const failedInvoices = errors.map((error, index) => ({
-      row: error.index + 1,
-      invoiceNumber: error.invoiceNumber || `Error-${index + 1}`,
-      customerName: error.customerName || "Unknown",
-      error: error.error || "Unknown error",
-      type: error.type || error.errorType || "import_error",
-      products: error.products || [],
-      timestamp: error.timestamp || new Date().toISOString(),
-    }));
+    // Get sample data
+    const sampleSale = await SaleSummary.findOne().limit(1);
+    const sampleMRCASH = await MRCash.findOne().limit(1);
 
     res.json({
       success: true,
-      failedInvoices,
-      count: failedInvoices.length,
-      sessionId,
-      summary: {
-        totalInvoices: progress.totalInvoices || 0,
-        successful: progress.successful || 0,
-        failed: progress.failed || 0,
-        progressPercentage: progress.progressPercentage || 0,
+      collections: {
+        SaleSummary: saleCount,
+        MRCashes: mrcashCount,
+        Staff: staffCount,
+        Customer: customerCount,
+        ReportInHand: reportInHandCount,
       },
+      sampleSale: sampleSale
+        ? {
+            _id: sampleSale._id,
+            invoiceNumber: sampleSale.invoiceNumber,
+            mrName: sampleSale.mrName,
+            mrId: sampleSale.mrId,
+            createdAt: sampleSale.createdAt,
+          }
+        : null,
+      sampleMRCASH: sampleMRCASH
+        ? {
+            _id: sampleMRCASH._id,
+            mrName: sampleMRCASH.mrName,
+            mrId: sampleMRCASH.mrId,
+            currentCash: sampleMRCASH.currentCash,
+            recentTransactions: sampleMRCASH.recentTransactions,
+            createdAt: sampleMRCASH.createdAt,
+          }
+        : null,
     });
   } catch (error) {
-    console.error("Error fetching failed invoices:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching failed invoices",
-      error: error.message,
-    });
+    console.error("Check collections error:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// 🔥 NEW: Endpoint to download ALL failed invoices as CSV
-router.get("/import/download-failed-invoices/:sessionId", async (req, res) => {
+// 🔥 ADDED: Test data structure endpoint
+router.post("/debug/check-import-data", async (req, res) => {
   try {
-    const { sessionId } = req.params;
-
-    if (!importProgressMap.has(sessionId)) {
-      return res.status(404).json({
-        success: false,
-        message: "Session not found",
-      });
-    }
-
-    const progress = importProgressMap.get(sessionId);
-    const errors = progress.errors || [];
-
-    if (errors.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No failed invoices found for this session",
-      });
-    }
-
-    // Format errors for CSV
-    const csvRows = [];
-
-    // Add headers
-    csvRows.push(
-      [
-        "Row",
-        "Invoice Number",
-        "Customer Name",
-        "Error Type",
-        "Error Message",
-        "Products",
-        "Sales Quantity",
-        "Bonus Quantity",
-        "Timestamp",
-      ].join(",")
+    const salesData = req.body;
+    
+    console.log("=== DEBUG: Import Data Structure ===");
+    console.log(
+      "Total records:",
+      Array.isArray(salesData) ? salesData.length : "Not an array"
     );
 
-    // Add data rows
-    errors.forEach((error, index) => {
-      const products = error.products || [];
-      const productNames = products.map((p) => p.name || "").join("; ");
-      const totalSalesQty = products.reduce(
-        (sum, p) => sum + (parseFloat(p.salesQty) || 0),
-        0
-      );
-      const totalBonusQty = products.reduce(
-        (sum, p) => sum + (parseFloat(p.bonusQty) || 0),
-        0
+    if (Array.isArray(salesData) && salesData.length > 0) {
+      const sample = salesData[0];
+      console.log("Sample record keys:", Object.keys(sample));
+      console.log("Sample MR Name:", sample.mrName);
+      console.log("Sample Customer Name:", sample.customerName);
+      console.log("Sample Invoice Number:", sample.invoiceNumber);
+      console.log(
+        "Sample Products count:",
+        Array.isArray(sample.products) ? sample.products.length : "Not an array"
       );
 
-      const row = [
-        index + 1,
-        `"${error.invoiceNumber || ""}"`,
-        `"${error.customerName || ""}"`,
-        `"${error.type || error.errorType || "import_error"}"`,
-        `"${(error.error || "").replace(/"/g, '""')}"`,
-        `"${productNames}"`,
-        totalSalesQty,
-        totalBonusQty,
-        `"${error.timestamp || new Date().toISOString()}"`,
-      ];
+      if (Array.isArray(sample.products) && sample.products.length > 0) {
+        console.log("Sample product:", sample.products[0]);
+      }
+    }
 
-      csvRows.push(row.join(","));
+    // Try to validate with existing function
+    const validationResult = await validateImportData(
+      Array.isArray(salesData) ? salesData : []
+    );
+
+    res.json({
+      success: true,
+      dataStructure: {
+        isArray: Array.isArray(salesData),
+        count: Array.isArray(salesData) ? salesData.length : 0,
+        sampleKeys:
+          Array.isArray(salesData) && salesData.length > 0
+            ? Object.keys(salesData[0])
+            : [],
+      },
+      validationResult,
+      message: "Check console for detailed logs",
     });
-
-    const csvContent = csvRows.join("\n");
-    const timestamp = new Date().toISOString().split("T")[0].replace(/-/g, "");
-    const filename = `failed_invoices_${sessionId}_${timestamp}.csv`;
-
-    // Set headers for CSV download
-    res.setHeader("Content-Type", "text/csv");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-    res.send(csvContent);
   } catch (error) {
-    console.error("Error downloading failed invoices:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error downloading failed invoices",
-      error: error.message,
-    });
+    console.error("Debug error:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -2042,10 +1655,9 @@ router.get("/sales/pending-collection-today", async (req, res) => {
   try {
     const today = new Date();
     const todayStr = today.toISOString().split("T")[0];
-
     const todayStart = new Date(todayStr + "T00:00:00.000Z");
     const todayEnd = new Date(todayStr + "T23:59:59.999Z");
-
+    
     const pendingCollections = await SaleSummary.find({
       dueDate: {
         $gte: todayStart,
@@ -2137,9 +1749,8 @@ router.get("/sales/credit-sale-not-received", async (req, res) => {
 router.get("/overdue", async (req, res) => {
   try {
     const { currentDate } = req.query;
-
     const referenceDate = currentDate ? new Date(currentDate) : new Date();
-
+    
     const overdueInvoices = await SaleSummary.find({
       $or: [
         { saleReturn: { $exists: false } },
@@ -2190,7 +1801,7 @@ router.get("/analytics/today", async (req, res) => {
     const now = new Date();
     const today = new Date(now);
     today.setHours(0, 0, 0, 0);
-
+    
     const todaySales = await SaleSummary.aggregate([
       {
         $match: {
@@ -2221,7 +1832,7 @@ router.get("/analytics/month", async (req, res) => {
   try {
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-
+    
     const monthlySales = await SaleSummary.aggregate([
       {
         $match: {
@@ -2252,7 +1863,7 @@ router.get("/analytics/year", async (req, res) => {
   try {
     const now = new Date();
     const yearStart = new Date(now.getFullYear(), 0, 1);
-
+    
     const yearlySales = await SaleSummary.aggregate([
       {
         $match: {
@@ -2284,17 +1895,17 @@ router.get("/analytics/dashboard", async (req, res) => {
     const now = new Date();
     const today = new Date(now);
     today.setHours(0, 0, 0, 0);
-
+    
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const yearStart = new Date(now.getFullYear(), 0, 1);
-
+    
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
     yesterday.setHours(0, 0, 0, 0);
-
+    
     const prevDayEnd = new Date(yesterday);
     prevDayEnd.setHours(23, 59, 59, 999);
-
+    
     const [todayResult, monthlyResult, yearlyResult, yesterdayResult] =
       await Promise.all([
         SaleSummary.aggregate([
@@ -2362,12 +1973,12 @@ router.get("/analytics/dashboard", async (req, res) => {
           },
         ]),
       ]);
-
+    
     const todaySales = todayResult[0]?.amount || 0;
     const monthlySales = monthlyResult[0]?.amount || 0;
     const yearlySales = yearlyResult[0]?.amount || 0;
     const yesterdaySales = yesterdayResult[0]?.amount || 0;
-
+    
     const growth =
       yesterdaySales > 0
         ? ((todaySales - yesterdaySales) / yesterdaySales) * 100
@@ -2396,8 +2007,8 @@ router.get("/analytics/dashboard", async (req, res) => {
 router.get("/analytics/breakdown", async (req, res) => {
   try {
     const { period } = req.query;
-
     let groupFormat;
+    
     switch (period) {
       case "daily":
         groupFormat = {
@@ -2436,7 +2047,7 @@ router.get("/analytics/breakdown", async (req, res) => {
       },
       { $sort: { "_id.year": 1, "_id.month": 1, "_id.day": 1 } },
     ]);
-
+    
     res.json(salesBreakdown);
   } catch (error) {
     console.error("❌ Error in sales breakdown analytics:", error);
@@ -2455,18 +2066,18 @@ router.get("/analytics/breakdown", async (req, res) => {
 router.get("/outstanding/custom-range", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-
+    
     if (!startDate || !endDate) {
       return res.status(400).json({
         success: false,
         message: "Start date and end date are required",
       });
     }
-
+    
     const start = new Date(startDate);
     const end = new Date(endDate);
     end.setHours(23, 59, 59, 999);
-
+    
     const outstandingData = await SaleSummary.aggregate([
       {
         $match: {
@@ -2504,12 +2115,12 @@ router.get("/outstanding/custom-range", async (req, res) => {
         $sort: { recordingDate: -1 },
       },
     ]);
-
+    
     const totalOutstanding = outstandingData.reduce(
       (sum, invoice) => sum + (invoice.dueAmount || 0),
       0
     );
-
+    
     res.json({
       success: true,
       totalOutstanding,
@@ -2532,24 +2143,24 @@ router.get("/outstanding/analytics/dashboard", async (req, res) => {
     const now = new Date();
     const today = new Date(now);
     today.setHours(0, 0, 0, 0);
-
+    
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const yearStart = new Date(now.getFullYear(), 0, 1);
-
+    
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
     yesterday.setHours(0, 0, 0, 0);
-
+    
     const prevDayEnd = new Date(yesterday);
     prevDayEnd.setHours(23, 59, 59, 999);
-
+    
     const outstandingFilter = {
       $or: [
         { dueAmount: { $gt: 0 } },
         { paymentStatus: { $in: ["Credit", "Partial Paid"] } },
       ],
     };
-
+    
     const [todayResult, monthlyResult, yearlyResult, yesterdayResult] =
       await Promise.all([
         SaleSummary.aggregate([
@@ -2621,18 +2232,18 @@ router.get("/outstanding/analytics/dashboard", async (req, res) => {
           },
         ]),
       ]);
-
+    
     const todayOutstanding = todayResult[0]?.amount || 0;
     const monthlyOutstanding = monthlyResult[0]?.amount || 0;
     const yearlyOutstanding = yearlyResult[0]?.amount || 0;
     const yesterdayOutstanding = yesterdayResult[0]?.amount || 0;
-
+    
     const growth =
       yesterdayOutstanding > 0
         ? ((todayOutstanding - yesterdayOutstanding) / yesterdayOutstanding) *
           100
         : 0;
-
+    
     res.json({
       totalOutstanding: yearlyOutstanding,
       monthlyOutstanding,
@@ -2654,24 +2265,20 @@ router.get("/outstanding/analytics/dashboard", async (req, res) => {
 
 const getTableDateRanges = (period) => {
   const now = new Date();
-
+  
   switch (period) {
     case "Today":
       const todayStart = new Date(now);
       todayStart.setHours(0, 0, 0, 0);
       return { start: todayStart, end: now };
-
     case "Month":
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
       return { start: monthStart, end: now };
-
     case "Year":
       const yearStart = new Date(now.getFullYear(), 0, 1);
       return { start: yearStart, end: now };
-
     case "custom":
       return null;
-
     default:
       const defaultStart = new Date(now);
       defaultStart.setHours(0, 0, 0, 0);
@@ -2683,12 +2290,12 @@ router.get("/outstanding/table-data", async (req, res) => {
   try {
     const { period, startDate, endDate } = req.query;
     let dateFilter = {};
-
+    
     if (period === "custom" && startDate && endDate) {
       const start = new Date(startDate);
       const end = new Date(endDate);
       end.setHours(23, 59, 59, 999);
-
+      
       dateFilter = {
         invoiceDate: {
           $gte: start,
@@ -2706,7 +2313,7 @@ router.get("/outstanding/table-data", async (req, res) => {
         };
       }
     }
-
+    
     dateFilter = {
       ...dateFilter,
       $or: [
@@ -2714,7 +2321,7 @@ router.get("/outstanding/table-data", async (req, res) => {
         { paymentStatus: { $in: ["Credit", "Partial Paid"] } },
       ],
     };
-
+    
     const outstandingData = await SaleSummary.aggregate([
       {
         $match: dateFilter,
@@ -2743,7 +2350,7 @@ router.get("/outstanding/table-data", async (req, res) => {
         $sort: { recordingDate: -1 },
       },
     ]);
-
+    
     res.json({
       success: true,
       data: outstandingData,
@@ -2765,12 +2372,12 @@ router.get("/outstanding/mr-wise", async (req, res) => {
   try {
     const { period, startDate, endDate } = req.query;
     let dateFilter = {};
-
+    
     if (period === "custom" && startDate && endDate) {
       const start = new Date(startDate);
       const end = new Date(endDate);
       end.setHours(23, 59, 59, 999);
-
+      
       dateFilter = {
         invoiceDate: {
           $gte: start,
@@ -2788,7 +2395,7 @@ router.get("/outstanding/mr-wise", async (req, res) => {
         };
       }
     }
-
+    
     dateFilter = {
       ...dateFilter,
       $or: [
@@ -2796,7 +2403,7 @@ router.get("/outstanding/mr-wise", async (req, res) => {
         { paymentStatus: { $in: ["Credit", "Partial Paid"] } },
       ],
     };
-
+    
     const mrWiseOutstanding = await SaleSummary.aggregate([
       {
         $match: dateFilter,
@@ -2833,7 +2440,7 @@ router.get("/outstanding/mr-wise", async (req, res) => {
         $sort: { totalOutstanding: -1 },
       },
     ]);
-
+    
     res.json({
       success: true,
       data: mrWiseOutstanding,
@@ -2855,12 +2462,12 @@ router.get("/outstanding/customer-wise", async (req, res) => {
   try {
     const { period, startDate, endDate } = req.query;
     let dateFilter = {};
-
+    
     if (period === "custom" && startDate && endDate) {
       const start = new Date(startDate);
       const end = new Date(endDate);
       end.setHours(23, 59, 59, 999);
-
+      
       dateFilter = {
         invoiceDate: {
           $gte: start,
@@ -2878,7 +2485,7 @@ router.get("/outstanding/customer-wise", async (req, res) => {
         };
       }
     }
-
+    
     dateFilter = {
       ...dateFilter,
       $or: [
@@ -2886,7 +2493,7 @@ router.get("/outstanding/customer-wise", async (req, res) => {
         { paymentStatus: { $in: ["Credit", "Partial Paid"] } },
       ],
     };
-
+    
     const customerWiseOutstanding = await SaleSummary.aggregate([
       {
         $match: dateFilter,
@@ -2925,7 +2532,7 @@ router.get("/outstanding/customer-wise", async (req, res) => {
         $sort: { totalOutstanding: -1 },
       },
     ]);
-
+    
     res.json({
       success: true,
       data: customerWiseOutstanding,
@@ -2950,17 +2557,17 @@ router.get("/outstanding/customer-wise", async (req, res) => {
 router.get("/sales/analytics/custom-range", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-
+    
     if (!startDate || !endDate) {
       return res
         .status(400)
         .json({ message: "Start date and end date are required" });
     }
-
+    
     const start = new Date(startDate);
     const end = new Date(endDate);
     end.setHours(23, 59, 59, 999);
-
+    
     const sales = await SaleSummary.aggregate([
       {
         $match: {
@@ -2978,7 +2585,7 @@ router.get("/sales/analytics/custom-range", async (req, res) => {
         },
       },
     ]);
-
+    
     const result = sales.length > 0 ? sales[0] : { totalSales: 0, count: 0 };
     res.json(result);
   } catch (error) {
@@ -2991,7 +2598,7 @@ router.get("/sales/highest-sales", async (req, res) => {
     const { limit = 5, period } = req.query;
     let dateFilter = {};
     const dateRange = getTableDateRanges(period);
-
+    
     if (dateRange) {
       dateFilter = {
         invoiceDate: {
@@ -3000,7 +2607,7 @@ router.get("/sales/highest-sales", async (req, res) => {
         },
       };
     }
-
+    
     const highestSales = await SaleSummary.aggregate([
       {
         $match: dateFilter,
@@ -3041,14 +2648,14 @@ router.get("/sales/highest-sales", async (req, res) => {
         $limit: parseInt(limit),
       },
     ]);
-
+    
     const now = new Date();
     const transformedData = highestSales.map((sale) => {
       const saleDate = new Date(sale.timeAgo);
       const diffMs = now - saleDate;
       const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
       const diffDays = Math.floor(diffHours / 24);
-
+      
       let timeAgo = "";
       if (diffDays > 0) {
         timeAgo = `${diffDays} day${diffDays > 1 ? "s" : ""} ago`;
@@ -3057,13 +2664,13 @@ router.get("/sales/highest-sales", async (req, res) => {
       } else {
         timeAgo = "Just now";
       }
-
+      
       return {
         ...sale,
         timeAgo,
       };
     });
-
+    
     res.json({
       success: true,
       data: transformedData,
@@ -3085,12 +2692,12 @@ router.get("/sales/table-data", async (req, res) => {
   try {
     const { period, startDate, endDate } = req.query;
     let dateFilter = {};
-
+    
     if (period === "custom" && startDate && endDate) {
       const start = new Date(startDate);
       const end = new Date(endDate);
       end.setHours(23, 59, 59, 999);
-
+      
       dateFilter = {
         invoiceDate: {
           $gte: start,
@@ -3108,7 +2715,7 @@ router.get("/sales/table-data", async (req, res) => {
         };
       }
     }
-
+    
     const salesData = await SaleSummary.aggregate([
       {
         $match: dateFilter,
@@ -3143,7 +2750,7 @@ router.get("/sales/table-data", async (req, res) => {
         $sort: { date: -1 },
       },
     ]);
-
+    
     const transformedData = salesData.map((sale) => ({
       date: sale.date,
       productName: sale.productName,
@@ -3165,7 +2772,7 @@ router.get("/sales/table-data", async (req, res) => {
       dueAmount: sale.dueAmount,
       totalAmount: sale.totalAmount,
     }));
-
+    
     res.json({
       success: true,
       data: transformedData,
@@ -3186,10 +2793,9 @@ router.get("/sales/table-data", async (req, res) => {
 router.get("/sales/summary-cards", async (req, res) => {
   try {
     const { period } = req.query;
-
     let dateFilter = {};
     const dateRange = getTableDateRanges(period);
-
+    
     if (dateRange) {
       dateFilter = {
         invoiceDate: {
@@ -3198,7 +2804,7 @@ router.get("/sales/summary-cards", async (req, res) => {
         },
       };
     }
-
+    
     const summary = await SaleSummary.aggregate([
       {
         $match: dateFilter,
@@ -3216,7 +2822,7 @@ router.get("/sales/summary-cards", async (req, res) => {
         },
       },
     ]);
-
+    
     const result =
       summary.length > 0
         ? summary[0]
@@ -3226,7 +2832,7 @@ router.get("/sales/summary-cards", async (req, res) => {
             totalTransactions: 0,
             averageOrderValue: 0,
           };
-
+    
     res.json({
       success: true,
       period: period,
@@ -3250,18 +2856,18 @@ router.get("/sales/summary-cards", async (req, res) => {
 router.get("/custom-range", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-
+    
     if (!startDate || !endDate) {
       return res.status(400).json({
         success: false,
         message: "Start date and end date are required",
       });
     }
-
+    
     const start = new Date(startDate);
     const end = new Date(endDate);
     end.setHours(23, 59, 59, 999);
-
+    
     const sales = await SaleSummary.aggregate([
       {
         $match: {
@@ -3279,9 +2885,9 @@ router.get("/custom-range", async (req, res) => {
         },
       },
     ]);
-
+    
     const result = sales.length > 0 ? sales[0] : { totalSales: 0, count: 0 };
-
+    
     res.json({
       success: true,
       totalSales: result.totalSales,
@@ -3311,18 +2917,18 @@ router.get("/sales/product-wise", async (req, res) => {
       endDate,
       productName,
     } = req.query;
-
+    
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
-
+    
     const matchConditions = {};
-
+    
     if (startDate && endDate) {
       const start = new Date(startDate);
       const end = new Date(endDate);
       end.setHours(23, 59, 59, 999);
-
+      
       if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
         matchConditions.recordingDate = {
           $gte: start,
@@ -3330,14 +2936,14 @@ router.get("/sales/product-wise", async (req, res) => {
         };
       }
     }
-
+    
     if (productName && productName.trim() !== "") {
       matchConditions["products.productName"] = new RegExp(
         productName.trim(),
         "i"
       );
     }
-
+    
     if (search && search.trim() !== "") {
       const searchRegex = new RegExp(search.trim(), "i");
       matchConditions.$or = [
@@ -3347,7 +2953,7 @@ router.get("/sales/product-wise", async (req, res) => {
         { "products.productName": searchRegex },
       ];
     }
-
+    
     const productWiseAggregate = await SaleSummary.aggregate([
       { $match: matchConditions },
       { $unwind: "$products" },
@@ -3383,21 +2989,21 @@ router.get("/sales/product-wise", async (req, res) => {
         },
       },
     ]);
-
+    
     let totalProducts = 0;
     let productSummary = [];
-
+    
     if (productWiseAggregate.length > 0) {
       totalProducts = productWiseAggregate[0].totalProducts;
       productSummary = productWiseAggregate[0].products;
     }
-
+    
     const paginatedProducts = productSummary.slice(skip, skip + limitNum);
     const totalPages = Math.ceil(totalProducts / limitNum);
-
+    
     if (paginatedProducts.length > 0) {
       const productNames = paginatedProducts.map((p) => p._id);
-
+      
       const detailedRecords = await SaleSummary.aggregate([
         { $match: matchConditions },
         { $unwind: "$products" },
@@ -3455,7 +3061,7 @@ router.get("/sales/product-wise", async (req, res) => {
         },
         { $sort: { recordingDate: -1, productName: 1 } },
       ]);
-
+      
       const result = paginatedProducts.map((product) => ({
         productName: product._id,
         summary: {
@@ -3469,7 +3075,7 @@ router.get("/sales/product-wise", async (req, res) => {
           .filter((record) => record.productName === product._id)
           .slice(0, 100),
       }));
-
+      
       res.status(200).json({
         products: result,
         pagination: {
@@ -3505,20 +3111,20 @@ router.get("/sales/product/:productName", async (req, res) => {
   try {
     const { productName } = req.params;
     const { page = 1, limit = 10, startDate, endDate } = req.query;
-
+    
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
-
+    
     const matchConditions = {
       "products.productName": decodeURIComponent(productName),
     };
-
+    
     if (startDate && endDate) {
       const start = new Date(startDate);
       const end = new Date(endDate);
       end.setHours(23, 59, 59, 999);
-
+      
       if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
         matchConditions.recordingDate = {
           $gte: start,
@@ -3526,9 +3132,9 @@ router.get("/sales/product/:productName", async (req, res) => {
         };
       }
     }
-
+    
     const totalCount = await SaleSummary.countDocuments(matchConditions);
-
+    
     const salesData = await SaleSummary.aggregate([
       { $match: matchConditions },
       { $unwind: "$products" },
@@ -3588,7 +3194,7 @@ router.get("/sales/product/:productName", async (req, res) => {
       { $skip: skip },
       { $limit: limitNum },
     ]);
-
+    
     const productSummary = await SaleSummary.aggregate([
       { $match: matchConditions },
       { $unwind: "$products" },
@@ -3610,7 +3216,7 @@ router.get("/sales/product/:productName", async (req, res) => {
         },
       },
     ]);
-
+    
     const summary =
       productSummary.length > 0
         ? productSummary[0]
@@ -3624,9 +3230,9 @@ router.get("/sales/product/:productName", async (req, res) => {
             averageSellingPrice: 0,
             averageProfitLoss: 0,
           };
-
+    
     const totalPages = Math.ceil(totalCount / limitNum);
-
+    
     res.status(200).json({
       productName: decodeURIComponent(productName),
       summary,
@@ -3648,307 +3254,92 @@ router.get("/sales/product/:productName", async (req, res) => {
   }
 });
 
-// ============================================================================
-// ➕ SALES CRUD OPERATIONS
-// ============================================================================
-
 router.post("/sales", async (req, res) => {
   try {
-    const saleData = req.body;
-
-    if (!saleData || typeof saleData !== "object") {
-      return res.status(400).json({ error: "Invalid or missing request body" });
+    const data = req.body;
+    
+    if (await checkInvoiceNumberExists(data.invoiceNumber)) {
+      return res.status(400).json({ error: "Invoice number already exists" });
     }
-
-    const requiredFields = [
-      "recordingDate",
-      "invoiceNumber",
-      "invoiceDate",
-      "mrName",
-      "customerCode",
-      "products",
-    ];
-
-    const missingFields = requiredFields.filter(
-      (field) =>
-        saleData[field] === undefined ||
-        saleData[field] === null ||
-        saleData[field] === ""
-    );
-
-    if (missingFields.length > 0) {
-      return res.status(400).json({
-        error: `Missing required fields: ${missingFields.join(", ")}`,
+    
+    const mrStaff = await findMRStaff(data.mrName || "No MR Name Provided");
+    const isReturn = isReturnTransaction(data.remark, data.paymentStatus);
+    const isExchange = (data.remark || "").toLowerCase().includes("exchange");
+    
+    const processedProducts = [];
+    let totalAmount = 0;
+    
+    for (const p of data.products || []) {
+      const sqty = parseQuantityWithParenthesis(p.salesQty);
+      const bqty = parseQuantityWithParenthesis(p.bonusQty) || 0;
+      const tqty = sqty + bqty;
+      
+      if (tqty === 0) continue;
+      
+      const invProduct = await findProductInInventory(p.productName);
+      if (!invProduct && tqty > 0) throw new Error(`Product not found: ${p.productName}`);
+      
+      if (tqty !== 0) await updateReportInHandAfterSale(invProduct?.productName || p.productName, sqty, bqty);
+      
+      processedProducts.push({
+        productName: invProduct?.productName || p.productName,
+        originalProductName: p.productName,
+        salesQty: sqty,
+        bonusQty: bqty,
+        totalQty: tqty,
+        netSellingAmount: Number(p.netSellingAmount) || 0,
+        lc: invProduct?.lc || 0,
+        profitLoss: (Number(p.netSellingAmount) || 0) - tqty * (invProduct?.lc || 0),
       });
+      
+      totalAmount += Number(p.netSellingAmount) || 0;
     }
-
-    if (!Array.isArray(saleData.products) || saleData.products.length === 0) {
-      return res
-        .status(400)
-        .json({ error: "Products array is missing or empty" });
-    }
-
-    const invoiceExists = await checkInvoiceNumberExists(
-      saleData.invoiceNumber
-    );
-    if (invoiceExists) {
-      return res.status(400).json({
-        error: `Invoice number "${saleData.invoiceNumber}" already exists. Please use a different invoice number.`,
-      });
-    }
-
-    // 🔥 FIX: Ensure mrName has a default value
-    if (!saleData.mrName || saleData.mrName.trim() === "") {
-      saleData.mrName = "No MR Name Provided";
-    }
-
-    // Try to find MR (staff) by name
-    let mrStaff = null;
-    if (saleData.mrName) {
-      mrStaff = await Staff.findOne({
-        $or: [
-          { name: { $regex: new RegExp(saleData.mrName.trim(), "i") } },
-          { email: { $regex: new RegExp(saleData.mrName.trim(), "i") } },
-        ],
-      });
-    }
-
-    // Check if this is a return transaction
-    const isReturn = isReturnTransaction(
-      saleData.remark,
-      saleData.paymentStatus
-    );
-
-    // Check if this is an exchange transaction
-    const isExchange =
-      saleData.remark?.toLowerCase().includes("exchange") ||
-      saleData.products.some((p) =>
-        (p.remark || "").toLowerCase().includes("exchange")
-      );
-
-    const totalAmount = saleData.products.reduce(
-      (total, product) => total + (parseFloat(product.netSellingAmount) || 0),
-      0
-    );
-
-    const paidAmount = parseFloat(saleData.paidAmount) || 0;
-    const dueAmount = totalAmount - paidAmount;
-
-    const paymentStatus = mapPaymentStatus(saleData.paymentStatus);
-
-    // 🔥 MODIFIED: Process products with enhanced product finder
-    const processedProducts = await Promise.all(
-      saleData.products.map(async (product) => {
-        let salesQty = Number(product.salesQty) || 0;
-        let bonusQty = Number(product.bonusQty) || 0;
-
-        if (isReturn && salesQty > 0) {
-          salesQty = -salesQty;
-        }
-        if (isReturn && bonusQty > 0) {
-          bonusQty = -bonusQty;
-        }
-
-        const totalQty = salesQty + bonusQty;
-
-        const existingProduct = await findProductInInventory(
-          product.productName
-        );
-
-        if (!existingProduct && !isReturn && totalQty > 0) {
-          throw new Error(
-            `Product "${product.productName}" not found in inventory`
-          );
-        }
-
-        let lcValue = 0;
-        let actualProductName = product.productName;
-
-        if (existingProduct) {
-          lcValue = existingProduct.lc || existingProduct.batches?.[0]?.lc || 0;
-          actualProductName = existingProduct.productName;
-        }
-
-        if (totalQty > 0 && existingProduct) {
-          try {
-            if (isExchange) {
-              await updateInventoryForExchange(
-                actualProductName,
-                salesQty,
-                bonusQty,
-                false
-              );
-            } else {
-              await updateReportInHandAfterSale(
-                actualProductName,
-                salesQty,
-                bonusQty
-              );
-            }
-          } catch (inventoryError) {
-            throw new Error(
-              `Insufficient stock for ${product.productName}: ${inventoryError.message}`
-            );
-          }
-        } else if (totalQty < 0 && existingProduct) {
-          try {
-            await updateReportInHandAfterSale(
-              actualProductName,
-              salesQty,
-              bonusQty
-            );
-          } catch (inventoryError) {
-            throw new Error(
-              `Failed to process return for ${product.productName}: ${inventoryError.message}`
-            );
-          }
-        }
-
-        let profitLoss;
-        if (isReturn) {
-          profitLoss = -Math.abs(
-            Number(product.netSellingAmount) - Math.abs(totalQty) * lcValue
-          );
-        } else {
-          profitLoss = Number(product.netSellingAmount) - totalQty * lcValue;
-        }
-
-        return {
-          productName: actualProductName,
-          originalProductName: product.productName,
-          salesQty: salesQty,
-          bonusQty: bonusQty,
-          totalQty: totalQty,
-          sellingPrice: Number(product.sellingPrice),
-          amount: Number(product.amount),
-          discount: Number(product.discount) || 0,
-          netSellingAmount: Number(product.netSellingAmount),
-          averageUnitPrice: Number(product.averageUnitPrice),
-          lc: lcValue,
-          profitLoss: profitLoss,
-          isProductAccept:
-            product.isProductAccept !== undefined
-              ? product.isProductAccept
-              : true,
-          isExchangeProduct: isExchange && totalQty <= 0,
-          isReturnProduct: isReturn,
-        };
-      })
-    );
-
-    // Get customer information
-    let customerName = saleData.customerName || "";
-    const customer = await Customer.findOne({
-      customerCode: saleData.customerCode,
-    });
-    if (customer) {
-      customerName = customer.name;
-    }
-
-    const newSaleData = {
-      recordingDate: new Date(saleData.recordingDate),
-      invoiceNumber: saleData.invoiceNumber,
-      invoiceDate: new Date(saleData.invoiceDate),
-      mrName: saleData.mrName || "No MR Name Provided",
-      mrId: mrStaff ? mrStaff._id : null, // Add MR ID if found
-      customerName,
-      customerCode: saleData.customerCode,
-      customerId: saleData.customerId || "",
+    
+    const paidAmount = Number(data.paidAmount) || 0;
+    
+    const sale = await SaleSummary.create({
+      ...data,
+      mrId: mrStaff?._id,
       products: processedProducts,
-      creditDays: saleData.creditDays ? Number(saleData.creditDays) : 0,
-      dueDate: saleData.dueDate ? new Date(saleData.dueDate) : null,
-      deliveryDate: saleData.deliveryDate
-        ? new Date(saleData.deliveryDate)
-        : null,
-      paidAmount,
-      dueAmount,
       totalAmount,
-      paymentStatus: paymentStatus,
-      remark: saleData.remark || saleData.remarks || "",
-      isExchange: isExchange,
-      isReturn: isReturn,
-    };
-
-    const savedSale = await SaleSummary.create(newSaleData);
-
-    // 🔥 CORRECTED: Add cash to MR if payment is Cash or Paid
-    let cashResult = null;
-    if (paymentStatus === "Cash" || paymentStatus === "Paid") {
-      if (paidAmount > 0) {
-        try {
-          cashResult = await addCashToMR({
-            _id: savedSale._id,
-            mrName: savedSale.mrName,
-            mrId: mrStaff ? mrStaff._id : null,
-            paidAmount: savedSale.paidAmount,
-            invoiceNumber: savedSale.invoiceNumber,
-            invoiceDate: savedSale.invoiceDate,
-            customerName: savedSale.customerName,
-            paymentStatus: savedSale.paymentStatus,
-            recordingDate: savedSale.recordingDate,
-          });
-
-          if (cashResult.success) {
-            console.log(
-              `💰 Added $${paidAmount} to MR ${savedSale.mrName}'s cash for sale ${savedSale.invoiceNumber}`
-            );
-          } else {
-            console.log(`⚠️ Cash not added: ${cashResult.reason}`);
-          }
-        } catch (cashError) {
-          console.error(
-            `❌ Failed to add cash to MR for sale ${savedSale.invoiceNumber}:`,
-            cashError.message
-          );
-          // Don't fail the sale creation because of cash tracking error
-        }
-      }
-    }
-
-    res.status(201).json({
-      message: `Sale with ${
-        savedSale.products.length
-      } product(s) added successfully${
-        isExchange ? " (Exchange Transaction)" : ""
-      }${isReturn ? " (Return Transaction)" : ""}`,
-      sale: savedSale,
-      cashAdded: cashResult
-        ? {
-            success: true,
-            mrName: cashResult.mrName,
-            amount: cashResult.amountAdded,
-            currentCash: cashResult.currentCash,
-          }
-        : null,
+      paidAmount,
+      dueAmount: totalAmount - paidAmount,
+      paymentStatus: mapPaymentStatus(data.paymentStatus),
+      isReturn,
+      isExchange,
+      createdAt: new Date(),
+      updatedAt: new Date()
     });
-  } catch (error) {
-    console.error("❌ Sale creation error:", error);
-
-    if (error.code === 11000) {
-      return res.status(400).json({
-        error: `Invoice number "${req.body.invoiceNumber}" already exists.`,
+    
+    if ((sale.paymentStatus === "Cash" || sale.paymentStatus === "Paid") && paidAmount > 0) {
+      await addCashToMR({
+        mrName: sale.mrName,
+        mrId: sale.mrId,
+        paidAmount,
+        invoiceNumber: sale.invoiceNumber,
+        customerName: sale.customerName,
+        paymentStatus: sale.paymentStatus,
+        invoiceDate: sale.invoiceDate,
       });
     }
-
-    if (error.name === "ValidationError") {
-      return res.status(400).json({ error: error.message });
-    }
-
-    res.status(500).json({ error: "Failed to add new sale" });
+    
+    res.status(201).json({ message: "Sale created successfully", sale });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
 // 🔥 MODIFIED: CORRECTED EDIT/UPDATE ENDPOINT WITH RETURN SUPPORT
 router.put("/sales/:id", async (req, res) => {
   const { id } = req.params;
-
+  
   try {
     // Get the original sale to compare changes
     const originalSale = await SaleSummary.findById(id);
     if (!originalSale) {
       return res.status(404).json({ error: "Sales record not found." });
     }
-
+    
     // Check for duplicate invoice number if it's being changed
     if (
       req.body.invoiceNumber &&
@@ -3964,18 +3355,18 @@ router.put("/sales/:id", async (req, res) => {
         });
       }
     }
-
+    
     // Check if this is a return transaction
     const isReturn = isReturnTransaction(
       req.body.remark,
       req.body.paymentStatus
     );
-
+    
     // Check if this is an exchange transaction
     const isExchange =
       req.body.remark?.toLowerCase().includes("exchange") ||
       originalSale.isExchange;
-
+    
     // 🔥 CRITICAL FIX: Restore original inventory first
     for (const product of originalSale.products) {
       const totalQty = product.salesQty + product.bonusQty;
@@ -3997,15 +3388,15 @@ router.put("/sales/:id", async (req, res) => {
         }
       }
     }
-
+    
     // Process the updated sale data
     const saleData = req.body;
-
+    
     // 🔥 FIX: Ensure mrName has a default value
     if (!saleData.mrName || saleData.mrName.trim() === "") {
       saleData.mrName = originalSale.mrName || "No MR Name Provided";
     }
-
+    
     // Try to find MR (staff) by name
     let mrStaff = null;
     if (saleData.mrName) {
@@ -4016,39 +3407,38 @@ router.put("/sales/:id", async (req, res) => {
         ],
       });
     }
-
+    
     const updatedProducts = await Promise.all(
       saleData.products.map(async (product) => {
         let salesQty = Number(product.salesQty) || 0;
         let bonusQty = Number(product.bonusQty) || 0;
-
+        
         if (isReturn && salesQty > 0) {
           salesQty = -salesQty;
         }
         if (isReturn && bonusQty > 0) {
           bonusQty = -bonusQty;
         }
-
+        
         const totalQty = salesQty + bonusQty;
-
         const existingProduct = await findProductInInventory(
           product.productName
         );
-
+        
         if (!existingProduct && !isReturn && totalQty > 0) {
           throw new Error(
             `Product "${product.productName}" not found in inventory`
           );
         }
-
+        
         let lcValue = 0;
         let actualProductName = product.productName;
-
+        
         if (existingProduct) {
           lcValue = existingProduct.lc || existingProduct.batches?.[0]?.lc || 0;
           actualProductName = existingProduct.productName;
         }
-
+        
         if (totalQty > 0 && existingProduct) {
           try {
             if (isExchange) {
@@ -4083,7 +3473,7 @@ router.put("/sales/:id", async (req, res) => {
             );
           }
         }
-
+        
         let profitLoss;
         if (isReturn) {
           profitLoss = -Math.abs(
@@ -4092,7 +3482,7 @@ router.put("/sales/:id", async (req, res) => {
         } else {
           profitLoss = Number(product.netSellingAmount) - totalQty * lcValue;
         }
-
+        
         return {
           productName: actualProductName,
           originalProductName: product.productName,
@@ -4115,14 +3505,14 @@ router.put("/sales/:id", async (req, res) => {
         };
       })
     );
-
+    
     const totalAmount = updatedProducts.reduce(
       (total, product) => total + (parseFloat(product.netSellingAmount) || 0),
       0
     );
     const paidAmount = parseFloat(saleData.paidAmount) || 0;
     const dueAmount = totalAmount - paidAmount;
-
+    
     const updatedSaleData = {
       recordingDate: new Date(saleData.recordingDate),
       invoiceNumber: saleData.invoiceNumber,
@@ -4147,7 +3537,7 @@ router.put("/sales/:id", async (req, res) => {
       isExchange: isExchange,
       isReturn: isReturn,
     };
-
+    
     // Save the updated sale
     const updatedSale = await SaleSummary.findByIdAndUpdate(
       id,
@@ -4157,20 +3547,20 @@ router.put("/sales/:id", async (req, res) => {
         runValidators: true,
       }
     );
-
+    
     if (!updatedSale) {
       return res.status(404).json({ error: "Sales record not found." });
     }
-
+    
     // 🔥 CORRECTED: Handle MR cash updates during sale edit
     let cashUpdated = false;
     let cashAmount = 0;
     let cashResult = null;
-
+    
     // Check if payment status changed
     const wasCashPaid = ["Cash", "Paid"].includes(originalSale.paymentStatus);
     const nowCashPaid = ["Cash", "Paid"].includes(updatedSale.paymentStatus);
-
+    
     if (!wasCashPaid && nowCashPaid) {
       // Changed from non-cash to cash - add cash
       try {
@@ -4183,7 +3573,7 @@ router.put("/sales/:id", async (req, res) => {
           customerName: updatedSale.customerName,
           paymentStatus: updatedSale.paymentStatus,
         });
-
+        
         if (cashResult.success) {
           cashUpdated = true;
           cashAmount = cashResult.amountAdded;
@@ -4199,9 +3589,10 @@ router.put("/sales/:id", async (req, res) => {
           mrId: originalSale.mrId,
           paidAmount: originalSale.paidAmount,
           invoiceNumber: originalSale.invoiceNumber,
+          customerName: originalSale.customerName,
           paymentStatus: originalSale.paymentStatus,
         });
-
+        
         if (cashResult.success) {
           cashUpdated = true;
           cashAmount = -cashResult.amountRemoved;
@@ -4219,9 +3610,10 @@ router.put("/sales/:id", async (req, res) => {
             mrId: originalSale.mrId,
             paidAmount: originalSale.paidAmount,
             invoiceNumber: originalSale.invoiceNumber,
+            customerName: originalSale.customerName,
             paymentStatus: originalSale.paymentStatus,
           });
-
+          
           // Then add new amount
           cashResult = await addCashToMR({
             mrName: updatedSale.mrName,
@@ -4232,7 +3624,7 @@ router.put("/sales/:id", async (req, res) => {
             customerName: updatedSale.customerName,
             paymentStatus: updatedSale.paymentStatus,
           });
-
+          
           if (cashResult.success) {
             cashUpdated = true;
             cashAmount = cashResult.amountAdded - originalSale.paidAmount;
@@ -4244,7 +3636,7 @@ router.put("/sales/:id", async (req, res) => {
         }
       }
     }
-
+    
     res.status(200).json({
       message: `Sale updated successfully${
         cashUpdated
@@ -4259,7 +3651,7 @@ router.put("/sales/:id", async (req, res) => {
     });
   } catch (err) {
     console.error("Error updating sale:", err);
-
+    
     try {
       const originalSale = await SaleSummary.findById(id);
       if (originalSale) {
@@ -4286,13 +3678,13 @@ router.put("/sales/:id", async (req, res) => {
     } catch (rollbackError) {
       console.error("❌ Failed to rollback inventory changes:", rollbackError);
     }
-
+    
     if (err.code === 11000) {
       return res.status(400).json({
         error: `Invoice number "${req.body.invoiceNumber}" already exists. Please use a different invoice number.`,
       });
     }
-
+    
     res.status(500).json({
       error: "Failed to update sales record.",
       details: err.message,
@@ -4304,9 +3696,8 @@ router.put("/sales/:id", async (req, res) => {
 router.get("/sales/all", async (req, res) => {
   try {
     const { search = "", tab = "All" } = req.query;
-
     const matchConditions = {};
-
+    
     if (search && search.trim() !== "") {
       const searchRegex = new RegExp(search.trim(), "i");
       matchConditions.$or = [
@@ -4315,11 +3706,11 @@ router.get("/sales/all", async (req, res) => {
         { "products.productName": searchRegex },
       ];
     }
-
+    
     if (tab && tab !== "All") {
       matchConditions.paymentStatus = new RegExp(`^${tab}$`, "i");
     }
-
+    
     const summaries = await SaleSummary.find(matchConditions)
       .sort({ recordingDate: -1 })
       .select({
@@ -4345,7 +3736,7 @@ router.get("/sales/all", async (req, res) => {
         isExchange: 1,
         isReturn: 1,
       });
-
+    
     res.status(200).json({
       summaries,
       count: summaries.length,
@@ -4360,13 +3751,13 @@ router.get("/sales/all", async (req, res) => {
 router.get("/sales", async (req, res) => {
   try {
     const { page = 1, limit = 9, search = "", tab = "All" } = req.query;
-
+    
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
-
+    
     const matchConditions = {};
-
+    
     if (search && search.trim() !== "") {
       const searchRegex = new RegExp(search.trim(), "i");
       matchConditions.$or = [
@@ -4375,14 +3766,14 @@ router.get("/sales", async (req, res) => {
         { "products.productName": searchRegex },
       ];
     }
-
+    
     if (tab && tab !== "All") {
       matchConditions.paymentStatus = new RegExp(`^${tab}$`, "i");
     }
-
+    
     const totalCount = await SaleSummary.countDocuments(matchConditions);
     const totalPages = Math.ceil(totalCount / limitNum);
-
+    
     const summaries = await SaleSummary.find(matchConditions)
       .sort({ recordingDate: -1 })
       .skip(skip)
@@ -4410,7 +3801,7 @@ router.get("/sales", async (req, res) => {
         isExchange: 1,
         isReturn: 1,
       });
-
+    
     res.status(200).json({
       summaries,
       pagination: {
@@ -4430,14 +3821,14 @@ router.get("/sales", async (req, res) => {
 // 🔥 MODIFIED: CORRECTED DELETE ENDPOINT WITH RETURN SUPPORT
 router.delete("/sales/:id", async (req, res) => {
   const { id } = req.params;
-
+  
   try {
     const saleToDelete = await SaleSummary.findById(id);
-
+    
     if (!saleToDelete) {
       return res.status(404).json({ error: "Sales record not found." });
     }
-
+    
     // 🔥 CORRECTED: Remove cash from MR if it was a cash/paid sale
     if (
       (saleToDelete.paymentStatus === "Cash" ||
@@ -4450,6 +3841,7 @@ router.delete("/sales/:id", async (req, res) => {
           mrId: saleToDelete.mrId,
           paidAmount: saleToDelete.paidAmount,
           invoiceNumber: saleToDelete.invoiceNumber,
+          customerName: saleToDelete.customerName,
           paymentStatus: saleToDelete.paymentStatus,
         });
       } catch (cashError) {
@@ -4460,7 +3852,7 @@ router.delete("/sales/:id", async (req, res) => {
         // Continue with deletion even if cash removal fails
       }
     }
-
+    
     // Restore inventory for all products in the sale
     for (const product of saleToDelete.products) {
       const totalQty = product.salesQty + product.bonusQty;
@@ -4482,10 +3874,10 @@ router.delete("/sales/:id", async (req, res) => {
         }
       }
     }
-
+    
     // Delete the sale record
     const deletedSale = await SaleSummary.findByIdAndDelete(id);
-
+    
     res.status(200).json({
       message: "Sales record deleted successfully and inventory restored.",
       deletedSale,
@@ -4503,68 +3895,67 @@ router.delete("/sales/:id", async (req, res) => {
 router.post("/sales/download-excel", async (req, res) => {
   try {
     const { startDate, endDate } = req.body;
-
+    
     if (!startDate || !endDate) {
       return res.status(400).json({
         success: false,
         message: "Start date and end date are required",
       });
     }
-
+    
     const start = new Date(startDate);
     const end = new Date(endDate);
-
+    
     if (isNaN(start.getTime()) || isNaN(end.getTime())) {
       return res.status(400).json({
         success: false,
         message: "Invalid date format",
       });
     }
-
+    
     if (start > end) {
       return res.status(400).json({
         success: false,
         message: "Start date cannot be after end date",
       });
     }
-
+    
     const filteredSalesData = await SaleSummary.find({
       invoiceDate: { $gte: start, $lte: end },
     }).sort({ invoiceDate: 1 });
-
+    
     if (filteredSalesData.length === 0) {
       return res.status(404).json({
         success: false,
         message: "No sales data found for the selected date range",
       });
     }
-
+    
     const customerIds = [
       ...new Set(filteredSalesData.map((sale) => sale.customerId?.toString())),
     ];
-
+    
     const customers = await Customer.find({
       _id: { $in: customerIds },
     });
-
+    
     const customerMap = {};
     customers.forEach((cust) => {
       customerMap[cust._id.toString()] = cust;
     });
-
+    
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Sale Summary");
-
+    
     worksheet.mergeCells("A1:AD1");
     const titleCell = worksheet.getCell("A1");
     titleCell.value = "HEALTHCARE SOUTH EAST ASIA";
     titleCell.font = { bold: true, size: 16 };
     titleCell.alignment = { vertical: "middle", horizontal: "center" };
     worksheet.getRow(1).height = 25;
-
+    
     const formatDateToReadable = (isoString) => {
       if (!isoString) return "";
-
       const date = new Date(isoString);
       return new Intl.DateTimeFormat("en-GB", {
         day: "2-digit",
@@ -4572,7 +3963,7 @@ router.post("/sales/download-excel", async (req, res) => {
         year: "numeric",
       }).format(date);
     };
-
+    
     worksheet.mergeCells("A2:AD2");
     const subtitleCell = worksheet.getCell("A2");
     subtitleCell.value = `Sale Summary List (${formatDateToReadable(
@@ -4581,7 +3972,7 @@ router.post("/sales/download-excel", async (req, res) => {
     subtitleCell.font = { bold: true, size: 14 };
     subtitleCell.alignment = { vertical: "middle", horizontal: "center" };
     worksheet.getRow(2).height = 20;
-
+    
     worksheet.columns = [
       { key: "no", width: 5 },
       { key: "recordingDate", width: 18 },
@@ -4618,7 +4009,7 @@ router.post("/sales/download-excel", async (req, res) => {
       { key: "isExchange", width: 15 },
       { key: "isReturn", width: 15 },
     ];
-
+    
     const headerRow = worksheet.getRow(3);
     headerRow.values = [
       "No",
@@ -4659,14 +4050,14 @@ router.post("/sales/download-excel", async (req, res) => {
     headerRow.font = { bold: true };
     headerRow.alignment = { vertical: "middle", horizontal: "center" };
     headerRow.height = 20;
-
+    
     ["recordingDate", "invoiceDate", "dueDate", "deliveryDate"].forEach(
       (key) => {
         const col = worksheet.getColumn(key);
         if (col) col.numFmt = "dd-mmm-yy";
       }
     );
-
+    
     [
       "salesQty",
       "bonusQty",
@@ -4685,19 +4076,19 @@ router.post("/sales/download-excel", async (req, res) => {
       const col = worksheet.getColumn(key);
       if (col) col.numFmt = "#,##0.00";
     });
-
+    
     let rowIndex = 0;
     filteredSalesData.forEach((sale) => {
       const customer = customerMap[sale.customerId?.toString()] || {};
-
+      
       const formatDate = (dateStr) => {
         const date = new Date(dateStr);
         return isNaN(date.getTime()) ? null : date;
       };
-
+      
       const formatCustomerCode = (code) =>
         code ? code.toString().padStart(4, "0") : "";
-
+      
       sale.products.forEach((product) => {
         const row = worksheet.addRow({
           no: ++rowIndex,
@@ -4735,7 +4126,7 @@ router.post("/sales/download-excel", async (req, res) => {
           isExchange: sale.isExchange ? "Yes" : "No",
           isReturn: sale.isReturn ? "Yes" : "No",
         });
-
+        
         // Color transactions differently
         if (sale.isReturn) {
           // Light red background for returns
@@ -4756,7 +4147,7 @@ router.post("/sales/download-excel", async (req, res) => {
             };
           });
         }
-
+        
         row.eachCell((cell) => {
           cell.border = {
             top: { style: "thin" },
@@ -4767,17 +4158,17 @@ router.post("/sales/download-excel", async (req, res) => {
         });
       });
     });
-
+    
     const fileName = `sale_summary_${formatDateToReadable(
       startDate
     )}_to_${formatDateToReadable(endDate)}.xlsx`;
-
+    
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     );
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-
+    
     await workbook.xlsx.write(res);
     res.end();
   } catch (error) {
@@ -4809,9 +4200,9 @@ router.get("/sales/unique-names", async (req, res) => {
     const uniqueNames = await Product.distinct("productName", {
       productName: { $ne: null },
     });
-
+    
     uniqueNames.sort((a, b) => a.localeCompare(b));
-
+    
     res.status(200).json({ productNames: uniqueNames });
   } catch (error) {
     console.error("Error fetching unique product names:", error);
@@ -4833,31 +4224,31 @@ router.get("/sales/stock/report-in-hand", async (req, res) => {
 router.post("/sales/delete-batch", async (req, res) => {
   try {
     const { ids } = req.body;
-
+    
     if (!Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({
         success: false,
         message: "No sale IDs provided",
       });
     }
-
+    
     const deletedSales = [];
     const errors = [];
-
+    
     // Process in smaller batches
     const batchSize = 10;
     for (let i = 0; i < ids.length; i += batchSize) {
       const batch = ids.slice(i, i + batchSize);
-
+      
       const batchPromises = batch.map(async (id) => {
         try {
           const saleToDelete = await SaleSummary.findById(id);
-
+          
           if (!saleToDelete) {
             errors.push({ id, error: "Not found" });
             return;
           }
-
+          
           // Restore inventory for all products
           for (const product of saleToDelete.products) {
             const totalQty = product.salesQty + product.bonusQty;
@@ -4872,10 +4263,10 @@ router.post("/sales/delete-batch", async (req, res) => {
               );
             }
           }
-
+          
           // Delete the sale
           await SaleSummary.findByIdAndDelete(id);
-
+          
           deletedSales.push({
             id,
             invoiceNumber: saleToDelete.invoiceNumber,
@@ -4890,10 +4281,10 @@ router.post("/sales/delete-batch", async (req, res) => {
           });
         }
       });
-
+      
       await Promise.allSettled(batchPromises);
     }
-
+    
     res.json({
       success: true,
       deletedCount: deletedSales.length,
@@ -4916,17 +4307,17 @@ router.get("/sales/inventory-check/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const sale = await SaleSummary.findById(id);
-
+    
     if (!sale) {
       return res.status(404).json({ error: "Sale not found" });
     }
-
+    
     const inventoryChecks = await Promise.all(
       sale.products.map(async (product) => {
         const existingProduct = await findProductInInventory(
           product.productName
         );
-
+        
         return {
           productName: product.productName,
           saleQty: product.totalQty,
@@ -4947,7 +4338,7 @@ router.get("/sales/inventory-check/:id", async (req, res) => {
         };
       })
     );
-
+    
     res.json({
       saleId: id,
       invoiceNumber: sale.invoiceNumber,
@@ -4966,12 +4357,12 @@ router.get("/sales/exchange-transactions", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
     const matchConditions = { isExchange: true };
-
+    
     if (startDate && endDate) {
       const start = new Date(startDate);
       const end = new Date(endDate);
       end.setHours(23, 59, 59, 999);
-
+      
       if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
         matchConditions.invoiceDate = {
           $gte: start,
@@ -4979,7 +4370,7 @@ router.get("/sales/exchange-transactions", async (req, res) => {
         };
       }
     }
-
+    
     const exchangeTransactions = await SaleSummary.find(matchConditions)
       .sort({ invoiceDate: -1 })
       .select({
@@ -4994,7 +4385,7 @@ router.get("/sales/exchange-transactions", async (req, res) => {
         isExchange: 1,
         isReturn: 1,
       });
-
+    
     res.json({
       success: true,
       data: exchangeTransactions,
@@ -5015,12 +4406,12 @@ router.get("/sales/return-transactions", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
     const matchConditions = { isReturn: true };
-
+    
     if (startDate && endDate) {
       const start = new Date(startDate);
       const end = new Date(endDate);
       end.setHours(23, 59, 59, 999);
-
+      
       if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
         matchConditions.invoiceDate = {
           $gte: start,
@@ -5028,7 +4419,7 @@ router.get("/sales/return-transactions", async (req, res) => {
         };
       }
     }
-
+    
     const returnTransactions = await SaleSummary.find(matchConditions)
       .sort({ invoiceDate: -1 })
       .select({
@@ -5043,7 +4434,7 @@ router.get("/sales/return-transactions", async (req, res) => {
         isReturn: 1,
         isExchange: 1,
       });
-
+    
     res.json({
       success: true,
       data: returnTransactions,
@@ -5063,9 +4454,8 @@ router.get("/sales/return-transactions", async (req, res) => {
 router.get("/sales/transactions-by-type", async (req, res) => {
   try {
     const { type, startDate, endDate } = req.query;
-
     let matchConditions = {};
-
+    
     if (type === "return") {
       matchConditions.isReturn = true;
     } else if (type === "exchange") {
@@ -5076,12 +4466,12 @@ router.get("/sales/transactions-by-type", async (req, res) => {
         { isExchange: { $ne: true } },
       ];
     }
-
+    
     if (startDate && endDate) {
       const start = new Date(startDate);
       const end = new Date(endDate);
       end.setHours(23, 59, 59, 999);
-
+      
       if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
         matchConditions.invoiceDate = {
           $gte: start,
@@ -5089,7 +4479,7 @@ router.get("/sales/transactions-by-type", async (req, res) => {
         };
       }
     }
-
+    
     const transactions = await SaleSummary.find(matchConditions)
       .sort({ invoiceDate: -1 })
       .select({
@@ -5104,7 +4494,7 @@ router.get("/sales/transactions-by-type", async (req, res) => {
         isReturn: 1,
         isExchange: 1,
       });
-
+    
     res.json({
       success: true,
       data: transactions,
@@ -5125,17 +4515,16 @@ router.get("/sales/transactions-by-type", async (req, res) => {
 router.get("/import/failed-invoices/:sessionId", async (req, res) => {
   try {
     const { sessionId } = req.params;
-
     if (!importProgressMap.has(sessionId)) {
       return res.status(404).json({
         success: false,
         message: "Session not found",
       });
     }
-
+    
     const progress = importProgressMap.get(sessionId);
     const errors = progress.errors || [];
-
+    
     // Format errors for download
     const failedInvoices = errors.map((error, index) => ({
       row: index + 1,
@@ -5146,7 +4535,7 @@ router.get("/import/failed-invoices/:sessionId", async (req, res) => {
       products: error.products || [],
       timestamp: error.timestamp || new Date().toISOString(),
     }));
-
+    
     res.json({
       success: true,
       failedInvoices,
@@ -5168,15 +4557,15 @@ router.get("/debug/product-match/:productName", async (req, res) => {
   try {
     const { productName } = req.params;
     const normalized = normalizeProductName(productName);
-
+    
     // Search in ReportInHand
     const reportProducts = await ReportInHand.find({
       productName: { $regex: productName, $options: "i" },
     });
-
+    
     // Search with enhanced finder
     const foundProduct = await findProductInInventory(productName);
-
+    
     res.json({
       searchTerm: productName,
       normalizedTerm: normalized,
@@ -5214,25 +4603,170 @@ router.get("/debug/product-match/:productName", async (req, res) => {
   }
 });
 
+// 🔥 FIXED: Debug endpoint to check MR cash updates
+router.get("/debug/mr-cash-updates", async (req, res) => {
+  try {
+    const { mrName } = req.query;
+    let query = {};
+    
+    if (mrName) {
+      query.mrName = { $regex: mrName, $options: "i" };
+    }
+    
+    const cashRecords = await MRCash.find(query).sort({ updatedAt: -1 });
+    const staffMembers = await Staff.find(query);
+    
+    // Get recent cash sales
+    const recentCashSales = await SaleSummary.find({
+      paymentStatus: { $in: ["Cash", "Paid"] },
+      paidAmount: { $gt: 0 },
+      ...(mrName ? { mrName: { $regex: mrName, $options: "i" } } : {}),
+    })
+      .sort({ invoiceDate: -1 })
+      .limit(10);
+    
+    res.json({
+      success: true,
+      cashRecords: cashRecords.map((record) => ({
+        id: record._id,
+        mrId: record.mrId,
+        mrName: record.mrName,
+        currentCash: record.currentCash,
+        cashTransferredToAdmin: record.cashTransferredToAdmin,
+        lastTransferDate: record.lastTransferDate,
+        recentTransactions: record.recentTransactions,
+        notes: record.notes,
+        createdAt: record.createdAt,
+        updatedAt: record.updatedAt,
+      })),
+      staffMembers: staffMembers.map((staff) => ({
+        id: staff._id,
+        name: staff.name,
+        email: staff.email,
+        role: staff.role,
+        isActive: staff.isActive,
+      })),
+      recentCashSales: recentCashSales.map((sale) => ({
+        invoiceNumber: sale.invoiceNumber,
+        invoiceDate: sale.invoiceDate,
+        mrName: sale.mrName,
+        mrId: sale.mrId,
+        paidAmount: sale.paidAmount,
+        paymentStatus: sale.paymentStatus,
+        customerName: sale.customerName,
+      })),
+    });
+  } catch (error) {
+    console.error("Debug MR cash error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+// Test endpoint to manually add cash to MR
+router.post("/debug/add-cash-manually", async (req, res) => {
+  try {
+    const { mrId, mrName, amount, invoiceNumber, notes } = req.body;
+    let mrStaff = null;
+    
+    // Find MR
+    if (mrId) {
+      mrStaff = await Staff.findById(mrId);
+    }
+    
+    if (!mrStaff && mrName) {
+      mrStaff = await Staff.findOne({
+        $or: [
+          { name: { $regex: new RegExp(mrName.trim(), "i") } },
+          { email: { $regex: new RegExp(mrName.trim(), "i") } },
+        ],
+      });
+    }
+    
+    if (!mrStaff) {
+      return res.status(404).json({
+        success: false,
+        message: "MR not found",
+      });
+    }
+    
+    // Find or create MR cash record
+    let mrCash = await MRCash.findOne({ mrId: mrStaff._id });
+    const cashAmount = parseFloat(amount) || 0;
+    
+    if (!mrCash) {
+      // Create new MR cash record
+      mrCash = new MRCash({
+        mrId: mrStaff._id,
+        mrName: mrStaff.name,
+        currentCash: cashAmount,
+        cashTransferredToAdmin: 0,
+        lastTransferDate: null,
+        notes:
+          notes ||
+          `Manual cash addition for invoice ${invoiceNumber || "manual"}`,
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      });
+    } else {
+      // Update existing
+      mrCash.currentCash = (mrCash.currentCash || 0) + cashAmount;
+      mrCash.updatedAt = new Date();
+      
+      const note = `Manually added $${cashAmount} ${
+        invoiceNumber ? `for invoice ${invoiceNumber}` : ""
+      }`;
+      if (mrCash.notes) {
+        mrCash.notes += `\n${note}`;
+      } else {
+        mrCash.notes = note;
+      }
+    }
+    
+    await mrCash.save();
+    
+    res.json({
+      success: true,
+      message: `Added $${cashAmount} to MR ${mrStaff.name}'s cash`,
+      data: {
+        mrName: mrStaff.name,
+        mrId: mrStaff._id,
+        amountAdded: cashAmount,
+        newBalance: mrCash.currentCash,
+        cashRecordId: mrCash._id,
+      },
+    });
+  } catch (error) {
+    console.error("Manual cash addition error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
 // Add this temporary debug endpoint
 router.get("/import/debug/:sessionId", async (req, res) => {
   try {
     const { sessionId } = req.params;
     const progress = importProgressMap.get(sessionId);
-
+    
     if (!progress) {
       return res.json({ error: "Session not found" });
     }
-
+    
     // Get detailed error samples
     const sampleErrors = progress.errors.slice(0, 20);
     const errorPatterns = {};
-
+    
     sampleErrors.forEach((error) => {
       const key = error.error?.split(":")[0] || "Unknown";
       errorPatterns[key] = (errorPatterns[key] || 0) + 1;
     });
-
+    
     res.json({
       totalErrors: progress.errors.length,
       errorPatterns,
@@ -5249,147 +4783,105 @@ router.get("/import/debug/:sessionId", async (req, res) => {
   }
 });
 
-// 🔥 ADD THESE DEBUG ENDPOINTS TO YOUR ROUTER:
-
-// Debug endpoint to check current import data structure
-router.post("/debug/check-import-data", async (req, res) => {
+// 🔥 CRITICAL: Add a simple diagnostic endpoint
+router.get("/debug/diagnostic", async (req, res) => {
   try {
-    const salesData = req.body;
-
-    // Log the structure
-    console.log("=== DEBUG: Import Data Structure ===");
-    console.log(
-      "Total records:",
-      Array.isArray(salesData) ? salesData.length : "Not an array"
-    );
-
-    if (Array.isArray(salesData) && salesData.length > 0) {
-      const sample = salesData[0];
-      console.log("Sample record keys:", Object.keys(sample));
-      console.log("Sample MR Name:", sample.mrName);
-      console.log("Sample Customer Name:", sample.customerName);
-      console.log("Sample Invoice Number:", sample.invoiceNumber);
-      console.log(
-        "Sample Products count:",
-        Array.isArray(sample.products) ? sample.products.length : "Not an array"
-      );
-
-      if (Array.isArray(sample.products) && sample.products.length > 0) {
-        console.log("Sample product:", sample.products[0]);
-      }
-    }
-
-    // Try to validate with existing function
-    const validationResult = await validateImportData(
-      Array.isArray(salesData) ? salesData : []
-    );
-
+    // Test database connection
+    const dbState = mongoose.connection.readyState;
+    const states = ['disconnected', 'connected', 'connecting', 'disconnecting'];
+    
+    // Test if we can insert and read
+    const testData = {
+      invoiceNumber: `DIAG-${Date.now()}`,
+      customerName: "Diagnostic Test",
+      mrName: "Test MR",
+      totalAmount: 100,
+      paidAmount: 100,
+      paymentStatus: "Cash"
+    };
+    
+    // Try to insert
+    const testSale = new SaleSummary({
+      ...testData,
+      customerId: new mongoose.Types.ObjectId(),
+      products: [{
+        productName: "Test Product",
+        salesQty: 1,
+        netSellingAmount: 100
+      }],
+      createdAt: new Date(),
+      updatedAt: new Date()
+    });
+    
+    const saved = await testSale.save();
+    
+    // Immediately delete it
+    await SaleSummary.findByIdAndDelete(saved._id);
+    
     res.json({
       success: true,
-      dataStructure: {
-        isArray: Array.isArray(salesData),
-        count: Array.isArray(salesData) ? salesData.length : 0,
-        sampleKeys:
-          Array.isArray(salesData) && salesData.length > 0
-            ? Object.keys(salesData[0])
-            : [],
+      database: {
+        state: states[dbState],
+        connection: dbState === 1 ? "Healthy" : "Problem",
       },
-      validationResult,
-      message: "Check console for detailed logs",
-    });
-  } catch (error) {
-    console.error("Debug error:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Test endpoint to create a single sale
-
-const logError = (error, context = "") => {
-  console.error(`❌ ${context} Error:`, error.message);
-  console.error("Error stack:", error.stack);
-  if (error.errors) {
-    Object.keys(error.errors).forEach((key) => {
-      console.error(`Field error ${key}:`, error.errors[key].message);
-    });
-  }
-};
-
-// Wrap your main endpoints with better error handling
-const wrapAsync = (fn) => {
-  return (req, res, next) => {
-    Promise.resolve(fn(req, res, next)).catch((error) => {
-      logError(error, `${req.method} ${req.path}`);
-      next(error);
-    });
-  };
-};
-// Check database collections
-router.get("/debug/check-collections", async (req, res) => {
-  try {
-    const saleCount = await SaleSummary.countDocuments();
-    const mrcashCount = await MRCash.countDocuments();
-    const staffCount = await Staff.countDocuments();
-    const customerCount = await Customer.countDocuments();
-    const reportInHandCount = await ReportInHand.countDocuments();
-
-    // Get sample data
-    const sampleSale = await SaleSummary.findOne().limit(1);
-    const sampleMRCASH = await MRCash.findOne().limit(1);
-
-    res.json({
-      success: true,
+      testInsert: {
+        success: true,
+        id: saved._id,
+        invoiceNumber: saved.invoiceNumber
+      },
       collections: {
-        SaleSummary: saleCount,
-        MRCashes: mrcashCount,
-        Staff: staffCount,
-        Customer: customerCount,
-        ReportInHand: reportInHandCount,
-      },
-      sampleSale: sampleSale
-        ? {
-            _id: sampleSale._id,
-            invoiceNumber: sampleSale.invoiceNumber,
-            mrName: sampleSale.mrName,
-            mrId: sampleSale.mrId,
-            createdAt: sampleSale.createdAt,
-          }
-        : null,
-      sampleMRCASH: sampleMRCASH
-        ? {
-            _id: sampleMRCASH._id,
-            mrName: sampleMRCASH.mrName,
-            mrId: sampleMRCASH.mrId,
-            currentCash: sampleMRCASH.currentCash,
-            createdAt: sampleMRCASH.createdAt,
-          }
-        : null,
+        SaleSummary: await SaleSummary.countDocuments(),
+        MRCash: await MRCash.countDocuments(),
+        Staff: await Staff.countDocuments()
+      }
     });
   } catch (error) {
-    console.error("Check collections error:", error);
-    res.status(500).json({ error: error.message });
+    console.error("Diagnostic error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      stack: error.stack
+    });
   }
 });
 
-// Export the router and utility functions
-export {
-  router as saleRouter,
-  importProgressMap,
-  initializeImportProgress,
-  updateImportProgress,
-  processImportAsync,
-  validateImportData,
-  findProductInInventory,
-  normalizeProductName,
-  mapPaymentStatus,
-  parseDateString,
-  isReturnTransaction,
-  updateReportInHandAfterSale,
-  addCashToMR,
-  removeCashFromMR,
-  restoreReportInHandAfterSaleDeletion,
-  checkInvoiceNumberExists,
-  parseQuantityWithParenthesis,
-};
+// 🔥 ADDED: Clear all test data endpoint
+router.post("/debug/clear-test-data", async (req, res) => {
+  try {
+    // Delete test sales
+    const testSales = await SaleSummary.deleteMany({
+      $or: [
+        { invoiceNumber: { $regex: /^TEST-/i } },
+        { invoiceNumber: { $regex: /^DIAG-/i } },
+        { customerName: "Test Customer" },
+        { customerName: "Diagnostic Test" }
+      ]
+    });
+    
+    // Delete test MR cash
+    const testMRCASH = await MRCash.deleteMany({
+      $or: [
+        { mrName: { $regex: /Test MR/i } },
+        { notes: { $regex: /test/i } }
+      ]
+    });
+    
+    res.json({
+      success: true,
+      deleted: {
+        sales: testSales.deletedCount,
+        mrcash: testMRCASH.deletedCount
+      },
+      message: "Test data cleared"
+    });
+  } catch (error) {
+    console.error("Clear test data error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
 
+// Export the router
 export default router;

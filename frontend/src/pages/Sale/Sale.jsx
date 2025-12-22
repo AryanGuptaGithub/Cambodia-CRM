@@ -467,149 +467,137 @@ const ImportSalesModal = ({
     setTotalToProcess(dataToImport.length);
 
     try {
-      // Start import with backend
-      const response = await axios.post(`${backendUrl}/api/sales/import`, {
-        invoices: dataToImport,
+      // Transform data to match backend expectations
+      const transformedInvoices = dataToImport.map(invoice => {
+        return {
+          ...invoice,
+          // Ensure required fields are present
+          invoiceDate: invoice.invoiceDate || new Date().toISOString().split('T')[0],
+          recordingDate: invoice.recordingDate || new Date().toISOString().split('T')[0],
+          paymentStatus: invoice.paymentStatus || "Credit",
+          // Calculate totals if not present
+          totalAmount: invoice.totalAmount || 
+            (invoice.products?.reduce((sum, p) => sum + (p.netSellingAmount || 0), 0) || 0),
+          dueAmount: invoice.dueAmount || 
+            ((invoice.totalAmount || 0) - (invoice.paidAmount || 0)),
+          // Add timestamps for sale summary
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          // Mark as regular sale (not return/exchange)
+          isReturn: false,
+          isExchange: false,
+          saleType: "regular"
+        };
       });
 
-      const { sessionId, totalInvoices } = response.data;
+      setImportStep("Sending data to server...");
+      setImportProgress(20);
 
-      if (!sessionId) {
-        throw new Error("No session ID received from server");
+      // Send all data at once with a timeout
+      const response = await axios.post(`${backendUrl}/api/sales/import`, {
+        invoices: transformedInvoices,
+        createSummaries: true, // IMPORTANT: Tell backend to create summaries
+        skipProgressTracking: true // Skip complex progress tracking
+      }, {
+        timeout: 300000 // 5 minutes timeout for large imports
+      });
+
+      setImportProgress(80);
+      setImportStep("Finalizing import...");
+
+      // Process response
+      const result = response.data;
+      
+      // IMPORTANT: Create a proper import result object
+      const importResult = {
+        summary: {
+          successfullyImported: result.successCount || result.successfullyImported || 0,
+          failed: result.failCount || result.failed || 0,
+          regularTransactions: result.regularCount || result.successCount || 0,
+          cashSales: result.cashSales || 0,
+          cashAmount: result.cashAmount || 0,
+          totalInvoices: transformedInvoices.length
+        },
+        insufficientStockProducts: result.insufficientStockProducts || [],
+        detailedErrors: {
+          validationErrors: result.validationErrors || [],
+          importErrors: result.failedInvoices || result.errors || []
+        },
+        rawResult: result // Keep raw result for debugging
+      };
+
+      // Store the result
+      setImportResult(importResult);
+      setImportSummary(importResult.summary);
+      
+      // IMPORTANT: Force refresh of sale summaries
+      if (onImportSuccess) {
+        onImportSuccess(); // This should trigger fetchSaleSummaries in parent
       }
 
-      // Store session ID for polling
-      setImportSessionId(sessionId);
+      // Show success message
+      let successMessage = `Import completed: ${importResult.summary.successfullyImported} successful, ${importResult.summary.failed} failed`;
+      
+      if (importResult.summary.cashSales > 0) {
+        successMessage += `\n💰 ${importResult.summary.cashSales} cash sales: $${importResult.summary.cashAmount.toFixed(2)}`;
+      }
 
-      // Create a more robust polling function with timeout
-      const pollProgress = async () => {
-        try {
-          // Try to get progress from the dedicated endpoint
-          const progressResponse = await axios.get(
-            `${backendUrl}/api/sales/import/progress/${sessionId}`,
-            { timeout: 5000 } // Add timeout to prevent hanging
-          );
+      showToast("success", successMessage);
+      
+      // Check for warnings
+      if (importResult.insufficientStockProducts.length > 0) {
+        showToast("warning", `${importResult.insufficientStockProducts.length} products have stock issues`);
+      }
 
-          const { progress } = progressResponse.data;
+      setImportProgress(100);
+      setImportStep("Import completed!");
+      
+      // Auto-show breakdown if there are failures
+      if (importResult.summary.failed > 0 || importResult.insufficientStockProducts.length > 0) {
+        setTimeout(() => {
+          setShowProgressBreakdown(true);
+        }, 1000);
+      }
 
-          if (progress) {
-            setImportProgress(progress.percentage || 0);
-            setProcessedCount(progress.processed || 0);
-            setTotalToProcess(progress.total || totalInvoices);
-            setImportStep(progress.status || "Processing...");
+      setImportComplete(true);
+      setIsImportInProgress(false);
 
-            // If backend reports completion
-            if (progress.completed) {
-              if (progress.result) {
-                const mockResult = {
-                  summary: {
-                    successfullyImported:
-                      progress.result.successfullyImported || 0,
-                    failed: progress.result.failed || 0,
-                    regularTransactions:
-                      progress.result.summary?.regularTransactions || 0,
-                    cashSales: progress.result.cashSales || 0,
-                    cashAmount: progress.result.cashAmount || 0,
-                  },
-                  insufficientStockProducts: [],
-                  detailedErrors: {
-                    validationErrors: [],
-                    importErrors: progress.result.failedInvoices || [],
-                  },
-                };
-
-                setImportResult(mockResult);
-                setImportSummary(mockResult.summary);
-
-                if (onImportSuccess) {
-                  onImportSuccess();
-                }
-
-                // Show success message with cash summary
-                let successMessage = `Import completed: ${progress.result.successfullyImported} successful, ${progress.result.failed} failed`;
-
-                if (progress.result.cashSales > 0) {
-                  successMessage += `\n💰 ${
-                    progress.result.cashSales
-                  } cash sales added to MR accounts: $${progress.result.cashAmount.toFixed(
-                    2
-                  )}`;
-                }
-
-                showToast("success", successMessage);
-              }
-
-              setImportComplete(true);
-              setIsImportInProgress(false);
-              return true;
-            }
-          }
-          return false; // Not completed yet
-        } catch (error) {
-          // Handle 404 and other errors gracefully
-          if (error.response?.status === 404) {
-            console.warn("Progress endpoint not found - switching to fallback mode");
-            
-            // IMPORTANT: Instead of trying alternative endpoints that may not exist,
-            // switch to a simpler progress simulation or timeout approach
-            setImportStep("Import in progress...");
-            setImportProgress(prev => Math.min(prev + 10, 90)); // Simulate slow progress
-            
-            // Check if we should timeout
-            const elapsedTime = Date.now() - importStartTime;
-            if (elapsedTime > 300000) { // 5 minutes timeout
-              setImportStep("Import timeout - check backend status");
-              showToast("warning", "Import is taking longer than expected. Please check manually.");
-              setIsImportInProgress(false);
-              setImportComplete(true); // Mark as complete to show UI
-              return true; // Stop polling
-            }
-            
-            return false; // Continue polling
-          }
-          
-          // For network errors or other issues
-          console.error("Error polling progress:", error.message);
-          setImportStep("Temporarily unable to check progress");
-          return false; // Continue polling
+    } catch (error) {
+      console.error("Import error:", error);
+      
+      // Create error result
+      const errorResult = {
+        summary: {
+          successfullyImported: 0,
+          failed: dataToImport.length,
+          regularTransactions: 0,
+          totalInvoices: dataToImport.length
+        },
+        insufficientStockProducts: [],
+        detailedErrors: {
+          validationErrors: [],
+          importErrors: [{
+            error: error.message || "Import failed",
+            message: error.response?.data?.message || "Failed to connect to server"
+          }]
         }
       };
 
-      // Poll every 2 seconds with a timeout
-      const importStartTime = Date.now();
-      const pollInterval = setInterval(async () => {
-        const isComplete = await pollProgress();
-        if (isComplete) {
-          clearInterval(pollInterval);
-          setProgressInterval(null);
-        }
-        
-        // Auto-timeout after 5 minutes regardless
-        if (Date.now() - importStartTime > 300000) {
-          clearInterval(pollInterval);
-          setProgressInterval(null);
-          setImportStep("Import timeout - process may still be running");
-          showToast("warning", "Import check timed out. Please verify import status manually.");
-          setIsImportInProgress(false);
-          setImportComplete(true);
-        }
-      }, 2000);
-
-      // Store interval for cleanup
-      setProgressInterval(pollInterval);
+      setImportResult(errorResult);
+      setImportSummary(errorResult.summary);
       
-      // Also poll immediately
-      const immediateComplete = await pollProgress();
-      if (immediateComplete && progressInterval) {
-        clearInterval(progressInterval);
-        setProgressInterval(null);
-      }
-    } catch (error) {
-      console.error("Import error:", error);
       setImportStep("Import failed!");
-      setImportMessage("Import failed: " + error.message);
-      showToast("error", "Failed to import data: " + error.message);
+      setImportMessage("Import failed: " + (error.message || "Server error"));
+      
+      showToast("error", "Failed to import data: " + (error.message || "Check connection"));
+      
+      // Show breakdown for errors
+      setTimeout(() => {
+        setShowProgressBreakdown(true);
+      }, 500);
+      
       setIsImportInProgress(false);
+      setImportComplete(true);
     } finally {
       setIsImporting(false);
     }
@@ -1654,6 +1642,33 @@ const Sales = () => {
 
   const SALES_PER_PAGE = 9;
 
+  // Helper function to process sales data
+  const processSalesData = (data) => {
+    const salesData = data.summaries || data.data || data;
+    
+    if (!Array.isArray(salesData)) {
+      console.error("Sales data is not an array:", salesData);
+      setSales([]);
+      return;
+    }
+
+    // Filter out any return or exchange transactions
+    const filteredData = salesData.filter(
+      (sale) => !sale.isReturn && !sale.isExchange
+    );
+
+    // Sort by date (newest first)
+    const sortedData = filteredData.sort((a, b) => {
+      return new Date(b.createdAt || b.invoiceDate) - new Date(a.createdAt || a.invoiceDate);
+    });
+
+    setSales(sortedData);
+    
+    if (sortedData.length === 0) {
+      console.warn("No sales data found after filtering");
+    }
+  };
+
   // Fetch stock data
   const fetchStockData = async () => {
     try {
@@ -1718,44 +1733,103 @@ const Sales = () => {
       setLoadingData(true);
       let url = `${backendUrl}/api/sales/all`;
 
-      const res = await fetch(url);
+      const res = await fetch(url, {
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
+      });
+      
       if (!res.ok) {
+        // Try alternative endpoint
         const fallbackRes = await fetch(
-          `${backendUrl}/api/sales?page=1&limit=1000`
+          `${backendUrl}/api/sales/summaries?refresh=true`,
+          {
+            headers: {
+              'Cache-Control': 'no-cache',
+              'Pragma': 'no-cache'
+            }
+          }
         );
-        if (!fallbackRes.ok) throw new Error("Failed to fetch sale summaries");
-
-        const data = await fallbackRes.json();
-        const salesData = data.summaries || data.data || data;
-
-        // Filter out any return or exchange transactions
-        const filteredData = salesData.filter(
-          (sale) => !sale.isReturn && !sale.isExchange
-        );
-
-        setSales(filteredData);
+        
+        if (!fallbackRes.ok) {
+          // Last resort - try to trigger summary generation
+          await axios.post(`${backendUrl}/api/sales/generate-summaries`);
+          
+          // Wait a bit and retry
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          const finalRes = await fetch(`${backendUrl}/api/sales/all`);
+          if (!finalRes.ok) throw new Error("Failed to fetch sale summaries");
+          
+          const data = await finalRes.json();
+          processSalesData(data);
+        } else {
+          const data = await fallbackRes.json();
+          processSalesData(data);
+        }
       } else {
         const data = await res.json();
-        const salesData = data.summaries || data.data || data;
-
-        // Filter out any return or exchange transactions
-        const filteredData = salesData.filter(
-          (sale) => !sale.isReturn && !sale.isExchange
-        );
-
-        setSales(filteredData);
+        processSalesData(data);
       }
     } catch (error) {
       console.error("❌ Fetch error:", error);
       showToast("error", error.message || "Error fetching sale summaries");
+      
+      // Try one more time with simpler endpoint
+      try {
+        const simpleRes = await fetch(`${backendUrl}/api/sales`);
+        if (simpleRes.ok) {
+          const data = await simpleRes.json();
+          processSalesData(data);
+        }
+      } catch (fallbackError) {
+        console.error("Fallback fetch also failed:", fallbackError);
+      }
     } finally {
       setLoadingData(false);
     }
   };
 
+  // Sync sale summaries function
+  const syncSaleSummaries = async () => {
+    try {
+      const response = await axios.post(`${backendUrl}/api/sales/sync-summaries`, {}, {
+        timeout: 30000
+      });
+      
+      if (response.data?.success) {
+        console.log("Sale summaries synced successfully");
+      }
+    } catch (error) {
+      console.warn("Failed to sync summaries, will retry on next fetch:", error);
+    }
+  };
+
+  // Handle import success
+  const handleImportSuccess = () => {
+    // Force refresh with delay to ensure backend has processed
+    setTimeout(() => {
+      fetchSaleSummaries();
+      fetchStockData();
+      
+      // Additional call to sync summaries if needed
+      syncSaleSummaries();
+    }, 1000);
+  };
+
   useEffect(() => {
     fetchSaleSummaries();
-  }, []);
+    
+    // Refresh data every 30 seconds when import modal is open
+    const interval = setInterval(() => {
+      if (showImportModal) {
+        fetchSaleSummaries();
+      }
+    }, 30000);
+    
+    return () => clearInterval(interval);
+  }, [showImportModal]);
 
   useEffect(() => {
     const fetchDropdownData = async () => {
@@ -1829,12 +1903,6 @@ const Sales = () => {
 
     fetchDropdownData();
   }, []);
-
-  // Handle import success
-  const handleImportSuccess = () => {
-    fetchSaleSummaries();
-    fetchStockData();
-  };
 
   const handleDeleteSelected = async () => {
     if (selected.length === 0) return;
