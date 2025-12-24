@@ -1,4 +1,3 @@
-
 import express from "express";
 import SaleSummary from "../../models/sale/saleSummary.js";
 import Customer from "../../models/master/customer.js";
@@ -10,96 +9,94 @@ import PaymentStatus from "../../models/paymentStatus.js";
 
 const router = express.Router();
 const importProgressMap = new Map();
+const BYPASS_STOCK_CHECK = process.env.BYPASS_STOCK_CHECK === "true";
 
 const createSessionId = () =>
   `import_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
 const normalizeProductName = (name) => {
   if (!name || typeof name !== "string") return "";
+
   return name
     .trim()
-    .toUpperCase()
-    .replace(/\s+/g, " ")
+    .toLowerCase()
+    .replace(/\s+/g, " ") // Multiple spaces → single
+    .replace(/[-_\/\\]/g, " ") // Dashes, slashes → space (safe)
+    .replace(/alu\s*alu/gi, "alu alu") // Standardize ALU ALU
     .trim();
 };
 
-// Updated fix map with exact DB names + common variations
+// 🔥 Keep + in fix map keys too!
 const productNameFixMap = {
-  "N-SEA BUCKTHORN & OIL LUTEIN EXTRACT": "N-SEA BUCKTHORN & OIL LUTEIN EXTRACT",
-  "N SEA BUCKTHORN & OIL LUTEIN EXTRACT": "N-SEA BUCKTHORN & OIL LUTEIN EXTRACT",
-  "SEA BUCKTHORN & OIL LUTEIN EXTRACT": "N-SEA BUCKTHORN & OIL LUTEIN EXTRACT",
+  "n-lycopene + wheatgerm oil": "N-LYCOPENE + WHEATGERM OIL",
+  "n lycopene + wheatgerm oil": "N-LYCOPENE + WHEATGERM OIL",
+  "n-lycopene+wheatgerm oil": "N-LYCOPENE + WHEATGERM OIL",
+  "lycopene + wheatgerm oil": "N-LYCOPENE + WHEATGERM OIL",
 
-  "N-LYCOPENE + WHEATGERM OIL": "N-LYCOPENE + WHEATGERM OIL",
-  "N LYCOPENE + WHEATGERM OIL": "N-LYCOPENE + WHEATGERM OIL",
-  "LYCOPENE + WHEATGERM OIL": "N-LYCOPENE + WHEATGERM OIL",
+  "n flaxseed oil": "N-FLAXSEED OIL",
+  "flaxseed oil": "N-FLAXSEED OIL",
 
-  "N-GARLIC OIL": "N-GARLIC OIL",
-  "N GARLIC OIL": "N-GARLIC OIL",
-  "GARLIC OIL": "N-GARLIC OIL",
+  "n evening primrose oil": "N-EVENING PRIMROSE OIL",
+  "evening primrose oil": "N-EVENING PRIMROSE OIL",
 
-  "N-NIGELLA OIL": "N-NIGELLA OIL",
-  "NIGELLA OIL": "N-NIGELLA OIL",
+  "n multiz": "N-MULTIZ",
+  multiz: "N-MULTIZ",
 
-  "N-KRILL OIL": "N-KRILL OIL",
-  "KRILL OIL": "N-KRILL OIL",
+  "n garlic oil": "N-GARLIC OIL",
+  "garlic oil": "N-GARLIC OIL",
 
-  "N-FLAXSEED OIL": "N-FLAXSEED OIL",
-  "FLAXSEED OIL": "N-FLAXSEED OIL",
+  "n fenugreek oil": "N-FENUGREEK OIL",
+  "fenugreek oil": "N-FENUGREEK OIL",
 
-  "N-EVENING PRIMROSE OIL": "N-EVENING PRIMROSE OIL",
-  "EVENING PRIMROSE OIL": "N-EVENING PRIMROSE OIL",
+  "n nigella oil": "N-NIGELLA OIL",
+  "nigella oil": "N-NIGELLA OIL",
 
-  "N-MULTIZ": "N-MULTIZ",
-  "MULTIZ": "N-MULTIZ",
+  "n krill oil": "N-KRILL OIL",
+  "krill oil": "N-KRILL OIL",
 
-  "N-FENUGREEK OIL": "N-FENUGREEK OIL",
-  "FENUGREEK OIL": "N-FENUGREEK OIL",
+  "n sea buckthorn & oil lutein extract":
+    "N-SEA BUCKTHORN & OIL LUTEIN EXTRACT",
+  "sea buckthorn & oil lutein extract": "N-SEA BUCKTHORN & OIL LUTEIN EXTRACT",
 
-  "ECOMOL 500": "ECOMOL 500",
-  "ECOMOL500": "ECOMOL 500",
-  "ECOMOL-500": "ECOMOL 500",
-  "ECOMOL": "ECOMOL 500",
+  "ecomol 500": "ECOMOL 500",
+  ecomol500: "ECOMOL 500",
+  ecomol: "ECOMOL 500",
 
-  // Add more as needed
+  // ALU ALU ECOCID
+  "alu alu ecocid 20": "ALU ALU ECOCID 20",
+  "alualu ecocid 20": "ALU ALU ECOCID 20",
+  "ecocid 20 alu alu": "ALU ALU ECOCID 20",
+  "ecocid alu alu 20": "ALU ALU ECOCID 20",
+  "ecocid 20": "ALU ALU ECOCID 20",
 };
 
 // ====================== STOCK CHECK WITH DETAILED LOGGING ======================
-
 const findProductStockInHand = async (productName, requiredQty) => {
-  console.log("\n=== STOCK CHECK START ===");
-  console.log(`Original product from Excel: "${productName}"`);
-  console.log(`Required quantity: ${requiredQty}`);
-
   try {
     const normalized = normalizeProductName(productName);
-    console.log(`Normalized: "${normalized}"`);
-
-    const fixedName = productNameFixMap[normalized] || normalized;
-    console.log(`After fix map: "${fixedName}"`);
-
-    // DO NOT escape + & - they are part of the name!
+    const fixedName = productNameFixMap[normalized] || productName.trim();
     const escaped = fixedName.replace(/[.*?^${}()|[\]\\]/g, "\\$&");
-    console.log(`Regex pattern: "${escaped}"`);
-
-    // Exact match first
     let stockItems = await ReportInHand.find({
       productName: { $regex: new RegExp(`^${escaped}$`, "i") },
     }).sort({ expiryDate: 1 });
 
-    console.log(`Exact match found: ${stockItems.length} document(s)`);
-
-    // Fallback: contains match (for safety)
     if (stockItems.length === 0) {
-      console.log("Trying contains match...");
       stockItems = await ReportInHand.find({
-        productName: { $regex: new RegExp(escaped, "i") },
+        productName: { $regex: escaped, $options: "i" },
       }).sort({ expiryDate: 1 });
-      console.log(`Contains match found: ${stockItems.length} document(s)`);
     }
 
     if (stockItems.length === 0) {
-      console.log(`❌ NO PRODUCT FOUND for "${productName}"`);
-      console.log("=== STOCK CHECK END (NO PRODUCT) ===\n");
+      const allItems = await ReportInHand.find({});
+      stockItems = allItems.filter(
+        (item) =>
+          normalizeProductName(item.productName) === normalized ||
+          item.productName.toLowerCase().includes(normalized) ||
+          normalized.includes(normalizeProductName(item.productName))
+      );
+    }
+
+    if (stockItems.length === 0) {
       return {
         insufficient: true,
         availableStock: 0,
@@ -107,40 +104,30 @@ const findProductStockInHand = async (productName, requiredQty) => {
       };
     }
 
-    stockItems.forEach((item, i) => {
-      console.log(`  [${i + 1}] "${item.productName}" | totalBoxes: ${item.totalBoxes}`);
-    });
-
-    const available = stockItems.reduce((sum, item) => sum + (item.totalBoxes || 0), 0);
-    console.log(`Total available (totalBoxes sum): ${available}`);
+    const available = stockItems.reduce(
+      (sum, item) => sum + (item.totalBoxes || 0),
+      0
+    );
 
     if (available < requiredQty) {
-      console.log(`❌ INSUFFICIENT: Need ${requiredQty}, Have ${available}`);
-      console.log("=== STOCK CHECK END (FAILED) ===\n");
       return {
         insufficient: true,
         availableStock: available,
         message: `Insufficient stock for "${productName}". Required: ${requiredQty}, Available: ${available}`,
       };
     }
-
-    console.log(`✅ SUFFICIENT: ${available} >= ${requiredQty}`);
-    console.log("=== STOCK CHECK END (SUCCESS) ===\n");
     return { insufficient: false, availableStock: available };
-
   } catch (error) {
-    console.error(`🚨 STOCK CHECK ERROR:`, error.message);
-    console.log("=== STOCK CHECK END (ERROR) ===\n");
+    console.error("🚨 STOCK CHECK ERROR:", error.message);
     return { insufficient: true, availableStock: 0, message: error.message };
   }
 };
 
-// ====================== STOCK CONSUMPTION (FIFO) ======================
-
+// 🔥 FIXED: Same logic in consumeStockFromHand
 const consumeStockFromHand = async (productName, requiredQty, session) => {
   try {
     const normalized = normalizeProductName(productName);
-    const fixedName = productNameFixMap[normalized] || normalized;
+    const fixedName = productNameFixMap[normalized] || productName.trim();
     const escaped = fixedName.replace(/[.*?^${}()|[\]\\]/g, "\\$&");
 
     let stockItems = await ReportInHand.find({
@@ -151,10 +138,18 @@ const consumeStockFromHand = async (productName, requiredQty, session) => {
 
     if (stockItems.length === 0) {
       stockItems = await ReportInHand.find({
-        productName: { $regex: new RegExp(escaped, "i") },
+        productName: { $regex: escaped, $options: "i" },
       })
-      .sort({ expiryDate: 1 })
-      .session(session);
+        .sort({ expiryDate: 1 })
+        .session(session);
+    }
+
+    if (stockItems.length === 0) {
+      // Final fallback scan
+      const allItems = await ReportInHand.find({}).session(session);
+      stockItems = allItems.filter(
+        (item) => normalizeProductName(item.productName) === normalized
+      );
     }
 
     if (stockItems.length === 0) {
@@ -163,19 +158,38 @@ const consumeStockFromHand = async (productName, requiredQty, session) => {
 
     let remaining = requiredQty;
 
+    // FIFO: oldest first
     for (const item of stockItems) {
       if (remaining <= 0) break;
-      const take = Math.min(item.totalBoxes || 0, remaining);
-      if (take > 0) {
-        item.totalBoxes -= take;
-        item.updatedAt = new Date();
-        await item.save({ session });
+
+      let itemRemaining = item.totalBoxes || 0;
+      while (itemRemaining > 0 && remaining > 0 && item.batches.length > 0) {
+        const batch = item.batches[0]; // oldest batch
+        const take = Math.min(batch.boxes, remaining, itemRemaining);
+
+        batch.boxes -= take;
+        batch.amount = batch.boxes * (batch.lc || 0);
         remaining -= take;
+        itemRemaining -= take;
+
+        // Remove empty batch
+        if (batch.boxes <= 0) {
+          item.batches.shift();
+        }
       }
+
+      item.totalBoxes = item.batches.reduce((sum, b) => sum + b.boxes, 0);
+      item.totalAmount = item.batches.reduce((sum, b) => sum + b.amount, 0);
+      item.updatedAt = new Date();
+      await item.save({ session });
     }
 
     if (remaining > 0) {
-      throw new Error(`Could only deduct ${requiredQty - remaining} of ${requiredQty} for ${productName}`);
+      throw new Error(
+        `Could only deduct ${
+          requiredQty - remaining
+        } of ${requiredQty} for ${productName}`
+      );
     }
 
     return { success: true };
@@ -207,13 +221,16 @@ const addCashToMR = async (saleData) => {
     customerName,
     paymentStatus,
   } = saleData;
-  if (!["Cash", "Paid"].includes(paymentStatus) || paidAmount <= 0) return { success: false };
+  if (!["Cash", "Paid"].includes(paymentStatus) || paidAmount <= 0)
+    return { success: false };
 
   let mrStaff = await findMRStaff(mrName, mrId);
   if (!mrStaff) {
     mrStaff = await new Staff({
       name: mrName,
-      email: `${mrName.toLowerCase().replace(/\s+/g, ".")}.placeholder@example.com`,
+      email: `${mrName
+        .toLowerCase()
+        .replace(/\s+/g, ".")}.placeholder@example.com`,
       role: "Medical Representative",
       isActive: true,
       isPlaceholder: true,
@@ -229,7 +246,14 @@ const addCashToMR = async (saleData) => {
       mrName: mrStaff.name,
       currentCash: amount,
       notes: `Initial cash from invoice ${invoiceNumber}`,
-      recentTransactions: [{ invoiceNumber, amount, type: "sale", date: invoiceDate || new Date() }],
+      recentTransactions: [
+        {
+          invoiceNumber,
+          amount,
+          type: "sale",
+          date: invoiceDate || new Date(),
+        },
+      ],
     });
   } else {
     mrCash.currentCash += amount;
@@ -240,13 +264,13 @@ const addCashToMR = async (saleData) => {
       date: invoiceDate || new Date(),
       notes: `Sale to ${customerName || "Unknown"}`,
     });
-    if (mrCash.recentTransactions.length > 50) mrCash.recentTransactions = mrCash.recentTransactions.slice(-50);
+    if (mrCash.recentTransactions.length > 50)
+      mrCash.recentTransactions = mrCash.recentTransactions.slice(-50);
   }
   await mrCash.save();
 
   return { success: true, amountAdded: amount };
 };
-
 
 const getOrCreateCustomer = async (data) => {
   let customer = null;
@@ -381,7 +405,6 @@ const updateImportProgress = (sessionId, updates) => {
 };
 
 // ====================== SINGLE INVOICE PROCESSING WITH STOCK DEDUCTION ======================
-
 const processSingleInvoice = async (saleData, sessionId, index) => {
   const progress = importProgressMap.get(sessionId);
   if (!progress) return { success: false, failedInvoice: null };
@@ -404,9 +427,11 @@ const processSingleInvoice = async (saleData, sessionId, index) => {
 
         if (totalQty <= 0) continue;
 
-        if (salesQty > 0) {
+        // === ONLY CHECK & DEDUCT STOCK IF BYPASS IS OFF ===
+        if (!BYPASS_STOCK_CHECK && salesQty > 0) {
           await consumeStockFromHand(p.productName, salesQty, session);
         }
+        // If BYPASS_STOCK_CHECK = true → completely skip stock operations
 
         processedProducts.push({
           productName: p.productName,
@@ -424,8 +449,7 @@ const processSingleInvoice = async (saleData, sessionId, index) => {
         });
       }
 
-      if (processedProducts.length === 0)
-        throw new Error("No valid products");
+      if (processedProducts.length === 0) throw new Error("No valid products");
 
       const totalAmount = processedProducts.reduce(
         (sum, p) => sum + (p.netSellingAmount || 0),
@@ -456,10 +480,7 @@ const processSingleInvoice = async (saleData, sessionId, index) => {
 
       await newSale.save({ session });
 
-      if (
-        ["Cash", "Paid"].includes(newSale.paymentStatus) &&
-        paidAmount > 0
-      ) {
+      if (["Cash", "Paid"].includes(newSale.paymentStatus) && paidAmount > 0) {
         await addCashToMR({
           mrName: newSale.mrName,
           mrId: newSale.mrId,
@@ -473,14 +494,23 @@ const processSingleInvoice = async (saleData, sessionId, index) => {
     });
     isSuccess = true;
   } catch (err) {
-    console.error(`Error processing invoice ${saleData.invoiceNumber}:`, err.message);
+    console.error(
+      `Error processing invoice ${saleData.invoiceNumber}:`,
+      err.message
+    );
+
+    const isStockError =
+      !BYPASS_STOCK_CHECK && err.message.toLowerCase().includes("stock");
+
     failedDetail = {
       row: index + 2,
       invoiceNumber: saleData.invoiceNumber || "Unknown",
       customerName: saleData.customerName || "Unknown",
-      productName: err.message.includes("for ") ? err.message.split("for ")[1] : "N/A",
+      productName: err.message.includes("for ")
+        ? err.message.split("for ")[1]?.trim()
+        : "N/A",
       message: err.message,
-      type: err.message.includes("stock") ? "insufficient_stock" : "import_error",
+      type: isStockError ? "insufficient_stock" : "import_error",
       timestamp: new Date().toISOString(),
     };
   } finally {
@@ -500,7 +530,11 @@ const processImportAsync = async (sessionId, validInvoices) => {
 
   for (let i = 0; i < validInvoices.length; i++) {
     const saleData = validInvoices[i];
-    const { success, failedInvoice } = await processSingleInvoice(saleData, sessionId, i);
+    const { success, failedInvoice } = await processSingleInvoice(
+      saleData,
+      sessionId,
+      i
+    );
 
     if (!success && failedInvoice) {
       errors.push(failedInvoice);
@@ -1121,6 +1155,25 @@ router.post("/sales/delete-batch", async (req, res) => {
       message: "Failed to delete sales",
       error: error.message,
     });
+  }
+});
+
+router.get("/reports/inhand/count", async (req, res) => {
+  try {
+    const totalDocs = await ReportInHand.countDocuments({});
+    const agg = await ReportInHand.aggregate([
+      { $group: { _id: null, total: { $sum: "$totalBoxes" } } },
+    ]);
+    const totalItems = agg.length > 0 ? agg[0].total : 0;
+
+    res.json({
+      success: true,
+      totalDocuments: totalDocs,
+      totalItems,
+    });
+  } catch (error) {
+    console.error("Stock count error:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
