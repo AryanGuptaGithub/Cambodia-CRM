@@ -1345,27 +1345,35 @@ const Sales = () => {
     []
   );
 
-  const filteredSales = useMemo(() => {
-    if (!Array.isArray(sales)) return [];
+const filteredSales = useMemo(() => {
+  if (!Array.isArray(sales)) return [];
 
-    const lowerSearch = searchTerm.trim().toLowerCase();
-    const selectedTabLower = selectedTab.toLowerCase();
+  const lowerSearch = searchTerm.trim().toLowerCase();
+  const selectedTabLower = selectedTab.toLowerCase();
 
-    return sales.filter((sale) => {
-      const paymentStatus = (sale.paymentStatus || "").toLowerCase();
+  return sales.filter((sale) => {
+    const paymentStatus = (sale.paymentStatus || "").toLowerCase();
 
-      if (selectedTabLower !== "All" && selectedTabLower !== paymentStatus) {
-        return false;
-      }
+    // ✅ If tab is NOT "all", then filter by payment status
+    if (selectedTabLower !== "all" && selectedTabLower !== paymentStatus) {
+      return false;
+    }
 
-      if (!lowerSearch) return true;
+    // ✅ If no search text, return all matching tab data
+    if (!lowerSearch) return true;
 
-      const fields = [sale.invoiceNumber, sale.customerName, sale.mrName];
-      return fields.some((f) =>
-        (f ?? "").toString().toLowerCase().includes(lowerSearch)
-      );
-    });
-  }, [sales, searchTerm, selectedTab]);
+    const fields = [
+      sale.invoiceNumber,
+      sale.customerName,
+      sale.mrName,
+    ];
+
+    return fields.some((f) =>
+      (f ?? "").toString().toLowerCase().includes(lowerSearch)
+    );
+  });
+}, [sales, searchTerm, selectedTab]);
+
 
   const currentSales = useMemo(() => {
     const start = (currentPage - 1) * SALES_PER_PAGE;

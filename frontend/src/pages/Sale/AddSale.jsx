@@ -399,6 +399,13 @@ const useSaleForm = (initialCustomerCode = "") => {
     return total.toFixed(2);
   }, []);
 
+  // NEW: Check if total amount equals paid amount
+  const isPaidInFull = useCallback(() => {
+    const totalAmount = parseFloat(form.totalAmount) || 0;
+    const paidAmount = parseFloat(form.paidAmount) || 0;
+    return totalAmount > 0 && totalAmount === paidAmount;
+  }, [form.totalAmount, form.paidAmount]);
+
   // Auto-set payment status based on paid amount and total amount
   const autoSetPaymentStatus = useCallback((currentForm) => {
     const totalAmount = parseFloat(currentForm.totalAmount) || 0;
@@ -419,6 +426,7 @@ const useSaleForm = (initialCustomerCode = "") => {
 
     return paymentStatus;
   }, []);
+  
   const calculateDerivedFields = useCallback(
     (name, value, currentForm) => {
       const updatedForm = { ...currentForm, [name]: value };
@@ -448,7 +456,7 @@ const useSaleForm = (initialCustomerCode = "") => {
         } else {
           updatedForm.dueDate = "";
         }
-      } // <- This closing brace was missing
+      }
 
       if (name === "paidAmount") {
         const totalNetAmount = calculateTotalNetAmount(currentForm.products);
@@ -466,6 +474,13 @@ const useSaleForm = (initialCustomerCode = "") => {
           dueAmount: newDueAmount,
           totalAmount: totalNetAmount,
         });
+
+        // NEW: Clear credit days and due date when paid in full
+        const isFullPayment = parseFloat(totalNetAmount) === parseFloat(value);
+        if (isFullPayment) {
+          updatedForm.creditDays = "";
+          updatedForm.dueDate = "";
+        }
       }
 
       // Auto-set payment status when total amount changes (from product updates)
@@ -480,6 +495,13 @@ const useSaleForm = (initialCustomerCode = "") => {
           totalAmount: value,
           dueAmount: dueAmount.toFixed(2),
         });
+
+        // NEW: Clear credit days and due date when paid in full
+        const isFullPayment = totalAmount === paidAmount;
+        if (isFullPayment) {
+          updatedForm.creditDays = "";
+          updatedForm.dueDate = "";
+        }
       }
 
       return updatedForm;
@@ -1116,6 +1138,7 @@ const useSaleForm = (initialCustomerCode = "") => {
     setErrors,
     products, // NEW: Return filtered products
     productNames, // NEW: Return filtered product names
+    isPaidInFull, // NEW: Return isPaidInFull function
   };
 };
 
@@ -1319,6 +1342,7 @@ const AddSale = () => {
     hasAtLeastOneProduct,
     products, // NEW: Get filtered products from useSaleForm
     productNames, // NEW: Get filtered product names from useSaleForm
+    isPaidInFull, // NEW: Get isPaidInFull function
   } = useSaleForm(customerCode);
 
   // REMOVED: useInitialSaleData hook and replaced with local state
@@ -1670,123 +1694,125 @@ const AddSale = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Check if required data is available
+    // Check if required data (MR, Customer, etc.) is available
     if (!checkRequiredData()) {
       return;
     }
 
-    // First validate form fields
+    // Validate products (e.g., required fields, positive quantities)
     if (!validate(products)) {
       showToast("error", "Please fix the validation errors before submitting");
       return;
     }
 
     try {
-      // Filter out empty products
+      // Filter out completely empty product rows
       const validProducts = form.products.filter(
-        (product) => product.productName.trim() !== ""
+        (product) =>
+          product.productName &&
+          product.productName.trim() !== "" &&
+          (Number(product.salesQty) > 0 || Number(product.bonusQty) > 0)
       );
 
       if (validProducts.length === 0) {
-        showToast("error", "Please add at least one product");
+        showToast("error", "Please add at least one product with quantity");
         return;
       }
 
-      // Validate total quantity (sales + bonus) for all products before submission
+      // Optional: Client-side stock check (remove if you don't want it)
       const stockErrors = [];
-      validProducts.forEach((product, index) => {
+      validProducts.forEach((product) => {
         const productData = products.find(
           (p) => p.productName === product.productName
         );
         if (productData) {
           const availableStock = calculateAvailableStock(productData);
-          const salesQty = parseInt(product.salesQty) || 0;
-          const bonusQty = parseInt(product.bonusQty) || 0;
-          const totalQty = salesQty + bonusQty;
-
+          const totalQty =
+            Number(product.salesQty) + Number(product.bonusQty || 0);
           if (totalQty > availableStock) {
             stockErrors.push(
-              `Product "${product.productName}": Total quantity (Sales + Bonus = ${totalQty}) exceeds available stock (${availableStock} boxes)`
+              `"${product.productName}": Required ${totalQty}, Available ${availableStock}`
             );
           }
         }
       });
 
       if (stockErrors.length > 0) {
-        showToast("error", stockErrors.join(", "));
+        showToast("error", "Stock insufficient: " + stockErrors.join("; "));
         return;
       }
 
-      // Helper function to safely format dates
+      // Safe date formatting
       const safeFormatDate = (dateString) => {
         if (!dateString) return "";
-        try {
-          const date = new Date(dateString);
-          return isNaN(date.getTime()) ? "" : date.toISOString().split("T")[0];
-        } catch (error) {
-          console.error("Invalid date format:", dateString, error);
-          return "";
-        }
+        const date = new Date(dateString);
+        return isNaN(date.getTime()) ? "" : date.toISOString().split("T")[0];
       };
 
-      // Create sales data object with products array (single sale record) - UPDATED to include customerName
+      // Prepare sale data – exactly matches backend expectations
       const saleData = {
         recordingDate: safeFormatDate(form.recordingDate),
-        invoiceNumber: form.invoiceNumber,
+        invoiceNumber: form.invoiceNumber?.trim() || "",
         invoiceDate: safeFormatDate(form.invoiceDate),
-        mrName: form.mrName,
-        mrId: form.mrId,
-        customerCode: form.customerCode,
-        customerId: form.customerId,
-        customerName: form.customerName, // Added customerName
+        mrName: form.mrName || "",
+        mrId: form.mrId || null,
+        customerCode: form.customerCode || "",
+        customerId: form.customerId || null,
+        customerName: form.customerName || "", // Important for reports
+
         products: validProducts.map((product) => ({
-          productName: product.productName,
-          salesQty: Number(product.salesQty),
+          productName: product.productName.trim(), // ← CRITICAL: This must be present and valid
+          salesQty: Number(product.salesQty) || 0,
           bonusQty: Number(product.bonusQty) || 0,
-          totalQty: Number(product.totalQty),
-          sellingPrice: Number(product.sellingPrice),
-          amount: Number(product.amount),
+          totalQty: Number(product.totalQty) || 0,
+          sellingPrice: Number(product.sellingPrice) || 0,
+          amount: Number(product.amount) || 0,
           discount: Number(product.discount) || 0,
-          netSellingAmount: Number(product.netSellingAmount),
-          averageUnitPrice: Number(product.averageUnitPrice),
+          netSellingAmount: Number(product.netSellingAmount) || 0,
+          averageUnitPrice: Number(product.averageUnitPrice) || 0,
           lc: Number(product.lc) || 0,
           fob: Number(product.fob) || 0,
           cif: Number(product.cif) || 0,
           profitLoss: Number(product.profitLoss) || 0,
           isProductAccept: true,
+          remark: product.remark || "",
         })),
+
         creditDays: form.creditDays ? Number(form.creditDays) : null,
         dueDate: safeFormatDate(form.dueDate),
         deliveryDate: safeFormatDate(form.deliveryDate),
         paidAmount: Number(form.paidAmount) || 0,
         dueAmount: Number(form.dueAmount) || 0,
-        totalAmount: Number(form.totalAmount),
-        paymentStatus: form.paymentStatus,
+        totalAmount: Number(form.totalAmount) || 0,
+        paymentStatus: form.paymentStatus || "Credit",
         remark: form.remark || "",
       };
+
+      console.log("Submitting sale data:", saleData); // Debug log
 
       const response = await fetch(`${backendUrl}/api/sales`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(saleData), // Send single sale object with products array
+        body: JSON.stringify(saleData),
       });
 
       const respData = await response.json();
 
       if (!response.ok) {
-        throw new Error(respData.error || "Something went wrong");
+        throw new Error(
+          respData.error || respData.message || "Failed to create sale"
+        );
       }
 
-      showToast("success", respData.message || "Sale added successfully");
-      navigate("/salelayout/sale");
+      showToast("success", respData.message || "Sale created successfully!");
+      navigate("/salelayout/sale"); // Redirect to sales list
     } catch (err) {
       console.error("Error submitting sale:", err);
-      showToast("error", err.message || "Error submitting sale");
+      showToast("error", err.message || "Failed to submit sale");
     }
   };
-
   // Handle numeric input change
   const handleNumericInputChange = useCallback(
     (e, updateFunc) => {
@@ -1810,6 +1836,9 @@ const AddSale = () => {
     },
     [isFormDisabled]
   );
+
+  // NEW: Check if paid in full
+  const paidInFull = isPaidInFull();
 
   if (loading) {
     return (
@@ -2293,30 +2322,12 @@ const AddSale = () => {
           />
         </div>
 
-        {/* Additional Common Fields */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-          <InputField
-            label="Credit Days"
-            name="creditDays"
-            type="text"
-            value={form.creditDays}
-            onChange={(e) => handleNumericInputChange(e, enhancedHandleChange)}
-            error={errors.creditDays}
-            disabled={isFormDisabled}
-          />
-
-          <DatePickerField
-            label="Due Date"
-            name="dueDate"
-            value={form.dueDate}
-            onChange={enhancedHandleChange}
-            error={errors.dueDate}
-            readOnly
-            placeholder="Due date will be calculated from current date + credit days"
-            disabled={isFormDisabled}
-          />
-
-          {/* Total Amount - ReadOnly and Disabled */}
+        {/* Additional Common Fields - MODIFIED: Conditional grid columns */}
+        <div
+          className={`grid grid-cols-1 ${
+            paidInFull ? "sm:grid-cols-2" : "sm:grid-cols-3"
+          } gap-4 mb-6`}
+        >
           <InputField
             label="Total Amount"
             name="totalAmount"
@@ -2326,7 +2337,6 @@ const AddSale = () => {
             readOnly
             disabled={true} // Always disabled as per requirement
           />
-
           <InputField
             label="Paid Amount"
             name="paidAmount"
@@ -2336,6 +2346,34 @@ const AddSale = () => {
             error={errors.paidAmount}
             disabled={isFormDisabled}
           />
+
+          {/* Show Credit Days and Due Date only when NOT paid in full */}
+          {!paidInFull && (
+            <>
+              <InputField
+                label="Credit Days"
+                name="creditDays"
+                type="text"
+                value={form.creditDays}
+                onChange={(e) =>
+                  handleNumericInputChange(e, enhancedHandleChange)
+                }
+                error={errors.creditDays}
+                disabled={isFormDisabled}
+              />
+
+              <DatePickerField
+                label="Due Date"
+                name="dueDate"
+                value={form.dueDate}
+                onChange={enhancedHandleChange}
+                error={errors.dueDate}
+                readOnly
+                placeholder="Due date will be calculated from current date + credit days"
+                disabled={isFormDisabled}
+              />
+            </>
+          )}
 
           {/* Due Amount - ReadOnly and Disabled */}
           <InputField
@@ -2374,8 +2412,8 @@ const AddSale = () => {
             disabled={isFormDisabled}
           />
 
-          {/* Remarks as Textarea with 2 rows */}
-          <div className="sm:col-span-3">
+          {/* Remarks as Textarea with 2 rows - MODIFIED: Conditional column span */}
+          <div className={`${paidInFull ? "sm:col-span-2" : "sm:col-span-3"}`}>
             <label className="text-sm font-medium text-gray-700 mb-1">
               Remark
             </label>
