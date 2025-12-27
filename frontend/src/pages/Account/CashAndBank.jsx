@@ -16,6 +16,7 @@ import { showToast } from "../../utils/toast";
 import { confirmDialog } from "../../utils/confirmationDialog";
 import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
 import { formatDateToReadable } from "../../utils/dateUtil.js";
+import SearchableDropdown from "../../components/common/SearchableDropdown"; // Add this import
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const ITEMS_PER_PAGE = 7;
@@ -275,6 +276,70 @@ const CustomDropdown = ({
   );
 };
 
+// New hook to fetch sales invoices
+const useInvoiceOptions = () => {
+  const [sales, setSales] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const fetchSales = async () => {
+    setLoading(true);
+    try {
+      const response = await axios.get(`${backendUrl}/api/sales/all`);
+      if (response.data && response.data.summaries) {
+        setSales(response.data.summaries);
+      } else {
+        setSales([]);
+      }
+      setError(null);
+    } catch (err) {
+      console.error("Error fetching sales:", err);
+      setError(err.message);
+      setSales([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSales();
+  }, []);
+
+  // Get invoice options for dropdown
+  const getInvoiceOptions = useCallback(() => {
+    if (loading) {
+      return [{ value: "", label: "Loading invoices...", disabled: true }];
+    }
+    
+    if (error || sales.length === 0) {
+      return [{ value: "", label: "No invoices available", disabled: true }];
+    }
+
+    // Remove duplicates and format options
+    const uniqueInvoices = [
+      ...new Set(sales.map((sale) => sale.invoiceNumber).filter(Boolean)),
+    ];
+
+    const options = [
+      { value: "", label: "Select Invoice Number" },
+      ...uniqueInvoices.map((invoice) => ({
+        value: invoice,
+        label: invoice,
+      })),
+    ];
+
+    return options;
+  }, [sales, loading, error]);
+
+  return {
+    sales,
+    loading,
+    error,
+    getInvoiceOptions,
+    refetch: fetchSales,
+  };
+};
+
 const AddTransactionModal = ({
   isOpen,
   onClose,
@@ -294,6 +359,14 @@ const AddTransactionModal = ({
   const [invoiceDataFetched, setInvoiceDataFetched] = useState(false);
   const [sourceAccountBalance, setSourceAccountBalance] = useState(0);
   const [originalAmount, setOriginalAmount] = useState(0);
+
+  // Use the new invoice options hook
+  const {
+    sales,
+    loading: salesLoading,
+    getInvoiceOptions,
+    refetch: refetchSales,
+  } = useInvoiceOptions();
 
   // Memoized helper functions to prevent infinite re-renders
   const requiresSupplier = useMemo(() => {
@@ -345,9 +418,28 @@ const AddTransactionModal = ({
     return categoryName === "withdraw";
   }, [form.categoryType, categoryOptions]);
 
+  // Check if category requires invoice dropdown
+  const requiresInvoiceDropdown = useMemo(() => {
+    if (!form.categoryType) return false;
+    const category = categoryOptions.find((cat) => cat.value === form.categoryType);
+    const categoryName = category?.label?.toLowerCase() || "";
+    return categoryName === "cash sale" || categoryName === "credit collection";
+  }, [form.categoryType, categoryOptions]);
+
+  // Check if category requires invoice fields (text input)
   const requiresInvoiceFields = useMemo(() => {
-    return !isDepositOrWithdraw && !requiresSupplier && !isPaymentOutward;
-  }, [isDepositOrWithdraw, requiresSupplier, isPaymentOutward]);
+    if (!form.categoryType) return false;
+    const category = categoryOptions.find((cat) => cat.value === form.categoryType);
+    const categoryName = category?.label?.toLowerCase() || "";
+    
+    // Invoice fields for sales-related categories (except those with dropdown)
+    return (
+      !isDepositOrWithdraw && 
+      !requiresSupplier && 
+      !isPaymentOutward &&
+      !requiresInvoiceDropdown
+    );
+  }, [form.categoryType, categoryOptions, isDepositOrWithdraw, requiresSupplier, isPaymentOutward, requiresInvoiceDropdown]);
 
   // Get filtered source options (exclude destination account for deposit/withdraw)
   const getFilteredSourceOptions = useMemo(() => {
@@ -372,6 +464,11 @@ const AddTransactionModal = ({
       (destination) => !form.source || destination.value !== form.source
     );
   }, [destinationOptions, form.source, isDepositOrWithdraw]);
+
+  // Get invoice options based on category
+  const invoiceOptions = useMemo(() => {
+    return getInvoiceOptions();
+  }, [getInvoiceOptions]);
 
   // Define form fields configuration with custom layout
   const formFields = useMemo(() => {
@@ -508,49 +605,71 @@ const AddTransactionModal = ({
         });
       }
     }
-    // Add invoice fields for other categories (sales, etc.)
+    // Add invoice fields for other categories
     else {
-      baseFields.splice(1, 0, {
-        key: "invoiceNumber",
-        label: "Invoice Number",
-        type: "text",
-        required: true,
-        layout: "half",
-      });
-      baseFields.splice(2, 0, {
-        key: "destination",
-        label: "Destination Account",
-        type: "select",
-        required: true,
-        options: destinationOptions,
-        layout: "half",
-      });
-      baseFields.push(
-        {
-          key: "invoiceDate",
-          label: "Invoice Date",
-          type: "date",
+      // For Cash Sale and Credit Collection: use dropdown
+      if (requiresInvoiceDropdown) {
+        baseFields.splice(1, 0, {
+          key: "invoiceNumber",
+          label: "Invoice Number",
+          type: "invoiceDropdown",
           required: true,
+          options: invoiceOptions,
           layout: "half",
-          disabled: true,
-        },
-        {
-          key: "customerName",
-          label: "Customer Name",
+        });
+      } 
+      // For other sales categories: use text input
+      else if (requiresInvoiceFields) {
+        baseFields.splice(1, 0, {
+          key: "invoiceNumber",
+          label: "Invoice Number",
           type: "text",
           required: true,
           layout: "half",
-          disabled: true,
-        },
-        {
-          key: "customerAddress",
-          label: "Customer Address",
-          type: "text",
-          required: false,
+        });
+      }
+      
+      // Add destination account for invoice-based categories
+      if (requiresInvoiceDropdown || requiresInvoiceFields) {
+        baseFields.splice(2, 0, {
+          key: "destination",
+          label: "Destination Account",
+          type: "select",
+          required: true,
+          options: destinationOptions,
           layout: "half",
-          disabled: true,
-        }
-      );
+        });
+      }
+
+      // Add additional invoice fields for all invoice-based categories
+      if (requiresInvoiceDropdown || requiresInvoiceFields) {
+        baseFields.push(
+          {
+            key: "invoiceDate",
+            label: "Invoice Date",
+            type: "date",
+            required: true,
+            layout: "half",
+            disabled: true,
+          },
+          {
+            key: "customerName",
+            label: "Customer Name",
+            type: "text",
+            required: true,
+            layout: "half",
+            disabled: true,
+          },
+          {
+            key: "customerAddress",
+            label: "Customer Address",
+            type: "text",
+            required: false,
+            layout: "half",
+            disabled: true,
+          }
+        );
+      }
     }
 
     // Add remarks textarea for all category types (full width)
@@ -578,6 +697,9 @@ const AddTransactionModal = ({
     isDepositOrWithdraw,
     isDeposit,
     isWithdraw,
+    requiresInvoiceDropdown,
+    requiresInvoiceFields,
+    invoiceOptions,
   ]);
 
   // Initialize form data
@@ -620,6 +742,9 @@ const AddTransactionModal = ({
         setOriginalAmount(0);
       }
       setErrors({});
+      
+      // Refetch sales when modal opens
+      refetchSales();
     }
   }, [isOpen, isEdit, editData, activeTab]);
 
@@ -663,11 +788,12 @@ const AddTransactionModal = ({
         }
 
         // Reset invoice fields when category changes to non-invoice categories
-        if (!requiresInvoiceFields && newForm.invoiceNumber) {
+        if (!requiresInvoiceFields && !requiresInvoiceDropdown && newForm.invoiceNumber) {
           newForm.invoiceNumber = "";
           newForm.invoiceDate = "";
           newForm.customerName = "";
           newForm.customerAddress = "";
+          newForm.amount = "";
         }
 
         // Reset source/destination for non-deposit/withdraw
@@ -687,32 +813,66 @@ const AddTransactionModal = ({
     }
   }, [form.categoryType]);
 
+  // Find sale data by invoice number
+  const findSaleByInvoice = (invoiceNumber) => {
+    return sales.find((sale) => sale.invoiceNumber === invoiceNumber);
+  };
+
+  // Check if invoice already has a transaction
+  const checkInvoiceExistsInCurrentData = (invoiceNumber) => {
+    return currentData.some((item) => item.invoiceNumber === invoiceNumber);
+  };
+
   const fetchSalesData = async (invoiceNumber) => {
     if (
       !invoiceNumber ||
       invoiceNumber.trim() === "" ||
-      !requiresInvoiceFields
+      (!requiresInvoiceFields && !requiresInvoiceDropdown)
     ) {
       return;
     }
 
     try {
       setIsFetchingSales(true);
-      const salesResponse = await axios.get(
-        `${backendUrl}/api/accounts/alternative?invoiceNumber=${invoiceNumber}`
-      );
-      const salesData = salesResponse.data;
+      
+      // For Cash Sale and Credit Collection: get data from local sales array
+      if (requiresInvoiceDropdown) {
+        const saleRecord = findSaleByInvoice(invoiceNumber);
+        
+        if (saleRecord) {
+          // Check if invoice already exists in current data
+          const existingTransaction = checkInvoiceExistsInCurrentData(invoiceNumber);
+          
+          if (existingTransaction) {
+            showToast(
+              "error",
+              `Invoice number ${invoiceNumber} already has a transaction`
+            );
+            setForm((prev) => ({
+              ...prev,
+              invoiceNumber: "",
+              invoiceDate: "",
+              customerName: "",
+              customerAddress: "",
+              amount: "",
+            }));
+            setInvoiceDataFetched(false);
+            return;
+          }
 
-      if (salesData.data && salesData.data.length > 0) {
-        const existingTransaction = currentData.find(
-          (item) => item.invoiceNumber === invoiceNumber
-        );
-
-        if (existingTransaction) {
-          showToast(
-            "error",
-            `Invoice number ${invoiceNumber} already has a transaction with amount $${existingTransaction.amount}`
-          );
+          setForm((prev) => ({
+            ...prev,
+            invoiceNumber: saleRecord.invoiceNumber,
+            invoiceDate:
+              saleRecord.invoiceDate?.split("T")[0] ||
+              new Date().toISOString().split("T")[0],
+            customerName: saleRecord.customerName || "",
+            customerAddress: saleRecord.customerAddress || "",
+            amount: saleRecord.totalAmount || "",
+          }));
+          setInvoiceDataFetched(true);
+        } else {
+          showToast("error", `Invoice ${invoiceNumber} not found in sales records`);
           setForm((prev) => ({
             ...prev,
             invoiceDate: "",
@@ -721,34 +881,64 @@ const AddTransactionModal = ({
             amount: "",
           }));
           setInvoiceDataFetched(false);
-          return;
         }
+      } 
+      // For other invoice-based categories: use API call
+      else if (requiresInvoiceFields) {
+        const salesResponse = await axios.get(
+          `${backendUrl}/api/accounts/alternative?invoiceNumber=${invoiceNumber}`
+        );
+        const salesData = salesResponse.data;
 
-        const saleRecord = salesData.data[0];
-        setForm((prev) => ({
-          ...prev,
-          invoiceDate:
-            saleRecord.invoiceDate?.split("T")[0] ||
-            new Date().toISOString().split("T")[0],
-          customerName: saleRecord.customerName || "",
-          customerAddress: saleRecord.customerAddress || "",
-          amount: saleRecord.amount || "",
-        }));
-        setInvoiceDataFetched(true);
-      } else {
-        setForm((prev) => ({
-          ...prev,
-          invoiceDate: "",
-          customerName: "",
-          customerAddress: "",
-          amount: "",
-        }));
-        setInvoiceDataFetched(false);
+        if (salesData.data && salesData.data.length > 0) {
+          const existingTransaction = currentData.find(
+            (item) => item.invoiceNumber === invoiceNumber
+          );
+
+          if (existingTransaction) {
+            showToast(
+              "error",
+              `Invoice number ${invoiceNumber} already has a transaction with amount $${existingTransaction.amount}`
+            );
+            setForm((prev) => ({
+              ...prev,
+              invoiceDate: "",
+              customerName: "",
+              customerAddress: "",
+              amount: "",
+            }));
+            setInvoiceDataFetched(false);
+            return;
+          }
+
+          const saleRecord = salesData.data[0];
+          setForm((prev) => ({
+            ...prev,
+            invoiceDate:
+              saleRecord.invoiceDate?.split("T")[0] ||
+              new Date().toISOString().split("T")[0],
+            customerName: saleRecord.customerName || "",
+            customerAddress: saleRecord.customerAddress || "",
+            amount: saleRecord.amount || "",
+          }));
+          setInvoiceDataFetched(true);
+        } else {
+          setForm((prev) => ({
+            ...prev,
+            invoiceDate: "",
+            customerName: "",
+            customerAddress: "",
+            amount: "",
+          }));
+          setInvoiceDataFetched(false);
+        }
       }
     } catch (error) {
       console.error("Error fetching sales data:", error);
       setInvoiceDataFetched(false);
-      showToast("error", "Error fetching invoice details");
+      if (requiresInvoiceFields) {
+        showToast("error", "Error fetching invoice details");
+      }
     } finally {
       setIsFetchingSales(false);
     }
@@ -817,7 +1007,7 @@ const AddTransactionModal = ({
     }
 
     // When invoice number changes, fetch the details for invoice-required categories
-    if (field === "invoiceNumber" && value && requiresInvoiceFields) {
+    if (field === "invoiceNumber" && value) {
       fetchSalesData(value);
     }
 
@@ -1051,6 +1241,11 @@ const AddTransactionModal = ({
     handleInputChange(field, storageValue);
   };
 
+  // Handle dropdown change
+  const handleDropdownChange = (e, field) => {
+    handleInputChange(field, e.target.value);
+  };
+
   // Render form field based on type
   const renderFormField = (field) => {
     const value = form[field.key] || "";
@@ -1068,6 +1263,24 @@ const AddTransactionModal = ({
               disabled={field.disabled || false}
               placeholder={field.placeholder || `Select ${field.label}`}
             />
+          </div>
+        );
+
+      case "invoiceDropdown":
+        return (
+          <div>
+            <SearchableDropdown
+              value={value}
+              onChange={(val) => handleInputChange(field.key, val)}
+              options={field.options || []}
+              placeholder={field.placeholder || `Select ${field.label}`}
+              error={fieldError}
+              disabled={field.disabled || salesLoading}
+              loading={salesLoading}
+            />
+            {isFetchingSales && (
+              <div className="mt-1 text-xs text-gray-500">Fetching invoice details...</div>
+            )}
           </div>
         );
 
@@ -1118,21 +1331,6 @@ const AddTransactionModal = ({
                     <>
                       Available Balance: $
                       {getAvailableBalanceForUpdate().toFixed(2)}
-                      {/* <span className="block text-blue-500">
-                        Original Amount: ${originalAmount.toFixed(2)}
-                      </span> */}
-                      {/* <span className="block text-green-500">
-                        When editing from ${originalAmount.toFixed(2)} to $
-                        {(parseFloat(form.amount) || 0).toFixed(2)}, the balance
-                        will{" "}
-                        {parseFloat(form.amount) < originalAmount
-                          ? "increase"
-                          : "decrease"}{" "}
-                        by $
-                        {Math.abs(
-                          originalAmount - (parseFloat(form.amount) || 0)
-                        ).toFixed(2)}
-                      </span> */}
                     </>
                   ) : (
                     <>
