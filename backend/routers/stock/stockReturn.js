@@ -256,21 +256,21 @@ router.put("/stock-returns/:id/status", async (req, res) => {
     const previousStatus = stockReturn.status;
 
     // If trying to approve but MR doesn't exist in MRCash
-    // if (status === "Approved") {
-    //   const mrCashData = await MRCash.findOne({
-    //     mrName: stockReturn.mrName,
-    //     isActive: true,
-    //   }).session(session);
+      // if (status === "Approved") {
+      //   const mrCashData = await MRCash.findOne({
+      //     mrName: stockReturn.mrName,
+      //     isActive: true,
+      //   }).session(session);
 
-    //   if (!mrCashData) {
-    //     await session.abortTransaction();
-    //     session.endSession();
-    //     return res.status(400).json({
-    //       success: false,
-    //       message: `MR ${stockReturn.mrName} not found in active MR list`,
-    //     });
-    //   }
-    // }
+      //   if (!mrCashData) {
+      //     await session.abortTransaction();
+      //     session.endSession();
+      //     return res.status(400).json({
+      //       success: false,
+      //       message: `MR ${stockReturn.mrName} not found in active MR list`,
+      //     });
+      //   }
+      // }
 
     const stockUpdates = [];
     const stockInMrUpdates = [];

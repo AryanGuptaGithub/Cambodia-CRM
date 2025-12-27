@@ -1395,34 +1395,49 @@ const Sales = () => {
     []
   );
 
-const filteredSales = useMemo(() => {
-  if (!Array.isArray(sales)) return [];
+  // Dynamic payment status tabs based on sales data
+  const paymentStatusTabs = useMemo(() => {
+    if (!Array.isArray(sales) || sales.length === 0) return ["All"];
+    
+    // Extract unique payment statuses from sales data
+    const uniqueStatuses = [...new Set(
+      sales
+        .map(sale => sale.paymentStatus)
+        .filter(status => status && status.trim() !== "")
+        .map(status => status.trim())
+    )].sort();
+    
+    return ["All", ...uniqueStatuses];
+  }, [sales]);
 
-  const lowerSearch = searchTerm.trim().toLowerCase();
-  const selectedTabLower = selectedTab.toLowerCase();
+  const filteredSales = useMemo(() => {
+    if (!Array.isArray(sales)) return [];
 
-  return sales.filter((sale) => {
-    const paymentStatus = (sale.paymentStatus || "").toLowerCase();
+    const lowerSearch = searchTerm.trim().toLowerCase();
+    const selectedTabLower = selectedTab.toLowerCase();
 
-    // ✅ If tab is NOT "all", then filter by payment status
-    if (selectedTabLower !== "all" && selectedTabLower !== paymentStatus) {
-      return false;
-    }
+    return sales.filter((sale) => {
+      const paymentStatus = (sale.paymentStatus || "").toLowerCase();
 
-    // ✅ If no search text, return all matching tab data
-    if (!lowerSearch) return true;
+      // ✅ If tab is NOT "all", then filter by payment status
+      if (selectedTabLower !== "all" && selectedTabLower !== paymentStatus) {
+        return false;
+      }
 
-    const fields = [
-      sale.invoiceNumber,
-      sale.customerName,
-      sale.mrName,
-    ];
+      // ✅ If no search text, return all matching tab data
+      if (!lowerSearch) return true;
 
-    return fields.some((f) =>
-      (f ?? "").toString().toLowerCase().includes(lowerSearch)
-    );
-  });
-}, [sales, searchTerm, selectedTab]);
+      const fields = [
+        sale.invoiceNumber,
+        sale.customerName,
+        sale.mrName,
+      ];
+
+      return fields.some((f) =>
+        (f ?? "").toString().toLowerCase().includes(lowerSearch)
+      );
+    });
+  }, [sales, searchTerm, selectedTab]);
 
 
   const currentSales = useMemo(() => {
@@ -2339,7 +2354,8 @@ const filteredSales = useMemo(() => {
           {sales.length > 0 ? (
             <div className="flex items-center gap-6">
               <div className="flex gap-4 flex-wrap">
-                {["All", "Cash", "Credit"].map((tab) => (
+                {/* Dynamic tabs based on payment statuses in sales data */}
+                {paymentStatusTabs.map((tab) => (
                   <button
                     key={`tab-${tab}`}
                     onClick={() => {

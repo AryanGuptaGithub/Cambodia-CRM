@@ -18,7 +18,7 @@ const calculateStockStatus = (boxes) => {
 const updateReportInHandForProduct = async (
   productData,
   supplierName,
-  operation = "subtract"
+  operation = "add" // Changed default to "add" for purchase returns
 ) => {
   try {
     const {
@@ -90,7 +90,7 @@ const updateReportInHandForProduct = async (
 /** ✅ Core helper: updates Product batches for a single product with FEFO logic */
 const updateProductBatchesForProduct = async (
   productData,
-  operation = "subtract"
+  operation = "add" // Changed default to "add" for purchase returns
 ) => {
   try {
     const { productName, returnQuantity = 0, expiredDate } = productData;
@@ -139,6 +139,7 @@ const updateProductBatchesForProduct = async (
         }
       }
     } else {
+      // This is the "add" operation for purchase returns
       if (expiredDate) {
         const targetExpiry = new Date(expiredDate);
 
@@ -160,6 +161,7 @@ const updateProductBatchesForProduct = async (
               productDoc.batches[batchIndex].boxes;
           }
         } else {
+          // Create new batch with expiry date
           const newBatch = {
             boxes: boxesToUpdate,
             lc: productData.lc || 0,
@@ -172,7 +174,9 @@ const updateProductBatchesForProduct = async (
           productDoc.batches.push(newBatch);
         }
       } else {
+        // If no expiry date, add to the most recent batch or create new
         if (productDoc.batches.length > 0) {
+          // Add to the first batch (assuming it's the most recent)
           productDoc.batches[0].boxes += boxesToUpdate;
           if (productDoc.batches[0].lc !== undefined) {
             productDoc.batches[0].amount =
@@ -218,7 +222,7 @@ const updateProductBatchesForProduct = async (
 /** ✅ Process multiple products in purchase return */
 const processPurchaseReturnProducts = async (
   purchaseReturnDoc,
-  operation = "subtract"
+  operation = "add" // Changed default to "add" for purchase returns
 ) => {
   try {
     // Ensure we're working with a Mongoose document that has the products array
@@ -327,7 +331,6 @@ router.get("/purchase-return", async (req, res) => {
 router.post("/purchase-return", async (req, res) => {
   try {
     const data = req.body;
-
     const { invoiceNumber, products } = data;
 
     // Validate required fields
@@ -372,21 +375,18 @@ router.post("/purchase-return", async (req, res) => {
         });
       }
 
-      // Check if product exists and has enough stock in ReportInHand
-      const reportInHandDoc = await ReportInHand.findOne({ productName });
-      if (!reportInHandDoc) {
+      // Check if product exists in the product catalog
+      const productDoc = await product.findOne({ productName });
+      if (!productDoc) {
         return res.status(400).json({
           success: false,
-          message: `Product ${productName} not found in ReportInHand`,
+          message: `Product ${productName} not found in the system`,
         });
       }
 
-      if (returnQuantity > reportInHandDoc.totalBoxes) {
-        return res.status(400).json({
-          success: false,
-          message: `Return quantity cannot exceed available stock for ${productName}. Available: ${reportInHandDoc.totalBoxes}, Requested: ${returnQuantity}`,
-        });
-      }
+      // IMPORTANT: REMOVED the stock availability check for purchase returns
+      // because in purchase returns, we're ADDING stock back to inventory, not subtracting
+      // So we don't need to check if we have enough stock to return
     }
 
     // Process products data
@@ -408,7 +408,9 @@ router.post("/purchase-return", async (req, res) => {
     });
 
     const saved = await newPurchaseReturn.save();
-    await processPurchaseReturnProducts(saved, "subtract");
+    
+    // CRITICAL CHANGE: For purchase returns, we ADD to stock (increase inventory)
+    await processPurchaseReturnProducts(saved, "add");
 
     res.status(201).json({
       success: true,
@@ -450,16 +452,16 @@ router.put("/purchase-return/:id", async (req, res) => {
         .json({ success: false, message: "Purchase return not found" });
     }
 
-    // Add back original stock first to both systems
-    await processPurchaseReturnProducts(originalReturn, "add");
+    // For purchase returns: First subtract the original return (reverse the addition)
+    await processPurchaseReturnProducts(originalReturn, "subtract");
 
     const updated = await PurchaseReturn.findByIdAndUpdate(id, updatedData, {
       new: true,
       runValidators: true,
     });
 
-    // Subtract new return quantity from both systems
-    await processPurchaseReturnProducts(updated, "subtract");
+    // For purchase returns: Then add the new return quantity
+    await processPurchaseReturnProducts(updated, "add");
 
     res.json({
       success: true,
@@ -486,7 +488,8 @@ router.delete("/purchase-return/:id", async (req, res) => {
         .json({ success: false, message: "Purchase return not found" });
     }
 
-    await processPurchaseReturnProducts(purchaseReturn, "add");
+    // For purchase returns: Subtract to reverse the addition (remove the stock that was added)
+    await processPurchaseReturnProducts(purchaseReturn, "subtract");
 
     const deleted = await PurchaseReturn.findByIdAndDelete(id);
     res.json({
@@ -515,7 +518,8 @@ router.delete("/purchase-return", async (req, res) => {
     const purchaseReturns = await PurchaseReturn.find({ _id: { $in: ids } });
 
     for (const p of purchaseReturns) {
-      await processPurchaseReturnProducts(p, "add");
+      // For purchase returns: Subtract to reverse the addition
+      await processPurchaseReturnProducts(p, "subtract");
     }
 
     const result = await PurchaseReturn.deleteMany({ _id: { $in: ids } });

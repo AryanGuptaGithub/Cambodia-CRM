@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Eye, X, Edit, Search } from "lucide-react";
+import { Eye, X, Edit, Search, Download } from "lucide-react";
 import { formatDateToReadable } from "../../utils/dateUtil";
 import { getVisiblePages } from "../../utils/useVisiblePages";
 import ReactDOM from "react-dom";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
-import axios from "axios"; // Added missing import
-import { showToast } from "../../utils/toast"; // Added missing import
+import axios from "axios";
+import { showToast } from "../../utils/toast";
+import * as XLSX from "xlsx"; // Add Excel export capability
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -20,6 +21,7 @@ function PriceList() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false); // Add download loading state
   const inputRef = useRef(null);
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -49,6 +51,7 @@ function PriceList() {
       setPriceList(data);
     } catch (err) {
       setError(err.message || "Something went wrong");
+      showToast("error", "Failed to load price list");
     } finally {
       setLoading(false);
     }
@@ -128,7 +131,7 @@ function PriceList() {
       if (res.status === 200) {
         showToast("success", "Product updated successfully");
         setIsEditModalOpen(false);
-        fetchPriceList(); // Fixed function name
+        fetchPriceList();
       }
     } catch (err) {
       console.error("Update error:", err);
@@ -157,8 +160,211 @@ function PriceList() {
     }
   };
 
+  // =============================
+  // 🔥 DOWNLOAD FUNCTIONALITY
+  // =============================
+  const downloadCSV = () => {
+    if (filteredPriceList.length === 0) {
+      showToast("info", "No data to download");
+      return;
+    }
+
+    try {
+      setDownloading(true);
+      
+      // Prepare data for CSV
+      const dataToDownload = filteredPriceList.map((item, index) => ({
+        "S.No": index + 1,
+        "Product Name": item.productName || "",
+        "Type": item.type || "",
+        "Selling Price (USD)": item.sellingPrice || "",
+        "LC": item.lc || "",
+        "Tax Selling Price (USD)": item.taxSellingPrice || "",
+        "Drug License": item.drugLicense || "",
+        "License Validity Date": item.licenseValidityDate 
+          ? formatDateToReadable(item.licenseValidityDate, "dd/MM/yyyy")
+          : "",
+
+      }));
+
+      // Create CSV content
+      const headers = Object.keys(dataToDownload[0]).join(",");
+      const rows = dataToDownload.map(item => 
+        Object.values(item).map(value => 
+          typeof value === 'string' && value.includes(',') 
+            ? `"${value}"` 
+            : value
+        ).join(",")
+      );
+      
+      const csvContent = [headers, ...rows].join("\n");
+      
+      // Create and download file
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      const timestamp = new Date().toISOString().split("T")[0];
+      
+      link.href = url;
+      link.download = `PriceList_${timestamp}_${filteredPriceList.length}_items.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      showToast("success", `Downloaded ${filteredPriceList.length} items as CSV`);
+    } catch (error) {
+      console.error("Download error:", error);
+      showToast("error", "Failed to download file");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  // Download as Excel (XLSX)
+  const downloadExcel = () => {
+    if (filteredPriceList.length === 0) {
+      showToast("info", "No data to download");
+      return;
+    }
+
+    try {
+      setDownloading(true);
+      
+      // Prepare data for Excel
+      const dataToDownload = filteredPriceList.map((item, index) => ({
+        "S.No": index + 1,
+        "Product Name": item.productName || "",
+        "Type": item.type || "",
+        "Selling Price (USD)": item.sellingPrice || "",
+        "LC": item.lc || "",
+        "Tax Selling Price (USD)": item.taxSellingPrice || "",
+        "Drug License": item.drugLicense || "",
+        "License Validity Date": item.licenseValidityDate 
+          ? formatDateToReadable(item.licenseValidityDate, "dd/MM/yyyy")
+          : "",
+      }));
+
+      // Create workbook and worksheet
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(dataToDownload);
+      
+      // Set column widths
+      const wscols = [
+        { wch: 6 },   // S.No
+        { wch: 30 },  // Product Name
+        { wch: 15 },  // Type
+        { wch: 18 },  // Selling Price
+        { wch: 10 },  // LC
+        { wch: 22 },  // Tax Selling Price
+        { wch: 15 },  // Drug License
+        { wch: 20 },  // License Validity
+   
+      ];
+      ws['!cols'] = wscols;
+      
+      // Add worksheet to workbook
+      XLSX.utils.book_append_sheet(wb, ws, "Price List");
+      
+      // Generate and download file
+      const timestamp = new Date().toISOString().split("T")[0];
+      const fileName = `PriceList_${timestamp}_${filteredPriceList.length}_items.xlsx`;
+      
+      XLSX.writeFile(wb, fileName);
+      
+      showToast("success", `Downloaded ${filteredPriceList.length} items as Excel`);
+    } catch (error) {
+      console.error("Excel download error:", error);
+      showToast("error", "Failed to download Excel file");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  // Download dropdown menu component
+  const DownloadDropdown = () => (
+    <div className="relative inline-block">
+      <button
+        className={`flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg cursor-pointer transition-colors ${downloading ? 'opacity-70 cursor-not-allowed' : ''}`}
+        onClick={() => setIsOpen(!isOpen)}
+        disabled={downloading}
+      >
+        <Download size={18} />
+        {downloading ? "Downloading..." : "Download"}
+      </button>
+      
+      {isOpen && (
+        <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
+          <button
+            onClick={() => {
+              downloadCSV();
+              setIsOpen(false);
+            }}
+            className="block w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-100 cursor-pointer border-b border-gray-100"
+          >
+            Download as CSV
+          </button>
+          <button
+            onClick={() => {
+              downloadExcel();
+              setIsOpen(false);
+            }}
+            className="block w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-100 cursor-pointer border-b border-gray-100"
+          >
+            Download as Excel
+          </button>
+          <button
+            onClick={() => {
+              // Download current page only
+              if (currentPriceList.length > 0) {
+                const dataToDownload = currentPriceList.map((item, index) => ({
+                  "S.No": (currentPage - 1) * priceListPerPage + index + 1,
+                  "Product Name": item.productName || "",
+                  "Type": item.type || "",
+                  "Selling Price (USD)": item.sellingPrice || "",
+                  "LC": item.lc || "",
+                  "Tax Selling Price (USD)": item.taxSellingPrice || "",
+                  "Drug License": item.drugLicense || "",
+                  "License Validity Date": item.licenseValidityDate 
+                    ? formatDateToReadable(item.licenseValidityDate, "dd/MM/yyyy")
+                    : "",
+                }));
+                
+                const wb = XLSX.utils.book_new();
+                const ws = XLSX.utils.json_to_sheet(dataToDownload);
+                XLSX.utils.book_append_sheet(wb, ws, `Page ${currentPage}`);
+                
+                const timestamp = new Date().toISOString().split("T")[0];
+                XLSX.writeFile(wb, `PriceList_Page_${currentPage}_${timestamp}.xlsx`);
+                
+                showToast("success", `Downloaded page ${currentPage} as Excel`);
+              }
+              setIsOpen(false);
+            }}
+            className="block w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-100 cursor-pointer"
+          >
+            Download Current Page (Excel)
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (isOpen && !event.target.closest('.relative.inline-block')) {
+        setIsOpen(false);
+      }
+    };
+    
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [isOpen]);
+
   return (
     <div className="max-w-8xl p-6 bg-white rounded-xl">
+      {/* Header with filters and download */}
       <div className="flex flex-wrap items-center gap-4 mb-4">
         {priceList.length > 0 && (
           <div className="flex gap-4 flex-wrap">
@@ -187,6 +393,9 @@ function PriceList() {
               </span>
             </p>
 
+            {/* Download Button */}
+            <DownloadDropdown />
+
             <div className="relative w-full md:w-72">
               <Search
                 className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
@@ -209,6 +418,26 @@ function PriceList() {
         )}
       </div>
 
+      {/* Loading State */}
+      {loading && (
+        <div className="flex justify-center items-center p-8">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+        </div>
+      )}
+
+      {/* Error State */}
+      {error && !loading && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
+          <p className="font-medium">Error: {error}</p>
+          <button 
+            onClick={fetchPriceList}
+            className="mt-2 text-sm underline hover:text-red-800 cursor-pointer"
+          >
+            Try Again
+          </button>
+        </div>
+      )}
+
       {/* Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
@@ -227,10 +456,23 @@ function PriceList() {
             </tr>
           </thead>
           <tbody>
-            {currentPriceList.length === 0 ? (
+            {!loading && currentPriceList.length === 0 ? (
               <tr>
-                <td colSpan={8} className="p-4 text-center text-gray-500">
-                  No priceList found.
+                <td colSpan={8} className="p-8 text-center text-gray-500">
+                  <div className="flex flex-col items-center justify-center">
+                    <div className="text-gray-400 mb-2">No products found</div>
+                    {searchTerm || selectedTab !== "All" ? (
+                      <button
+                        onClick={() => {
+                          setSearchTerm("");
+                          setSelectedTab("All");
+                        }}
+                        className="text-sm text-indigo-600 hover:text-indigo-800 cursor-pointer underline"
+                      >
+                        Clear filters
+                      </button>
+                    ) : null}
+                  </div>
                 </td>
               </tr>
             ) : (
@@ -244,7 +486,6 @@ function PriceList() {
                       : "border-b"
                   }`}
                 >
-                  {" "}
                   <td className="p-3">
                     {capitalizeFirstLetter(priceList.productName) || "--"}
                   </td>
@@ -259,14 +500,14 @@ function PriceList() {
                   </td>
                   <td className="p-3 flex items-center justify-center gap-3">
                     <button
-                      className="text-blue-600 hover:text-blue-800 cursor-pointer"
+                      className="text-blue-600 hover:text-blue-800 cursor-pointer p-1 rounded hover:bg-blue-50"
                       onClick={() => handleView(priceList)}
                       title="View"
                     >
                       <Eye size={18} />
                     </button>
                     <button
-                      className="text-green-600 hover:text-green-800 cursor-pointer"
+                      className="text-green-600 hover:text-green-800 cursor-pointer p-1 rounded hover:bg-green-50"
                       onClick={() => handleEdit(priceList)}
                       title="Edit"
                     >
@@ -279,39 +520,42 @@ function PriceList() {
           </tbody>
         </table>
 
-        {currentPriceList.length > 0 && (
-          <div className="mt-4 p-5 flex justify-start gap-2">
-            <button
-              onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-              disabled={currentPage === 1}
-              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-            >
-              ← Prev
-            </button>
-
-            {visiblePages.map((page) => (
+        {!loading && currentPriceList.length > 0 && (
+          <div className="mt-4 p-5 flex">
+       
+            <div className="flex gap-2">
               <button
-                key={page}
-                onClick={() => setCurrentPage(page)}
-                className={`px-3 py-1 rounded cursor-pointer ${
-                  currentPage === page
-                    ? "bg-indigo-600 text-white"
-                    : "bg-gray-200 hover:bg-gray-300"
-                }`}
+                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
               >
-                {page}
+                ← Prev
               </button>
-            ))}
 
-            <button
-              onClick={() =>
-                setCurrentPage((prev) => Math.min(prev + 1, totalPages))
-              }
-              disabled={currentPage === totalPages}
-              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-            >
+              {visiblePages.map((page) => (
+                <button
+                  key={page}
+                  onClick={() => setCurrentPage(page)}
+                  className={`px-3 py-1 rounded cursor-pointer ${
+                    currentPage === page
+                      ? "bg-indigo-600 text-white"
+                      : "bg-gray-200 hover:bg-gray-300"
+                  }`}
+                >
+                  {page}
+                </button>
+              ))}
+
+              <button
+                onClick={() =>
+                  setCurrentPage((prev) => Math.min(prev + 1, totalPages))
+                }
+                disabled={currentPage === totalPages}
+                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+              >
                 Next →
-            </button>
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -355,6 +599,7 @@ function PriceList() {
                       setForm({ ...form, productName: e.target.value })
                     }
                     className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
+                    required
                   />
                 </div>
 
@@ -370,7 +615,7 @@ function PriceList() {
                   />
                 </div>
 
-                {/* Selling Price - Changed to text input with numeric validation */}
+                {/* Selling Price */}
                 <div>
                   <label className="block text-sm font-medium text-gray-600">
                     Selling Price (USD)
@@ -384,7 +629,7 @@ function PriceList() {
                   />
                 </div>
 
-                {/* LC - Changed to text input with numeric validation */}
+                {/* LC */}
                 <div>
                   <label className="block text-sm font-medium text-gray-600">
                     LC
@@ -398,7 +643,7 @@ function PriceList() {
                   />
                 </div>
 
-                {/* Tax Selling Price - Changed to text input with numeric validation */}
+                {/* Tax Selling Price */}
                 <div>
                   <label className="block text-sm font-medium text-gray-600">
                     Tax Selling Price (USD)
@@ -471,7 +716,7 @@ function PriceList() {
           document.body
         )}
 
-      {/* View Modal (unchanged) */}
+      {/* View Modal */}
       {isViewModalOpen &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
