@@ -2,7 +2,6 @@ import mongoose from "mongoose";
 import dotenv from "dotenv";
 import User from "./models/User.js";
 import SaleType from "./models/reports/saleType.js";
-import Warehouse from "./models/stock/warehouse.js";
 import OrderStatus from "./models/stock/orderStatus.js";
 import Destination from "./models/accounts/Destination.js";
 import CategoryType from "./models/accounts/CategoryType.js";
@@ -15,6 +14,7 @@ import ProductType from "./models/projectManger/productType.js";
 import ProductPackingType from "./models/projectManger/ProductPackingType.js";
 import AllowanceType from "./models/Hrm/AllowanceType.js";
 import MRCash from "./models/accounts/MRCash.js";
+import Staff from "./models/staffMember/staff.js"
 
 dotenv.config();
 
@@ -106,7 +106,7 @@ async function seedProvinces() {
     { name: "Mondulkiri", code: "mondulkiri" },
     { name: "Oddar Meanchey", code: "oddar_meanchey" },
     { name: "Pailin", code: "pailin" },
-    { name: "Phnom Penh (capital)", code: "phnom_penh" },
+    { name: "Phnom Penh", code: "phnom_penh" },
     { name: "Preah Vihear", code: "preah_vihear" },
     { name: "Prey Veng", code: "prey_veng" },
     { name: "Pursat", code: "pursat" },
@@ -120,186 +120,89 @@ async function seedProvinces() {
   ];
 
   await Province.insertMany(provinces);
+  console.log("✅ Provinces seeded");
 }
+
 
 async function seedZones() {
   try {
     await Zone.deleteMany({});
 
+    // 1️⃣ Load all provinces
+    const provinces = await Province.find({});
+    const provinceMap = {};
+
+    provinces.forEach((p) => {
+      provinceMap[p.name.trim().toLowerCase()] = p._id;
+    });
+
+    // 2️⃣ Zone list with CORRECT province names
     const zones = [
-      { name: "271", code: "zone_271" },
-      { name: "7 Makara", code: "zone_7_makara" },
-      { name: "Angtasom", code: "zone_angtasom" },
-      { name: "Angkor borey", code: "zone_angkor_borey" },
-      { name: "Anlong romeat", code: "zone_anlong_romeat" },
-      { name: "Arey Ksat", code: "zone_arey_ksat" },
-      { name: "Banan", code: "zone_banan" },
-      { name: "Bak Touk", code: "zone_bak_touk" },
-      { name: "Banok", code: "zone_banok" },
-      { name: "Banteay Meanchey", code: "zone_banteay_meanchey" },
-      { name: "BKK", code: "zone_bkk" },
-      { name: "Boeung Reang", code: "zone_boeung_reang" },
-      { name: "Boeung Salang", code: "zone_boeung_salang" },
-      { name: "Boeung Tompon", code: "zone_boeung_tompon" },
-      { name: "Boung pring", code: "zone_boung_pring" },
-      { name: "Brasaet Bakong", code: "zone_brasaet_bakong" },
-      { name: "Bophanom", code: "zone_bophanom" },
-      { name: "Bounty kamping pouy", code: "zone_bounty_kamping_pouy" },
-      { name: "Calmette", code: "zone_calmette" },
-      { name: "Chamkamon", code: "zone_chamkamon" },
-      { name: "Chamka Dong", code: "zone_chamka_dong" },
-      { name: "Chak Angre", code: "zone_chak_angre" },
-      { name: "Cham pa Lue", code: "zone_cham_pa_lue" },
-      { name: "Chbar Ampov", code: "zone_chbar_ampov" },
-      { name: "Chhouk", code: "zone_chhouk" },
-      { name: "Chhouk Va", code: "zone_chhouk_va" },
-      { name: "Chhouk Var 1", code: "zone_chhouk_var_1" },
-      { name: "Chom Chao", code: "zone_chom_chao" },
-      { name: "Chomkasomrong", code: "zone_chomkasomrong" },
-      { name: "Chroy Chongva", code: "zone_chroy_chongva" },
-      { name: "Chrouy Changvar", code: "zone_chrouy_changvar" },
-      { name: "Chrouy Chongva", code: "zone_chrouy_chongva" },
-      { name: "Damdek", code: "zone_damdek" },
-      { name: "Dangkao", code: "zone_dangkao" },
-      { name: "Dong Khpous", code: "zone_dong_khpous" },
-      { name: "Dongkor", code: "zone_dongkor" },
-      { name: "Doun Keo", code: "zone_doun_keo" },
-      { name: "Duan Penh", code: "zone_duan_penh" },
-      { name: "Dorng Toung", code: "zone_dorng_toung" },
-      { name: "Dom Nakloung", code: "zone_dom_nakloung" },
-      { name: "Deurm Roka", code: "zone_deurm_roka" },
-      { name: "Elysee Koh Pich", code: "zone_elysee_koh_pich" },
-      { name: "Kandal Stoung", code: "zone_kandal_stoung" },
-      { name: "Kamreang", code: "zone_kamreang" },
-      { name: "Kampong Pompil", code: "zone_kampong_pompil" },
-      { name: "Kampong Siem", code: "zone_kampong_siem" },
-      { name: "Kampong Trolach", code: "zone_kampong_trolach" },
-      { name: "Kampot", code: "zone_kampot" },
-      { name: "Kien Svay", code: "zone_kien_svay" },
-      { name: "Kirirom", code: "zone_kirirom" },
-      { name: "Koh Anderk", code: "zone_koh_anderk" },
-      { name: "Koh Krobey", code: "zone_koh_krobey" },
-      { name: "Kompong Reang", code: "zone_kompong_reang" },
-      { name: "Kompin Pouy", code: "zone_kompin_pouy" },
-      { name: "Kompong Thom Town", code: "zone_kompong_thom_town" },
-      { name: "Kompong Svay", code: "zone_kompong_svay" },
-      { name: "Koskrorlor", code: "zone_koskrorlor" },
-      { name: "Krokor", code: "zone_krokor" },
-      { name: "Krong Battambang", code: "zone_krong_battambang" },
-      { name: "Krong Kampong Cham", code: "zone_krong_kampong_cham" },
-      { name: "Krong Kampong Chhnang", code: "zone_krong_kampong_chhnang" },
-      { name: "Krong Pailin", code: "zone_krong_pailin" },
-      { name: "Krong Senmonorom", code: "zone_krong_senmonorom" },
-      { name: "Krong Siem Reap", code: "zone_krong_siem_reap" },
-      { name: "Krong Stung Treng", code: "zone_krong_stung_treng" },
-      { name: "Krong Suong", code: "zone_krong_suong" },
-      { name: "Krong Svay Reing", code: "zone_krong_svy_reing" },
-      { name: "Krong Takeo", code: "zone_krong_takeo" },
-      { name: "Krong Sereysorphon", code: "zone_krong_sereysorphon" },
-      { name: "Krong Stoung Sen", code: "zone_krong_stoung_sen" },
-      { name: "Krong Thom", code: "zone_krong_thom" },
-      { name: "Krong Pursat", code: "zone_krong_pursat" },
-      { name: "Ksach Kandal", code: "zone_ksach_kandal" },
-      { name: "Kumreang", code: "zone_kumreang" },
-      { name: "Kg Cham", code: "zone_kg_cham" },
-      { name: "Kg Channang", code: "zone_kg_channang" },
-      { name: "Kg Chma", code: "zone_kg_chma" },
-      { name: "Kg Ompel", code: "zone_kg_ompel" },
-      { name: "Kg Ompoul", code: "zone_kg_ompoul" },
-      { name: "Kg Spue", code: "zone_kg_spue" },
-      { name: "Kg Som", code: "zone_kg_som" },
-      { name: "Kg Seila", code: "zone_kg_seila" },
-      { name: "Kg Trom Baek", code: "zone_kg_trom_baek" },
-      { name: "Kg Thkov", code: "zone_kg_thkov" },
-      { name: "Kg Phumipur", code: "zone_kg_phumipur" },
-      { name: "Kg Brasat", code: "zone_kg_brasat" },
-      { name: "Kilo 6", code: "zone_kilo_6" },
-      { name: "Lvea Em", code: "zone_lvea_em" },
-      { name: "Memot", code: "zone_memot" },
-      { name: "Mean Chey", code: "zone_mean_chey" },
-      { name: "Mao Tse Toung", code: "zone_mao_tse_toung" },
-      { name: "Mesang", code: "zone_mesang" },
-      { name: "Moung Russey", code: "zone_moung_russey" },
-      { name: "Mukompul", code: "zone_mukompul" },
-      { name: "Mongkol Borey", code: "zone_mongkol_borey" },
-      { name: "Neak Lerng", code: "zone_neak_lerng" },
-      { name: "Neak Loung", code: "zone_neak_loung" },
-      { name: "Orussey", code: "zone_orussey" },
-      { name: "Onloung Verl", code: "zone_onloung_verl" },
-      { name: "Paav", code: "zone_paav" },
-      { name: "Phnom Prek", code: "zone_phnom_prek" },
-      { name: "Phnom Penh", code: "zone_phnom_penh" },
-      { name: "Phsar Chas", code: "zone_phsar_chas" },
-      { name: "Phsar Chrey", code: "zone_phsar_chrey" },
-      { name: "Phsar Depo", code: "zone_phsar_depo" },
-      { name: "Phsar Kandal", code: "zone_phsar_kandal" },
-      { name: "Phsar Kampong Cham", code: "zone_phsar_kampong_cham" },
-      { name: "Phsar Khvang", code: "zone_phsar_khvang" },
-      { name: "Phsar Koki", code: "zone_phsar_koki" },
-      { name: "Phsar Nat", code: "zone_phsar_nat" },
-      { name: "Phsar Rong Chak", code: "zone_phsar_rong_chak" },
-      { name: "Phsar Seva", code: "zone_phsar_seva" },
-      { name: "Phsar Stueng", code: "zone_phsar_stueng" },
-      { name: "Phsar Tapang", code: "zone_phsar_tapang" },
-      { name: "Phsar Takeo", code: "zone_phsar_takeo" },
-      { name: "Phsar Trach", code: "zone_phsar_trach" },
-      { name: "Phsar Soer", code: "zone_phsar_soer" },
-      { name: "Phsar Doeum Thkov", code: "zone_phsar_doeum_thkov" },
-      { name: "Phsar Chey", code: "zone_phsar_chey" },
-      { name: "Phsar Dermtkov", code: "zone_phsar_dermtkov" },
-      { name: "Poipet", code: "zone_poipet" },
-      { name: "Prek Anchanh", code: "zone_prek_anchanh" },
-      { name: "Prek Pnov", code: "zone_prek_pnov" },
-      { name: "Prek Prasdach", code: "zone_prek_prasdach" },
-      { name: "Prek Takeo", code: "zone_prek_takeo" },
-      { name: "Prey Kabas", code: "zone_prey_kabas" },
-      { name: "Prey Sala", code: "zone_prey_sala" },
-      { name: "Prey Thnorng", code: "zone_prey_thnorng" },
-      { name: "Prey Toteoung", code: "zone_prey_toteoung" },
-      { name: "Pov Reang", code: "zone_pov_reang" },
-      { name: "Porsenchey", code: "zone_porsenchey" },
-      { name: "Ropov", code: "zone_ropov" },
-      { name: "Russey Keo", code: "zone_russey_keo" },
-      { name: "Sa Ang", code: "zone_sa_ang" },
-      { name: "Samrong", code: "zone_samrong" },
-      { name: "Samrong Andet", code: "zone_samrong_andet" },
-      { name: "Sen Sok", code: "zone_sen_sok" },
-      { name: "Sihanouk Ville", code: "zone_sihanouk_ville" },
-      { name: "Slepl Lany", code: "zone_slepl_lany" },
-      { name: "Slakek", code: "zone_slakek" },
-      { name: "Srey Ambel", code: "zone_srey_ambel" },
-      { name: "Srey Veal", code: "zone_srey_veal" },
-      { name: "St 271", code: "zone_st_271" },
-      { name: "Stoung", code: "zone_stoung" },
-      { name: "Stoung Trang", code: "zone_stoung_trang" },
-      { name: "Svay Anthor", code: "zone_svay_anthor" },
-      { name: "Svay Por", code: "zone_svay_por" },
-      { name: "Svay Reang", code: "zone_svay_reang" },
-      { name: "Svaypor", code: "zone_svaypor" },
-      { name: "Svagpor District", code: "zone_svagpor_district" },
-      { name: "Takeo", code: "zone_takeo" },
-      { name: "Talat", code: "zone_talat" },
-      { name: "Toul Kouk", code: "zone_toul_kouk" },
-      { name: "Toul Pongro", code: "zone_toul_pongro" },
-      { name: "Toul Sangke", code: "zone_toul_sangke" },
-      { name: "Toul Tompong", code: "zone_toul_tompong" },
-      { name: "Toul Ta Eak", code: "zone_toul_ta_eak" },
-      { name: "Toul Taak", code: "zone_toul_taak" },
-      { name: "Toul Kork", code: "zone_toul_kork" },
-      { name: "Toek Laók 2", code: "zone_toek_laok_2" },
-      { name: "Ton Le Eum", code: "zone_ton_le_eum" },
-      { name: "Tram Kok", code: "zone_tram_kok" },
-      { name: "Tramkhna", code: "zone_tramkhna" },
-      { name: "Troping Thloeng", code: "zone_troping_thloeng" },
-      { name: "Veal Renh", code: "zone_veal_renh" },
-      { name: "Veng Sreng", code: "zone_veng_sreng" },
+      // Phnom Penh
+      { name: "7 Makara", province: "phnom penh" },
+      { name: "Toul Kork", province: "phnom penh" },
+      { name: "Chamkamon", province: "phnom penh" },
+      { name: "Russey Keo", province: "phnom penh" },
+
+      // Takeo
+      { name: "Angkor Borey", province: "takeo" },
+      { name: "Banan", province: "takeo" },
+      { name: "Doun Keo", province: "takeo" },
+      { name: "Prey Kabas", province: "takeo" },
+      { name: "Tram Kok", province: "takeo" },
+
+      // Siem Reap
+      { name: "Krong Siem Reap", province: "siem reap" },
+      { name: "Damdek", province: "siem reap" },
+
+      // Banteay Meanchey
+      { name: "Poipet", province: "banteay meanchey" },
+      { name: "Mongkol Borey", province: "banteay meanchey" },
+
+      // Battambang
+      { name: "Krong Battambang", province: "battambang" },
+      { name: "Moung Russey", province: "battambang" },
+
+      // Kampong Cham
+      { name: "Kampong Cham", province: "kampong cham" },
+
+      // Tbong Khmum
+      { name: "Memot", province: "tbong khmum" },
+
+      // Oddar Meanchey
+      { name: "Samrong", province: "oddar meanchey" },
+
+      // Stung Treng
+      { name: "Krong Stung Treng", province: "stung treng" },
+
+      // Sihanoukville
+      { name: "Sihanouk Ville", province: "sihanoukville" },
+      { name: "Veal Renh", province: "sihanoukville" },
     ];
 
-    await Zone.insertMany(zones);
+    // 3️⃣ Attach provinceId WITH validation
+    const formattedZones = zones.map((z) => {
+      const provinceKey = z.province.trim().toLowerCase();
+      const provinceId = provinceMap[provinceKey];
+
+      if (!provinceId) {
+        throw new Error(`❌ Province not found for zone: ${z.name} (${z.province})`);
+      }
+
+      return {
+        name: z.name,
+        provinceId,
+      };
+    });
+
+    await Zone.insertMany(formattedZones);
+    console.log("✅ Zones seeded successfully (province-wise)");
+
   } catch (error) {
-    console.error("❌ Error seeding zones:", error);
+    console.error("❌ Error seeding zones:", error.message);
   }
 }
+
 
 async function seedSaleTypes() {
   await SaleType.deleteMany({});
@@ -1371,19 +1274,19 @@ async function runSeeders() {
 
   try {
     await seedUsers();
-    // await seedSaleTypes();
-    // await seedOrderStatuses();
-    // await seedDestinations();
-    // await seedCategoryTypes();
-    // await seedTransactionTypes();
-    // await seedProvinces();
-    // await seedZones();
-    // await seedBusinessTypes();
-    // await seedProductTypes();
-    // await seedProductPackingTypes();
-    // await seedAllowanceTypes(); // Add allowance types seeding
-    // await seedHTabs();
-    // await seedMRCash();
+    await seedSaleTypes();
+    await seedOrderStatuses();
+    await seedDestinations();
+    await seedCategoryTypes();
+    await seedTransactionTypes();
+    await seedProvinces();
+    await seedZones();
+    await seedBusinessTypes();
+    await seedProductTypes();
+    await seedProductPackingTypes();
+    await seedAllowanceTypes(); // Add allowance types seeding
+    await seedHTabs();
+    await seedMRCash();
   } catch (error) {
     console.error("❌ Seeding error:", error);
   } finally {

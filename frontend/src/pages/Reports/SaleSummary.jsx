@@ -1059,8 +1059,6 @@ const SaleSummary = () => {
                     value={form.bonusQuantity}
                     onChange={(e) => {
                       const value = e.target.value;
-
-                      // Allow only numeric strings (optional: allow empty string)
                       if (/^\d*$/.test(value)) {
                         setForm({ ...form, bonusQuantity: value });
                       }

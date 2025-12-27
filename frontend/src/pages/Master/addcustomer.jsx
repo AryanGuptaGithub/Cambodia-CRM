@@ -16,7 +16,7 @@ import {
   validateCustomerForm,
   fetchProvinces,
   fetchMRList,
-  fetchZones,
+  fetchZonesByProvince,
   fetchBusinessTypes,
 } from "../../utils/customerUtil";
 
@@ -61,8 +61,8 @@ const useCustomerForm = (initialCustomerCode = "") => {
     if (!form.province) newErrors.province = "Province is required";
 
     // Customer Number validation - only numbers allowed
-    if (form.customerNumber && !/^\d+$/.test(form.customerNumber)) {
-      newErrors.customerNumber = "Customer Number must contain only numbers";
+    if (form.customerPhoneNumber && !/^\d+$/.test(form.customerPhoneNumber)) {
+      newErrors.customerPhoneNumber = "Customer Number must contain only numbers";
     }
 
     setErrors(newErrors);
@@ -90,7 +90,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
     }
 
     // Handle Customer Number - only allow numbers
-    if (name === "customerNumber") {
+    if (name === "customerPhoneNumber") {
       const numericValue = value.replace(/[^\d]/g, "");
       setForm((prevForm) => ({
         ...prevForm,
@@ -117,12 +117,29 @@ const useCustomerForm = (initialCustomerCode = "") => {
     setErrors((prev) => ({ ...prev, typeOfBusiness: "" }));
   }, []);
 
-  const handleProvinceChange = useCallback((provinceName) => {
+  const handleProvinceChange = useCallback(async (provinceName) => {
+    console.log("Province changed to:", provinceName);
+    
+    // Update form with selected province
     setForm((prevForm) => ({
       ...prevForm,
       province: provinceName,
+      zone: "", // Reset zone when province changes
     }));
+    
+    // Clear province error
     setErrors((prev) => ({ ...prev, province: "" }));
+    
+    // Clear zone error since we're resetting it
+    setErrors((prev) => ({ ...prev, zone: "" }));
+    
+    // Fetch zones for the selected province
+    if (provinceName) {
+      await loadZones(provinceName);
+    } else {
+      // If province is cleared, reset zones
+      setZones([]);
+    }
   }, []);
 
   const handleMRChange = useCallback(
@@ -141,6 +158,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
   );
 
   const handleZoneChange = useCallback((zoneName) => {
+    console.log("Zone changed to:", zoneName);
     setForm((prevForm) => ({
       ...prevForm,
       zone: zoneName,
@@ -153,13 +171,32 @@ const useCustomerForm = (initialCustomerCode = "") => {
       setProvincesLoading(true);
       const result = await fetchProvinces();
       if (result.success) {
-        setProvinces(result.data);
+        let provincesData = result.data;
+        
+        // Handle different possible response formats
+        if (result.data && result.data.provinces) {
+          provincesData = result.data.provinces;
+        } else if (result.data && Array.isArray(result.data.data)) {
+          provincesData = result.data.data;
+        }
+        
+        // Ensure provincesData is an array
+        if (Array.isArray(provincesData)) {
+          console.log("Loaded provinces:", provincesData.length);
+          setProvinces(provincesData);
+        } else {
+          console.error("Provinces data is not an array:", provincesData);
+          setProvinces([]);
+          showToast("error", "Provinces data format is incorrect");
+        }
       } else {
-        showToast("error", result.error);
+        showToast("error", result.error || "Failed to load provinces");
+        setProvinces([]);
       }
     } catch (error) {
       console.error("Error in loadProvinces:", error);
       showToast("error", "Failed to load provinces");
+      setProvinces([]);
     } finally {
       setProvincesLoading(false);
     }
@@ -170,48 +207,89 @@ const useCustomerForm = (initialCustomerCode = "") => {
       setMrListLoading(true);
       const result = await fetchMRList();
       if (result.success) {
-        setMrList(result.data);
+        let mrData = result.data;
+        
+        // Handle different possible response formats
+        if (result.data && result.data.mrList) {
+          mrData = result.data.mrList;
+        } else if (result.data && Array.isArray(result.data.data)) {
+          mrData = result.data.data;
+        }
+        
+        // Ensure mrData is an array
+        if (Array.isArray(mrData)) {
+          console.log("Loaded MRs:", mrData.length);
+          setMrList(mrData);
 
-        if (result.data.length === 0) {
-          if (!isMrListEmptyRef.current) {
-            setIsMrListEmpty(true);
-            isMrListEmptyRef.current = true;
-            // showToast(
-            //   "error",
-            //   "No Medical Representatives found. Please add at least one MR first."
-            // );
+          if (mrData.length === 0) {
+            if (!isMrListEmptyRef.current) {
+              setIsMrListEmpty(true);
+              isMrListEmptyRef.current = true;
+            }
+          } else {
+            setIsMrListEmpty(false);
+            isMrListEmptyRef.current = false;
           }
         } else {
-          setIsMrListEmpty(false);
-          isMrListEmptyRef.current = false;
+          console.error("MR data is not an array:", mrData);
+          setMrList([]);
+          setIsMrListEmpty(true);
+          showToast("error", "MR data format is incorrect");
         }
       } else {
-        showToast("error", result.error);
+        showToast("error", result.error || "Failed to load Medical Representatives");
         setIsMrListEmpty(true);
         isMrListEmptyRef.current = true;
+        setMrList([]);
       }
     } catch (error) {
       console.error("Error in loadMRList:", error);
       showToast("error", "Failed to load Medical Representatives");
       setIsMrListEmpty(true);
       isMrListEmptyRef.current = true;
+      setMrList([]);
     } finally {
       setMrListLoading(false);
     }
   }, []);
 
-  const loadZones = useCallback(async () => {
+  const loadZones = useCallback(async (provinceName) => {
     try {
       setZonesLoading(true);
-      const result = await fetchZones();
+      console.log("Loading zones for province:", provinceName);
+      
+      // Call fetchZonesByProvince with the province name
+      const result = await fetchZonesByProvince(provinceName);
+      console.log("Zones API result for province:", provinceName, result);
+      
       if (result.success) {
-        setZones(result.data);
+        let zonesData = result.data;
+        
+        // Handle different possible response formats
+        if (result.data && result.data.zones) {
+          zonesData = result.data.zones;
+        } else if (result.data && Array.isArray(result.data.data)) {
+          zonesData = result.data.data;
+        }
+        
+        // Ensure zonesData is an array
+        if (Array.isArray(zonesData)) {
+          console.log(`Loaded ${zonesData.length} zones for province: ${provinceName}`);
+          setZones(zonesData);
+        } else {
+          console.error("Zones data is not an array:", zonesData);
+          setZones([]);
+          showToast("error", "Zones data format is incorrect");
+        }
       } else {
-        showToast("error", result.error);
+        console.warn("Failed to load zones for province:", provinceName, result.error);
+        setZones([]);
+        // Don't show toast for this as it might be expected if no zones exist
       }
     } catch (error) {
       console.error("Error in loadZones:", error);
-      showToast("error", "Failed to load zones");
+      setZones([]);
+      // Don't show toast for this as it might be expected
     } finally {
       setZonesLoading(false);
     }
@@ -222,13 +300,32 @@ const useCustomerForm = (initialCustomerCode = "") => {
       setBusinessTypesLoading(true);
       const result = await fetchBusinessTypes();
       if (result.success) {
-        setBusinessTypes(result.data);
+        let businessData = result.data;
+        
+        // Handle different possible response formats
+        if (result.data && result.data.businessTypes) {
+          businessData = result.data.businessTypes;
+        } else if (result.data && Array.isArray(result.data.data)) {
+          businessData = result.data.data;
+        }
+        
+        // Ensure businessData is an array
+        if (Array.isArray(businessData)) {
+          console.log("Loaded business types:", businessData.length);
+          setBusinessTypes(businessData);
+        } else {
+          console.error("Business types data is not an array:", businessData);
+          setBusinessTypes([]);
+          showToast("error", "Business types data format is incorrect");
+        }
       } else {
-        showToast("error", result.error);
+        showToast("error", result.error || "Failed to load business types");
+        setBusinessTypes([]);
       }
     } catch (error) {
       console.error("Error in loadBusinessTypes:", error);
       showToast("error", "Failed to load business types");
+      setBusinessTypes([]);
     } finally {
       setBusinessTypesLoading(false);
     }
@@ -340,14 +437,32 @@ const AddCustomer = () => {
     getTodayDate,
   } = useCustomerForm(customerCode);
 
-  // Memoized province options for dropdown
+  // Memoized province options for dropdown - with safety checks
   const provinceOptions = useMemo(() => {
-    return [
-      ...provinces.map((province) => ({
-        value: province.name,
-        label: province.name,
-      })),
-    ];
+    if (!provinces || !Array.isArray(provinces)) {
+      console.warn("Provinces is not an array:", provinces);
+      return [];
+    }
+    
+    try {
+      return provinces
+        .map((province) => {
+          // Handle different province object structures
+          const provinceName = province.name || province.provinceName || province.value || province.label || province.province || "";
+          if (!provinceName) {
+            console.warn("Province without name found:", province);
+            return null;
+          }
+          return {
+            value: provinceName,
+            label: provinceName,
+          };
+        })
+        .filter(Boolean); // Remove null entries
+    } catch (error) {
+      console.error("Error creating province options:", error);
+      return [];
+    }
   }, [provinces]);
 
   // Memoized MR options for dropdown
@@ -362,44 +477,80 @@ const AddCustomer = () => {
       ];
     }
 
-    return [
-      ...mrList.map((mr) => ({
-        value: mr._id,
-        label: `${mr.medicalRepName}`,
-      })),
-    ];
+    if (!mrList || !Array.isArray(mrList)) {
+      console.warn("MR list is not an array:", mrList);
+      return [];
+    }
+
+    return mrList
+      .map((mr) => {
+        const mrName = mr.medicalRepName || mr.name || mr.fullName || "";
+        if (!mrName) {
+          console.warn("MR without name found:", mr);
+          return null;
+        }
+        return {
+          value: mr._id || mr.id || "",
+          label: mrName,
+        };
+      })
+      .filter(Boolean); // Remove null entries
   }, [mrList, isMrListEmpty]);
 
-  // Memoized zone options for dropdown
+  // Memoized zone options for dropdown - only show zones for selected province
   const zoneOptions = useMemo(() => {
-    return [
-      ...zones.map((zone) => ({
-        value: zone.name,
-        label: zone.name,
-      })),
-    ];
+    if (!zones || !Array.isArray(zones)) {
+      console.warn("Zones is not an array:", zones);
+      return [];
+    }
+    
+    return zones
+      .map((zone) => {
+        const zoneName = zone.name || zone.zoneName || zone.value || zone.label || zone.zone || "";
+        if (!zoneName) {
+          console.warn("Zone without name found:", zone);
+          return null;
+        }
+        return {
+          value: zoneName,
+          label: zoneName,
+        };
+      })
+      .filter(Boolean); // Remove null entries
   }, [zones]);
 
   // Memoized business type options for dropdown
   const businessTypeOptions = useMemo(() => {
-    return [
-      ...businessTypes
-        .map((type) => {
-          if (typeof type === "string") {
-            return {
-              value: type,
-              label: type,
-            };
-          } else if (type && typeof type === "object") {
-            return {
-              value: type.name || type.value || type._id,
-              label: type.name || type.label || type.value,
-            };
+    if (!businessTypes || !Array.isArray(businessTypes)) {
+      console.warn("Business types is not an array:", businessTypes);
+      return [];
+    }
+    
+    return businessTypes
+      .map((type) => {
+        if (typeof type === "string") {
+          return {
+            value: type,
+            label: type,
+          };
+        } else if (type && typeof type === "object") {
+          const typeValue = type.name || type.value || type._id || "";
+          const typeLabel = type.name || type.label || type.value || "";
+          
+          if (!typeValue || !typeLabel) {
+            console.warn("Business type without value/label found:", type);
+            return null;
           }
-          return { value: "", label: "Invalid type" };
-        })
-        .filter((option) => option.value !== ""),
-    ];
+          
+          return {
+            value: typeValue,
+            label: typeLabel,
+          };
+        }
+        console.warn("Invalid business type format:", type);
+        return null;
+      })
+      .filter(Boolean); // Remove null entries
   }, [businessTypes]);
 
   // Set initial customer code and fetch data
@@ -407,42 +558,101 @@ const AddCustomer = () => {
     if (customerCode) {
       updateFormField("customerCode", customerCode);
     }
-    loadProvinces();
-    loadMRList();
-    loadZones();
-    loadBusinessTypes();
+    
+    // Load data with error handling
+    const loadData = async () => {
+      try {
+        await Promise.allSettled([
+          loadProvinces(),
+          loadMRList(),
+          loadBusinessTypes(),
+        ]);
+        // Note: We don't load zones initially, only when province is selected
+      } catch (error) {
+        console.error("Error loading data:", error);
+        showToast("error", "Failed to load required data");
+      }
+    };
+    
+    loadData();
   }, [
     customerCode,
     loadProvinces,
     loadMRList,
-    loadZones,
     loadBusinessTypes,
     updateFormField,
   ]);
 
   // Set today's date as default when component mounts
   useEffect(() => {
-    const today = getTodayDate();
-    updateFormField("date", today);
+    try {
+      const today = getTodayDate();
+      updateFormField("date", today);
+      console.log("Set default date to:", today);
+    } catch (error) {
+      console.error("Error setting default date:", error);
+    }
   }, [updateFormField]);
+
+  // Load zones when province changes
+  useEffect(() => {
+    const loadZonesForProvince = async () => {
+      if (form.province && form.province.trim() !== "") {
+        console.log("Province changed to:", form.province);
+        await loadZones(form.province);
+      } else {
+        // Clear zones if province is cleared
+        console.log("Province cleared, resetting zones");
+        setZones([]);
+      }
+    };
+    
+    if (form.province) {
+      loadZonesForProvince();
+    }
+  }, [form.province]);
 
   // Check if form is valid for submission
   const isFormValid = useMemo(() => {
-    return (
-      !isMrListEmpty &&
-      form.date &&
-      form.medicalRepId &&
-      form.name.trim() &&
-      form.typeOfBusiness.trim() &&
-      form.zone &&
-      form.province &&
-      !errors.customerNumber &&
-      !errors.date // Ensure no date errors
-    );
-  }, [form, isMrListEmpty, errors.customerNumber, errors.date]);
+    try {
+      return (
+        !isMrListEmpty &&
+        form.date &&
+        form.medicalRepId &&
+        form.name &&
+        form.name.trim() &&
+        form.typeOfBusiness &&
+        form.typeOfBusiness.trim() &&
+        form.zone &&
+        form.province &&
+        (!form.customerPhoneNumber || /^\d+$/.test(form.customerPhoneNumber)) &&
+        !errors.date
+      );
+    } catch (error) {
+      console.error("Error checking form validity:", error);
+      return false;
+    }
+  }, [form, isMrListEmpty, errors.date]);
 
   // Check if any field should be disabled
   const isFormDisabled = isMrListEmpty;
+
+  // Show loading state
+  if (provincesLoading || mrListLoading || businessTypesLoading) {
+    return (
+      <div className="max-w-3xl mx-auto p-8 bg-white rounded-3xl shadow-lg">
+        <h2 className="text-xl font-semibold text-gray-800 mb-4">
+          Add New Customer
+        </h2>
+        <div className="flex justify-center items-center h-64">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto"></div>
+            <p className="mt-4 text-gray-600">Loading form data...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-3xl mx-auto p-8 bg-white rounded-3xl shadow-lg">
@@ -503,21 +713,24 @@ const AddCustomer = () => {
               onChange={handleChange}
               error={errors.date}
               required
-              max={getTodayDate()} // Set max to today to prevent future date selection in UI
+              max={getTodayDate()}
               disabled={isFormDisabled}
             />
-            <SearchableDropdown
-              value={form.medicalRepId}
-              onChange={handleMRChange}
-              options={mrOptions}
-              placeholder={isMrListEmpty ? "No MRs Available" : "Select MR"}
-              required={true}
-              loading={mrListLoading}
-              error={errors.medicalRepName}
-              label="Medical Representative"
-              disabled={isMrListEmpty}
+            <InputField
+              label="Customer Number"
+              name="customerPhoneNumber"
+              value={form.customerPhoneNumber}
+              onChange={handleChange}
+              placeholder="Enter numbers only"
+              error={errors.customerPhoneNumber}
+              disabled={isFormDisabled}
+              type="tel"
+              inputMode="numeric"
+              pattern="[0-9]*"
             />
           </div>
+
+          {/* Column 2 */}
           <div className="space-y-6">
             <InputField
               label="Customer Name in English"
@@ -539,50 +752,9 @@ const AddCustomer = () => {
               error={errors.typeOfBusiness}
               label="Types of Business"
               disabled={isFormDisabled}
+              emptyMessage="No business types available"
             />
 
-            {/* Customer Number - Optional, Numbers Only */}
-            <InputField
-              label="Customer Number"
-              name="customerNumber"
-              value={form.customerNumber}
-              onChange={handleChange}
-              placeholder="Enter numbers only"
-              error={errors.customerNumber}
-              disabled={isFormDisabled}
-              type="tel"
-              inputMode="numeric"
-              pattern="[0-9]*"
-            />
-          </div>
-
-          {/* Column 3 */}
-          <div className="space-y-6">
-            {/* Customer Address - Now Optional */}
-            <InputField
-              label="Customer Address"
-              name="address"
-              value={form.address}
-              onChange={handleChange}
-              error={errors.address}
-              placeholder="Optional"
-              disabled={isFormDisabled}
-            />
-
-            {/* Zone Dropdown */}
-            <SearchableDropdown
-              value={form.zone}
-              onChange={handleZoneChange}
-              options={zoneOptions}
-              placeholder="Select Zone"
-              required={true}
-              loading={zonesLoading}
-              error={errors.zone}
-              label="Zone"
-              disabled={isFormDisabled}
-            />
-
-            {/* Province Dropdown */}
             <SearchableDropdown
               value={form.province}
               onChange={handleProvinceChange}
@@ -593,6 +765,46 @@ const AddCustomer = () => {
               error={errors.province}
               label="Province"
               disabled={isFormDisabled}
+              emptyMessage="No provinces available"
+            />
+          </div>
+
+          {/* Column 3 */}
+          <div className="space-y-6">
+            <InputField
+              label="Customer Address"
+              name="address"
+              value={form.address}
+              onChange={handleChange}
+              error={errors.address}
+              placeholder="Optional"
+              disabled={isFormDisabled}
+            />
+
+            <SearchableDropdown
+              value={form.medicalRepId}
+              onChange={handleMRChange}
+              options={mrOptions}
+              placeholder={isMrListEmpty ? "No MRs Available" : "Select MR"}
+              required={true}
+              loading={mrListLoading}
+              error={errors.medicalRepName}
+              label="Medical Representative"
+              disabled={isMrListEmpty}
+              emptyMessage="No MRs available"
+            />
+
+            <SearchableDropdown
+              value={form.zone}
+              onChange={handleZoneChange}
+              options={zoneOptions}
+              placeholder={form.province ? "Select Zone" : "Select a province first"}
+              required={true}
+              loading={zonesLoading && form.province !== ""}
+              error={errors.zone}
+              label="Zone"
+              disabled={isFormDisabled || !form.province || zonesLoading}
+              emptyMessage={form.province ? (zones.length === 0 ? "No zones available for this province" : "Select Zone") : "Select a province first"}
             />
           </div>
         </div>
@@ -625,7 +837,6 @@ const AddCustomer = () => {
               loading ||
               provincesLoading ||
               mrListLoading ||
-              zonesLoading ||
               businessTypesLoading ||
               !isFormValid ||
               isMrListEmpty
@@ -634,7 +845,6 @@ const AddCustomer = () => {
               loading ||
               provincesLoading ||
               mrListLoading ||
-              zonesLoading ||
               businessTypesLoading ||
               !isFormValid ||
               isMrListEmpty

@@ -779,7 +779,7 @@ const Product = () => {
                 disabled={currentPage === 1}
                 className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
               >
-                Prev
+                ← Prev
               </button>
 
               {visiblePages.map((page) => (
@@ -803,7 +803,7 @@ const Product = () => {
                 disabled={currentPage === totalPages}
                 className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
               >
-                Next
+                  Next →
               </button>
             </div>
           )}

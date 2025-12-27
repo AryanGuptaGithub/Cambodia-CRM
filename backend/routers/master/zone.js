@@ -1,5 +1,6 @@
 import express from "express";
 import Zone from "../../models/master/zone.js";
+import Province from "../../models/master/Province.js";
 
 const router = express.Router();
 
@@ -140,6 +141,26 @@ router.delete('/zone/:id', async (req, res) => {
       message: 'Server error while deleting zone',
       error: error.message 
     });
+  }
+});
+
+router.get("/by-province/:provinceName", async (req, res) => {
+  try {
+    const province = await Province.findOne({
+      name: new RegExp(`^${req.params.provinceName}$`, "i"),
+    });
+
+    if (!province) {
+      return res.json({ success: true, data: [] });
+    }
+
+    const zones = await Zone.find({ provinceId: province._id }).sort({
+      name: 1,
+    });
+
+    res.json({ success: true, data: zones });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

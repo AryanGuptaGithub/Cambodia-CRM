@@ -9,7 +9,6 @@ import PaymentStatus from "../../models/paymentStatus.js";
 
 const router = express.Router();
 const importProgressMap = new Map();
-const BYPASS_STOCK_CHECK = process.env.BYPASS_STOCK_CHECK === "true";
 
 const createSessionId = () =>
   `import_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -481,6 +480,7 @@ const updateImportProgress = (sessionId, updates) => {
   );
   importProgressMap.set(sessionId, progress);
 };
+
 // ====================== SINGLE INVOICE PROCESSING WITH STOCK DEDUCTION ======================
 const processSingleInvoice = async (saleData, sessionId, index) => {
   const progress = importProgressMap.get(sessionId);
@@ -497,23 +497,21 @@ const processSingleInvoice = async (saleData, sessionId, index) => {
 
       const processedProducts = [];
 
-      // First, check stock for all products
-      if (!BYPASS_STOCK_CHECK) {
-        for (const p of saleData.products) {
-          const salesQty = parseFloat(p.salesQty) || 0;
-          if (salesQty > 0) {
-            const stockCheck = await findProductStockInHand(
-              p.productName,
-              salesQty
-            );
-            if (stockCheck.insufficient) {
-              throw new Error(stockCheck.message);
-            }
+      // Check stock for all products
+      for (const p of saleData.products) {
+        const salesQty = parseFloat(p.salesQty) || 0;
+        if (salesQty > 0) {
+          const stockCheck = await findProductStockInHand(
+            p.productName,
+            salesQty
+          );
+          if (stockCheck.insufficient) {
+            throw new Error(stockCheck.message);
           }
         }
       }
 
-      // Then process products and deduct stock
+      // Process products and deduct stock
       for (const p of saleData.products) {
         const salesQty = parseFloat(p.salesQty) || 0;
         const bonusQty = parseFloat(p.bonusQty) || 0;
@@ -521,8 +519,8 @@ const processSingleInvoice = async (saleData, sessionId, index) => {
 
         if (totalQty <= 0) continue;
 
-        // Deduct stock if BYPASS_STOCK_CHECK is false
-        if (!BYPASS_STOCK_CHECK && salesQty > 0) {
+        // Deduct stock
+        if (salesQty > 0) {
           await consumeStockFromHand(p.productName, salesQty, session);
         }
 
@@ -592,8 +590,7 @@ const processSingleInvoice = async (saleData, sessionId, index) => {
       err.message
     );
 
-    const isStockError =
-      !BYPASS_STOCK_CHECK && err.message.toLowerCase().includes("stock");
+    const isStockError = err.message.toLowerCase().includes("stock");
 
     failedDetail = {
       row: index + 2,
@@ -612,6 +609,7 @@ const processSingleInvoice = async (saleData, sessionId, index) => {
 
   return { success: isSuccess, failedInvoice: failedDetail };
 };
+
 // ====================== MAIN IMPORT ======================
 
 const processImportAsync = async (sessionId, validInvoices) => {
@@ -660,14 +658,20 @@ const parseQuantityWithParenthesis = (qty) => {
 
 router.post("/sales/import", async (req, res) => {
   let sessionId = null;
+
   try {
     const invoices = Array.isArray(req.body?.invoices)
       ? req.body.invoices
-      : req.body || [];
-    if (invoices.length === 0)
-      return res
-        .status(400)
-        .json({ success: false, message: "No invoices provided" });
+      : Array.isArray(req.body)
+      ? req.body
+      : [];
+
+    if (!invoices.length) {
+      return res.status(400).json({
+        success: false,
+        message: "No invoices provided",
+      });
+    }
 
     const {
       validData,
@@ -683,29 +687,36 @@ router.post("/sales/import", async (req, res) => {
       });
     }
 
-    const dataToImport = validData.length > 0 ? validData : invoices;
+    const dataToImport = validData.length ? validData : invoices;
+
+    // ⚠️ Ensure no session object is inside invoice data
+    const sanitizedData = dataToImport.map(({ session, ...rest }) => rest);
 
     sessionId = createSessionId();
-    initializeImportProgress(sessionId, dataToImport.length);
+    initializeImportProgress(sessionId, sanitizedData.length);
 
-    processImportAsync(sessionId, dataToImport);
+    processImportAsync(sessionId, sanitizedData);
 
     res.json({
       success: true,
       message:
         "Import started – valid products will be imported with stock deduction",
       sessionId,
-      totalInvoices: dataToImport.length,
+      totalInvoices: sanitizedData.length,
       progressUrl: `/api/sales/import/progress/${sessionId}`,
     });
   } catch (error) {
     console.error("Import start error:", error);
     if (sessionId) importProgressMap.delete(sessionId);
-    res
-      .status(500)
-      .json({ success: false, message: "Import failed", error: error.message });
+
+    res.status(500).json({
+      success: false,
+      message: "Import failed",
+      error: error.message,
+    });
   }
 });
+
 
 router.get("/sales/import/progress/:sessionId", (req, res) => {
   const progress = importProgressMap.get(req.params.sessionId);
@@ -885,43 +896,41 @@ router.delete("/sales/:id", async (req, res) => {
       }
 
       // Restore stock for each product
-      if (!BYPASS_STOCK_CHECK) {
-        for (const product of saleToDelete.products) {
-          const salesQty = product.salesQty || 0;
-          if (salesQty > 0) {
-            // Find the product in ReportInHand
-            const normalized = normalizeProductName(product.productName);
-            const fixedName =
-              productNameFixMap[normalized] || product.productName.trim();
-            const escaped = fixedName.replace(/[.*?^${}()|[\]\\]/g, "\\$&");
+      for (const product of saleToDelete.products) {
+        const salesQty = product.salesQty || 0;
+        if (salesQty > 0) {
+          // Find the product in ReportInHand
+          const normalized = normalizeProductName(product.productName);
+          const fixedName =
+            productNameFixMap[normalized] || product.productName.trim();
+          const escaped = fixedName.replace(/[.*?^${}()|[\]\\]/g, "\\$&");
 
-            let stockItem = await ReportInHand.findOne({
-              productName: { $regex: new RegExp(`^${escaped}$`, "i") },
+          let stockItem = await ReportInHand.findOne({
+            productName: { $regex: new RegExp(`^${escaped}$`, "i") },
+          }).session(session);
+
+          if (!stockItem) {
+            stockItem = await ReportInHand.findOne({
+              productName: { $regex: escaped, $options: "i" },
             }).session(session);
+          }
 
-            if (!stockItem) {
-              stockItem = await ReportInHand.findOne({
-                productName: { $regex: escaped, $options: "i" },
-              }).session(session);
-            }
+          if (stockItem) {
+            // Add a new batch with the restored quantity
+            stockItem.batches.push({
+              batchNumber: `RESTORE-${Date.now()}`,
+              boxes: salesQty,
+              lc: product.lc || 0,
+              amount: salesQty * (product.lc || 0),
+              date: new Date(),
+            });
 
-            if (stockItem) {
-              // Add a new batch with the restored quantity
-              stockItem.batches.push({
-                batchNumber: `RESTORE-${Date.now()}`,
-                boxes: salesQty,
-                lc: product.lc || 0,
-                amount: salesQty * (product.lc || 0),
-                date: new Date(),
-              });
+            // Update totals
+            stockItem.totalBoxes += salesQty;
+            stockItem.totalAmount += salesQty * (product.lc || 0);
+            stockItem.updatedAt = new Date();
 
-              // Update totals
-              stockItem.totalBoxes += salesQty;
-              stockItem.totalAmount += salesQty * (product.lc || 0);
-              stockItem.updatedAt = new Date();
-
-              await stockItem.save({ session });
-            }
+            await stockItem.save({ session });
           }
         }
       }
@@ -1350,19 +1359,17 @@ router.post("/sales", async (req, res) => {
       let totalAmount = 0;
 
       // Check stock availability first
-      if (!BYPASS_STOCK_CHECK) {
-        for (const p of data.products || []) {
-          if (!p.productName || !p.productName.trim()) continue;
+      for (const p of data.products || []) {
+        if (!p.productName || !p.productName.trim()) continue;
 
-          const salesQty = Number(p.salesQty) || 0;
-          if (salesQty > 0) {
-            const stockCheck = await findProductStockInHand(
-              p.productName,
-              salesQty
-            );
-            if (stockCheck.insufficient) {
-              throw new Error(stockCheck.message);
-            }
+        const salesQty = Number(p.salesQty) || 0;
+        if (salesQty > 0) {
+          const stockCheck = await findProductStockInHand(
+            p.productName,
+            salesQty
+          );
+          if (stockCheck.insufficient) {
+            throw new Error(stockCheck.message);
           }
         }
       }
@@ -1376,8 +1383,8 @@ router.post("/sales", async (req, res) => {
         const totalQty = salesQty + bonusQty;
         if (totalQty === 0) continue;
 
-        // Deduct stock if BYPASS_STOCK_CHECK is false
-        if (!BYPASS_STOCK_CHECK && salesQty > 0) {
+        // Deduct stock
+        if (salesQty > 0) {
           await consumeStockFromHand(p.productName, salesQty, session);
         }
 
@@ -1513,32 +1520,30 @@ router.put("/sales/:id", async (req, res) => {
       let totalAmount = 0;
 
       // Calculate stock differences and check availability
-      if (!BYPASS_STOCK_CHECK) {
-        // Create a map of original products
-        const originalProductsMap = {};
-        originalSale.products.forEach((p) => {
-          originalProductsMap[p.productName] = p.salesQty || 0;
-        });
+      // Create a map of original products
+      const originalProductsMap = {};
+      originalSale.products.forEach((p) => {
+        originalProductsMap[p.productName] = p.salesQty || 0;
+      });
 
-        // Check new quantities
-        for (const p of saleData.products || []) {
-          if (!p.productName || !p.productName.trim()) continue;
+      // Check new quantities
+      for (const p of saleData.products || []) {
+        if (!p.productName || !p.productName.trim()) continue;
 
-          const newSalesQty = Number(p.salesQty) || 0;
-          const originalQty = originalProductsMap[p.productName] || 0;
+        const newSalesQty = Number(p.salesQty) || 0;
+        const originalQty = originalProductsMap[p.productName] || 0;
 
-          // If increasing quantity, check if stock is available
-          if (newSalesQty > originalQty) {
-            const additionalNeeded = newSalesQty - originalQty;
-            const stockCheck = await findProductStockInHand(
-              p.productName,
-              additionalNeeded
+        // If increasing quantity, check if stock is available
+        if (newSalesQty > originalQty) {
+          const additionalNeeded = newSalesQty - originalQty;
+          const stockCheck = await findProductStockInHand(
+            p.productName,
+            additionalNeeded
+          );
+          if (stockCheck.insufficient) {
+            throw new Error(
+              `Insufficient stock for "${p.productName}". Additional ${additionalNeeded} needed, available: ${stockCheck.availableStock}`
             );
-            if (stockCheck.insufficient) {
-              throw new Error(
-                `Insufficient stock for "${p.productName}". Additional ${additionalNeeded} needed, available: ${stockCheck.availableStock}`
-              );
-            }
           }
         }
       }
@@ -1561,54 +1566,48 @@ router.put("/sales/:id", async (req, res) => {
         );
         const originalQty = originalProduct ? originalProduct.salesQty || 0 : 0;
 
-        // Adjust stock if BYPASS_STOCK_CHECK is false
-        if (!BYPASS_STOCK_CHECK) {
-          if (newSalesQty > originalQty) {
-            // Need to deduct additional stock
-            const additionalNeeded = newSalesQty - originalQty;
-            await consumeStockFromHand(
-              p.productName,
-              additionalNeeded,
-              session
-            );
-          } else if (newSalesQty < originalQty) {
-            // Need to restore excess stock
-            const excess = originalQty - newSalesQty;
+        // Adjust stock
+        if (newSalesQty > originalQty) {
+          // Need to deduct additional stock
+          const additionalNeeded = newSalesQty - originalQty;
+          await consumeStockFromHand(p.productName, additionalNeeded, session);
+        } else if (newSalesQty < originalQty) {
+          // Need to restore excess stock
+          const excess = originalQty - newSalesQty;
 
-            // Find the product in ReportInHand to restore
-            const normalized = normalizeProductName(p.productName);
-            const fixedName =
-              productNameFixMap[normalized] || p.productName.trim();
-            const escaped = fixedName.replace(/[.*?^${}()|[\]\\]/g, "\\$&");
+          // Find the product in ReportInHand to restore
+          const normalized = normalizeProductName(p.productName);
+          const fixedName =
+            productNameFixMap[normalized] || p.productName.trim();
+          const escaped = fixedName.replace(/[.*?^${}()|[\]\\]/g, "\\$&");
 
-            let stockItem = await ReportInHand.findOne({
-              productName: { $regex: new RegExp(`^${escaped}$`, "i") },
+          let stockItem = await ReportInHand.findOne({
+            productName: { $regex: new RegExp(`^${escaped}$`, "i") },
+          }).session(session);
+
+          if (!stockItem) {
+            stockItem = await ReportInHand.findOne({
+              productName: { $regex: escaped, $options: "i" },
             }).session(session);
+          }
 
-            if (!stockItem) {
-              stockItem = await ReportInHand.findOne({
-                productName: { $regex: escaped, $options: "i" },
-              }).session(session);
-            }
+          if (stockItem) {
+            // Add a new batch with the restored quantity
+            stockItem.batches.push({
+              batchNumber: `RESTORE-${Date.now()}`,
+              boxes: excess,
+              lc: p.lc || originalProduct?.lc || 0,
+              amount: excess * (p.lc || originalProduct?.lc || 0),
+              date: new Date(),
+            });
 
-            if (stockItem) {
-              // Add a new batch with the restored quantity
-              stockItem.batches.push({
-                batchNumber: `RESTORE-${Date.now()}`,
-                boxes: excess,
-                lc: p.lc || originalProduct?.lc || 0,
-                amount: excess * (p.lc || originalProduct?.lc || 0),
-                date: new Date(),
-              });
+            // Update totals
+            stockItem.totalBoxes += excess;
+            stockItem.totalAmount +=
+              excess * (p.lc || originalProduct?.lc || 0);
+            stockItem.updatedAt = new Date();
 
-              // Update totals
-              stockItem.totalBoxes += excess;
-              stockItem.totalAmount +=
-                excess * (p.lc || originalProduct?.lc || 0);
-              stockItem.updatedAt = new Date();
-
-              await stockItem.save({ session });
-            }
+            await stockItem.save({ session });
           }
         }
 

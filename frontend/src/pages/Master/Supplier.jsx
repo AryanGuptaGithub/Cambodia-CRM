@@ -219,7 +219,7 @@ const Pagination = ({ currentPage, totalPages, setCurrentPage }) => (
       disabled={currentPage === 1}
       className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
     >
-      Prev
+      ← Prev
     </button>
     {Array.from({ length: totalPages }, (_, index) => index + 1).map((page) => (
       <button
@@ -239,7 +239,7 @@ const Pagination = ({ currentPage, totalPages, setCurrentPage }) => (
       disabled={currentPage === totalPages}
       className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
     >
-      Next
+        Next →
     </button>
   </div>
 );

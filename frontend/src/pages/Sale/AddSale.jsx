@@ -1445,12 +1445,13 @@ const AddSale = () => {
     };
   };
 
-  // Function to check if required data is available and set form disabled state
+  // FIXED: Function to check if required data is available and set form disabled state
   const checkRequiredData = useCallback(() => {
     const missingFields = [];
 
-    if (productNames.length === 0) {
-      missingFields.push("product names");
+    // Check if productsList is loaded and has items (regardless of stock)
+    if (productsList.length === 0 && !productsListLoading) {
+      missingFields.push("products");
     }
     if (mrList.length === 0 && !mrListLoading) {
       missingFields.push("medical representatives");
@@ -1466,10 +1467,20 @@ const AddSale = () => {
       return false;
     }
 
+    // Additional check: if there are products but none have stock, show a different message
+    if (productNames.length === 0 && productsList.length > 0) {
+      setUploadMessage("All products are currently out of stock. Please add stock to products first.");
+      setShowUploadMessage(true);
+      setIsFormDisabled(true);
+      return false;
+    }
+
     setShowUploadMessage(false);
     setIsFormDisabled(false);
     return true;
   }, [
+    productsList.length,
+    productsListLoading,
     productNames.length,
     mrList.length,
     mrListLoading,
@@ -1852,29 +1863,49 @@ const AddSale = () => {
 
   return (
     <div className="max-w-5xl mx-auto p-6 bg-white rounded-2xl shadow">
-      {/* Upload Message Banner - CHANGED TO RED */}
+      {/* Upload Message Banner - CHANGED TO SHOW DIFFERENT COLORS BASED ON ISSUE */}
       {showUploadMessage && (
-        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+        <div className={`mb-6 p-4 rounded-lg ${
+          uploadMessage.includes("out of stock") 
+            ? "bg-yellow-50 border border-yellow-200" 
+            : "bg-red-50 border border-red-200"
+        }`}>
           <div className="flex items-center">
             <div className="flex-shrink-0">
-              <svg
-                className="h-5 w-5 text-red-400"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                  clipRule="evenodd"
-                />
-              </svg>
+              {uploadMessage.includes("out of stock") ? (
+                <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+              ) : (
+                <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+              )}
             </div>
             <div className="ml-3">
-              <h3 className="text-sm font-medium text-red-800">
-                Required Data Missing
+              <h3 className={`text-sm font-medium ${
+                uploadMessage.includes("out of stock") 
+                  ? "text-yellow-800" 
+                  : "text-red-800"
+              }`}>
+                {uploadMessage.includes("out of stock") 
+                  ? "Stock Issue" 
+                  : "Required Data Missing"}
               </h3>
-              <div className="mt-2 text-sm text-red-700">
+              <div className={`mt-2 text-sm ${
+                uploadMessage.includes("out of stock") 
+                  ? "text-yellow-700" 
+                  : "text-red-700"
+              }`}>
                 <p>{uploadMessage}</p>
+                {uploadMessage.includes("out of stock") && (
+                  <button
+                    onClick={() => navigate("/reportlayout/reports-in-hand")}
+                    className="mt-2 inline-flex items-center px-3 py-1 border border-transparent text-sm leading-4 font-medium rounded-md shadow-sm text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500"
+                  >
+                    Go to Product Manager
+                  </button>
+                )}
               </div>
             </div>
           </div>

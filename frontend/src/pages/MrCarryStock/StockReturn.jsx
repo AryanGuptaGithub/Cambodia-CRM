@@ -746,12 +746,6 @@ const StockReturn = () => {
     return returnItem.mrCashDetails?.currentCash || returnItem.currentCash || 0;
   };
 
-  // Check if currentCash is greater than 1000
-  const isCashAboveThreshold = (returnItem) => {
-    const currentCash = getCurrentCash(returnItem);
-    return currentCash > 1000;
-  };
-
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -904,17 +898,8 @@ const StockReturn = () => {
                         </span>
                       </td>
                       <td className="p-3">
-                        <span className={`font-medium ${
-                          currentCash > 1000 
-                            ? "text-green-700" 
-                            : "text-red-600"
-                        }`}>
+                        <span className="font-medium text-green-700">
                           ${formatCurrency(currentCash)}
-                          {currentCash <= 1000 && (
-                            <span className="text-xs text-red-500 block mt-1">
-                              Below $1,000
-                            </span>
-                          )}
                         </span>
                       </td>
                       <td className="p-3">
@@ -1080,17 +1065,8 @@ const StockReturn = () => {
                     <label className="block text-sm font-medium mb-1">
                       Current Cash
                     </label>
-                    <p className={`border rounded-lg px-3 py-2 bg-gray-50 font-medium ${
-                      isCashAboveThreshold(selectedReturn) 
-                        ? "text-green-700" 
-                        : "text-red-600"
-                    }`}>
+                    <p className="border rounded-lg px-3 py-2 bg-gray-50 font-medium text-green-700">
                       ${formatCurrency(getCurrentCash(selectedReturn))}
-                      {!isCashAboveThreshold(selectedReturn) && (
-                        <span className="text-xs text-red-500 block mt-1">
-                          Must be above $1,000 to approve
-                        </span>
-                      )}
                     </p>
                   </div>
                   {selectedReturn.approvedAt && (
@@ -1110,7 +1086,7 @@ const StockReturn = () => {
                       </label>
                       <p className="border rounded-lg px-3 py-2 bg-gray-50">
                         {selectedReturn.rejectedReason}
-                      </p>
+                    </p>
                     </div>
                   )}
                 </div>
@@ -1178,23 +1154,13 @@ const StockReturn = () => {
                             handleStatusUpdate("Rejected", reason);
                           }
                         }}
-                        className="px-5 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                        className="px-5 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 cursor-pointer"
                       >
                         Reject
                       </button>
                       <button
                         onClick={() => handleStatusUpdate("Approved")}
-                        disabled={!isCashAboveThreshold(selectedReturn)}
-                        className={`px-5 py-2 text-white rounded-lg flex items-center gap-2 ${
-                          isCashAboveThreshold(selectedReturn)
-                            ? "bg-green-600 hover:bg-green-700 cursor-pointer"
-                            : "bg-gray-400 cursor-not-allowed"
-                        }`}
-                        title={
-                          !isCashAboveThreshold(selectedReturn)
-                            ? "Current cash must be greater than $1,000 to approve"
-                            : ""
-                        }
+                        className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center gap-2 cursor-pointer"
                       >
                         <CheckCircle size={18} />
                         Approve

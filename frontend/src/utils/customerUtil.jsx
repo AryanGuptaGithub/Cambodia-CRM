@@ -48,24 +48,6 @@ export const validateCustomerForm = (form) => {
   return newErrors;
 };
 
-// API functions
-export const fetchProvinces = async () => {
-  try {
-    const response = await axios.get(`${backendUrl}/api/customers/provinces`);
-    if (response.data.success) {
-      return { success: true, data: response.data.data || [] };
-    } else {
-      return { 
-        success: false, 
-        error: response.data.message || "Failed to fetch provinces" 
-      };
-    }
-  } catch (error) {
-    console.error("Error fetching provinces:", error);
-    return { success: false, error: "Failed to load provinces" };
-  }
-};
-
 export const fetchMRList = async () => {
   try {
     const response = await axios.get(`${backendUrl}/api/staffs`);
@@ -130,6 +112,101 @@ export const fetchHRMSalary = async () => {
   } catch (error) {
     console.error("Error fetching provinces:", error);
     return { success: false, error: "Failed to load provinces" };
+  }
+};
+
+export const fetchProvinces = async () => {
+  try {
+    const res = await fetch(`${backendUrl}/api/customers/provinces`);
+    const json = await res.json();
+
+    let provinces = [];
+
+    // Case 1: already array
+    if (Array.isArray(json)) {
+      provinces = json;
+    }
+
+    // Case 2: { success, data: [...] }
+    else if (json?.success && Array.isArray(json.data)) {
+      provinces = json.data;
+    }
+
+    // Case 3: object → convert to array
+    else if (typeof json === "object") {
+      provinces = Object.entries(json).map(([province, zones]) => ({
+        province,
+        zones: Array.isArray(zones) ? zones : [],
+      }));
+    }
+
+    return {
+      success: true,
+      data: provinces,
+    };
+  } catch (error) {
+    console.error("fetchProvinces error:", error);
+    return { success: false, data: [] };
+  }
+};
+
+// In your customerUtil.js file
+export const fetchZonesByProvince = async (provinceName) => {
+  try {
+    if (!provinceName || provinceName.trim() === "") {
+      console.log("No province name provided, returning empty zones array");
+      return { success: true, data: [] };
+    }
+
+    console.log(`Fetching zones for province: ${provinceName}`);
+    
+    // URL encode the province name to handle special characters
+    const encodedProvinceName = encodeURIComponent(provinceName.trim());
+    
+    const res = await fetch(
+      `${backendUrl}/api/zones/by-province/${encodedProvinceName}`
+    );
+    
+    if (!res.ok) {
+      console.error(`Failed to fetch zones: ${res.status} ${res.statusText}`);
+      return { 
+        success: false, 
+        error: `Failed to fetch zones: ${res.status}`,
+        data: [] 
+      };
+    }
+    
+    const json = await res.json();
+    console.log("Zones API response:", json);
+
+    // Ensure zones is always array - handle different response formats
+    let zones = [];
+    
+    if (Array.isArray(json)) {
+      zones = json;
+    } else if (json && Array.isArray(json.data)) {
+      zones = json.data;
+    } else if (json && json.success && Array.isArray(json.data)) {
+      zones = json.data;
+    } else if (json && json.success && json.data && Array.isArray(json.data.zones)) {
+      zones = json.data.zones;
+    } else if (json && Array.isArray(json.zones)) {
+      zones = json.zones;
+    }
+
+    console.log(`Found ${zones.length} zones for province: ${provinceName}`);
+
+    return {
+      success: true,
+      data: zones,
+    };
+  } catch (error) {
+    console.error("fetchZonesByProvince error:", error);
+    return { 
+      success: false, 
+      error: error.message,
+      data: [] 
+    };
   }
 };
 

@@ -304,7 +304,7 @@ function Purchase() {
               lc: firstBatch.lc || product.lc || 0,
               fob: firstBatch.fob || product.fob || 0,
               cif: firstBatch.cif || product.cif || 0,
-              type: product.type || "Tablet",
+              type: product.type || "",
             });
           }
         });
@@ -456,6 +456,10 @@ function Purchase() {
           // Calculate amount
           const amount = quantityPerBoxStrip * lc;
 
+          // Get product type from product database
+          const productKey = productName.toLowerCase().trim();
+          const productInfo = productMap.get(productKey);
+
           // Create a unique key for grouping: invoiceNumber + supplierName
           const groupKey = `${invoiceNumber}_${supplierName}`;
 
@@ -483,7 +487,7 @@ function Purchase() {
             lc,
             lcNumber: lc,
             remarks,
-            type: "Tablet",
+            type: productInfo?.type || "",
             amount,
           });
         }
@@ -659,6 +663,7 @@ function Purchase() {
     }
   };
 
+  // In fetchPurchaseDetails function, add more detailed logging:
   const fetchPurchaseDetails = async () => {
     try {
       setLoading(true);
@@ -666,6 +671,7 @@ function Purchase() {
 
       if (!purchaseRes.ok) throw new Error("Failed to fetch purchase details");
       const purchaseData = await purchaseRes.json();
+      console.log("Backend purchase data response:", purchaseData);
 
       // Handle different response structures safely
       let purchaseArray = [];
@@ -683,13 +689,26 @@ function Purchase() {
         purchaseArray = purchaseData.result;
       }
 
+      console.log("Processed purchase array:", purchaseArray);
+
       const typeSet = new Set();
       if (Array.isArray(purchaseArray) && purchaseArray.length > 0) {
-        purchaseArray.forEach((purchase) => {
+        purchaseArray.forEach((purchase, purchaseIndex) => {
           // Check if purchase has products array
           if (purchase.products && Array.isArray(purchase.products)) {
-            purchase.products.forEach((product) => {
-              const type = product.productType || product.type;
+            console.log(
+              `Purchase ${purchaseIndex + 1} products:`,
+              purchase.products
+            );
+
+            purchase.products.forEach((product, productIndex) => {
+              console.log(`Product ${productIndex + 1}:`, {
+                productName: product.productName,
+                productType: product.productType,
+                type: product.type,
+              });
+
+              const type = product.productType;
               if (type && type.trim() && type.toLowerCase() !== "unknown") {
                 typeSet.add(type.trim());
               }
@@ -698,6 +717,7 @@ function Purchase() {
         });
       }
 
+      console.log("Extracted types:", Array.from(typeSet));
       setPurchases(purchaseArray);
       setTypes(["All", ...Array.from(typeSet).sort()]);
     } catch (error) {
@@ -1171,7 +1191,9 @@ function Purchase() {
 
     let filtered = invoiceProducts;
     if (selectedTab !== "All") {
-      filtered = invoiceProducts.filter((p) => p.productType === selectedTab);
+      filtered = invoiceProducts.filter(
+        (p) => p.productType === selectedTab || p.type === selectedTab
+      );
     }
 
     if (searchTerm.trim() !== "") {
@@ -1182,7 +1204,8 @@ function Purchase() {
           selectedPurchaseProduct.supplierName
             ?.toLowerCase()
             .includes(lowerSearch) ||
-          p.productType?.toLowerCase().includes(lowerSearch)
+          p.productType?.toLowerCase().includes(lowerSearch) ||
+          p.type?.toLowerCase().includes(lowerSearch)
       );
     }
 
@@ -1563,7 +1586,6 @@ function Purchase() {
                             </button>
                           </div>
 
-                          {/* Product Details - Conditionally Rendered */}
                           {expandedProductIndex === index && (
                             <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
                               {[
@@ -1883,11 +1905,16 @@ function Purchase() {
                             const uniqueTypes = [
                               ...new Set(
                                 invoiceProducts
-                                  .map((p) => p?.productType)
+                                  .map((p) => p?.productType || p?.type)
                                   .filter(Boolean)
                               ),
                             ];
-
+                            {
+                              console.log("1896", uniqueTypes);
+                            }
+                            {
+                              console.log("invoiceProducts", invoiceProducts);
+                            }
                             return ["All", ...uniqueTypes].map(
                               (type, typeIndex) => (
                                 <button
@@ -1958,15 +1985,19 @@ function Purchase() {
                               <td className="p-3 whitespace-nowrap min-w-[120px]">
                                 <span
                                   className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                    product.productType === "physical"
+                                    product.productType === "physical" ||
+                                    product.type === "physical"
                                       ? "bg-blue-100 text-blue-800"
-                                      : product.productType === "digital"
+                                      : product.productType === "digital" ||
+                                        product.type === "digital"
                                       ? "bg-purple-100 text-purple-800"
                                       : "bg-green-100 text-green-800"
                                   }`}
                                 >
                                   {capitalizeFirstLetter(
-                                    product.productType || "unknown"
+                                    product.productType ||
+                                      product.type ||
+                                      "unknown"
                                   )}
                                 </span>
                               </td>

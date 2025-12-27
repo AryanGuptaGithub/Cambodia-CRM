@@ -20,6 +20,7 @@ import {
   CreditCard,
   Truck,
   Clock,
+  PackageCheck,
 } from "lucide-react";
 import ReactDOM from "react-dom";
 import SampleExcelDownloadSale from "../../excels/SampleExcelDownloadSale";
@@ -551,8 +552,7 @@ const ImportSalesModal = ({
       const { sessionId: newSessionId } = res.data;
       setSessionId(newSessionId);
       setImportStep("Import started – processing invoices...");
-      showToast("info", "Import started on server");
-
+      
       // Fast polling every 800ms for smooth progress
       pollingIntervalRef.current = setInterval(async () => {
         try {
@@ -1136,6 +1136,9 @@ const Sales = () => {
   const [selectedSaleProducts, setSelectedSaleProducts] = useState([]);
   const [mrList, setMrList] = useState([]);
   const [customerList, setCustomerList] = useState([]);
+  const [hasPurchaseInventories, setHasPurchaseInventories] = useState(false);
+  const [checkingPurchaseInventories, setCheckingPurchaseInventories] = useState(true);
+  const [shouldCheckPurchase, setShouldCheckPurchase] = useState(true); // NEW: Control when to check
   const inputRef = useRef(null);
   const { statuses, loading } = useInitialSaleData();
 
@@ -1160,6 +1163,53 @@ const Sales = () => {
   });
 
   const SALES_PER_PAGE = 9;
+
+  // Function to check if purchase inventories exist
+  const checkPurchaseInventories = async () => {
+    try {
+      setCheckingPurchaseInventories(true);
+      const response = await axios.get(`${backendUrl}/api/purchases/check`);
+      console.log("Purchase inventory check response:", response.data);
+      setHasPurchaseInventories(response.data.exists || response.data.count > 0);
+    } catch (error) {
+      console.error("Error checking purchase inventories:", error);
+      setHasPurchaseInventories(false);
+    } finally {
+      setCheckingPurchaseInventories(false);
+    }
+  };
+
+  // NEW: Re-check purchase inventories when needed
+  const recheckPurchaseInventories = () => {
+    setShouldCheckPurchase(true);
+  };
+
+  // Modified useEffect to check purchase inventories
+  useEffect(() => {
+    if (shouldCheckPurchase) {
+      checkPurchaseInventories();
+      setShouldCheckPurchase(false);
+    }
+  }, [shouldCheckPurchase]);
+
+  // Also check when component mounts
+  useEffect(() => {
+    checkPurchaseInventories();
+  }, []);
+
+  // NEW: Listen for custom event when purchase inventory is added
+  useEffect(() => {
+    const handlePurchaseInventoryAdded = () => {
+      console.log("Purchase inventory added event received");
+      recheckPurchaseInventories();
+    };
+
+    window.addEventListener('purchase-inventory-added', handlePurchaseInventoryAdded);
+    
+    return () => {
+      window.removeEventListener('purchase-inventory-added', handlePurchaseInventoryAdded);
+    };
+  }, []);
 
   const processSalesData = (data) => {
     const salesData = data.summaries || data.data || data;
@@ -1556,6 +1606,25 @@ const filteredSales = useMemo(() => {
 
     return !hasMRs && !hasCustomers;
   }, [mrList, customerList]);
+
+  // Combine all conditions for disabling buttons
+  const shouldDisableButtons = useMemo(() => {
+    return checkingPurchaseInventories || !hasPurchaseInventories || showMRCustomerWarning;
+  }, [checkingPurchaseInventories, hasPurchaseInventories, showMRCustomerWarning]);
+
+  // Get appropriate button title
+  const getButtonTitle = () => {
+    if (checkingPurchaseInventories) {
+      return "Checking purchase inventories...";
+    }
+    if (!hasPurchaseInventories) {
+      return "First purchase the entry enter then sale";
+    }
+    if (showMRCustomerWarning) {
+      return "Please add MR and Customer data first";
+    }
+    return "Create new sale";
+  };
 
   if (loading) return <LoadingOverlay text="Please wait..." />;
 
@@ -2184,12 +2253,8 @@ const filteredSales = useMemo(() => {
             <button
               className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={() => navigate("/salelayout/sale/new")}
-              disabled={showMRCustomerWarning}
-              title={
-                showMRCustomerWarning
-                  ? "Please add MR and Customer data first"
-                  : "Create new sale"
-              }
+              disabled={shouldDisableButtons}
+              title={getButtonTitle()}
             >
               <UserPlus size={18} /> Add New Sales
             </button>
@@ -2197,12 +2262,8 @@ const filteredSales = useMemo(() => {
             <button
               onClick={() => setShowImportModal(true)}
               className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={showMRCustomerWarning}
-              title={
-                showMRCustomerWarning
-                  ? "Please add MR and Customer data first"
-                  : "Import sales data"
-              }
+              disabled={shouldDisableButtons}
+              title={getButtonTitle()}
             >
               <Upload size={18} /> Import Sales
             </button>
@@ -2227,7 +2288,31 @@ const filteredSales = useMemo(() => {
           )}
         </div>
 
-        {showMRCustomerWarning && (
+        {/* Purchase Inventories Warning */}
+        {!checkingPurchaseInventories && !hasPurchaseInventories && (
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <div className="flex items-start gap-3">
+              <PackageCheck className="text-red-600 mt-0.5 flex-shrink-0" size={20} />
+              <div>
+                <h3 className="font-medium text-red-800 mb-1">
+                  Purchase Inventory Required
+                </h3>
+                <p className="text-sm text-red-700">
+                  Please add purchase inventory entries first before creating or importing sales.
+                  <button 
+                    onClick={recheckPurchaseInventories}
+                    className="ml-2 text-red-800 underline hover:text-red-900 cursor-pointer"
+                  >
+                    Click here to re-check
+                  </button>
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MR/Customer Warning - Only show if purchase inventories exist */}
+        {!checkingPurchaseInventories && hasPurchaseInventories && showMRCustomerWarning && (
           <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
             <div className="flex items-start gap-3">
               <AlertCircle

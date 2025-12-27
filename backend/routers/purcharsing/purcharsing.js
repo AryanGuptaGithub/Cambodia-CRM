@@ -13,10 +13,10 @@ const normalizeProductName = (name) => {
   return name
     .trim()
     .toLowerCase()
-    .replace(/\s+/g, " ")                    // Multiple spaces → single
-    .replace(/[-_\/\\]/g, " ")               // Dashes, slashes → space
-    .replace(/alu\s*alu/gi, "alu alu")       // Standardize ALU ALU variations
-    .replace(/[^a-z0-9\s]/g, "")             // Remove remaining special chars
+    .replace(/\s+/g, " ") // Multiple spaces → single
+    .replace(/[-_\/\\]/g, " ") // Dashes, slashes → space
+    .replace(/alu\s*alu/gi, "alu alu") // Standardize ALU ALU variations
+    .replace(/[^a-z0-9\s]/g, "") // Remove remaining special chars
     .trim();
 };
 
@@ -48,13 +48,14 @@ const productNameFixMap = {
   "n krill oil": "N-KRILL OIL",
   "krill oil": "N-KRILL OIL",
 
-  "n sea buckthorn & oil lutein extract": "N-SEA BUCKTHORN & OIL LUTEIN EXTRACT",
+  "n sea buckthorn & oil lutein extract":
+    "N-SEA BUCKTHORN & OIL LUTEIN EXTRACT",
   "sea buckthorn & oil lutein extract": "N-SEA BUCKTHORN & OIL LUTEIN EXTRACT",
 
   "ecomol 500": "ECOMOL 500",
-  "ecomol500": "ECOMOL 500",
+  ecomol500: "ECOMOL 500",
   "ecomol-500": "ECOMOL 500",
-  "ecomol": "ECOMOL 500",
+  ecomol: "ECOMOL 500",
 
   // 🔥 NEW: ALU ALU ECOCID 20 variations
   "alu alu ecocid 20": "ALU ALU ECOCID 20",
@@ -68,7 +69,10 @@ const productNameFixMap = {
 
 const getStrictNormalizedProductName = (name) => {
   if (!name) return "";
-  return name.toLowerCase().replace(/[^a-z0-9]/g, "").trim();
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .trim();
 };
 
 const findProductInReportInHand = async (productName) => {
@@ -79,17 +83,17 @@ const findProductInReportInHand = async (productName) => {
     // 1. Try exact match on fixed name
     let item = await ReportInHand.findOne({
       productName: { $regex: new RegExp(`^${fixedName}$`, "i") },
-    });
+    }).lean();
     if (item) return item;
 
     // 2. Try contains match on fixed name
     item = await ReportInHand.findOne({
       productName: { $regex: fixedName, $options: "i" },
-    });
+    }).lean();
     if (item) return item;
 
     // 3. Scan all items for tolerant match
-    const allItems = await ReportInHand.find({});
+    const allItems = await ReportInHand.find({}).lean();
     for (const doc of allItems) {
       const normalizedDoc = normalizeProductName(doc.productName);
       if (
@@ -102,15 +106,24 @@ const findProductInReportInHand = async (productName) => {
     }
 
     // 4. Special ALU ALU + ECOCID fallback
-    if (normalizedInput.includes("alu alu") && normalizedInput.includes("ecocid")) {
+    if (
+      normalizedInput.includes("alu alu") &&
+      normalizedInput.includes("ecocid")
+    ) {
       return await ReportInHand.findOne({
-        productName: { $regex: "alu alu.*ecocid|ecocid.*alu alu", $options: "i" },
-      });
+        productName: {
+          $regex: "alu alu.*ecocid|ecocid.*alu alu",
+          $options: "i",
+        },
+      }).lean();
     }
 
     return null;
   } catch (error) {
-    console.error(`Error finding "${productName}" in ReportInHand:`, error.message);
+    console.error(
+      `Error finding "${productName}" in ReportInHand:`,
+      error.message
+    );
     return null;
   }
 };
@@ -128,6 +141,7 @@ const filterReportsWithBatches = (reports) => {
   );
 };
 
+// FIXED: Completely rewritten updateReportInHand to avoid session issues
 const updateReportInHand = async (productData, operation = "add") => {
   try {
     const {
@@ -151,34 +165,13 @@ const updateReportInHand = async (productData, operation = "add") => {
 
     // Normalize and fix product name
     const normalized = normalizeProductName(productName);
-    const fixedProductName = productNameFixMap[normalized] || productName.trim();
+    const fixedProductName =
+      productNameFixMap[normalized] || productName.trim();
 
-    // Find existing item
-    let item = await findProductInReportInHand(fixedProductName);
-
-    // Create new if adding and not found
-    if (operation === "add" && !item) {
-      item = new ReportInHand({
-        productName: fixedProductName,
-        supplierName: validSupplier,
-        type: type || "Tablet",
-        batches: [],
-        totalBoxes: 0,
-        totalAmount: 0,
-        status: "Out of Stock",
-      });
-    }
-
-    // If subtracting and not found → skip
-    if (operation === "subtract" && !item) {
-      console.warn(`Cannot subtract: "${fixedProductName}" not found in ReportInHand`);
-      return;
-    }
-
-    // ADD: Push new batch
+    // Use atomic operations instead of document manipulation
     if (operation === "add") {
       const amount = qty * (lc || 0);
-      item.batches.push({
+      const newBatch = {
         boxes: qty,
         lc: lc || 0,
         fob: fob || 0,
@@ -186,46 +179,112 @@ const updateReportInHand = async (productData, operation = "add") => {
         amount,
         expiryDate: expiryDate ? new Date(expiryDate) : null,
         date: new Date(),
-      });
-    }
+      };
 
-    // SUBTRACT: FIFO deduction
-    if (operation === "subtract") {
+      // Try to find and update existing document
+      const existingDoc = await ReportInHand.findOne({
+        productName: { $regex: new RegExp(`^${fixedProductName}$`, "i") },
+      }).lean();
+
+      if (existingDoc) {
+        // Update existing document
+        const updatedBatches = [...(existingDoc.batches || []), newBatch];
+        const totalBoxes = updatedBatches.reduce((sum, b) => sum + (b.boxes || 0), 0);
+        const totalAmount = updatedBatches.reduce((sum, b) => sum + (b.amount || 0), 0);
+        
+        await ReportInHand.updateOne(
+          { _id: existingDoc._id },
+          {
+            $set: {
+              batches: updatedBatches,
+              totalBoxes,
+              totalAmount,
+              status: calculateStockStatus(totalBoxes),
+            }
+          }
+        );
+      } else {
+        // Create new document
+        await ReportInHand.create({
+          productName: fixedProductName,
+          supplierName: validSupplier,
+          type: type || "",
+          batches: [newBatch],
+          totalBoxes: qty,
+          totalAmount: amount,
+          status: calculateStockStatus(qty),
+        });
+      }
+
+    } else if (operation === "subtract") {
+      // For subtraction, find the document first
+      const item = await ReportInHand.findOne({
+        productName: { $regex: new RegExp(`^${fixedProductName}$`, "i") }
+      }).lean();
+
+      if (!item) {
+        console.warn(`Cannot subtract: "${fixedProductName}" not found in ReportInHand`);
+        return;
+      }
+
       if (!item.batches || item.batches.length === 0) {
         console.warn(`No batches to subtract from for "${fixedProductName}"`);
         return;
       }
 
+      // Create a copy of batches and sort by date (FIFO)
+      const sortedBatches = [...item.batches].sort((a, b) => new Date(a.date) - new Date(b.date));
       let remaining = qty;
-      item.batches.sort((a, b) => new Date(a.date) - new Date(b.date)); // FIFO
+      const updatedBatches = [];
 
-      const batchesCopy = [...item.batches];
-      for (let i = 0; i < batchesCopy.length && remaining > 0; i++) {
-        const batch = batchesCopy[i];
+      for (const batch of sortedBatches) {
+        if (remaining <= 0) {
+          updatedBatches.push(batch);
+          continue;
+        }
+
         if (batch.boxes > remaining) {
-          batch.boxes -= remaining;
-          batch.amount = batch.boxes * (batch.lc || 0);
+          // Partial deduction
+          const newBoxes = batch.boxes - remaining;
+          const newAmount = newBoxes * (batch.lc || 0);
+          updatedBatches.push({
+            ...batch,
+            boxes: newBoxes,
+            amount: newAmount
+          });
           remaining = 0;
         } else {
+          // Full deduction
           remaining -= batch.boxes;
-          batch.boxes = 0;
-          batch.amount = 0;
+          // Don't push this batch (it's fully consumed)
         }
       }
 
-      item.batches = batchesCopy.filter((b) => b.boxes > 0);
-    }
+      // Filter out batches with 0 boxes
+      const finalBatches = updatedBatches.filter(b => b.boxes > 0);
+      
+      // Calculate new totals
+      const totalBoxes = finalBatches.reduce((sum, b) => sum + (b.boxes || 0), 0);
+      const totalAmount = finalBatches.reduce((sum, b) => sum + (b.amount || 0), 0);
+      const status = calculateStockStatus(totalBoxes);
 
-    // Recalculate totals
-    item.totalBoxes = item.batches.reduce((sum, b) => sum + (b.boxes || 0), 0);
-    item.totalAmount = item.batches.reduce((sum, b) => sum + (b.amount || 0), 0);
-    item.status = calculateStockStatus(item.totalBoxes);
-
-    // Delete if empty
-    if (item.totalBoxes <= 0) {
-      await ReportInHand.findByIdAndDelete(item._id);
-    } else {
-      await item.save();
+      if (totalBoxes <= 0) {
+        // Delete if empty
+        await ReportInHand.findByIdAndDelete(item._id);
+      } else {
+        // Update with new batches and totals
+        await ReportInHand.updateOne(
+          { _id: item._id },
+          {
+            $set: {
+              batches: finalBatches,
+              totalBoxes,
+              totalAmount,
+              status
+            }
+          }
+        );
+      }
     }
   } catch (err) {
     console.error("updateReportInHand ERROR:", err.message || err);
@@ -237,7 +296,8 @@ router.get("/purchase-invoice", async (req, res) => {
     const invoices = await purchaseInventory
       .find()
       .sort({ invoiceDate: -1 })
-      .select("invoiceNumber invoiceDate supplierName totalAmount");
+      .select("invoiceNumber invoiceDate supplierName totalAmount")
+      .lean();
 
     res.json(invoices);
   } catch (err) {
@@ -247,40 +307,61 @@ router.get("/purchase-invoice", async (req, res) => {
 
 router.get("/purchase", async (req, res) => {
   try {
-    const purchases = await purchaseInventory.find().sort({ createdAt: -1 });
+    const purchases = await purchaseInventory
+      .find()
+      .sort({ createdAt: -1 })
+      .lean(); // Use lean() to get plain objects
 
     const productList = await Product.find(
       {},
       "productName type packing qtyPerBoxStrip sellingPrice batches"
-    );
+    ).lean();
 
+    // 🔹 Build product map with normalized names
     const productMap = new Map();
-    productList.forEach((p) => {
-      if (p.productName) {
-        const normalizedKey = normalizeProductName(p.productName);
-        productMap.set(normalizedKey, p);
+    productList.forEach((prod) => {
+      if (prod.productName) {
+        // Normalize product name for matching
+        const normalizedKey = normalizeProductName(prod.productName);
+        productMap.set(normalizedKey, prod);
       }
     });
 
     const enhancedPurchases = purchases.map((invoice) => {
       const enhancedProducts = invoice.products.map((p) => {
+        // Normalize the purchase product name
         const normalizedProductName = normalizeProductName(p.productName);
+        
+        // Find matching product in database
         const productInfo = productMap.get(normalizedProductName);
+        
+        // Try to find product with exact match first, then try partial match
+        let matchedProduct = productInfo;
+        if (!matchedProduct) {
+          // Try to find by partial match
+          for (const [key, prod] of productMap.entries()) {
+            if (normalizedProductName.includes(key) || key.includes(normalizedProductName)) {
+              matchedProduct = prod;
+              break;
+            }
+          }
+        }
 
         return {
-          ...p.toObject(),
-          productType: p.type || productInfo?.type || "Tablet",
-          productPacking: productInfo?.packing || "",
-          productQtyPerBoxStrip: productInfo?.qtyPerBoxStrip || 0,
-          sellingPrice: p.sellingPrice || productInfo?.sellingPrice || 0,
-          fob: p.fob || productInfo?.batches?.[0]?.fob || 0,
-          cif: p.cif || productInfo?.batches?.[0]?.cif || 0,
-          lc: p.lc || productInfo?.batches?.[0]?.lc || 0,
+          ...p,
+          // Get type from matched product database, fallback to purchase product type or empty
+          productType: matchedProduct?.type || p?.type || "",
+          productPacking: matchedProduct?.packing || "",
+          productQtyPerBoxStrip: matchedProduct?.qtyPerBoxStrip || 0,
+          sellingPrice: p.sellingPrice || matchedProduct?.sellingPrice || 0,
+          fob: p.fob || matchedProduct?.batches?.[0]?.fob || 0,
+          cif: p.cif || matchedProduct?.batches?.[0]?.cif || 0,
+          lc: p.lc || matchedProduct?.batches?.[0]?.lc || 0,
         };
       });
 
       return {
-        ...invoice.toObject(),
+        ...invoice,
         products: enhancedProducts,
       };
     });
@@ -300,21 +381,12 @@ router.put("/purchase/:id", async (req, res) => {
   try {
     const id = req.params.id;
 
-    const oldInvoice = await purchaseInventory.findById(id);
+    const oldInvoice = await purchaseInventory.findById(id).lean();
     if (!oldInvoice) return res.status(404).json({ message: "Not found" });
 
-    const oldProducts = JSON.parse(JSON.stringify(oldInvoice.products));
+    const oldProducts = oldInvoice.products || [];
 
-    const updated = await purchaseInventory.findByIdAndUpdate(id, req.body, {
-      new: true,
-      runValidators: true,
-    });
-
-    if (!updated) {
-      return res.status(404).json({ message: "Invoice not found after update" });
-    }
-
-    // Subtract old products
+    // First update ReportInHand by subtracting old products
     for (const oldProduct of oldProducts) {
       await updateReportInHand(
         {
@@ -325,14 +397,91 @@ router.put("/purchase/:id", async (req, res) => {
           fob: oldProduct.fob || 0,
           cif: oldProduct.cif || 0,
           expiryDate: oldProduct.expiryDate,
-          type: oldProduct.type || "Tablet",
+          type: oldProduct.type || "",
         },
         "subtract"
       );
     }
 
-    // Add new products
-    for (const newProduct of updated.products) {
+    // Prepare new products data
+    const newProducts = req.body.products || [];
+    let totalAmount = 0;
+
+    // Process product IDs if they exist
+    const productIds = newProducts.map((p) => p.productId).filter((id) => id);
+    const productsInfo = await Product.find(
+      { _id: { $in: productIds } },
+      "productName type batches"
+    ).lean();
+
+    const productTypeMap = new Map();
+    const productBatchMap = new Map();
+    const productNameMap = new Map();
+
+    productsInfo.forEach((p) => {
+      if (p._id) {
+        productTypeMap.set(p._id.toString(), p.type || "");
+        if (p.batches && p.batches.length > 0) {
+          productBatchMap.set(p._id.toString(), p.batches[0]);
+        }
+        productNameMap.set(p._id.toString(), p.productName);
+      }
+    });
+
+    const processedProducts = newProducts.map((p) => {
+      const qty = Number(p.quantityPerBoxStrip || 0);
+      const productBatch = productBatchMap.get(p.productId);
+
+      const lc = Number(p.lc) || productBatch?.lc || 0;
+      const fob = Number(p.fob) || productBatch?.fob || 0;
+      const cif = Number(p.cif) || productBatch?.cif || 0;
+      const amount = qty * lc;
+
+      totalAmount += amount;
+
+      let productNameToUse = p.productName;
+      if (p.productId && productNameMap.has(p.productId.toString())) {
+        productNameToUse = productNameMap.get(p.productId.toString());
+      } else {
+        const normalized = normalizeProductName(p.productName);
+        productNameToUse = productNameFixMap[normalized] || p.productName;
+      }
+
+      return {
+        productName: productNameToUse,
+        type: p.type || productTypeMap.get(p.productId) || "",
+        expiryDate: p.expiryDate ? new Date(p.expiryDate) : null,
+        quantityPerBoxStrip: qty,
+        lc,
+        fob,
+        cif,
+        amount,
+      };
+    });
+
+    // Now update the purchase inventory
+    const updated = await purchaseInventory.findByIdAndUpdate(
+      id,
+      {
+        ...req.body,
+        products: processedProducts,
+        totalAmount,
+      },
+      {
+        new: true,
+        runValidators: true,
+        lean: true // Return plain object
+      }
+    );
+
+    if (!updated) {
+      return res
+        .status(404)
+        .json({ message: "Invoice not found after update" });
+    }
+
+    // Add new products to ReportInHand
+    for (const newProduct of processedProducts) {
       await updateReportInHand(
         {
           productName: newProduct.productName || "",
@@ -342,7 +491,7 @@ router.put("/purchase/:id", async (req, res) => {
           fob: newProduct.fob || 0,
           cif: newProduct.cif || 0,
           expiryDate: newProduct.expiryDate,
-          type: newProduct.type || "Tablet",
+          type: newProduct.type || "",
         },
         "add"
       );
@@ -357,7 +506,7 @@ router.put("/purchase/:id", async (req, res) => {
 
 router.delete("/purchase/:id", async (req, res) => {
   try {
-    const invoice = await purchaseInventory.findById(req.params.id);
+    const invoice = await purchaseInventory.findById(req.params.id).lean();
     if (!invoice) return res.status(404).json({ error: "Not found" });
 
     for (const p of invoice.products) {
@@ -370,13 +519,13 @@ router.delete("/purchase/:id", async (req, res) => {
           fob: p.fob || 0,
           cif: p.cif || 0,
           expiryDate: p.expiryDate,
-          type: p.type || "Tablet",
+          type: p.type || "",
         },
         "subtract"
       );
     }
 
-    await purchaseInventory.findByIdAndDelete(invoice._id);
+    await purchaseInventory.findByIdAndDelete(req.params.id);
     res.json({ message: "Deleted successfully" });
   } catch (err) {
     console.error("Delete purchase error:", err);
@@ -397,7 +546,7 @@ router.delete("/purchase", async (req, res) => {
       });
     }
 
-    const invoices = await purchaseInventory.find({ _id: { $in: ids } });
+    const invoices = await purchaseInventory.find({ _id: { $in: ids } }).lean();
 
     if (invoices.length === 0) {
       return res.status(404).json({
@@ -417,12 +566,15 @@ router.delete("/purchase", async (req, res) => {
               fob: p.fob || 0,
               cif: p.cif || 0,
               expiryDate: p.expiryDate,
-              type: p.type || "Tablet",
+              type: p.type || "",
             },
             "subtract"
           );
         } catch (productError) {
-          console.error(`Error processing product ${p.productName}:`, productError);
+          console.error(
+            `Error processing product ${p.productName}:`,
+            productError
+          );
         }
       }
     }
@@ -446,7 +598,11 @@ router.delete("/purchase", async (req, res) => {
 router.post("/purchase", async (req, res) => {
   try {
     const data = req.body;
-    if (!data.invoiceNumber || !data.supplierName || !Array.isArray(data.products)) {
+    if (
+      !data.invoiceNumber ||
+      !data.supplierName ||
+      !Array.isArray(data.products)
+    ) {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
@@ -467,7 +623,7 @@ router.post("/purchase", async (req, res) => {
     const productsInfo = await Product.find(
       { _id: { $in: productIds } },
       "productName type batches"
-    );
+    ).lean();
 
     const productTypeMap = new Map();
     const productBatchMap = new Map();
@@ -475,7 +631,7 @@ router.post("/purchase", async (req, res) => {
 
     productsInfo.forEach((p) => {
       if (p._id) {
-        productTypeMap.set(p._id.toString(), p.type || "Tablet");
+        productTypeMap.set(p._id.toString(), p.type || "");
         if (p.batches && p.batches.length > 0) {
           productBatchMap.set(p._id.toString(), p.batches[0]);
         }
@@ -504,7 +660,7 @@ router.post("/purchase", async (req, res) => {
 
       return {
         productName: productNameToUse,
-        type: p.type || productTypeMap.get(p.productId) || "Tablet",
+        type: p.type || productTypeMap.get(p.productId) || "",
         expiryDate: p.expiryDate ? new Date(p.expiryDate) : null,
         quantityPerBoxStrip: qty,
         lc,
@@ -569,7 +725,7 @@ router.post("/purchase/import", async (req, res) => {
     }
 
     // 🔥 FIXED: Fetch all products with enhanced matching
-    const allProducts = await Product.find({}, "productName type batches");
+    const allProducts = await Product.find({}, "productName type batches").lean();
     const productMap = new Map();
 
     allProducts.forEach((product) => {
@@ -587,7 +743,8 @@ router.post("/purchase/import", async (req, res) => {
     // Get the last invoice number from database to start incrementing from there
     const lastInvoice = await purchaseInventory
       .findOne({}, { invoiceNumber: 1 })
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
 
     let invoiceCounter = 1;
     if (lastInvoice && lastInvoice.invoiceNumber) {
@@ -648,14 +805,15 @@ router.post("/purchase/import", async (req, res) => {
 
           // 🔥 FIXED: Use enhanced product name matching
           const normalizedInput = normalizeProductName(product.productName);
-          const fixedInputName = productNameFixMap[normalizedInput] || normalizedInput;
+          const fixedInputName =
+            productNameFixMap[normalizedInput] || normalizedInput;
           const productInfo = productMap.get(fixedInputName.toLowerCase());
 
           let productNameToUse = product.productName;
           if (productInfo) {
             // Use the exact product name from the database
             productNameToUse = productInfo.productName;
-            
+
             // Get missing values from product database
             if (fob === 0) fob = productInfo.batches?.[0]?.fob || 0;
             if (cif === 0) cif = productInfo.batches?.[0]?.cif || 0;
@@ -669,7 +827,7 @@ router.post("/purchase/import", async (req, res) => {
 
           return {
             productName: productNameToUse,
-            type: product.type || productInfo?.type || "Tablet",
+            type: product.type || productInfo?.type || "",
             expiryDate: product.expiryDate
               ? new Date(product.expiryDate)
               : null,
@@ -755,7 +913,7 @@ router.post("/purchase/import", async (req, res) => {
 // Get reports in hand
 router.get("/reports-in-hand", async (req, res) => {
   try {
-    const reports = await ReportInHand.find().sort({ createdAt: -1 });
+    const reports = await ReportInHand.find().sort({ createdAt: -1 }).lean();
     const filteredReports = filterReportsWithBatches(reports);
     res.status(200).json({
       success: true,
@@ -905,7 +1063,7 @@ router.post("/reports-in-hand/download-excel", async (req, res) => {
       const row = worksheet.addRow([
         item.productName,
         item.supplierName,
-        item.type || "Tablet",
+        item.type || "",
         item.batchData.date
           ? dayjs(item.batchData.date).format("DD/MM/YYYY")
           : "",
@@ -1029,11 +1187,10 @@ router.post("/reports-in-hand/download-excel", async (req, res) => {
   }
 });
 
-// Download purchase excel
+// Download purchase excel - FIXED VERSION
 router.post("/purchases/download-excel", async (req, res) => {
   try {
     const { startDate, endDate } = req.body;
-
     if (!startDate || !endDate) {
       return res.status(400).json({
         success: false,
@@ -1043,7 +1200,8 @@ router.post("/purchases/download-excel", async (req, res) => {
 
     const start = new Date(startDate);
     const end = new Date(endDate);
-
+    // Set end date to end of day
+    end.setHours(23, 59, 59, 999);
     const purchases = await purchaseInventory
       .find({
         invoiceDate: { $gte: start, $lte: end },
@@ -1051,7 +1209,7 @@ router.post("/purchases/download-excel", async (req, res) => {
       .lean();
 
     if (purchases.length === 0) {
-      return res.status(404).json({
+      return res.status(200).json({
         success: false,
         message: "No purchases found for selected date range",
       });
@@ -1097,29 +1255,46 @@ router.post("/purchases/download-excel", async (req, res) => {
       { width: 20 },
     ];
 
-    purchases.forEach((purchase) => {
-      purchase.products.forEach((p) => {
-        worksheet.addRow([
-          purchase.invoiceNumber,
-          dayjs(purchase.invoiceDate).format("DD/MM/YYYY"),
-          purchase.deliveryNumber,
-          dayjs(purchase.receivedDate).format("DD/MM/YYYY"),
-          p.productName,
-          p.type || "Tablet",
-          purchase.supplierName,
-          p.expiryDate ? dayjs(p.expiryDate).format("DD/MM/YYYY") : "",
-          p.quantityPerBoxStrip,
-          p.fob,
-          p.cif,
-          p.lc,
-          p.amount ?? Number(p.quantityPerBoxStrip) * Number(p.lc || 0),
-          purchase.remarks || "",
-        ]);
-      });
+    let totalRows = 0;
+    purchases.forEach((purchase, purchaseIndex) => {
+      if (purchase.products && Array.isArray(purchase.products)) {
+        purchase.products.forEach((product, productIndex) => {
+          // Calculate amount if not provided
+          const quantity = Number(product.quantityPerBoxStrip) || 0;
+          const lc = Number(product.lc) || 0;
+          const amount = product.amount || quantity * lc;
+
+          const rowData = [
+            purchase.invoiceNumber || "",
+            purchase.invoiceDate
+              ? dayjs(purchase.invoiceDate).format("DD/MM/YYYY")
+              : "",
+            purchase.deliveryNumber || "",
+            purchase.receivedDate
+              ? dayjs(purchase.receivedDate).format("DD/MM/YYYY")
+              : "",
+            product.productName || "",
+            product.type || "",
+            purchase.supplierName || "",
+            product.expiryDate
+              ? dayjs(product.expiryDate).format("DD/MM/YYYY")
+              : "",
+            quantity,
+            product.fob || 0,
+            product.cif || 0,
+            lc,
+            amount,
+            purchase.remarks || "",
+          ];
+
+          worksheet.addRow(rowData);
+          totalRows++;
+        });
+      }
     });
 
-    worksheet.eachRow((row) => {
-      row.eachCell((cell) => {
+    worksheet.eachRow((row, rowNumber) => {
+      row.eachCell((cell, colNumber) => {
         cell.border = {
           top: { style: "thin" },
           left: { style: "thin" },
@@ -1140,13 +1315,23 @@ router.post("/purchases/download-excel", async (req, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
 
     await workbook.xlsx.write(res);
-    res.end();
   } catch (error) {
-    console.error("Error generating purchase Excel:", error);
+    console.error("🔥 38. Error occurred in purchase download-excel endpoint:");
+    console.error("🔥 39. Error message:", error.message);
+    console.error("🔥 40. Error stack:", error.stack);
+
+    if (error.code) {
+      console.error("🔥 41. Error code:", error.code);
+    }
+
     res.status(500).json({
       success: false,
       message: "Failed to generate purchase excel file",
-      error: error.message,
+      error:
+        process.env.NODE_ENV === "development"
+          ? error.message
+          : "Internal server error",
+      timestamp: new Date().toISOString(),
     });
   }
 });
@@ -1160,15 +1345,12 @@ router.get("/debug/purchase-product-match/:productName", async (req, res) => {
     // Search in Product collection
     const productMatches = await Product.find({
       productName: { $regex: productName, $options: "i" },
-    });
-
-    // Search with enhanced finder
-    const foundProduct = await findProductInProducts(productName);
+    }).lean();
 
     // Search in ReportInHand
     const reportInHandMatches = await ReportInHand.find({
       productName: { $regex: productName, $options: "i" },
-    });
+    }).lean();
 
     res.json({
       searchTerm: productName,
@@ -1180,14 +1362,6 @@ router.get("/debug/purchase-product-match/:productName", async (req, res) => {
         type: p.type,
         batches: p.batches,
       })),
-      foundByEnhancedFinder: foundProduct
-        ? {
-            id: foundProduct._id,
-            productName: foundProduct.productName,
-            type: foundProduct.type,
-            batches: foundProduct.batches,
-          }
-        : null,
       reportInHandMatches: reportInHandMatches.map((p) => ({
         id: p._id,
         productName: p.productName,
@@ -1197,16 +1371,39 @@ router.get("/debug/purchase-product-match/:productName", async (req, res) => {
           0,
         supplierName: p.supplierName,
       })),
-      allProductsInProductCollection: (await Product.find({}))
+      allProductsInProductCollection: (await Product.find({}).lean())
         .map((p) => p.productName)
         .slice(0, 20), // First 20 products
-      allProductsInReportInHand: (await ReportInHand.find({}))
+      allProductsInReportInHand: (await ReportInHand.find({}).lean())
         .map((p) => p.productName)
         .slice(0, 20), // First 20 products
     });
   } catch (error) {
     console.error("Purchase debug error:", error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+router.get("/purchases/check", async (req, res) => {
+  try {
+    const count = await purchaseInventory.countDocuments();
+
+    res.status(200).json({
+      success: true,
+      exists: count > 0,
+      count: count,
+      message:
+        count > 0
+          ? "Purchase inventories found"
+          : "No purchase inventories found",
+    });
+  } catch (error) {
+    console.error("Error checking purchase inventories:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error checking purchase inventories",
+      error: error.message,
+    });
   }
 });
 

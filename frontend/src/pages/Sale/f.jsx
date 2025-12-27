@@ -524,8 +524,7 @@ const ImportSalesModal = ({
       const { sessionId: newSessionId } = res.data;
       setSessionId(newSessionId);
       setImportStep("Import started – processing invoices...");
-      showToast("info", "Import started on server");
-
+      
       pollingIntervalRef.current = setInterval(async () => {
         try {
           const progRes = await axios.get(

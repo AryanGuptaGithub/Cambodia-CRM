@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 import StockReturn from "../../models/stock/StockReturn.js";
 import StockInMrHand from "../../models/stock/StockInMRHand.js";
 import MRCash from "../../models/accounts/MRCash.js";
-
+import MR from "../../models/staffMember/staff.js"; // Add this import - adjust path as needed
 
 const router = express.Router();
 
@@ -25,9 +25,7 @@ const generateReturnId = async () => {
   return `${prefix}${year}${month}${sequence.toString().padStart(4, "0")}`;
 };
 
-// -----------------------------
-// 🔥 FUNCTION: CLEAN USER INPUT
-// -----------------------------
+// Clean string helper
 const cleanString = (str) => {
   if (!str) return "";
   return str
@@ -37,8 +35,7 @@ const cleanString = (str) => {
     .toLowerCase();
 };
 
-// ----------------------------------------------
-// 🔥 FUNCTION: FIND MR DATA WITH FALLBACK LOGIC
+// Find MR data with fallback logic
 const findMR = async (returnItem) => {
   const mrName = returnItem.mrName?.trim();
 
@@ -49,13 +46,12 @@ const findMR = async (returnItem) => {
   let mrCashData = null;
 
   try {
-    // Case-insensitive exact or partial match
-    const regex = new RegExp(mrName, "i");
+    // First try exact match
     mrCashData = await MRCash.findOne({
       mrName: mrName,
       isActive: true,
     })
-      .select("currentCash")
+      .select("currentCash mrCode mrName")
       .lean();
   } catch (err) {
     console.error("Try 1 Error:", err);
@@ -64,6 +60,7 @@ const findMR = async (returnItem) => {
   return mrCashData;
 };
 
+// Get all stock returns
 router.get("/stock-returns", async (req, res) => {
   try {
     const {
@@ -121,9 +118,7 @@ router.get("/stock-returns", async (req, res) => {
       .populate("approvedBy", "name email")
       .lean();
 
-    // -------------------------------------------------
-    // 🔥 Enhance all return items with MR Cash details
-    // -------------------------------------------------
+    // Enhance returns with MR Cash details
     const enhancedReturns = await Promise.all(
       stockReturns.map(async (item) => {
         try {
@@ -167,6 +162,7 @@ router.get("/stock-returns", async (req, res) => {
   }
 });
 
+// Get single stock return
 router.get("/stock-returns/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -184,7 +180,6 @@ router.get("/stock-returns/:id", async (req, res) => {
     })
       .populate("createdBy", "name email")
       .populate("approvedBy", "name email")
-      .populate("items.stockRecordId")
       .lean();
 
     if (!stockReturn) {
@@ -194,7 +189,7 @@ router.get("/stock-returns/:id", async (req, res) => {
       });
     }
 
-    // Get MR data using the findMR function
+    // Get MR data
     const mrCashData = await findMR(stockReturn);
 
     const enhancedReturn = {
@@ -217,6 +212,7 @@ router.get("/stock-returns/:id", async (req, res) => {
   }
 });
 
+// Update stock return status - FIXED VERSION
 router.put("/stock-returns/:id/status", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -227,6 +223,7 @@ router.put("/stock-returns/:id/status", async (req, res) => {
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({
         success: false,
         message: "Invalid stock return ID format",
@@ -235,6 +232,7 @@ router.put("/stock-returns/:id/status", async (req, res) => {
 
     if (!["Pending", "Approved", "Rejected"].includes(status)) {
       await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({
         success: false,
         message: "Invalid status. Must be 'Pending', 'Approved', or 'Rejected'",
@@ -244,12 +242,11 @@ router.put("/stock-returns/:id/status", async (req, res) => {
     const stockReturn = await StockReturn.findOne({
       _id: id,
       isDeleted: false,
-    })
-      .populate("mrId")
-      .session(session);
+    }).session(session);
 
     if (!stockReturn) {
       await session.abortTransaction();
+      session.endSession();
       return res.status(404).json({
         success: false,
         message: "Stock return not found",
@@ -258,10 +255,77 @@ router.put("/stock-returns/:id/status", async (req, res) => {
 
     const previousStatus = stockReturn.status;
 
+    // If trying to approve but MR doesn't exist in MRCash
+    // if (status === "Approved") {
+    //   const mrCashData = await MRCash.findOne({
+    //     mrName: stockReturn.mrName,
+    //     isActive: true,
+    //   }).session(session);
+
+    //   if (!mrCashData) {
+    //     await session.abortTransaction();
+    //     session.endSession();
+    //     return res.status(400).json({
+    //       success: false,
+    //       message: `MR ${stockReturn.mrName} not found in active MR list`,
+    //     });
+    //   }
+    // }
+
     const stockUpdates = [];
-    const mrUpdates = [];
+    const stockInMrUpdates = [];
+    const mrCashUpdates = [];
+
+    // Handle Rejected status
     if (status === "Rejected" && previousStatus !== "Rejected") {
+      // Restore stock quantities in StockInMrHand
       for (const item of stockReturn.items) {
+        stockInMrUpdates.push({
+          updateOne: {
+            filter: { 
+              mrName: stockReturn.mrName,
+              "products.productId": item.productId 
+            },
+            update: {
+              $inc: { "products.$.boxQuantity": item.returnQty },
+              $set: { updatedAt: new Date() },
+            },
+          },
+        });
+
+        // If previously approved, restore MR stock
+        if (previousStatus === "Approved") {
+          stockUpdates.push({
+            updateOne: {
+              filter: { _id: item.stockRecordId },
+              update: {
+                $inc: { remainingQty: item.returnQty },
+                $set: { updatedAt: new Date() },
+              },
+            },
+          });
+        }
+      }
+    }
+
+    // Handle Approved status
+    if (status === "Approved" && previousStatus === "Pending") {
+      // Deduct from MR's stock in StockInMrHand
+      for (const item of stockReturn.items) {
+        stockInMrUpdates.push({
+          updateOne: {
+            filter: { 
+              mrName: stockReturn.mrName,
+              "products.productId": item.productId 
+            },
+            update: {
+              $inc: { "products.$.boxQuantity": -item.returnQty },
+              $set: { updatedAt: new Date() },
+            },
+          },
+        });
+
+        // Add to main stock
         stockUpdates.push({
           updateOne: {
             filter: { _id: item.stockRecordId },
@@ -271,88 +335,49 @@ router.put("/stock-returns/:id/status", async (req, res) => {
             },
           },
         });
-
-        if (previousStatus === "Approved") {
-          mrUpdates.push({
-            updateOne: {
-              filter: {
-                _id: stockReturn.mrId,
-                "products.productId": item.productId,
-              },
-              update: {
-                $inc: { "products.$.boxQuantity": item.returnQty },
-                $set: {
-                  "products.$.updatedAt": new Date(),
-                  updatedAt: new Date(),
-                },
-              },
-            },
-          });
-        }
       }
     }
 
+    // Handle Approved after Rejected
     if (status === "Approved" && previousStatus === "Rejected") {
       for (const item of stockReturn.items) {
-        stockUpdates.push({
+        // Deduct from MR's stock again
+        stockInMrUpdates.push({
           updateOne: {
-            filter: { _id: item.stockRecordId },
+            filter: { 
+              mrName: stockReturn.mrName,
+              "products.productId": item.productId 
+            },
             update: {
-              $inc: { remainingQty: -item.returnQty },
+              $inc: { "products.$.boxQuantity": -item.returnQty },
               $set: { updatedAt: new Date() },
             },
           },
         });
 
-        mrUpdates.push({
+        // Add to main stock
+        stockUpdates.push({
           updateOne: {
-            filter: {
-              _id: stockReturn.mrId,
-              "products.productId": item.productId,
-            },
+            filter: { _id: item.stockRecordId },
             update: {
-              $inc: { "products.$.boxQuantity": -item.returnQty },
-              $set: {
-                "products.$.updatedAt": new Date(),
-                updatedAt: new Date(),
-              },
+              $inc: { remainingQty: item.returnQty },
+              $set: { updatedAt: new Date() },
             },
           },
         });
       }
     }
 
-    if (status === "Approved" && previousStatus === "Pending") {
-      for (const item of stockReturn.items) {
-        mrUpdates.push({
-          updateOne: {
-            filter: {
-              _id: stockReturn.mrId,
-              "products.productId": item.productId,
-            },
-            update: {
-              $inc: { "products.$.boxQuantity": -item.returnQty },
-              $set: {
-                "products.$.updatedAt": new Date(),
-                updatedAt: new Date(),
-              },
-            },
-          },
-        });
-      }
-    }
-
+    // Execute updates if any
     if (stockUpdates.length > 0) {
       await StockInMrHand.bulkWrite(stockUpdates, { session });
     }
 
-    if (mrUpdates.length > 0) {
-      await MR.bulkWrite(mrUpdates, { session });
+    if (stockInMrUpdates.length > 0) {
+      await StockInMrHand.bulkWrite(stockInMrUpdates, { session });
     }
 
-    // =============================
-    // UPDATE STATUS
-    // =============================
+    // Update stock return status
     stockReturn.status = status;
 
     if (status === "Approved") {
@@ -366,17 +391,17 @@ router.put("/stock-returns/:id/status", async (req, res) => {
     }
 
     await stockReturn.save({ session });
+
     await session.commitTransaction();
     session.endSession();
 
+    // Fetch updated data
     const updatedReturn = await StockReturn.findById(id)
       .populate("createdBy", "name email")
       .populate("approvedBy", "name email")
-      .populate("mrId")
       .lean();
 
-    const updatedMR = await MR.findById(stockReturn.mrId).lean();
-
+    // Get MR cash data
     const mrCashData = await findMR(updatedReturn);
 
     return res.status(200).json({
@@ -385,10 +410,7 @@ router.put("/stock-returns/:id/status", async (req, res) => {
       data: {
         ...updatedReturn,
         currentCash: mrCashData?.currentCash || 0,
-        mrDetails: {
-          ...mrCashData,
-          mrData: updatedMR,
-        },
+        mrDetails: mrCashData,
       },
     });
   } catch (error) {
@@ -405,6 +427,7 @@ router.put("/stock-returns/:id/status", async (req, res) => {
   }
 });
 
+// Delete stock return
 router.delete("/stock-returns/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -414,6 +437,7 @@ router.delete("/stock-returns/:id", async (req, res) => {
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({
         success: false,
         message: "Invalid stock return ID format",
@@ -427,6 +451,7 @@ router.delete("/stock-returns/:id", async (req, res) => {
 
     if (!stockReturn) {
       await session.abortTransaction();
+      session.endSession();
       return res.status(404).json({
         success: false,
         message: "Stock return not found",
@@ -435,30 +460,35 @@ router.delete("/stock-returns/:id", async (req, res) => {
 
     if (stockReturn.status !== "Pending") {
       await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({
         success: false,
         message: "Only pending stock returns can be deleted",
       });
     }
 
-    const stockUpdates = [];
-
+    // Restore stock quantities in StockInMrHand
+    const stockInMrUpdates = [];
     for (const item of stockReturn.items) {
-      stockUpdates.push({
+      stockInMrUpdates.push({
         updateOne: {
-          filter: { _id: item.stockRecordId },
+          filter: { 
+            mrName: stockReturn.mrName,
+            "products.productId": item.productId 
+          },
           update: {
-            $inc: { remainingQty: item.returnQty },
+            $inc: { "products.$.boxQuantity": item.returnQty },
             $set: { updatedAt: new Date() },
           },
         },
       });
     }
 
-    if (stockUpdates.length > 0) {
-      await StockInMrHand.bulkWrite(stockUpdates, { session });
+    if (stockInMrUpdates.length > 0) {
+      await StockInMrHand.bulkWrite(stockInMrUpdates, { session });
     }
 
+    // Mark as deleted
     stockReturn.isDeleted = true;
     await stockReturn.save({ session });
 
@@ -473,6 +503,7 @@ router.delete("/stock-returns/:id", async (req, res) => {
     await session.abortTransaction();
     session.endSession();
 
+    console.error("Error deleting stock return:", error);
     return res.status(500).json({
       success: false,
       message: "Failed to delete stock return",
@@ -481,6 +512,7 @@ router.delete("/stock-returns/:id", async (req, res) => {
   }
 });
 
+// Bulk delete stock returns
 router.delete("/stock-returns/bulk", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -490,6 +522,7 @@ router.delete("/stock-returns/bulk", async (req, res) => {
 
     if (!Array.isArray(ids) || ids.length === 0) {
       await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({
         success: false,
         message: "Please provide stock return IDs to delete",
@@ -509,6 +542,7 @@ router.delete("/stock-returns/bulk", async (req, res) => {
 
     if (invalidIds.length > 0) {
       await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({
         success: false,
         message: "Invalid ID(s) provided",
@@ -524,32 +558,48 @@ router.delete("/stock-returns/bulk", async (req, res) => {
 
     if (stockReturns.length === 0) {
       await session.abortTransaction();
+      session.endSession();
       return res.status(404).json({
         success: false,
         message: "No pending stock returns found to delete",
       });
     }
 
-    const stockUpdates = [];
-
+    // Group updates by MR name
+    const updatesByMR = {};
     for (const returnDoc of stockReturns) {
       for (const item of returnDoc.items) {
-        stockUpdates.push({
-          updateOne: {
-            filter: { _id: item.stockRecordId },
-            update: {
-              $inc: { remainingQty: item.returnQty },
-              $set: { updatedAt: new Date() },
-            },
-          },
-        });
+        const key = `${returnDoc.mrName}-${item.productId}`;
+        if (!updatesByMR[key]) {
+          updatesByMR[key] = {
+            mrName: returnDoc.mrName,
+            productId: item.productId,
+            totalQty: 0,
+          };
+        }
+        updatesByMR[key].totalQty += item.returnQty;
       }
     }
 
-    if (stockUpdates.length > 0) {
-      await StockInMrHand.bulkWrite(stockUpdates, { session });
+    // Create bulk update operations
+    const stockInMrUpdates = Object.values(updatesByMR).map((update) => ({
+      updateOne: {
+        filter: { 
+          mrName: update.mrName,
+          "products.productId": update.productId 
+        },
+        update: {
+          $inc: { "products.$.boxQuantity": update.totalQty },
+          $set: { updatedAt: new Date() },
+        },
+      },
+    }));
+
+    if (stockInMrUpdates.length > 0) {
+      await StockInMrHand.bulkWrite(stockInMrUpdates, { session });
     }
 
+    // Mark as deleted
     await StockReturn.updateMany(
       { _id: { $in: validIds } },
       { $set: { isDeleted: true } },
@@ -567,6 +617,7 @@ router.delete("/stock-returns/bulk", async (req, res) => {
     await session.abortTransaction();
     session.endSession();
 
+    console.error("Error bulk deleting stock returns:", error);
     return res.status(500).json({
       success: false,
       message: "Failed to delete stock returns",
@@ -575,6 +626,7 @@ router.delete("/stock-returns/bulk", async (req, res) => {
   }
 });
 
+// Get MR stock
 router.get("/mr-stock/:mrName", async (req, res) => {
   try {
     const { mrName } = req.params;
@@ -626,15 +678,16 @@ router.get("/mr-stock/:mrName", async (req, res) => {
       message: `Found ${stockItems.length} stock items for ${mrName}`,
     });
   } catch (error) {
+    console.error("Error fetching MR stock:", error);
     return res.status(500).json({
       success: false,
       message: "Failed to fetch MR stock",
       error: error.message,
-      details: process.env.NODE_ENV === "development" ? error.stack : undefined,
     });
   }
 });
 
+// Get statistics
 router.get("/stock-returns/statistics", async (req, res) => {
   try {
     const { mrCode, startDate, endDate } = req.query;
@@ -719,6 +772,7 @@ router.get("/stock-returns/statistics", async (req, res) => {
       },
     });
   } catch (error) {
+    console.error("Error fetching statistics:", error);
     return res.status(500).json({
       success: false,
       message: "Failed to fetch statistics",
@@ -727,6 +781,7 @@ router.get("/stock-returns/statistics", async (req, res) => {
   }
 });
 
+// Create stock return
 router.post("/stock-returns", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -743,19 +798,35 @@ router.post("/stock-returns", async (req, res) => {
       });
     }
 
-    const mr = await StockInMrHand.findOne({ mrName: mrName }).session(session);
+    // Check if MR exists in MRCash
+    const mrCash = await MRCash.findOne({ 
+      mrName: mrName,
+      isActive: true 
+    }).session(session);
 
-    if (!mr) {
+    if (!mrCash) {
       await session.abortTransaction();
       session.endSession();
       return res.status(404).json({
         success: false,
-        message: "Medical Representative not found",
+        message: "Medical Representative not found or not active",
+      });
+    }
+
+    // Get MR stock
+    const mrStock = await StockInMrHand.findOne({ mrName: mrName }).session(session);
+
+    if (!mrStock) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        success: false,
+        message: "No stock found for this MR",
       });
     }
 
     const returnItems = [];
-    const stockUpdates = [];
+    const stockInMrUpdates = [];
     let totalQuantity = 0;
     let totalValue = 0;
 
@@ -771,7 +842,7 @@ router.post("/stock-returns", async (req, res) => {
         });
       }
 
-      const productInMr = mr.products?.find(
+      const productInMr = mrStock.products?.find(
         (p) =>
           p.productId?.toString() === item.stockRecordId ||
           p._id?.toString() === item.stockRecordId
@@ -784,9 +855,7 @@ router.post("/stock-returns", async (req, res) => {
           success: false,
           message: `Product "${
             item.productName || item.stockRecordId
-          }" not found in stock for MR: ${mrName}. Available products: ${
-            mr.products?.map((p) => p.productName).join(", ") || "None"
-          }`,
+          }" not found in stock for MR: ${mrName}`,
         });
       }
 
@@ -804,7 +873,7 @@ router.post("/stock-returns", async (req, res) => {
       }
 
       const returnItem = {
-        stockRecordId: productInMr._id,
+        stockRecordId: item.stockRecordId,
         productId: productInMr.productId,
         productCode:
           item.productCode ||
@@ -824,10 +893,11 @@ router.post("/stock-returns", async (req, res) => {
       totalQuantity += returnItem.returnQty;
       totalValue += returnItem.returnQty * returnItem.costPrice;
 
-      stockUpdates.push({
+      // Prepare update for StockInMrHand
+      stockInMrUpdates.push({
         updateOne: {
           filter: {
-            _id: mr._id,
+            _id: mrStock._id,
             "products._id": productInMr._id,
           },
           update: {
@@ -852,17 +922,13 @@ router.post("/stock-returns", async (req, res) => {
       createdById = new mongoose.Types.ObjectId("000000000000000000000001");
     }
 
-    const mrCode =
-      mr.mrCode ||
-      `MR-${mr.mrName.toUpperCase().slice(0, 4)}-${mr._id
-        .toString()
-        .slice(-4)}`;
-
     const stockReturn = new StockReturn({
       returnId: returnId,
-      mrId: mr._id,
-      mrCode: mrCode,
-      mrName: mr.mrName,
+      mrId: mrCash._id,
+      mrCode: mrCash.mrCode || `MR-${mrCash.mrName.toUpperCase().slice(0, 4)}-${mrCash._id
+        .toString()
+        .slice(-4)}`,
+      mrName: mrName,
       returnDate: returnDate || new Date(),
       items: returnItems,
       totalItems: returnItems.length,
@@ -873,22 +939,20 @@ router.post("/stock-returns", async (req, res) => {
       createdBy: createdById,
     });
 
-    if (stockUpdates.length > 0) {
-      for (const update of stockUpdates) {
-        await StockInMrHand.updateOne(
-          update.updateOne.filter,
-          update.updateOne.update,
-          { session }
-        );
-      }
+    // Execute stock updates
+    if (stockInMrUpdates.length > 0) {
+      await StockInMrHand.bulkWrite(stockInMrUpdates, { session });
     }
 
-    await stockReturn.save({ session, validateBeforeSave: true });
+    // Save stock return
+    await stockReturn.save({ session });
 
     await session.commitTransaction();
     session.endSession();
 
-    const populatedReturn = await StockReturn.findById(stockReturn._id);
+    const populatedReturn = await StockReturn.findById(stockReturn._id)
+      .populate("createdBy", "name email")
+      .lean();
 
     return res.status(201).json({
       success: true,
@@ -900,6 +964,8 @@ router.post("/stock-returns", async (req, res) => {
       await session.abortTransaction();
     }
     session.endSession();
+
+    console.error("Error creating stock return:", error);
 
     if (error.name === "ValidationError") {
       const validationErrors = {};
@@ -913,16 +979,6 @@ router.post("/stock-returns", async (req, res) => {
         success: false,
         message: "Validation failed",
         errors: validationErrors,
-        details: error.message,
-      });
-    }
-
-    if (error.name === "MissingSchemaError") {
-      return res.status(500).json({
-        success: false,
-        message: "Database configuration error. Please contact administrator.",
-        error:
-          process.env.NODE_ENV === "development" ? error.message : undefined,
       });
     }
 
@@ -936,10 +992,7 @@ router.post("/stock-returns", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to create stock return",
-      error:
-        process.env.NODE_ENV === "development"
-          ? error.message
-          : "Internal server error",
+      error: error.message,
     });
   }
 });
