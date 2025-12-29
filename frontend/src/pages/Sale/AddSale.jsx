@@ -1799,8 +1799,6 @@ const AddSale = () => {
         remark: form.remark || "",
       };
 
-      console.log("Submitting sale data:", saleData); // Debug log
-
       const response = await fetch(`${backendUrl}/api/sales`, {
         method: "POST",
         headers: {

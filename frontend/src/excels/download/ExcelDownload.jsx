@@ -7,12 +7,12 @@ import "./saleExcelDownload.css";
 import { showToast } from "../../utils/toast";
 import { formatDateToReadable } from "../../utils/dateUtil";
 
-const SaleExcelDownload = ({ 
-  type = "sales", 
+const SaleExcelDownload = ({
+  type = "sales",
   modalTitle = "Download Report",
   buttonText = "Download Excel",
   successMessage = "Excel downloaded successfully!",
-  filePrefix = "summary"
+  filePrefix = "summary",
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [startDate, setStartDate] = useState(null);
@@ -34,8 +34,8 @@ const SaleExcelDownload = ({
     if (!date) return null;
     const d = new Date(date);
     const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
   };
 
@@ -54,34 +54,20 @@ const SaleExcelDownload = ({
         return;
       }
 
-      console.log('values of startDate', startDate);
-      console.log('values of endDate', endDate);
-      
-      // Format dates for backend
       const formattedStartDate = formatDateForBackend(startDate);
       const formattedEndDate = formatDateForBackend(endDate);
-      
-      console.log('Formatted startDate for backend:', formattedStartDate);
-      console.log('Formatted endDate for backend:', formattedEndDate);
-
-      // Dynamic API endpoint based on type
       const apiEndpoint = `${backendUrl}/api/${type}/download-excel`;
-      console.log('API Endpoint:', apiEndpoint);
-
       const response = await fetch(apiEndpoint, {
         method: "POST",
-        headers: { 
+        headers: {
           "Content-Type": "application/json",
-          "Accept": "application/json"
+          Accept: "application/json",
         },
-        body: JSON.stringify({ 
-          startDate: formattedStartDate, 
-          endDate: formattedEndDate 
+        body: JSON.stringify({
+          startDate: formattedStartDate,
+          endDate: formattedEndDate,
         }),
       });
-      
-      console.log('Response status:', response.status);
-      console.log('Response status text:', response.statusText);
 
       if (!response.ok) {
         // Try to parse error message
@@ -98,26 +84,28 @@ const SaleExcelDownload = ({
 
       // Check if response is OK for Excel file
       const contentType = response.headers.get("content-type");
-      console.log('Content-Type:', contentType);
-      
-      if (contentType && contentType.includes("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")) {
+    
+      if (
+        contentType &&
+        contentType.includes(
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+      ) {
         const blob = await response.blob();
-        console.log('Blob size:', blob.size);
-        
         if (blob.size === 0) {
           throw new Error("Received empty Excel file");
         }
-        
+
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.style.display = "none";
         a.href = url;
 
         // Dynamic file name
-        const fileName = `${filePrefix}_${formatDateToReadable(startDate)}_to_${formatDateToReadable(endDate)}.xlsx`;
+        const fileName = `${filePrefix}_${formatDateToReadable(
+          startDate
+        )}_to_${formatDateToReadable(endDate)}.xlsx`;
         a.download = fileName;
-        console.log('Downloading file:', fileName);
-
         document.body.appendChild(a);
         a.click();
         window.URL.revokeObjectURL(url);
@@ -128,14 +116,16 @@ const SaleExcelDownload = ({
       } else {
         // Handle non-Excel response (probably an error in JSON)
         const responseText = await response.text();
-        console.error('Non-Excel response:', responseText);
+        console.error("Non-Excel response:", responseText);
         let errorData;
         try {
           errorData = JSON.parse(responseText);
         } catch (e) {
           errorData = { message: responseText };
         }
-        throw new Error(errorData.message || "Server returned non-Excel response");
+        throw new Error(
+          errorData.message || "Server returned non-Excel response"
+        );
       }
     } catch (error) {
       console.error("Error generating Excel:", error);
@@ -167,9 +157,7 @@ const SaleExcelDownload = ({
                 <X size={20} />
               </button>
 
-              <h2 className="text-lg font-semibold mb-4">
-                {modalTitle}
-              </h2>
+              <h2 className="text-lg font-semibold mb-4">{modalTitle}</h2>
 
               <div className="space-y-4">
                 {/* Start Date */}

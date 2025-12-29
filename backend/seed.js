@@ -120,7 +120,6 @@ async function seedProvinces() {
   ];
 
   await Province.insertMany(provinces);
-  console.log("✅ Provinces seeded");
 }
 
 
@@ -194,10 +193,7 @@ async function seedZones() {
         provinceId,
       };
     });
-
     await Zone.insertMany(formattedZones);
-    console.log("✅ Zones seeded successfully (province-wise)");
-
   } catch (error) {
     console.error("❌ Error seeding zones:", error.message);
   }

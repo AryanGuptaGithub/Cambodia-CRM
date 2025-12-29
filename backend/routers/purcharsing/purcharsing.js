@@ -141,7 +141,6 @@ const filterReportsWithBatches = (reports) => {
   );
 };
 
-// FIXED: Completely rewritten updateReportInHand to avoid session issues
 const updateReportInHand = async (productData, operation = "add") => {
   try {
     const {
@@ -168,7 +167,6 @@ const updateReportInHand = async (productData, operation = "add") => {
     const fixedProductName =
       productNameFixMap[normalized] || productName.trim();
 
-    // Use atomic operations instead of document manipulation
     if (operation === "add") {
       const amount = qty * (lc || 0);
       const newBatch = {
@@ -181,7 +179,7 @@ const updateReportInHand = async (productData, operation = "add") => {
         date: new Date(),
       };
 
-      // Try to find and update existing document
+      // Try to find existing document
       const existingDoc = await ReportInHand.findOne({
         productName: { $regex: new RegExp(`^${fixedProductName}$`, "i") },
       }).lean();
@@ -189,9 +187,19 @@ const updateReportInHand = async (productData, operation = "add") => {
       if (existingDoc) {
         // Update existing document
         const updatedBatches = [...(existingDoc.batches || []), newBatch];
-        const totalBoxes = updatedBatches.reduce((sum, b) => sum + (b.boxes || 0), 0);
-        const totalAmount = updatedBatches.reduce((sum, b) => sum + (b.amount || 0), 0);
+        const totalBoxes = updatedBatches.reduce(
+          (sum, b) => sum + (b.boxes || 0),
+          0
+        );
+        const totalAmount = updatedBatches.reduce(
+          (sum, b) => sum + (b.amount || 0),
+          0
+        );
         
+        // Calculate weighted average price
+        // Formula: (sum of (quantity * price)) / total quantity
+        const averagePrice = totalBoxes > 0 ? totalAmount / totalBoxes : 0;
+
         await ReportInHand.updateOne(
           { _id: existingDoc._id },
           {
@@ -199,12 +207,15 @@ const updateReportInHand = async (productData, operation = "add") => {
               batches: updatedBatches,
               totalBoxes,
               totalAmount,
+              averagePrice,
               status: calculateStockStatus(totalBoxes),
-            }
+            },
           }
         );
       } else {
         // Create new document
+        const averagePrice = qty > 0 ? amount / qty : 0;
+        
         await ReportInHand.create({
           productName: fixedProductName,
           supplierName: validSupplier,
@@ -212,18 +223,20 @@ const updateReportInHand = async (productData, operation = "add") => {
           batches: [newBatch],
           totalBoxes: qty,
           totalAmount: amount,
+          averagePrice,
           status: calculateStockStatus(qty),
         });
       }
-
     } else if (operation === "subtract") {
-      // For subtraction, find the document first
+      // For subtraction (purchase return or deletion)
       const item = await ReportInHand.findOne({
-        productName: { $regex: new RegExp(`^${fixedProductName}$`, "i") }
+        productName: { $regex: new RegExp(`^${fixedProductName}$`, "i") },
       }).lean();
 
       if (!item) {
-        console.warn(`Cannot subtract: "${fixedProductName}" not found in ReportInHand`);
+        console.warn(
+          `Cannot subtract: "${fixedProductName}" not found in ReportInHand`
+        );
         return;
       }
 
@@ -233,7 +246,9 @@ const updateReportInHand = async (productData, operation = "add") => {
       }
 
       // Create a copy of batches and sort by date (FIFO)
-      const sortedBatches = [...item.batches].sort((a, b) => new Date(a.date) - new Date(b.date));
+      const sortedBatches = [...item.batches].sort(
+        (a, b) => new Date(a.date) - new Date(b.date)
+      );
       let remaining = qty;
       const updatedBatches = [];
 
@@ -250,7 +265,7 @@ const updateReportInHand = async (productData, operation = "add") => {
           updatedBatches.push({
             ...batch,
             boxes: newBoxes,
-            amount: newAmount
+            amount: newAmount,
           });
           remaining = 0;
         } else {
@@ -261,11 +276,20 @@ const updateReportInHand = async (productData, operation = "add") => {
       }
 
       // Filter out batches with 0 boxes
-      const finalBatches = updatedBatches.filter(b => b.boxes > 0);
-      
+      const finalBatches = updatedBatches.filter((b) => b.boxes > 0);
+
       // Calculate new totals
-      const totalBoxes = finalBatches.reduce((sum, b) => sum + (b.boxes || 0), 0);
-      const totalAmount = finalBatches.reduce((sum, b) => sum + (b.amount || 0), 0);
+      const totalBoxes = finalBatches.reduce(
+        (sum, b) => sum + (b.boxes || 0),
+        0
+      );
+      const totalAmount = finalBatches.reduce(
+        (sum, b) => sum + (b.amount || 0),
+        0
+      );
+      
+      // Calculate new weighted average price
+      const averagePrice = totalBoxes > 0 ? totalAmount / totalBoxes : 0;
       const status = calculateStockStatus(totalBoxes);
 
       if (totalBoxes <= 0) {
@@ -280,8 +304,9 @@ const updateReportInHand = async (productData, operation = "add") => {
               batches: finalBatches,
               totalBoxes,
               totalAmount,
-              status
-            }
+              averagePrice,
+              status,
+            },
           }
         );
       }

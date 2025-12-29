@@ -1,13 +1,13 @@
 import express from "express";
 import mongoose from "mongoose";
-import ExcelJS from "exceljs"; // Add this import
+import ExcelJS from "exceljs";
 import SaleSummary from "../../models/sale/saleSummary.js";
 import Customer from "../../models/master/customer.js";
 import MRCash from "../../models/accounts/MRCash.js";
 import Staff from "../../models/staffMember/staff.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
 import PaymentStatus from "../../models/paymentStatus.js";
-import Product from "../../models/projectManger/product.js"; // Add this import for /sales/unique-names route
+import Product from "../../models/projectManger/product.js";
 
 const router = express.Router();
 const importProgressMap = new Map();
@@ -239,7 +239,7 @@ const findMRStaff = async (mrName, mrId) => {
   return null;
 };
 
-const addCashToMR = async (saleData) => {
+const addCashToMR = async (saleData, session = null) => {
   const {
     mrName = "No MR Name Provided",
     mrId,
@@ -269,7 +269,7 @@ const addCashToMR = async (saleData) => {
   if (!mrCash) {
     mrCash = new MRCash({
       mrId: mrStaff._id,
-      mrName: mrStaff.name,
+      mrName: mrStaff.name || mrName,
       currentCash: amount,
       notes: `Initial cash from invoice ${invoiceNumber}`,
       recentTransactions: [
@@ -296,11 +296,15 @@ const addCashToMR = async (saleData) => {
     }
   }
 
-  await mrCash.save();
+  if (session) {
+    await mrCash.save({ session });
+  } else {
+    await mrCash.save();
+  }
   return { success: true, amountAdded: amount };
 };
 
-const removeCashFromMR = async (saleData) => {
+const removeCashFromMR = async (saleData, session = null) => {
   const {
     mrName = "No MR Name Provided",
     mrId,
@@ -348,7 +352,11 @@ const removeCashFromMR = async (saleData) => {
     mrCash.recentTransactions = mrCash.recentTransactions.slice(-50);
   }
 
-  await mrCash.save();
+  if (session) {
+    await mrCash.save({ session });
+  } else {
+    await mrCash.save();
+  }
   return { success: true, amountRemoved: amount };
 };
 
@@ -582,7 +590,7 @@ const processSingleInvoice = async (saleData, sessionId, index) => {
           invoiceDate: newSale.invoiceDate,
           customerName: newSale.customerName,
           paymentStatus: newSale.paymentStatus,
-        });
+        }, session);
       }
     });
     isSuccess = true;
@@ -718,7 +726,6 @@ router.post("/sales/import", async (req, res) => {
     });
   }
 });
-
 
 router.get("/sales/import/progress/:sessionId", (req, res) => {
   const progress = importProgressMap.get(req.params.sessionId);
@@ -950,7 +957,7 @@ router.delete("/sales/:id", async (req, res) => {
           invoiceNumber: saleToDelete.invoiceNumber,
           customerName: saleToDelete.customerName,
           paymentStatus: saleToDelete.paymentStatus,
-        });
+        }, session);
       }
 
       // Delete the sale
@@ -1344,30 +1351,38 @@ router.post("/sales", async (req, res) => {
   try {
     await session.withTransaction(async () => {
       const data = req.body;
-      console.log("Incoming sale data:", data);
-
-      if (!data.invoiceNumber) {
+      /* ----------------- BASIC VALIDATION ----------------- */
+      if (!data.invoiceNumber?.trim()) {
         throw new Error("Invoice number is required");
       }
 
-      // Check for duplicate invoice number
-      if (await checkInvoiceNumberExists(data.invoiceNumber)) {
+      if (!data.mrName?.trim()) {
+        throw new Error("MR Name is required");
+      }
+
+      if (!data.mrId) {
+        throw new Error("MR ID is required");
+      }
+
+      if (await checkInvoiceNumberExists(data.invoiceNumber.trim())) {
         throw new Error("Invoice number already exists");
       }
 
-      const mrStaff = await findMRStaff(data.mrName, data.mrId);
+      /* ----------------- FIND MR ----------------- */
+      const mrStaff = await findMRStaff(data.mrName.trim(), data.mrId);
 
-      const processedProducts = [];
-      let totalAmount = 0;
+      if (!mrStaff) {
+        throw new Error("Invalid MR. MR not found.");
+      }
 
-      // Check stock availability first
+      /* ----------------- STOCK CHECK ----------------- */
       for (const p of data.products || []) {
-        if (!p.productName || !p.productName.trim()) continue;
+        if (!p.productName?.trim()) continue;
 
         const salesQty = Number(p.salesQty) || 0;
         if (salesQty > 0) {
           const stockCheck = await findProductStockInHand(
-            p.productName,
+            p.productName.trim(),
             salesQty
           );
           if (stockCheck.insufficient) {
@@ -1376,24 +1391,27 @@ router.post("/sales", async (req, res) => {
         }
       }
 
-      // Process products and deduct stock
+      /* ----------------- PROCESS PRODUCTS ----------------- */
+      const processedProducts = [];
+      let totalAmount = 0;
+
       for (const p of data.products || []) {
-        if (!p.productName || !p.productName.trim()) continue;
+        if (!p.productName?.trim()) continue;
 
         const salesQty = Number(p.salesQty) || 0;
         const bonusQty = Number(p.bonusQty) || 0;
         const totalQty = salesQty + bonusQty;
         if (totalQty === 0) continue;
 
-        // Deduct stock
         if (salesQty > 0) {
-          await consumeStockFromHand(p.productName, salesQty, session);
+          await consumeStockFromHand(p.productName.trim(), salesQty, session);
         }
 
         const sellingPrice = Number(p.sellingPrice) || 0;
         const amount = sellingPrice * salesQty;
         const discount = Number(p.discount) || 0;
         const netSellingAmount = amount - discount;
+        const lc = Number(p.lc) || 0;
 
         processedProducts.push({
           productName: p.productName.trim(),
@@ -1404,74 +1422,74 @@ router.post("/sales", async (req, res) => {
           amount,
           discount,
           netSellingAmount,
-          averageUnitPrice: totalQty > 0 ? netSellingAmount / totalQty : 0,
-          lc: Number(p.lc) || 0,
-          profitLoss: netSellingAmount - totalQty * (Number(p.lc) || 0),
+          averageUnitPrice: totalQty ? netSellingAmount / totalQty : 0,
+          lc,
+          profitLoss: netSellingAmount - totalQty * lc,
           isProductAccept: true,
         });
 
         totalAmount += netSellingAmount;
       }
 
-      if (processedProducts.length === 0) {
-        throw new Error("At least one valid product required");
+      if (!processedProducts.length) {
+        throw new Error("At least one valid product is required");
       }
 
+      /* ----------------- PAYMENT ----------------- */
       const paidAmount = Number(data.paidAmount) || 0;
       const dueAmount = Math.max(0, totalAmount - paidAmount);
+      const paymentStatus = mapPaymentStatus(data.paymentStatus);
 
-      const sale = await SaleSummary.create(
-        [
+      /* ----------------- CREATE SALE ----------------- */
+      const saleData = {
+        recordingDate: data.recordingDate || new Date(),
+        invoiceNumber: data.invoiceNumber.trim(),
+        invoiceDate: data.invoiceDate || new Date(),
+        mrName: data.mrName.trim(),
+        mrId: mrStaff._id,
+        customerName: data.customerName || "",
+        customerCode: data.customerCode || "",
+        customerId: data.customerId || null,
+        products: processedProducts,
+        creditDays: Number(data.creditDays) || 0,
+        dueDate: data.dueDate || "",
+        deliveryDate: data.deliveryDate || "",
+        paidAmount,
+        dueAmount,
+        totalAmount,
+        paymentStatus,
+        remark: data.remark || "",
+      };
+
+      const [sale] = await SaleSummary.create([saleData], { session });
+
+      /* ----------------- ADD CASH TO MR (FIXED) ----------------- */
+      if (["Cash", "Paid"].includes(paymentStatus) && paidAmount > 0) {
+        await addCashToMR(
           {
-            recordingDate:
-              data.recordingDate || new Date().toISOString().split("T")[0],
-            invoiceNumber: data.invoiceNumber.trim(),
-            invoiceDate:
-              data.invoiceDate || new Date().toISOString().split("T")[0],
-            mrName: data.mrName || "No MR Name Provided",
-            mrId: mrStaff?._id || null,
-            customerName: data.customerName || "",
-            customerCode: data.customerCode || "",
-            customerId: data.customerId || null,
-            products: processedProducts,
-            creditDays: Number(data.creditDays) || 0,
-            dueDate: data.dueDate || "",
-            deliveryDate: data.deliveryDate || "",
+            mrName: data.mrName.trim(),
+            mrId: mrStaff._id,
             paidAmount,
-            dueAmount,
-            totalAmount,
-            paymentStatus: mapPaymentStatus(data.paymentStatus),
-            remark: data.remark || "",
+            invoiceNumber: data.invoiceNumber.trim(),
+            invoiceDate: data.invoiceDate || new Date(),
+            customerName: data.customerName || "",
+            paymentStatus,
           },
-        ],
-        { session }
-      );
-
-      // Only update cash if real MR exists
-      if (["Cash", "Paid"].includes(sale[0].paymentStatus) && paidAmount > 0) {
-        await addCashToMR({
-          mrName: sale[0].mrName,
-          mrId: sale[0].mrId,
-          paidAmount,
-          invoiceNumber: sale[0].invoiceNumber,
-          invoiceDate: sale[0].invoiceDate,
-          customerName: sale[0].customerName,
-          paymentStatus: sale[0].paymentStatus,
-        });
+          session
+        );
       }
 
       res.status(201).json({
-        message: "Sale created successfully with stock deduction",
-        sale: sale[0],
+        success: true,
+        message: "Sale created successfully",
+        sale,
       });
     });
   } catch (err) {
     console.error("Sale create error:", err);
     res.status(500).json({
+      success: false,
       error: err.message || "Failed to create sale",
-      details: err.message.includes("stock")
-        ? "Insufficient stock or product not found"
-        : undefined,
     });
   } finally {
     await session.endSession();
@@ -1661,7 +1679,7 @@ router.put("/sales/:id", async (req, res) => {
             invoiceNumber: originalSale.invoiceNumber,
             customerName: originalSale.customerName,
             paymentStatus: originalSale.paymentStatus,
-          });
+          }, session);
         }
 
         // Add new cash record
@@ -1677,7 +1695,7 @@ router.put("/sales/:id", async (req, res) => {
             invoiceDate: saleData.invoiceDate || originalSale.invoiceDate,
             customerName: saleData.customerName || originalSale.customerName,
             paymentStatus: mapPaymentStatus(saleData.paymentStatus),
-          });
+          }, session);
         }
       }
 

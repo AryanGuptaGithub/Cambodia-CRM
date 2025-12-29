@@ -276,8 +276,8 @@ const CustomDropdown = ({
   );
 };
 
-// New hook to fetch sales invoices
-const useInvoiceOptions = () => {
+// New hook to fetch sales invoices with payment status filtering
+const useInvoiceOptions = (categoryName = "") => {
   const [sales, setSales] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -305,7 +305,7 @@ const useInvoiceOptions = () => {
     fetchSales();
   }, []);
 
-  // Get invoice options for dropdown
+  // Get invoice options for dropdown with payment status filtering
   const getInvoiceOptions = useCallback(() => {
     if (loading) {
       return [{ value: "", label: "Loading invoices...", disabled: true }];
@@ -315,9 +315,31 @@ const useInvoiceOptions = () => {
       return [{ value: "", label: "No invoices available", disabled: true }];
     }
 
+    // Filter invoices based on category name and payment status
+    let filteredSales = sales;
+
+    // Get the category name to understand the context
+    const categoryNameLower = categoryName?.toLowerCase() || "";
+    
+    if (categoryNameLower.includes("cash sale")) {
+      // Filter for Cash Sale: invoices with payment status "cash" or "paid"
+      filteredSales = sales.filter(sale => {
+        const paymentStatus = sale.paymentStatus?.toLowerCase() || "";
+        return paymentStatus === "cash" || paymentStatus === "paid";
+      });
+    } else if (categoryNameLower.includes("credit collection")) {
+      // Filter for Credit Collection: invoices with payment status "credit" or "pending"
+      filteredSales = sales.filter(sale => {
+        const paymentStatus = sale.paymentStatus?.toLowerCase() || "";
+        return paymentStatus === "credit" || paymentStatus === "pending" || 
+               paymentStatus === "unpaid" || paymentStatus === "due";
+      });
+    }
+    // If no category specified or doesn't require filtering, show all
+
     // Remove duplicates and format options
     const uniqueInvoices = [
-      ...new Set(sales.map((sale) => sale.invoiceNumber).filter(Boolean)),
+      ...new Set(filteredSales.map((sale) => sale.invoiceNumber).filter(Boolean)),
     ];
 
     const options = [
@@ -329,10 +351,33 @@ const useInvoiceOptions = () => {
     ];
 
     return options;
-  }, [sales, loading, error]);
+  }, [sales, loading, error, categoryName]);
+
+  // Also return filtered sales for use in findSaleByInvoice
+  const getFilteredSales = useCallback(() => {
+    if (!categoryName) return sales;
+
+    const categoryNameLower = categoryName.toLowerCase();
+    
+    if (categoryNameLower.includes("cash sale")) {
+      return sales.filter(sale => {
+        const paymentStatus = sale.paymentStatus?.toLowerCase() || "";
+        return paymentStatus === "cash" || paymentStatus === "paid";
+      });
+    } else if (categoryNameLower.includes("credit collection")) {
+      return sales.filter(sale => {
+        const paymentStatus = sale.paymentStatus?.toLowerCase() || "";
+        return paymentStatus === "credit" || paymentStatus === "pending" || 
+               paymentStatus === "unpaid" || paymentStatus === "due";
+      });
+    }
+    
+    return sales;
+  }, [sales, categoryName]);
 
   return {
     sales,
+    filteredSales: getFilteredSales(),
     loading,
     error,
     getInvoiceOptions,
@@ -360,77 +405,68 @@ const AddTransactionModal = ({
   const [sourceAccountBalance, setSourceAccountBalance] = useState(0);
   const [originalAmount, setOriginalAmount] = useState(0);
 
-  // Use the new invoice options hook
+  // Get category name for filtering
+  const getCategoryName = useMemo(() => {
+    if (!form.categoryType) return "";
+    const category = categoryOptions.find((cat) => cat.value === form.categoryType);
+    return category?.label || "";
+  }, [form.categoryType, categoryOptions]);
+
+  // Use the new invoice options hook with category filtering
   const {
     sales,
+    filteredSales,
     loading: salesLoading,
     getInvoiceOptions,
     refetch: refetchSales,
-  } = useInvoiceOptions();
+  } = useInvoiceOptions(getCategoryName);
 
-  // Memoized helper functions to prevent infinite re-renders
+  // Memoized helper functions
   const requiresSupplier = useMemo(() => {
-    const categoryType = form.categoryType;
-    const category = categoryOptions.find((cat) => cat.value === categoryType);
-    const categoryName = category?.label?.toLowerCase() || "";
-    return categoryName === "payment inward" || categoryName === "remittance";
-  }, [form.categoryType, categoryOptions]);
+    const categoryName = getCategoryName.toLowerCase();
+    return categoryName.includes("payment inward") || categoryName.includes("remittance");
+  }, [getCategoryName]);
 
   const isRemittance = useMemo(() => {
-    const categoryType = form.categoryType;
-    const category = categoryOptions.find((cat) => cat.value === categoryType);
-    const categoryName = category?.label?.toLowerCase() || "";
-    return categoryName === "remittance";
-  }, [form.categoryType, categoryOptions]);
+    const categoryName = getCategoryName.toLowerCase();
+    return categoryName.includes("remittance");
+  }, [getCategoryName]);
 
   const isPaymentInward = useMemo(() => {
-    const categoryType = form.categoryType;
-    const category = categoryOptions.find((cat) => cat.value === categoryType);
-    const categoryName = category?.label?.toLowerCase() || "";
-    return categoryName === "payment inward";
-  }, [form.categoryType, categoryOptions]);
+    const categoryName = getCategoryName.toLowerCase();
+    return categoryName.includes("payment inward");
+  }, [getCategoryName]);
 
   const isPaymentOutward = useMemo(() => {
-    const categoryType = form.categoryType;
-    const category = categoryOptions.find((cat) => cat.value === categoryType);
-    const categoryName = category?.label?.toLowerCase() || "";
-    return categoryName === "payment outward";
-  }, [form.categoryType, categoryOptions]);
+    const categoryName = getCategoryName.toLowerCase();
+    return categoryName.includes("payment outward");
+  }, [getCategoryName]);
 
   const isDepositOrWithdraw = useMemo(() => {
-    const categoryType = form.categoryType;
-    const category = categoryOptions.find((cat) => cat.value === categoryType);
-    const categoryName = category?.label?.toLowerCase() || "";
-    return categoryName === "withdraw" || categoryName === "deposit";
-  }, [form.categoryType, categoryOptions]);
+    const categoryName = getCategoryName.toLowerCase();
+    return categoryName.includes("withdraw") || categoryName.includes("deposit");
+  }, [getCategoryName]);
 
   const isDeposit = useMemo(() => {
-    const categoryType = form.categoryType;
-    const category = categoryOptions.find((cat) => cat.value === categoryType);
-    const categoryName = category?.label?.toLowerCase() || "";
-    return categoryName === "deposit";
-  }, [form.categoryType, categoryOptions]);
+    const categoryName = getCategoryName.toLowerCase();
+    return categoryName.includes("deposit");
+  }, [getCategoryName]);
 
   const isWithdraw = useMemo(() => {
-    const categoryType = form.categoryType;
-    const category = categoryOptions.find((cat) => cat.value === categoryType);
-    const categoryName = category?.label?.toLowerCase() || "";
-    return categoryName === "withdraw";
-  }, [form.categoryType, categoryOptions]);
+    const categoryName = getCategoryName.toLowerCase();
+    return categoryName.includes("withdraw");
+  }, [getCategoryName]);
 
   // Check if category requires invoice dropdown
   const requiresInvoiceDropdown = useMemo(() => {
-    if (!form.categoryType) return false;
-    const category = categoryOptions.find((cat) => cat.value === form.categoryType);
-    const categoryName = category?.label?.toLowerCase() || "";
-    return categoryName === "cash sale" || categoryName === "credit collection";
-  }, [form.categoryType, categoryOptions]);
+    const categoryName = getCategoryName.toLowerCase();
+    return categoryName.includes("cash sale") || categoryName.includes("credit collection");
+  }, [getCategoryName]);
 
   // Check if category requires invoice fields (text input)
   const requiresInvoiceFields = useMemo(() => {
     if (!form.categoryType) return false;
-    const category = categoryOptions.find((cat) => cat.value === form.categoryType);
-    const categoryName = category?.label?.toLowerCase() || "";
+    const categoryName = getCategoryName.toLowerCase();
     
     // Invoice fields for sales-related categories (except those with dropdown)
     return (
@@ -439,7 +475,7 @@ const AddTransactionModal = ({
       !isPaymentOutward &&
       !requiresInvoiceDropdown
     );
-  }, [form.categoryType, categoryOptions, isDepositOrWithdraw, requiresSupplier, isPaymentOutward, requiresInvoiceDropdown]);
+  }, [getCategoryName, isDepositOrWithdraw, requiresSupplier, isPaymentOutward, requiresInvoiceDropdown]);
 
   // Get filtered source options (exclude destination account for deposit/withdraw)
   const getFilteredSourceOptions = useMemo(() => {
@@ -609,9 +645,18 @@ const AddTransactionModal = ({
     else {
       // For Cash Sale and Credit Collection: use dropdown
       if (requiresInvoiceDropdown) {
+        const categoryName = getCategoryName.toLowerCase();
+        let paymentStatusNote = "";
+        
+        // if (categoryName.includes("cash sale")) {
+        //   paymentStatusNote = "(Only invoices with 'Cash' or 'Paid' status)";
+        // } else if (categoryName.includes("credit collection")) {
+        //   paymentStatusNote = "(Only invoices with 'Credit' or 'Pending' status)";
+        // }
+        
         baseFields.splice(1, 0, {
           key: "invoiceNumber",
-          label: "Invoice Number",
+          label: `Invoice Number ${paymentStatusNote}`,
           type: "invoiceDropdown",
           required: true,
           options: invoiceOptions,
@@ -687,7 +732,7 @@ const AddTransactionModal = ({
     sourceOptions,
     destinationOptions,
     supplierOptions,
-    form.categoryType,
+    getCategoryName,
     getFilteredSourceOptions,
     getFilteredDestinationOptions,
     requiresSupplier,
@@ -815,7 +860,15 @@ const AddTransactionModal = ({
 
   // Find sale data by invoice number
   const findSaleByInvoice = (invoiceNumber) => {
-    return sales.find((sale) => sale.invoiceNumber === invoiceNumber);
+    // First check filtered sales (already filtered by payment status)
+    let sale = filteredSales.find((sale) => sale.invoiceNumber === invoiceNumber);
+    
+    // If not found in filtered sales, check all sales (for edit mode)
+    if (!sale) {
+      sale = sales.find((sale) => sale.invoiceNumber === invoiceNumber);
+    }
+    
+    return sale;
   };
 
   // Check if invoice already has a transaction
@@ -835,7 +888,7 @@ const AddTransactionModal = ({
     try {
       setIsFetchingSales(true);
       
-      // For Cash Sale and Credit Collection: get data from local sales array
+      // For Cash Sale and Credit Collection: get data from filtered sales
       if (requiresInvoiceDropdown) {
         const saleRecord = findSaleByInvoice(invoiceNumber);
         
@@ -872,7 +925,23 @@ const AddTransactionModal = ({
           }));
           setInvoiceDataFetched(true);
         } else {
-          showToast("error", `Invoice ${invoiceNumber} not found in sales records`);
+          // Check if invoice exists but doesn't match payment status filter
+          const allSaleRecord = sales.find((s) => s.invoiceNumber === invoiceNumber);
+          if (allSaleRecord) {
+            const paymentStatus = allSaleRecord.paymentStatus || "Unknown";
+            const categoryName = getCategoryName.toLowerCase();
+            
+            if (categoryName.includes("cash sale")) {
+              showToast("error", `Invoice ${invoiceNumber} has payment status "${paymentStatus}". Cash Sale requires invoices with "Cash" or "Paid" status.`);
+            } else if (categoryName.includes("credit collection")) {
+              showToast("error", `Invoice ${invoiceNumber} has payment status "${paymentStatus}". Credit Collection requires invoices with "Credit" or "Pending" status.`);
+            } else {
+              showToast("error", `Invoice ${invoiceNumber} not available for ${getCategoryName}`);
+            }
+          } else {
+            showToast("error", `Invoice ${invoiceNumber} not found in sales records`);
+          }
+          
           setForm((prev) => ({
             ...prev,
             invoiceDate: "",

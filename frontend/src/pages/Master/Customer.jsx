@@ -871,7 +871,6 @@ const Customer = () => {
     return formatDateToYYYYMMDD(today);
   };
   const handleCustomerImport = async () => {
-    console.log('values of prarseData', parsedData);
     if (!parsedData.length) {
       showToast("warning", "Upload a valid file first");
       return;

@@ -59,6 +59,51 @@ import {
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
+// Helper function to format tab labels
+const formatTabLabel = (tabId) => {
+  // Remove prefix (e.g., "reports_", "master_", etc.)
+  const parts = tabId.split('_');
+  const label = parts.length > 1 ? parts[1] : parts[0];
+  
+  // First, handle common patterns
+  // 1. Handle "dailyreport" → "Daily Report" pattern
+  let formatted = label;
+  
+  // Common words that should be separated
+  const commonWords = [
+    'daily', 'monthly', 'annual', 'weekly', 'yearly',
+    'report', 'price', 'customer', 'product', 'sales',
+    'expense', 'collection', 'summary', 'sample', 'stock',
+    'payment', 'remittance', 'province', 'wise', 'outstanding',
+    'cash', 'bank', 'mrcash', 'return', 'view', 'categories',
+    'profile', 'manipulation', 'attendance', 'dashboard', 'holidays'
+  ];
+  
+  // Create a regex pattern to insert spaces before these words
+  commonWords.forEach(word => {
+    const regex = new RegExp(`(${word})`, 'gi');
+    formatted = formatted.replace(regex, ' $1 ');
+  });
+  
+  // Clean up multiple spaces
+  formatted = formatted.replace(/\s+/g, ' ').trim();
+  
+  // Capitalize first letter of each word
+  formatted = formatted
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+  
+  // Handle special acronyms and abbreviations
+  formatted = formatted
+    .replace(/\bMr\b/gi, 'MR')
+    .replace(/\bCogs\b/gi, 'COGS')
+    .replace(/\bPl\b/gi, 'PL')
+    .replace(/\bHrm\b/gi, 'HRM');
+  
+  return formatted;
+};
+
 // API service for tab management
 const tabService = {
   async getVisibleTabs() {
@@ -159,7 +204,7 @@ const tabService = {
       mrCarryStock_carrystockview: { visible: true, sequence: 1 },
       mrCarryStock_stockreturn: { visible: true, sequence: 2 },
 
-      // Accounts sub-tabs - ADDED: Three sub-tabs
+      // Accounts sub-tabs
       accounts_cashbank: { visible: true, sequence: 1 },
       accounts_mrcash: { visible: true, sequence: 2 },
 
@@ -199,21 +244,6 @@ const tabService = {
       financeReports_operationcostsales: { visible: true, sequence: 4 },
       financeReports_tourexpensesales: { visible: true, sequence: 5 },
       financeReports_plreport: { visible: true, sequence: 6 },
-
-      // Settings sub-tabs
-      settings_companyprofile: { visible: true, sequence: 1 },
-      settings_tabmanipulation: { visible: true, sequence: 2 },
-
-      // Utility sub-tabs
-      utility_companyprofile: { visible: true, sequence: 1 },
-      utility_tabhideview: { visible: true, sequence: 2 },
-
-      // HRM sub-tabs
-      hrm_dashboard: { visible: true, sequence: 1 },
-      hrm_holidays: { visible: true, sequence: 2 },
-      hrm_leaveattendance: { visible: true, sequence: 3 },
-      hrm_payroll: { visible: true, sequence: 4 },
-      hrm_settings: { visible: true, sequence: 5 },
     };
   },
 };
@@ -260,7 +290,7 @@ const expensePaths = [
   "/expenselayout/expenses",
 ];
 
-// Accounts paths - UPDATED: Added paths for new sub-tabs
+// Accounts paths
 const accountPaths = [
   "/accountlayout",
   "/accountlayout/mrcash"
@@ -420,7 +450,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
     } else if (location.pathname.startsWith("/hrmlayout")) {
       setActiveParentMenu("hrm");
     } else if (location.pathname.startsWith("/accountlayout")) {
-      setActiveParentMenu("accounts"); // Updated: Accounts detection
+      setActiveParentMenu("accounts");
     } else if (location.pathname.startsWith("/settingslayout")) {
       setActiveParentMenu("settings");
     } else if (location.pathname.startsWith("/mrcarrystocklayout")) {
@@ -822,7 +852,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                         )}
                       >
                         <FileText className="w-4 h-4" />
-                        <span className="mx-auto">Purchase/Cr.Note</span>
+                        <span className="mx-auto">Purchase Return</span>
                       </Link>
                     );
                   } else if (tabId === "purchase_purchaseout") {
@@ -890,7 +920,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                           )}
                         >
                           <FileText className="w-4 h-4" />
-                          <span className="mx-auto">Sale Return/Cr.Note</span>
+                          <span className="mx-auto">Sale Return</span>
                         </Link>
                       );
                     }
@@ -985,7 +1015,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
           </div>
         )}
 
-        {/* Accounts - UPDATED: Now with 3 sub-tabs */}
+        {/* Accounts */}
         {shouldShowTab("accounts") && (
           <div>
             <button
@@ -1009,7 +1039,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                 {getSortedTabs([
                   "accounts_cashbank",
                   "accounts_mrcash",
-                  
                 ]).map((tabId) => {
                   const linkMap = {
                     accounts_cashbank: "/accountlayout",
@@ -1019,13 +1048,11 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                   const iconMap = {
                     accounts_cashbank: Wallet,
                     accounts_mrcash: Coins,
-                   
                   };
 
                   const labelMap = {
                     accounts_cashbank: "Cash & Bank",
                     accounts_mrcash: "MR Cash",
-                   
                   };
 
                   const IconComponent = iconMap[tabId];
@@ -1150,7 +1177,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                   "reports_salesummary",
                   "reports_dailysample",
                   "reports_profitloss",
-                  "reports_expirystockreport",
+                  "reports_expirystock",
                 ]).map((tabId) => {
                   // Handle master customer reports dropdown
                   if (
@@ -1310,10 +1337,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                                 >
                                   <IconComponent className="w-4 h-4" />
                                   <span>
-                                    {subTabId
-                                      .split("_")[1]
-                                      .replace(/([A-Z])/g, " $1")
-                                      .trim()}
+                                    {formatTabLabel(subTabId)}
                                   </span>
                                 </Link>
                               );
@@ -1351,8 +1375,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                     reports_salesummary: "/reportlayout/salesummary",
                     reports_dailysample: "/reportlayout/dailysample",
                     reports_profitloss: "/reportlayout/profitloss",
-                    reports_expirystockreport:
-                      "/reportlayout/expiry-stock-report",
+                    reports_expirystock: "/reportlayout/expiry-stock-report",
                   };
 
                   const iconMap = {
@@ -1375,7 +1398,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                     reports_salesummary: TrendingUp,
                     reports_dailysample: Boxes,
                     reports_profitloss: DollarSign,
-                    reports_expirystockreport: Clock,
+                    reports_expirystock: Clock,
                   };
 
                   const IconComponent = iconMap[tabId];
@@ -1389,14 +1412,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                         className={getChildLinkClass(path)}
                       >
                         <IconComponent className="w-4 h-4" />
-                        <span>
-                          {tabId === "reports_expirystock"
-                            ? "Expiry Stock Report"
-                            : tabId
-                                .split("_")[1]
-                                .replace(/([A-Z])/g, " $1")
-                                .trim()}
-                        </span>
+                        <span>{formatTabLabel(tabId)}</span>
                       </Link>
                     );
                   }
@@ -1521,8 +1537,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                       <span className="mx-auto">
                         {tabId === "hrm_leaveattendance"
                           ? "Leave & Attendance"
-                          : tabId.split("_")[1].charAt(0).toUpperCase() +
-                            tabId.split("_")[1].slice(1)}
+                          : formatTabLabel(tabId)}
                       </span>
                     </Link>
                   );

@@ -2,7 +2,7 @@ import express from "express";
 import mongoose from "mongoose";
 import PurchaseReturn from "../../models/purcharsing/purchaseReturns.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
-import product from "../../models/projectManger/product.js";
+import Product from "../../models/projectManger/product.js";
 
 const router = express.Router();
 
@@ -14,11 +14,11 @@ const calculateStockStatus = (boxes) => {
   return "In Stock";
 };
 
-/** ✅ Core helper: updates ReportInHand for a single product */
-const updateReportInHandForProduct = async (
+/** ✅ Core helper: updates ReportInHand for purchase returns with average price calculation */
+const updateReportInHandForPurchaseReturn = async (
   productData,
   supplierName,
-  operation = "add" // Changed default to "add" for purchase returns
+  operation = "subtract" // Changed to subtract for purchase returns (return to supplier)
 ) => {
   try {
     const {
@@ -28,74 +28,141 @@ const updateReportInHandForProduct = async (
       lc = 0,
       fob = 0,
       cif = 0,
+      expiredDate,
     } = productData;
 
     const validSupplierName = supplierName?.trim() || "Unknown Supplier";
     const boxesToUpdate = returnQuantity;
     const amountToUpdate = returnAmount;
 
-    const existing = await ReportInHand.findOne({ productName });
+    // Find the existing product in ReportInHand (case-insensitive search)
+    const existing = await ReportInHand.findOne({
+      productName: { $regex: new RegExp(`^${productName}$`, "i") },
+    });
 
     if (existing) {
-      // Get current values with proper null checking
-      const currentBoxes = existing.totalBoxes || 0;
-      const currentAmount = existing.totalAmount || 0;
+      // Make a copy of batches
+      let updatedBatches = [...(existing.batches || [])];
+      let totalBoxes = existing.totalBoxes || 0;
+      let totalAmount = existing.totalAmount || 0;
 
-      let finalBoxes =
-        operation === "subtract"
-          ? currentBoxes - boxesToUpdate
-          : currentBoxes + boxesToUpdate;
+      if (operation === "subtract") {
+        // For purchase returns: remove stock (return to supplier)
+        let remainingToRemove = boxesToUpdate;
+        
+        // Sort batches by date (FIFO - First In First Out)
+        updatedBatches.sort((a, b) => new Date(a.date) - new Date(b.date));
+        
+        // Remove from batches
+        for (let i = 0; i < updatedBatches.length && remainingToRemove > 0; i++) {
+          const batch = updatedBatches[i];
+          
+          if (batch.boxes <= remainingToRemove) {
+            // Remove entire batch
+            remainingToRemove -= batch.boxes;
+            totalBoxes -= batch.boxes;
+            totalAmount -= (batch.amount || (batch.boxes * batch.lc) || 0);
+            updatedBatches[i] = null; // Mark for removal
+          } else {
+            // Remove partial from this batch
+            batch.boxes -= remainingToRemove;
+            batch.amount = batch.boxes * (batch.lc || lc || 0);
+            totalBoxes -= remainingToRemove;
+            totalAmount -= (remainingToRemove * (batch.lc || lc || 0));
+            remainingToRemove = 0;
+          }
+        }
+        
+        // Filter out null batches (removed ones)
+        updatedBatches = updatedBatches.filter(b => b !== null && b.boxes > 0);
+      } else {
+        // operation === "add" - For undoing a purchase return
+        // Add a new batch with the returned stock
+        const newBatch = {
+          boxes: boxesToUpdate,
+          lc: lc,
+          fob: fob,
+          cif: cif,
+          amount: amountToUpdate,
+          expiryDate: expiredDate ? new Date(expiredDate) : null,
+          date: new Date(),
+        };
+        
+        updatedBatches.push(newBatch);
+        totalBoxes += boxesToUpdate;
+        totalAmount += amountToUpdate;
+        
+        // Sort by date after adding
+        updatedBatches.sort((a, b) => new Date(a.date) - new Date(b.date));
+      }
 
-      let finalAmount =
-        operation === "subtract"
-          ? currentAmount - amountToUpdate
-          : currentAmount + amountToUpdate;
+      // Calculate new average price
+      const averagePrice = totalBoxes > 0 ? totalAmount / totalBoxes : 0;
+      const status = calculateStockStatus(totalBoxes);
 
-      if (finalBoxes < 0) finalBoxes = 0;
-      if (finalAmount < 0) finalAmount = 0;
-
-      const newStatus = calculateStockStatus(finalBoxes);
-
-      await ReportInHand.findByIdAndUpdate(existing._id, {
-        $set: {
-          totalBoxes: finalBoxes,
-          totalAmount: finalAmount,
-          status: newStatus,
-          supplierName: validSupplierName,
-          updatedAt: new Date(),
-        },
-      });
+      if (totalBoxes <= 0) {
+        // Delete if no stock left
+        await ReportInHand.findByIdAndDelete(existing._id);
+      } else {
+        // Update the document
+        await ReportInHand.findByIdAndUpdate(existing._id, {
+          $set: {
+            batches: updatedBatches,
+            totalBoxes,
+            totalAmount,
+            averagePrice,
+            status,
+            supplierName: validSupplierName,
+            updatedAt: new Date(),
+          },
+        });
+      }
     } else if (operation === "add") {
+      // Creating a new product in ReportInHand (should not happen for purchase returns)
+      const averagePrice = boxesToUpdate > 0 ? amountToUpdate / boxesToUpdate : 0;
       const status = calculateStockStatus(boxesToUpdate);
+      
       await ReportInHand.create({
         productName,
         supplierName: validSupplierName,
         totalBoxes: boxesToUpdate,
         totalAmount: amountToUpdate,
+        averagePrice,
         status,
         lc: lc || 0,
         fob: fob || 0,
         cif: cif || 0,
         minStockLevel: 10,
-        batches: [],
+        batches: [{
+          boxes: boxesToUpdate,
+          lc: lc,
+          fob: fob,
+          cif: cif,
+          amount: amountToUpdate,
+          expiryDate: expiredDate ? new Date(expiredDate) : null,
+          date: new Date(),
+        }],
       });
     }
   } catch (error) {
-    console.error("❌ Error in updateReportInHandForProduct:", error);
+    console.error("❌ Error in updateReportInHandForPurchaseReturn:", error);
     console.error("Product Data:", productData);
     throw error;
   }
 };
 
-/** ✅ Core helper: updates Product batches for a single product with FEFO logic */
-const updateProductBatchesForProduct = async (
+/** ✅ Core helper: updates Product batches for a single product with FEFO logic and average price */
+const updateProductBatchesForPurchaseReturn = async (
   productData,
-  operation = "add" // Changed default to "add" for purchase returns
+  operation = "subtract" // Changed to subtract for purchase returns
 ) => {
   try {
-    const { productName, returnQuantity = 0, expiredDate } = productData;
+    const { productName, returnQuantity = 0, expiredDate, lc = 0 } = productData;
 
-    const productDoc = await product.findOne({ productName });
+    const productDoc = await Product.findOne({ 
+      productName: { $regex: new RegExp(`^${productName}$`, "i") }
+    });
+    
     if (!productDoc) {
       throw new Error(`Product ${productName} not found`);
     }
@@ -109,12 +176,13 @@ const updateProductBatchesForProduct = async (
     let remainingBoxes = boxesToUpdate;
 
     if (operation === "subtract") {
+      // For purchase returns: remove from stock
       const sortedBatches = [...productDoc.batches]
         .filter((batch) => batch.boxes > 0)
         .sort((a, b) => {
           const expiryA = a.expiryDate ? new Date(a.expiryDate) : new Date(0);
           const expiryB = b.expiryDate ? new Date(b.expiryDate) : new Date(0);
-          return expiryA - expiryB;
+          return expiryA - expiryB; // FEFO: First Expiry First Out
         });
 
       // Subtract from batches in FEFO order
@@ -131,7 +199,7 @@ const updateProductBatchesForProduct = async (
         productDoc.batches[batchIndex].boxes -= subtractQty;
         remainingBoxes -= subtractQty;
 
-        // Update batch amount if lc field exists
+        // Update batch amount
         if (productDoc.batches[batchIndex].lc !== undefined) {
           productDoc.batches[batchIndex].amount =
             productDoc.batches[batchIndex].lc *
@@ -139,7 +207,7 @@ const updateProductBatchesForProduct = async (
         }
       }
     } else {
-      // This is the "add" operation for purchase returns
+      // operation === "add" - For undoing a purchase return
       if (expiredDate) {
         const targetExpiry = new Date(expiredDate);
 
@@ -153,8 +221,8 @@ const updateProductBatchesForProduct = async (
         if (batchIndex !== -1) {
           // Add to existing batch with matching expiry
           productDoc.batches[batchIndex].boxes += boxesToUpdate;
-
-          // Update batch amount if lc field exists
+          
+          // Update batch amount
           if (productDoc.batches[batchIndex].lc !== undefined) {
             productDoc.batches[batchIndex].amount =
               productDoc.batches[batchIndex].lc *
@@ -164,12 +232,12 @@ const updateProductBatchesForProduct = async (
           // Create new batch with expiry date
           const newBatch = {
             boxes: boxesToUpdate,
-            lc: productData.lc || 0,
+            lc: lc || 0,
             fob: productData.fob || 0,
             cif: productData.cif || 0,
-            amount: (productData.lc || 0) * boxesToUpdate,
+            amount: (lc || 0) * boxesToUpdate,
             expiryDate: expiredDate,
-            date: productData.date || new Date(),
+            date: new Date(),
           };
           productDoc.batches.push(newBatch);
         }
@@ -186,11 +254,11 @@ const updateProductBatchesForProduct = async (
           // Create new batch without specific expiry
           const newBatch = {
             boxes: boxesToUpdate,
-            lc: productData.lc || 0,
+            lc: lc || 0,
             fob: productData.fob || 0,
             cif: productData.cif || 0,
-            amount: (productData.lc || 0) * boxesToUpdate,
-            date: productData.date || new Date(),
+            amount: (lc || 0) * boxesToUpdate,
+            date: new Date(),
           };
           productDoc.batches.push(newBatch);
         }
@@ -206,6 +274,12 @@ const updateProductBatchesForProduct = async (
       (sum, batch) => sum + (batch.amount || 0),
       0
     );
+    
+    // Calculate average price
+    productDoc.averagePrice = productDoc.totalBoxes > 0 
+      ? productDoc.totalAmount / productDoc.totalBoxes 
+      : 0;
+    
     productDoc.status = calculateStockStatus(productDoc.totalBoxes);
 
     // Remove batches with zero boxes
@@ -213,7 +287,7 @@ const updateProductBatchesForProduct = async (
 
     await productDoc.save();
   } catch (error) {
-    console.error("❌ Error in updateProductBatchesForProduct:", error);
+    console.error("❌ Error in updateProductBatchesForPurchaseReturn:", error);
     console.error("Product Data:", productData);
     throw error;
   }
@@ -222,10 +296,9 @@ const updateProductBatchesForProduct = async (
 /** ✅ Process multiple products in purchase return */
 const processPurchaseReturnProducts = async (
   purchaseReturnDoc,
-  operation = "add" // Changed default to "add" for purchase returns
+  operation = "subtract" // Default is subtract for purchase returns (return to supplier)
 ) => {
   try {
-    // Ensure we're working with a Mongoose document that has the products array
     const purchaseReturn = purchaseReturnDoc.toObject
       ? purchaseReturnDoc.toObject()
       : purchaseReturnDoc;
@@ -242,14 +315,15 @@ const processPurchaseReturnProducts = async (
       }
 
       try {
-        // Update ReportInHand for this product
-        await updateReportInHandForProduct(
+        // Update ReportInHand for this product with average price calculation
+        await updateReportInHandForPurchaseReturn(
           productData,
           supplierName,
           operation
         );
 
-        await updateProductBatchesForProduct(productData, operation);
+        // Update Product batches
+        await updateProductBatchesForPurchaseReturn(productData, operation);
       } catch (productError) {
         console.error(
           `❌ Failed to process product ${productData.productName}:`,
@@ -327,11 +401,11 @@ router.get("/purchase-return", async (req, res) => {
   }
 });
 
-/** ✅ POST create purchase return */
+/** ✅ POST create purchase return - UPDATED WITH AVERAGE PRICE AND STOCK VALIDATION */
 router.post("/purchase-return", async (req, res) => {
   try {
     const data = req.body;
-    const { invoiceNumber, products } = data;
+    const { invoiceNumber, products, supplierName } = data;
 
     // Validate required fields
     if (!invoiceNumber || !products || !Array.isArray(products)) {
@@ -352,7 +426,13 @@ router.post("/purchase-return", async (req, res) => {
 
     // Validate each product
     for (const productData of products) {
-      const { productName, purchaseQty, returnQuantity, usedQty } = productData;
+      const { 
+        productName, 
+        purchaseQty, 
+        returnQuantity, 
+        usedQty,
+        lc = 0 
+      } = productData;
 
       if (!productName) {
         return res.status(400).json({
@@ -376,7 +456,10 @@ router.post("/purchase-return", async (req, res) => {
       }
 
       // Check if product exists in the product catalog
-      const productDoc = await product.findOne({ productName });
+      const productDoc = await Product.findOne({ 
+        productName: { $regex: new RegExp(`^${productName}$`, "i") }
+      });
+      
       if (!productDoc) {
         return res.status(400).json({
           success: false,
@@ -384,33 +467,82 @@ router.post("/purchase-return", async (req, res) => {
         });
       }
 
-      // IMPORTANT: REMOVED the stock availability check for purchase returns
-      // because in purchase returns, we're ADDING stock back to inventory, not subtracting
-      // So we don't need to check if we have enough stock to return
+      // Check stock availability in ReportInHand
+      const reportInHandItem = await ReportInHand.findOne({
+        productName: { $regex: new RegExp(`^${productName}$`, "i") },
+      });
+      
+      if (!reportInHandItem) {
+        return res.status(400).json({
+          success: false,
+          message: `Product ${productName} not found in inventory`,
+        });
+      }
+      
+      const availableStock = reportInHandItem.totalBoxes || 0;
+      if (availableStock < returnQuantity) {
+        return res.status(400).json({
+          success: false,
+          message: `Insufficient stock to return ${returnQuantity} boxes of ${productName}. Available: ${availableStock}`,
+        });
+      }
+
+      // Calculate return amount if not provided
+      if (!productData.returnAmount || productData.returnAmount === 0) {
+        // Use average price from ReportInHand or product LC price
+        const avgPrice = reportInHandItem.averagePrice || lc || 0;
+        productData.returnAmount = returnQuantity * avgPrice;
+      }
     }
 
     // Process products data
-    const processedProducts = products.map((productData) => ({
-      ...productData,
-      purchaseQty: parseFloat(productData.purchaseQty),
-      returnQuantity: parseFloat(productData.returnQuantity),
-      usedQty: parseFloat(productData.usedQty) || 0,
-      fob: parseFloat(productData.fob) || 0,
-      cif: parseFloat(productData.cif) || 0,
-      lc: parseFloat(productData.lc) || 0,
-      amount: parseFloat(productData.amount),
-      returnAmount: parseFloat(productData.returnAmount),
+    const processedProducts = await Promise.all(products.map(async (productData) => {
+      const { 
+        productName, 
+        purchaseQty, 
+        returnQuantity, 
+        usedQty, 
+        fob, 
+        cif, 
+        lc,
+        amount,
+        returnAmount,
+        expiredDate
+      } = productData;
+
+      // Get current average price from ReportInHand
+      const reportInHandItem = await ReportInHand.findOne({
+        productName: { $regex: new RegExp(`^${productName}$`, "i") },
+      });
+
+      const currentAvgPrice = reportInHandItem?.averagePrice || lc || 0;
+      const calculatedReturnAmount = returnAmount || (returnQuantity * currentAvgPrice);
+
+      return {
+        ...productData,
+        productName,
+        purchaseQty: parseFloat(purchaseQty),
+        returnQuantity: parseFloat(returnQuantity),
+        usedQty: parseFloat(usedQty) || 0,
+        fob: parseFloat(fob) || 0,
+        cif: parseFloat(cif) || 0,
+        lc: parseFloat(lc) || currentAvgPrice,
+        amount: parseFloat(amount) || (parseFloat(purchaseQty) * (parseFloat(lc) || currentAvgPrice)),
+        returnAmount: parseFloat(calculatedReturnAmount),
+        expiredDate: expiredDate ? new Date(expiredDate) : null,
+      };
     }));
 
     const newPurchaseReturn = new PurchaseReturn({
       ...data,
+      supplierName: supplierName.trim(),
       products: processedProducts,
     });
 
     const saved = await newPurchaseReturn.save();
     
-    // CRITICAL CHANGE: For purchase returns, we ADD to stock (increase inventory)
-    await processPurchaseReturnProducts(saved, "add");
+    // For purchase returns: SUBTRACT from stock (return to supplier)
+    await processPurchaseReturnProducts(saved, "subtract");
 
     res.status(201).json({
       success: true,
@@ -439,7 +571,7 @@ router.post("/purchase-return", async (req, res) => {
   }
 });
 
-/** ✅ PUT update purchase return */
+/** ✅ PUT update purchase return - UPDATED WITH AVERAGE PRICE */
 router.put("/purchase-return/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -452,16 +584,43 @@ router.put("/purchase-return/:id", async (req, res) => {
         .json({ success: false, message: "Purchase return not found" });
     }
 
-    // For purchase returns: First subtract the original return (reverse the addition)
-    await processPurchaseReturnProducts(originalReturn, "subtract");
+    // First: ADD back the original return to reverse the subtraction
+    await processPurchaseReturnProducts(originalReturn, "add");
+
+    // Validate and process updated products
+    const { products, supplierName } = updatedData;
+    
+    if (products && Array.isArray(products)) {
+      for (const productData of products) {
+        const { productName, returnQuantity } = productData;
+        
+        // Check stock availability for new quantities
+        const reportInHandItem = await ReportInHand.findOne({
+          productName: { $regex: new RegExp(`^${productName}$`, "i") },
+        });
+        
+        if (reportInHandItem) {
+          const availableStock = reportInHandItem.totalBoxes || 0;
+          if (availableStock < returnQuantity) {
+            // Revert the add operation since validation failed
+            await processPurchaseReturnProducts(originalReturn, "subtract");
+            
+            return res.status(400).json({
+              success: false,
+              message: `Insufficient stock to return ${returnQuantity} boxes of ${productName}. Available: ${availableStock}`,
+            });
+          }
+        }
+      }
+    }
 
     const updated = await PurchaseReturn.findByIdAndUpdate(id, updatedData, {
       new: true,
       runValidators: true,
     });
 
-    // For purchase returns: Then add the new return quantity
-    await processPurchaseReturnProducts(updated, "add");
+    // Then: SUBTRACT the new return quantities
+    await processPurchaseReturnProducts(updated, "subtract");
 
     res.json({
       success: true,
@@ -470,13 +629,24 @@ router.put("/purchase-return/:id", async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating purchase return:", error);
+    
+    // Try to revert any changes if error occurred
+    try {
+      const originalReturn = await PurchaseReturn.findById(req.params.id);
+      if (originalReturn) {
+        await processPurchaseReturnProducts(originalReturn, "subtract");
+      }
+    } catch (revertError) {
+      console.error("Error reverting changes:", revertError);
+    }
+    
     res
       .status(500)
       .json({ success: false, message: "Server error", error: error.message });
   }
 });
 
-/** ✅ DELETE single purchase return */
+/** ✅ DELETE single purchase return - UPDATED WITH AVERAGE PRICE */
 router.delete("/purchase-return/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -488,8 +658,8 @@ router.delete("/purchase-return/:id", async (req, res) => {
         .json({ success: false, message: "Purchase return not found" });
     }
 
-    // For purchase returns: Subtract to reverse the addition (remove the stock that was added)
-    await processPurchaseReturnProducts(purchaseReturn, "subtract");
+    // ADD back the stock to reverse the subtraction (undo the return)
+    await processPurchaseReturnProducts(purchaseReturn, "add");
 
     const deleted = await PurchaseReturn.findByIdAndDelete(id);
     res.json({
@@ -518,8 +688,8 @@ router.delete("/purchase-return", async (req, res) => {
     const purchaseReturns = await PurchaseReturn.find({ _id: { $in: ids } });
 
     for (const p of purchaseReturns) {
-      // For purchase returns: Subtract to reverse the addition
-      await processPurchaseReturnProducts(p, "subtract");
+      // ADD back to reverse the subtraction (undo the returns)
+      await processPurchaseReturnProducts(p, "add");
     }
 
     const result = await PurchaseReturn.deleteMany({ _id: { $in: ids } });
@@ -630,5 +800,15 @@ router.patch("/purchase-return/:id/status", async (req, res) => {
       .json({ success: false, message: "Server error", error: error.message });
   }
 });
+
+/** ✅ Helper function to calculate average price for a product */
+const calculateAveragePrice = (batches) => {
+  if (!batches || batches.length === 0) return 0;
+  
+  const totalBoxes = batches.reduce((sum, batch) => sum + (batch.boxes || 0), 0);
+  const totalAmount = batches.reduce((sum, batch) => sum + (batch.amount || 0), 0);
+  
+  return totalBoxes > 0 ? totalAmount / totalBoxes : 0;
+};
 
 export default router;

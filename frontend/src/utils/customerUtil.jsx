@@ -154,13 +154,9 @@ export const fetchProvinces = async () => {
 export const fetchZonesByProvince = async (provinceName) => {
   try {
     if (!provinceName || provinceName.trim() === "") {
-      console.log("No province name provided, returning empty zones array");
       return { success: true, data: [] };
-    }
-
-    console.log(`Fetching zones for province: ${provinceName}`);
-    
-    // URL encode the province name to handle special characters
+    }    
+  
     const encodedProvinceName = encodeURIComponent(provinceName.trim());
     
     const res = await fetch(
@@ -177,8 +173,6 @@ export const fetchZonesByProvince = async (provinceName) => {
     }
     
     const json = await res.json();
-    console.log("Zones API response:", json);
-
     // Ensure zones is always array - handle different response formats
     let zones = [];
     
@@ -193,8 +187,6 @@ export const fetchZonesByProvince = async (provinceName) => {
     } else if (json && Array.isArray(json.zones)) {
       zones = json.zones;
     }
-
-    console.log(`Found ${zones.length} zones for province: ${provinceName}`);
 
     return {
       success: true,

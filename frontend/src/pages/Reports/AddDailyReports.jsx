@@ -100,20 +100,24 @@ const AddDailyReports = () => {
   };
 
   const getDateRange = () => {
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth();
     const today = new Date();
+    const currentYear = today.getFullYear();
+    const currentMonth = today.getMonth();
 
     switch (selectedTab) {
       case "today":
         return {
           startDate: today.toISOString().split("T")[0],
           endDate: today.toISOString().split("T")[0],
+          displayDate: today.toISOString().split("T")[0] // Add display date
         };
 
       case "all":
-        return {}; // No date filter for "all"
+        return {
+          startDate: null,
+          endDate: null,
+          displayDate: "All Records" // Add display date
+        };
 
       case "currentMonth":
         const firstDay = new Date(currentYear, currentMonth, 1);
@@ -121,6 +125,7 @@ const AddDailyReports = () => {
         return {
           startDate: firstDay.toISOString().split("T")[0],
           endDate: lastDay.toISOString().split("T")[0],
+          displayDate: `${getCurrentMonthName()} ${getCurrentYear()}` // Add display date
         };
 
       case "janToPreviousMonth":
@@ -128,6 +133,7 @@ const AddDailyReports = () => {
         return {
           startDate: janToPrevRange.startDate,
           endDate: janToPrevRange.endDate,
+          displayDate: janToPrevRange.label // Add display date
         };
 
       case "custom":
@@ -138,10 +144,17 @@ const AddDailyReports = () => {
           endDate: customDateRange.endDate
             ? customDateRange.endDate.toISOString().split("T")[0]
             : "",
+          displayDate: customDateRange.startDate && customDateRange.endDate
+            ? `${formatDateForDisplay(customDateRange.startDate)} - ${formatDateForDisplay(customDateRange.endDate)}`
+            : "Select custom dates" // Add display date
         };
 
       default:
-        return {};
+        return {
+          startDate: null,
+          endDate: null,
+          displayDate: "Today"
+        };
     }
   };
 
@@ -193,20 +206,29 @@ const AddDailyReports = () => {
         params,
       });
 
-      // Use the response data directly
-      setData(
-        response.data.data || {
-          summary: {
-            totalSalesAmount: 0,
-            totalOrders: 0,
-            totalMRs: 0,
-            totalCustomers: 0,
-            credits: 0,
-            cash: 0,
-          },
-          records: [],
-        }
-      );
+      // Add custom date display to records if it's a custom filter
+      let records = response.data.data?.records || [];
+      
+      // If it's a custom date filter, override the date with the selected range
+      if (selectedTab === "custom" && dateRange.startDate && dateRange.endDate) {
+        records = records.map(record => ({
+          ...record,
+          date: dateRange.displayDate // Use the custom date range as display
+        }));
+      }
+
+      setData({
+        summary: response.data.data?.summary || {
+          totalSalesAmount: 0,
+          totalOrders: 0,
+          totalMRs: 0,
+          totalCustomers: 0,
+          credits: 0,
+          cash: 0,
+        },
+        records: records,
+      });
+      
       setPagination(
         response.data.pagination || {
           currentPage: 1,
@@ -393,30 +415,8 @@ const AddDailyReports = () => {
   };
 
   const getActiveFilterDisplay = () => {
-    switch (selectedTab) {
-      case "today":
-        return "Today";
-
-      case "all":
-        return "All Records";
-
-      case "currentMonth":
-        return `${getCurrentMonthName()} ${getCurrentYear()}`;
-
-      case "janToPreviousMonth":
-        return getJanToPreviousMonthRange().label;
-
-      case "custom":
-        if (customDateRange.startDate && customDateRange.endDate) {
-          return `${formatDateForDisplay(
-            customDateRange.startDate
-          )} to ${formatDateForDisplay(customDateRange.endDate)}`;
-        }
-        return "Select custom dates";
-
-      default:
-        return "Today";
-    }
+    const dateRange = getDateRange();
+    return dateRange.displayDate || "Today";
   };
 
   // Render Pagination Component
@@ -484,7 +484,7 @@ const AddDailyReports = () => {
 
   const getTableColumns = () => {
     switch (selectedSaleType) {
-      case "Total Sales":
+      case "Total sales":
         return ["credits", "cash", "totalSales"];
       case "Cash Sales":
         return ["cash", "totalSales"];
@@ -495,7 +495,6 @@ const AddDailyReports = () => {
     }
   };
 
-
   const renderSummaryCards = () => (
     <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
       <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-green-500 border border-gray-200">
@@ -503,7 +502,7 @@ const AddDailyReports = () => {
           <div>
             <p className="text-sm text-gray-600">Total Sales</p>
             <p className="text-2xl font-bold text-gray-800">
-              ${data.summary.totalSalesAmount?.toLocaleString() || 0}
+              ${data.summary.totalSalesAmount || 0}
             </p>
           </div>
           <DollarSign className="w-8 h-8 text-green-500" />
@@ -559,14 +558,6 @@ const AddDailyReports = () => {
                 <p className="text-2xl font-bold text-gray-800">
                   ${data.summary.credits?.toLocaleString() || 0}
                 </p>
-                {/* <p className="text-xs text-gray-500 mt-1">
-                  {data.summary.totalSalesAmount > 0
-                    ? `${(
-                        (data.summary.credits / data.summary.totalSalesAmount) *
-                        100
-                      ).toFixed(1)}% of total sales`
-                    : "0% of total sales"}
-                </p> */}
               </div>
               <DollarSign className="w-8 h-8 text-blue-500" />
             </div>
@@ -581,14 +572,6 @@ const AddDailyReports = () => {
                 <p className="text-2xl font-bold text-gray-800">
                   ${data.summary.cash?.toLocaleString() || 0}
                 </p>
-                {/* <p className="text-xs text-gray-500 mt-1">
-                  {data.summary.totalSalesAmount > 0
-                    ? `${(
-                        (data.summary.cash / data.summary.totalSalesAmount) *
-                        100
-                      ).toFixed(1)}% of total sales`
-                    : "0% of total sales"}
-                </p> */}
               </div>
               <DollarSign className="w-8 h-8 text-green-500" />
             </div>
@@ -598,7 +581,6 @@ const AddDailyReports = () => {
     );
   };
 
-  // Render table headers based on selected sale type
   const renderTableHeaders = () => {
     const columns = getTableColumns();
 
@@ -606,7 +588,6 @@ const AddDailyReports = () => {
       <thead className="bg-gray-100 text-gray-700 border-b">
         <tr>
           <th className="p-3 text-sm font-medium">Sr.No</th>
-          <th className="p-3 text-sm font-medium">MR ID</th>
           <th className="p-3 text-sm font-medium">MR Name</th>
           <th className="p-3 text-sm font-medium">Contact</th>
           {columns.includes("credits") && (
@@ -616,13 +597,12 @@ const AddDailyReports = () => {
             <th className="p-3 text-sm font-medium">Cash ($)</th>
           )}
           <th className="p-3 text-sm font-medium">Total Sales ($)</th>
-          <th className="p-3 text-sm font-medium">Date</th>
+          <th className="p-3 text-sm font-medium">Date Range</th>
         </tr>
       </thead>
     );
   };
 
-  // Render table row cells based on selected sale type
   const renderTableRow = (mr, index) => {
     const columns = getTableColumns();
 
@@ -638,24 +618,17 @@ const AddDailyReports = () => {
             {getSerialNumber(index)}
           </div>
         </td>
-        <td className="p-3">
-          <div className="text-sm text-gray-600 font-medium">
-            {mr.mrId || "N/A"}
-          </div>
-        </td>
+
         <td className="p-3">
           <div>
             <div className="text-sm font-medium text-gray-900 capitalize">
               {mr.mrName}
             </div>
-            <div className="text-xs text-gray-500">
-              {mr.staff?.email || "N/A"}
-            </div>
           </div>
         </td>
         <td className="p-3">
           <div className="text-sm text-gray-900">
-            {mr.staff?.contactNo || "N/A"}
+            {mr.mrContactNo || "N/A"}
           </div>
         </td>
         {columns.includes("credits") && (
@@ -679,8 +652,8 @@ const AddDailyReports = () => {
   // Calculate colspan for loading and empty states
   const getColSpan = () => {
     const columns = getTableColumns();
-    // Base columns: Sr.No, MR ID, MR Name, Contact, Total Sales, Date = 6 columns
-    let colCount = 6;
+    // Base columns: Sr.No, MR Name, Contact, Total Sales, Date = 5 columns
+    let colCount = 5;
     if (columns.includes("credits")) colCount++;
     if (columns.includes("cash")) colCount++;
     return colCount;

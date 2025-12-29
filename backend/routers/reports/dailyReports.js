@@ -1,6 +1,7 @@
 import express from "express";
 import SaleSummary from "../../models/sale/saleSummary.js";
 import SaleType from "../../models/reports/saleType.js";
+import mongoose from "mongoose";
 
 const router = express.Router();
 
@@ -16,67 +17,65 @@ router.get("/dailyReports", async (req, res) => {
       limit = 7,
     } = req.query;
 
- 
-
     const pageNum = Math.max(1, parseInt(page, 10));
     const limitNum = Math.max(1, parseInt(limit, 10));
     const skip = (pageNum - 1) * limitNum;
 
-    // Build match conditions separately
-    const paymentStatusMatch = {};
-    const dateMatch = {};
-    const searchMatch = {};
+    // Build match conditions
+    const matchConditions = {};
 
-    // 1. First: Payment Status Condition based on active sale type tab
+    // 1. Payment Status Condition based on active sale type tab
     if (saleType && saleType !== "Total sales") {
       if (saleType.toLowerCase().includes("cash")) {
-        paymentStatusMatch.paymentStatus = "Cash";
+        matchConditions.paymentStatus = "Cash";
       } else if (saleType.toLowerCase().includes("credit")) {
-        paymentStatusMatch.paymentStatus = "Credit";
+        matchConditions.paymentStatus = "Credit";
       }
     }
 
-    // 2. Second: Search Condition
+    // 2. Search Condition
     if (search?.trim()) {
-      searchMatch.mrName = { $regex: search.trim(), $options: "i" };
+      matchConditions.mrName = { $regex: search.trim(), $options: "i" };
     }
 
-    // 3. Third: Date Condition based on active date tab
-    const isValidDate = (d) => d instanceof Date && !isNaN(d);
-
+    // 3. Date Condition - USING invoiceDate INSTEAD OF recordingDate
     if (dateFilter && dateFilter !== "all") {
-      let start, end;
       const today = new Date();
-
+      
+      const todayStr = today.toISOString().split('T')[0];
+      let startDateStr, endDateStr;
+      
       switch (dateFilter) {
         case "today":
-          start = new Date(today);
-          end = new Date(today);
+          startDateStr = todayStr;
+          endDateStr = todayStr;
           break;
 
         case "currentMonth":
-          start = new Date(today.getFullYear(), today.getMonth(), 1);
-          end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+          const currentYear = today.getFullYear();
+          const currentMonth = today.getMonth();
+          startDateStr = new Date(currentYear, currentMonth, 1).toISOString().split('T')[0];
+          endDateStr = new Date(currentYear, currentMonth + 1, 0).toISOString().split('T')[0];
           break;
 
         case "janToPreviousMonth":
-          const currentYear = today.getFullYear();
-          const currentMonth = today.getMonth();
-          if (currentMonth === 0) {
-            // If current month is January, show previous year
-            start = new Date(currentYear - 1, 0, 1);
-            end = new Date(currentYear - 1, 11, 31);
+          const year = today.getFullYear();
+          const month = today.getMonth();
+          
+          if (month === 0) {
+            startDateStr = `${year - 1}-01-01`;
+            endDateStr = `${year - 1}-12-31`;
           } else {
-            start = new Date(currentYear, 0, 1);
-            end = new Date(currentYear, currentMonth - 1, 0);
+            startDateStr = `${year}-01-01`;
+            const lastMonth = new Date(year, month, 0);
+            endDateStr = lastMonth.toISOString().split('T')[0];
           }
           break;
 
         case "custom":
-          // Use provided startDate and endDate from custom filter
           if (startDate && endDate) {
-            start = new Date(startDate);
-            end = new Date(endDate);
+            startDateStr = startDate;
+            endDateStr = endDate;
           }
           break;
 
@@ -84,52 +83,45 @@ router.get("/dailyReports", async (req, res) => {
           break;
       }
 
-      // Apply date filter if dates are valid
-      if (start && end && isValidDate(start) && isValidDate(end)) {
-        start.setHours(0, 0, 0, 0);
+      if (startDateStr && endDateStr) {
+        const start = new Date(startDateStr);
+        const end = new Date(endDateStr);
         end.setHours(23, 59, 59, 999);
-
-        dateMatch.deliveryDate = {
+        
+        // USING invoiceDate FOR DATE FILTERING
+        matchConditions.invoiceDate = {
           $gte: start,
           $lte: end,
         };
       }
     }
 
-    // Combine all match conditions
-    const matchStage = {
-      ...paymentStatusMatch,
-      ...dateMatch,
-      ...searchMatch,
-    };
-
- 
-
-    // Base aggregation pipeline for MR-wise grouping
+    // Build base pipeline
     const basePipeline = [];
-
-    // Apply the combined match stage
-    if (Object.keys(matchStage).length > 0) {
-      basePipeline.push({ $match: matchStage });
+    
+    if (Object.keys(matchConditions).length > 0) {
+      basePipeline.push({ $match: matchConditions });
     }
 
-    // Group by MR name only to get total sums for each MR
+    // Group by MR name and MR ID to preserve both
     basePipeline.push({
       $group: {
-        _id: "$mrName", // Group only by MR name, not by date
-        totalSalesAmount: { $sum: "$netSellingAmount" },
+        _id: {
+          mrName: "$mrName",
+          mrId: "$mrId"
+        },
+        totalSalesAmount: { $sum: "$totalAmount" },
         totalOrders: { $sum: 1 },
         totalPaidAmount: { $sum: "$paidAmount" },
         totalDueAmount: { $sum: "$dueAmount" },
         totalSalesQty: { $sum: "$salesQty" },
         totalBonusQty: { $sum: "$bonusQty" },
         totalQty: { $sum: "$totalQty" },
-        // Categorize based on paymentStatus
         credits: {
           $sum: {
             $cond: [
               { $eq: ["$paymentStatus", "Credit"] },
-              "$netSellingAmount",
+              "$totalAmount",
               0,
             ],
           },
@@ -138,53 +130,47 @@ router.get("/dailyReports", async (req, res) => {
           $sum: {
             $cond: [
               { $eq: ["$paymentStatus", "Cash"] },
-              "$netSellingAmount",
+              "$totalAmount",
               0,
             ],
           },
         },
         uniqueCustomers: { $addToSet: "$customerCode" },
-        // Get the latest date for this MR within the filtered period
-        latestDate: { $max: "$deliveryDate" },
-        // Get the earliest date for this MR within the filtered period
-        earliestDate: { $min: "$deliveryDate" },
+        // USING invoiceDate FOR DATE DISPLAY
+        latestInvoiceDate: { $max: "$invoiceDate" },
+        earliestInvoiceDate: { $min: "$invoiceDate" },
       },
     });
 
-    // Lookup staff details
+    // Lookup staff details - SIMPLIFIED APPROACH
     basePipeline.push({
       $lookup: {
         from: "staffs",
-        let: { mrName: "$_id" },
+        let: { searchMrId: "$_id.mrId" },
         pipeline: [
           {
             $match: {
               $expr: {
-                $and: [
-                  { $eq: ["$medicalRepName", "$$mrName"] },
-                  { $eq: ["$enabled", true] },
-                ],
-              },
-            },
-          },
-          {
-            $project: {
-              medicalRepName: 1,
-              teamName: 1,
-              contactNo: 1,
-              email: 1,
-            },
-          },
+                $or: [
+                  // Match by _id field (ObjectId to ObjectId)
+                  { $eq: ["$_id", { $toObjectId: "$$searchMrId" }] },
+                  // Match by MRId field (if mrId is string like "810")
+                  { $eq: ["$MRId", { $toString: "$$searchMrId" }] }
+                ]
+              }
+            }
+          }
         ],
         as: "staffDetails",
       },
     });
 
-    // Format output
+    // Format output with staff details
     basePipeline.push({
       $project: {
         _id: 0,
-        mrName: "$_id",
+        mrName: "$_id.mrName",
+        mrId: "$_id.mrId",
         totalSalesAmount: { $round: ["$totalSalesAmount", 2] },
         totalOrders: 1,
         totalPaidAmount: { $round: ["$totalPaidAmount", 2] },
@@ -195,72 +181,92 @@ router.get("/dailyReports", async (req, res) => {
         credits: { $round: ["$credits", 2] },
         cash: { $round: ["$cash", 2] },
         totalCustomers: { $size: "$uniqueCustomers" },
-        // Show date range for the MR's activity
-        dateRange: {
-          $cond: {
-            if: { $eq: ["$earliestDate", "$latestDate"] },
-            then: {
-              $dateToString: { format: "%Y-%m-%d", date: "$latestDate" },
-            },
-            else: {
-              $concat: [
-                {
-                  $dateToString: { format: "%Y-%m-%d", date: "$earliestDate" },
-                },
-                " to ",
-                { $dateToString: { format: "%Y-%m-%d", date: "$latestDate" } },
-              ],
-            },
-          },
+        // USING invoiceDate FOR DATE DISPLAY
+        date: {
+          $dateToString: {
+            format: "%Y-%m-%d",
+            date: "$latestInvoiceDate",
+            timezone: "Asia/Dhaka"
+          }
         },
-        latestDate: {
-          $dateToString: { format: "%Y-%m-%d", date: "$latestDate" },
-        },
-        staff: {
+        latestInvoiceDate: 1,
+        // Staff details
+        mrContactNo: {
           $cond: {
             if: { $gt: [{ $size: "$staffDetails" }, 0] },
-            then: { $arrayElemAt: ["$staffDetails", 0] },
-            else: {
-              medicalRepName: "$_id",
-              contactNo: "Not Available",
-              email: "Not Available",
-              teamName: "Not Available",
-            },
-          },
+            then: { $arrayElemAt: ["$staffDetails.contactNo", 0] },
+            else: "Not Available"
+          }
+        },
+        mrEmail: {
+          $cond: {
+            if: { $gt: [{ $size: "$staffDetails" }, 0] },
+            then: { $arrayElemAt: ["$staffDetails.email", 0] },
+            else: "Not Available"
+          }
+        },
+        mrTeamName: {
+          $cond: {
+            if: { $gt: [{ $size: "$staffDetails" }, 0] },
+            then: { $arrayElemAt: ["$staffDetails.teamName", 0] },
+            else: "Not Available"
+          }
+        },
+        mrMedicalRepName: {
+          $cond: {
+            if: { $gt: [{ $size: "$staffDetails" }, 0] },
+            then: { $arrayElemAt: ["$staffDetails.medicalRepName", 0] },
+            else: "Not Available"
+          }
         },
       },
     });
 
     basePipeline.push({ $sort: { totalSalesAmount: -1 } });
 
-    // Execute pipelines in parallel for pagination
-    const [countResult, reportsData, summaryResult] = await Promise.all([
-      // Count total records (total MRs)
-      SaleSummary.aggregate([...basePipeline, { $count: "totalCount" }]),
+    // Get total count
+    const countPipeline = [
+      ...(Object.keys(matchConditions).length > 0 ? [{ $match: matchConditions }] : []),
+      {
+        $group: {
+          _id: {
+            mrName: "$mrName",
+            mrId: "$mrId"
+          },
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalCount: { $sum: 1 }
+        }
+      }
+    ];
 
-      // Get paginated data
+    // Execute pipelines
+    const [countResult, reportsData, summaryResult] = await Promise.all([
+      SaleSummary.aggregate(countPipeline),
       SaleSummary.aggregate([
         ...basePipeline,
         { $skip: skip },
         { $limit: limitNum },
       ]),
-
-      // Get summary data (across all MRs)
+      // Update summary pipeline to also use invoiceDate
       SaleSummary.aggregate([
-        { $match: matchStage },
+        { $match: matchConditions },
         {
           $group: {
             _id: null,
-            totalSalesAmount: { $sum: "$netSellingAmount" },
+            totalSalesAmount: { $sum: "$totalAmount" },
             totalOrders: { $sum: 1 },
             totalPaidAmount: { $sum: "$paidAmount" },
             totalDueAmount: { $sum: "$dueAmount" },
-            // Summary also based on paymentStatus
             credits: {
               $sum: {
                 $cond: [
                   { $eq: ["$paymentStatus", "Credit"] },
-                  "$netSellingAmount",
+                  "$totalAmount",
                   0,
                 ],
               },
@@ -269,13 +275,16 @@ router.get("/dailyReports", async (req, res) => {
               $sum: {
                 $cond: [
                   { $eq: ["$paymentStatus", "Cash"] },
-                  "$netSellingAmount",
+                  "$totalAmount",
                   0,
                 ],
               },
             },
             uniqueCustomers: { $addToSet: "$customerCode" },
             uniqueMRs: { $addToSet: "$mrName" },
+            // Also track invoiceDate range for summary
+            latestInvoiceDate: { $max: "$invoiceDate" },
+            earliestInvoiceDate: { $min: "$invoiceDate" },
           },
         },
         {
@@ -289,6 +298,37 @@ router.get("/dailyReports", async (req, res) => {
             cash: { $round: ["$cash", 2] },
             totalCustomers: { $size: "$uniqueCustomers" },
             totalMRs: { $size: "$uniqueMRs" },
+            dateRange: {
+              $cond: {
+                if: { $eq: ["$earliestInvoiceDate", "$latestInvoiceDate"] },
+                then: {
+                  $dateToString: {
+                    format: "%Y-%m-%d",
+                    date: "$earliestInvoiceDate",
+                    timezone: "Asia/Dhaka"
+                  }
+                },
+                else: {
+                  $concat: [
+                    {
+                      $dateToString: {
+                        format: "%Y-%m-%d",
+                        date: "$earliestInvoiceDate",
+                        timezone: "Asia/Dhaka"
+                      }
+                    },
+                    " to ",
+                    {
+                      $dateToString: {
+                        format: "%Y-%m-%d",
+                        date: "$latestInvoiceDate",
+                        timezone: "Asia/Dhaka"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
           },
         },
       ]),
@@ -297,20 +337,81 @@ router.get("/dailyReports", async (req, res) => {
     const totalRecords = countResult[0]?.totalCount || 0;
     const totalPages = Math.ceil(totalRecords / limitNum);
 
-    // Format records with sequential IDs
-    const records = reportsData.map((report, index) => ({
-      mrId: `MR${String(skip + index + 1).padStart(3, "0")}`,
+    // Check if staff lookup worked, if not, manually fetch staff details
+    let enhancedRecords = [...reportsData];
+    
+    // Find reports where staff details are missing
+    const reportsMissingStaff = enhancedRecords.filter(
+      report => report.mrContactNo === "Not Available" && report.mrId
+    );
+
+    if (reportsMissingStaff.length > 0) {
+      // Collect all mrIds that need staff lookup
+      const mrIdsToLookup = reportsMissingStaff.map(report => report.mrId);
+      
+      // Fetch staff details manually
+      const staffDetails = await mongoose.connection.db.collection("staffs").find({
+        $or: [
+          { _id: { $in: mrIdsToLookup.map(id => new mongoose.Types.ObjectId(id)) } },
+          { MRId: { $in: mrIdsToLookup } }
+        ]
+      }).toArray();
+
+      // Create a lookup map
+      const staffMap = {};
+      staffDetails.forEach(staff => {
+        // Map by _id
+        if (staff._id) {
+          staffMap[staff._id.toString()] = staff;
+        }
+        // Map by MRId
+        if (staff.MRId) {
+          staffMap[staff.MRId] = staff;
+        }
+      });
+
+      // Enhance the records with staff details
+      enhancedRecords = enhancedRecords.map(report => {
+        if (report.mrContactNo === "Not Available" && report.mrId) {
+          const staff = staffMap[report.mrId];
+          
+          if (staff) {
+            return {
+              ...report,
+              mrContactNo: staff.contactNo || "Not Available",
+              mrEmail: staff.email || "Not Available",
+              mrTeamName: staff.teamName || "Not Available",
+              mrMedicalRepName: staff.medicalRepName || "Not Available",
+            };
+          }
+        }
+        return report;
+      });
+    }
+
+    // Format records
+    const records = enhancedRecords.map((report, index) => ({
+      mrId: report.mrId || `MR${String(skip + index + 1).padStart(3, "0")}`,
       mrName: report.mrName,
       totalSalesAmount: report.totalSalesAmount,
       totalOrders: report.totalOrders,
+      totalPaidAmount: report.totalPaidAmount,
+      totalDueAmount: report.totalDueAmount,
+      totalSalesQty: report.totalSalesQty,
+      totalBonusQty: report.totalBonusQty,
+      totalQty: report.totalQty,
       credits: report.credits,
       cash: report.cash,
       totalCustomers: report.totalCustomers,
-      date: report.dateRange, // Show date range instead of single date
-      latestDate: report.latestDate, // Also include latest date for sorting
-      staff: report.staff,
+      date: report.date,
+      // Staff details
+      mrContactNo: report.mrContactNo,
+      mrEmail: report.mrEmail,
+      mrTeamName: report.mrTeamName,
+      mrMedicalRepName: report.mrMedicalRepName,
     }));
 
+    // Get the summary result and add date range info
     const summary = summaryResult[0] || {
       totalSalesAmount: 0,
       totalOrders: 0,
@@ -320,8 +421,9 @@ router.get("/dailyReports", async (req, res) => {
       cash: 0,
       totalCustomers: 0,
       totalMRs: 0,
+      dateRange: "N/A",
     };
-
+    
     res.status(200).json({
       data: {
         summary,

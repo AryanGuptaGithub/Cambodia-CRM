@@ -62,7 +62,8 @@ const useCustomerForm = (initialCustomerCode = "") => {
 
     // Customer Number validation - only numbers allowed
     if (form.customerPhoneNumber && !/^\d+$/.test(form.customerPhoneNumber)) {
-      newErrors.customerPhoneNumber = "Customer Number must contain only numbers";
+      newErrors.customerPhoneNumber =
+        "Customer Number must contain only numbers";
     }
 
     setErrors(newErrors);
@@ -118,22 +119,15 @@ const useCustomerForm = (initialCustomerCode = "") => {
   }, []);
 
   const handleProvinceChange = useCallback(async (provinceName) => {
-    console.log("Province changed to:", provinceName);
-    
-    // Update form with selected province
     setForm((prevForm) => ({
       ...prevForm,
       province: provinceName,
       zone: "", // Reset zone when province changes
     }));
-    
-    // Clear province error
+
     setErrors((prev) => ({ ...prev, province: "" }));
-    
-    // Clear zone error since we're resetting it
     setErrors((prev) => ({ ...prev, zone: "" }));
-    
-    // Fetch zones for the selected province
+
     if (provinceName) {
       await loadZones(provinceName);
     } else {
@@ -158,7 +152,6 @@ const useCustomerForm = (initialCustomerCode = "") => {
   );
 
   const handleZoneChange = useCallback((zoneName) => {
-    console.log("Zone changed to:", zoneName);
     setForm((prevForm) => ({
       ...prevForm,
       zone: zoneName,
@@ -172,20 +165,18 @@ const useCustomerForm = (initialCustomerCode = "") => {
       const result = await fetchProvinces();
       if (result.success) {
         let provincesData = result.data;
-        
+
         // Handle different possible response formats
         if (result.data && result.data.provinces) {
           provincesData = result.data.provinces;
         } else if (result.data && Array.isArray(result.data.data)) {
           provincesData = result.data.data;
         }
-        
+
         // Ensure provincesData is an array
         if (Array.isArray(provincesData)) {
-          console.log("Loaded provinces:", provincesData.length);
           setProvinces(provincesData);
         } else {
-          console.error("Provinces data is not an array:", provincesData);
           setProvinces([]);
           showToast("error", "Provinces data format is incorrect");
         }
@@ -208,17 +199,16 @@ const useCustomerForm = (initialCustomerCode = "") => {
       const result = await fetchMRList();
       if (result.success) {
         let mrData = result.data;
-        
+
         // Handle different possible response formats
         if (result.data && result.data.mrList) {
           mrData = result.data.mrList;
         } else if (result.data && Array.isArray(result.data.data)) {
           mrData = result.data.data;
         }
-        
+
         // Ensure mrData is an array
         if (Array.isArray(mrData)) {
-          console.log("Loaded MRs:", mrData.length);
           setMrList(mrData);
 
           if (mrData.length === 0) {
@@ -237,7 +227,10 @@ const useCustomerForm = (initialCustomerCode = "") => {
           showToast("error", "MR data format is incorrect");
         }
       } else {
-        showToast("error", result.error || "Failed to load Medical Representatives");
+        showToast(
+          "error",
+          result.error || "Failed to load Medical Representatives"
+        );
         setIsMrListEmpty(true);
         isMrListEmptyRef.current = true;
         setMrList([]);
@@ -256,25 +249,22 @@ const useCustomerForm = (initialCustomerCode = "") => {
   const loadZones = useCallback(async (provinceName) => {
     try {
       setZonesLoading(true);
-      console.log("Loading zones for province:", provinceName);
-      
+
       // Call fetchZonesByProvince with the province name
       const result = await fetchZonesByProvince(provinceName);
-      console.log("Zones API result for province:", provinceName, result);
-      
+
       if (result.success) {
         let zonesData = result.data;
-        
+
         // Handle different possible response formats
         if (result.data && result.data.zones) {
           zonesData = result.data.zones;
         } else if (result.data && Array.isArray(result.data.data)) {
           zonesData = result.data.data;
         }
-        
+
         // Ensure zonesData is an array
         if (Array.isArray(zonesData)) {
-          console.log(`Loaded ${zonesData.length} zones for province: ${provinceName}`);
           setZones(zonesData);
         } else {
           console.error("Zones data is not an array:", zonesData);
@@ -282,7 +272,6 @@ const useCustomerForm = (initialCustomerCode = "") => {
           showToast("error", "Zones data format is incorrect");
         }
       } else {
-        console.warn("Failed to load zones for province:", provinceName, result.error);
         setZones([]);
         // Don't show toast for this as it might be expected if no zones exist
       }
@@ -301,17 +290,16 @@ const useCustomerForm = (initialCustomerCode = "") => {
       const result = await fetchBusinessTypes();
       if (result.success) {
         let businessData = result.data;
-        
+
         // Handle different possible response formats
         if (result.data && result.data.businessTypes) {
           businessData = result.data.businessTypes;
         } else if (result.data && Array.isArray(result.data.data)) {
           businessData = result.data.data;
         }
-        
+
         // Ensure businessData is an array
         if (Array.isArray(businessData)) {
-          console.log("Loaded business types:", businessData.length);
           setBusinessTypes(businessData);
         } else {
           console.error("Business types data is not an array:", businessData);
@@ -443,12 +431,18 @@ const AddCustomer = () => {
       console.warn("Provinces is not an array:", provinces);
       return [];
     }
-    
+
     try {
       return provinces
         .map((province) => {
           // Handle different province object structures
-          const provinceName = province.name || province.provinceName || province.value || province.label || province.province || "";
+          const provinceName =
+            province.name ||
+            province.provinceName ||
+            province.value ||
+            province.label ||
+            province.province ||
+            "";
           if (!provinceName) {
             console.warn("Province without name found:", province);
             return null;
@@ -503,10 +497,16 @@ const AddCustomer = () => {
       console.warn("Zones is not an array:", zones);
       return [];
     }
-    
+
     return zones
       .map((zone) => {
-        const zoneName = zone.name || zone.zoneName || zone.value || zone.label || zone.zone || "";
+        const zoneName =
+          zone.name ||
+          zone.zoneName ||
+          zone.value ||
+          zone.label ||
+          zone.zone ||
+          "";
         if (!zoneName) {
           console.warn("Zone without name found:", zone);
           return null;
@@ -525,7 +525,7 @@ const AddCustomer = () => {
       console.warn("Business types is not an array:", businessTypes);
       return [];
     }
-    
+
     return businessTypes
       .map((type) => {
         if (typeof type === "string") {
@@ -536,12 +536,12 @@ const AddCustomer = () => {
         } else if (type && typeof type === "object") {
           const typeValue = type.name || type.value || type._id || "";
           const typeLabel = type.name || type.label || type.value || "";
-          
+
           if (!typeValue || !typeLabel) {
             console.warn("Business type without value/label found:", type);
             return null;
           }
-          
+
           return {
             value: typeValue,
             label: typeLabel,
@@ -558,7 +558,7 @@ const AddCustomer = () => {
     if (customerCode) {
       updateFormField("customerCode", customerCode);
     }
-    
+
     // Load data with error handling
     const loadData = async () => {
       try {
@@ -573,7 +573,7 @@ const AddCustomer = () => {
         showToast("error", "Failed to load required data");
       }
     };
-    
+
     loadData();
   }, [
     customerCode,
@@ -588,7 +588,6 @@ const AddCustomer = () => {
     try {
       const today = getTodayDate();
       updateFormField("date", today);
-      console.log("Set default date to:", today);
     } catch (error) {
       console.error("Error setting default date:", error);
     }
@@ -598,15 +597,12 @@ const AddCustomer = () => {
   useEffect(() => {
     const loadZonesForProvince = async () => {
       if (form.province && form.province.trim() !== "") {
-        console.log("Province changed to:", form.province);
         await loadZones(form.province);
       } else {
-        // Clear zones if province is cleared
-        console.log("Province cleared, resetting zones");
         setZones([]);
       }
     };
-    
+
     if (form.province) {
       loadZonesForProvince();
     }
@@ -798,13 +794,21 @@ const AddCustomer = () => {
               value={form.zone}
               onChange={handleZoneChange}
               options={zoneOptions}
-              placeholder={form.province ? "Select Zone" : "Select a province first"}
+              placeholder={
+                form.province ? "Select Zone" : "Select a province first"
+              }
               required={true}
               loading={zonesLoading && form.province !== ""}
               error={errors.zone}
               label="Zone"
               disabled={isFormDisabled || !form.province || zonesLoading}
-              emptyMessage={form.province ? (zones.length === 0 ? "No zones available for this province" : "Select Zone") : "Select a province first"}
+              emptyMessage={
+                form.province
+                  ? zones.length === 0
+                    ? "No zones available for this province"
+                    : "Select Zone"
+                  : "Select a province first"
+              }
             />
           </div>
         </div>

@@ -671,9 +671,6 @@ function Purchase() {
 
       if (!purchaseRes.ok) throw new Error("Failed to fetch purchase details");
       const purchaseData = await purchaseRes.json();
-      console.log("Backend purchase data response:", purchaseData);
-
-      // Handle different response structures safely
       let purchaseArray = [];
 
       if (Array.isArray(purchaseData)) {
@@ -689,25 +686,12 @@ function Purchase() {
         purchaseArray = purchaseData.result;
       }
 
-      console.log("Processed purchase array:", purchaseArray);
-
       const typeSet = new Set();
       if (Array.isArray(purchaseArray) && purchaseArray.length > 0) {
         purchaseArray.forEach((purchase, purchaseIndex) => {
           // Check if purchase has products array
           if (purchase.products && Array.isArray(purchase.products)) {
-            console.log(
-              `Purchase ${purchaseIndex + 1} products:`,
-              purchase.products
-            );
-
             purchase.products.forEach((product, productIndex) => {
-              console.log(`Product ${productIndex + 1}:`, {
-                productName: product.productName,
-                productType: product.productType,
-                type: product.type,
-              });
-
               const type = product.productType;
               if (type && type.trim() && type.toLowerCase() !== "unknown") {
                 typeSet.add(type.trim());
@@ -716,8 +700,6 @@ function Purchase() {
           }
         });
       }
-
-      console.log("Extracted types:", Array.from(typeSet));
       setPurchases(purchaseArray);
       setTypes(["All", ...Array.from(typeSet).sort()]);
     } catch (error) {
@@ -1909,12 +1891,7 @@ function Purchase() {
                                   .filter(Boolean)
                               ),
                             ];
-                            {
-                              console.log("1896", uniqueTypes);
-                            }
-                            {
-                              console.log("invoiceProducts", invoiceProducts);
-                            }
+
                             return ["All", ...uniqueTypes].map(
                               (type, typeIndex) => (
                                 <button
