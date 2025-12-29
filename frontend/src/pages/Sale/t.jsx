@@ -246,57 +246,28 @@ const ImportSalesModal = ({
   const [isUploading, setIsUploading] = useState(false);
   const [parsedData, setParsedData] = useState([]);
   const [importMessage, setImportMessage] = useState("");
-  const [importErrorDetails, setImportErrorDetails] = useState([]);
+  const [validationErrors, setValidationErrors] = useState([]);
   const [isImporting, setIsImporting] = useState(false);
-  const [showValidationErrors, setShowValidationErrors] = useState(false);
-  const [importStep, setImportStep] = useState("");
-  const [isCancelled, setIsCancelled] = useState(false);
-  const abortControllerRef = useRef(null);
-  const [isProcessingFile, setIsProcessingFile] = useState(false);
-  const [showParsedSection, setShowParsedSection] = useState(false);
+  const fileInputRef = useRef(null);
 
-  const [failedInvoices, setFailedInvoices] = useState([]);
-  const [showFailedInvoices, setShowFailedInvoices] = useState(false);
-  const [sessionId, setSessionId] = useState(null);
-
-  // Progress state
-  const [serverProgress, setServerProgress] = useState(0);
-  const [serverProcessed, setServerProcessed] = useState(0);
-  const [serverTotal, setServerTotal] = useState(0);
-
-  const pollingIntervalRef = useRef(null);
-
-  const clearPolling = () => {
-    if (pollingIntervalRef.current) {
-      clearInterval(pollingIntervalRef.current);
-      pollingIntervalRef.current = null;
+  // Reset modal state
+  const resetModal = () => {
+    setParsedData([]);
+    setValidationErrors([]);
+    setImportMessage("");
+    setIsUploading(false);
+    setIsImporting(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
     }
   };
 
-  const resetModal = () => {
-    setParsedData([]);
-    setImportErrorDetails([]);
-    setFailedInvoices([]);
-    setShowParsedSection(false);
-    setShowValidationErrors(false);
-    setShowFailedInvoices(false);
-    setSessionId(null);
-    setServerProgress(0);
-    setServerProcessed(0);
-    setServerTotal(0);
-    setIsImporting(false);
-    setImportStep("");
-    clearPolling();
-  };
-
+  // Handle modal close
   const handleClose = () => {
-    if (isImporting || isUploading || isProcessingFile) {
+    if (isUploading || isImporting) {
       if (window.confirm("Import in progress. Cancel and close?")) {
-        handleCancelImport();
-        setTimeout(() => {
-          resetModal();
-          onClose();
-        }, 500);
+        resetModal();
+        onClose();
       }
       return;
     }
@@ -304,39 +275,47 @@ const ImportSalesModal = ({
     onClose();
   };
 
-  const handleCancelImport = () => {
-    setIsCancelled(true);
-    abortControllerRef.current?.abort();
-    clearPolling();
-    setIsImporting(false);
-    setImportStep("Import cancelled");
-    showToast("info", "Import cancelled");
+  // Validate suppliers and products (similar to Purchase component)
+  const validateData = () => {
+    if (!mrList.length && !customerList.length) {
+      showToast(
+        "error",
+        "No MRs and customers found. Please add at least one MR and one customer first."
+      );
+      return false;
+    } else if (!mrList.length) {
+      showToast("error", "No MRs found. Please add at least one MR first.");
+      return false;
+    } else if (!customerList.length) {
+      showToast(
+        "error",
+        "No customers found. Please add at least one customer first."
+      );
+      return false;
+    }
+    return true;
   };
 
-  const parseExcelQuantity = (value) => {
-    if (value === null || value === undefined) return 0;
-    const str = String(value).trim();
-    const num = parseFloat(str.replace(/,/g, ""));
-    return isNaN(num) ? 0 : Math.abs(num);
-  };
-
+  // Parse Excel file
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
+    // Validate file size
     if (file.size > 20 * 1024 * 1024) {
       showToast("error", "File size too large. Maximum size is 20MB.");
       return;
     }
 
-    setImportMessage("Reading file...");
+    // Validate data before processing
+    if (!validateData()) {
+      return;
+    }
+
     setIsUploading(true);
-    setIsProcessingFile(true);
-    setImportErrorDetails([]);
-    setShowValidationErrors(false);
-    setShowParsedSection(false);
-    setShowFailedInvoices(false);
-    setFailedInvoices([]);
+    setImportMessage("Reading file...");
+    setParsedData([]);
+    setValidationErrors([]);
 
     try {
       const data = await new Promise((resolve, reject) => {
@@ -349,110 +328,231 @@ const ImportSalesModal = ({
       setImportMessage("Processing Excel data...");
       const workbook = XLSX.read(new Uint8Array(data), { type: "array" });
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      
+      // Get all rows
       const rows = XLSX.utils.sheet_to_json(worksheet, {
         header: 1,
         defval: "",
         raw: false,
       });
 
-      setImportMessage("Parsing rows...");
-      let headerIdx = -1;
-      for (let i = 0; i < Math.min(rows.length, 20); i++) {
-        const row = rows[i].map((c) =>
-          String(c || "")
-            .trim()
-            .toLowerCase()
-        );
-        if (row.some((cell) => cell.includes("invoice"))) {
-          headerIdx = i;
+      if (rows.length === 0) {
+        showToast("warning", "Excel file is empty");
+        setIsUploading(false);
+        return;
+      }
+
+      // Find header row
+      let headerRowIndex = -1;
+      let headers = [];
+
+      for (let i = 0; i < Math.min(10, rows.length); i++) {
+        const row = rows[i];
+        if (!Array.isArray(row)) continue;
+
+        const rowText = row.join(" ").toLowerCase();
+        const hasInvoice = rowText.includes("invoice");
+        const hasCustomer = rowText.includes("customer");
+        const hasProduct = rowText.includes("product");
+
+        if ((hasInvoice && hasCustomer) || (hasInvoice && hasProduct)) {
+          headerRowIndex = i;
+          headers = row.map((h) => h?.toString().trim() || "");
           break;
         }
       }
-      if (headerIdx === -1) {
-        throw new Error("Header row with 'Invoice' not found");
+
+      if (headerRowIndex === -1) {
+        headerRowIndex = 0;
+        headers = rows[0].map((h) => h?.toString().trim() || "");
       }
 
-      const headers = rows[headerIdx].map((h) => String(h || "").trim());
-      const dataRows = rows
-        .slice(headerIdx + 1)
-        .filter((row) =>
-          row.some(
-            (cell) =>
-              cell !== null && cell !== undefined && String(cell).trim() !== ""
-          )
-        );
+      // Create header mapping
+      const headerMap = {};
+      headers.forEach((header, index) => {
+        if (!header) return;
+        const normalized = header.toLowerCase().trim();
 
-      const getColIndex = (colName) =>
-        headers.findIndex((h) =>
-          h.toLowerCase().includes(colName.toLowerCase())
-        );
+        if (normalized.includes("invoice") && normalized.includes("no")) {
+          headerMap.invoiceNumber = index;
+        } else if (normalized.includes("invoice") && normalized.includes("date")) {
+          headerMap.invoiceDate = index;
+        } else if (normalized.includes("customer") && normalized.includes("name")) {
+          headerMap.customerName = index;
+        } else if (normalized.includes("customer") && normalized.includes("code")) {
+          headerMap.customerCode = index;
+        } else if (normalized.includes("mr") && normalized.includes("name")) {
+          headerMap.mrName = index;
+        } else if (normalized.includes("product") && normalized.includes("name")) {
+          headerMap.productName = index;
+        } else if (normalized.includes("sales") && normalized.includes("qty")) {
+          headerMap.salesQty = index;
+        } else if (normalized.includes("bonus") && normalized.includes("qty")) {
+          headerMap.bonusQty = index;
+        } else if (normalized.includes("selling") && normalized.includes("price")) {
+          headerMap.sellingPrice = index;
+        } else if (normalized.includes("discount")) {
+          headerMap.discount = index;
+        } else if (normalized.includes("credit") && normalized.includes("days")) {
+          headerMap.creditDays = index;
+        } else if (normalized.includes("paid") && normalized.includes("amount")) {
+          headerMap.paidAmount = index;
+        } else if (normalized.includes("remarks")) {
+          headerMap.remarks = index;
+        }
+      });
 
-      const groupedInvoices = {};
-      const validationErrors = [];
-      let rowCount = headerIdx;
+      // Process data rows
+      const invoiceGroups = {};
+      const errors = [];
+      let rowCount = headerRowIndex + 1;
 
-      for (const row of dataRows) {
+      for (let i = headerRowIndex + 1; i < rows.length; i++) {
         rowCount++;
-        const invoiceNumber = String(
-          row[getColIndex("Invoice #")] || row[getColIndex("Invoice")] || ""
-        ).trim();
+        const row = rows[i];
+        
+        // Skip empty rows
+        if (!Array.isArray(row) || row.every(cell => !cell || cell.toString().trim() === "")) {
+          continue;
+        }
 
-        const customerName = String(
-          row[getColIndex("Customer Name")] || ""
-        ).trim();
-        const productName = String(
-          row[getColIndex("Product Name")] || ""
-        ).trim();
+        const getValue = (field) => {
+          const index = headerMap[field];
+          return index !== undefined && row[index] !== undefined 
+            ? row[index] 
+            : "";
+        };
 
-        const salesQty = parseExcelQuantity(row[getColIndex("Sales Qty")]);
-        const bonusQty = parseExcelQuantity(row[getColIndex("Bonus Qty")]) || 0;
-        const sellingPrice = Number(row[getColIndex("Selling Price")]) || 0;
+        const parseNumber = (value) => {
+          if (!value && value !== 0) return 0;
+          if (typeof value === "number") return value;
 
+          const str = value.toString().trim();
+          if (!str || str.toLowerCase() === "n/a") return 0;
+
+          // Remove non-numeric characters except decimal point and minus
+          const cleaned = str.replace(/[^\d.-]/g, "");
+          if (cleaned === "") return 0;
+
+          const num = parseFloat(cleaned);
+          return isNaN(num) ? 0 : num;
+        };
+
+        const parseDate = (value) => {
+          if (!value) return null;
+
+          // Handle Excel date numbers
+          if (typeof value === "number") {
+            try {
+              const excelEpoch = new Date(1899, 11, 30);
+              const date = new Date(excelEpoch.getTime() + value * 86400000);
+              return date.toISOString().split("T")[0];
+            } catch (e) {
+              return null;
+            }
+          }
+
+          // Handle string dates
+          const str = value.toString().trim();
+          if (!str) return null;
+
+          // Try common date formats
+          const formats = [
+            "YYYY-MM-DD",
+            "DD/MM/YYYY",
+            "MM/DD/YYYY",
+            "YYYY/MM/DD",
+            "DD-MM-YYYY",
+            "MM-DD-YYYY",
+          ];
+
+          for (const format of formats) {
+            try {
+              const parsed = dayjs(str, format);
+              if (parsed.isValid()) {
+                return parsed.format("YYYY-MM-DD");
+              }
+            } catch (e) {
+              // Continue to next format
+            }
+          }
+
+          return null;
+        };
+
+        // Get values from row
+        let invoiceNumber = getValue("invoiceNumber")?.toString().trim();
+        const invoiceDate = parseDate(getValue("invoiceDate"));
+        const customerName = getValue("customerName")?.toString().trim();
+        const customerCode = getValue("customerCode")?.toString().trim();
+        let mrName = getValue("mrName")?.toString().trim();
+        const productName = getValue("productName")?.toString().trim();
+        const salesQty = parseNumber(getValue("salesQty"));
+        const bonusQty = parseNumber(getValue("bonusQty")) || 0;
+        const sellingPrice = parseNumber(getValue("sellingPrice"));
+        const discount = parseNumber(getValue("discount")) || 0;
+        const creditDays = parseNumber(getValue("creditDays")) || 0;
+        const paidAmount = parseNumber(getValue("paidAmount")) || 0;
+        const remarks = getValue("remarks")?.toString().trim() || "";
+
+        // Validate required fields
         const rowErrors = [];
 
-        if (!invoiceNumber) rowErrors.push("Invoice number is required");
+        if (!invoiceNumber) invoiceNumber = `SALE-${rowCount}`;
         if (!customerName) rowErrors.push("Customer name is required");
         if (!productName) rowErrors.push("Product name is required");
+        if (salesQty <= 0 && bonusQty <= 0) rowErrors.push("Sales or Bonus quantity must be > 0");
+        if (sellingPrice < 0) rowErrors.push("Selling price cannot be negative");
 
-        const totalQty = salesQty + bonusQty;
-        if (totalQty <= 0) rowErrors.push("Sales + Bonus quantity must be > 0");
-        if (sellingPrice < 0)
-          rowErrors.push("Selling price cannot be negative");
+        // Check if MR exists in MR list
+        if (mrName && mrList.length > 0) {
+          const mrExists = mrList.some(mr => 
+            mr.toLowerCase() === mrName.toLowerCase()
+          );
+          if (!mrExists && mrName !== "Not Provided") {
+            rowErrors.push(`MR "${mrName}" not found in MR list`);
+          }
+        }
 
         if (rowErrors.length > 0) {
-          validationErrors.push({
-            row: rowCount + 1,
-            invoiceNumber: invoiceNumber || "N/A",
+          errors.push({
+            row: rowCount,
+            invoiceNumber,
             customerName: customerName || "N/A",
-            mrName:
-              String(row[getColIndex("MR Name")] || "").trim() || "Unknown",
             productName: productName || "N/A",
-            error: rowErrors.join("; "),
-            message: rowErrors.join("; "),
-            type: "validation",
+            errors: rowErrors.join("; "),
           });
           continue;
         }
 
-        if (!groupedInvoices[invoiceNumber]) {
-          const creditDays = Number(row[getColIndex("Credit Days")]) || 0;
+        // Set default MR if not provided
+        if (!mrName) {
+          mrName = "Not Provided";
+        }
+
+        // Calculate amounts
+        const amount = sellingPrice * salesQty;
+        const netSellingAmount = amount - discount;
+        const totalQty = salesQty + bonusQty;
+        const averageUnitPrice = totalQty > 0 ? netSellingAmount / totalQty : 0;
+
+        // Group by invoice number
+        if (!invoiceGroups[invoiceNumber]) {
           const dueDate = new Date();
           dueDate.setDate(dueDate.getDate() + creditDays);
 
-          groupedInvoices[invoiceNumber] = {
+          invoiceGroups[invoiceNumber] = {
             recordingDate: new Date().toISOString().split("T")[0],
             invoiceNumber,
-            invoiceDate: new Date().toISOString().split("T")[0],
-            mrName: String(row[getColIndex("MR Name")] || "").trim(),
+            invoiceDate: invoiceDate || new Date().toISOString().split("T")[0],
+            mrName,
             customerName,
-            customerCode: String(
-              row[getColIndex("Customer Code")] || ""
-            ).trim(),
+            customerCode,
             customerId: "",
             creditDays,
-            paidAmount: Number(row[getColIndex("Paid Amount")]) || 0,
-            paymentStatus: "Credit",
-            remark: String(row[getColIndex("Remarks")] || "").trim(),
+            paidAmount,
+            paymentStatus: paidAmount > 0 ? "Partial" : "Credit",
+            remark: remarks,
             products: [],
             totalAmount: 0,
             dueAmount: 0,
@@ -461,11 +561,8 @@ const ImportSalesModal = ({
           };
         }
 
-        const discount = Number(row[getColIndex("Discount")]) || 0;
-        const amount = sellingPrice * Math.abs(salesQty);
-        const netSellingAmount = amount - discount;
-
-        groupedInvoices[invoiceNumber].products.push({
+        // Add product to invoice
+        invoiceGroups[invoiceNumber].products.push({
           productName,
           salesQty,
           bonusQty,
@@ -474,439 +571,262 @@ const ImportSalesModal = ({
           amount,
           discount,
           netSellingAmount,
-          averageUnitPrice: totalQty > 0 ? netSellingAmount / totalQty : 0,
+          averageUnitPrice,
           lc: 0,
           profitLoss: 0,
           isProductAccept: true,
           remark: "",
         });
 
-        groupedInvoices[invoiceNumber].totalAmount += netSellingAmount;
+        // Update invoice totals
+        invoiceGroups[invoiceNumber].totalAmount += netSellingAmount;
       }
 
-      Object.values(groupedInvoices).forEach((inv) => {
-        inv.dueAmount = inv.totalAmount - inv.paidAmount;
+      // Calculate due amounts for each invoice
+      Object.values(invoiceGroups).forEach(invoice => {
+        invoice.dueAmount = invoice.totalAmount - invoice.paidAmount;
       });
 
-      const validInvoices = Object.values(groupedInvoices).filter(
-        (inv) => inv.products.length > 0 && inv.totalAmount > 0
+      const validInvoices = Object.values(invoiceGroups).filter(
+        inv => inv.products.length > 0
       );
 
       setParsedData(validInvoices);
-      setImportErrorDetails(validationErrors);
+      setValidationErrors(errors);
 
-      if (validationErrors.length > 0) {
-        showToast(
-          "warning",
-          `${validationErrors.length} validation errors found`
-        );
+      if (errors.length > 0) {
+        showToast("warning", `${errors.length} validation errors found`);
       } else {
-        showToast("success", "File parsed successfully – ready to import");
+        showToast("success", `Found ${validInvoices.length} valid invoices`);
       }
-      setShowParsedSection(true);
     } catch (error) {
-      console.error("File processing error:", error);
-      showToast("error", "Failed to process file: " + error.message);
+      console.error("Error processing file:", error);
+      showToast("error", `Failed to process file: ${error.message}`);
     } finally {
       setIsUploading(false);
-      setIsProcessingFile(false);
     }
   };
 
-  const handleProductImport = async (dataToImport) => {
-    if (!dataToImport?.length) {
-      showToast("error", "No data to import");
+  // Handle import
+  const handleImportData = async () => {
+    if (parsedData.length === 0) {
+      showToast("warning", "Please upload a valid file first");
+      return;
+    }
+
+    // Validate data before import
+    if (!validateData()) {
       return;
     }
 
     setIsImporting(true);
-    setIsCancelled(false);
-    setImportStep("Preparing data...");
-    setServerProgress(0);
-    setServerProcessed(0);
-    setServerTotal(dataToImport.length);
-    setFailedInvoices([]);
-
-    abortControllerRef.current = new AbortController();
 
     try {
-      const transformedInvoices = dataToImport.map((inv) => ({
-        ...inv,
-        invoiceDate: inv.invoiceDate || new Date().toISOString().split("T")[0],
-        recordingDate:
-          inv.recordingDate || new Date().toISOString().split("T")[0],
-        paymentStatus: inv.paymentStatus || "Credit",
-        totalAmount:
-          inv.totalAmount ||
-          inv.products.reduce((s, p) => s + (p.netSellingAmount || 0), 0),
-        dueAmount: (inv.totalAmount || 0) - (inv.paidAmount || 0),
-      }));
-
-      setImportStep("Sending to server...");
       const res = await axios.post(
         `${backendUrl}/api/sales/import`,
-        { invoices: transformedInvoices },
-        { timeout: 300000, signal: abortControllerRef.current.signal }
+        { invoices: parsedData },
+        { timeout: 300000 }
       );
 
-      const { sessionId: newSessionId } = res.data;
-      setSessionId(newSessionId);
-      setImportStep("Import started – processing invoices...");
-      
-      // Fast polling every 800ms for smooth progress
-      pollingIntervalRef.current = setInterval(async () => {
-        try {
-          const progRes = await axios.get(
-            `${backendUrl}/api/sales/import/progress/${newSessionId}`
-          );
-          const prog = progRes.data.progress;
-
-          setServerProgress(prog.percentage || 0);
-          setServerProcessed(prog.processed || 0);
-          setServerTotal(prog.total || dataToImport.length);
-
-          if (prog.completed || prog.error) {
-            clearPolling();
-            setIsImporting(false);
-
-            if (prog.error) {
-              setImportStep("Import failed");
-              showToast("error", prog.error || "Import failed on server");
-            } else {
-              setImportStep("Import completed successfully!");
-              showToast(
-                "success",
-                `Imported ${prog.successful} of ${prog.total} invoices`
-              );
-              if (onImportSuccess) onImportSuccess();
-            }
-
-            if (prog.failed > 0) {
-              try {
-                const failedRes = await axios.get(
-                  `${backendUrl}/api/sales/import/failed/${newSessionId}`
-                );
-                if (
-                  failedRes.data.success &&
-                  failedRes.data.data?.failedInvoices?.length > 0
-                ) {
-                  setFailedInvoices(failedRes.data.data.failedInvoices);
-                  setShowFailedInvoices(true);
-                }
-              } catch (e) {
-                console.warn("Could not fetch failed invoices");
-              }
-            }
-          }
-        } catch (err) {
-          if (err.code === "ERR_CANCELED") return;
-          console.error("Polling error:", err);
+      if (res.status === 200) {
+        showToast(
+          "success",
+          res.data.message || "Sales imported successfully!"
+        );
+        
+        if (onImportSuccess) {
+          onImportSuccess();
         }
-      }, 800);
-    } catch (err) {
-      clearPolling();
-      setIsImporting(false);
-
-      if (axios.isCancel(err) || isCancelled) {
-        setImportStep("Import cancelled");
-        showToast("info", "Import cancelled");
-      } else {
-        console.error("Import error:", err);
-        const message =
-          err.response?.data?.message || err.message || "Import failed";
-        setImportStep("Import failed");
-        showToast("error", message);
+        
+        resetModal();
+        onClose();
       }
+    } catch (err) {
+      console.error("Import error:", err);
+      const message = err.response?.data?.message || err.message || "Import failed";
+      showToast("error", message);
+    } finally {
+      setIsImporting(false);
     }
   };
 
+  // Download failed report
   const downloadFailedReport = () => {
-    const allErrors = [
-      ...importErrorDetails.map((e) => ({
-        Row: e.row,
-        "Invoice #": e.invoiceNumber,
-        Customer: e.customerName,
-        Product: e.productName || "N/A",
-        Error: e.message || e.error,
-        Type: "Validation",
-      })),
-      ...failedInvoices.map((e) => ({
-        Row: e.row || "N/A",
-        "Invoice #": e.invoiceNumber,
-        Customer: "N/A",
-        Product: e.productName || "N/A",
-        Error: e.message || e.error,
-        Type:
-          e.type === "insufficient_stock"
-            ? "Insufficient Stock"
-            : "Import Error",
-      })),
-    ];
-
-    if (allErrors.length === 0) {
-      showToast("warning", "No failed items to download");
+    if (validationErrors.length === 0) {
+      showToast("warning", "No validation errors to download");
       return;
     }
 
+    const allErrors = validationErrors.map((err, index) => ({
+      "Row": err.row,
+      "Invoice #": err.invoiceNumber,
+      "Customer Name": err.customerName,
+      "Product Name": err.productName,
+      "Errors": err.errors,
+    }));
+
     const ws = XLSX.utils.json_to_sheet(allErrors);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Failed Import");
-    const fileName = `import_failed_${new Date()
+    XLSX.utils.book_append_sheet(wb, ws, "Validation Errors");
+    
+    const fileName = `sales_validation_errors_${new Date()
       .toISOString()
       .slice(0, 10)}.xlsx`;
+    
     XLSX.writeFile(wb, fileName);
-    showToast("success", "Report downloaded");
-  };
-
-  const handleImportData = () => {
-    handleProductImport(parsedData);
-  };
-
-  const resetParsedData = () => {
-    setParsedData([]);
-    setImportErrorDetails([]);
-    setShowParsedSection(false);
-    setShowValidationErrors(false);
-    setFailedInvoices([]);
-    setShowFailedInvoices(false);
+    showToast("success", "Validation report downloaded");
   };
 
   if (!isOpen) return null;
 
   return ReactDOM.createPortal(
-    <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-50">
-      <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
-        {/* Validation Errors Section */}
-        {importErrorDetails.length > 0 && showParsedSection && !isImporting && (
-          <div className="mb-6 border border-red-200 rounded-lg overflow-hidden">
-            <div className="bg-red-50 p-3 flex justify-between items-center">
+    <div className="fixed inset-0 flex justify-center items-center z-50">
+      {/* Background Overlay */}
+      <div
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={() => !isUploading && !isImporting && handleClose()}
+      />
+
+      {/* Modal Content */}
+      <div
+        className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative z-10"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Close Button */}
+        <button
+          onClick={handleClose}
+          className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+          disabled={isUploading || isImporting}
+        >
+          <X size={20} />
+        </button>
+
+        {/* Header */}
+        <h2 className="text-lg font-semibold mb-4">Import Sales</h2>
+        
+        {isSampleFile && <SampleExcelDownloadSale />}
+
+        {/* Validation Errors Display */}
+        {validationErrors.length > 0 && (
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+            <div className="flex justify-between items-center mb-2">
               <div className="flex items-center gap-2">
-                <AlertCircle className="text-red-600" size={18} />
-                <h3 className="font-medium text-red-800">
-                  Validation Errors ({importErrorDetails.length})
+                <AlertCircle className="text-red-600" size={16} />
+                <h3 className="text-sm font-medium text-red-800">
+                  Validation Errors ({validationErrors.length})
                 </h3>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setShowValidationErrors(!showValidationErrors)}
-                  className="text-sm text-red-600 hover:text-red-800 border border-red-300 px-3 py-1 rounded"
-                >
-                  {showValidationErrors ? "Hide" : "Show"} Details
-                </button>
-                <button
-                  onClick={downloadFailedReport}
-                  className="text-sm bg-red-600 text-white px-3 py-1 rounded flex items-center gap-1 hover:bg-red-700"
-                >
-                  <Download size={14} /> Report
-                </button>
-              </div>
-            </div>
-            {showValidationErrors && (
-              <div className="max-h-60 overflow-y-auto bg-white">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 sticky top-0">
-                    <tr>
-                      <th className="p-2 text-left border-b">Row</th>
-                      <th className="p-2 text-left border-b">Invoice #</th>
-                      <th className="p-2 text-left border-b">Customer</th>
-                      <th className="p-2 text-left border-b">Product</th>
-                      <th className="p-2 text-left border-b">Error</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {importErrorDetails.map((err, i) => (
-                      <tr key={i} className="hover:bg-red-50 border-b">
-                        <td className="p-2">{err.row}</td>
-                        <td className="p-2">{err.invoiceNumber}</td>
-                        <td className="p-2">{err.customerName}</td>
-                        <td className="p-2">{err.productName || "N/A"}</td>
-                        <td className="p-2 text-red-600 text-xs">
-                          {err.error}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Server Failed Invoices */}
-        {failedInvoices.length > 0 && !isImporting && (
-          <div className="mb-6 border border-orange-200 rounded-lg overflow-hidden">
-            <div className="bg-orange-50 p-3 flex justify-between items-center">
-              <div className="flex items-center gap-2">
-                <AlertCircle className="text-orange-600" size={18} />
-                <h3 className="font-medium text-orange-800">
-                  Failed Invoices ({failedInvoices.length})
-                </h3>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setShowFailedInvoices(!showFailedInvoices)}
-                  className="text-sm text-orange-600 hover:text-orange-800 border border-orange-300 px-3 py-1 rounded"
-                >
-                  {showFailedInvoices ? "Hide" : "Show"} Details
-                </button>
-                <button
-                  onClick={downloadFailedReport}
-                  className="text-sm bg-orange-600 text-white px-3 py-1 rounded flex items-center gap-1 hover:bg-orange-700"
-                >
-                  <Download size={14} /> Report
-                </button>
-              </div>
-            </div>
-            {showFailedInvoices && (
-              <div className="max-h-60 overflow-y-auto bg-white">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 sticky top-0">
-                    <tr>
-                      <th className="p-2 text-left border-b">Row</th>
-                      <th className="p-2 text-left border-b">Invoice(s)</th>
-                      <th className="p-2 text-left border-b">Product</th>
-                      <th className="p-2 text-left border-b">Issue</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {failedInvoices.map((err, i) => (
-                      <tr key={i} className="hover:bg-orange-50 border-b">
-                        <td className="p-2">{err.row || "N/A"}</td>
-                        <td className="p-2">{err.invoiceNumber}</td>
-                        <td className="p-2">{err.productName || "N/A"}</td>
-                        <td className="p-2 text-orange-600 text-xs">
-                          {err.message || err.error}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* File Processing */}
-        {(isUploading || isProcessingFile) && (
-          <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <div className="flex justify-between mb-2">
-              <h3 className="font-medium text-blue-800">
-                {isUploading ? "Uploading..." : "Processing file..."}
-              </h3>
-            </div>
-            <div className="w-full bg-gray-200 rounded-full h-2.5">
-              <div
-                className="bg-blue-600 h-2.5 rounded-full transition-all"
-                style={{ width: "70%" }}
-              />
-            </div>
-            <p className="text-sm text-gray-600 mt-2">{importMessage}</p>
-          </div>
-        )}
-
-        {/* Parsed Success */}
-        {showParsedSection && parsedData.length > 0 && (
-          <div className="mb-6 bg-green-50 border border-green-200 rounded-lg p-4">
-            <div className="flex justify-between items-start">
-              <div>
-                <h3 className="font-medium text-green-800">
-                  File Successfully Parsed
-                </h3>
-                <p className="text-sm text-green-700">
-                  Found {parsedData.length} valid invoices ready for import
-                </p>
-                {importErrorDetails.length > 0 && (
-                  <p className="text-sm text-yellow-700 mt-1">
-                    ⚠️ {importErrorDetails.length} rows skipped due to errors
-                  </p>
-                )}
               </div>
               <button
-                onClick={resetParsedData}
-                className="text-sm text-gray-600 hover:text-gray-800 px-3 py-1"
+                onClick={downloadFailedReport}
+                className="text-xs bg-red-600 text-white px-2 py-1 rounded flex items-center gap-1 hover:bg-red-700"
               >
-                Cancel
+                <Download size={12} /> Report
               </button>
+            </div>
+            <p className="text-xs text-red-700">
+              {validationErrors.length} rows have validation errors and will be skipped.
+            </p>
+          </div>
+        )}
+
+        <div className="mb-6">
+          <label className="block text-gray-700 mb-2">
+            Select Excel File
+          </label>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            onChange={handleFileUpload}
+            className="block w-full border rounded-lg px-3 py-2 cursor-pointer"
+            onClick={(e) => e.stopPropagation()}
+            disabled={isUploading || isImporting}
+          />
+          <p className="text-sm text-gray-500 mt-1">
+            Max 20MB. Ensure file has required columns.
+          </p>
+        </div>
+
+        {/* Data Summary */}
+        {parsedData.length > 0 && (
+          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+            <div className="flex items-center gap-2 mb-1">
+              <CheckCircle className="text-green-600" size={16} />
+              <h3 className="text-sm font-medium text-green-800">
+                File Successfully Parsed
+              </h3>
+            </div>
+            <p className="text-xs text-green-700">
+              Found {parsedData.length} valid invoices ready for import.
+              {validationErrors.length > 0 && (
+                <span className="ml-2">
+                  ({validationErrors.length} rows skipped due to errors)
+                </span>
+              )}
+            </p>
+            <div className="mt-2 text-xs text-gray-600">
+              Total Products: {parsedData.reduce((sum, inv) => sum + inv.products.length, 0)}
             </div>
           </div>
         )}
 
-        {/* SMOOTH PROGRESS BAR */}
-        {isImporting && (
-          <div className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-2xl p-6 shadow-xl">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-2xl font-bold text-blue-900">
-                Importing Sales Data...
+        {/* Loading State */}
+        {(isUploading || isImporting) && (
+          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="flex justify-between items-center">
+              <h3 className="text-sm font-medium text-blue-800">
+                {isUploading ? "Processing File..." : "Importing..."}
               </h3>
-              <span className="text-3xl font-extrabold text-indigo-700">
-                {serverProgress}%
+              <span className="text-xs text-blue-600">
+                {isUploading ? "Please wait" : "Importing sales data"}
               </span>
             </div>
+            {importMessage && (
+              <p className="text-xs text-gray-600 mt-1">{importMessage}</p>
+            )}
+          </div>
+        )}
 
-            <div className="w-full bg-gray-300 rounded-full h-12 overflow-hidden shadow-inner mb-4">
-              <div
-                className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 h-full rounded-full transition-all duration-1000 ease-out flex items-center justify-end pr-6 shadow-lg"
-                style={{ width: `${serverProgress}%` }}
-              >
-                <span className="text-white text-lg font-bold drop-shadow-lg">
-                  {serverProcessed} / {serverTotal}
+        {/* Action Buttons */}
+        <div className="flex justify-between items-center">
+          <div className="text-gray-700">
+            {parsedData.length > 0 ? (
+              <>
+                Invoices to import:{" "}
+                <span className="font-semibold text-blue-600">
+                  {parsedData.length}
                 </span>
-              </div>
-            </div>
-
-            <p className="text-center text-gray-700 font-medium text-lg mb-6">
-              {importStep}
-            </p>
-
-            <div className="flex justify-center">
-              <button
-                onClick={handleCancelImport}
-                className="px-8 py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-lg transition transform hover:scale-105"
-              >
-                Cancel Import
-              </button>
-            </div>
+              </>
+            ) : (
+              <span className="text-gray-500">No data to import</span>
+            )}
           </div>
-        )}
-
-        {/* File Upload */}
-        {!showParsedSection && !isUploading && !isProcessingFile && (
-          <div className="mb-8">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Import Sale 
-            </label>
-            {isSampleFile && <SampleExcelDownloadSale />}
-            <input
-              type="file"
-              accept=".xlsx,.xls,.csv"
-              onChange={handleFileUpload}
-              className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-            />
-            <p className="text-xs text-gray-500 mt-1">Max 20MB</p>
-          </div>
-        )}
-
-        {/* Import Button */}
-        {!isImporting && showParsedSection && parsedData.length > 0 && (
-          <div className="mb-6">
+          <div className="flex gap-3">
+            <button
+              onClick={handleClose}
+              disabled={isUploading || isImporting}
+              className={`px-5 py-2 rounded-lg cursor-pointer ${
+                isUploading || isImporting
+                  ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                  : "bg-gray-300 hover:bg-gray-400 text-gray-700"
+              }`}
+            >
+              Cancel
+            </button>
             <button
               onClick={handleImportData}
-              className="w-full bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white py-4 rounded-xl font-bold text-xl shadow-lg transition transform hover:scale-105"
+              disabled={isUploading || isImporting || parsedData.length === 0}
+              className={`px-5 py-2 rounded-lg cursor-pointer ${
+                isUploading || isImporting || parsedData.length === 0
+                  ? "bg-blue-400 text-white cursor-not-allowed"
+                  : "bg-blue-600 hover:bg-blue-700 text-white"
+              }`}
             >
-              Import Data ({parsedData.length} invoices)
+              {isImporting
+                ? "Importing..."
+                : `Import (${parsedData.length})`}
             </button>
           </div>
-        )}
-
-        {/* Footer */}
-        <div className="flex justify-end pt-4 border-t border-gray-200">
-          <button
-            onClick={handleClose}
-            disabled={isUploading || isProcessingFile || isImporting}
-            className="px-6 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg font-medium disabled:opacity-50"
-          >
-            Close
-          </button>
         </div>
       </div>
     </div>,
