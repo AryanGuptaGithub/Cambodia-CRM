@@ -5,7 +5,7 @@ import Province from "../../models/master/Province.js";
 const router = express.Router();
 
 // GET all zones
-router.get('/zones', async (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const zones = await Zone.find().sort({ name: 1 });
     res.json(zones);
@@ -20,7 +20,7 @@ router.get('/zones', async (req, res) => {
 });
 
 // GET zone by ID
-router.get('/zone/:id', async (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
     const zone = await Zone.findById(req.params.id);
     if (!zone) {
@@ -41,7 +41,7 @@ router.get('/zone/:id', async (req, res) => {
 });
 
 // POST create new zone
-router.post('/zone', async (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const { name } = req.body;
 
@@ -80,7 +80,7 @@ router.post('/zone', async (req, res) => {
 });
 
 // PUT update zone
-router.put('/zone/:id', async (req, res) => {
+router.put('/:id', async (req, res) => {
   try {
     const { name } = req.body;
     if (!name) {
@@ -119,7 +119,7 @@ router.put('/zone/:id', async (req, res) => {
 });
 
 // DELETE zone
-router.delete('/zone/:id', async (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
     const deletedZone = await Zone.findByIdAndDelete(req.params.id);
 
@@ -144,23 +144,48 @@ router.delete('/zone/:id', async (req, res) => {
   }
 });
 
-router.get("/by-province/:provinceName", async (req, res) => {
+// GET zones by province name
+router.get('/by-province/:provinceName', async (req, res) => {
   try {
-    const province = await Province.findOne({
-      name: new RegExp(`^${req.params.provinceName}$`, "i"),
+    const provinceName = decodeURIComponent(req.params.provinceName);
+    
+    // First try exact match
+    let province = await Province.findOne({
+      name: { $regex: new RegExp(`^${provinceName}$`, 'i') }
     });
 
+    // If not found, try partial match
     if (!province) {
-      return res.json({ success: true, data: [] });
+      province = await Province.findOne({
+        name: { $regex: provinceName, $options: 'i' }
+      });
     }
 
-    const zones = await Zone.find({ provinceId: province._id }).sort({
-      name: 1,
-    });
+    if (!province) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Province not found',
+        data: [] 
+      });
+    }
 
-    res.json({ success: true, data: zones });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    // Find zones that belong to this province
+    const zones = await Zone.find({ 
+      provinceId: province._id 
+    }).sort({ name: 1 });
+
+    res.json({ 
+      success: true, 
+      message: 'Zones fetched successfully',
+      data: zones 
+    });
+  } catch (error) {
+    console.error('Error fetching zones by province:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error while fetching zones',
+      error: error.message 
+    });
   }
 });
 

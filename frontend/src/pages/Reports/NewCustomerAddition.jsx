@@ -170,8 +170,8 @@ const NewCustomerAddition = () => {
               : "bg-gray-100 text-gray-400 cursor-not-allowed"
           }`}
         >
-          <ChevronLeft size={16} />
-          Prev
+          
+             ← Prev
         </button>
 
         {/* Page Numbers */}
@@ -206,8 +206,8 @@ const NewCustomerAddition = () => {
               : "bg-gray-100 text-gray-400 cursor-not-allowed"
           }`}
         >
-          Next
-          <ChevronRight size={16} />
+           Next →
+          
         </button>
       </div>
     );
@@ -278,7 +278,6 @@ const NewCustomerAddition = () => {
         <thead className="bg-gray-100 text-gray-700 border-b">
           <tr>
             <th className="p-3 text-sm font-medium">Sr.No</th>
-            <th className="p-3 text-sm font-medium">MR ID</th>
             <th className="p-3 text-sm font-medium">MR Name</th>
             <th className="p-3 text-sm font-medium">Contact</th>
             <th className="p-3 text-sm font-medium">Zone</th>
@@ -316,18 +315,11 @@ const NewCustomerAddition = () => {
               {getSerialNumber(index)}
             </div>
           </td>
-          <td className="p-3">
-            <div className="text-sm text-gray-600 font-medium">
-              {record.mrId || "N/A"}
-            </div>
-          </td>
+          
           <td className="p-3">
             <div>
               <div className="text-sm font-medium text-gray-900 capitalize">
                 {record.mrName}
-              </div>
-              <div className="text-xs text-gray-500">
-                {record.email || "N/A"}
               </div>
             </div>
           </td>

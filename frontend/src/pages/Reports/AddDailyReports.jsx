@@ -434,8 +434,8 @@ const AddDailyReports = () => {
               : "bg-gray-100 text-gray-400 cursor-not-allowed"
           }`}
         >
-          <ChevronLeft size={16} />
-          Prev
+          
+        ← Prev
         </button>
 
         {/* Page Numbers */}
@@ -470,8 +470,7 @@ const AddDailyReports = () => {
               : "bg-gray-100 text-gray-400 cursor-not-allowed"
           }`}
         >
-          Next
-          <ChevronRight size={16} />
+          Next →
         </button>
       </div>
     );

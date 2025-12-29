@@ -1022,7 +1022,7 @@ const PurchaseReturn = () => {
                   disabled={currentPage === 1}
                   className="px-3 py-1.5 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer text-sm"
                 >
-                  Previous
+                   ← Prev
                 </button>
                 {visiblePages.map((page, idx) =>
                   page === "..." ? (
@@ -1054,7 +1054,7 @@ const PurchaseReturn = () => {
                   disabled={currentPage === totalPages}
                   className="px-3 py-1.5 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer text-sm"
                 >
-                  Next
+                  Next →
                 </button>
               </div>
             </div>

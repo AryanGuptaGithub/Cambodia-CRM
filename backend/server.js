@@ -133,7 +133,7 @@ app.use("/api", hTabsRoutes);
 app.use("/api", Holiday);
 app.use("/api", Attendance);
 app.use("/api", Payroll);
-app.use("/api", zone);
+app.use('/api/zones', zone);
 app.use("/api", businessTypes);
 app.use("/api", productType);
 app.use("/api", productPackingType);

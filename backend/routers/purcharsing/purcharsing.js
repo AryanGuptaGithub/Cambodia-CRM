@@ -16,7 +16,8 @@ const normalizeProductName = (name) => {
     .replace(/\s+/g, " ") // Multiple spaces → single
     .replace(/[-_\/\\]/g, " ") // Dashes, slashes → space
     .replace(/alu\s*alu/gi, "alu alu") // Standardize ALU ALU variations
-    .replace(/[^a-z0-9\s]/g, "") // Remove remaining special chars
+    .replace(/[^a-z0-9\s.]/g, "") // Remove special chars but keep dots for decimals
+    .replace(/(\d+)\.(\d+)/g, "$1.$2") // Preserve decimal numbers
     .trim();
 };
 
@@ -65,6 +66,38 @@ const productNameFixMap = {
   "ecocid alu alu 20": "ALU ALU ECOCID 20",
   "ecocid 20": "ALU ALU ECOCID 20",
   "alu alu ecocid": "ALU ALU ECOCID 20",
+
+  // 🔥 FIX: Add product name fixes for products with decimals
+  "sirmox cl 228.5 syp": "SIRMOX CL 228.5 SYP",
+  "sirmox cl 2285 syp": "SIRMOX CL 228.5 SYP", // Handle missing decimal
+  "sirmox cl 228.5": "SIRMOX CL 228.5",
+  "sirmox cl 2285": "SIRMOX CL 228.5", // Handle missing decimal
+
+  "sirmox cl 625": "SIRMOX CL 625",
+  "sirmox cl 1000": "SIRMOX CL 1000",
+  "sirmox 500": "SIRMOX 500",
+  "sirmox 500 cap": "SIRMOX 500",
+  "sirmox 250 syp": "SIRMOX 250 SYP",
+  "sirmox 250 cap": "SIRMOX 250 CAP",
+  "sirmox 250": "SIRMOX 250",
+
+  "ecocid 20": "ECOCID 20",
+  "ecoflam 400": "ECOFLAX 400",
+  "ecofloxacin 200": "ECOFLOXCIN 200",
+  "ecolevo 500": "ECOLEVO 500",
+  "ecopred 5": "ECOPRED 5",
+  "ecothrocin 500": "ECOTHROCIN 500",
+  "ecothrocin 250": "ECOTHROCIN 250",
+  "ecovastin 10": "ECOVASTIN 10",
+  "ecovastin 20": "ECOVASTIN 20",
+  "ecozin 5": "ECOZIN 5",
+  "ecozin m": "ECOZIN M",
+  "ecozole 400": "ECOZOLE 400",
+  "esoprazole 20": "ESOPRAZOLE 20",
+  "esoprazole 40": "ESOPRAZOLE 40",
+  "kamzole 200": "KAMZOLE 200",
+  "suprafen 500": "SUPRAFEN 500",
+  "ecoflaz 6": "ECOFLAZ 6",
 };
 
 const getStrictNormalizedProductName = (name) => {
@@ -79,27 +112,40 @@ const findProductInReportInHand = async (productName) => {
   try {
     const normalizedInput = normalizeProductName(productName);
     const fixedName = productNameFixMap[normalizedInput] || normalizedInput;
-
-    // 1. Try exact match on fixed name
+    // 1. Try exact match on fixed name (case-insensitive)
     let item = await ReportInHand.findOne({
       productName: { $regex: new RegExp(`^${fixedName}$`, "i") },
     }).lean();
-    if (item) return item;
+
+    if (item) {
+      return item;
+    }
 
     // 2. Try contains match on fixed name
     item = await ReportInHand.findOne({
       productName: { $regex: fixedName, $options: "i" },
     }).lean();
-    if (item) return item;
 
-    // 3. Scan all items for tolerant match
+    if (item) {
+      return item;
+    }
+
+    // 3. Try to match by removing spaces and special chars
+    const strictNormalizedInput = getStrictNormalizedProductName(productName);
     const allItems = await ReportInHand.find({}).lean();
     for (const doc of allItems) {
-      const normalizedDoc = normalizeProductName(doc.productName);
+      const strictNormalizedDoc = getStrictNormalizedProductName(
+        doc.productName
+      );
+
+      if (strictNormalizedDoc === strictNormalizedInput) {
+        return doc;
+      }
+
+      // Check if either contains the other
       if (
-        normalizedDoc === normalizedInput ||
-        normalizedDoc.includes(normalizedInput) ||
-        normalizedInput.includes(normalizedDoc)
+        strictNormalizedDoc.includes(strictNormalizedInput) ||
+        strictNormalizedInput.includes(strictNormalizedDoc)
       ) {
         return doc;
       }
@@ -110,12 +156,16 @@ const findProductInReportInHand = async (productName) => {
       normalizedInput.includes("alu alu") &&
       normalizedInput.includes("ecocid")
     ) {
-      return await ReportInHand.findOne({
+      const aluItem = await ReportInHand.findOne({
         productName: {
           $regex: "alu alu.*ecocid|ecocid.*alu alu",
           $options: "i",
         },
       }).lean();
+
+      if (aluItem) {
+        return aluItem;
+      }
     }
 
     return null;
@@ -165,8 +215,7 @@ const updateReportInHand = async (productData, operation = "add") => {
     // Normalize and fix product name
     const normalized = normalizeProductName(productName);
     const fixedProductName =
-      productNameFixMap[normalized] || productName.trim();
-
+      productNameFixMap[normalized] || productName.trim().toUpperCase();
     if (operation === "add") {
       const amount = qty * (lc || 0);
       const newBatch = {
@@ -185,7 +234,6 @@ const updateReportInHand = async (productData, operation = "add") => {
       }).lean();
 
       if (existingDoc) {
-        // Update existing document
         const updatedBatches = [...(existingDoc.batches || []), newBatch];
         const totalBoxes = updatedBatches.reduce(
           (sum, b) => sum + (b.boxes || 0),
@@ -195,9 +243,8 @@ const updateReportInHand = async (productData, operation = "add") => {
           (sum, b) => sum + (b.amount || 0),
           0
         );
-        
+
         // Calculate weighted average price
-        // Formula: (sum of (quantity * price)) / total quantity
         const averagePrice = totalBoxes > 0 ? totalAmount / totalBoxes : 0;
 
         await ReportInHand.updateOne(
@@ -215,7 +262,6 @@ const updateReportInHand = async (productData, operation = "add") => {
       } else {
         // Create new document
         const averagePrice = qty > 0 ? amount / qty : 0;
-        
         await ReportInHand.create({
           productName: fixedProductName,
           supplierName: validSupplier,
@@ -245,7 +291,6 @@ const updateReportInHand = async (productData, operation = "add") => {
         return;
       }
 
-      // Create a copy of batches and sort by date (FIFO)
       const sortedBatches = [...item.batches].sort(
         (a, b) => new Date(a.date) - new Date(b.date)
       );
@@ -287,7 +332,7 @@ const updateReportInHand = async (productData, operation = "add") => {
         (sum, b) => sum + (b.amount || 0),
         0
       );
-      
+
       // Calculate new weighted average price
       const averagePrice = totalBoxes > 0 ? totalAmount / totalBoxes : 0;
       const status = calculateStockStatus(totalBoxes);
@@ -296,7 +341,6 @@ const updateReportInHand = async (productData, operation = "add") => {
         // Delete if empty
         await ReportInHand.findByIdAndDelete(item._id);
       } else {
-        // Update with new batches and totals
         await ReportInHand.updateOne(
           { _id: item._id },
           {
@@ -335,7 +379,7 @@ router.get("/purchase", async (req, res) => {
     const purchases = await purchaseInventory
       .find()
       .sort({ createdAt: -1 })
-      .lean(); // Use lean() to get plain objects
+      .lean();
 
     const productList = await Product.find(
       {},
@@ -356,16 +400,19 @@ router.get("/purchase", async (req, res) => {
       const enhancedProducts = invoice.products.map((p) => {
         // Normalize the purchase product name
         const normalizedProductName = normalizeProductName(p.productName);
-        
+
         // Find matching product in database
         const productInfo = productMap.get(normalizedProductName);
-        
+
         // Try to find product with exact match first, then try partial match
         let matchedProduct = productInfo;
         if (!matchedProduct) {
           // Try to find by partial match
           for (const [key, prod] of productMap.entries()) {
-            if (normalizedProductName.includes(key) || key.includes(normalizedProductName)) {
+            if (
+              normalizedProductName.includes(key) ||
+              key.includes(normalizedProductName)
+            ) {
               matchedProduct = prod;
               break;
             }
@@ -410,8 +457,6 @@ router.put("/purchase/:id", async (req, res) => {
     if (!oldInvoice) return res.status(404).json({ message: "Not found" });
 
     const oldProducts = oldInvoice.products || [];
-
-    // First update ReportInHand by subtracting old products
     for (const oldProduct of oldProducts) {
       await updateReportInHand(
         {
@@ -431,8 +476,6 @@ router.put("/purchase/:id", async (req, res) => {
     // Prepare new products data
     const newProducts = req.body.products || [];
     let totalAmount = 0;
-
-    // Process product IDs if they exist
     const productIds = newProducts.map((p) => p.productId).filter((id) => id);
     const productsInfo = await Product.find(
       { _id: { $in: productIds } },
@@ -469,7 +512,8 @@ router.put("/purchase/:id", async (req, res) => {
         productNameToUse = productNameMap.get(p.productId.toString());
       } else {
         const normalized = normalizeProductName(p.productName);
-        productNameToUse = productNameFixMap[normalized] || p.productName;
+        productNameToUse =
+          productNameFixMap[normalized] || p.productName.toUpperCase();
       }
 
       return {
@@ -495,7 +539,7 @@ router.put("/purchase/:id", async (req, res) => {
       {
         new: true,
         runValidators: true,
-        lean: true // Return plain object
+        lean: true,
       }
     );
 
@@ -505,8 +549,7 @@ router.put("/purchase/:id", async (req, res) => {
         .json({ message: "Invoice not found after update" });
     }
 
-    // Add new products to ReportInHand
-    for (const newProduct of processedProducts) {
+    for (const newProduct of processedProducts) {  
       await updateReportInHand(
         {
           productName: newProduct.productName || "",
@@ -533,7 +576,6 @@ router.delete("/purchase/:id", async (req, res) => {
   try {
     const invoice = await purchaseInventory.findById(req.params.id).lean();
     if (!invoice) return res.status(404).json({ error: "Not found" });
-
     for (const p of invoice.products) {
       await updateReportInHand(
         {
@@ -605,7 +647,6 @@ router.delete("/purchase", async (req, res) => {
     }
 
     const result = await purchaseInventory.deleteMany({ _id: { $in: ids } });
-
     res.json({
       success: true,
       message: `Deleted ${result.deletedCount} invoices successfully`,
@@ -643,7 +684,6 @@ router.post("/purchase", async (req, res) => {
     }
 
     let totalAmount = 0;
-
     const productIds = data.products.map((p) => p.productId).filter((id) => id);
     const productsInfo = await Product.find(
       { _id: { $in: productIds } },
@@ -680,7 +720,8 @@ router.post("/purchase", async (req, res) => {
         productNameToUse = productNameMap.get(p.productId.toString());
       } else {
         const normalized = normalizeProductName(p.productName);
-        productNameToUse = productNameFixMap[normalized] || p.productName;
+        productNameToUse =
+          productNameFixMap[normalized] || p.productName.toUpperCase();
       }
 
       return {
@@ -749,8 +790,10 @@ router.post("/purchase/import", async (req, res) => {
       return res.status(400).json({ message: "No data to import" });
     }
 
-    // 🔥 FIXED: Fetch all products with enhanced matching
-    const allProducts = await Product.find({}, "productName type batches").lean();
+    const allProducts = await Product.find(
+      {},
+      "productName type batches"
+    ).lean();
     const productMap = new Map();
 
     allProducts.forEach((product) => {
@@ -786,7 +829,6 @@ router.post("/purchase/import", async (req, res) => {
           skipped.push(invoiceData.invoiceNumber || "Unknown");
           continue;
         }
-
         // Generate or validate invoice number
         let invoiceNumber = invoiceData.invoiceNumber;
 
@@ -797,12 +839,10 @@ router.post("/purchase/import", async (req, res) => {
           });
 
           if (existingInvoice) {
-            // Generate new unique invoice number
             invoiceNumber = `INC${String(invoiceCounter).padStart(5, "0")}`;
             invoiceCounter++;
           }
         } else {
-          // Generate new invoice number if not provided
           invoiceNumber = `INC${String(invoiceCounter).padStart(5, "0")}`;
           invoiceCounter++;
         }
@@ -821,14 +861,13 @@ router.post("/purchase/import", async (req, res) => {
         const deliveryNumber = invoiceData.deliveryNumber || invoiceNumber;
 
         // Process each product in the invoice with enhanced matching
-        const processedProducts = invoiceData.products.map((product) => {
+        const processedProducts = invoiceData.products.map((product, idx) => {
           const quantityPerBoxStrip =
             parseFloat(product.quantityPerBoxStrip) || 0;
           let lc = parseFloat(product.lc) || parseFloat(product.lcNumber) || 0;
           let fob = parseFloat(product.fob) || 0;
           let cif = parseFloat(product.cif) || 0;
 
-          // 🔥 FIXED: Use enhanced product name matching
           const normalizedInput = normalizeProductName(product.productName);
           const fixedInputName =
             productNameFixMap[normalizedInput] || normalizedInput;
@@ -836,20 +875,22 @@ router.post("/purchase/import", async (req, res) => {
 
           let productNameToUse = product.productName;
           if (productInfo) {
-            // Use the exact product name from the database
             productNameToUse = productInfo.productName;
-
-            // Get missing values from product database
-            if (fob === 0) fob = productInfo.batches?.[0]?.fob || 0;
-            if (cif === 0) cif = productInfo.batches?.[0]?.cif || 0;
-            if (lc === 0) lc = productInfo.batches?.[0]?.lc || 0;
+            if (fob === 0) {
+              fob = productInfo.batches?.[0]?.fob || 0;
+            }
+            if (cif === 0) {
+              cif = productInfo.batches?.[0]?.cif || 0;
+            }
+            if (lc === 0) {
+              lc = productInfo.batches?.[0]?.lc || 0;
+            }
           } else {
             // Use the fixed input name if not found in database
-            productNameToUse = fixedInputName;
+            productNameToUse = fixedInputName.toUpperCase();
           }
 
           const amount = quantityPerBoxStrip * lc;
-
           return {
             productName: productNameToUse,
             type: product.type || productInfo?.type || "",
@@ -869,7 +910,6 @@ router.post("/purchase/import", async (req, res) => {
           (sum, product) => sum + (product.amount || 0),
           0
         );
-
         // Create invoice
         const invoice = await purchaseInventory.create({
           invoiceNumber: invoiceNumber,
@@ -902,8 +942,8 @@ router.post("/purchase/import", async (req, res) => {
         importedInvoices.push(invoice);
       } catch (err) {
         console.error(
-          `Error processing invoice ${invoiceData.invoiceNumber}:`,
-          err
+          `❌ Error processing invoice ${invoiceData.invoiceNumber}:`,
+          err.message
         );
         skipped.push(invoiceData.invoiceNumber || "Unknown");
       }
@@ -1341,12 +1381,12 @@ router.post("/purchases/download-excel", async (req, res) => {
 
     await workbook.xlsx.write(res);
   } catch (error) {
-    console.error("🔥 38. Error occurred in purchase download-excel endpoint:");
-    console.error("🔥 39. Error message:", error.message);
-    console.error("🔥 40. Error stack:", error.stack);
+    console.error("🔥 Error occurred in purchase download-excel endpoint:");
+    console.error("Error message:", error.message);
+    console.error("Error stack:", error.stack);
 
     if (error.code) {
-      console.error("🔥 41. Error code:", error.code);
+      console.error("Error code:", error.code);
     }
 
     res.status(500).json({
