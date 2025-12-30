@@ -55,13 +55,13 @@ import profitAndLoss from "./routers/reports/ProfitAndLoss.js";
 import expiryStockReport from "./routers/reports/expiryStockReport.js";
 import hrmDashboard from "./routers/hrm/dashboard.js";
 import payrollExport from "./routers/hrm/payrollExport.js";
-import leaves from './routers/hrm/Leave.js';
+import leaves from "./routers/hrm/Leave.js";
 import stockTransferToMR from "./routers/stock/stockTransferToMRRoutes.js";
 import StockReturn from "./routers/stock/stockReturn.js";
 import mrCash from "./routers/accounts/mrCashRoutes.js";
 import overdue from "./routers/overdue.js";
-import productReport from "./routers/reports/productReport.js"
-
+import productReport from "./routers/reports/productReport.js";
+import outstandingCollections from "./routers/reports/outstandingCollections.js";
 
 dotenv.config();
 
@@ -134,7 +134,7 @@ app.use("/api", hTabsRoutes);
 app.use("/api", Holiday);
 app.use("/api", Attendance);
 app.use("/api", Payroll);
-app.use('/api/zones', zone);
+app.use("/api/zones", zone);
 app.use("/api", businessTypes);
 app.use("/api", productType);
 app.use("/api", productPackingType);
@@ -143,13 +143,14 @@ app.use("/api", profitAndLoss);
 app.use("/api", expiryStockReport);
 app.use("/api", hrmDashboard);
 app.use("/api", payrollExport);
-app.use("/api",leaves);
+app.use("/api", leaves);
 app.use("/api", stockTransferToMR);
 app.use("/api", stockTransfer);
 app.use("/api", StockReturn);
 app.use("/api", mrCash);
 app.use("/api", overdue);
 app.use("/api", productReport);
+app.use("/api", outstandingCollections);
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);

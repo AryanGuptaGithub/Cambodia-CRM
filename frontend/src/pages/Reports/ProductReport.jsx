@@ -339,150 +339,137 @@ const ProductReport = () => {
     reader.readAsArrayBuffer(file);
   };
 
-  // Import parsed products to backend
-  const handleImport = async () => {
-    if (parsedData.length === 0) {
-      showToast("warning", "Please upload a valid file first");
-      return;
+  // Export to Excel function - Frontend implementation for custom format
+const exportToExcel = async () => {
+  setIsExporting(true);
+  try {
+    console.log("Exporting to Excel with frontend implementation");
+    
+    // Create a new workbook
+    const workbook = XLSX.utils.book_new();
+    
+    // Define the data array
+    const data = [];
+    
+    // Add headers based on your requested format
+    const headers = [
+      "Product Name",
+      "Category",
+      "Current Stock",
+      "Price",
+      activeTab === "month" ? `Sales (Month ${currentMonth})` : 
+      activeTab === "year" ? `Sales (Year ${currentYear})` : "Sales (All Data)",
+      "Profit Margin"
+    ];
+    
+    data.push(headers);
+    
+    // Add product data
+    filteredProducts.forEach((product) => {
+      const row = [
+        product.name || "",
+        product.category || "",
+        product.currentStock?.toFixed(2) || "0.00",
+        `$${product.price?.toFixed(2) || "0.00"}`,
+        `$${product.periodSales?.toFixed(2) || "0.00"}`,
+        product.profitMargin || "0%"
+      ];
+      data.push(row);
+    });
+    
+    // Create worksheet (NO SUMMARY SECTION ADDED)
+    const worksheet = XLSX.utils.aoa_to_sheet(data);
+    
+    // Set column widths
+    const colWidths = [
+      { wch: 30 }, // Product Name
+      { wch: 20 }, // Category
+      { wch: 15 }, // Current Stock
+      { wch: 15 }, // Price
+      { wch: 20 }, // Sales
+      { wch: 15 }  // Profit Margin
+    ];
+    worksheet['!cols'] = colWidths;
+    
+    // Style the header row only
+    const headerRange = XLSX.utils.decode_range(worksheet['!ref']);
+    for (let C = headerRange.s.c; C <= headerRange.e.c; ++C) {
+      const cellAddress = XLSX.utils.encode_cell({ r: 0, c: C });
+      if (!worksheet[cellAddress]) continue;
+      worksheet[cellAddress].s = {
+        font: { bold: true },
+        fill: { fgColor: { rgb: "F0F0F0" } },
+        alignment: { horizontal: "center" }
+      };
     }
-    setIsUploading(true);
-
-    try {
-      const res = await axios.post(
-        `${backendUrl}/api/products/import`,
-        parsedData
-      );
-
-      if (res.status === 200) {
-        showToast(
-          "success",
-          res.data.message || "Products imported successfully!"
-        );
-        setShowImportModal(false);
-        fetchProducts();
-      }
-    } catch (err) {
-      console.error("Import error:", err);
-      if (err.response) {
-        const { message } = err.response.data;
-        const cleanMessage = message.replace(/<[^>]+>/g, "");
-        showToast("error", cleanMessage || "Failed to import products.");
-      } else {
-        showToast("error", "Network error. Please try again.");
-      }
-    } finally {
-      setIsUploading(false);
+    
+    // Add worksheet to workbook
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Product Report");
+    
+    // Generate filename
+    let fileName = "product-report";
+    if (activeTab === "month") {
+      fileName = `product-report-month-${currentMonth}-${currentYear}`;
+    } else if (activeTab === "year") {
+      fileName = `product-report-year-${currentYear}`;
+    } else {
+      fileName = `product-report-all-data`;
     }
-  };
-
-  // Export to Excel function
-  const exportToExcel = async () => {
-    setIsExporting(true);
-    try {
-      console.log("Exporting to Excel with params:", {
-        period: activeTab,
-        month: activeTab === "month" ? currentMonth : null,
-        year: activeTab === "month" || activeTab === "year" ? currentYear : null,
-        searchTerm: searchTerm || null,
-        category: categoryFilter || null
-      });
-
-      // Call the new export endpoint
-      const response = await axios.get(`${backendUrl}/api/product-report/export/excel`, {
-        params: {
-          period: activeTab,
-          month: activeTab === "month" ? currentMonth : null,
-          year: activeTab === "month" || activeTab === "year" ? currentYear : null,
-          searchTerm: searchTerm || null,
-          category: categoryFilter || null
-        },
-        responseType: 'blob'
-      });
-
-      // Create a download link
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      
-      // Extract filename from Content-Disposition header or use default
-      let fileName = 'product-report';
-      const contentDisposition = response.headers['content-disposition'];
-      if (contentDisposition) {
-        const fileNameMatch = contentDisposition.match(/filename="?(.+)"?/);
-        if (fileNameMatch && fileNameMatch.length > 1) {
-          fileName = fileNameMatch[1];
-        }
-      } else {
-        // Fallback filename based on period
-        if (activeTab === 'month') {
-          fileName = `product-report-month-${currentMonth}-${currentYear}`;
-        } else if (activeTab === 'year') {
-          fileName = `product-report-year-${currentYear}`;
-        }
-        fileName += '.xlsx';
-      }
-      
-      link.setAttribute('download', fileName);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-      
-      showToast('success', 'Excel file downloaded successfully!');
-    } catch (error) {
-      console.error('Export error:', error);
-      if (error.response) {
-        console.error('Response error:', error.response.data);
-      }
-      showToast('error', error.response?.data?.message || 'Failed to export to Excel. Please try again.');
-    } finally {
-      setIsExporting(false);
-    }
-  };
+    fileName += ".xlsx";
+    
+    // Write and download
+    XLSX.writeFile(workbook, fileName);
+    
+    showToast("success", "Excel file downloaded successfully!");
+  } catch (error) {
+    console.error("Export error:", error);
+    showToast("error", "Failed to export to Excel. Please try again.");
+  } finally {
+    setIsExporting(false);
+  }
+};
 
   // Alternative: Export to CSV (frontend only)
   const exportToCSV = () => {
     const periodSuffix = activeTab === "month" ? `-${currentMonth}-${currentYear}` : 
                         activeTab === "year" ? `-${currentYear}` : "";
     
+    // Use the same format as Excel export
     const headers = [
       "Product Name",
       "Category",
-      "SKU/Packing",
       "Current Stock",
-      "Selling Price",
-      "LC Price",
-      "FOB Price",
+      "Price",
       activeTab === "month" ? `Sales (Month ${currentMonth})` : 
-      activeTab === "year" ? `Sales (Year ${currentYear})` : "Total Sales",
-      "Quantity Sold",
-      "Profit Amount",
-      "Profit Margin",
-      "Supplier",
-      "Status"
+      activeTab === "year" ? `Sales (Year ${currentYear})` : "Sales (All Data)",
+      "Profit Margin"
     ];
     
     const csvData = filteredProducts.map((product) => {
       return [
         product.name,
         product.category,
-        product.sku,
         product.currentStock?.toFixed(2) || "0.00",
-        product.price?.toFixed(2) || "0.00",
-        product.lcPrice?.toFixed(2) || product.cost?.toFixed(2) || "0.00",
-        product.fobPrice?.toFixed(2) || "0.00",
-        product.periodSales?.toFixed(2) || "0.00",
-        product.periodSoldQuantity || 0,
-        product.profitAmount?.toFixed(2) || "0.00",
-        product.profitMargin || "0%",
-        product.supplierName,
-        product.status
+        `$${product.price?.toFixed(2) || "0.00"}`,
+        `$${product.periodSales?.toFixed(2) || "0.00"}`,
+        product.profitMargin || "0%"
       ];
     });
+
+    // Add summary section
+    const summary = [
+      [],
+      ["SUMMARY", "", "", "", "", ""],
+      ["Total Products", stats.totalProducts.toString(), "", "", "", ""],
+      ["Total Sales", "", "", "", `$${stats.totalSales.toFixed(2)}`, ""],
+      ["Average Profit Margin", "", "", "", "", `${stats.avgProfitMargin.toFixed(1)}%`],
+      ["Total Stock", stats.totalStock.toFixed(2), "", "", "", ""]
+    ];
 
     const csvContent = [
       headers.join(","),
       ...csvData.map((row) => row.join(",")),
+      ...summary.map((row) => row.join(","))
     ].join("\n");
 
     const blob = new Blob([csvContent], { type: "text/csv" });
@@ -546,6 +533,18 @@ const ProductReport = () => {
         return `Current Year (${currentYear})`;
       default:
         return "All Data";
+    }
+  };
+
+  // Get sales column header based on active tab
+  const getSalesColumnHeader = () => {
+    switch (activeTab) {
+      case "month":
+        return `Sales (Month ${currentMonth})`;
+      case "year":
+        return `Sales (Year ${currentYear})`;
+      default:
+        return "Sales (All Data)";
     }
   };
 
@@ -762,12 +761,8 @@ const ProductReport = () => {
               <th className="p-3 text-sm font-medium">Category</th>
               <th className="p-3 text-sm font-medium">Current Stock</th>
               <th className="p-3 text-sm font-medium">Price</th>
-              <th className="p-3 text-sm font-medium">
-                {activeTab === "month" ? `Sales (Month)` : 
-                 activeTab === "year" ? `Sales (Year)` : "Total Sales"}
-              </th>
+              <th className="p-3 text-sm font-medium">{getSalesColumnHeader()}</th>
               <th className="p-3 text-sm font-medium">Profit Margin</th>
-              <th className="p-3 text-sm font-medium">Status</th>
             </tr>
           </thead>
           <tbody>
@@ -818,25 +813,12 @@ const ProductReport = () => {
                         {profitMargin}
                       </span>
                     </td>
-                    <td className="p-3">
-                      <span
-                        className={`inline-flex px-3 py-1 text-xs font-semibold rounded-full ${
-                          product.status === 'In Stock'
-                            ? "bg-green-100 text-green-800"
-                            : product.status === 'Low Stock'
-                            ? "bg-yellow-100 text-yellow-800"
-                            : "bg-red-100 text-red-800"
-                        }`}
-                      >
-                        {product.status || "Unknown"}
-                      </span>
-                    </td>
                   </tr>
                 );
               })
             ) : (
               <tr>
-                <td colSpan={7} className="p-8 text-center">
+                <td colSpan={6} className="p-8 text-center">
                   <div className="flex flex-col items-center justify-center">
                     <Package className="w-12 h-12 text-gray-400 mb-4" />
                     <h3 className="text-lg font-medium text-gray-900 mb-2">No products found</h3>
@@ -922,7 +904,6 @@ const ProductReport = () => {
             </>
           )}
         </div>
-
       </div>
 
       {/* Import Modal */}

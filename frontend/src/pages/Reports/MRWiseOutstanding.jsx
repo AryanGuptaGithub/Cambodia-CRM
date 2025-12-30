@@ -30,6 +30,7 @@ const MRWiseOutstanding = () => {
     records: [],
   });
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [selectedTab, setSelectedTab] = useState("all");
   const [showCustomFilter, setShowCustomFilter] = useState(false);
   const [customDateRange, setCustomDateRange] = useState({
@@ -312,8 +313,82 @@ const MRWiseOutstanding = () => {
     setSelectedTab("all");
   };
 
-  const exportToExcel = () => {
-    showToast("info", "Export feature coming soon");
+  const exportToExcel = async () => {
+    setExporting(true);
+    try {
+      // Get the date range based on selected tab
+      const dateRange = getDateRange();
+      
+      // Build query parameters
+      const params = new URLSearchParams();
+      
+      if (searchTerm) {
+        params.append('search', searchTerm);
+      }
+      
+      if (selectedTab !== 'all') {
+        if (dateRange.startDate) {
+          params.append('startDate', dateRange.startDate);
+        }
+        if (dateRange.endDate) {
+          params.append('endDate', dateRange.endDate);
+        }
+      }
+      
+      console.log("Exporting Excel with params:", {
+        search: searchTerm,
+        startDate: dateRange.startDate,
+        endDate: dateRange.endDate
+      });
+      
+      // Make the export request
+      const response = await axios.get(`${backendUrl}/api/mr-wise-outstanding/export/excel`, {
+        params: params,
+        responseType: 'blob'
+      });
+
+      // Create a download link
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      
+      // Extract filename from Content-Disposition header or use default
+      let fileName = 'mr-wise-outstanding.xlsx';
+      const contentDisposition = response.headers['content-disposition'];
+      if (contentDisposition) {
+        const fileNameMatch = contentDisposition.match(/filename="?(.+)"?/);
+        if (fileNameMatch && fileNameMatch.length > 1) {
+          fileName = fileNameMatch[1];
+        }
+      } else {
+        // Fallback filename based on current tab
+        const currentDate = new Date();
+        const formattedDate = currentDate.toISOString().split('T')[0];
+        
+        if (selectedTab === 'currentMonth') {
+          fileName = `mr-wise-outstanding-${getCurrentMonthName().toLowerCase()}-${getCurrentYear()}.xlsx`;
+        } else if (selectedTab === 'janToPreviousMonth') {
+          fileName = `mr-wise-outstanding-${getJanToPreviousMonthRange().label.replace(/ /g, '-')}.xlsx`;
+        } else if (selectedTab === 'custom' && dateRange.startDate && dateRange.endDate) {
+          fileName = `mr-wise-outstanding-${dateRange.startDate}-to-${dateRange.endDate}.xlsx`;
+        } else {
+          fileName = `mr-wise-outstanding-${formattedDate}.xlsx`;
+        }
+      }
+      
+      link.setAttribute('download', fileName);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      
+      showToast('success', 'Excel file downloaded successfully!');
+    } catch (error) {
+      console.error('Export error:', error);
+      showToast('error', error.response?.data?.message || 'Failed to export to Excel. Please try again.');
+    } finally {
+      setExporting(false);
+    }
   };
 
   const formatDateForDisplay = (date) => {
@@ -436,10 +511,15 @@ const MRWiseOutstanding = () => {
 
           <button
             onClick={exportToExcel}
-            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+            disabled={exporting || (selectedTab === "custom" && (!customDateRange.startDate || !customDateRange.endDate))}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl shadow-md cursor-pointer ${
+              exporting || (selectedTab === "custom" && (!customDateRange.startDate || !customDateRange.endDate))
+                ? "bg-gray-400 text-gray-200 cursor-not-allowed"
+                : "bg-green-600 hover:bg-green-700 text-white"
+            }`}
           >
             <Download size={18} />
-            Export Excel
+            {exporting ? "Exporting..." : "Export Excel"}
           </button>
         </div>
       </div>
@@ -504,7 +584,7 @@ const MRWiseOutstanding = () => {
             <div>
               <p className="text-sm text-gray-600">Total Outstanding</p>
               <p className="text-2xl font-bold text-gray-800">
-                ${data.summary.totalOutstandingAmount?.toLocaleString() || 0}
+                ${data.summary.totalOutstandingAmount?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "0.00"}
               </p>
             </div>
             <FileText className="w-8 h-8 text-blue-500" />
@@ -551,7 +631,10 @@ const MRWiseOutstanding = () => {
             {loading ? (
               <tr>
                 <td colSpan="6" className="p-3 text-center">
-                  Loading...
+                  <div className="flex justify-center items-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+                    <span className="ml-2">Loading...</span>
+                  </div>
                 </td>
               </tr>
             ) : data.records.length > 0 ? (
@@ -578,20 +661,20 @@ const MRWiseOutstanding = () => {
                         {mr.mrName}
                       </div>
                       <div className="text-xs text-gray-500">
-                        {mr.staff.email}
+                        {mr.staff?.email || "No email"}
                       </div>
                     </div>
                   </td>
                   <td className="p-3">
                     <div className="text-sm text-gray-900">
-                      {mr.staff.contactNo || "N/A"}
+                      {mr.staff?.contactNo || "Not Available"}
                     </div>
                   </td>
                   <td className="p-3 text-sm font-semibold text-green-600">
                     {mr.totalCustomers || 0}
                   </td>
                   <td className="p-3 text-sm font-semibold text-blue-600">
-                    {mr.totalOutstandingAmount?.toLocaleString() || 0}
+                    ${mr.totalOutstandingAmount?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "0.00"}
                   </td>
                 </tr>
               ))
@@ -645,8 +728,8 @@ const MRWiseOutstanding = () => {
                       selectsStart
                       startDate={customDateRange.startDate}
                       endDate={customDateRange.endDate}
-                      className="w-full border rounded-lg px-3 py-2"
-                      placeholderText="Start date"
+                      className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      placeholderText="Select start date"
                       dateFormat="yyyy-MM-dd"
                       isClearable
                     />
@@ -665,8 +748,8 @@ const MRWiseOutstanding = () => {
                       startDate={customDateRange.startDate}
                       endDate={customDateRange.endDate}
                       minDate={customDateRange.startDate}
-                      className="w-full border rounded-lg px-3 py-2"
-                      placeholderText="End date"
+                      className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      placeholderText="Select end date"
                       dateFormat="yyyy-MM-dd"
                       isClearable
                     />
@@ -677,20 +760,20 @@ const MRWiseOutstanding = () => {
               <div className="flex justify-between gap-3">
                 <button
                   onClick={handleClearFilters}
-                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer transition-colors"
                 >
                   Clear All
                 </button>
                 <div className="flex gap-3">
                   <button
                     onClick={() => setShowCustomFilter(false)}
-                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer"
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer transition-colors"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleApplyCustomFilter}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg cursor-pointer transition-colors"
                   >
                     Apply Filter
                   </button>

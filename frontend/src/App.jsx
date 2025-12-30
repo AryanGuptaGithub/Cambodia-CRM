@@ -78,7 +78,7 @@ import UserReport from "./pages/Reports/UserReport";
 import PaymentReports from "./pages/Reports/PaymentReports";
 
 // New report components
-import TotalCashSales from "./pages/Reports/TotalCashSales";
+import CashSales from "./pages/Reports/CashSales";
 import OutstandingCollection from "./pages/Reports/OutstandingCollection";
 import TotalExpense from "./pages/Reports/TotalExpense";
 import Remittance from "./pages/Reports/Remittance";
@@ -265,7 +265,7 @@ function App() {
             <Route path="mrwisesales" element={<MRWiseSales />} />
 
             {/* Financial Reports */}
-            <Route path="cashsales" element={<TotalCashSales />} />
+            <Route path="cashsales" element={<CashSales />} />
             <Route
               path="outstandingcollection"
               element={<OutstandingCollection />}

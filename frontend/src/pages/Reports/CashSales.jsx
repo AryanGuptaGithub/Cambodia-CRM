@@ -1,5 +1,12 @@
 import React, { useState, useEffect } from "react";
-import { DollarSign, Download, Filter, Calendar, X } from "lucide-react";
+import {
+  DollarSign,
+  Download,
+  Filter,
+  Calendar,
+  X,
+  Package,
+} from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
 import { formatDateToReadable } from "../../utils/dateUtil";
@@ -9,7 +16,7 @@ import "react-datepicker/dist/react-datepicker.css";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-const TotalCashSales = () => {
+const CashSales = () => {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedTab, setSelectedTab] = useState("currentMonth");
@@ -18,6 +25,10 @@ const TotalCashSales = () => {
     startDate: null,
     endDate: null,
   });
+  const [exportLoading, setExportLoading] = useState(false);
+  const [showProductModal, setShowProductModal] = useState(false);
+  const [selectedProducts, setSelectedProducts] = useState([]);
+  const [selectedSaleInfo, setSelectedSaleInfo] = useState(null);
 
   const getCurrentMonthName = () => {
     return new Date().toLocaleString("default", { month: "long" });
@@ -85,7 +96,7 @@ const TotalCashSales = () => {
         return {};
     }
   };
-
+  
   const fetchCashSales = async () => {
     setLoading(true);
     try {
@@ -96,6 +107,7 @@ const TotalCashSales = () => {
         (!dateRange.startDate || !dateRange.endDate)
       ) {
         setLoading(false);
+        setData([]);
         return;
       }
 
@@ -109,6 +121,7 @@ const TotalCashSales = () => {
     } catch (error) {
       console.error("Error fetching cash sales:", error);
       showToast("error", "Failed to fetch cash sales data");
+      setData([]);
     } finally {
       setLoading(false);
     }
@@ -119,6 +132,7 @@ const TotalCashSales = () => {
       selectedTab === "custom" &&
       (!customDateRange.startDate || !customDateRange.endDate)
     ) {
+      setData([]);
       return;
     }
     fetchCashSales();
@@ -160,11 +174,99 @@ const TotalCashSales = () => {
     }
   };
 
-  const exportToExcel = () => {
-    showToast("info", "Export feature coming soon");
+  const exportToExcel = async () => {
+    try {
+      setExportLoading(true);
+      const dateRange = getDateRange();
+
+      if (
+        selectedTab === "custom" &&
+        (!dateRange.startDate || !dateRange.endDate)
+      ) {
+        showToast(
+          "warning",
+          "Please select both start and end dates for export"
+        );
+        setExportLoading(false);
+        return;
+      }
+
+      if (data.length === 0) {
+        showToast("warning", "No data available to export");
+        setExportLoading(false);
+        return;
+      }
+
+      showToast("info", "Preparing Excel file...");
+
+      const params = new URLSearchParams();
+
+      if (dateRange.startDate) params.append("startDate", dateRange.startDate);
+      if (dateRange.endDate) params.append("endDate", dateRange.endDate);
+
+      const downloadUrl = `${backendUrl}/api/reports/cash-sales/export/excel?${params.toString()}`;
+
+      const response = await axios.get(downloadUrl, {
+        responseType: "blob",
+      });
+
+      const blob = new Blob([response.data], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+
+      let fileName = "cash-sales-report";
+      if (dateRange.startDate && dateRange.endDate) {
+        fileName = `cash-sales-${dateRange.startDate.replace(
+          /-/g,
+          ""
+        )}-to-${dateRange.endDate.replace(/-/g, "")}`;
+      } else {
+        const today = new Date().toISOString().split("T")[0];
+        fileName = `cash-sales-${today.replace(/-/g, "")}`;
+      }
+      fileName += ".xlsx";
+
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(link);
+
+      showToast("success", "Excel file downloaded successfully!");
+    } catch (error) {
+      console.error("Error exporting to Excel:", error);
+      if (error.response?.status === 400) {
+        showToast("error", "Invalid date format for export");
+      } else if (error.response?.status === 404) {
+        showToast("error", "Export service not available");
+      } else {
+        showToast("error", "Failed to export to Excel");
+      }
+    } finally {
+      setExportLoading(false);
+    }
   };
 
-  const totalAmount = data.reduce((sum, item) => sum + (item.amount || 0), 0);
+  const showProductDetails = (products, sale) => {
+    setSelectedProducts(products);
+    setSelectedSaleInfo({
+      invoiceNumber: sale.invoiceNumber,
+      customerName: sale.customerName,
+      date: sale.deliveryDate,
+      totalAmount: sale.totalAmount || sale.amount || 0,
+    });
+    setShowProductModal(true);
+  };
+
+  const totalAmount = data.reduce(
+    (sum, item) => sum + (item.totalAmount || item.amount || 0),
+    0
+  );
 
   const formatDateForDisplay = (date) => {
     return date ? formatDateToReadable(date) : "";
@@ -191,6 +293,8 @@ const TotalCashSales = () => {
     }
   };
 
+  const isExportDisabled = loading || exportLoading || data.length === 0;
+
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-4">
@@ -200,10 +304,20 @@ const TotalCashSales = () => {
         </div>
         <button
           onClick={exportToExcel}
-          className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+          disabled={isExportDisabled}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl shadow-md cursor-pointer ${
+            isExportDisabled
+              ? "bg-gray-400 text-gray-700 cursor-not-allowed"
+              : "bg-green-600 hover:bg-green-700 text-white"
+          }`}
+          title={
+            data.length === 0
+              ? "No data available to export"
+              : "Export to Excel"
+          }
         >
           <Download size={18} />
-          Export Excel
+          {exportLoading ? "Exporting..." : "Export Excel"}
         </button>
       </div>
 
@@ -247,6 +361,9 @@ const TotalCashSales = () => {
           <Filter size={16} />
           <span>Active Filter: </span>
           <span className="font-medium">{getActiveFilterDisplay()}</span>
+          <span className="text-gray-500 ml-2">
+            ({data.length} records found)
+          </span>
         </div>
       </div>
 
@@ -274,7 +391,7 @@ const TotalCashSales = () => {
         </div>
       </div>
 
-      {/* Data Table - Updated with Sr.No column and removed Payment Method */}
+      {/* Data Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
@@ -295,31 +412,58 @@ const TotalCashSales = () => {
                 </td>
               </tr>
             ) : data.length > 0 ? (
-              data.map((sale, index) => (
-                <tr
-                  key={index}
-                  className={`hover:bg-gray-50 ${
-                    index === data.length - 1 ? "" : "border-b"
-                  }`}
-                >
-                  <td className="p-3 text-sm text-gray-900">{index + 1}</td>
-                  <td className="p-3 text-sm text-gray-900">
-                    {formatDateToReadable(sale.deliveryDate)}
-                  </td>
-                  <td className="p-3 text-sm text-gray-900">
-                    {sale.invoiceNumber}
-                  </td>
-                  <td className="p-3 text-sm text-gray-900 capitalize">
-                    {sale.customerName}
-                  </td>
-                  <td className="p-3 text-sm text-gray-900 capitalize">
-                    {sale.productName}
-                  </td>
-                  <td className="p-3 text-sm font-semibold text-green-600">
-                    {sale.amount?.toLocaleString()}
-                  </td>
-                </tr>
-              ))
+              data.map((sale, index) => {
+                const hasMultipleProducts =
+                  sale.displayProducts && sale.displayProducts.length > 1;
+                const productCount = sale.displayProducts
+                  ? sale.displayProducts.length
+                  : 1;
+
+                return (
+                  <tr
+                    key={index}
+                    className={`hover:bg-gray-50 ${
+                      index === data.length - 1 ? "" : "border-b"
+                    }`}
+                  >
+                    <td className="p-3 text-sm text-gray-900">{index + 1}</td>
+                    <td className="p-3 text-sm text-gray-900">
+                      {formatDateToReadable(sale.deliveryDate)}
+                    </td>
+                    <td className="p-3 text-sm text-gray-900">
+                      {sale.invoiceNumber}
+                    </td>
+                    <td className="p-3 text-sm text-gray-900 capitalize">
+                      {sale.customerName}
+                    </td>
+                    <td className="p-3 text-sm text-gray-900 capitalize">
+                      <div className="flex items-center justify-center gap-2">
+                        {hasMultipleProducts ? (
+                          <button
+                            onClick={() =>
+                              showProductDetails(sale.displayProducts, sale)
+                            }
+                            className="flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 cursor-pointer"
+                            title="Click to view products"
+                          >
+                            <Package size={14} />
+                            <span> {productCount}</span>
+                          </button>
+                        ) : (
+                          <span className="capitalize">
+                            {sale.displayProducts && sale.displayProducts[0]
+                              ? sale.displayProducts[0].productName || sale.displayProducts[0].name
+                              : sale.productName || "N/A"}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="p-3 text-sm font-semibold text-green-600">
+                      ${(sale.totalAmount || sale.amount || 0).toLocaleString()}
+                    </td>
+                  </tr>
+                );
+              })
             ) : (
               <tr>
                 <td colSpan="6" className="p-3 text-center text-gray-500">
@@ -333,20 +477,138 @@ const TotalCashSales = () => {
           </tbody>
         </table>
       </div>
+      
+      {showProductModal && (
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            <div
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setShowProductModal(false)}
+            />
+            <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative z-10">
+              <button
+                onClick={() => setShowProductModal(false)}
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+
+              <h2 className="text-lg font-semibold text-gray-800 mb-4">
+                Product Details
+              </h2>
+              
+              {/* Sale Information */}
+              {selectedSaleInfo && (
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4 p-4 bg-gray-50 rounded-lg">
+                  <div>
+                    <p className="text-sm text-gray-600">Invoice Number</p>
+                    <p className="text-sm font-medium">{selectedSaleInfo.invoiceNumber}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600">Customer</p>
+                    <p className="text-sm font-medium">{selectedSaleInfo.customerName}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600">Date</p>
+                    <p className="text-sm font-medium">{formatDateToReadable(selectedSaleInfo.date)}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600">Total Amount</p>
+                    <p className="text-sm font-medium text-green-600">
+                      ${selectedSaleInfo.totalAmount.toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse bg-white rounded-lg overflow-hidden shadow-sm text-center">
+                  <thead className="bg-gray-100 text-gray-700">
+                    <tr>
+                      <th className="p-3 text-sm font-medium">S.r.No</th>
+                      <th className="p-3 text-sm font-medium">Product Name</th>
+                      <th className="p-3 text-sm font-medium">Sales Qty</th>
+                      <th className="p-3 text-sm font-medium">Bonus Qty</th>
+                      <th className="p-3 text-sm font-medium">Total Qty</th>
+                      <th className="p-3 text-sm font-medium">Selling Price ($)</th>
+                      <th className="p-3 text-sm font-medium">Amount ($)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedProducts.map((product, index) => {
+                      const totalQty = product.totalQty || (product.salesQty || 0) + (product.bonusQty || 0);
+                      
+                      return (
+                        <tr 
+                          key={index} 
+                          className={`hover:bg-gray-50 ${index === selectedProducts.length - 1 ? '' : 'border-b'}`}
+                        >
+                          <td className="p-3 text-sm text-gray-900">{index + 1}</td>
+                          <td className="p-3 text-sm text-gray-900 capitalize">{product.productName}</td>
+                          <td className="p-3 text-sm text-gray-900">{product.salesQty || 0}</td>
+                          <td className="p-3 text-sm text-gray-900">{product.bonusQty || 0}</td>
+                          <td className="p-3 text-sm text-gray-900 font-medium">{totalQty}</td>
+                          <td className="p-3 text-sm text-gray-900">
+                            ${product.sellingPrice ? product.sellingPrice.toFixed(2) : '0.00'}
+                          </td>
+                          <td className="p-3 text-sm text-gray-900">
+                            ${product.amount ? product.amount.toLocaleString() : '0'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot className="bg-gray-50">
+                    <tr>
+                      <td colSpan="2" className="p-3 text-right text-sm font-medium text-gray-700">
+                        Total:
+                      </td>
+                      <td className="p-3 text-sm font-medium text-gray-900">
+                        {selectedProducts.reduce((sum, product) => sum + (product.salesQty || 0), 0)}
+                      </td>
+                      <td className="p-3 text-sm font-medium text-gray-900">
+                        {selectedProducts.reduce((sum, product) => sum + (product.bonusQty || 0), 0)}
+                      </td>
+                      <td className="p-3 text-sm font-bold text-blue-700">
+                        {selectedProducts.reduce((sum, product) => {
+                          const totalQty = product.totalQty || (product.salesQty || 0) + (product.bonusQty || 0);
+                          return sum + totalQty;
+                        }, 0)}
+                      </td>
+                      <td className="p-3 text-sm font-medium text-gray-700"></td>
+                      <td className="p-3 text-sm font-bold text-green-700">
+                        ${selectedProducts.reduce((sum, product) => {
+                          return sum + (product.amount || 0);
+                        }, 0).toLocaleString()}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+
+              <div className="mt-6 flex justify-end">
+                <button
+                  onClick={() => setShowProductModal(false)}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )
+      )}
 
       {/* Custom Filter Modal */}
       {showCustomFilter &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            {/* Background Overlay */}
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={() => setShowCustomFilter(false)}
             />
-
-            {/* Modal Content */}
             <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative z-10">
-              {/* Close Button */}
               <button
                 onClick={() => setShowCustomFilter(false)}
                 className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
@@ -359,7 +621,6 @@ const TotalCashSales = () => {
               </h2>
 
               <div className="space-y-4 mb-6">
-                {/* Start Date */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Start Date
@@ -379,7 +640,6 @@ const TotalCashSales = () => {
                   />
                 </div>
 
-                {/* End Date */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     End Date
@@ -421,4 +681,4 @@ const TotalCashSales = () => {
   );
 };
 
-export default TotalCashSales;
+export default CashSales;

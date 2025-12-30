@@ -226,6 +226,13 @@ const MRWiseSales = () => {
           },
           records: [],
         });
+        setPagination({
+          currentPage: 1,
+          totalPages: 1,
+          totalRecords: 0,
+          hasNext: false,
+          hasPrev: false,
+        });
       }
     } else {
       // For other tabs, fetch immediately
@@ -308,10 +315,46 @@ const MRWiseSales = () => {
     });
     setSearchTerm("");
     setSelectedTab("all");
+    fetchMRWiseSales(1);
   };
 
-  const exportToExcel = () => {
-    showToast("info", "Export feature coming soon");
+  const exportToExcel = async () => {
+    try {
+      const dateRange = getDateRange();
+      const params = new URLSearchParams();
+      
+      // Add search term if present
+      if (searchTerm && searchTerm.trim() !== "") {
+        params.append("search", searchTerm.trim());
+      }
+      
+      // Add date parameters for non-"all" tabs
+      if (selectedTab !== "all") {
+        if (selectedTab === "custom" && (!dateRange.startDate || !dateRange.endDate)) {
+          showToast("warning", "Please select both start and end dates for export");
+          return;
+        }
+        
+        if (dateRange.startDate) params.append("startDate", dateRange.startDate);
+        if (dateRange.endDate) params.append("endDate", dateRange.endDate);
+      }
+      
+      // Create the download URL
+      const downloadUrl = `${backendUrl}/api/mr-wise-sales/export/excel${params.toString() ? `?${params.toString()}` : ''}`;
+      
+      // Create a temporary anchor element to trigger download
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.setAttribute('download', '');
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      showToast("success", "Excel file downloaded successfully");
+    } catch (error) {
+      console.error("Error exporting to Excel:", error);
+      showToast("error", "Failed to export to Excel");
+    }
   };
 
   const formatDateForDisplay = (date) => {
@@ -434,7 +477,8 @@ const MRWiseSales = () => {
 
           <button
             onClick={exportToExcel}
-            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+            disabled={loading}
+            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Download size={18} />
             Export Excel
@@ -530,7 +574,7 @@ const MRWiseSales = () => {
             <Users className="w-8 h-8 text-purple-500" />
           </div>
         </div>
-        {/* <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-orange-500 border border-gray-200">
+        <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-orange-500 border border-gray-200">
           <div className="flex justify-between items-center">
             <div>
               <p className="text-sm text-gray-600">Avg Order Value</p>
@@ -540,7 +584,7 @@ const MRWiseSales = () => {
             </div>
             <User className="w-8 h-8 text-orange-500" />
           </div>
-        </div> */}
+        </div>
       </div>
 
       {/* Data Table */}
@@ -567,7 +611,7 @@ const MRWiseSales = () => {
             ) : data.records.length > 0 ? (
               data.records.map((mr, index) => (
                 <tr
-                  key={index}
+                  key={mr.mrId || index}
                   className={`hover:bg-gray-50 ${
                     index === data.records.length - 1 ? "" : "border-b"
                   }`}
@@ -599,10 +643,10 @@ const MRWiseSales = () => {
                     {mr.totalOrders || 0}
                   </td>
                   <td className="p-3 text-sm font-semibold text-green-600">
-                    {mr.totalSalesAmount?.toLocaleString() || 0}
+                    ${mr.totalSalesAmount?.toLocaleString() || 0}
                   </td>
                   <td className="p-3 text-sm font-semibold text-orange-600">
-                    {mr.averageOrderValue?.toLocaleString() || 0}
+                    ${mr.averageOrderValue?.toLocaleString() || 0}
                   </td>
                 </tr>
               ))
