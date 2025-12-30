@@ -299,14 +299,6 @@ router.get("/reports/outstanding-collections", async (req, res) => {
 router.get("/reports/outstanding-collections/export/excel", async (req, res) => {
   try {
     const { startDate, endDate, search, customerCode } = req.query;
-
-    console.log("Outstanding collections Excel export request received with params:", {
-      startDate,
-      endDate,
-      search,
-      customerCode
-    });
-
     const matchStage = {
       paymentStatus: { $regex: /^credit$/i },
       isReturn: false,

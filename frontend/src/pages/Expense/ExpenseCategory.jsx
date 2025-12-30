@@ -475,7 +475,7 @@ const ExpenseCategory = () => {
                 : "bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer"
             }`}
           >
-            Prev
+             ← Prev
           </button>
 
           <div className="flex gap-1">
@@ -506,7 +506,7 @@ const ExpenseCategory = () => {
                 : "bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer"
             }`}
           >
-            Next
+           Next →
           </button>
         </div>
       )}
