@@ -27,6 +27,7 @@ const NewCustomerAddition = () => {
     records: [],
   });
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [pagination, setPagination] = useState({
     currentPage: 1,
@@ -44,6 +45,9 @@ const NewCustomerAddition = () => {
     pagination.currentPage,
     pagination.totalPages
   );
+
+  // Calculate if export should be disabled
+  const isExportDisabled = exporting || data.records.length === 0;
 
   // Calculate serial number based on current page and items per page
   const getSerialNumber = (index) => {
@@ -151,8 +155,50 @@ const NewCustomerAddition = () => {
     setSelectedReportType(type);
   };
 
-  const exportToExcel = () => {
-    showToast("info", "Export feature coming soon");
+  const exportToExcel = async () => {
+    // Prevent export if there are no records
+    if (data.records.length === 0) {
+      showToast("warning", "No records to export");
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const params = {
+        reportType: selectedReportType,
+      };
+
+      if (searchTerm && searchTerm.trim() !== "") {
+        params.search = searchTerm.trim();
+      }
+
+      // Create URL with query parameters
+      const queryString = new URLSearchParams(params).toString();
+      const exportUrl = `${backendUrl}/api/new-customers/export?${queryString}`;
+
+      // Use axios with responseType 'blob' for file download
+      const response = await axios.get(exportUrl, {
+        responseType: 'blob',
+      });
+
+      // Create download link
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      const fileName = `New_Customer_Report_${selectedReportType.replace(' ', '_')}_${new Date().toISOString().split('T')[0]}.xlsx`;
+      
+      link.href = url;
+      link.setAttribute('download', fileName);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      showToast("success", "Excel report downloaded successfully!");
+    } catch (error) {
+      console.error("Error exporting to Excel:", error);
+      showToast("error", "Failed to download Excel report");
+    } finally {
+      setExporting(false);
+    }
   };
 
   // Render Pagination Component
@@ -170,8 +216,8 @@ const NewCustomerAddition = () => {
               : "bg-gray-100 text-gray-400 cursor-not-allowed"
           }`}
         >
+          ← Prev
           
-             ← Prev
         </button>
 
         {/* Page Numbers */}
@@ -196,7 +242,6 @@ const NewCustomerAddition = () => {
           ))}
         </div>
 
-        {/* Next Button */}
         <button
           onClick={() => handlePageChange(pagination.currentPage + 1)}
           disabled={!pagination.hasNext}
@@ -207,7 +252,6 @@ const NewCustomerAddition = () => {
           }`}
         >
            Next →
-          
         </button>
       </div>
     );
@@ -377,7 +421,7 @@ const NewCustomerAddition = () => {
 
   // Calculate colspan for loading and empty states
   const getColSpan = () => {
-    return selectedReportType === "MR Wise" ? 7 : 7;
+    return selectedReportType === "MR Wise" ? 5 : 6;
   };
 
   return (
@@ -418,10 +462,16 @@ const NewCustomerAddition = () => {
 
           <button
             onClick={exportToExcel}
-            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+            disabled={isExportDisabled}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl shadow-md cursor-pointer ${
+              isExportDisabled
+                ? "bg-gray-400 text-white cursor-not-allowed opacity-70"
+                : "bg-green-600 hover:bg-green-700 text-white"
+            }`}
+            title={data.records.length === 0 ? "No records to export" : "Export to Excel"}
           >
             <Download size={18} />
-            Export Excel
+            {exporting ? "Exporting..." : "Export Excel"}
           </button>
         </div>
       </div>

@@ -30,6 +30,7 @@ const CustomerRetentionRate = () => {
     records: [],
   });
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [pagination, setPagination] = useState({
     currentPage: 1,
@@ -48,6 +49,10 @@ const CustomerRetentionRate = () => {
   );
 
   const itemsPerPage = 7;
+  
+  // Calculate if export should be disabled
+  const isExportDisabled = exporting || loading || data.records.length === 0;
+
   const getSerialNumber = (index) => {
     return (pagination.currentPage - 1) * itemsPerPage + index + 1;
   };
@@ -164,8 +169,48 @@ const CustomerRetentionRate = () => {
     }
   };
 
-  const exportToExcel = () => {
-    showToast("info", "Export feature coming soon");
+  const exportToExcel = async () => {
+    // Prevent export if there are no records
+    if (data.records.length === 0) {
+      showToast("warning", "No records to export");
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const params = {};
+
+      if (searchTerm && searchTerm.trim() !== "") {
+        params.search = searchTerm.trim();
+      }
+
+      // Create URL with query parameters
+      const queryString = new URLSearchParams(params).toString();
+      const exportUrl = `${backendUrl}/api/customer-retention/export?${queryString}`;
+
+      // Use axios with responseType 'blob' for file download
+      const response = await axios.get(exportUrl, {
+        responseType: 'blob',
+      });
+
+      // Create download link
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      const fileName = `Customer_Retention_Report_${new Date().toISOString().split('T')[0]}.xlsx`;
+      
+      link.href = url;
+      link.setAttribute('download', fileName);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      showToast("success", "Excel report downloaded successfully!");
+    } catch (error) {
+      console.error("Error exporting to Excel:", error);
+      showToast("error", "Failed to download Excel report");
+    } finally {
+      setExporting(false);
+    }
   };
 
   // Render Pagination Component
@@ -301,10 +346,11 @@ const CustomerRetentionRate = () => {
   // Render zone header row - Fixed border-b for 7th row
   const renderZoneHeader = (record, index) => {
     const isLastRowOnPage = (index + 1) % itemsPerPage === 0 || index + 1 === data.records.length;
+    const zoneId = record._id || `zone-${index}`; // Use _id instead of zoneId
     
     return (
       <tr
-        key={`zone-${record.zoneId}`}
+        key={`zone-${zoneId}-${index}`} // Add index to ensure uniqueness
         className={`bg-gray-50 hover:bg-gray-100 ${
           isLastRowOnPage ? "" : "border-b"
         }`}
@@ -339,17 +385,17 @@ const CustomerRetentionRate = () => {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                toggleZoneExpansion(record.zoneId);
+                toggleZoneExpansion(zoneId);
               }}
               disabled={loading}
               className={`flex items-center gap-1 px-3 py-1 rounded-lg text-xs cursor-pointer ${
-                expandedZones.has(record.zoneId)
+                expandedZones.has(zoneId)
                   ? "bg-indigo-600 hover:bg-indigo-700 text-white"
                   : "bg-gray-200 hover:bg-gray-300 text-gray-700"
               } ${loading ? "opacity-50 cursor-not-allowed" : ""}`}
             >
               <Users size={14} />
-              {expandedZones.has(record.zoneId)
+              {expandedZones.has(zoneId)
                 ? "Hide Details"
                 : "View Details"}
             </button>
@@ -361,14 +407,15 @@ const CustomerRetentionRate = () => {
 
   // Render customer rows for expanded zone - Fixed border-b for last customer row
   const renderCustomerRows = (record, zoneIndex) => {
-    const shouldShowCustomers = expandedZones.has(record.zoneId);
+    const zoneId = record._id || `zone-${zoneIndex}`; // Use _id instead of zoneId
+    const shouldShowCustomers = expandedZones.has(zoneId);
 
     if (
       !shouldShowCustomers ||
       !record.customers ||
       record.customers.length === 0
     ) {
-      return null;
+      return []; // Return empty array instead of null
     }
 
     return record.customers.map((customer, customerIndex) => {
@@ -377,7 +424,7 @@ const CustomerRetentionRate = () => {
       
       return (
         <tr
-          key={`customer-${customer.customerId}`}
+          key={`customer-${customer.customerId || customer.customerCode || `customer-${zoneIndex}-${customerIndex}`}`} // Fallback keys
           className={`bg-white hover:bg-gray-50 ${
             isLastCustomerRow && isLastZoneRow ? "" : "border-b"
           }`}
@@ -446,6 +493,53 @@ const CustomerRetentionRate = () => {
   // Get column span
   const getColSpan = () => 6;
 
+  // Helper function to render table rows without empty text nodes
+  const renderTableRows = () => {
+    if (loading) {
+      return (
+        <tr>
+          <td colSpan={getColSpan()} className="p-0">
+            <LoadingSpinner />
+          </td>
+        </tr>
+      );
+    }
+
+    if (data.records.length === 0) {
+      return (
+        <tr>
+          <td
+            colSpan={getColSpan()}
+            className="p-3 text-center text-gray-500"
+          >
+            No customer retention data found
+          </td>
+        </tr>
+      );
+    }
+
+    // Build all rows including zone headers and customer rows
+    const allRows = [];
+    data.records.forEach((record, index) => {
+      const zoneId = record._id || `zone-${index}`;
+      
+      // Add zone header row
+      allRows.push(
+        <React.Fragment key={`zone-header-${zoneId}-${index}`}>
+          {renderZoneHeader(record, index)}
+        </React.Fragment>
+      );
+      
+      // Add customer rows if zone is expanded
+      const customerRows = renderCustomerRows(record, index);
+      if (customerRows && customerRows.length > 0) {
+        allRows.push(...customerRows);
+      }
+    });
+
+    return allRows;
+  };
+
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-4">
@@ -486,15 +580,16 @@ const CustomerRetentionRate = () => {
 
           <button
             onClick={exportToExcel}
-            disabled={loading}
+            disabled={isExportDisabled}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl shadow-md cursor-pointer ${
-              loading 
-                ? "bg-gray-400 cursor-not-allowed text-white" 
+              isExportDisabled
+                ? "bg-gray-400 text-white cursor-not-allowed opacity-70"
                 : "bg-green-600 hover:bg-green-700 text-white"
             }`}
+            title={data.records.length === 0 ? "No records to export" : "Export to Excel"}
           >
             <Download size={18} />
-            Export Excel
+            {exporting ? "Exporting..." : "Export Excel"}
           </button>
         </div>
       </div>
@@ -505,29 +600,7 @@ const CustomerRetentionRate = () => {
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           {renderTableHeaders()}
           <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={getColSpan()} className="p-0">
-                  <LoadingSpinner />
-                </td>
-              </tr>
-            ) : data.records.length > 0 ? (
-              data.records.map((record, index) => (
-                <React.Fragment key={`fragment-${record.zoneId}`}>
-                  {renderZoneHeader(record, index)}
-                  {renderCustomerRows(record, index)}
-                </React.Fragment>
-              ))
-            ) : (
-              <tr>
-                <td
-                  colSpan={getColSpan()}
-                  className="p-3 text-center text-gray-500"
-                >
-                  No customer retention data found
-                </td>
-              </tr>
-            )}
+            {renderTableRows()}
           </tbody>
         </table>
       </div>

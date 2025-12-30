@@ -12,6 +12,8 @@ import {
   Phone,
   Building,
   Eye,
+  FileSpreadsheet,
+  UserCheck,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
@@ -30,6 +32,8 @@ const ZoneWiseCustomers = () => {
     records: [],
   });
   const [loading, setLoading] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [customerExportLoading, setCustomerExportLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [pagination, setPagination] = useState({
     currentPage: 1,
@@ -39,8 +43,10 @@ const ZoneWiseCustomers = () => {
     hasPrev: false,
   });
   const [expandedZones, setExpandedZones] = useState(new Set());
+  const [showExportOptions, setShowExportOptions] = useState(false);
 
   const inputRef = useRef(null);
+  const exportOptionsRef = useRef(null);
 
   const visiblePages = useVisiblePages(
     pagination.currentPage,
@@ -134,6 +140,20 @@ const ZoneWiseCustomers = () => {
     fetchZoneWiseData(1);
   }, []);
 
+  // Close export options when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (exportOptionsRef.current && !exportOptionsRef.current.contains(event.target)) {
+        setShowExportOptions(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
   const handlePageChange = (page) => {
     if (page >= 1 && page <= pagination.totalPages) {
       fetchZoneWiseData(page);
@@ -164,8 +184,92 @@ const ZoneWiseCustomers = () => {
     }
   };
 
-  const exportToExcel = () => {
-    showToast("info", "Export feature coming soon");
+  // Export Zone Wise Data (Summary + Zones + Customers)
+  const exportZoneWiseData = async () => {
+    setExportLoading(true);
+    try {
+      const params = {};
+      if (searchTerm && searchTerm.trim() !== "") {
+        params.search = searchTerm.trim();
+      }
+
+      const response = await axios.get(
+        `${backendUrl}/api/zone-wise-customers/export`,
+        {
+          params,
+          responseType: 'blob',
+        }
+      );
+
+      // Create blob from response
+      const blob = new Blob([response.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const fileName = `zone_wise_customers_${new Date().toISOString().split('T')[0]}.xlsx`;
+      
+      link.href = url;
+      link.setAttribute('download', fileName);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+
+      showToast("success", "Zone wise data exported successfully!");
+      setShowExportOptions(false);
+    } catch (error) {
+      console.error('Export error:', error);
+      showToast("error", "Failed to export data to Excel");
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
+  // Export Only Customer List
+  const exportCustomerList = async () => {
+    setCustomerExportLoading(true);
+    try {
+      const params = {};
+      if (searchTerm && searchTerm.trim() !== "") {
+        params.search = searchTerm.trim();
+      }
+
+      const response = await axios.get(
+        `${backendUrl}/api/zone-wise-customers/export-customers`,
+        {
+          params,
+          responseType: 'blob',
+        }
+      );
+
+      // Create blob from response
+      const blob = new Blob([response.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const fileName = `customer_list_${new Date().toISOString().split('T')[0]}.xlsx`;
+      
+      link.href = url;
+      link.setAttribute('download', fileName);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+
+      showToast("success", "Customer list exported successfully!");
+      setShowExportOptions(false);
+    } catch (error) {
+      console.error('Customer export error:', error);
+      showToast("error", "Failed to export customer list");
+    } finally {
+      setCustomerExportLoading(false);
+    }
   };
 
   // Render Pagination Component
@@ -411,6 +515,72 @@ const ZoneWiseCustomers = () => {
   // Get column span
   const getColSpan = () => 6;
 
+  // Export Options Dropdown
+  const renderExportOptions = () => (
+    <div 
+      ref={exportOptionsRef}
+      className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 z-50"
+    >
+      <div className="p-2">
+        <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2 px-2">
+          Export Options
+        </div>
+        
+        <button
+          onClick={exportZoneWiseData}
+          disabled={exportLoading}
+          className={`w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-md mb-1 ${
+            exportLoading
+              ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+              : 'hover:bg-blue-50 text-blue-700 hover:text-blue-800'
+          }`}
+        >
+          {exportLoading ? (
+            <>
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+              <span>Exporting...</span>
+            </>
+          ) : (
+            <>
+              <FileSpreadsheet size={16} />
+              <div className="text-left">
+                <div className="font-medium">Zone Wise Report</div>
+                <div className="text-xs text-gray-500">Summary + Zones + Customers</div>
+              </div>
+            </>
+          )}
+        </button>
+
+        <div className="border-t my-1"></div>
+
+        <button
+          onClick={exportCustomerList}
+          disabled={customerExportLoading}
+          className={`w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-md ${
+            customerExportLoading
+              ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+              : 'hover:bg-green-50 text-green-700 hover:text-green-800'
+          }`}
+        >
+          {customerExportLoading ? (
+            <>
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-green-600"></div>
+              <span>Exporting...</span>
+            </>
+          ) : (
+            <>
+              <UserCheck size={16} />
+              <div className="text-left">
+                <div className="font-medium">Customer List Only</div>
+                <div className="text-xs text-gray-500">Detailed customer data</div>
+              </div>
+            </>
+          )}
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-4">
@@ -446,13 +616,18 @@ const ZoneWiseCustomers = () => {
             )}
           </div>
 
-          <button
-            onClick={exportToExcel}
-            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-          >
-            <Download size={18} />
-            Export Excel
-          </button>
+          {/* Export Button with Dropdown */}
+          <div className="relative">
+            <button
+              onClick={() => setShowExportOptions(!showExportOptions)}
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+            >
+              <Download size={18} />
+              Export Excel
+            </button>
+            
+            {showExportOptions && renderExportOptions()}
+          </div>
         </div>
       </div>
 

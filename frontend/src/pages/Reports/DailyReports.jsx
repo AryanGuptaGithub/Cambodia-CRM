@@ -21,7 +21,7 @@ import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-const AddDailyReports = () => {
+const DailyReports = () => {
   const [data, setData] = useState({
     summary: {
       totalSalesAmount: 0,
@@ -50,6 +50,7 @@ const AddDailyReports = () => {
   });
   const [saleTypes, setSaleTypes] = useState([]);
   const [selectedSaleType, setSelectedSaleType] = useState("Total sales");
+  const [exporting, setExporting] = useState(false);
 
   const inputRef = useRef(null);
 
@@ -109,14 +110,14 @@ const AddDailyReports = () => {
         return {
           startDate: today.toISOString().split("T")[0],
           endDate: today.toISOString().split("T")[0],
-          displayDate: today.toISOString().split("T")[0] // Add display date
+          displayDate: today.toISOString().split("T")[0]
         };
 
       case "all":
         return {
           startDate: null,
           endDate: null,
-          displayDate: "All Records" // Add display date
+          displayDate: "All Records"
         };
 
       case "currentMonth":
@@ -125,7 +126,7 @@ const AddDailyReports = () => {
         return {
           startDate: firstDay.toISOString().split("T")[0],
           endDate: lastDay.toISOString().split("T")[0],
-          displayDate: `${getCurrentMonthName()} ${getCurrentYear()}` // Add display date
+          displayDate: `${getCurrentMonthName()} ${getCurrentYear()}`
         };
 
       case "janToPreviousMonth":
@@ -133,7 +134,7 @@ const AddDailyReports = () => {
         return {
           startDate: janToPrevRange.startDate,
           endDate: janToPrevRange.endDate,
-          displayDate: janToPrevRange.label // Add display date
+          displayDate: janToPrevRange.label
         };
 
       case "custom":
@@ -146,7 +147,7 @@ const AddDailyReports = () => {
             : "",
           displayDate: customDateRange.startDate && customDateRange.endDate
             ? `${formatDateForDisplay(customDateRange.startDate)} - ${formatDateForDisplay(customDateRange.endDate)}`
-            : "Select custom dates" // Add display date
+            : "Select custom dates"
         };
 
       default:
@@ -166,7 +167,7 @@ const AddDailyReports = () => {
       let params = {
         page: page,
         limit: 7,
-        dateFilter: selectedTab, // Send active date tab
+        dateFilter: selectedTab,
       };
 
       // Only add date parameters for tabs that require them
@@ -312,7 +313,7 @@ const AddDailyReports = () => {
       // For other tabs, fetch immediately with current active values
       fetchDailyReports(1);
     }
-  }, [selectedTab, selectedSaleType]); // This effect runs when either tab changes
+  }, [selectedTab, selectedSaleType]);
 
   // Fetch data when custom dates change (only for custom tab)
   useEffect(() => {
@@ -406,8 +407,70 @@ const AddDailyReports = () => {
     setSelectedSaleType("Total sales");
   };
 
-  const exportToExcel = () => {
-    showToast("info", "Export feature coming soon");
+  const exportToExcel = async () => {
+    // Check if there's data to export
+    if (data.records.length === 0) {
+      showToast("warning", "No data found to export");
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const dateRange = getDateRange();
+      
+      // Prepare export parameters
+      const exportParams = {
+        saleType: selectedSaleType !== "Total sales" ? selectedSaleType : undefined,
+        dateFilter: selectedTab,
+        search: searchTerm.trim() || undefined,
+        export: true // Flag to indicate this is an export request
+      };
+
+      // Add date parameters for non-"all" tabs
+      if (selectedTab !== "all" && dateRange.startDate && dateRange.endDate) {
+        exportParams.startDate = dateRange.startDate;
+        exportParams.endDate = dateRange.endDate;
+      }
+
+      // Make request to export endpoint
+      const response = await axios.get(`${backendUrl}/api/dailyReports/export`, {
+        params: exportParams,
+        responseType: 'blob' // Important for file download
+      });
+
+      // Get filename from response headers or create one
+      let filename = 'daily_reports.xlsx';
+      const contentDisposition = response.headers['content-disposition'];
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+        if (filenameMatch && filenameMatch[1]) {
+          filename = filenameMatch[1];
+        }
+      }
+
+      // Create download link
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      
+      // Clean up
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      
+      showToast("success", "Excel file downloaded successfully");
+    } catch (error) {
+      console.error("Error exporting to Excel:", error);
+      if (error.response && error.response.status === 404) {
+        showToast("warning", "No data found for the selected filters");
+      } else {
+        showToast("error", "Failed to export data to Excel");
+      }
+    } finally {
+      setExporting(false);
+    }
   };
 
   const formatDateForDisplay = (date) => {
@@ -434,8 +497,7 @@ const AddDailyReports = () => {
               : "bg-gray-100 text-gray-400 cursor-not-allowed"
           }`}
         >
-          
-        ← Prev
+          ← Prev
         </button>
 
         {/* Page Numbers */}
@@ -501,7 +563,7 @@ const AddDailyReports = () => {
           <div>
             <p className="text-sm text-gray-600">Total Sales</p>
             <p className="text-2xl font-bold text-gray-800">
-              ${data.summary.totalSalesAmount || 0}
+              ${data.summary.totalSalesAmount?.toLocaleString() || 0}
             </p>
           </div>
           <DollarSign className="w-8 h-8 text-green-500" />
@@ -512,7 +574,7 @@ const AddDailyReports = () => {
           <div>
             <p className="text-sm text-gray-600">Total Orders</p>
             <p className="text-2xl font-bold text-gray-800">
-              {data.summary.totalOrders || 0}
+              {data.summary.totalOrders?.toLocaleString() || 0}
             </p>
           </div>
           <TrendingUp className="w-8 h-8 text-blue-500" />
@@ -523,7 +585,7 @@ const AddDailyReports = () => {
           <div>
             <p className="text-sm text-gray-600">Total MRs</p>
             <p className="text-2xl font-bold text-gray-800">
-              {data.summary.totalMRs || 0}
+              {data.summary.totalMRs?.toLocaleString() || 0}
             </p>
           </div>
           <Users className="w-8 h-8 text-purple-500" />
@@ -534,7 +596,7 @@ const AddDailyReports = () => {
           <div>
             <p className="text-sm text-gray-600">Total Customers</p>
             <p className="text-2xl font-bold text-gray-800">
-              {data.summary.totalCustomers || 0}
+              {data.summary.totalCustomers?.toLocaleString() || 0}
             </p>
           </div>
           <User className="w-8 h-8 text-orange-500" />
@@ -596,7 +658,7 @@ const AddDailyReports = () => {
             <th className="p-3 text-sm font-medium">Cash ($)</th>
           )}
           <th className="p-3 text-sm font-medium">Total Sales ($)</th>
-          <th className="p-3 text-sm font-medium">Date Range</th>
+          <th className="p-3 text-sm font-medium">Date</th>
         </tr>
       </thead>
     );
@@ -627,21 +689,21 @@ const AddDailyReports = () => {
         </td>
         <td className="p-3">
           <div className="text-sm text-gray-900">
-            {mr.mrContactNo || "N/A"}
+            {mr.mrContactNo || "Not Available"}
           </div>
         </td>
         {columns.includes("credits") && (
           <td className="p-3 text-sm font-semibold text-blue-600">
-            {mr.credits?.toLocaleString() || 0}
+            ${mr.credits?.toLocaleString() || 0}
           </td>
         )}
         {columns.includes("cash") && (
           <td className="p-3 text-sm font-semibold text-green-600">
-            {mr.cash?.toLocaleString() || 0}
+            ${mr.cash?.toLocaleString() || 0}
           </td>
         )}
         <td className="p-3 text-sm font-semibold text-gray-800">
-          {mr.totalSalesAmount?.toLocaleString() || 0}
+          ${mr.totalSalesAmount?.toLocaleString() || 0}
         </td>
         <td className="p-3 text-sm text-gray-600">{mr.date || "N/A"}</td>
       </tr>
@@ -693,10 +755,24 @@ const AddDailyReports = () => {
 
           <button
             onClick={exportToExcel}
-            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+            disabled={exporting || data.records.length === 0}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl shadow-md cursor-pointer ${
+              exporting || data.records.length === 0
+                ? "bg-gray-400 text-white cursor-not-allowed"
+                : "bg-green-600 hover:bg-green-700 text-white"
+            }`}
           >
-            <Download size={18} />
-            Export Excel
+            {exporting ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                Exporting...
+              </>
+            ) : (
+              <>
+                <Download size={18} />
+                Export Excel
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -923,4 +999,4 @@ const AddDailyReports = () => {
   );
 };
 
-export default AddDailyReports;
+export default DailyReports;

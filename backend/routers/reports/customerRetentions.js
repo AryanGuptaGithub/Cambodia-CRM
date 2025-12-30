@@ -1,9 +1,11 @@
 import express from "express";
 import Customer from "../../models/master/customer.js";
 import SaleSummary from "../../models/sale/saleSummary.js";
+import ExcelJS from "exceljs";
+
 const router = express.Router();
 
-// Customer Retention by Zone (original endpoint - keep as is)
+// Customer Retention by Zone (updated to include _id in response)
 router.get("/customer-retention", async (req, res) => {
   try {
     const { page = 1, limit = 7, search = "", period = "all" } = req.query;
@@ -82,7 +84,7 @@ router.get("/customer-retention", async (req, res) => {
           paginated: [
             {
               $group: {
-                _id: "$zone",
+                _id: "$zone", // This is the zone ID
                 zoneName: { $first: "$zone" },
                 totalCustomers: { $sum: 1 },
                 retainedCustomers: {
@@ -200,6 +202,277 @@ router.get("/customer-retention", async (req, res) => {
   }
 });
 
+// NEW: Excel Export Endpoint for Customer Retention (updated)
+router.get("/customer-retention/export", async (req, res) => {
+  try {
+    const { search = "", period = "all" } = req.query;
+
+    // Date filter
+    let dateFilter = {};
+    if (period === "last_month") {
+      const now = new Date();
+      const firstDayOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const lastDayOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+      dateFilter = { invoiceDate: { $gte: firstDayOfLastMonth, $lte: lastDayOfLastMonth } };
+    }
+
+    // Search filter
+    let searchCondition = {};
+    if (search.trim() !== "") {
+      const regex = new RegExp(search.trim(), "i");
+      searchCondition = {
+        $or: [
+          { zone: regex },
+          { name: regex },
+          { customerCode: regex },
+          { medicalRepName: regex },
+          { province: regex },
+        ],
+      };
+    }
+
+    // Pipeline for export (no pagination)
+    const pipeline = [
+      ...(Object.keys(searchCondition).length > 0 ? [{ $match: searchCondition }] : []),
+      {
+        $lookup: {
+          from: "salesummaries",
+          localField: "customerCode",
+          foreignField: "customerCode",
+          as: "sales",
+          pipeline: [
+            ...(Object.keys(dateFilter).length > 0 ? [{ $match: dateFilter }] : []),
+            { $project: { invoiceDate: 1 } },
+          ],
+        },
+      },
+      {
+        $addFields: {
+          totalSales: { $size: "$sales" },
+          isActiveCustomer: {
+            $cond: [
+              {
+                $and: [
+                  { $ne: [{ $max: "$sales.invoiceDate" }, null] },
+                  {
+                    $gte: [
+                      { $max: "$sales.invoiceDate" },
+                      new Date(Date.now() - 90 * 24 * 60 * 60 * 1000),
+                    ],
+                  },
+                ],
+              },
+              true,
+              false,
+            ],
+          },
+        },
+      },
+      {
+        $group: {
+          _id: "$zone",
+          zoneName: { $first: "$zone" },
+          totalCustomers: { $sum: 1 },
+          retainedCustomers: {
+            $sum: { $cond: ["$isActiveCustomer", 1, 0] },
+          },
+        },
+      },
+      {
+        $addFields: {
+          retentionRate: {
+            $cond: [
+              { $gt: ["$totalCustomers", 0] },
+              {
+                $round: [
+                  {
+                    $multiply: [
+                      { $divide: ["$retainedCustomers", "$totalCustomers"] },
+                      100,
+                    ],
+                  },
+                  2,
+                ],
+              },
+              0,
+            ],
+          },
+        },
+      },
+      { $sort: { retentionRate: -1, totalCustomers: -1 } },
+    ];
+
+    const records = await Customer.aggregate(pipeline);
+
+    // Get summary statistics
+    const summaryPipeline = [
+      ...(Object.keys(searchCondition).length > 0 ? [{ $match: searchCondition }] : []),
+      {
+        $lookup: {
+          from: "salesummaries",
+          localField: "customerCode",
+          foreignField: "customerCode",
+          as: "sales",
+          pipeline: [
+            ...(Object.keys(dateFilter).length > 0 ? [{ $match: dateFilter }] : []),
+            { $project: { invoiceDate: 1 } },
+          ],
+        },
+      },
+      {
+        $addFields: {
+          isActiveCustomer: {
+            $cond: [
+              {
+                $and: [
+                  { $ne: [{ $max: "$sales.invoiceDate" }, null] },
+                  {
+                    $gte: [
+                      { $max: "$sales.invoiceDate" },
+                      new Date(Date.now() - 90 * 24 * 60 * 60 * 1000),
+                    ],
+                  },
+                ],
+              },
+              true,
+              false,
+            ],
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalCustomers: { $sum: 1 },
+          retainedCustomers: { $sum: { $cond: ["$isActiveCustomer", 1, 0] } },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          totalCustomers: 1,
+          retainedCustomers: 1,
+          retentionRate: {
+            $cond: [
+              { $gt: ["$totalCustomers", 0] },
+              {
+                $round: [
+                  {
+                    $multiply: [
+                      { $divide: ["$retainedCustomers", "$totalCustomers"] },
+                      100,
+                    ],
+                  },
+                  2,
+                ],
+              },
+              0,
+            ],
+          },
+        },
+      },
+    ];
+
+    const summaryResult = await Customer.aggregate(summaryPipeline);
+    const summary = summaryResult[0] || {
+      totalCustomers: 0,
+      retainedCustomers: 0,
+      retentionRate: 0,
+    };
+
+    // Create Excel workbook
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Customer Retention Report');
+
+    // Add report title
+    worksheet.mergeCells('A1:E1');
+    const titleRow = worksheet.getCell('A1');
+    titleRow.value = 'Customer Retention/Repeat Rate Report';
+    titleRow.font = { size: 16, bold: true };
+    titleRow.alignment = { horizontal: 'center' };
+
+    // Add summary section
+    worksheet.addRow([]);
+    worksheet.mergeCells('A3:E3');
+    const summaryTitle = worksheet.getCell('A3');
+    summaryTitle.value = 'Summary';
+    summaryTitle.font = { size: 14, bold: true };
+
+    const summaryRow1 = worksheet.addRow([
+      'Total Customers', summary.totalCustomers,
+      'Retained Customers', summary.retainedCustomers,
+      'Retention Rate', `${summary.retentionRate?.toFixed(1) || 0}%`,
+      'Generated Date', new Date().toLocaleDateString()
+    ]);
+
+    summaryRow1.eachCell((cell) => {
+      cell.font = { bold: true };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFE0E0E0' }
+      };
+    });
+
+    worksheet.addRow([]);
+
+    // Add data headers
+    const headers = ['Sr.No', 'Zone Name', 'Total Customers', 'Retained Customers', 'Retention Rate'];
+    const headerRow = worksheet.addRow(headers);
+    headerRow.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF4F81BD' }
+      };
+      cell.alignment = { horizontal: 'center' };
+    });
+
+    // Add data rows
+    records.forEach((record, index) => {
+      const rowData = [
+        index + 1,
+        record.zoneName || "N/A",
+        record.totalCustomers || 0,
+        record.retainedCustomers || 0,
+        `${record.retentionRate?.toFixed(1) || 0}%`
+      ];
+      worksheet.addRow(rowData);
+    });
+
+    // Format columns
+    worksheet.columns.forEach((column, index) => {
+      let maxLength = 0;
+      column.eachCell({ includeEmpty: true }, (cell) => {
+        const columnLength = cell.value ? cell.value.toString().length : 10;
+        if (columnLength > maxLength) {
+          maxLength = columnLength;
+        }
+      });
+      column.width = Math.min(maxLength + 2, 30);
+    });
+
+    // Set response headers
+    const fileName = `Customer_Retention_Report_${Date.now()}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+
+    // Write to response
+    await workbook.xlsx.write(res);
+    res.end();
+
+  } catch (error) {
+    console.error("❌ Error exporting customer retention to Excel:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to export data to Excel",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+});
+
+// ... (keep the existing annual and monthly endpoints as they are - they remain unchanged)
 // Annual Customer Repeat Rate (individual customer records)
 router.get("/annual-customer-repeat-rate", async (req, res) => {
   try {

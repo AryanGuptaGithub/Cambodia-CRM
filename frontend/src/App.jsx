@@ -104,7 +104,7 @@ import ProductReport from "./pages/Reports/ProductReport";
 import ExpiryStockReport from "./pages/Reports/ExpiryStockReport";
 
 // Report form pages
-import AddDailReports from "./pages/Reports/AddDailyReports";
+import DailyReports from "./pages/Reports/DailyReports";
 import AddDailySampleReport from "./pages/Reports/AddDailySample";
 import AddDailySummaryReports from "./pages/Reports/AddNewSaleSummaryReports";
 
@@ -226,8 +226,8 @@ function App() {
           </Route>
           {/* Report routes */}
           <Route path="reportlayout" element={<ReportsLayout />}>
-            <Route index element={<AddDailReports />} />
-            <Route path="dailyreport" element={<AddDailReports />} />
+            <Route index element={<DailyReports />} />
+            <Route path="dailyreport" element={<DailyReports />} />
 
             {/* New Report Routes */}
             <Route path="averageprice" element={<AveragePricePerProduct />} />

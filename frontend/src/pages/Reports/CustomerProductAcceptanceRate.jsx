@@ -30,6 +30,7 @@ const CustomerProductAcceptanceRate = () => {
   });
 
   const [loading, setLoading] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [pagination, setPagination] = useState({
     currentPage: 1,
@@ -91,7 +92,6 @@ const CustomerProductAcceptanceRate = () => {
         }
       );
     } catch (error) {
-      console.error("❌ Error fetching acceptance rate data:", error);
       showToast("error", "Failed to fetch acceptance rate data");
       setData({
         summary: {
@@ -137,8 +137,47 @@ const CustomerProductAcceptanceRate = () => {
     if (e.key === "Enter") fetchAcceptanceData(1);
   };
 
-  const exportToExcel = () => {
-    showToast("info", "Export to Excel feature coming soon");
+  // Export to Excel function
+  const exportToExcel = async () => {
+    setExportLoading(true);
+    try {
+      const params = {};
+      if (searchTerm && searchTerm.trim() !== "") {
+        params.search = searchTerm.trim();
+      }
+
+      const response = await axios.get(
+        `${backendUrl}/api/customer-product-acceptance-rate/export`,
+        {
+          params,
+          responseType: 'blob', // Important for file download
+        }
+      );
+
+      // Create blob from response
+      const blob = new Blob([response.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const fileName = `customer_product_acceptance_rate_${new Date().toISOString().split('T')[0]}.xlsx`;
+      
+      link.href = url;
+      link.setAttribute('download', fileName);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+
+      showToast("success", "Excel file downloaded successfully");
+    } catch (error) {
+      console.error('Export error:', error);
+      showToast("error", "Failed to export to Excel");
+    } finally {
+      setExportLoading(false);
+    }
   };
 
   // Pagination render
@@ -155,7 +194,7 @@ const CustomerProductAcceptanceRate = () => {
               : "bg-gray-100 text-gray-400 cursor-not-allowed"
           }`}
         >
-          <ChevronLeft size={16} /> Prev
+           ← Prev
         </button>
 
         <div className="flex gap-1">
@@ -188,7 +227,7 @@ const CustomerProductAcceptanceRate = () => {
               : "bg-gray-100 text-gray-400 cursor-not-allowed"
           }`}
         >
-          Next <ChevronRight size={16} />
+          Next →
         </button>
       </div>
     );
@@ -295,10 +334,24 @@ const CustomerProductAcceptanceRate = () => {
 
           <button
             onClick={exportToExcel}
-            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+            disabled={exportLoading}
+            className={`flex items-center gap-2 ${
+              exportLoading 
+                ? 'bg-green-500 cursor-not-allowed' 
+                : 'bg-green-600 hover:bg-green-700'
+            } text-white px-4 py-2 rounded-xl shadow-md cursor-pointer`}
           >
-            <Download size={18} />
-            Export Excel
+            {exportLoading ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                Exporting...
+              </>
+            ) : (
+              <>
+                <Download size={18} />
+                Export Excel
+              </>
+            )}
           </button>
         </div>
       </div>
