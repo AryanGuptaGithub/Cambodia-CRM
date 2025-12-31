@@ -208,7 +208,7 @@ const tabService = {
       accounts_cashbank: { visible: true, sequence: 1 },
       accounts_mrcash: { visible: true, sequence: 2 },
 
-      // Reports sub-tabs
+      // Reports sub-tabs - REMOVED reports_payment from here
       reports_dailyreport: { visible: true, sequence: 1 },
       reports_averageprice: { visible: true, sequence: 2 },
       reports_newcustomeraddition: { visible: true, sequence: 3 },
@@ -224,7 +224,7 @@ const tabService = {
       reports_remittance: { visible: true, sequence: 13 },
       reports_provincewisesale: { visible: true, sequence: 14 },
       reports_provincewisecustomer: { visible: true, sequence: 15 },
-      reports_payment: { visible: true, sequence: 16 },
+      // reports_payment: { visible: true, sequence: 16 }, // REMOVED THIS LINE
       reports_financeReports: { visible: true, sequence: 17 },
       reports_reportsinhand: { visible: true, sequence: 18 },
       reports_salesummary: { visible: true, sequence: 19 },
@@ -297,7 +297,6 @@ const accountPaths = [
 ];
 
 const reportPaths = [
-  "/reportlayout/payment",
   "/reportlayout/dailyreport",
   "/reportlayout/averageprice",
   "/reportlayout/newcustomeraddition",
@@ -1171,7 +1170,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                   "reports_remittance",
                   "reports_provincewisesale",
                   "reports_provincewisecustomer",
-                  "reports_payment",
+                  // "reports_payment", // REMOVED FROM THIS ARRAY TOO
                   "reports_financeReports",
                   "reports_reportsinhand",
                   "reports_salesummary",
@@ -1370,7 +1369,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                       "/reportlayout/province-wise-sale",
                     reports_provincewisecustomer:
                       "/reportlayout/province-wise-customer",
-                    reports_payment: "/reportlayout/payment",
+                    // reports_payment: "/reportlayout/payment", // REMOVED FROM LINK MAP
                     reports_reportsinhand: "/reportlayout/reports-in-hand",
                     reports_salesummary: "/reportlayout/salesummary",
                     reports_dailysample: "/reportlayout/dailysample",
@@ -1393,7 +1392,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                     reports_remittance: Coins,
                     reports_provincewisesale: Globe,
                     reports_provincewisecustomer: Users,
-                    reports_payment: CreditCard,
+                    // reports_payment: CreditCard, // REMOVED FROM ICON MAP
                     reports_reportsinhand: HandCoins,
                     reports_salesummary: TrendingUp,
                     reports_dailysample: Boxes,

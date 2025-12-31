@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Eye,
   Search,
@@ -21,7 +21,6 @@ const ProvinceWiseSale = () => {
       totalProvinces: 0,
       totalInvoices: 0,
       totalCustomers: 0,
-      totalQuantity: 0,
       averageSalePerProvince: 0,
       averageSalePerInvoice: 0,
     },
@@ -36,7 +35,7 @@ const ProvinceWiseSale = () => {
   const [expandedProvince, setExpandedProvince] = useState(null);
   const inputRef = useRef(null);
 
-  const itemsPerPage = 6;
+  const itemsPerPage = 9;
 
   useEffect(() => {
     fetchProvinceData();
@@ -102,12 +101,6 @@ const ProvinceWiseSale = () => {
     ? getVisiblePages(currentPage, pagination.totalPages)
     : [];
 
-  if (loading)
-    return (
-      <div className="flex justify-center items-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
-      </div>
-    );
   const handleIconClick = () => {
     if (inputRef.current) {
       inputRef.current.focus();
@@ -117,6 +110,13 @@ const ProvinceWiseSale = () => {
       }, 1000);
     }
   };
+
+  if (loading)
+    return (
+      <div className="flex justify-center items-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+      </div>
+    );
 
   if (error)
     return (
@@ -142,6 +142,12 @@ const ProvinceWiseSale = () => {
           <h1 className="text-2xl font-bold text-gray-800">
             Province-wise Sales Analytics
           </h1>
+          <p className="text-sm text-gray-600 mt-1">
+            Showing {records.length} of {pagination?.totalRecords || 0} provinces with sales
+            {summary.totalProvinces > 0 && (
+              <span className="ml-2">(Total {summary.totalProvinces} provinces in database)</span>
+            )}
+          </p>
         </div>
         <div className="flex items-center gap-8">
           <div className="flex items-center gap-3">
@@ -230,6 +236,13 @@ const ProvinceWiseSale = () => {
               <p className="text-2xl font-bold text-gray-800 mt-1">
                 {formatCurrency(summary.totalSales)}
               </p>
+              <p className="text-sm text-gray-500 mt-1">
+                {summary.totalInvoices > 0 && (
+                  <>
+                    {summary.totalInvoices?.toLocaleString()} invoices
+                  </>
+                )}
+              </p>
             </div>
             <div className="p-3 bg-green-100 rounded-lg">
               <FileText className="text-green-600" size={24} />
@@ -245,6 +258,13 @@ const ProvinceWiseSale = () => {
               </p>
               <p className="text-2xl font-bold text-gray-800 mt-1">
                 {summary.totalProvinces}
+              </p>
+              <p className="text-sm text-gray-500 mt-1">
+                {records.length > 0 && (
+                  <>
+                    {records.length} with sales
+                  </>
+                )}
               </p>
             </div>
             <div className="p-3 bg-blue-100 rounded-lg">
@@ -316,9 +336,7 @@ const ProvinceWiseSale = () => {
                 <th className="text-center p-4 font-semibold text-gray-700">
                   Customers
                 </th>
-                <th className="text-center p-4 font-semibold text-gray-700">
-                  Quantity
-                </th>
+                
                 <th className="text-center p-4 font-semibold text-gray-700">
                   Avg Sale Value ($)
                 </th>
@@ -332,7 +350,7 @@ const ProvinceWiseSale = () => {
             </thead>
             <tbody className="divide-y divide-gray-200">
               {records.map((record, index) => (
-                <React.Fragment key={record.province}>
+                <React.Fragment key={`${record.province}-${index}`}>
                   <tr
                     className={`hover:bg-gray-50 ${
                       index % 2 === 0 ? "bg-white" : "bg-gray-50"
@@ -350,32 +368,28 @@ const ProvinceWiseSale = () => {
                     </td>
                     <td className="p-4 text-center">
                       <span className="font-semibold text-gray-800">
-                        {record.totalSalesAmount}
+                        {formatCurrency(record.totalSalesAmount || 0)}
                       </span>
                     </td>
                     <td className="p-4 text-center">
                       <span className="font-semibold text-gray-800">
-                        {record.totalInvoices?.toLocaleString()}
+                        {record.totalInvoices?.toLocaleString() || 0}
                       </span>
                     </td>
                     <td className="p-4 text-center">
                       <span className="font-semibold text-gray-800">
-                        {record.totalCustomers?.toLocaleString()}
+                        {record.totalCustomers?.toLocaleString() || 0}
                       </span>
                     </td>
+                   
                     <td className="p-4 text-center">
-                      <span className="font-semibold text-gray-800">
-                        {record.totalQuantity?.toLocaleString()}
+                      <span className="text-sm text-gray-600">
+                        {formatCurrency(record.averageSaleValue || 0)}
                       </span>
                     </td>
                     <td className="p-4 text-center">
                       <span className="text-sm text-gray-600">
-                        {record.averageSaleValue}
-                      </span>
-                    </td>
-                    <td className="p-4 text-center">
-                      <span className="text-sm text-gray-600">
-                        {record.averageSalePerCustomer}
+                        {formatCurrency(record.averageSalePerCustomer || 0)}
                       </span>
                     </td>
                     <td className="p-4 text-center">
@@ -399,50 +413,56 @@ const ProvinceWiseSale = () => {
                           <h4 className="font-semibold text-gray-800 mb-3">
                             Sale Details - {record.province}
                           </h4>
+                          <div className="mb-4 p-3 bg-blue-100 rounded-lg">
+                            <p className="text-sm text-blue-800">
+                              <strong>Summary:</strong> {record.totalCustomers} customers, {record.totalInvoices} invoices, 
+                              Total Sales: {formatCurrency(record.totalSalesAmount)}, 
+                              
+                            </p>
+                          </div>
                           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {record.customerDetails?.map((sale, saleIndex) => (
+                            {record.customerDetails?.map((customer, customerIndex) => (
                               <div
-                                key={saleIndex}
+                                key={`${customer.customerCode}-${customerIndex}`}
                                 className="bg-white rounded-lg p-4 shadow-sm border border-gray-200"
                               >
                                 <div className="flex justify-between items-start mb-2">
                                   <div>
                                     <h5 className="font-medium text-gray-800 capitalize">
-                                      {sale.customerName}
+                                      {customer.customerName || customer.customerCode}
                                     </h5>
                                     <p className="text-sm text-gray-600">
-                                      {sale.customerCode}
+                                      Customer Code: {customer.customerCode}
                                     </p>
                                   </div>
                                   <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full">
-                                    {new Date(
-                                      sale.invoiceDate
-                                    ).toLocaleDateString()}
+                                    {customer.invoiceCount} invoices
                                   </span>
                                 </div>
                                 <div className="space-y-1 text-sm text-gray-600">
                                   <p>
                                     Zone:{" "}
                                     <span className="font-medium capitalize">
-                                      {sale.zone}
+                                      {customer.zone || "N/A"}
                                     </span>
                                   </p>
                                   <p>
                                     Medical Rep:{" "}
                                     <span className="font-medium capitalize">
-                                      {sale.medicalRepName}
+                                      {customer.medicalRepName || "N/A"}
                                     </span>
                                   </p>
+                            
                                   <p>
-                                    Quantity:{" "}
-                                    <span className="font-medium">
-                                      {sale.quantity}
-                                    </span>
-                                  </p>
-                                  <p>
-                                    Sale Amount:{" "}
+                                    Total Sales:{" "}
                                     <span className="font-medium text-green-600">
-                                      {formatCurrency(sale.totalSales)}
+                                      {formatCurrency(customer.totalSales)}
+                                    </span>
+                                  </p>
+                                  <p>
+                                    Avg per Invoice:{" "}
+                                    <span className="font-medium text-blue-600">
+                                      {formatCurrency(customer.averageSalePerInvoice)}
                                     </span>
                                   </p>
                                 </div>
@@ -474,50 +494,53 @@ const ProvinceWiseSale = () => {
           </div>
         )}
 
-        {/* Pagination - Moved to left side */}
+        {/* Pagination */}
         {pagination && pagination.totalPages > 1 && (
-          <div className="mt-4 p-5 flex justify-start gap-2">
-            <button
-              onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-              disabled={currentPage === 1}
-              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-            >
-              Prev
-            </button>
-            {visiblePages.map((page, idx) =>
-              page === "..." ? (
-                <span
-                  key={`ellipsis-${idx}`}
-                  className="px-3 py-1 text-gray-500 select-none cursor-pointer"
-                >
-                  ...
-                </span>
-              ) : (
-                <button
-                  key={page}
-                  onClick={() => setCurrentPage(page)}
-                  className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
-                    currentPage === page
-                      ? "bg-indigo-600 text-white"
-                      : "bg-gray-200 hover:bg-gray-300"
-                  }`}
-                >
-                  {page}
-                </button>
-              )
-            )}
-            <button
-              onClick={() => {
-                setCurrentPage((prev) =>
-                  Math.min(prev + 1, pagination.totalPages)
-                );
-                window.scrollTo({ top: 0, behavior: "smooth" });
-              }}
-              disabled={currentPage === pagination.totalPages}
-              className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-            >
-              Next
-            </button>
+          <div className="mt-4 p-5 flex">
+  
+            <div className="flex gap-2">
+              <button
+                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1"
+              >
+                ← Prev
+              </button>
+              {visiblePages.map((page, idx) =>
+                page === "..." ? (
+                  <span
+                    key={`ellipsis-${idx}`}
+                    className="px-3 py-2 text-gray-500 select-none"
+                  >
+                    ...
+                  </span>
+                ) : (
+                  <button
+                    key={page}
+                    onClick={() => setCurrentPage(page)}
+                    className={`px-4 py-2 rounded-lg w-10 text-center transition ${
+                      currentPage === page
+                        ? "bg-indigo-600 text-white"
+                        : "bg-gray-200 hover:bg-gray-300"
+                    } cursor-pointer`}
+                  >
+                    {page}
+                  </button>
+                )
+              )}
+              <button
+                onClick={() => {
+                  setCurrentPage((prev) =>
+                    Math.min(prev + 1, pagination.totalPages)
+                  );
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                }}
+                disabled={currentPage === pagination.totalPages}
+                className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1"
+              >
+                Next →
+              </button>
+            </div>
           </div>
         )}
       </div>
