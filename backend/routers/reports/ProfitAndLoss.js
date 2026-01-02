@@ -57,59 +57,41 @@ const createDateRangeFilterForRecordingDate = (startDate, endDate) => {
   return Object.keys(filter).length > 0 ? filter : undefined;
 };
 
-// Helper function to calculate profit for multiple sales at once
+// UPDATED: Helper function to calculate profit for multiple sales at once
+// Now uses the existing totalProfitLoss field
 const calculateProfitsForSales = async (sales) => {
   try {
     if (!sales || sales.length === 0) {
-      return sales.map(sale => ({ ...sale, profit: 0 }));
+      return sales.map(sale => ({ ...sale, profit: 0, _cost: 0 }));
     }
     
-    // Get all sale IDs
-    const saleIds = sales.map(sale => sale._id);
-    
-    // Get all sales with populated products
-    const populatedSales = await SaleSummary.find({ _id: { $in: saleIds } })
-      .populate({
-        path: 'products.productId',
-        select: 'lc productName',
-        options: { strictPopulate: false }
-      })
-      .lean();
-    
-    // Create a map for quick lookup
-    const saleMap = new Map();
-    populatedSales.forEach(sale => {
-      saleMap.set(sale._id.toString(), sale);
-    });
-    
-    // Calculate profit for each sale
+    // Calculate profit for each sale using the existing totalProfitLoss field
     return sales.map(sale => {
-      const populatedSale = saleMap.get(sale._id.toString());
-      let totalProfit = 0;
+      // Convert Mongoose document to plain object if needed
+      const saleData = sale.toObject ? sale.toObject() : sale;
+      
+      let totalProfit = saleData.totalProfitLoss || 0;
       let totalCost = 0;
       
-      if (populatedSale && populatedSale.products && Array.isArray(populatedSale.products)) {
-        populatedSale.products.forEach(product => {
-          // Use sellingPrice from product object
-          const sellingPrice = product.sellingPrice || product.unitPrice || 0;
-          // Use lc from populated productId
-          const lcPrice = product.productId?.lc || 0;
-          // Use salesQty or quantity
+      // Calculate cost from products if available
+      if (saleData.products && Array.isArray(saleData.products)) {
+        saleData.products.forEach(product => {
+          const lcPrice = product.lc || 0;
           const quantity = product.salesQty || product.quantity || 0;
-          
-          const productProfit = (sellingPrice - lcPrice) * quantity;
           const productCost = lcPrice * quantity;
-          
-          totalProfit += productProfit;
           totalCost += productCost;
         });
+      } else {
+        // If products not available, estimate cost from revenue and profit
+        const revenue = saleData.totalAmount || 0;
+        totalCost = Math.max(0, revenue - totalProfit);
       }
       
       // Store cost for COGS calculation
-      sale._cost = totalCost;
+      saleData._cost = totalCost;
       
       return {
-        ...sale,
+        ...saleData,
         profit: totalProfit
       };
     });
@@ -119,7 +101,8 @@ const calculateProfitsForSales = async (sales) => {
   }
 };
 
-// Helper function to calculate profit for multiple returns at once
+// UPDATED: Helper function to calculate profit for multiple returns at once
+// Now returns have their own profit/loss calculation
 const calculateProfitsForReturns = async (returns) => {
   try {
     if (!returns || returns.length === 0) {
@@ -145,7 +128,7 @@ const calculateProfitsForReturns = async (returns) => {
     });
     
     // Calculate profit for each return
-    return returns.map(salesReturn => {
+    return returns.map((salesReturn) => {
       const populatedReturn = returnMap.get(salesReturn._id.toString());
       let totalProfitLoss = 0;
       let totalCost = 0;
@@ -156,6 +139,7 @@ const calculateProfitsForReturns = async (returns) => {
           const lcPrice = product.productId?.lc || 0;
           const quantity = product.salesQty || product.quantity || 0;
           
+          // For returns, profit/loss is negative
           const profitLoss = -(sellingPrice - lcPrice) * quantity;
           const productCost = lcPrice * quantity;
           
@@ -217,37 +201,34 @@ router.get("/pl-report", async (req, res) => {
     const sortDirection = sortOrder === "desc" ? -1 : 1;
 
     console.log('Sale Filter:', JSON.stringify(saleFilter, null, 2));
-    console.log('Recording Date Filter:', JSON.stringify(recordingDateFilter, null, 2));
 
-    // Get sales with date range filter
+    // Get sales with date range filter - INCLUDING totalProfitLoss
     const sales = await SaleSummary.find(saleFilter)
       .select(
-        "recordingDate invoiceNumber customerName totalAmount paidAmount dueAmount paymentStatus mrName products"
+        "recordingDate invoiceNumber customerName totalAmount paidAmount dueAmount paymentStatus mrName products totalProfitLoss"
       )
-      .sort({ recordingDate: sortDirection });
+      .sort({ recordingDate: sortDirection })
+      .lean(); // Use lean() to get plain JavaScript objects
 
     console.log(`Found ${sales.length} sales for the date range`);
     
-    // Debug: Show date range and sample dates
+    // Debug: Show sample sales with totalProfitLoss
     if (sales.length > 0) {
-      console.log('Date range of found sales:');
-      const dates = sales.map(s => s.recordingDate).sort();
-      console.log('Earliest:', dates[0]);
-      console.log('Latest:', dates[dates.length - 1]);
-      console.log('Sample sale dates:');
+      console.log('Sample sales with totalProfitLoss:');
       sales.slice(0, 5).forEach(s => {
-        console.log(`  Invoice: ${s.invoiceNumber}, Date: ${s.recordingDate}, Amount: ${s.totalAmount}`);
+        console.log(`  Invoice: ${s.invoiceNumber}, Amount: ${s.totalAmount}, Profit/Loss: ${s.totalProfitLoss}`);
       });
     }
 
-    // Calculate profit for each sale
+    // Calculate profit for each sale - USING EXISTING totalProfitLoss
     const salesWithProfit = await calculateProfitsForSales(sales);
 
     const salesReturns = await SalesReturn.find(returnFilter)
       .select(
         "recordingDate invoiceNumber customerName totalAmount paidAmount dueAmount paymentStatus mrName products"
       )
-      .sort({ recordingDate: sortDirection });
+      .sort({ recordingDate: sortDirection })
+      .lean();
 
     // Calculate profit for each return
     const returnsWithProfit = await calculateProfitsForReturns(salesReturns);
@@ -257,7 +238,8 @@ router.get("/pl-report", async (req, res) => {
         "period payrollCode employeeId basicSalary totalAllowance deductions netSalary status paymentDate createdAt"
       )
       .populate("employeeId", "medicalRepName employeeName")
-      .sort({ createdAt: sortDirection });
+      .sort({ createdAt: sortDirection })
+      .lean();
 
     const expenses = await addExpense
       .find(expenseFilter)
@@ -271,9 +253,10 @@ router.get("/pl-report", async (req, res) => {
       })
       .populate("sourceAccount", "name accountNumber")
       .populate("createdBy", "name email")
-      .sort({ date: sortDirection });
+      .sort({ date: sortDirection })
+      .lean();
 
-    // Calculate totals
+    // Calculate totals - USING THE PROFIT FROM salesWithProfit
     let totalSalesRevenue = 0;
     let totalProfitFromSales = 0;
     let totalPaidAmount = 0;
@@ -282,7 +265,7 @@ router.get("/pl-report", async (req, res) => {
     
     salesWithProfit.forEach(sale => {
       totalSalesRevenue += sale.totalAmount || 0;
-      totalProfitFromSales += sale.profit || 0;
+      totalProfitFromSales += sale.profit || 0; // This now uses totalProfitLoss
       totalPaidAmount += sale.paidAmount || 0;
       totalDueAmount += sale.dueAmount || 0;
       totalCostOfGoodsSold += sale._cost || 0;
@@ -370,9 +353,9 @@ router.get("/pl-report", async (req, res) => {
       type: "sale",
       date: sale.recordingDate,
       title: sale.invoiceNumber,
-      description: `Sale to ${sale.customerName}`,
+      description: `Sale to ${sale.customerName || 'Unknown'}`,
       amount: sale.totalAmount || 0,
-      profit: sale.profit || 0,
+      profit: sale.profit || 0, // Uses existing totalProfitLoss
       expense: 0,
       status: sale.paymentStatus || "pending",
       details: {
@@ -382,6 +365,7 @@ router.get("/pl-report", async (req, res) => {
         customerName: sale.customerName || "",
         totalAmount: sale.totalAmount || 0,
         calculatedProfit: sale.profit || 0,
+        storedProfitLoss: sale.totalProfitLoss || 0, // Include stored value
       },
     }));
 
@@ -390,7 +374,7 @@ router.get("/pl-report", async (req, res) => {
       type: "return",
       date: salesReturn.recordingDate,
       title: `${salesReturn.invoiceNumber} (Return)`,
-      description: `Return from ${salesReturn.customerName}`,
+      description: `Return from ${salesReturn.customerName || 'Unknown'}`,
       amount: -(salesReturn.totalAmount || 0),
       profit: salesReturn.profit || 0,
       expense: 0,
@@ -497,14 +481,15 @@ router.get("/pl-report", async (req, res) => {
 
     // Extract profit details from sales data
     const salesProfitDetails = salesWithProfit.map(sale => ({
-      invoiceNumber: sale.invoiceNumber,
+      invoiceNumber: sale.invoiceNumber || 'N/A',
       date: sale.recordingDate,
       customer: sale.customerName || "Unknown",
       totalAmount: sale.totalAmount || 0,
-      profit: sale.profit || 0,
+      profit: sale.profit || 0, // Uses existing totalProfitLoss
       purchaseCost: sale._cost || 0,
       margin: (sale.totalAmount || 0) > 0 ? 
-        ((sale.profit || 0) / (sale.totalAmount || 0)) * 100 : 0
+        ((sale.profit || 0) / (sale.totalAmount || 0)) * 100 : 0,
+      storedProfitLoss: sale.totalProfitLoss || 0 // Show stored value
     }));
 
     const response = {
@@ -524,7 +509,7 @@ router.get("/pl-report", async (req, res) => {
       totals: totals,
       summary: {
         revenue: totalSalesRevenue,
-        cogs: totalCostOfGoodsSold, // Fixed: Now using actual cost calculation
+        cogs: totalCostOfGoodsSold,
         grossProfit: adjustedGrossProfit,
         expenses: totalExpensesAmount,
         payrollExpenses: totalNetSalary,
@@ -542,10 +527,12 @@ router.get("/pl-report", async (req, res) => {
         salesFound: sales.length,
         totalRevenueCalculated: totalSalesRevenue,
         totalCostCalculated: totalCostOfGoodsSold,
+        totalProfitCalculated: totalProfitFromSales,
         sampleSales: sales.slice(0, 5).map(s => ({
           invoice: s.invoiceNumber,
           date: s.recordingDate,
           total: s.totalAmount,
+          storedProfitLoss: s.totalProfitLoss || 0,
           productsCount: s.products?.length || 0
         }))
       }
@@ -555,7 +542,9 @@ router.get("/pl-report", async (req, res) => {
       revenue: response.summary.revenue,
       cogs: response.summary.cogs,
       grossProfit: response.summary.grossProfit,
-      collectionRate: response.summary.collectionRate
+      collectionRate: response.summary.collectionRate,
+      totalProfitFromSales: totalProfitFromSales,
+      netProfit: netProfit
     });
 
     res.json(response);
@@ -598,32 +587,35 @@ router.get("/pl-report/summary", async (req, res) => {
 
     console.log('Summary Sale Filter:', JSON.stringify(saleFilter, null, 2));
 
-    // Get sales summary
+    // Get sales summary - INCLUDING totalProfitLoss
     const sales = await SaleSummary.find(saleFilter)
-      .select("recordingDate totalAmount paidAmount dueAmount products invoiceNumber")
-      .sort({ recordingDate: -1 });
+      .select("recordingDate totalAmount paidAmount dueAmount products invoiceNumber totalProfitLoss customerName mrName paymentStatus")
+      .sort({ recordingDate: -1 })
+      .lean();
 
     console.log(`Summary: Found ${sales.length} sales for date range`);
 
-    // Calculate profit for all sales
+    // Calculate profit for all sales - USING EXISTING totalProfitLoss
     const salesWithProfit = await calculateProfitsForSales(sales);
 
     // Get sales returns summary
     const salesReturns = await SalesReturn.find(returnFilter)
       .select("recordingDate totalAmount products")
-      .sort({ recordingDate: -1 });
+      .sort({ recordingDate: -1 })
+      .lean();
 
     // Calculate profit for all returns
     const returnsWithProfit = await calculateProfitsForReturns(salesReturns);
 
     // Get payroll summary
     const payrolls = await Payroll.find(payrollFilter)
-      .select("netSalary basicSalary totalAllowance deductions status");
+      .select("netSalary basicSalary totalAllowance deductions status")
+      .lean();
 
     // Get expense summary
-    const expenses = await addExpense.find(expenseFilter).select("amount category");
+    const expenses = await addExpense.find(expenseFilter).select("amount category").lean();
 
-    // Aggregate sales data
+    // Aggregate sales data - USING THE PROFIT FROM salesWithProfit
     let totalSalesRevenue = 0;
     let totalProfitFromSales = 0;
     let totalPaidAmount = 0;
@@ -632,7 +624,7 @@ router.get("/pl-report/summary", async (req, res) => {
     
     salesWithProfit.forEach(sale => {
       totalSalesRevenue += sale.totalAmount || 0;
-      totalProfitFromSales += sale.profit || 0;
+      totalProfitFromSales += sale.profit || 0; // Uses totalProfitLoss
       totalPaidAmount += sale.paidAmount || 0;
       totalDueAmount += sale.dueAmount || 0;
       totalCostOfGoodsSold += sale._cost || 0;
@@ -688,7 +680,7 @@ router.get("/pl-report/summary", async (req, res) => {
     // Format summary for frontend
     const formattedSummary = {
       revenue: totalSalesRevenue,
-      cogs: totalCostOfGoodsSold, // Fixed: Now using actual cost calculation
+      cogs: totalCostOfGoodsSold,
       grossProfit: adjustedGrossProfit,
       expenses: totalExpensesAmount,
       payrollExpenses: totalNetSalary,
@@ -736,31 +728,33 @@ router.get("/pl-report/orders", async (req, res) => {
 
     const sales = await SaleSummary.find(saleFilter)
       .select(
-        "recordingDate invoiceNumber customerName totalAmount paidAmount dueAmount paymentStatus mrName products"
+        "recordingDate invoiceNumber customerName totalAmount paidAmount dueAmount paymentStatus mrName products totalProfitLoss"
       )
-      .sort({ recordingDate: -1 });
+      .sort({ recordingDate: -1 })
+      .lean();
 
-    // Calculate profit for each sale
+    // Calculate profit for each sale - USING EXISTING totalProfitLoss
     const salesWithProfit = await calculateProfitsForSales(sales);
 
     const returns = await SalesReturn.find(returnFilter)
       .select(
         "recordingDate invoiceNumber customerName totalAmount paidAmount dueAmount paymentStatus mrName products"
       )
-      .sort({ recordingDate: -1 });
+      .sort({ recordingDate: -1 })
+      .lean();
 
     // Calculate profit for each return
     const returnsWithProfit = await calculateProfitsForReturns(returns);
 
     // Transform sales data
     const salesData = salesWithProfit.map((order) => ({
-      orderId: order.invoiceNumber,
+      orderId: order.invoiceNumber || 'N/A',
       date: order.recordingDate,
-      customer: order.customerName,
-      mrName: order.mrName,
+      customer: order.customerName || "Unknown",
+      mrName: order.mrName || "",
       amount: order.totalAmount || 0,
-      profit: order.profit || 0,
-      purchaseCost: order._cost || 0, // Use actual cost
+      profit: order.profit || 0, // Uses totalProfitLoss
+      purchaseCost: order._cost || 0,
       margin: (order.totalAmount || 0) > 0 ? 
         ((order.profit || 0) / (order.totalAmount || 0)) * 100 : 0,
       paid: order.paidAmount || 0,
@@ -771,13 +765,13 @@ router.get("/pl-report/orders", async (req, res) => {
 
     // Transform returns data
     const returnsData = returnsWithProfit.map((returnOrder) => ({
-      orderId: `${returnOrder.invoiceNumber} (Return)`,
+      orderId: `${returnOrder.invoiceNumber || 'N/A'} (Return)`,
       date: returnOrder.recordingDate,
-      customer: returnOrder.customerName,
-      mrName: returnOrder.mrName,
+      customer: returnOrder.customerName || "Unknown",
+      mrName: returnOrder.mrName || "",
       amount: -(returnOrder.totalAmount || 0),
       profit: returnOrder.profit || 0,
-      purchaseCost: returnOrder._cost || 0, // Use actual cost
+      purchaseCost: returnOrder._cost || 0,
       margin: 0,
       paid: returnOrder.paidAmount || 0,
       due: returnOrder.dueAmount || 0,
@@ -800,6 +794,73 @@ router.get("/pl-report/orders", async (req, res) => {
       success: false,
       message: "Error fetching orders report",
       error: error.message,
+    });
+  }
+});
+
+// NEW: Route to update profit/loss for existing sales
+router.post("/pl-report/update-profits", async (req, res) => {
+  try {
+    const { startDate, endDate } = req.body;
+    
+    let saleFilter = {};
+    const recordingDateFilter = createDateRangeFilterForRecordingDate(startDate, endDate);
+    
+    if (recordingDateFilter) {
+      saleFilter.recordingDate = recordingDateFilter;
+    }
+
+    // Get all sales in the date range
+    const sales = await SaleSummary.find(saleFilter)
+      .select("products totalAmount")
+      .sort({ recordingDate: -1 })
+      .lean();
+
+    let updatedCount = 0;
+    let errors = [];
+
+    // Update each sale's totalProfitLoss
+    for (const sale of sales) {
+      try {
+        let totalProfitLoss = 0;
+        
+        if (sale.products && Array.isArray(sale.products)) {
+          sale.products.forEach(product => {
+            const sellingPrice = product.sellingPrice || product.unitPrice || 0;
+            const lc = product.lc || 0;
+            const quantity = product.salesQty || product.quantity || 0;
+            
+            const productProfitLoss = (sellingPrice - lc) * quantity;
+            totalProfitLoss += productProfitLoss;
+          });
+        }
+
+        // Update the sale with calculated profit/loss
+        await SaleSummary.findByIdAndUpdate(sale._id, {
+          totalProfitLoss: totalProfitLoss
+        });
+
+        updatedCount++;
+      } catch (error) {
+        errors.push({
+          saleId: sale._id,
+          error: error.message
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Updated totalProfitLoss for ${updatedCount} sales`,
+      updatedCount,
+      errors: errors.length > 0 ? errors : undefined
+    });
+  } catch (error) {
+    console.error("Update profits error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error updating profit/loss",
+      error: error.message
     });
   }
 });

@@ -464,7 +464,7 @@ const PLReport = () => {
                 <tbody>
                   {profitDetails.length > 0 ? profitDetails.map((item, index) => (
                     <tr key={index} className="border-b hover:bg-gray-50">
-                      <td className="p-3 font-medium text-gray-800">{item.invoiceNumber}</td>
+                      <td className="p-3 font-medium text-gray-800">{item.invoiceNumber}{console.log(item)}</td>
                       <td className="p-3 text-gray-600">{formatDateToReadable(item.date)}</td>
                       <td className="p-3 text-gray-800">{item.customer}</td>
                       <td className="p-3 font-semibold text-gray-700">${item.totalAmount?.toLocaleString() || 0}</td>

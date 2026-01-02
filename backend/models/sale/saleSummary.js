@@ -5,13 +5,19 @@ const { Schema } = mongoose;
 const roundToTwo = (value) =>
   typeof value === "number" ? Math.round(value * 100) / 100 : value;
 
+// Calculate profit/loss for a product
+const calculateProfitLoss = (sellingPrice, lc, quantity) => {
+  const profit = (sellingPrice - lc) * quantity;
+  return roundToTwo(profit);
+};
+
 // Product Subschema
 const productSchema = new Schema({
   productName: { type: String, required: true },
-  originalProductName: { type: String }, // Store the original name from import
-  salesQty: { type: Number, required: true }, // Allow negative for returns
-  bonusQty: { type: Number, default: 0 },
-  totalQty: { type: Number, required: true },
+  originalProductName: { type: String },
+  salesQty: { type: Number, required: true, set: roundToTwo },
+  bonusQty: { type: Number, default: 0, set: roundToTwo },
+  totalQty: { type: Number, required: true, set: roundToTwo },
   sellingPrice: { type: Number, required: true, min: 0, set: roundToTwo },
   amount: { type: Number, required: true, set: roundToTwo },
   discount: { type: Number, default: 0, min: 0, set: roundToTwo },
@@ -22,6 +28,8 @@ const productSchema = new Schema({
   isProductAccept: { type: Boolean, default: true },
   isExchangeProduct: { type: Boolean, default: false },
   isReturnProduct: { type: Boolean, default: false },
+}, {
+  _id: true
 });
 
 // Sale Summary Schema
@@ -40,7 +48,7 @@ const saleSummarySchema = new Schema(
     customerId: {
       type: Schema.Types.ObjectId,
       ref: "Customer",
-      required: false, // Changed to false for imports
+      required: false,
     },
     customerCode: { type: String, trim: true },
     products: [productSchema],
@@ -60,6 +68,8 @@ const saleSummarySchema = new Schema(
     isReturn: { type: Boolean, default: false },
     importBatchId: { type: Number },
     importStatus: { type: String, default: "pending" },
+    // Virtual field for total profit/loss
+    totalProfitLoss: { type: Number, default: 0, set: roundToTwo },
   },
   {
     timestamps: true,
@@ -68,6 +78,31 @@ const saleSummarySchema = new Schema(
   }
 );
 
+// Calculate total profit/loss before saving
+saleSummarySchema.pre("save", function (next) {
+  if (this.products && this.products.length > 0) {
+    // Calculate profit/loss for each product
+    this.products.forEach(product => {
+      if (typeof product.salesQty === 'number' && 
+          typeof product.sellingPrice === 'number' && 
+          typeof product.lc === 'number') {
+        product.profitLoss = calculateProfitLoss(
+          product.sellingPrice,
+          product.lc,
+          product.salesQty
+        );
+      }
+    });
+    
+    // Calculate total profit/loss
+    this.totalProfitLoss = this.products.reduce((total, product) => {
+      return total + (product.profitLoss || 0);
+    }, 0);
+  }
+  
+  next();
+});
+
 // Indexes
 saleSummarySchema.index({ invoiceNumber: 1 }, { unique: true });
 saleSummarySchema.index({ customerId: 1, invoiceDate: -1 });
@@ -75,6 +110,7 @@ saleSummarySchema.index({ mrId: 1, recordingDate: -1 });
 saleSummarySchema.index({ isExchange: 1 });
 saleSummarySchema.index({ isReturn: 1 });
 saleSummarySchema.index({ paymentStatus: 1 });
+saleSummarySchema.index({ totalProfitLoss: 1 });
 
 const SaleSummary = mongoose.model("SaleSummary", saleSummarySchema);
 export default SaleSummary;

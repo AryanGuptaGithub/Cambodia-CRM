@@ -71,6 +71,51 @@ const productNameFixMap = {
   "ecocid 20": "ALU ALU ECOCID 20",
 };
 
+// NEW FUNCTION: Get LC value from Product model
+const getProductLCFromDatabase = async (productName) => {
+  try {
+    if (!productName || typeof productName !== 'string') {
+      return 0;
+    }
+
+    const normalizedName = normalizeProductName(productName);
+    const fixedName = productNameFixMap[normalizedName] || productName.trim();
+    const escaped = fixedName.replace(/[.*?^${}()|[\]\\]/g, "\\$&");
+
+    // First try exact match
+    let product = await Product.findOne({
+      productName: { $regex: new RegExp(`^${escaped}$`, "i") }
+    });
+
+    // If not found, try partial match
+    if (!product) {
+      product = await Product.findOne({
+        productName: { $regex: escaped, $options: "i" }
+      });
+    }
+
+    // If still not found, search all products for similarity
+    if (!product) {
+      const allProducts = await Product.find({});
+      product = allProducts.find(p => 
+        normalizeProductName(p.productName) === normalizedName ||
+        p.productName.toLowerCase().includes(normalizedName) ||
+        normalizedName.includes(normalizeProductName(p.productName))
+      );
+    }
+
+    // Return LC value if found, otherwise return 0
+    if (product) {
+      return parseFloat(product.lc) || parseFloat(product.fob) || 0;
+    }
+
+    return 0;
+  } catch (error) {
+    console.error("Error fetching product LC:", error.message);
+    return 0;
+  }
+};
+
 const findProductStockInHand = async (productName, requiredQty) => {
   try {
     const normalized = normalizeProductName(productName);
@@ -464,6 +509,15 @@ const updateImportProgress = (sessionId, updates) => {
   importProgressMap.set(sessionId, progress);
 };
 
+// Helper to calculate profit/loss for a product
+const calculateProductProfitLoss = (product) => {
+  const salesQty = parseFloat(product.salesQty) || 0;
+  const sellingPrice = parseFloat(product.sellingPrice) || 0;
+  const lc = parseFloat(product.lc) || 0;
+  
+  return (sellingPrice - lc) * salesQty;
+};
+
 // ====================== SINGLE INVOICE PROCESSING WITH STOCK DEDUCTION ======================
 const processSingleInvoice = async (saleData, sessionId, index) => {
   const progress = importProgressMap.get(sessionId);
@@ -492,6 +546,9 @@ const processSingleInvoice = async (saleData, sessionId, index) => {
       }
     }
 
+    let totalAmount = 0;
+    let totalProfitLoss = 0;
+
     // Process products and deduct stock
     for (const p of saleData.products) {
       const salesQty = parseFloat(p.salesQty) || 0;
@@ -505,28 +562,46 @@ const processSingleInvoice = async (saleData, sessionId, index) => {
         await consumeStockFromHand(p.productName, salesQty);
       }
 
+      const sellingPrice = parseFloat(p.sellingPrice) || 0;
+      const amount = parseFloat(p.amount) || 0;
+      const discount = parseFloat(p.discount) || 0;
+      const netSellingAmount = parseFloat(p.netSellingAmount) || 0;
+      const averageUnitPrice = parseFloat(p.averageUnitPrice) || 0;
+      
+      // NEW: Get LC value - if 0 or not provided in Excel, fetch from Product model
+      let lc = parseFloat(p.lc) || 0;
+      if (lc <= 0) {
+        lc = await getProductLCFromDatabase(p.productName);
+      }
+      
+      // Calculate profit/loss for this product
+      const profitLoss = calculateProductProfitLoss({
+        salesQty,
+        sellingPrice,
+        lc
+      });
+
       processedProducts.push({
         productName: p.productName,
         salesQty,
         bonusQty,
         totalQty,
-        sellingPrice: parseFloat(p.sellingPrice) || 0,
-        amount: parseFloat(p.amount) || 0,
-        discount: parseFloat(p.discount) || 0,
-        netSellingAmount: parseFloat(p.netSellingAmount) || 0,
-        averageUnitPrice: parseFloat(p.averageUnitPrice) || 0,
-        lc: parseFloat(p.lc) || 0,
-        profitLoss: parseFloat(p.profitLoss) || 0,
+        sellingPrice,
+        amount,
+        discount,
+        netSellingAmount,
+        averageUnitPrice,
+        lc, // Use fetched LC value
+        profitLoss, // Store calculated profit/loss
         isProductAccept: p.isProductAccept !== false,
       });
+
+      totalAmount += netSellingAmount;
+      totalProfitLoss += profitLoss;
     }
 
     if (processedProducts.length === 0) throw new Error("No valid products");
 
-    const totalAmount = processedProducts.reduce(
-      (sum, p) => sum + (p.netSellingAmount || 0),
-      0
-    );
     const paidAmount = parseFloat(saleData.paidAmount) || 0;
     const dueAmount = Math.max(0, totalAmount - paidAmount);
 
@@ -546,6 +621,7 @@ const processSingleInvoice = async (saleData, sessionId, index) => {
       paidAmount,
       dueAmount,
       totalAmount,
+      totalProfitLoss, // Store total profit/loss for the sale
       paymentStatus: mapPaymentStatus(saleData.paymentStatus),
       remark: saleData.remark || "",
     });
@@ -625,16 +701,6 @@ const checkInvoiceNumberExists = async (invoiceNumber, excludeId = null) => {
   return await SaleSummary.exists(query);
 };
 
-const parseQuantityWithParenthesis = (qty) => {
-  if (!qty) return 0;
-  if (typeof qty === "number") return qty;
-  const str = qty.toString().trim();
-  if (str.startsWith("(") && str.endsWith(")")) {
-    return -parseFloat(str.slice(1, -1)) || 0;
-  }
-  return parseFloat(str) || 0;
-};
-
 // ====================== ROUTES ======================
 
 router.post("/sales/import", async (req, res) => {
@@ -689,7 +755,7 @@ router.post("/sales/import", async (req, res) => {
     res.json({
       success: true,
       message:
-        "Import started – valid products will be imported with stock deduction",
+        "Import started – valid products will be imported with stock deduction and LC auto-fetching",
       sessionId,
       totalInvoices: sanitizedData.length,
       progressUrl: `/api/sales/import/progress/${sessionId}`,
@@ -788,6 +854,7 @@ router.get("/sales/all", async (req, res) => {
         paidAmount: 1,
         dueAmount: 1,
         totalAmount: 1,
+        totalProfitLoss: 1,
         products: 1,
         createdAt: 1,
         updatedAt: 1,
@@ -850,6 +917,7 @@ router.get("/sales", async (req, res) => {
         paidAmount: 1,
         dueAmount: 1,
         totalAmount: 1,
+        totalProfitLoss: 1,
         products: 1,
         createdAt: 1,
         updatedAt: 1,
@@ -1007,7 +1075,7 @@ router.post("/sales/download-excel", async (req, res) => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Sale Summary");
 
-    worksheet.mergeCells("A1:AD1");
+    worksheet.mergeCells("A1:AE1");
     const titleCell = worksheet.getCell("A1");
     titleCell.value = "HEALTHCARE SOUTH EAST ASIA";
     titleCell.font = { bold: true, size: 16 };
@@ -1024,7 +1092,7 @@ router.post("/sales/download-excel", async (req, res) => {
       }).format(date);
     };
 
-    worksheet.mergeCells("A2:AD2");
+    worksheet.mergeCells("A2:AE2");
     const subtitleCell = worksheet.getCell("A2");
     subtitleCell.value = `Sale Summary List (${formatDateToReadable(
       startDate
@@ -1055,6 +1123,7 @@ router.post("/sales/download-excel", async (req, res) => {
       { key: "averageUnitPrice", width: 25 },
       { key: "lc", width: 10 },
       { key: "profitLoss", width: 15 },
+      { key: "totalProfitLoss", width: 15 },
       { key: "isProductAccept", width: 15 },
       { key: "creditDays", width: 15 },
       { key: "dueDate", width: 15 },
@@ -1088,7 +1157,8 @@ router.post("/sales/download-excel", async (req, res) => {
       "Net Selling Amount",
       "Average Unit Price",
       "LC",
-      "Profit/Loss",
+      "Product Profit/Loss",
+      "Total Profit/Loss",
       "Product Accept",
       "Credit Days",
       "Due Date",
@@ -1121,6 +1191,7 @@ router.post("/sales/download-excel", async (req, res) => {
       "averageUnitPrice",
       "lc",
       "profitLoss",
+      "totalProfitLoss",
       "paidAmount",
       "dueAmount",
       "totalAmount",
@@ -1141,7 +1212,10 @@ router.post("/sales/download-excel", async (req, res) => {
       const formatCustomerCode = (code) =>
         code ? code.toString().padStart(4, "0") : "";
 
-      sale.products.forEach((product) => {
+      sale.products.forEach((product, index) => {
+        // For first product row, show total profit/loss, for subsequent rows, leave it blank
+        const totalProfitLossValue = index === 0 ? sale.totalProfitLoss || 0 : "";
+        
         const row = worksheet.addRow({
           no: ++rowIndex,
           recordingDate: formatDate(sale.recordingDate),
@@ -1164,6 +1238,7 @@ router.post("/sales/download-excel", async (req, res) => {
           averageUnitPrice: product.averageUnitPrice,
           lc: product.lc,
           profitLoss: product.profitLoss,
+          totalProfitLoss: totalProfitLossValue,
           isProductAccept: product.isProductAccept ? "Yes" : "No",
           creditDays: sale.creditDays,
           dueDate: formatDate(sale.dueDate),
@@ -1271,6 +1346,7 @@ router.post("/sales/delete-batch", async (req, res) => {
             id,
             invoiceNumber: saleToDelete.invoiceNumber,
             customerName: saleToDelete.customerName,
+            totalProfitLoss: saleToDelete.totalProfitLoss,
           });
         } catch (error) {
           errors.push({
@@ -1319,6 +1395,18 @@ router.get("/reports/inhand/count", async (req, res) => {
   }
 });
 
+// NEW HELPER: Get LC for product during manual sale creation
+const getLCForProduct = async (productName, providedLC) => {
+  // If LC is provided and > 0, use it
+  const lc = parseFloat(providedLC) || 0;
+  if (lc > 0) {
+    return lc;
+  }
+  
+  // Otherwise fetch from Product model
+  return await getProductLCFromDatabase(productName);
+};
+
 router.post("/sales", async (req, res) => {
   try {
     const data = req.body;
@@ -1365,6 +1453,7 @@ router.post("/sales", async (req, res) => {
     /* ----------------- PROCESS PRODUCTS ----------------- */
     const processedProducts = [];
     let totalAmount = 0;
+    let totalProfitLoss = 0;
 
     for (const p of data.products || []) {
       if (!p.productName?.trim()) continue;
@@ -1382,7 +1471,12 @@ router.post("/sales", async (req, res) => {
       const amount = sellingPrice * salesQty;
       const discount = Number(p.discount) || 0;
       const netSellingAmount = amount - discount;
-      const lc = Number(p.lc) || 0;
+      
+      // NEW: Get LC value - if 0 or not provided, fetch from Product model
+      const lc = await getLCForProduct(p.productName.trim(), p.lc);
+      
+      // Calculate profit/loss
+      const profitLoss = (sellingPrice - lc) * salesQty;
 
       processedProducts.push({
         productName: p.productName.trim(),
@@ -1395,11 +1489,12 @@ router.post("/sales", async (req, res) => {
         netSellingAmount,
         averageUnitPrice: totalQty ? netSellingAmount / totalQty : 0,
         lc,
-        profitLoss: netSellingAmount - totalQty * lc,
+        profitLoss,
         isProductAccept: true,
       });
 
       totalAmount += netSellingAmount;
+      totalProfitLoss += profitLoss;
     }
 
     if (!processedProducts.length) {
@@ -1428,6 +1523,7 @@ router.post("/sales", async (req, res) => {
       paidAmount,
       dueAmount,
       totalAmount,
+      totalProfitLoss,
       paymentStatus,
       remark: data.remark || "",
     };
@@ -1449,7 +1545,7 @@ router.post("/sales", async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: "Sale created successfully",
+      message: "Sale created successfully with auto-fetched LC values",
       sale,
     });
   } catch (err) {
@@ -1501,6 +1597,7 @@ router.put("/sales/:id", async (req, res) => {
 
     const updatedProducts = [];
     let totalAmount = 0;
+    let totalProfitLoss = 0;
 
     // Calculate stock differences and check availability
     // Create a map of original products
@@ -1593,8 +1690,19 @@ router.put("/sales/:id", async (req, res) => {
         }
       }
 
-      const netSellingAmount = Number(p.netSellingAmount) || 0;
-      const lcValue = p.lc || originalProduct?.lc || 0;
+      const sellingPrice = Number(p.sellingPrice) || 0;
+      const amount = sellingPrice * newSalesQty;
+      const discount = Number(p.discount) || 0;
+      const netSellingAmount = amount - discount;
+      
+      // NEW: Get LC value - if 0 or not provided, use original or fetch from Product model
+      let lcValue = parseFloat(p.lc) || 0;
+      if (lcValue <= 0) {
+        lcValue = originalProduct?.lc || await getProductLCFromDatabase(p.productName);
+      }
+      
+      // Calculate profit/loss
+      const profitLoss = (sellingPrice - lcValue) * newSalesQty;
 
       updatedProducts.push({
         productName: p.productName.trim(),
@@ -1602,18 +1710,19 @@ router.put("/sales/:id", async (req, res) => {
         salesQty: newSalesQty,
         bonusQty,
         totalQty,
-        sellingPrice: Number(p.sellingPrice) || 0,
-        amount: Number(p.amount) || 0,
-        discount: Number(p.discount) || 0,
+        sellingPrice,
+        amount,
+        discount,
         netSellingAmount,
         averageUnitPrice: totalQty > 0 ? netSellingAmount / totalQty : 0,
         lc: lcValue,
-        profitLoss: netSellingAmount - totalQty * lcValue,
+        profitLoss,
         isProductAccept:
           p.isProductAccept !== undefined ? p.isProductAccept : true,
       });
 
       totalAmount += netSellingAmount;
+      totalProfitLoss += profitLoss;
     }
 
     if (updatedProducts.length === 0) {
@@ -1685,6 +1794,7 @@ router.put("/sales/:id", async (req, res) => {
           : originalSale.deliveryDate,
         paidAmount,
         totalAmount,
+        totalProfitLoss,
         dueAmount,
         paymentStatus:
           mapPaymentStatus(saleData.paymentStatus) ||
@@ -1696,7 +1806,7 @@ router.put("/sales/:id", async (req, res) => {
     );
 
     res.status(200).json({
-      message: "Sale updated successfully with stock adjustment",
+      message: "Sale updated successfully with stock adjustment and LC auto-fetch",
       sale: updatedSale,
     });
   } catch (err) {
@@ -1704,6 +1814,56 @@ router.put("/sales/:id", async (req, res) => {
     res.status(500).json({
       error: "Failed to update sales record",
       details: err.message,
+    });
+  }
+});
+
+// New route to get profit/loss summary
+router.get("/sales/profit-loss-summary", async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+
+    const filter = {};
+    
+    if (startDate && endDate) {
+      filter.invoiceDate = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate)
+      };
+    }
+
+    const result = await SaleSummary.aggregate([
+      { $match: filter },
+      {
+        $group: {
+          _id: null,
+          totalSales: { $sum: 1 },
+          totalAmount: { $sum: "$totalAmount" },
+          totalProfitLoss: { $sum: "$totalProfitLoss" },
+          totalPaid: { $sum: "$paidAmount" },
+          totalDue: { $sum: "$dueAmount" }
+        }
+      }
+    ]);
+
+    const summary = result.length > 0 ? result[0] : {
+      totalSales: 0,
+      totalAmount: 0,
+      totalProfitLoss: 0,
+      totalPaid: 0,
+      totalDue: 0
+    };
+
+    res.json({
+      success: true,
+      summary
+    });
+  } catch (error) {
+    console.error("Profit/Loss summary error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch profit/loss summary",
+      error: error.message
     });
   }
 });
