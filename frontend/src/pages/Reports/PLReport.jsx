@@ -114,7 +114,6 @@ const PLReport = () => {
       if (endDate) params.endDate = endDate.toISOString().split("T")[0];
 
       const response = await axios.get(`${backendUrl}/api/pl-report/summary`, { params });
-      console.log("Summary response:", response.data);
       if (response.data.success && response.data.data) {
         setData({
           summary: response.data.data || {
@@ -138,8 +137,7 @@ const PLReport = () => {
       if (endDate) params.endDate = endDate.toISOString().split("T")[0];
 
       const response = await axios.get(`${backendUrl}/api/pl-report`, { params });
-      console.log("Table response:", response.data);
-      
+
       if (response.data.success) {
         const responseData = response.data.data || [];
         const details = response.data.details || {};
@@ -464,7 +462,7 @@ const PLReport = () => {
                 <tbody>
                   {profitDetails.length > 0 ? profitDetails.map((item, index) => (
                     <tr key={index} className="border-b hover:bg-gray-50">
-                      <td className="p-3 font-medium text-gray-800">{item.invoiceNumber}{console.log(item)}</td>
+                      <td className="p-3 font-medium text-gray-800">{item.invoiceNumber}</td>
                       <td className="p-3 text-gray-600">{formatDateToReadable(item.date)}</td>
                       <td className="p-3 text-gray-800">{item.customer}</td>
                       <td className="p-3 font-semibold text-gray-700">${item.totalAmount?.toLocaleString() || 0}</td>

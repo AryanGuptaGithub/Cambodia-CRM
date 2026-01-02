@@ -342,9 +342,7 @@ const ProductReport = () => {
   // Export to Excel function - Frontend implementation for custom format
 const exportToExcel = async () => {
   setIsExporting(true);
-  try {
-    console.log("Exporting to Excel with frontend implementation");
-    
+  try {    
     // Create a new workbook
     const workbook = XLSX.utils.book_new();
     

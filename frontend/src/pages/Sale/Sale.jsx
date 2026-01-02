@@ -1169,7 +1169,6 @@ const Sales = () => {
     try {
       setCheckingPurchaseInventories(true);
       const response = await axios.get(`${backendUrl}/api/purchases/check`);
-      console.log("Purchase inventory check response:", response.data);
       setHasPurchaseInventories(response.data.exists || response.data.count > 0);
     } catch (error) {
       console.error("Error checking purchase inventories:", error);
@@ -1200,7 +1199,6 @@ const Sales = () => {
   // NEW: Listen for custom event when purchase inventory is added
   useEffect(() => {
     const handlePurchaseInventoryAdded = () => {
-      console.log("Purchase inventory added event received");
       recheckPurchaseInventories();
     };
 

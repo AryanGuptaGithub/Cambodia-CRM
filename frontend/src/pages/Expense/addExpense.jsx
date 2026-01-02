@@ -1,4 +1,3 @@
-// components/AddExpense.jsx
 import React, { useCallback, useEffect, useState } from "react";
 import { Save, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -84,7 +83,6 @@ const SelectField = ({
   placeholder = "Select an option",
   disabled = false,
 }) => {
-  // Create a unique key for each option
   const getOptionKey = (option, index) => {
     return option.value || option._id || option.label || `option-${index}`;
   };
@@ -165,7 +163,6 @@ const AddExpense = ({
       final = parts[0] + "." + parts.slice(1).join("");
     }
     setFormData((prev) => ({ ...prev, amount: final }));
-    // Clear amount error on change
     setErrors((prev) => ({ ...prev, amount: "" }));
   };
 
@@ -219,7 +216,6 @@ const AddExpense = ({
       if (errors[name]) {
         setErrors((prev) => ({ ...prev, [name]: "" }));
       }
-      // Clear amount error when changing source account
       if (name === "sourceAccount") {
         setErrors((prev) => ({ ...prev, amount: "" }));
       }
@@ -239,9 +235,7 @@ const AddExpense = ({
       if (catResp.data && catResp.data.success) {
         const responseData = catResp.data.data;
 
-        // Handle different possible response structures
         if (Array.isArray(responseData)) {
-          // Case 1: It's already an array
           categories = responseData
             .filter((c) => c && (c.Category || c.category))
             .map((c, index) => ({
@@ -249,7 +243,6 @@ const AddExpense = ({
               label: c.Category || c.category,
             }));
         } else if (responseData && typeof responseData === "object") {
-          // Case 2: It's a single object with Category properties
           if (responseData.Category || responseData.category) {
             categories = [
               {
@@ -261,10 +254,7 @@ const AddExpense = ({
                 label: responseData.Category || responseData.category,
               },
             ];
-          }
-          // Case 3: Look for nested array
-          else {
-            // Try to find any array property in the object
+          } else {
             const arrayKeys = Object.keys(responseData).filter((key) =>
               Array.isArray(responseData[key])
             );
@@ -314,7 +304,6 @@ const AddExpense = ({
   }, []);
 
   useEffect(() => {
-    // whenever source account switches, clear amount error
     if (errors.amount) {
       setErrors((prev) => ({ ...prev, amount: "" }));
     }
@@ -353,23 +342,7 @@ const AddExpense = ({
     return Object.keys(newErrors).length === 0;
   }, [formData, validateAmountAgainstBalance, getSelectedAccountBalance]);
 
-  const updateDestinationAccount = async (accountId, amount, operation) => {
-    try {
-      const resp = await axios.patch(
-        `${backendUrl}/api/expenses/destinations/${accountId}/balance`,
-        {
-          amount,
-          operation, // "add" or "subtract"
-        }
-      );
-      return resp.data;
-    } catch (err) {
-      console.error("Error updating dest account:", err);
-      throw new Error(
-        err.response?.data?.message || "Failed to update destination account"
-      );
-    }
-  };
+  // REMOVED: updateDestinationAccount function (not needed anymore)
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -381,7 +354,7 @@ const AddExpense = ({
         date: formData.date,
         amount: amt,
         remarks: formData.remarks.trim(),
-        category: formData.expenseCategory,
+        category: formData.expenseCategory, // Backend expects "category" not "expenseCategory"
         sourceAccount: formData.sourceAccount,
       };
 
@@ -390,25 +363,16 @@ const AddExpense = ({
       let resp;
 
       if (isEditing && initialData?._id) {
-        const oldAmt = initialData.amount || 0;
-        const diff = amt - oldAmt;
-
+        // For editing, just send the update request
         resp = await axios.put(
           `${backendUrl}/api/expenses/${initialData._id}`,
           submitData
         );
-
-        if (diff !== 0) {
-          const op = diff > 0 ? "subtract" : "add";
-          await updateDestinationAccount(
-            formData.sourceAccount,
-            Math.abs(diff),
-            op
-          );
-        }
+        // The backend handles the balance update automatically
       } else {
+        // For creating, just send the create request
         resp = await axios.post(`${backendUrl}/api/expenses`, submitData);
-        await updateDestinationAccount(formData.sourceAccount, amt, "subtract");
+        // The backend handles the balance update automatically
       }
 
       if (resp.data.success) {

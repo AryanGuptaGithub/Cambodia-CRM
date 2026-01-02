@@ -334,13 +334,7 @@ const MRWiseOutstanding = () => {
           params.append('endDate', dateRange.endDate);
         }
       }
-      
-      console.log("Exporting Excel with params:", {
-        search: searchTerm,
-        startDate: dateRange.startDate,
-        endDate: dateRange.endDate
-      });
-      
+            
       // Make the export request
       const response = await axios.get(`${backendUrl}/api/mr-wise-outstanding/export/excel`, {
         params: params,

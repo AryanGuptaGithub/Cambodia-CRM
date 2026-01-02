@@ -1,8 +1,6 @@
-// routes/expenses.js
 import express from "express";
 const router = express.Router();
 import Expense from "../../models/expenses/addExpense.js";
-// Add the missing import for expense category model
 import addExpenseCategary from "../../models/expenses/addExpenseCategary.js";
 import mongoose from "mongoose";
 import Destination from "../../models/accounts/Destination.js";
@@ -10,9 +8,7 @@ import Destination from "../../models/accounts/Destination.js";
 // Helper function to convert Sr number to category ObjectId
 const convertSrToCategoryId = async (categoryValue) => {
   if (typeof categoryValue === "string" && /^\d+$/.test(categoryValue)) {
-    // Get all categories sorted the same way as in the expense-categary route
     const categories = await addExpenseCategary.find().sort({ category: 1 });
-
     const srNumber = parseInt(categoryValue);
     if (srNumber >= 1 && srNumber <= categories.length) {
       const categoryId = categories[srNumber - 1]._id;
@@ -57,7 +53,6 @@ const getDateRangeForPeriod = (period) => {
       break;
 
     default:
-      // Return all data if no period specified
       return {};
   }
 
@@ -73,7 +68,6 @@ const getDateRangeForPeriod = (period) => {
 router.get("/expenses", async (req, res) => {
   try {
     const { period } = req.query;
-    // Build query based on period
     let query = {};
     if (period) {
       query = getDateRangeForPeriod(period);
@@ -84,12 +78,11 @@ router.get("/expenses", async (req, res) => {
       .populate("sourceAccount", "name")
       .sort({ date: -1, createdAt: -1 });
 
-    // Calculate totals for the dashboard
+    // Calculate totals
     const currentDate = new Date();
     const currentMonthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
     const currentYearStart = new Date(currentDate.getFullYear(), 0, 1);
     
-    // Get monthly total
     const monthlyExpenses = await Expense.find({
       date: {
         $gte: currentMonthStart,
@@ -98,7 +91,6 @@ router.get("/expenses", async (req, res) => {
     });
     const monthlyTotal = monthlyExpenses.reduce((sum, expense) => sum + (expense.amount || 0), 0);
 
-    // Get yearly total
     const yearlyExpenses = await Expense.find({
       date: {
         $gte: currentYearStart,
@@ -107,7 +99,6 @@ router.get("/expenses", async (req, res) => {
     });
     const yearlyTotal = yearlyExpenses.reduce((sum, expense) => sum + (expense.amount || 0), 0);
 
-    // Get latest 10 expenses for the dashboard cards
     const latestExpenses = await Expense.find()
       .populate("category", "category description")
       .populate("sourceAccount", "name")
@@ -133,12 +124,11 @@ router.get("/expenses", async (req, res) => {
   }
 });
 
-// Get single expense by ID - FIXED
+// Get single expense by ID
 router.get("/expenses/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Validate if the ID is a valid MongoDB ObjectId
     if (!isValidObjectId(id)) {
       return res.status(400).json({
         success: false,
@@ -164,7 +154,6 @@ router.get("/expenses/:id", async (req, res) => {
   } catch (error) {
     console.error("Error fetching expense:", error);
 
-    // Handle CastError specifically
     if (error.name === "CastError") {
       return res.status(400).json({
         success: false,
@@ -180,7 +169,7 @@ router.get("/expenses/:id", async (req, res) => {
   }
 });
 
-// Create new expense
+// Create new expense - FIXED: REMOVED duplicate balance update
 router.post("/expenses", async (req, res) => {
   try {
     const expenseData = req.body;
@@ -194,8 +183,16 @@ router.post("/expenses", async (req, res) => {
     ) {
       return res.status(400).json({
         success: false,
-        message:
-          "Date, category, amount, and source account are required fields",
+        message: "Date, category, amount, and source account are required fields",
+      });
+    }
+
+    // Validate amount
+    const amount = parseFloat(expenseData.amount);
+    if (isNaN(amount) || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Amount must be a valid positive number",
       });
     }
 
@@ -232,36 +229,76 @@ router.post("/expenses", async (req, res) => {
       });
     }
 
-    // Create the expense with the proper category ID
-    const newExpense = new Expense({
-      ...expenseData,
-      category: categoryId,
-    });
+    // Check if source account has sufficient balance
+    const sourceAccount = await Destination.findById(expenseData.sourceAccount);
+    if (!sourceAccount) {
+      return res.status(404).json({
+        success: false,
+        message: "Source account not found",
+      });
+    }
 
-    let savedExpense = await newExpense.save();
+    if (sourceAccount.totalAmount < amount) {
+      return res.status(400).json({
+        success: false,
+        message: `Insufficient balance in source account. Available: $${sourceAccount.totalAmount}, Required: $${amount}`,
+      });
+    }
 
-    // Deduct amount from source account
-    await Destination.findByIdAndUpdate(expenseData.sourceAccount, {
-      $inc: { totalAmount: -parseFloat(expenseData.amount) },
-    });
+    // Start transaction
+    const session = await mongoose.startSession();
+    session.startTransaction();
 
-    savedExpense = await savedExpense.populate([
-      { path: "category", select: "category" },
-      { path: "sourceAccount", select: "name" },
-    ]);
+    try {
+      // Deduct amount from source account FIRST
+      await Destination.findByIdAndUpdate(
+        expenseData.sourceAccount,
+        { $inc: { totalAmount: -amount } },
+        { session }
+      );
 
-    // Construct the success message
-    const successMessage = `Added expense <b>${savedExpense.category.category}</b> of <b>$${savedExpense.amount}</b> from <b>${savedExpense.sourceAccount.name}</b> successfully`;
+      // Create the expense
+      const newExpense = new Expense({
+        ...expenseData,
+        category: categoryId,
+        amount: amount,
+      });
 
-    res.status(201).json({
-      success: true,
-      message: successMessage,
-      data: savedExpense,
-    });
+      let savedExpense = await newExpense.save({ session });
+
+      // Populate the saved expense
+      savedExpense = await Expense.findById(savedExpense._id)
+        .populate("category", "category")
+        .populate("sourceAccount", "name")
+        .session(session);
+
+      await session.commitTransaction();
+      session.endSession();
+
+      // Construct the success message
+      const successMessage = `Added expense <b>${savedExpense.category.category}</b> of <b>$${savedExpense.amount}</b> from <b>${savedExpense.sourceAccount.name}</b> successfully`;
+
+      res.status(201).json({
+        success: true,
+        message: successMessage,
+        data: savedExpense,
+      });
+    } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
+      throw error;
+    }
   } catch (error) {
     console.error("Error creating expense:", error);
 
     if (error.message.includes("Invalid category Sr number")) {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
+    if (error.message.includes("Insufficient balance")) {
       return res.status(400).json({
         success: false,
         message: error.message,
@@ -350,7 +387,7 @@ router.get("/expense-categary", async (req, res) => {
 
     const responseData = categories.map((category, index) => ({
       Sr: index + 1,
-      _id: category._id, // Include the actual ObjectId
+      _id: category._id,
       Category: category.category,
       Remarks: category.description,
       "Amount Until Year ($)": ytdMap.get(category._id.toString()) || 0,
@@ -372,7 +409,7 @@ router.get("/expense-categary", async (req, res) => {
   }
 });
 
-// UPDATE EXPENSE - CORRECTED LOGIC
+// UPDATE EXPENSE - FIXED
 router.put("/expenses/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -463,9 +500,28 @@ router.put("/expenses/:id", async (req, res) => {
     const oldSourceAccountId = existingExpense.sourceAccount?.toString();
     const newSourceAccountId = updateData.sourceAccount;
 
-    // Handle source account balance changes
+    // Check if new source account has sufficient balance when changing accounts
     if (oldSourceAccountId !== newSourceAccountId) {
-      // If source account changed, refund old account and deduct from new account
+      const newSourceAccount = await Destination.findById(newSourceAccountId).session(session);
+      if (!newSourceAccount) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(404).json({
+          success: false,
+          message: "New source account not found",
+        });
+      }
+
+      if (newSourceAccount.totalAmount < newAmount) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          success: false,
+          message: `Insufficient balance in new source account. Available: $${newSourceAccount.totalAmount}, Required: $${newAmount}`,
+        });
+      }
+
+      // Refund old account
       if (oldSourceAccountId) {
         await Destination.findByIdAndUpdate(
           oldSourceAccountId,
@@ -481,12 +537,27 @@ router.put("/expenses/:id", async (req, res) => {
         { session }
       );
     } else {
-      // Same source account, adjust balance based on amount difference
-      const amountDifference = oldAmount - newAmount;
+      // Same source account, check if balance is sufficient for the difference
+      const currentSourceAccount = await Destination.findById(newSourceAccountId).session(session);
+      const amountDifference = newAmount - oldAmount;
+
+      if (amountDifference > 0) {
+        // Need to deduct more
+        if (currentSourceAccount.totalAmount < amountDifference) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(400).json({
+            success: false,
+            message: `Insufficient balance. Available: $${currentSourceAccount.totalAmount}, Additional required: $${amountDifference}`,
+          });
+        }
+      }
+
+      // Adjust balance based on amount difference
       if (amountDifference !== 0) {
         await Destination.findByIdAndUpdate(
           newSourceAccountId,
-          { $inc: { totalAmount: amountDifference } },
+          { $inc: { totalAmount: -amountDifference } },
           { session }
         );
       }
@@ -522,7 +593,8 @@ router.put("/expenses/:id", async (req, res) => {
 
     console.error("Error updating expense:", error);
 
-    if (error.message.includes("Invalid category Sr number")) {
+    if (error.message.includes("Invalid category Sr number") || 
+        error.message.includes("Insufficient balance")) {
       return res.status(400).json({
         success: false,
         message: error.message,
@@ -660,7 +732,7 @@ router.get("/expenses/statistics/summary", async (req, res) => {
       { $match: matchStage },
       {
         $lookup: {
-          from: "addexpensecategaries", // Make sure this matches your collection name
+          from: "addexpensecategaries",
           localField: "category",
           foreignField: "_id",
           as: "categoryInfo",
@@ -698,94 +770,6 @@ router.get("/expenses/statistics/summary", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to fetch expense statistics",
-      error: error.message,
-    });
-  }
-});
-
-router.patch("/expenses/destinations/:id/balance", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { amount, operation } = req.body; // operation: "add" or "subtract"
-
-    // Validate MongoDB ID
-    if (!isValidObjectId(id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid account ID format",
-      });
-    }
-
-    // Validate amount
-    if (typeof amount !== "number" || amount <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Amount must be a positive number",
-      });
-    }
-
-    // Validate operation
-    if (!["add", "subtract"].includes(operation)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid operation. Use 'add' or 'subtract'",
-      });
-    }
-
-    // Find the account
-    const account = await Destination.findById(id);
-    if (!account) {
-      return res.status(404).json({
-        success: false,
-        message: "Destination account not found",
-      });
-    }
-
-    // Check account status
-    if (!account.isActive) {
-      return res.status(400).json({
-        success: false,
-        message: "Cannot update inactive account",
-      });
-    }
-
-    const previousBalance = account.totalAmount;
-    let newBalance;
-
-    if (operation === "add") {
-      newBalance = previousBalance + amount;
-    } else {
-      // "subtract"
-      newBalance = previousBalance - amount;
-      if (newBalance < 0) {
-        return res.status(400).json({
-          success: false,
-          message: "Insufficient balance",
-        });
-      }
-    }
-
-    account.totalAmount = newBalance;
-    await account.save();
-
-    res.status(200).json({
-      success: true,
-      message:
-        operation === "add"
-          ? "Amount added to balance successfully"
-          : "Amount subtracted from balance successfully",
-      data: {
-        previousBalance,
-        newBalance,
-        operation,
-        amount,
-      },
-    });
-  } catch (error) {
-    console.error("Error updating account balance:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to update account balance",
       error: error.message,
     });
   }

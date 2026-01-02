@@ -12,24 +12,30 @@ const expenseSchema = new mongoose.Schema(
       ref: "ExpenseCategory",
       required: true,
     },
-    remarks: { // Changed from description to remarks
+    remarks: {
       type: String,
       trim: true,
-      // Removed required: true to make it optional
+      required: true, // Added required back as per your frontend validation
     },
     amount: {
       type: Number,
       required: true,
-      min: 0,
+      min: 0.01, // Changed from 0 to 0.01 to ensure positive amount
+      validate: {
+        validator: function(v) {
+          return v > 0;
+        },
+        message: 'Amount must be greater than 0'
+      }
     },
     sourceAccount: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Destination",
       required: true,
     },
+    // Optional fields (you can add these later)
     paymentMethod: {
       type: String,
-      required: true,
       enum: ["cash", "card", "bank transfer", "digital wallet", "other"],
       default: "cash",
     },
@@ -61,7 +67,15 @@ const expenseSchema = new mongoose.Schema(
 expenseSchema.index({ date: -1 });
 expenseSchema.index({ category: 1 });
 expenseSchema.index({ sourceAccount: 1 });
-expenseSchema.index({ paymentMethod: 1 });
 expenseSchema.index({ createdAt: -1 });
+
+// Pre-save middleware to ensure amount is positive
+expenseSchema.pre('save', function(next) {
+  if (this.amount <= 0) {
+    next(new Error('Amount must be greater than 0'));
+  } else {
+    next();
+  }
+});
 
 export default mongoose.model("Expense", expenseSchema);

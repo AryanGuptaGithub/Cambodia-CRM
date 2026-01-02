@@ -1,28 +1,230 @@
-// routes/salesSalaryRatio.js
 import express from "express";
 import SaleSummary from "../../models/sale/saleSummary.js";
 import Payroll from "../../models/Hrm/Payroll.js";
 import Staff from "../../models/staffMember/staff.js";
-import stockTransferToMR from "../../models/stock/stockTransferToMR.js";
 import mongoose from "mongoose";
+import ExcelJS from 'exceljs';
+ 
 
 const router = express.Router();
 
-router.get("/sales-salary-ratio", async (req, res) => {
-  try {
-    const { page = 1, limit = 7, search = "" } = req.query;
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
-    const skip = (pageNum - 1) * limitNum;
+const getYearMonthFromDate = (date) => {
+  const d = new Date(date);
+  const year = d.getFullYear();
+  const month = (d.getMonth() + 1).toString().padStart(2, '0');
+  return `${year}-${month}`;
+};
 
-    // 🔍 Step 1: Search filter
-    const salesMatchConditions = {};
+const getPeriodsFromDateRange = (startDate, endDate) => {
+  const periods = [];
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  
+  let current = new Date(start.getFullYear(), start.getMonth(), 1);
+  
+  while (current <= end) {
+    const year = current.getFullYear();
+    const month = (current.getMonth() + 1).toString().padStart(2, '0');
+    periods.push(`${year}-${month}`);
+    current.setMonth(current.getMonth() + 1);
+  }
+  
+  return periods;
+};
+
+// Enhanced name normalization function - FIXED to handle Phanda variations
+const normalizeMrName = (name) => {
+  if (!name) return "";
+  
+  // Remove common prefixes and normalize
+  let normalized = name
+    .replace(/^(mr|mrs|ms|miss|dr|prof)\s+/i, '') // Remove titles
+    .replace(/[^\w\s]/g, ' ') // Remove special characters
+    .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+    .trim()
+    .toLowerCase();
+  
+  // Special handling for specific names
+  if (normalized.includes('makara')) {
+    normalized = 'makara';
+  }
+  
+  // Handle Phanda variations
+  if (normalized.includes('phanda')) {
+    normalized = 'phanda';
+  }
+  
+  return normalized;
+};
+
+// Function to normalize MR name in JavaScript (for post-processing)
+const normalizeNameInJS = (name) => {
+  if (!name) return "";
+  
+  // Simple normalization: lowercase and remove common prefixes
+  let normalized = name.toLowerCase().trim();
+  
+  // Remove common prefixes
+  const prefixes = ['mr ', 'mrs ', 'ms ', 'miss ', 'dr ', 'prof '];
+  for (const prefix of prefixes) {
+    if (normalized.startsWith(prefix)) {
+      normalized = normalized.substring(prefix.length);
+      break;
+    }
+  }
+  
+  // Remove extra spaces
+  normalized = normalized.replace(/\s+/g, ' ').trim();
+  
+  // Special cases
+  if (normalized.includes('makara')) {
+    normalized = 'makara';
+  }
+  
+  if (normalized.includes('phanda')) {
+    normalized = 'phanda';
+  }
+  
+  return normalized;
+};
+
+// Calculate Salary/Sale ratio as (Profit - Total Expense) / Expense * 100
+const calculateSalarySaleRatio = (profit, totalExpense) => {
+  if (totalExpense === 0) return 0;
+  return ((profit - totalExpense) / totalExpense) * 100;
+};
+
+// Calculate Performance as (Profit / Total Expense) * 100
+const calculatePerformance = (profit, totalExpense) => {
+  if (totalExpense === 0) return profit > 0 ? 1000 : 0;
+  return (profit / totalExpense) * 100;
+};
+
+router.get("/sales-salary-ratio", async (req, res) => {
+  try {     
+    const { 
+      page = 1, 
+      limit = 7, 
+      search = "",
+      startDate,
+      endDate,
+      period,
+      dateFilter = "currentMonth",
+      export: isExport = false
+    } = req.query;
+    
+    console.log("🔍 API Parameters:", {
+      page, limit, search, startDate, endDate, period, dateFilter, isExport
+    });
+    
+    const pageNum = parseInt(page);
+    const limitNum = isExport ? 10000 : parseInt(limit);
+    const skip = isExport ? 0 : (pageNum - 1) * limitNum;
+    
+    // 🔍 Step 1: Build date filter conditions for sales
+    const salesDateConditions = {};
+    
+    if (startDate && endDate) {
+      salesDateConditions.recordingDate = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate)
+      };
+      console.log("📅 Custom date range:", startDate, "to", endDate);
+    } else {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = now.getMonth();
+      
+      console.log("📅 Building date filter for:", dateFilter);
+      
+      switch(dateFilter) {
+        case 'today':
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const tomorrow = new Date(today);
+          tomorrow.setDate(tomorrow.getDate() + 1);
+          salesDateConditions.recordingDate = {
+            $gte: today,
+            $lt: tomorrow
+          };
+          console.log("📅 Today filter applied");
+          break;
+          
+        case 'currentMonth':
+          const firstDay = new Date(year, month, 1);
+          const lastDay = new Date(year, month + 1, 0);
+          salesDateConditions.recordingDate = {
+            $gte: firstDay,
+            $lte: lastDay
+          };
+          console.log("📅 Current month filter:", firstDay, "to", lastDay);
+          break;
+          
+        case 'janToPreviousMonth':
+          const currentMonth = now.getMonth();
+          if (currentMonth === 0) {
+            salesDateConditions.recordingDate = {
+              $gte: new Date(year - 1, 0, 1),
+              $lte: new Date(year - 1, 11, 31)
+            };
+            console.log("📅 Jan to Dec of previous year (2025)");
+          } else {
+            salesDateConditions.recordingDate = {
+              $gte: new Date(year, 0, 1),
+              $lte: new Date(year, currentMonth, 0)
+            };
+            console.log(`📅 Jan to ${currentMonth} of current year`);
+          }
+          break;
+          
+        case 'all':
+          console.log("📅 All records - no date filter");
+          break;
+          
+        default:
+          const defaultFirstDay = new Date(year, month, 1);
+          const defaultLastDay = new Date(year, month + 1, 0);
+          salesDateConditions.recordingDate = {
+            $gte: defaultFirstDay,
+            $lte: defaultLastDay
+          };
+          console.log("📅 Default filter (current month)");
+      }
+    }
+
+    // 🔍 Step 2: Combine search and date conditions for sales
+    const salesMatchConditions = { ...salesDateConditions };
+    
     if (search && search.trim() !== "") {
       const searchRegex = new RegExp(search.trim(), "i");
       salesMatchConditions.mrName = searchRegex;
+      console.log("🔍 Search filter applied:", search.trim());
     }
 
-    // 📊 Step 2: Aggregate Sales
+    console.log("🔍 Final sales match conditions:", salesMatchConditions);
+
+    // 📊 Step 3: Get ALL sales data for summary calculation
+    console.log("📊 Getting ALL sales data for summary...");
+    const allSalesForSummary = await SaleSummary.aggregate([
+      { $unwind: "$products" },
+      { $match: salesMatchConditions },
+      {
+        $group: {
+          _id: null,
+          totalSales: { $sum: "$totalAmount" },
+          totalProfit: { $sum: "$products.profitLoss" },
+          saleCount: { $sum: 1 }
+        }
+      }
+    ]);
+
+    console.log("📊 All sales summary result:", allSalesForSummary);
+
+    const totalSalesFromAllRecords = allSalesForSummary[0]?.totalSales || 0;
+    const totalProfitFromAllRecords = allSalesForSummary[0]?.totalProfit || 0;
+
+    // 📊 Step 4: Get sales data with MR grouping - SIMPLIFIED aggregation
+    console.log("📊 Getting sales data with MR grouping...");
     const salesAggregate = await SaleSummary.aggregate([
       { $unwind: "$products" },
       { $match: salesMatchConditions },
@@ -31,59 +233,198 @@ router.get("/sales-salary-ratio", async (req, res) => {
           _id: {
             mrName: "$mrName",
             mrId: "$mrId",
-            recordingDate: {
-              $dateToString: { format: "%Y-%m-%d", date: "$recordingDate" },
-            },
           },
           totalSales: { $sum: "$totalAmount" },
           totalProfit: { $sum: "$products.profitLoss" },
-          totalNetSellingAmount: { $sum: "$products.netSellingAmount" },
           saleCount: { $sum: 1 },
           customers: { $addToSet: "$customerCode" },
+          lastSaleDate: { $max: "$recordingDate" }
         },
       },
       {
         $project: {
           _id: 0,
-          srDate: "$_id.recordingDate",
           mrName: "$_id.mrName",
           mrId: "$_id.mrId",
           sale: "$totalSales",
           profit: "$totalProfit",
-          gp: "$totalNetSellingAmount",
           saleCount: 1,
           customerCount: { $size: "$customers" },
+          lastSaleDate: 1
         },
       },
-      { $sort: { srDate: -1, mrName: 1 } },
+      { $sort: { sale: -1 } },
+      ...(isExport ? [] : [{ $skip: skip }, { $limit: limitNum }])
     ]);
 
-    // 👥 Step 3: Get unique MR names
-    const mrNames = [...new Set(salesAggregate.map((r) => r.mrName))];
-
-    let staffMembers = [];
-    if (mrNames.length > 0) {
-      staffMembers = await Staff.find({
-        medicalRepName: { $in: mrNames },
-      }).select("_id medicalRepName");
-    }
-
-    // 🗺️ Build a map for easy lookup
-    const staffNameToId = {};
-    const staffIdToName = {};
-    staffMembers.forEach((staff) => {
-      staffNameToId[staff.medicalRepName] = staff._id.toString();
-      staffIdToName[staff._id.toString()] = staff.medicalRepName;
+    console.log(`📊 Found ${salesAggregate.length} sales records before grouping`);
+    
+    // Now group by normalized name in JavaScript
+    const groupedSales = {};
+    salesAggregate.forEach(record => {
+      const normalizedName = normalizeNameInJS(record.mrName);
+      
+      if (!groupedSales[normalizedName]) {
+        // Create new grouped record
+        groupedSales[normalizedName] = {
+          normalizedName: normalizedName,
+          mrName: record.mrName, // Keep the first original name
+          mrId: record.mrId,
+          originalNames: [record.mrName],
+          sale: parseFloat(record.sale) || 0,
+          profit: parseFloat(record.profit) || 0,
+          saleCount: parseInt(record.saleCount) || 0,
+          customerCount: parseInt(record.customerCount) || 0,
+          lastSaleDate: record.lastSaleDate,
+          // Keep track of all sales records for this normalized name
+          records: [record]
+        };
+      } else {
+        // Add to existing grouped record
+        groupedSales[normalizedName].sale += parseFloat(record.sale) || 0;
+        groupedSales[normalizedName].profit += parseFloat(record.profit) || 0;
+        groupedSales[normalizedName].saleCount += parseInt(record.saleCount) || 0;
+        groupedSales[normalizedName].customerCount = Math.max(
+          groupedSales[normalizedName].customerCount,
+          parseInt(record.customerCount) || 0
+        );
+        
+        // Update to the most recent sale date
+        if (record.lastSaleDate && (!groupedSales[normalizedName].lastSaleDate || 
+            record.lastSaleDate > groupedSales[normalizedName].lastSaleDate)) {
+          groupedSales[normalizedName].lastSaleDate = record.lastSaleDate;
+        }
+        
+        // Add original name if not already in the list
+        if (record.mrName && !groupedSales[normalizedName].originalNames.includes(record.mrName)) {
+          groupedSales[normalizedName].originalNames.push(record.mrName);
+        }
+        
+        // Keep the most common name (the one with highest sales)
+        if (parseFloat(record.sale) > parseFloat(groupedSales[normalizedName].records[0].sale)) {
+          groupedSales[normalizedName].mrName = record.mrName;
+        }
+        
+        groupedSales[normalizedName].records.push(record);
+      }
     });
 
-    // 💰 Step 4: Payroll aggregation
+    // Convert grouped object to array
+    const salesAggregateGrouped = Object.values(groupedSales);
+    
+    console.log(`📊 Found ${salesAggregateGrouped.length} sales records after grouping`);
+    if (!isExport && salesAggregateGrouped.length > 0) {
+      console.log("📊 Sales records after grouping:", salesAggregateGrouped.map(r => ({ 
+        normalizedName: r.normalizedName,
+        mrName: r.mrName, 
+        sale: r.sale,
+        originalNames: r.originalNames
+      })));
+    }
+
+    // 👥 Step 5: Get ALL staff members
+    console.log("👥 Fetching ALL staff members...");
+    const allStaffMembers = await Staff.find({}).select("_id medicalRepName employeeId");
+    console.log(`👥 Total staff members in database: ${allStaffMembers.length}`);
+    
+    // Build staff maps
+    const staffMap = {
+      idToName: {},
+      nameToId: {},
+      normalizedNameToId: {}
+    };
+    
+    allStaffMembers.forEach((staff) => {
+      const originalName = staff.medicalRepName;
+      const staffId = staff._id.toString();
+      
+      if (originalName) {
+        // Store original mapping
+        staffMap.idToName[staffId] = originalName;
+        
+        // Store normalized name mapping
+        const normalizedStaffName = normalizeMrName(originalName);
+        staffMap.normalizedNameToId[normalizedStaffName] = staffId;
+        
+        // Also store simple lowercase for matching
+        const simpleName = originalName.toLowerCase().trim();
+        staffMap.nameToId[simpleName] = staffId;
+        
+        if (!isExport) {
+          console.log(`👥 Staff: ${originalName} -> ID: ${staffId}, Normalized: ${normalizedStaffName}`);
+        }
+      }
+    });
+
+    if (!isExport) {
+      console.log(`👥 Staff map created with ${Object.keys(staffMap.normalizedNameToId).length} normalized names`);
+    }
+
+    // 💰 Step 6: Get payroll data for ALL staff
+    console.log("💰 Getting payroll data for ALL staff...");
     let payrollAggregate = [];
-    if (staffMembers.length > 0) {
-      const objectIdMrIds = staffMembers.map(
-        (s) => new mongoose.Types.ObjectId(s._id)
-      );
+    
+    const allStaffIds = allStaffMembers.map(s => new mongoose.Types.ObjectId(s._id));
+    console.log(`💰 Total staff IDs: ${allStaffIds.length}`);
+    
+    if (allStaffIds.length > 0) {
+      const payrollMatchConditions = { employeeId: { $in: allStaffIds } };
+      
+      let payrollPeriods = [];
+      
+      if (period) {
+        payrollMatchConditions.period = period;
+        payrollPeriods = [period];
+        console.log(`💰 Filtering payroll by single period: ${period}`);
+      } else if (startDate && endDate) {
+        payrollPeriods = getPeriodsFromDateRange(startDate, endDate);
+        payrollMatchConditions.period = { $in: payrollPeriods };
+        console.log(`💰 Filtering payroll by multiple periods:`, payrollPeriods);
+      } else {
+        const now = new Date();
+        const currentPeriod = getYearMonthFromDate(now);
+        
+        switch(dateFilter) {
+          case 'today':
+            payrollMatchConditions.period = currentPeriod;
+            payrollPeriods = [currentPeriod];
+            console.log(`💰 Today filter - using current period: ${currentPeriod}`);
+            break;
+            
+          case 'currentMonth':
+            payrollMatchConditions.period = currentPeriod;
+            payrollPeriods = [currentPeriod];
+            console.log(`💰 Current month filter - using period: ${currentPeriod}`);
+            break;
+            
+          case 'janToPreviousMonth':
+            if (now.getMonth() === 0) {
+              const prevYear = now.getFullYear() - 1;
+              payrollPeriods = [];
+              for (let i = 1; i <= 12; i++) {
+                payrollPeriods.push(`${prevYear}-${i.toString().padStart(2, '0')}`);
+              }
+            } else {
+              const currentYear = now.getFullYear();
+              payrollPeriods = [];
+              for (let i = 1; i <= now.getMonth(); i++) {
+                payrollPeriods.push(`${currentYear}-${i.toString().padStart(2, '0')}`);
+              }
+            }
+            payrollMatchConditions.period = { $in: payrollPeriods };
+            console.log(`💰 Jan-Previous Month filter - using periods:`, payrollPeriods);
+            break;
+            
+          case 'all':
+            console.log("💰 All records - getting all payroll data");
+            break;
+        }
+      }
+      
+      console.log("💰 Payroll match conditions:", payrollMatchConditions);
+      
       payrollAggregate = await Payroll.aggregate([
-        { $match: { employeeId: { $in: objectIdMrIds } } },
+        { $match: payrollMatchConditions },
         {
           $group: {
             _id: "$employeeId",
@@ -92,309 +433,241 @@ router.get("/sales-salary-ratio", async (req, res) => {
             allowance: { $sum: { $ifNull: ["$totalAllowance", 0] } },
             tourExpense: { $sum: { $ifNull: ["$tourExpense", 0] } },
             otherExpense: { $sum: { $ifNull: ["$otherExpense", 0] } },
+            payrollCount: { $sum: 1 }
           },
         },
       ]);
+      
+      console.log(`💰 Payroll aggregation complete. Found ${payrollAggregate.length} payroll records`);
     }
 
-    // 📘 Convert payroll to map by MR name
-    const payrollByMrName = {};
-    payrollAggregate.forEach((p) => {
-      const name = staffIdToName[p._id.toString()];
-      if (name) {
-        payrollByMrName[name] = p;
+    // 📊 Step 7: Calculate TOTAL summary from ALL payroll data
+    console.log("📊 Calculating TOTAL summary from ALL payroll data...");
+    
+    const totalPayrollSummary = payrollAggregate.reduce(
+      (acc, payroll) => {
+        return {
+          totalSalary: acc.totalSalary + (parseFloat(payroll.salary) || 0),
+          totalIncentive: acc.totalIncentive + (parseFloat(payroll.incentive) || 0),
+          totalAllowance: acc.totalAllowance + (parseFloat(payroll.allowance) || 0),
+          totalTourExpense: acc.totalTourExpense + (parseFloat(payroll.tourExpense) || 0),
+          totalOtherExpense: acc.totalOtherExpense + (parseFloat(payroll.otherExpense) || 0),
+        };
+      },
+      { 
+        totalSalary: 0, 
+        totalIncentive: 0, 
+        totalAllowance: 0, 
+        totalTourExpense: 0, 
+        totalOtherExpense: 0 
       }
+    );
+
+    const totalExpenseFromAllRecords = 
+      totalPayrollSummary.totalSalary +
+      totalPayrollSummary.totalIncentive +
+      totalPayrollSummary.totalAllowance +
+      totalPayrollSummary.totalTourExpense +
+      totalPayrollSummary.totalOtherExpense;
+
+    const ratio = totalSalesFromAllRecords > 0 
+      ? parseFloat((totalExpenseFromAllRecords / totalSalesFromAllRecords).toFixed(4))
+      : 0;
+
+    const summary = {
+      totalSales: parseFloat(totalSalesFromAllRecords) || 0,
+      totalSalary: parseFloat(totalPayrollSummary.totalSalary) || 0,
+      totalExpense: parseFloat(totalExpenseFromAllRecords) || 0,
+      totalProfit: parseFloat(totalProfitFromAllRecords) || 0,
+      ratio: ratio,
+    };
+
+    console.log("📊 Final summary for selected period:", summary);
+
+    // 📘 Convert payroll to map by staff ID
+    const payrollByStaffId = {};
+    payrollAggregate.forEach((p) => {
+      payrollByStaffId[p._id.toString()] = p;
     });
 
-    // 🔗 Step 5: Combine sales + payroll
-    const combinedData = salesAggregate.map((record) => {
-      const payroll = payrollByMrName[record.mrName] || {};
+    if (!isExport) {
+      console.log(`📘 Payroll map has ${Object.keys(payrollByStaffId).length} entries`);
+    }
 
-      const totalExpense =
-        (payroll.salary || 0) +
-        (payroll.incentive || 0) +
-        (payroll.allowance || 0) +
-        (payroll.tourExpense || 0) +
-        (payroll.otherExpense || 0);
+    // 🔗 Step 8: Combine sales + payroll with normalized matching
+    console.log("🔗 Combining sales and payroll data...");
+    const combinedData = salesAggregateGrouped.map((record, index) => {
+      if (!isExport && index < 5) {
+        console.log(`\n🔗 Processing record ${index + 1}: "${record.mrName}" (Normalized: "${record.normalizedName}")`);
+      }
+      
+      let matchedStaffId = null;
+      let matchType = 'none';
+      
+      // First try to match by normalized name
+      const normalizedSalesName = record.normalizedName;
+      if (normalizedSalesName && staffMap.normalizedNameToId[normalizedSalesName]) {
+        matchedStaffId = staffMap.normalizedNameToId[normalizedSalesName];
+        matchType = 'normalized_exact';
+        if (!isExport && index < 5) {
+          console.log(`   ✅ Matched by normalized name: ${matchedStaffId}`);
+        }
+      }
+      
+      // If no match, try to match with staff names that contain the sales name
+      if (!matchedStaffId && normalizedSalesName) {
+        for (const [staffNormalizedName, staffId] of Object.entries(staffMap.normalizedNameToId)) {
+          if (staffNormalizedName.includes(normalizedSalesName) || 
+              normalizedSalesName.includes(staffNormalizedName)) {
+            matchedStaffId = staffId;
+            matchType = 'normalized_contains';
+            if (!isExport && index < 5) {
+              console.log(`   ✅ Matched by normalized contains: ${staffId}`);
+            }
+            break;
+          }
+        }
+      }
+      
+      // If still no match, try original names
+      if (!matchedStaffId && record.originalNames && record.originalNames.length > 0) {
+        for (const originalName of record.originalNames) {
+          if (!originalName) continue;
+          
+          const simpleName = originalName.toLowerCase().trim();
+          if (staffMap.nameToId[simpleName]) {
+            matchedStaffId = staffMap.nameToId[simpleName];
+            matchType = 'original_name';
+            if (!isExport && index < 5) {
+              console.log(`   ✅ Matched by original name: ${originalName} -> ${matchedStaffId}`);
+            }
+            break;
+          }
+        }
+      }
+      
+      let payroll = {};
+      if (matchedStaffId) {
+        payroll = payrollByStaffId[matchedStaffId] || {};
+        if (!isExport && index < 5) {
+          console.log(`   💰 Found payroll for ${matchedStaffId}:`, {
+            salary: payroll.salary || 0,
+            incentive: payroll.incentive || 0,
+            allowance: payroll.allowance || 0
+          });
+        }
+      } else if (!isExport && index < 5) {
+        console.log(`   ❌ No staff match found for "${record.mrName}" (Normalized: "${record.normalizedName}")`);
+      }
 
-      const salarySaleRatio = record.sale > 0 ? totalExpense / record.sale : 0;
-      const performance =
-        totalExpense > 0 ? (record.profit / totalExpense) * 100 : 0;
+      const salary = parseFloat(payroll.salary) || 0;
+      const incentive = parseFloat(payroll.incentive) || 0;
+      const allowance = parseFloat(payroll.allowance) || 0;
+      const tourExpense = parseFloat(payroll.tourExpense) || 0;
+      const otherExpense = parseFloat(payroll.otherExpense) || 0;
+      const sale = parseFloat(record.sale) || 0;
+      const profit = parseFloat(record.profit) || 0;
+
+      const totalExpense = salary + incentive + allowance + tourExpense + otherExpense;
+      
+      const salarySaleRatio = calculateSalarySaleRatio(profit, totalExpense);
+      const performance = calculatePerformance(profit, totalExpense);
 
       return {
-        srDate: record.srDate,
-        mrName: record.mrName,
-        mrId: record.mrId,
-        sale: record.sale || 0,
-        profit: record.profit || 0,
-        gp: record.gp || 0,
-        salary: payroll.salary || 0,
-        incentive: payroll.incentive || 0,
-        allowance: payroll.allowance || 0,
-        tourExpense: payroll.tourExpense || 0,
-        otherExpense: payroll.otherExpense || 0,
-        totalExpense,
-        salarySaleRatio,
-        performance,
-        saleCount: record.saleCount || 0,
-        customerCount: record.customerCount || 0,
+        srDate: record.lastSaleDate || "",
+        mrName: record.mrName || "",
+        mrId: record.mrId || matchedStaffId || "",
+        normalizedName: record.normalizedName || "",
+        sale: sale,
+        profit: profit,
+        salary: salary,
+        incentive: incentive,
+        allowance: allowance,
+        tourExpense: tourExpense,
+        otherExpense: otherExpense,
+        totalExpense: totalExpense,
+        salarySaleRatio: parseFloat(salarySaleRatio.toFixed(2)),
+        performance: parseFloat(performance.toFixed(2)),
+        saleCount: parseInt(record.saleCount) || 0,
+        customerCount: parseInt(record.customerCount) || 0,
+        matchType: matchType,
+        matchedStaffId: matchedStaffId
       };
     });
 
-    // 📄 Step 6: Pagination
-    const totalRecords = combinedData.length;
-    const paginatedData = combinedData.slice(skip, skip + limitNum);
-    const totalPages = Math.ceil(totalRecords / limitNum);
-
-    // 📊 Step 7: Summary
-    const summary = combinedData.reduce(
-      (acc, record) => ({
-        totalSales: acc.totalSales + (record.sale || 0),
-        totalSalary: acc.totalSalary + (record.salary || 0),
-        totalExpense: acc.totalExpense + (record.totalExpense || 0),
-        totalProfit: acc.totalProfit + (record.profit || 0),
-      }),
-      { totalSales: 0, totalSalary: 0, totalExpense: 0, totalProfit: 0 }
-    );
-
-    summary.ratio =
-      summary.totalSales > 0 ? summary.totalExpense / summary.totalSales : 0;
-
-    // 📤 Step 8: Response
-    res.status(200).json({
-      success: true,
-      data: {
-        summary,
-        records: paginatedData,
-      },
-      pagination: {
-        currentPage: pageNum,
-        totalPages,
-        totalRecords,
-        hasNext: pageNum < totalPages,
-        hasPrev: pageNum > 1,
-      },
-    });
-  } catch (error) {
-    console.error("❌ Error in /sales-salary-ratio:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch sales salary ratio data",
-      error: error.message,
-    });
-  }
-});
-
-// Alternative version with better performance for large datasets
-router.get("/sales-salary-ratio-optimized", async (req, res) => {
-  try {
-    const { page = 1, limit = 7, search = "" } = req.query;
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
-    const skip = (pageNum - 1) * limitNum;
-
-    // Build match conditions
-    const matchConditions = {};
-    if (search && search.trim() !== "") {
-      const searchRegex = new RegExp(search.trim(), "i");
-      matchConditions.mrName = searchRegex;
+    // Log matching statistics
+    if (!isExport) {
+      const matchedCount = combinedData.filter(r => r.matchedStaffId).length;
+      const payrollMatchedCount = combinedData.filter(r => r.salary > 0).length;
+      console.log(`\n📊 Matching Summary:`);
+      console.log(`📊 Total sales records (after grouping): ${combinedData.length}`);
+      console.log(`📊 Records matched to staff: ${matchedCount}`);
+      console.log(`📊 Records with payroll data: ${payrollMatchedCount}`);
+      console.log(`📊 Total salary in table: $${combinedData.reduce((sum, r) => sum + r.salary, 0)}`);
+      console.log(`📊 Expected total salary: $${summary.totalSalary}`);
     }
 
-    // Get total count first
+    // For export, return the data directly
+    if (isExport) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          summary,
+          records: combinedData,
+        },
+        totalRecords: combinedData.length
+      });
+    }
+
+    // 📄 Step 9: Get total count for pagination (simplified)
     const totalCountAggregate = await SaleSummary.aggregate([
       { $unwind: "$products" },
-      { $match: matchConditions },
+      { $match: salesMatchConditions },
       {
         $group: {
           _id: {
             mrName: "$mrName",
-            recordingDate: {
-              $dateToString: { format: "%Y-%m-%d", date: "$recordingDate" },
-            },
+            mrId: "$mrId",
           },
         },
       },
       { $count: "total" },
     ]);
 
-    const totalRecords = totalCountAggregate[0]?.total || 0;
+    // Since we're grouping by normalized name in JS, we need to adjust the total
+    // This is an approximation - for accurate count we'd need to fetch all and group
+    const totalRecordsBeforeGrouping = totalCountAggregate[0]?.total || 0;
+    
+    // For pagination purposes, we'll use the grouped count
+    const totalRecords = salesAggregateGrouped.length;
     const totalPages = Math.ceil(totalRecords / limitNum);
 
-    // Get paginated sales data
-    const salesAggregate = await SaleSummary.aggregate([
-      { $unwind: "$products" },
-      { $match: matchConditions },
-      {
-        $group: {
-          _id: {
-            mrName: "$mrName",
-            mrId: "$mrId",
-            recordingDate: {
-              $dateToString: { format: "%Y-%m-%d", date: "$recordingDate" },
-            },
-          },
-          totalSales: { $sum: "$totalAmount" },
-          totalProfit: { $sum: "$products.profitLoss" },
-          totalNetSellingAmount: { $sum: "$products.netSellingAmount" },
-          saleCount: { $sum: 1 },
-          customers: { $addToSet: "$customerCode" },
-        },
-      },
-      {
-        $project: {
-          _id: 0,
-          srDate: "$_id.recordingDate",
-          mrName: "$_id.mrName",
-          mrId: "$_id.mrId",
-          sale: "$totalSales",
-          profit: "$totalProfit",
-          gp: "$totalNetSellingAmount",
-          saleCount: 1,
-          customerCount: { $size: "$customers" },
-        },
-      },
-      { $sort: { srDate: -1, mrName: 1 } },
-      { $skip: skip },
-      { $limit: limitNum },
-    ]);
+    console.log(`📄 Pagination: Total Records (before grouping): ${totalRecordsBeforeGrouping}, After grouping: ${totalRecords}, Total Pages: ${totalPages}`);
 
-    // Get MR IDs for the current page
-    const mrIds = salesAggregate.map((record) => record.mrId);
-
-    // Get staff information
-    let staffMap = {};
-    if (mrIds.length > 0) {
-      const staffMembers = await Staff.find({
-        _id: { $in: mrIds },
-      }).select("_id medicalRepName");
-
-      staffMembers.forEach((staff) => {
-        staffMap[staff._id.toString()] = staff.medicalRepName;
-      });
-    }
-
-    // Get payroll data for the current page's MRs
-    let payrollAggregate = [];
-    if (mrIds.length > 0) {
-      payrollAggregate = await Payroll.aggregate([
-        {
-          $match: {
-            employeeId: { $in: mrIds },
-          },
-        },
-        {
-          $group: {
-            _id: "$employeeId",
-            salary: { $sum: "$basicSalary" },
-            incentive: { $sum: { $ifNull: ["$incentive", 0] } },
-            allowance: { $sum: { $ifNull: ["$totalAllowance", 0] } },
-            tourExpense: { $sum: { $ifNull: ["$tourExpense", 0] } },
-            otherExpense: { $sum: { $ifNull: ["$otherExpense", 0] } },
-          },
-        },
-      ]);
-    }
-
-    // Combine data
-    const records = salesAggregate.map((record) => {
-      const payroll =
-        payrollAggregate.find(
-          (p) => p._id.toString() === record.mrId?.toString()
-        ) || {};
-      const actualMrName = staffMap[record.mrId] || record.mrName;
-
-      const totalExpense =
-        (payroll.salary || 0) +
-        (payroll.incentive || 0) +
-        (payroll.allowance || 0) +
-        (payroll.tourExpense || 0) +
-        (payroll.otherExpense || 0);
-
-      const salarySaleRatio = record.sale > 0 ? totalExpense / record.sale : 0;
-      const performance =
-        totalExpense > 0 ? (record.profit / totalExpense) * 100 : 0;
-
-      return {
-        srDate: record.srDate,
-        mrName: actualMrName,
-        mrId: record.mrId,
-        sale: record.sale || 0,
-        profit: record.profit || 0,
-        gp: record.gp || 0,
-        salary: payroll.salary || 0,
-        incentive: payroll.incentive || 0,
-        allowance: payroll.allowance || 0,
-        tourExpense: payroll.tourExpense || 0,
-        totalExpense: totalExpense,
-        salarySaleRatio: salarySaleRatio,
-        performance: performance,
-        saleCount: record.saleCount || 0,
-        customerCount: record.customerCount || 0,
-      };
-    });
-
-    // Calculate summary from all data
-    const allSalesData = await SaleSummary.aggregate([
-      { $unwind: "$products" },
-      { $match: matchConditions },
-      {
-        $group: {
-          _id: null,
-          totalSales: { $sum: "$totalAmount" },
-          totalProfit: { $sum: "$products.profitLoss" },
-        },
-      },
-    ]);
-
-    const allMrIds = await SaleSummary.distinct("mrId", matchConditions);
-
-    const allPayrollData = await Payroll.aggregate([
-      {
-        $match: {
-          employeeId: { $in: allMrIds },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalSalary: { $sum: "$basicSalary" },
-          totalIncentive: { $sum: { $ifNull: ["$incentive", 0] } },
-          totalAllowance: { $sum: { $ifNull: ["$totalAllowance", 0] } },
-          totalTourExpense: { $sum: { $ifNull: ["$tourExpense", 0] } },
-          totalOtherExpense: { $sum: { $ifNull: ["$otherExpense", 0] } },
-        },
-      },
-    ]);
-
-    const totalSales = allSalesData[0]?.totalSales || 0;
-    const totalProfit = allSalesData[0]?.totalProfit || 0;
-    const totalSalary = allPayrollData[0]?.totalSalary || 0;
-    const totalIncentive = allPayrollData[0]?.totalIncentive || 0;
-    const totalAllowance = allPayrollData[0]?.totalAllowance || 0;
-    const totalTourExpense = allPayrollData[0]?.totalTourExpense || 0;
-    const totalOtherExpense = allPayrollData[0]?.totalOtherExpense || 0;
-
-    const totalExpense =
-      totalSalary +
-      totalIncentive +
-      totalAllowance +
-      totalTourExpense +
-      totalOtherExpense;
-    const ratio = totalSales > 0 ? totalExpense / totalSales : 0;
-
-    const summary = {
-      totalSales,
-      totalSalary,
-      totalExpense,
-      totalProfit,
-      ratio,
-    };
+    // 📤 Step 10: Response
+    const responseData = combinedData.map(record => ({
+      srDate: record.srDate,
+      mrName: record.mrName,
+      mrId: record.mrId,
+      sale: record.sale,
+      profit: record.profit,
+      salary: record.salary,
+      incentive: record.incentive,
+      allowance: record.allowance,
+      tourExpense: record.tourExpense,
+      otherExpense: record.otherExpense,
+      totalExpense: record.totalExpense,
+      salarySaleRatio: record.salarySaleRatio,
+      performance: record.performance,
+      saleCount: record.saleCount,
+      customerCount: record.customerCount,
+    }));
 
     res.status(200).json({
       success: true,
       data: {
         summary,
-        records,
+        records: responseData,
       },
       pagination: {
         currentPage: pageNum,
@@ -403,9 +676,28 @@ router.get("/sales-salary-ratio-optimized", async (req, res) => {
         hasNext: pageNum < totalPages,
         hasPrev: pageNum > 1,
       },
+      filterInfo: {
+        type: dateFilter,
+        startDate: salesDateConditions.recordingDate?.$gte,
+        endDate: salesDateConditions.recordingDate?.$lte,
+        period: period,
+      },
+      debugInfo: {
+        totalStaff: allStaffMembers.length,
+        totalPayroll: payrollAggregate.length,
+        staffMatches: combinedData.filter(r => r.matchedStaffId).length,
+        payrollMatches: combinedData.filter(r => r.salary > 0).length,
+        tableSalaryTotal: combinedData.reduce((sum, r) => sum + r.salary, 0),
+        originalRecordCount: totalRecordsBeforeGrouping,
+        groupedRecordCount: totalRecords
+      }
     });
+    
+    console.log("✅ API call completed successfully!");
   } catch (error) {
-    console.error("❌ Error fetching sales salary ratio data:", error);
+    console.error("❌ Error in /sales-salary-ratio:", error);
+    console.error("❌ Error stack:", error.stack);
+    
     res.status(500).json({
       success: false,
       message: "Failed to fetch sales salary ratio data",
@@ -414,36 +706,7 @@ router.get("/sales-salary-ratio-optimized", async (req, res) => {
   }
 });
 
-router.get("/mrs", async (req, res) => {
-  try {
-    // Simple aggregation to get only unique MR names
-    const mrList = await stockTransferToMR.aggregate([
-      {
-        $group: {
-          _id: "$stockTransferToMr", // Group by MR name
-        },
-      },
-      {
-        $project: {
-          _id: 0,
-          mrName: "$_id",
-        },
-      },
-      { $sort: { mrName: 1 } },
-    ]);
+// Export endpoint
 
-    res.status(200).json({
-      success: true,
-      data: mrList,
-    });
-  } catch (error) {
-    console.error("❌ Error fetching MR list:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch MR list",
-      error: error.message,
-    });
-  }
-});
 
 export default router;

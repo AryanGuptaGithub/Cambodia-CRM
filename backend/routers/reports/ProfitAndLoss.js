@@ -174,15 +174,11 @@ router.get("/pl-report", async (req, res) => {
       limit = 10,
     } = req.query;
 
-    console.log('Query parameters:', { startDate, endDate });
-
-    // Build filter objects
     let saleFilter = {};
     let returnFilter = {};
     let payrollFilter = {};
     let expenseFilter = {};
 
-    // Use the specialized filter for recordingDate fields
     const recordingDateFilter = createDateRangeFilterForRecordingDate(startDate, endDate);
     const dateFilter = createDateRangeFilter(startDate, endDate);
     
@@ -199,10 +195,6 @@ router.get("/pl-report", async (req, res) => {
     // Calculate pagination
     const skip = (page - 1) * limit;
     const sortDirection = sortOrder === "desc" ? -1 : 1;
-
-    console.log('Sale Filter:', JSON.stringify(saleFilter, null, 2));
-
-    // Get sales with date range filter - INCLUDING totalProfitLoss
     const sales = await SaleSummary.find(saleFilter)
       .select(
         "recordingDate invoiceNumber customerName totalAmount paidAmount dueAmount paymentStatus mrName products totalProfitLoss"
@@ -210,17 +202,6 @@ router.get("/pl-report", async (req, res) => {
       .sort({ recordingDate: sortDirection })
       .lean(); // Use lean() to get plain JavaScript objects
 
-    console.log(`Found ${sales.length} sales for the date range`);
-    
-    // Debug: Show sample sales with totalProfitLoss
-    if (sales.length > 0) {
-      console.log('Sample sales with totalProfitLoss:');
-      sales.slice(0, 5).forEach(s => {
-        console.log(`  Invoice: ${s.invoiceNumber}, Amount: ${s.totalAmount}, Profit/Loss: ${s.totalProfitLoss}`);
-      });
-    }
-
-    // Calculate profit for each sale - USING EXISTING totalProfitLoss
     const salesWithProfit = await calculateProfitsForSales(sales);
 
     const salesReturns = await SalesReturn.find(returnFilter)
@@ -270,8 +251,6 @@ router.get("/pl-report", async (req, res) => {
       totalDueAmount += sale.dueAmount || 0;
       totalCostOfGoodsSold += sale._cost || 0;
     });
-
-    console.log(`Calculated totals - Revenue: ${totalSalesRevenue}, Profit: ${totalProfitFromSales}, COGS: ${totalCostOfGoodsSold}`);
 
     let totalReturnsAmount = 0;
     let totalProfitFromReturns = 0;
@@ -538,15 +517,6 @@ router.get("/pl-report", async (req, res) => {
       }
     };
 
-    console.log('Response summary:', {
-      revenue: response.summary.revenue,
-      cogs: response.summary.cogs,
-      grossProfit: response.summary.grossProfit,
-      collectionRate: response.summary.collectionRate,
-      totalProfitFromSales: totalProfitFromSales,
-      netProfit: netProfit
-    });
-
     res.json(response);
   } catch (error) {
     console.error("Profit Loss Report Error:", error);
@@ -562,10 +532,6 @@ router.get("/pl-report", async (req, res) => {
 router.get("/pl-report/summary", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-
-    console.log('Summary query parameters:', { startDate, endDate });
-
-    // Use the same logic as the main endpoint but only return summary
     let saleFilter = {};
     let returnFilter = {};
     let payrollFilter = {};
@@ -585,15 +551,10 @@ router.get("/pl-report/summary", async (req, res) => {
       expenseFilter.date = dateFilter;
     }
 
-    console.log('Summary Sale Filter:', JSON.stringify(saleFilter, null, 2));
-
-    // Get sales summary - INCLUDING totalProfitLoss
     const sales = await SaleSummary.find(saleFilter)
       .select("recordingDate totalAmount paidAmount dueAmount products invoiceNumber totalProfitLoss customerName mrName paymentStatus")
       .sort({ recordingDate: -1 })
       .lean();
-
-    console.log(`Summary: Found ${sales.length} sales for date range`);
 
     // Calculate profit for all sales - USING EXISTING totalProfitLoss
     const salesWithProfit = await calculateProfitsForSales(sales);
@@ -629,8 +590,6 @@ router.get("/pl-report/summary", async (req, res) => {
       totalDueAmount += sale.dueAmount || 0;
       totalCostOfGoodsSold += sale._cost || 0;
     });
-
-    console.log(`Summary Calculated - Revenue: ${totalSalesRevenue}, Profit: ${totalProfitFromSales}, COGS: ${totalCostOfGoodsSold}`);
 
     // Aggregate returns data
     let totalReturnsAmount = 0;
@@ -693,8 +652,6 @@ router.get("/pl-report/summary", async (req, res) => {
       totalExpenses: expenses.length,
       collectionRate: parseFloat(collectionRate.toFixed(2)),
     };
-
-    console.log('Formatted summary:', formattedSummary);
 
     res.json({
       success: true,
