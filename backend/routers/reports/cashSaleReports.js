@@ -183,12 +183,6 @@ router.get("/reports/cash-sales", async (req, res) => {
 router.get("/reports/cash-sales/export/excel", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-
-    console.log("Cash sales Excel export request received with params:", {
-      startDate,
-      endDate
-    });
-
     const matchStage = {
       paymentStatus: { $regex: /^cash$/i },
       isReturn: false,

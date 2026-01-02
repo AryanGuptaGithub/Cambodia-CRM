@@ -231,14 +231,6 @@ router.get("/reports/remittance", async (req, res) => {
 router.get("/reports/remittance/export/excel", async (req, res) => {
   try {
     const { startDate, endDate, search, supplierId } = req.query;
-
-    console.log("Remittance Excel export request received with params:", {
-      startDate,
-      endDate,
-      search,
-      supplierId
-    });
-
     // Validate date parameters for export
     if (startDate) {
       const start = new Date(startDate);

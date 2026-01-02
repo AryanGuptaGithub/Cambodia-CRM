@@ -4,19 +4,12 @@ import SaleSummary from "../../models/sale/saleSummary.js";
 
 const router = express.Router();
 
-router.get("/province-wise-customer", async (req, res) => {
-  console.log("📥 ========== PROVINCE WISE CUSTOMER API STARTED ==========");
-  console.log("📋 Request Query Parameters:", req.query);
-  
+router.get("/province-wise-customer", async (req, res) => {  
   try {
     const { page = 1, limit = 6, search = "", period = "all" } = req.query;
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
-
-    console.log(`🔢 Pagination: Page=${pageNum}, Limit=${limitNum}, Skip=${skip}`);
-    console.log(`🔍 Search: "${search}"`);
-    console.log(`📅 Period: "${period}"`);
 
     // Build search condition
     let searchCondition = {};
@@ -30,10 +23,7 @@ router.get("/province-wise-customer", async (req, res) => {
           { medicalRepName: searchRegex },
         ],
       };
-      console.log("✅ Search condition applied:", searchCondition);
-    } else {
-      console.log("ℹ️ No search condition applied");
-    }
+    } 
 
     console.time("⏱️ Total Query Execution Time");
 
@@ -50,10 +40,6 @@ router.get("/province-wise-customer", async (req, res) => {
             $lte: lastDayOfLastMonth
           }
         };
-        console.log("📅 Date filter: Last Month", {
-          from: firstDayOfLastMonth.toISOString(),
-          to: lastDayOfLastMonth.toISOString()
-        });
       } else if (period === "last_year") {
         const now = new Date();
         const firstDayOfLastYear = new Date(now.getFullYear() - 1, 0, 1);
@@ -64,16 +50,8 @@ router.get("/province-wise-customer", async (req, res) => {
             $lte: lastDayOfLastYear
           }
         };
-        console.log("📅 Date filter: Last Year", {
-          from: firstDayOfLastYear.toISOString(),
-          to: lastDayOfLastYear.toISOString()
-        });
-      }
-    } else {
-      console.log("ℹ️ No date filter applied (All time data)");
+      }  
     }
-
-    console.log("🔧 Building aggregation pipeline...");
 
     // Main aggregation pipeline for province-wise customers
     const pipeline = [
@@ -221,8 +199,6 @@ router.get("/province-wise-customer", async (req, res) => {
       { $sort: { totalCustomers: -1 } },
     ];
 
-    console.log("📊 Aggregation pipeline built with", pipeline.length, "stages");
-
     // Use facet for pagination and summary
     const facetPipeline = [
       ...pipeline,
@@ -289,37 +265,9 @@ router.get("/province-wise-customer", async (req, res) => {
       },
     ];
 
-    console.log("🚀 Executing MongoDB aggregation...");
     const result = await Customer.aggregate(facetPipeline);
-    console.timeEnd("⏱️ Total Query Execution Time");
-    
-    console.log("✅ Aggregation completed!");
-    console.log("📦 Result structure:", {
-      hasResult: !!result && result.length > 0,
-      paginatedCount: result[0]?.paginated?.length || 0,
-      totalCount: result[0]?.totalCount?.[0]?.count || 0,
-      hasSummary: !!result[0]?.summary && result[0]?.summary.length > 0,
-    });
-
     const records = result[0]?.paginated || [];
-    const totalCount = result[0]?.totalCount[0]?.count || 0;
-    
-    console.log(`📄 Records fetched: ${records.length}`);
-    console.log(`📈 Total records: ${totalCount}`);
-    
-    if (records.length > 0) {
-      console.log("📋 Sample record data:", {
-        province: records[0].province,
-        totalCustomers: records[0].totalCustomers,
-        activeCustomers: records[0].activeCustomers,
-        totalSalesAmount: records[0].totalSalesAmount,
-        averageSalesPerCustomer: records[0].averageSalesPerCustomer,
-        customerRetentionRate: records[0].customerRetentionRate,
-      });
-    }
-    
-    // Get unique provinces count
-    console.log("🔍 Fetching unique provinces count...");
+    const totalCount = result[0]?.totalCount[0]?.count || 0;     
     const allProvinces = await Customer.aggregate([
       ...(Object.keys(searchCondition).length > 0 ? [{ $match: searchCondition }] : []),
       {
@@ -338,8 +286,6 @@ router.get("/province-wise-customer", async (req, res) => {
     ]);
     
     const uniqueProvincesCount = allProvinces[0]?.count || 0;
-    console.log(`📍 Unique provinces: ${uniqueProvincesCount}`);
-    
     const summary = result[0]?.summary[0] || {
       totalCustomers: 0,
       totalProvinces: 0,
@@ -351,19 +297,9 @@ router.get("/province-wise-customer", async (req, res) => {
       customerActivationRate: 0,
     };
 
-    console.log("📊 Summary data:", summary);
-
-    // Override totalProvinces with accurate count
     summary.totalProvinces = uniqueProvincesCount;
 
     const totalPages = Math.ceil(totalCount / limitNum);
-    
-    console.log("📑 Pagination:", {
-      currentPage: pageNum,
-      totalPages,
-      totalRecords: totalCount,
-    });
-
     const responseData = {
       success: true,
       data: {
@@ -379,8 +315,6 @@ router.get("/province-wise-customer", async (req, res) => {
         hasPrev: pageNum > 1,
       },
     };
-
-    console.log("✅ ========== API REQUEST COMPLETED ==========\n");
     res.json(responseData);
   } catch (error) {
     console.error("❌ ========== API ERROR ==========");

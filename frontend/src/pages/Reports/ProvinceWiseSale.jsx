@@ -18,16 +18,17 @@ const ProvinceWiseSale = () => {
   const [data, setData] = useState({
     summary: {
       totalSales: 0,
-      totalProvinces: 0,
+      totalProvinces: 0, // Now shows only provinces with sales
       totalInvoices: 0,
       totalCustomers: 0,
       averageSalePerProvince: 0,
       averageSalePerInvoice: 0,
     },
     records: [],
-    uniqueProvincesCount: 0,
+    uniqueProvincesCount: 0, // Now shows only provinces with sales
   });
   const [loading, setLoading] = useState(true);
+  const [exportLoading, setExportLoading] = useState(false);
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -74,11 +75,56 @@ const ProvinceWiseSale = () => {
     setExpandedProvince(expandedProvince === province ? null : province);
   };
 
-  const exportToExcel = () => {
-    showToast("info", "Export to Excel feature coming soon");
+  const exportToExcel = async () => {
+    try {
+      setExportLoading(true);
+      
+      const response = await axios.get(`${backendUrl}/api/province-wise-sale/export`, {
+        params: {
+          search: searchTerm,
+          period: period,
+        },
+        responseType: 'blob',
+      });
+
+      // Create a download link
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      
+      // Extract filename from content-disposition header or use default
+      const contentDisposition = response.headers['content-disposition'];
+      let filename = `Province-Wise-Sales-${period === 'all' ? 'All-Time' : period === 'last_month' ? 'Last-Month' : 'Last-Year'}.xlsx`;
+      
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+        if (filenameMatch && filenameMatch.length === 2) {
+          filename = filenameMatch[1];
+        }
+      }
+      
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      
+      showToast("success", "Excel file downloaded successfully!");
+    } catch (err) {
+      console.error("Error exporting to Excel:", err);
+      if (err.response?.status === 404) {
+        showToast("warning", "No data available to export");
+      } else {
+        showToast("error", "Failed to export data to Excel");
+      }
+    } finally {
+      setExportLoading(false);
+    }
   };
 
   const { summary, records, pagination } = data;
+
+  // Check if export button should be disabled
+  const isExportDisabled = records.length === 0 || exportLoading;
 
   // Generate visible pages for pagination
   const getVisiblePages = (currentPage, totalPages) => {
@@ -142,12 +188,6 @@ const ProvinceWiseSale = () => {
           <h1 className="text-2xl font-bold text-gray-800">
             Province-wise Sales Analytics
           </h1>
-          <p className="text-sm text-gray-600 mt-1">
-            Showing {records.length} of {pagination?.totalRecords || 0} provinces with sales
-            {summary.totalProvinces > 0 && (
-              <span className="ml-2">(Total {summary.totalProvinces} provinces in database)</span>
-            )}
-          </p>
         </div>
         <div className="flex items-center gap-8">
           <div className="flex items-center gap-3">
@@ -171,10 +211,24 @@ const ProvinceWiseSale = () => {
             </div>
             <button
               onClick={exportToExcel}
-              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
+              disabled={isExportDisabled}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl shadow-md cursor-pointer transition-colors ${
+                isExportDisabled
+                  ? "bg-gray-400 text-gray-700 cursor-not-allowed"
+                  : "bg-green-600 hover:bg-green-700 text-white"
+              }`}
             >
-              <Download size={18} />
-              Export Excel
+              {exportLoading ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  Exporting...
+                </>
+              ) : (
+                <>
+                  <Download size={18} />
+                  Export Excel
+                </>
+              )}
             </button>
           </div>
         </div>
@@ -336,7 +390,6 @@ const ProvinceWiseSale = () => {
                 <th className="text-center p-4 font-semibold text-gray-700">
                   Customers
                 </th>
-                
                 <th className="text-center p-4 font-semibold text-gray-700">
                   Avg Sale Value ($)
                 </th>
@@ -381,7 +434,6 @@ const ProvinceWiseSale = () => {
                         {record.totalCustomers?.toLocaleString() || 0}
                       </span>
                     </td>
-                   
                     <td className="p-4 text-center">
                       <span className="text-sm text-gray-600">
                         {formatCurrency(record.averageSaleValue || 0)}
@@ -408,7 +460,7 @@ const ProvinceWiseSale = () => {
                   {/* Expanded Sale Details */}
                   {expandedProvince === record.province && (
                     <tr>
-                      <td colSpan="9" className="p-4 bg-blue-50">
+                      <td colSpan="8" className="p-4 bg-blue-50">
                         <div className="mb-4">
                           <h4 className="font-semibold text-gray-800 mb-3">
                             Sale Details - {record.province}
@@ -416,8 +468,7 @@ const ProvinceWiseSale = () => {
                           <div className="mb-4 p-3 bg-blue-100 rounded-lg">
                             <p className="text-sm text-blue-800">
                               <strong>Summary:</strong> {record.totalCustomers} customers, {record.totalInvoices} invoices, 
-                              Total Sales: {formatCurrency(record.totalSalesAmount)}, 
-                              
+                              Total Sales: {formatCurrency(record.totalSalesAmount)}
                             </p>
                           </div>
                           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -452,7 +503,6 @@ const ProvinceWiseSale = () => {
                                       {customer.medicalRepName || "N/A"}
                                     </span>
                                   </p>
-                            
                                   <p>
                                     Total Sales:{" "}
                                     <span className="font-medium text-green-600">
@@ -497,7 +547,6 @@ const ProvinceWiseSale = () => {
         {/* Pagination */}
         {pagination && pagination.totalPages > 1 && (
           <div className="mt-4 p-5 flex">
-  
             <div className="flex gap-2">
               <button
                 onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
