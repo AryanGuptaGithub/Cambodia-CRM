@@ -9,6 +9,7 @@ import {
   X,
   Users,
   CreditCard,
+  ShoppingBag,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
@@ -33,13 +34,16 @@ const PLReport = () => {
   const [tableData, setTableData] = useState([]);
   const [salaryDetails, setSalaryDetails] = useState([]);
   const [expenseDetails, setExpenseDetails] = useState([]);
+  const [profitDetails, setProfitDetails] = useState([]);
   const [totals, setTotals] = useState({
-    totalAmount: 0,
-    totalProfit: 0,
+    totalSalesRevenue: 0,
+    totalProfitFromSales: 0,
     totalExpense: 0,
     totalSalaryExpense: 0,
     totalOtherExpense: 0,
+    totalProfit: 0,
     totalLoss: 0,
+    grossProfit: 0,
   });
   const [loading, setLoading] = useState(false);
   const [tableLoading, setTableLoading] = useState(false);
@@ -49,6 +53,7 @@ const PLReport = () => {
   const [customEndDate, setCustomEndDate] = useState(null);
   const [showSalaryDetailsModal, setShowSalaryDetailsModal] = useState(false);
   const [showExpenseDetailsModal, setShowExpenseDetailsModal] = useState(false);
+  const [showProfitDetailsModal, setShowProfitDetailsModal] = useState(false);
 
   // Get current date information
   const getCurrentDateInfo = () => {
@@ -109,11 +114,14 @@ const PLReport = () => {
       if (endDate) params.endDate = endDate.toISOString().split("T")[0];
 
       const response = await axios.get(`${backendUrl}/api/pl-report/summary`, { params });
-      setData({
-        summary: response.data.data || {
-          revenue: 0, cogs: 0, grossProfit: 0, expenses: 0, netProfit: 0, profitMargin: 0,
-        },
-      });
+      console.log("Summary response:", response.data);
+      if (response.data.success && response.data.data) {
+        setData({
+          summary: response.data.data || {
+            revenue: 0, cogs: 0, grossProfit: 0, expenses: 0, netProfit: 0, profitMargin: 0,
+          },
+        });
+      }
     } catch (error) {
       console.error("Error fetching P&L data:", error);
       showToast("error", "Failed to fetch P&L report data");
@@ -130,32 +138,54 @@ const PLReport = () => {
       if (endDate) params.endDate = endDate.toISOString().split("T")[0];
 
       const response = await axios.get(`${backendUrl}/api/pl-report`, { params });
-      const responseData = response.data.data || [];
-      const details = response.data.details || {};
-      const backendTotals = response.data.totals || {};
+      console.log("Table response:", response.data);
       
-      setTableData(responseData);
-      setSalaryDetails(details.salaryDetails || []);
-      setExpenseDetails(details.expenseDetails || []);
+      if (response.data.success) {
+        const responseData = response.data.data || [];
+        const details = response.data.details || {};
+        const backendTotals = response.data.totals || {};
+        const backendSummary = response.data.summary || {};
+        
+        setTableData(responseData);
+        setSalaryDetails(details.salaryDetails || []);
+        setExpenseDetails(details.expenseDetails || []);
+        setProfitDetails(details.profitDetails || []);
 
-      // Use the totals directly from backend response
-      setTotals({
-        totalAmount: backendTotals.totalRevenue || 0,
-        totalProfit: backendTotals.totalProfit || 0,
-        totalLoss: backendTotals.totalLoss || 0,
-        totalExpense: backendTotals.totalExpense || 0,
-        totalSalaryExpense: backendTotals.payrollExpense || 0,
-        totalOtherExpense: backendTotals.otherExpense || 0,
-      });
+        // Update summary from backend if available
+        if (backendSummary.revenue !== undefined) {
+          setData({
+            summary: backendSummary
+          });
+        }
+
+        // Use the totals directly from backend response
+        setTotals({
+          totalSalesRevenue: backendTotals.totalSalesRevenue || 0,
+          totalProfitFromSales: backendTotals.totalProfitFromSales || 0,
+          grossProfit: backendTotals.grossProfit || 0,
+          totalExpense: backendTotals.totalExpense || 0,
+          totalSalaryExpense: backendTotals.payrollExpense || 0,
+          totalOtherExpense: backendTotals.otherExpense || 0,
+          totalProfit: backendTotals.totalProfit || 0,
+          totalLoss: backendTotals.totalLoss || 0,
+        });
+      }
     } catch (error) {
       console.error("Error fetching table data:", error);
       showToast("error", "Failed to fetch table data");
       setTableData([]);
       setSalaryDetails([]);
       setExpenseDetails([]);
+      setProfitDetails([]);
       setTotals({
-        totalAmount: 0, totalProfit: 0, totalExpense: 0,
-        totalSalaryExpense: 0, totalOtherExpense: 0, totalLoss: 0,
+        totalSalesRevenue: 0,
+        totalProfitFromSales: 0,
+        grossProfit: 0,
+        totalExpense: 0,
+        totalSalaryExpense: 0,
+        totalOtherExpense: 0,
+        totalProfit: 0,
+        totalLoss: 0,
       });
     } finally {
       setTableLoading(false);
@@ -163,7 +193,7 @@ const PLReport = () => {
   };
 
   const fetchAllData = (startDate = null, endDate = null) => {
-    fetchPLData(startDate, endDate);
+    // Only fetch table data which now includes summary
     fetchTableData(startDate, endDate);
   };
 
@@ -208,26 +238,73 @@ const PLReport = () => {
   };
 
   const renderSummaryCards = () => (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
       {[
-        { label: "Total Revenue", value: data.summary.revenue, color: "green", icon: TrendingUp },
-        { label: "COGS", value: data.summary.cogs, color: "red", icon: TrendingDown },
-        { label: "Gross Profit", value: data.summary.grossProfit, color: "blue", icon: DollarSign },
-        { label: "Total Expenses", value: data.summary.expenses, color: "orange", icon: TrendingDown },
+        { 
+          label: "Total Revenue", 
+          value: data.summary.revenue, 
+          color: "green", 
+          icon: TrendingUp,
+          format: (val) => `$${typeof val === 'number' ? val.toLocaleString() : '0'}` 
+        },
+        { 
+          label: "COGS (Purchase Cost)", 
+          value: data.summary.cogs, 
+          color: "orange", 
+          icon: ShoppingBag,
+          format: (val) => `$${typeof val === 'number' ? val.toLocaleString() : '0'}` 
+        },
+        { 
+          label: "Gross Profit", 
+          value: data.summary.grossProfit, 
+          color: "blue", 
+          icon: DollarSign,
+          format: (val) => `$${typeof val === 'number' ? val.toLocaleString() : '0'}` 
+        },
+        { 
+          label: "Total Expenses", 
+          value: data.summary.expenses, 
+          color: "red", 
+          icon: TrendingDown,
+          format: (val) => `$${typeof val === 'number' ? val.toLocaleString() : '0'}` 
+        },
         { 
           label: "Net Profit/Loss", 
           value: data.summary.netProfit, 
           color: data.summary.netProfit >= 0 ? "green" : "red", 
-          icon: data.summary.netProfit >= 0 ? TrendingUp : TrendingDown 
+          icon: data.summary.netProfit >= 0 ? TrendingUp : TrendingDown,
+          format: (val) => `$${typeof val === 'number' ? Math.abs(val).toLocaleString() : '0'} ${val >= 0 ? '' : '(Loss)'}`
         },
-        { label: "Profit Margin", value: `${data.summary.profitMargin?.toFixed(2) || 0}%`, color: "indigo", icon: FileBarChart },
+        { 
+          label: "Profit Margin", 
+          value: `${data.summary.profitMargin?.toFixed(2) || 0}%`, 
+          color: "indigo", 
+          icon: FileBarChart,
+          format: (val) => val
+        },
+        { 
+          label: "Profit from Sales", 
+          value: totals.totalProfitFromSales, 
+          color: "purple", 
+          icon: DollarSign,
+          format: (val) => `$${typeof val === 'number' ? val.toLocaleString() : '0'}` 
+        },
+        { 
+          label: "Sales Revenue", 
+          value: totals.totalSalesRevenue, 
+          color: "teal", 
+          icon: TrendingUp,
+          format: (val) => `$${typeof val === 'number' ? val.toLocaleString() : '0'}` 
+        },
       ].map((card, index) => (
         <div key={index} className={`bg-white p-6 rounded-xl shadow-md border-l-4 ${
           card.color === 'green' ? 'border-green-500' : 
           card.color === 'red' ? 'border-red-500' : 
           card.color === 'blue' ? 'border-blue-500' : 
           card.color === 'orange' ? 'border-orange-500' : 
-          'border-indigo-500'
+          card.color === 'indigo' ? 'border-indigo-500' :
+          card.color === 'purple' ? 'border-purple-500' :
+          'border-teal-500'
         }`}>
           <div className="flex justify-between items-center">
             <div>
@@ -239,21 +316,24 @@ const PLReport = () => {
               }`}>
                 {loading ? (
                   <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
-                ) : card.label.includes("Margin") ? (
-                  card.value
-                ) : card.label === "Net Profit/Loss" ? (
-                  `$${typeof card.value === 'number' ? Math.abs(card.value).toLocaleString() : '0'} ${card.value >= 0 ? '' : '(Loss)'}`
                 ) : (
-                  `$${typeof card.value === 'number' ? card.value.toLocaleString() : '0'}`
+                  card.format(card.value)
                 )}
               </div>
+              {card.label === "Profit Margin" && data.summary.grossProfit > 0 && (
+                <div className="text-xs text-gray-500 mt-1">
+                  {((data.summary.netProfit / data.summary.grossProfit) * 100).toFixed(1)}% of gross profit
+                </div>
+              )}
             </div>
             <card.icon className={`w-8 h-8 ${
               card.color === 'green' ? 'text-green-500' : 
               card.color === 'red' ? 'text-red-500' : 
               card.color === 'blue' ? 'text-blue-500' : 
               card.color === 'orange' ? 'text-orange-500' : 
-              'text-indigo-500'
+              card.color === 'indigo' ? 'text-indigo-500' :
+              card.color === 'purple' ? 'text-purple-500' :
+              'text-teal-500'
             }`} />
           </div>
         </div>
@@ -262,21 +342,19 @@ const PLReport = () => {
   );
 
   const renderMainTable = () => {
-    // Use the totals directly from backend
-    const displayProfit = totals.totalProfit;
-    const displayLoss = totals.totalLoss;
-
     return (
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
           <thead className="bg-gray-100 text-gray-700">
             <tr>
               <th className="p-3 text-sm font-medium">Period</th>
+              <th className="p-3 text-sm font-medium">Sales Revenue($)</th>
+              <th className="p-3 text-sm font-medium">Profit from Sales($)</th>
+              <th className="p-3 text-sm font-medium">Gross Profit($)</th>
               <th className="p-3 text-sm font-medium">Salary Expense($)</th>
               <th className="p-3 text-sm font-medium">Other Expenses($)</th>
               <th className="p-3 text-sm font-medium">Total Expense($)</th>
-              <th className="p-3 text-sm font-medium">Profit($)</th>
-              <th className="p-3 text-sm font-medium">Loss($)</th>
+              <th className="p-3 text-sm font-medium">Net Profit/Loss($)</th>
             </tr>
           </thead>
           <tbody>
@@ -284,11 +362,31 @@ const PLReport = () => {
               <td className="p-3 text-gray-600 font-medium">{currentRange.label}</td>
               <td className="p-3">
                 <div className="flex items-center justify-center gap-2">
+                  <span className="text-gray-700">{totals.totalSalesRevenue?.toLocaleString() || 0}</span>
+                  <button
+                    onClick={() => setShowProfitDetailsModal(true)}
+                    className="text-purple-600 hover:text-purple-800 transition-colors p-1 rounded hover:bg-purple-50 cursor-pointer"
+                    title="View Profit Details"
+                    disabled={profitDetails.length === 0}
+                  >
+                    <ShoppingBag size={16} />
+                  </button>
+                </div>
+              </td>
+              <td className="p-3">
+                <span className="text-purple-700 font-medium">{totals.totalProfitFromSales?.toLocaleString() || 0}</span>
+              </td>
+              <td className="p-3">
+                <span className="text-blue-700 font-medium">{totals.grossProfit?.toLocaleString() || 0}</span>
+              </td>
+              <td className="p-3">
+                <div className="flex items-center justify-center gap-2">
                   <span className="text-gray-700">{totals.totalSalaryExpense?.toLocaleString() || 0}</span>
                   <button
                     onClick={() => setShowSalaryDetailsModal(true)}
                     className="text-blue-600 hover:text-blue-800 transition-colors p-1 rounded hover:bg-blue-50 cursor-pointer"
                     title="View Salary Details"
+                    disabled={salaryDetails.length === 0}
                   >
                     <Users size={16} />
                   </button>
@@ -301,6 +399,7 @@ const PLReport = () => {
                     onClick={() => setShowExpenseDetailsModal(true)}
                     className="text-green-600 hover:text-green-800 transition-colors p-1 rounded hover:bg-green-50 cursor-pointer"
                     title="View Expense Details"
+                    disabled={expenseDetails.length === 0}
                   >
                     <CreditCard size={16} />
                   </button>
@@ -310,18 +409,106 @@ const PLReport = () => {
                 <span className="text-gray-700 font-medium">{totals.totalExpense?.toLocaleString() || 0}</span>
               </td>
               <td className="p-3">
-                <span className={`font-medium ${displayProfit > 0 ? "text-green-700" : "text-gray-700"}`}>
-                  {displayProfit > 0 ? displayProfit.toLocaleString() : "0"}
-                </span>
-              </td>
-              <td className="p-3">
-                <span className={`font-medium ${displayLoss > 0 ? "text-red-700" : "text-gray-700"}`}>
-                  {displayLoss > 0 ? displayLoss.toLocaleString() : "0"}
+                <span className={`font-medium ${
+                  totals.totalProfit > 0 ? "text-green-700" : 
+                  totals.totalLoss > 0 ? "text-red-700" : "text-gray-700"
+                }`}>
+                  {totals.totalProfit > 0 
+                    ? `+$${totals.totalProfit.toLocaleString()}` 
+                    : totals.totalLoss > 0 
+                    ? `-$${totals.totalLoss.toLocaleString()}` 
+                    : "$0"}
                 </span>
               </td>
             </tr>
           </tbody>
         </table>
+      </div>
+    );
+  };
+
+  const renderProfitDetailsModal = () => {
+    if (!showProfitDetailsModal) return null;
+
+    return (
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
+        <div className="bg-white w-full max-w-6xl max-h-[90vh] rounded-xl shadow-lg relative flex flex-col">
+          <div className="flex items-center justify-between p-6 border-b border-gray-200">
+            <h2 className="text-xl font-semibold text-gray-800">Profit Details - {currentRange.label}</h2>
+            <button onClick={() => setShowProfitDetailsModal(false)} className="text-gray-500 hover:text-gray-700 cursor-pointer">
+              <X size={20} />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-6">
+            <div className="mb-4 p-4 bg-blue-50 rounded-lg">
+              <h3 className="font-semibold text-blue-800 mb-2">Profit Calculation Method</h3>
+              <p className="text-sm text-blue-600">
+                Profit = (Selling Price - LC Price) × Quantity Sold
+              </p>
+            </div>
+            
+            <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
+              <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden shadow text-center">
+                <thead className="bg-gray-100 text-gray-700 border-b">
+                  <tr>
+                    <th className="p-3 text-sm font-medium">Invoice</th>
+                    <th className="p-3 text-sm font-medium">Date</th>
+                    <th className="p-3 text-sm font-medium">Customer</th>
+                    <th className="p-3 text-sm font-medium">Total Revenue</th>
+                    <th className="p-3 text-sm font-medium">Purchase Cost</th>
+                    <th className="p-3 text-sm font-medium">Profit</th>
+                    <th className="p-3 text-sm font-medium">Margin</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {profitDetails.length > 0 ? profitDetails.map((item, index) => (
+                    <tr key={index} className="border-b hover:bg-gray-50">
+                      <td className="p-3 font-medium text-gray-800">{item.invoiceNumber}</td>
+                      <td className="p-3 text-gray-600">{formatDateToReadable(item.date)}</td>
+                      <td className="p-3 text-gray-800">{item.customer}</td>
+                      <td className="p-3 font-semibold text-gray-700">${item.totalAmount?.toLocaleString() || 0}</td>
+                      <td className="p-3 text-orange-600">${item.purchaseCost?.toLocaleString() || 0}</td>
+                      <td className="p-3 font-semibold text-green-600">${item.profit?.toLocaleString() || 0}</td>
+                      <td className="p-3">
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          item.margin >= 30 ? "bg-green-100 text-green-800" :
+                          item.margin >= 15 ? "bg-yellow-100 text-yellow-800" :
+                          "bg-red-100 text-red-800"
+                        }`}>
+                          {item.margin?.toFixed(1) || 0}%
+                        </span>
+                      </td>
+                    </tr>
+                  )) : (
+                    <tr><td colSpan="7" className="text-center py-8 text-gray-500">No sales profit records found</td></tr>
+                  )}
+                </tbody>
+                {profitDetails.length > 0 && (
+                  <tfoot>
+                    <tr className="bg-gray-100 font-semibold text-sm">
+                      <td colSpan="3" className="p-3 text-left">Total:</td>
+                      <td className="p-3">${profitDetails.reduce((sum, item) => sum + (item.totalAmount || 0), 0).toLocaleString()}</td>
+                      <td className="p-3 text-orange-600">${profitDetails.reduce((sum, item) => sum + (item.purchaseCost || 0), 0).toLocaleString()}</td>
+                      <td className="p-3 text-green-600">${profitDetails.reduce((sum, item) => sum + (item.profit || 0), 0).toLocaleString()}</td>
+                      <td className="p-3">
+                        {profitDetails.length > 0 && profitDetails.reduce((sum, item) => sum + (item.totalAmount || 0), 0) > 0 ? 
+                          ((profitDetails.reduce((sum, item) => sum + (item.profit || 0), 0) / 
+                           profitDetails.reduce((sum, item) => sum + (item.totalAmount || 0), 0)) * 100).toFixed(1) + '%' : '0%'}
+                      </td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          </div>
+
+          <div className="flex justify-end p-6 border-t border-gray-200 bg-gray-50">
+            <button onClick={() => setShowProfitDetailsModal(false)} className="px-6 py-2 text-gray-700 bg-gray-300 hover:bg-gray-400 rounded-lg transition-colors cursor-pointer">
+              Close
+            </button>
+          </div>
+        </div>
       </div>
     );
   };
@@ -537,6 +724,7 @@ const PLReport = () => {
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold text-gray-800">Profit & Loss Report</h1>
+          <span className="text-sm text-gray-500">(Profit = Selling Price - LC Price)</span>
         </div>
         <div className="flex items-center gap-3">
           <button onClick={exportToExcel} className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer">
@@ -574,6 +762,7 @@ const PLReport = () => {
       </div>
 
       {renderCustomDateModal()}
+      {renderProfitDetailsModal()}
       {renderSalaryDetailsModal()}
       {renderExpenseDetailsModal()}
     </div>

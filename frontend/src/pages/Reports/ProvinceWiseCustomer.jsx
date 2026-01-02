@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Eye, Search, TrendingUp, Users, FileText, Target } from "lucide-react";
+import { Eye, Search, TrendingUp, Users, FileText, Target, Download } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
 import { formatCurrency } from "../../utils/formatCurrency";
@@ -27,6 +27,7 @@ const ProvinceWiseCustomer = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [period, setPeriod] = useState("all");
   const [expandedProvince, setExpandedProvince] = useState(null);
+  const [exportLoading, setExportLoading] = useState(false);
   const inputRef = useRef(null);
 
   const itemsPerPage = 6;
@@ -67,6 +68,55 @@ const ProvinceWiseCustomer = () => {
     }
   };
 
+  const exportToExcel = async () => {
+    try {
+      setExportLoading(true);
+      
+      // Create query parameters for export
+      const params = new URLSearchParams();
+      if (searchTerm) params.append('search', searchTerm);
+      if (period !== 'all') params.append('period', period);
+      
+      // Make API call for export
+      const response = await axios.get(
+        `${backendUrl}/api/province-wise-customer/export`,
+        {
+          params: params,
+          responseType: 'blob',
+        }
+      );
+
+      // Create a blob from the response
+      const blob = new Blob([response.data], { type: response.headers['content-type'] });
+      
+      // Create a URL for the blob
+      const url = window.URL.createObjectURL(blob);
+      
+      // Create a temporary anchor element to trigger download
+      const link = document.createElement('a');
+      link.href = url;
+      
+      // Generate filename with timestamp
+      const timestamp = new Date().toISOString().split('T')[0];
+      link.download = `province_wise_customers_${timestamp}.csv`;
+      
+      // Append to body, click and remove
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      // Clean up the URL object
+      window.URL.revokeObjectURL(url);
+      
+      showToast("success", "Export started successfully!");
+    } catch (err) {
+      console.error("Error exporting data:", err);
+      showToast("error", "Failed to export data. Please try again.");
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
   const toggleProvinceExpand = (province) => {
     setExpandedProvince(expandedProvince === province ? null : province);
   };
@@ -93,6 +143,7 @@ const ProvinceWiseCustomer = () => {
   const visiblePages = pagination
     ? getVisiblePages(currentPage, pagination.totalPages)
     : [];
+    
   const handleIconClick = () => {
     if (inputRef.current) {
       inputRef.current.focus();
@@ -134,8 +185,11 @@ const ProvinceWiseCustomer = () => {
           <h1 className="text-2xl font-bold text-gray-800">
             Province-wise Customer Analytics
           </h1>
+          <p className="text-gray-600 mt-1">
+            Analyze customer distribution and performance across provinces
+          </p>
         </div>
-        <div className="flex items-center gap-8">
+        <div className="flex items-center gap-4">
           <div className="relative">
             <Search
               className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 cursor-pointer"
@@ -154,6 +208,27 @@ const ProvinceWiseCustomer = () => {
               className="pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 w-64"
             />
           </div>
+                 <button
+            onClick={exportToExcel}
+            disabled={exportLoading || records.length === 0}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+              exportLoading || records.length === 0
+                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                : 'bg-green-600 text-white hover:bg-green-700'
+            }`}
+          >
+            {exportLoading ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                Exporting...
+              </>
+            ) : (
+              <>
+                <Download size={18} />
+                Export Excel
+              </>
+            )}
+          </button>
         </div>
       </div>
 
@@ -248,8 +323,7 @@ const ProvinceWiseCustomer = () => {
                 {summary.activeCustomers.toLocaleString()}
               </p>
               <p className="text-sm text-green-600 mt-1">
-                {formatPercentage(summary.customerActivationRate)} activation
-                rate
+                {formatPercentage(summary.customerActivationRate)} activation rate
               </p>
             </div>
             <div className="p-3 bg-purple-100 rounded-lg">
@@ -484,7 +558,7 @@ const ProvinceWiseCustomer = () => {
           </div>
         )}
 
-        {/* Pagination - Moved to left side */}
+        {/* Pagination */}
         {pagination && pagination.totalPages > 1 && (
           <div className="mt-4 p-5 flex justify-start gap-2">
             <button
@@ -492,7 +566,7 @@ const ProvinceWiseCustomer = () => {
               disabled={currentPage === 1}
               className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
             >
-              Prev
+            ← Prev
             </button>
             {visiblePages.map((page, idx) =>
               page === "..." ? (
@@ -526,7 +600,7 @@ const ProvinceWiseCustomer = () => {
               disabled={currentPage === pagination.totalPages}
               className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
             >
-              Next
+                 Next →
             </button>
           </div>
         )}

@@ -37,20 +37,55 @@ function getFilterLabel(filter) {
   }
 }
 
+// Helper function to search items by product name or supplier name
+const searchItems = (items, searchTerm) => {
+  if (!searchTerm || searchTerm.trim() === '') {
+    return items;
+  }
+  
+  const searchLower = searchTerm.toLowerCase().trim();
+  
+  return items.filter(item => {
+    // Search in product name
+    const productNameMatch = item.productName && 
+      item.productName.toLowerCase().includes(searchLower);
+    
+    // Search in supplier name
+    const supplierNameMatch = item.supplierName && 
+      item.supplierName.toLowerCase().includes(searchLower);
+    
+    // Return true if either matches
+    return productNameMatch || supplierNameMatch;
+  });
+};
+
 router.get('/expiry-stock-report', async (req, res) => {
   try {
-    const { page = 1, limit = 10, filter = 'all' } = req.query;
+    const { page = 1, limit = 10, filter = 'all', search = '' } = req.query;
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
+    const searchTerm = search || '';
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // Find all items with batches
-    const allItems = await reportsInHand.find({
+    // Build query for fetching items
+    let query = {
       'batches': { $exists: true, $not: { $size: 0 } }
-    }).lean();
+    };
+
+    // Add search criteria if search term exists
+    if (searchTerm) {
+      const searchRegex = new RegExp(searchTerm, 'i');
+      query.$or = [
+        { productName: searchRegex },
+        { supplierName: searchRegex }
+      ];
+    }
+
+    // Find all items with batches (with search filter if applicable)
+    const allItems = await reportsInHand.find(query).lean();
 
     let allExpiringBatches = [];
     let totalExpiringSoon = 0;
@@ -60,6 +95,8 @@ router.get('/expiry-stock-report', async (req, res) => {
     let expiredValue = 0;
     let totalBoxes = 0;
     let totalValue = 0;
+    let totalFilteredBoxes = 0;
+    let totalFilteredValue = 0;
 
     // Process each item and its batches
     allItems.forEach(item => {
@@ -72,13 +109,14 @@ router.get('/expiry-stock-report', async (req, res) => {
             const daysRemaining = calculateDaysRemaining(batch.expiryDate);
             const isExpired = daysRemaining < 0;
             
-            // Calculate values
+            // Calculate values for ALL batches (for totals)
             const boxes = batch.boxes || 0;
             const cifPrice = batch.cif || 0;
             const batchValue = boxes * cifPrice;
             
-            totalBoxes += boxes;
-            totalValue += batchValue;
+            // Add to filtered totals (only items that match the search)
+            totalFilteredBoxes += boxes;
+            totalFilteredValue += batchValue;
             
             // Check if batch should be included based on filter
             let shouldInclude = false;
@@ -134,6 +172,43 @@ router.get('/expiry-stock-report', async (req, res) => {
       }
     });
 
+    // Apply search to filtered batches if search term exists
+    if (searchTerm) {
+      allExpiringBatches = searchItems(allExpiringBatches, searchTerm);
+      
+      // Recalculate totals after search
+      totalExpiringSoon = 0;
+      totalNearExpiryValue = 0;
+      criticalItems = 0;
+      expiredItems = 0;
+      expiredValue = 0;
+      totalBoxes = 0;
+      totalValue = 0;
+      
+      allExpiringBatches.forEach(item => {
+        totalBoxes += item.quantity;
+        totalValue += item.totalValue;
+        
+        if (!item.isExpired && item.daysRemaining <= 15) {
+          totalExpiringSoon += item.quantity;
+          totalNearExpiryValue += item.totalValue;
+          
+          if (item.daysRemaining <= 3) {
+            criticalItems += item.quantity;
+          }
+        }
+        
+        if (item.isExpired) {
+          expiredItems += item.quantity;
+          expiredValue += item.totalValue;
+        }
+      });
+    } else {
+      // If no search, use the already calculated totals
+      totalBoxes = totalFilteredBoxes;
+      totalValue = totalFilteredValue;
+    }
+
     // Sort items (expired first, then by days remaining)
     allExpiringBatches.sort((a, b) => {
       if (a.isExpired && !b.isExpired) return -1;
@@ -145,7 +220,7 @@ router.get('/expiry-stock-report', async (req, res) => {
     const totalItemsCount = allExpiringBatches.length;
     const paginatedItems = allExpiringBatches.slice(skip, skip + limitNum);
 
-    // Calculate filtered summary
+    // Calculate filtered summary (for current page)
     let filteredExpiringSoon = 0;
     let filteredNearExpiryValue = 0;
     let filteredCriticalItems = 0;
@@ -153,13 +228,18 @@ router.get('/expiry-stock-report', async (req, res) => {
     let filteredExpiredValue = 0;
 
     paginatedItems.forEach(item => {
-      filteredExpiringSoon += item.quantity;
-      filteredNearExpiryValue += item.totalValue;
+      if (!item.isExpired && item.daysRemaining <= 15) {
+        filteredExpiringSoon += item.quantity;
+        filteredNearExpiryValue += item.totalValue;
+        
+        if (item.daysRemaining <= 3) {
+          filteredCriticalItems += item.quantity;
+        }
+      }
+      
       if (item.isExpired) {
         filteredExpiredItems += item.quantity;
         filteredExpiredValue += item.totalValue;
-      } else if (item.daysRemaining <= 3) {
-        filteredCriticalItems += item.quantity;
       }
     });
 
@@ -208,16 +288,29 @@ router.get('/expiry-stock-report', async (req, res) => {
 // Separate endpoint for export data
 router.get('/expiry-stock-report/export', async (req, res) => {
   try {
-    const { filter = 'all' } = req.query;
+    const { filter = 'all', search = '' } = req.query;
+    const searchTerm = search || '';
 
     // Calculate dates for expiry range
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
-    // Find all items with batches
-    const allItems = await reportsInHand.find({
+    // Build query for fetching items
+    let query = {
       'batches': { $exists: true, $not: { $size: 0 } }
-    }).lean();
+    };
+
+    // Add search criteria if search term exists
+    if (searchTerm) {
+      const searchRegex = new RegExp(searchTerm, 'i');
+      query.$or = [
+        { productName: searchRegex },
+        { supplierName: searchRegex }
+      ];
+    }
+
+    // Find all items with batches (with search filter if applicable)
+    const allItems = await reportsInHand.find(query).lean();
 
     // Process items to find expiring batches
     let allExpiringBatches = [];
@@ -237,17 +330,13 @@ router.get('/expiry-stock-report/export', async (req, res) => {
             const expiryDate = new Date(batch.expiryDate);
             expiryDate.setHours(0, 0, 0, 0);
             
-            const timeDiff = expiryDate.getTime() - today.getTime();
-            const daysRemaining = Math.ceil(timeDiff / (1000 * 3600 * 24));
+            const daysRemaining = calculateDaysRemaining(batch.expiryDate);
             const isExpired = daysRemaining < 0;
             
-            // Calculate values for ALL batches (for totals)
+            // Calculate values
             const boxes = batch.boxes || 0;
             const cifPrice = batch.cif || 0;
             const batchValue = boxes * cifPrice;
-            
-            totalBoxes += boxes;
-            totalValue += batchValue;
             
             // Apply filter based on client request
             let shouldInclude = false;
@@ -280,6 +369,9 @@ router.get('/expiry-stock-report/export', async (req, res) => {
                 expiredValue += batchValue;
               }
               
+              totalBoxes += boxes;
+              totalValue += batchValue;
+              
               allExpiringBatches.push({
                 productId: item._id,
                 productName: item.productName || 'Unknown Product',
@@ -305,6 +397,39 @@ router.get('/expiry-stock-report/export', async (req, res) => {
       }
     });
 
+    // Apply search to filtered batches if search term exists
+    if (searchTerm) {
+      allExpiringBatches = searchItems(allExpiringBatches, searchTerm);
+      
+      // Recalculate totals after search
+      totalExpiringSoon = 0;
+      totalNearExpiryValue = 0;
+      criticalItems = 0;
+      expiredItems = 0;
+      expiredValue = 0;
+      totalBoxes = 0;
+      totalValue = 0;
+      
+      allExpiringBatches.forEach(item => {
+        totalBoxes += item.quantity;
+        totalValue += item.totalValue;
+        
+        if (!item.isExpired && item.daysRemaining <= 15) {
+          totalExpiringSoon += item.quantity;
+          totalNearExpiryValue += item.totalValue;
+          
+          if (item.daysRemaining <= 3) {
+            criticalItems += item.quantity;
+          }
+        }
+        
+        if (item.isExpired) {
+          expiredItems += item.quantity;
+          expiredValue += item.totalValue;
+        }
+      });
+    }
+
     // Sort items (expired first, then by days remaining)
     allExpiringBatches.sort((a, b) => {
       if (a.isExpired && !b.isExpired) return -1;
@@ -325,8 +450,9 @@ router.get('/expiry-stock-report/export', async (req, res) => {
       },
       items: allExpiringBatches,
       filter: filter,
-      generatedDate: formatDateForExcel(new Date()), // Use formatted date
-      filterLabel: getFilterLabel(filter)
+      generatedDate: formatDateForExcel(new Date()),
+      filterLabel: getFilterLabel(filter),
+      searchTerm: searchTerm || null
     };
 
     res.status(200).json({

@@ -4,26 +4,21 @@ import SaleSummary from "../../models/sale/saleSummary.js";
 
 const router = express.Router();
 
-router.get("/province-wise-customer", async (req, res) => {  
+router.get("/province-wise-customer", async (req, res) => {
   try {
     const { page = 1, limit = 6, search = "", period = "all" } = req.query;
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
 
-    // Build search condition
+    // Build search condition - ONLY by province
     let searchCondition = {};
     if (search && search.trim() !== "") {
       const searchRegex = new RegExp(search.trim(), "i");
       searchCondition = {
-        $or: [
-          { province: searchRegex },
-          { zone: searchRegex },
-          { name: searchRegex },
-          { medicalRepName: searchRegex },
-        ],
+        province: searchRegex,
       };
-    } 
+    }
 
     console.time("⏱️ Total Query Execution Time");
 
@@ -32,13 +27,21 @@ router.get("/province-wise-customer", async (req, res) => {
     if (period === "last_month" || period === "last_year") {
       if (period === "last_month") {
         const now = new Date();
-        const firstDayOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        const lastDayOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+        const firstDayOfLastMonth = new Date(
+          now.getFullYear(),
+          now.getMonth() - 1,
+          1
+        );
+        const lastDayOfLastMonth = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          0
+        );
         dateFilter = {
           invoiceDate: {
             $gte: firstDayOfLastMonth,
-            $lte: lastDayOfLastMonth
-          }
+            $lte: lastDayOfLastMonth,
+          },
         };
       } else if (period === "last_year") {
         const now = new Date();
@@ -47,31 +50,33 @@ router.get("/province-wise-customer", async (req, res) => {
         dateFilter = {
           invoiceDate: {
             $gte: firstDayOfLastYear,
-            $lte: lastDayOfLastYear
-          }
+            $lte: lastDayOfLastYear,
+          },
         };
-      }  
+      }
     }
 
     // Main aggregation pipeline for province-wise customers
     const pipeline = [
-      // Match customers based on search condition
-      ...(Object.keys(searchCondition).length > 0 ? [{ $match: searchCondition }] : []),
-      
+      // Match customers based on search condition (province only)
+      ...(Object.keys(searchCondition).length > 0
+        ? [{ $match: searchCondition }]
+        : []),
+
       // Filter out customers without province
       {
         $match: {
-          province: { $exists: true, $ne: null, $ne: "" }
-        }
+          province: { $exists: true, $ne: null, $ne: "" },
+        },
       },
-      
+
       // Add a normalized province field for case-insensitive grouping
       {
         $addFields: {
-          normalizedProvince: { $toLower: "$province" }
-        }
+          normalizedProvince: { $toLower: "$province" },
+        },
       },
-      
+
       // Lookup sales data for each customer (with date filter if applicable)
       {
         $lookup: {
@@ -80,7 +85,9 @@ router.get("/province-wise-customer", async (req, res) => {
           foreignField: "customerCode",
           as: "sales",
           pipeline: [
-            ...(Object.keys(dateFilter).length > 0 ? [{ $match: dateFilter }] : []),
+            ...(Object.keys(dateFilter).length > 0
+              ? [{ $match: dateFilter }]
+              : []),
             {
               $project: {
                 netSellingAmount: 1,
@@ -92,7 +99,7 @@ router.get("/province-wise-customer", async (req, res) => {
           ],
         },
       },
-      
+
       // Group by normalized province (case-insensitive)
       {
         $group: {
@@ -105,22 +112,17 @@ router.get("/province-wise-customer", async (req, res) => {
           },
           activeCustomers: {
             $sum: {
-              $cond: [
-                { $gt: [{ $size: "$sales" }, 0] },
-                1,
-                0
-              ],
+              $cond: [{ $gt: [{ $size: "$sales" }, 0] }, 1, 0],
             },
           },
-          // Fix: Sum all sales amounts properly
-          totalSalesAmount: { 
+          totalSalesAmount: {
             $sum: {
               $reduce: {
                 input: "$sales",
                 initialValue: 0,
-                in: { $add: ["$$value", "$$this.netSellingAmount"] }
-              }
-            }
+                in: { $add: ["$$value", "$$this.netSellingAmount"] },
+              },
+            },
           },
           totalInvoices: { $sum: { $size: "$sales" } },
           customerDetails: {
@@ -135,9 +137,9 @@ router.get("/province-wise-customer", async (req, res) => {
                   $map: {
                     input: "$sales",
                     as: "sale",
-                    in: "$$sale.netSellingAmount"
-                  }
-                }
+                    in: "$$sale.netSellingAmount",
+                  },
+                },
               },
               invoiceCount: { $size: "$sales" },
               lastPurchaseDate: { $max: "$sales.invoiceDate" },
@@ -145,11 +147,13 @@ router.get("/province-wise-customer", async (req, res) => {
           },
         },
       },
-      
+
       // Calculate additional metrics
       {
         $addFields: {
-          inactiveCustomers: { $subtract: ["$totalCustomers", "$activeCustomers"] },
+          inactiveCustomers: {
+            $subtract: ["$totalCustomers", "$activeCustomers"],
+          },
           customerRetentionRate: {
             $cond: [
               { $gt: ["$totalCustomers", 0] },
@@ -171,7 +175,7 @@ router.get("/province-wise-customer", async (req, res) => {
           },
         },
       },
-      
+
       // Project final fields - Convert rounded values to numbers
       {
         $project: {
@@ -181,20 +185,20 @@ router.get("/province-wise-customer", async (req, res) => {
           newCustomers: 1,
           activeCustomers: 1,
           inactiveCustomers: 1,
-          totalSalesAmount: { 
-            $toDouble: { $round: ["$totalSalesAmount", 2] }
+          totalSalesAmount: {
+            $toDouble: { $round: ["$totalSalesAmount", 2] },
           },
           totalInvoices: 1,
-          customerRetentionRate: { 
-            $toDouble: { $round: ["$customerRetentionRate", 2] }
+          customerRetentionRate: {
+            $toDouble: { $round: ["$customerRetentionRate", 2] },
           },
-          averageSalesPerCustomer: { 
-            $toDouble: { $round: ["$averageSalesPerCustomer", 2] }
+          averageSalesPerCustomer: {
+            $toDouble: { $round: ["$averageSalesPerCustomer", 2] },
           },
           customerDetails: 1,
         },
       },
-      
+
       // Sort by total customers (descending)
       { $sort: { totalCustomers: -1 } },
     ];
@@ -204,13 +208,8 @@ router.get("/province-wise-customer", async (req, res) => {
       ...pipeline,
       {
         $facet: {
-          paginated: [
-            { $skip: skip },
-            { $limit: limitNum },
-          ],
-          totalCount: [
-            { $count: "count" }
-          ],
+          paginated: [{ $skip: skip }, { $limit: limitNum }],
+          totalCount: [{ $count: "count" }],
           summary: [
             {
               $group: {
@@ -230,14 +229,23 @@ router.get("/province-wise-customer", async (req, res) => {
                 totalProvinces: 1,
                 newCustomers: 1,
                 activeCustomers: 1,
-                totalSalesAmount: { $toDouble: { $round: ["$totalSalesAmount", 2] } },
+                totalSalesAmount: {
+                  $toDouble: { $round: ["$totalSalesAmount", 2] },
+                },
                 totalInvoices: 1,
                 averageCustomersPerProvince: {
                   $cond: [
                     { $gt: ["$totalProvinces", 0] },
-                    { $toDouble: { $round: [{ $divide: ["$totalCustomers", "$totalProvinces"] }, 1] } },
-                    0
-                  ]
+                    {
+                      $toDouble: {
+                        $round: [
+                          { $divide: ["$totalCustomers", "$totalProvinces"] },
+                          1,
+                        ],
+                      },
+                    },
+                    0,
+                  ],
                 },
                 customerActivationRate: {
                   $cond: [
@@ -247,7 +255,12 @@ router.get("/province-wise-customer", async (req, res) => {
                         $round: [
                           {
                             $multiply: [
-                              { $divide: ["$activeCustomers", "$totalCustomers"] },
+                              {
+                                $divide: [
+                                  "$activeCustomers",
+                                  "$totalCustomers",
+                                ],
+                              },
                               100,
                             ],
                           },
@@ -267,25 +280,31 @@ router.get("/province-wise-customer", async (req, res) => {
 
     const result = await Customer.aggregate(facetPipeline);
     const records = result[0]?.paginated || [];
-    const totalCount = result[0]?.totalCount[0]?.count || 0;     
-    const allProvinces = await Customer.aggregate([
-      ...(Object.keys(searchCondition).length > 0 ? [{ $match: searchCondition }] : []),
+    const totalCount = result[0]?.totalCount[0]?.count || 0;
+
+    // For unique provinces count with search
+    const uniqueProvincesPipeline = [
+      ...(Object.keys(searchCondition).length > 0
+        ? [{ $match: searchCondition }]
+        : []),
       {
         $match: {
-          province: { $exists: true, $ne: null, $ne: "" }
-        }
+          province: { $exists: true, $ne: null, $ne: "" },
+        },
       },
       {
         $group: {
-          _id: { $toLower: "$province" }
-        }
+          _id: { $toLower: "$province" },
+        },
       },
       {
-        $count: "count"
-      }
-    ]);
-    
+        $count: "count",
+      },
+    ];
+
+    const allProvinces = await Customer.aggregate(uniqueProvincesPipeline);
     const uniqueProvincesCount = allProvinces[0]?.count || 0;
+
     const summary = result[0]?.summary[0] || {
       totalCustomers: 0,
       totalProvinces: 0,
@@ -315,13 +334,16 @@ router.get("/province-wise-customer", async (req, res) => {
         hasPrev: pageNum > 1,
       },
     };
+
+    console.timeEnd("⏱️ Total Query Execution Time");
+
     res.json(responseData);
   } catch (error) {
     console.error("❌ ========== API ERROR ==========");
     console.error("🔴 Error:", error.message);
     console.error("🔴 Stack:", error.stack);
     console.error("❌ ========== END ERROR ==========\n");
-    
+
     res.status(500).json({
       success: false,
       message: "Failed to fetch province wise customer data",
@@ -330,22 +352,17 @@ router.get("/province-wise-customer", async (req, res) => {
   }
 });
 
-// Add Excel export endpoint
+// Also update the export endpoint to search only by province
 router.get("/province-wise-customer/export", async (req, res) => {
   try {
     const { search = "", period = "all" } = req.query;
 
-    // Build search condition
+    // Build search condition - ONLY by province
     let searchCondition = {};
     if (search && search.trim() !== "") {
       const searchRegex = new RegExp(search.trim(), "i");
       searchCondition = {
-        $or: [
-          { province: searchRegex },
-          { zone: searchRegex },
-          { name: searchRegex },
-          { medicalRepName: searchRegex },
-        ],
+        province: searchRegex,
       };
     }
 
@@ -354,13 +371,21 @@ router.get("/province-wise-customer/export", async (req, res) => {
     if (period === "last_month" || period === "last_year") {
       if (period === "last_month") {
         const now = new Date();
-        const firstDayOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        const lastDayOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+        const firstDayOfLastMonth = new Date(
+          now.getFullYear(),
+          now.getMonth() - 1,
+          1
+        );
+        const lastDayOfLastMonth = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          0
+        );
         dateFilter = {
           invoiceDate: {
             $gte: firstDayOfLastMonth,
-            $lte: lastDayOfLastMonth
-          }
+            $lte: lastDayOfLastMonth,
+          },
         };
       } else if (period === "last_year") {
         const now = new Date();
@@ -369,23 +394,25 @@ router.get("/province-wise-customer/export", async (req, res) => {
         dateFilter = {
           invoiceDate: {
             $gte: firstDayOfLastYear,
-            $lte: lastDayOfLastYear
-          }
+            $lte: lastDayOfLastYear,
+          },
         };
       }
     }
 
     const pipeline = [
-      ...(Object.keys(searchCondition).length > 0 ? [{ $match: searchCondition }] : []),
+      ...(Object.keys(searchCondition).length > 0
+        ? [{ $match: searchCondition }]
+        : []),
       {
         $match: {
-          province: { $exists: true, $ne: null, $ne: "" }
-        }
+          province: { $exists: true, $ne: null, $ne: "" },
+        },
       },
       {
         $addFields: {
-          normalizedProvince: { $toLower: "$province" }
-        }
+          normalizedProvince: { $toLower: "$province" },
+        },
       },
       {
         $lookup: {
@@ -394,8 +421,10 @@ router.get("/province-wise-customer/export", async (req, res) => {
           foreignField: "customerCode",
           as: "sales",
           pipeline: [
-            ...(Object.keys(dateFilter).length > 0 ? [{ $match: dateFilter }] : []),
-            { $project: { netSellingAmount: 1 } },
+            ...(Object.keys(dateFilter).length > 0
+              ? [{ $match: dateFilter }]
+              : []),
+            { $project: { netSellingAmount: 1, invoiceDate: 1 } },
           ],
         },
       },
@@ -406,26 +435,34 @@ router.get("/province-wise-customer/export", async (req, res) => {
           totalCustomers: { $sum: 1 },
           newCustomers: { $sum: { $cond: ["$isNew", 1, 0] } },
           activeCustomers: {
-            $sum: { $cond: [{ $gt: [{ $size: "$sales" }, 0] }, 1, 0] }
+            $sum: { $cond: [{ $gt: [{ $size: "$sales" }, 0] }, 1, 0] },
           },
-          totalSalesAmount: { 
+          totalSalesAmount: {
             $sum: {
               $reduce: {
                 input: "$sales",
                 initialValue: 0,
-                in: { $add: ["$$value", "$$this.netSellingAmount"] }
-              }
-            }
+                in: { $add: ["$$value", "$$this.netSellingAmount"] },
+              },
+            },
           },
+          totalInvoices: { $sum: { $size: "$sales" } },
         },
       },
       {
         $addFields: {
-          inactiveCustomers: { $subtract: ["$totalCustomers", "$activeCustomers"] },
+          inactiveCustomers: {
+            $subtract: ["$totalCustomers", "$activeCustomers"],
+          },
           customerRetentionRate: {
             $cond: [
               { $gt: ["$totalCustomers", 0] },
-              { $multiply: [{ $divide: ["$activeCustomers", "$totalCustomers"] }, 100] },
+              {
+                $multiply: [
+                  { $divide: ["$activeCustomers", "$totalCustomers"] },
+                  100,
+                ],
+              },
               0,
             ],
           },
@@ -441,14 +478,19 @@ router.get("/province-wise-customer/export", async (req, res) => {
       {
         $project: {
           _id: 0,
-          "Province": "$province",
-          "Total Customers": 1,
-          "Active Customers": 1,
-          "Inactive Customers": 1,
-          "New Customers": 1,
+          Province: "$province",
+          "Total Customers": "$totalCustomers",
+          "Active Customers": "$activeCustomers",
+          "Inactive Customers": "$inactiveCustomers",
+          "New Customers": "$newCustomers",
           "Total Sales Amount": { $round: ["$totalSalesAmount", 2] },
-          "Average Sales Per Customer": { $round: ["$averageSalesPerCustomer", 2] },
-          "Customer Retention Rate (%)": { $round: ["$customerRetentionRate", 2] },
+          "Total Invoices": "$totalInvoices",
+          "Average Sales Per Customer": {
+            $round: ["$averageSalesPerCustomer", 2],
+          },
+          "Customer Retention Rate (%)": {
+            $round: ["$customerRetentionRate", 2],
+          },
         },
       },
       { $sort: { "Total Customers": -1 } },
@@ -458,38 +500,45 @@ router.get("/province-wise-customer/export", async (req, res) => {
 
     // Convert to CSV format
     const headers = [
-      'Province',
-      'Total Customers',
-      'Active Customers',
-      'Inactive Customers',
-      'New Customers',
-      'Total Sales Amount',
-      'Average Sales Per Customer',
-      'Customer Retention Rate (%)'
+      "Province",
+      "Total Customers",
+      "Active Customers",
+      "Inactive Customers",
+      "New Customers",
+      "Total Sales Amount",
+      "Total Invoices",
+      "Average Sales Per Customer",
+      "Customer Retention Rate (%)",
     ];
 
-    const csvRows = data.map(row => [
-      row.Province || '',
-      row['Total Customers'] || 0,
-      row['Active Customers'] || 0,
-      row['Inactive Customers'] || 0,
-      row['New Customers'] || 0,
-      row['Total Sales Amount'] || 0,
-      row['Average Sales Per Customer'] || 0,
-      row['Customer Retention Rate (%)'] || 0
+    // Format CSV rows
+    const csvRows = data.map((row) => [
+      `"${(row.Province || "").replace(/"/g, '""')}"`, // Escape quotes in province names
+      row["Total Customers"] || 0,
+      row["Active Customers"] || 0,
+      row["Inactive Customers"] || 0,
+      row["New Customers"] || 0,
+      row["Total Sales Amount"] || 0,
+      row["Total Invoices"] || 0,
+      row["Average Sales Per Customer"] || 0,
+      row["Customer Retention Rate (%)"] || 0,
     ]);
 
-    const csvContent = [
-      headers.join(','),
-      ...csvRows.map(row => row.join(','))
-    ].join('\n');
+    // Add BOM for UTF-8 encoding (helps with Excel)
+    const csvContent =
+      "\ufeff" +
+      [headers.join(","), ...csvRows.map((row) => row.join(","))].join("\n");
 
     // Set response headers for file download
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename="province_wise_customers_${new Date().toISOString().split('T')[0]}.csv"`);
-    
-    res.send(csvContent);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="province_wise_customers_${
+        new Date().toISOString().split("T")[0]
+      }.csv"`
+    );
 
+    res.send(csvContent);
   } catch (error) {
     console.error("Error exporting data:", error);
     res.status(500).json({

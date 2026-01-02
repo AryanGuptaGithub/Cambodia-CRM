@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Download,
   Calendar,
@@ -6,6 +6,7 @@ import {
   Package,
   DollarSign,
   RefreshCw,
+  Search,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
@@ -44,11 +45,14 @@ const ExpiryStockReport = () => {
   const [exportLoading, setExportLoading] = useState(false);
   const [filter, setFilter] = useState("all");
   const [currentPage, setCurrentPage] = useState(1);
+  const [searchTerm, setSearchTerm] = useState("");
   const [itemsPerPage] = useState(10);
+  const inputRef = useRef(null);
 
   const fetchExpiryStockData = async (
     page = currentPage,
-    filterType = filter
+    filterType = filter,
+    search = searchTerm
   ) => {
     setLoading(true);
     try {
@@ -59,6 +63,7 @@ const ExpiryStockReport = () => {
             page: page,
             limit: itemsPerPage,
             filter: filterType,
+            search: search,
           },
         }
       );
@@ -130,16 +135,42 @@ const ExpiryStockReport = () => {
     fetchExpiryStockData();
   }, []);
 
+  // Add useEffect to handle search with debouncing
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(() => {
+      setCurrentPage(1);
+      fetchExpiryStockData(1, filter, searchTerm);
+    }, 500); // 500ms debounce
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchTerm]);
+
   const handleFilterChange = (newFilter) => {
     setFilter(newFilter);
     setCurrentPage(1);
-    fetchExpiryStockData(1, newFilter);
+    fetchExpiryStockData(1, newFilter, searchTerm);
   };
 
   const handlePageChange = (newPage) => {
     if (newPage >= 1 && newPage <= data.pagination.pages) {
       setCurrentPage(newPage);
-      fetchExpiryStockData(newPage, filter);
+      fetchExpiryStockData(newPage, filter, searchTerm);
+    }
+  };
+
+  const handleSearchChange = (e) => {
+    setSearchTerm(e.target.value);
+  };
+
+  const handleSearchIconClick = () => {
+    if (inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.classList.add("highlight");
+      setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.classList.remove("highlight");
+        }
+      }, 1000);
     }
   };
 
@@ -163,6 +194,7 @@ const ExpiryStockReport = () => {
         {
           params: {
             filter: filter,
+            search: searchTerm,
           },
         }
       );
@@ -215,6 +247,8 @@ const ExpiryStockReport = () => {
         [`Expiry Stock Report - ${exportData.filterLabel}`, '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
         // Second row: Report date (centered)
         [`Report Generated: ${exportData.generatedDate}`, '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+        // Third row: Search term if exists
+        searchTerm ? [`Search Term: "${searchTerm}"`, '', '', '', '', '', '', '', '', '', '', '', '', '', ''] : [],
         // Empty row for spacing
         [],
         // Summary section
@@ -269,8 +303,10 @@ const ExpiryStockReport = () => {
         { s: { r: 0, c: 0 }, e: { r: 0, c: 14 } },
         // Report date - merge all 15 columns and center
         { s: { r: 1, c: 0 }, e: { r: 1, c: 14 } },
+        // Search term - merge all 15 columns and center if exists
+        ...(searchTerm ? [{ s: { r: 2, c: 0 }, e: { r: 2, c: 14 } }] : []),
         // Summary title - merge all 15 columns and center
-        { s: { r: 3, c: 0 }, e: { r: 3, c: 14 } },
+        { s: { r: searchTerm ? 4 : 3, c: 0 }, e: { r: searchTerm ? 4 : 3, c: 14 } },
       ];
 
       // Set column widths
@@ -312,8 +348,21 @@ const ExpiryStockReport = () => {
         };
       }
 
-      // Summary title (row 4) - Centered with yellow background
-      const summaryTitleCell = ws["A4"];
+      // Search term (row 3) - Centered with light blue background if exists
+      if (searchTerm) {
+        const searchCell = ws["A3"];
+        if (searchCell) {
+          searchCell.s = {
+            font: { bold: true, sz: 11, italic: true },
+            fill: { fgColor: { rgb: "E6F3FF" } }, // Light blue background
+            alignment: { horizontal: "center", vertical: "center" },
+          };
+        }
+      }
+
+      // Summary title - Centered with yellow background
+      const summaryTitleRow = searchTerm ? 4 : 3;
+      const summaryTitleCell = ws[`A${summaryTitleRow + 1}`];
       if (summaryTitleCell) {
         summaryTitleCell.s = {
           font: { bold: true, sz: 14 },
@@ -322,8 +371,9 @@ const ExpiryStockReport = () => {
         };
       }
 
-      // Summary data rows (rows 5-9) - Left aligned with light lavender background
-      for (let row = 4; row < 4 + summaryData.length; row++) {
+      // Summary data rows - Left aligned with light lavender background
+      const summaryDataStartRow = summaryTitleRow + 1;
+      for (let row = summaryDataStartRow; row < summaryDataStartRow + summaryData.length; row++) {
         for (let col = 0; col < 15; col++) {
           const cellAddress = XLSX.utils.encode_cell({ r: row, c: col });
           if (ws[cellAddress]) {
@@ -337,7 +387,7 @@ const ExpiryStockReport = () => {
       }
 
       // Column headers row - Centered with gray background
-      const headerRow = 4 + summaryData.length + 1; // Calculate header row position
+      const headerRow = summaryDataStartRow + summaryData.length + 1; // Calculate header row position
       for (let col = 0; col < 15; col++) {
         const cellAddress = XLSX.utils.encode_cell({ r: headerRow, c: col });
         if (ws[cellAddress]) {
@@ -374,7 +424,7 @@ const ExpiryStockReport = () => {
       // Generate Excel file
       const fileName = `expiry-stock-report-${
         new Date().toISOString().split("T")[0]
-      }-${filter}.xlsx`;
+      }-${filter}${searchTerm ? `-search-${searchTerm.substring(0, 10)}` : ""}.xlsx`;
       XLSX.writeFile(wb, fileName);
 
       showToast("success", "Excel file downloaded successfully");
@@ -444,21 +494,6 @@ const ExpiryStockReport = () => {
     }
     
     return summaryRows;
-  };
-
-  const getFilterLabel = (filter) => {
-    switch (filter) {
-      case "all":
-        return "All Items";
-      case "expired":
-        return "Expired Items";
-      case "near-expiry":
-        return "Near Expiry (≤15 days)";
-      case "critical":
-        return "Critical (≤3 days)";
-      default:
-        return "All Items";
-    }
   };
 
   const getDaysRemainingColor = (item) => {
@@ -540,7 +575,7 @@ const ExpiryStockReport = () => {
     }
 
     return (
-      <div className="mt-4 p-5 flex gap-2 justify-center">
+      <div className="mt-4 p-5 flex gap-2">
         <button
           onClick={() => handlePageChange(currentPage - 1)}
           disabled={currentPage === 1}
@@ -888,8 +923,25 @@ const ExpiryStockReport = () => {
         </div>
 
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => fetchExpiryStockData(currentPage, filter)}
+          {/* Search Input */}
+          <div className="relative">
+            <Search
+              className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 cursor-pointer"
+              size={20}
+              onClick={handleSearchIconClick}
+            />
+            <input
+              type="text"
+              placeholder="Search product or supplier..."
+              value={searchTerm}
+              ref={inputRef}
+              onChange={handleSearchChange}
+              className="pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-200 focus:border-blue-500 w-64"
+            />
+          </div>
+
+          {/* <button
+            onClick={() => fetchExpiryStockData(currentPage, filter, searchTerm)}
             disabled={loading}
             className={`flex items-center gap-2 ${
               loading ? "bg-blue-400" : "bg-blue-600 hover:bg-blue-700"
@@ -897,7 +949,7 @@ const ExpiryStockReport = () => {
           >
             <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
             {loading ? "Loading..." : "Refresh"}
-          </button>
+          </button> */}
           <button
             className={`flex items-center gap-2 ${
               !isExportEnabled() || exportLoading
@@ -924,6 +976,11 @@ const ExpiryStockReport = () => {
             Stock Items Expiring Soon or Expired
             <span className="ml-2 text-sm font-normal text-gray-600">
               ({data.items.length} items on this page)
+              {searchTerm && (
+                <span className="ml-2 text-blue-600">
+                  • Search: "{searchTerm}"
+                </span>
+              )}
             </span>
           </h2>
         </div>
@@ -1026,10 +1083,22 @@ const ExpiryStockReport = () => {
                       className="px-6 py-8 text-center text-gray-500"
                     >
                       <Package className="w-12 h-12 text-gray-300 mx-auto mb-2" />
-                      <div>No items found for the selected filter</div>
+                      <div>
+                        {searchTerm
+                          ? `No items found for "${searchTerm}"`
+                          : "No items found for the selected filter"}
+                      </div>
+                      {searchTerm && (
+                        <button
+                          onClick={() => setSearchTerm("")}
+                          className="mt-2 text-blue-600 hover:text-blue-800 text-sm font-medium"
+                        >
+                          Clear search
+                        </button>
+                      )}
                       <button
                         onClick={() => handleFilterChange("all")}
-                        className="mt-2 text-blue-600 hover:text-blue-800 text-sm font-medium"
+                        className="mt-2 ml-2 text-blue-600 hover:text-blue-800 text-sm font-medium"
                       >
                         Show all items
                       </button>
