@@ -1,17 +1,23 @@
-import React, { useState, useEffect } from "react";
+// Frontend: SalaryCOGSRatio.jsx - Fixed version
+import React, { useState, useEffect, useRef } from "react";
 import {
+  TrendingUp,
   Download,
-  ChevronLeft,
-  ChevronRight,
   Search,
   X,
   Users,
   DollarSign,
+  BarChart3,
+  Percent,
+  FileDown,
+  Filter,
   Scale,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
 import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -20,43 +26,261 @@ const SalaryCOGSRatio = () => {
     summary: {
       totalSalary: 0,
       totalCOGS: 0,
-      ratio: 0,
+      totalSales: 0,
+      totalProfit: 0,
+      totalExpense: 0,
+      salaryCOGSRatio: 0,
+      expenseCOGSRatio: 0,
+      salarySaleRatio: 0,
+      totalAllowance: 0,
+      totalIncentive: 0,
+      totalTourExpense: 0,
+      profitMargin: 0,
     },
     records: [],
   });
 
   const [loading, setLoading] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
-  const [recordsPerPage] = useState(10);
+  const [selectedTab, setSelectedTab] = useState("currentMonth");
+  const [showCustomFilter, setShowCustomFilter] = useState(false);
+  const [customDateRange, setCustomDateRange] = useState({
+    startDate: null,
+    endDate: null,
+  });
 
-  const fetchSalaryCOGSData = async () => {
+  const [pagination, setPagination] = useState({
+    currentPage: 1,
+    totalPages: 1,
+    totalRecords: 0,
+    hasNext: false,
+    hasPrev: false,
+  });
+
+  const inputRef = useRef(null);
+  const itemsPerPage = 7; // Changed to 7 as requested
+
+  const visiblePages = useVisiblePages(
+    pagination.currentPage,
+    pagination.totalPages
+  );
+
+  const getSerialNumber = (index) => {
+    return (pagination.currentPage - 1) * itemsPerPage + index + 1;
+  };
+
+  const getCurrentMonthName = () => {
+    return new Date().toLocaleString("default", { month: "long" });
+  };
+
+  const getCurrentYear = () => {
+    return new Date().getFullYear();
+  };
+
+  const getPreviousMonthName = () => {
+    const previousMonth = new Date();
+    previousMonth.setMonth(previousMonth.getMonth() - 1);
+    return previousMonth.toLocaleString("default", { month: "long" });
+  };
+
+  const getJanToPreviousMonthDisplay = () => {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+    
+    if (currentMonth === 0) {
+      return `Jan - Dec ${currentYear - 1}`;
+    } else {
+      return `Jan - ${getPreviousMonthName()} ${currentYear}`;
+    }
+  };
+
+  const getYearMonthFromDate = (date) => {
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = (d.getMonth() + 1).toString().padStart(2, "0");
+    return `${year}-${month}`;
+  };
+
+  const getDateRange = () => {
+    const today = new Date();
+    const currentYear = today.getFullYear();
+    const currentMonth = today.getMonth();
+
+    switch (selectedTab) {
+      case "today":
+        const todayStr = today.toISOString().split("T")[0];
+        return {
+          startDate: todayStr,
+          endDate: todayStr,
+          period: getYearMonthFromDate(today),
+          displayDate: todayStr,
+        };
+
+      case "all":
+        return {
+          startDate: null,
+          endDate: null,
+          period: null,
+          displayDate: "All Records",
+        };
+
+      case "currentMonth":
+        const firstDay = new Date(currentYear, currentMonth, 1);
+        const lastDay = new Date(currentYear, currentMonth + 1, 0);
+        return {
+          startDate: firstDay.toISOString().split("T")[0],
+          endDate: lastDay.toISOString().split("T")[0],
+          period: `${currentYear}-${(currentMonth + 1).toString().padStart(2, "0")}`,
+          displayDate: `${getCurrentMonthName()} ${getCurrentYear()}`,
+        };
+
+      case "janToPreviousMonth":
+        const janFirst = new Date(currentYear, 0, 1);
+        const lastMonthLastDay = new Date(currentYear, currentMonth, 0);
+        return {
+          startDate: janFirst.toISOString().split("T")[0],
+          endDate: lastMonthLastDay.toISOString().split("T")[0],
+          period: null,
+          displayDate: getJanToPreviousMonthDisplay(),
+        };
+
+      case "custom":
+        const startStr = customDateRange.startDate
+          ? customDateRange.startDate.toISOString().split("T")[0]
+          : "";
+        const endStr = customDateRange.endDate
+          ? customDateRange.endDate.toISOString().split("T")[0]
+          : "";
+
+        return {
+          startDate: startStr,
+          endDate: endStr,
+          period: customDateRange.startDate
+            ? getYearMonthFromDate(customDateRange.startDate)
+            : null,
+          displayDate:
+            customDateRange.startDate && customDateRange.endDate
+              ? `${startStr} - ${endStr}`
+              : "Select custom dates",
+        };
+
+      default:
+        return {
+          startDate: null,
+          endDate: null,
+          period: null,
+          displayDate: "Current Month",
+        };
+    }
+  };
+
+  const fetchSalaryCOGSData = async (page = 1, search = searchTerm) => {
     setLoading(true);
     try {
-      const response = await axios.get(
-        `${backendUrl}/api/salary-cogs-ratio`
-      );
-      
-      setData(
-        response.data.data || {
-          summary: {
-            totalSalary: 0,
-            totalCOGS: 0,
-            ratio: 0,
-          },
-          records: [],
+      const dateRange = getDateRange();
+
+      let params = {
+        page: page,
+        limit: itemsPerPage,
+        dateFilter: selectedTab,
+      };
+
+      if (selectedTab !== "all") {
+        if (selectedTab === "custom" && (!dateRange.startDate || !dateRange.endDate)) {
+          setLoading(false);
+          showToast("warning", "Please select both start and end dates for custom filter");
+          return;
         }
-      );
+
+        if (dateRange.startDate) params.startDate = dateRange.startDate;
+        if (dateRange.endDate) params.endDate = dateRange.endDate;
+        if (dateRange.period) params.period = dateRange.period;
+      }
+
+      if (search && search.trim() !== "") {
+        params.search = search.trim();
+      }
+
+      const response = await axios.get(`${backendUrl}/api/salary-cogs-ratio`, {
+        params,
+      });
+
+      if (response.data.success) {
+        const summary = response.data.data?.summary || {
+          totalSalary: 0,
+          totalCOGS: 0,
+          totalSales: 0,
+          totalProfit: 0,
+          totalExpense: 0,
+          salaryCOGSRatio: 0,
+          expenseCOGSRatio: 0,
+          salarySaleRatio: 0,
+          totalAllowance: 0,
+          totalIncentive: 0,
+          totalTourExpense: 0,
+          profitMargin: 0,
+        };
+
+        const safeSummary = {
+          totalSalary: parseFloat(summary.totalSalary) || 0,
+          totalCOGS: parseFloat(summary.totalCOGS) || 0,
+          totalSales: parseFloat(summary.totalSales) || 0,
+          totalProfit: parseFloat(summary.totalProfit) || 0,
+          totalExpense: parseFloat(summary.totalExpense) || 0,
+          salaryCOGSRatio: parseFloat(summary.salaryCOGSRatio) || 0,
+          expenseCOGSRatio: parseFloat(summary.expenseCOGSRatio) || 0,
+          salarySaleRatio: parseFloat(summary.salarySaleRatio) || 0,
+          totalAllowance: parseFloat(summary.totalAllowance) || 0,
+          totalIncentive: parseFloat(summary.totalIncentive) || 0,
+          totalTourExpense: parseFloat(summary.totalTourExpense) || 0,
+          profitMargin: parseFloat(summary.profitMargin) || 0,
+        };
+
+        setData({
+          summary: safeSummary,
+          records: response.data.data?.records || [],
+        });
+
+        setPagination(
+          response.data.pagination || {
+            currentPage: 1,
+            totalPages: 1,
+            totalRecords: 0,
+            hasNext: false,
+            hasPrev: false,
+          }
+        );
+      } else {
+        throw new Error(response.data.message || "Failed to fetch data");
+      }
     } catch (error) {
       console.error("Error fetching salary COGS ratio data:", error);
-      showToast("error", "Failed to fetch salary COGS ratio data");
+      showToast("error", error.response?.data?.message || "Failed to fetch salary COGS ratio data");
       setData({
         summary: {
           totalSalary: 0,
           totalCOGS: 0,
-          ratio: 0,
+          totalSales: 0,
+          totalProfit: 0,
+          totalExpense: 0,
+          salaryCOGSRatio: 0,
+          expenseCOGSRatio: 0,
+          salarySaleRatio: 0,
+          totalAllowance: 0,
+          totalIncentive: 0,
+          totalTourExpense: 0,
+          profitMargin: 0,
         },
         records: [],
+      });
+      setPagination({
+        currentPage: 1,
+        totalPages: 1,
+        totalRecords: 0,
+        hasNext: false,
+        hasPrev: false,
       });
     } finally {
       setLoading(false);
@@ -64,60 +288,284 @@ const SalaryCOGSRatio = () => {
   };
 
   useEffect(() => {
-    fetchSalaryCOGSData();
-  }, []);
+    if (selectedTab === "custom") {
+      if (customDateRange.startDate && customDateRange.endDate) {
+        fetchSalaryCOGSData(1);
+      } else {
+        setData({
+          summary: {
+            totalSalary: 0,
+            totalCOGS: 0,
+            totalSales: 0,
+            totalProfit: 0,
+            totalExpense: 0,
+            salaryCOGSRatio: 0,
+            expenseCOGSRatio: 0,
+            salarySaleRatio: 0,
+            totalAllowance: 0,
+            totalIncentive: 0,
+            totalTourExpense: 0,
+            profitMargin: 0,
+          },
+          records: [],
+        });
+        setPagination({
+          currentPage: 1,
+          totalPages: 1,
+          totalRecords: 0,
+          hasNext: false,
+          hasPrev: false,
+        });
+      }
+    } else {
+      fetchSalaryCOGSData(1);
+    }
+  }, [selectedTab]);
 
-  const exportToExcel = () => {
-    showToast("info", "Export to Excel feature coming soon");
+  useEffect(() => {
+    if (selectedTab === "custom" && customDateRange.startDate && customDateRange.endDate) {
+      fetchSalaryCOGSData(1);
+    }
+  }, [customDateRange.startDate, customDateRange.endDate]);
+
+  const handlePageChange = (page) => {
+    if (page >= 1 && page <= pagination.totalPages) {
+      fetchSalaryCOGSData(page);
+    }
   };
 
-  // Filter records based on search term
-  const filteredRecords = data.records.filter(record =>
-    record.mrName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    record.srDate?.includes(searchTerm)
-  );
+  const handleSearchChange = (e) => {
+    setSearchTerm(e.target.value);
+  };
 
-  // Pagination
-  const totalPages = Math.ceil(filteredRecords.length / recordsPerPage);
-  const visiblePages = useVisiblePages(currentPage, totalPages);
-  const currentRecords = filteredRecords.slice(
-    (currentPage - 1) * recordsPerPage,
-    currentPage * recordsPerPage
-  );
+  const handleClearSearch = () => {
+    setSearchTerm("");
+    fetchSalaryCOGSData(1);
+  };
+
+  const handleCustomDateChange = (name, date) => {
+    setCustomDateRange((prev) => ({ ...prev, [name]: date }));
+  };
+
+  useEffect(() => {
+    const delayDebounce = setTimeout(() => {
+      fetchSalaryCOGSData(1, searchTerm);
+    }, 500);
+
+    return () => clearTimeout(delayDebounce);
+  }, [searchTerm]);
+
+  const handleApplyCustomFilter = () => {
+    if (!customDateRange.startDate || !customDateRange.endDate) {
+      showToast("warning", "Please select both start and end dates");
+      return;
+    }
+
+    if (customDateRange.startDate > customDateRange.endDate) {
+      showToast("warning", "Start date cannot be after end date");
+      return;
+    }
+
+    setSelectedTab("custom");
+    setShowCustomFilter(false);
+    fetchSalaryCOGSData(1);
+  };
+
+  const handleTabChange = (tab) => {
+    setSelectedTab(tab);
+    if (tab === "custom") {
+      setShowCustomFilter(true);
+    } else {
+      setCustomDateRange({
+        startDate: null,
+        endDate: null,
+      });
+      setShowCustomFilter(false);
+    }
+  };
+
+  const handleClearFilters = () => {
+    setCustomDateRange({
+      startDate: null,
+      endDate: null,
+    });
+    setSearchTerm("");
+    setSelectedTab("currentMonth");
+    setShowCustomFilter(false);
+  };
+
+  const exportToExcel = async () => {
+    if (data.records.length === 0) {
+      showToast("warning", "No data found to export");
+      return;
+    }
+
+    setExportLoading(true);
+    try {
+      const dateRange = getDateRange();
+
+      const params = {
+        dateFilter: selectedTab,
+        search: searchTerm.trim() || undefined,
+        export: "true"
+      };
+
+      if (selectedTab !== "all") {
+        if (dateRange.startDate) params.startDate = dateRange.startDate;
+        if (dateRange.endDate) params.endDate = dateRange.endDate;
+        if (dateRange.period) params.period = dateRange.period;
+      }
+
+      const response = await axios.get(
+        `${backendUrl}/api/salary-cogs-ratio/export`,
+        {
+          params,
+          responseType: "blob",
+        }
+      );
+
+      let filename = "salary-cogs-ratio-report.xlsx";
+      const contentDisposition = response.headers["content-disposition"];
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+        if (filenameMatch && filenameMatch[1]) {
+          filename = filenameMatch[1];
+        }
+      }
+
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+
+      showToast("success", "Excel report downloaded successfully");
+    } catch (error) {
+      console.error("Error exporting to Excel:", error);
+      if (error.response && error.response.status === 404) {
+        showToast("warning", "No data found for the selected filters");
+      } else {
+        showToast("error", "Failed to export Excel report");
+      }
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
+  const getActiveFilterDisplay = () => {
+    const dateRange = getDateRange();
+    return dateRange.displayDate || "Current Month";
+  };
 
   const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    }).format(amount || 0);
+    const num = parseFloat(amount);
+    return isNaN(num)
+      ? "$0.00"
+      : `$${num.toLocaleString(undefined, {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}`;
   };
 
-  const formatRatio = (ratio) => {
-    return typeof ratio === 'number' ? ratio.toFixed(4) : '0.0000';
+  const formatPercentage = (value) => {
+    const num = parseFloat(value);
+    if (isNaN(num)) return "0.00%";
+    return `${num.toFixed(2)}%`;
+  };
+
+  const formatRatio = (value) => {
+    const num = parseFloat(value);
+    return isNaN(num) ? "0.0000" : num.toFixed(4);
+  };
+
+  const getRatioColor = (ratio) => {
+    if (ratio <= 0.5) return "text-green-600";
+    if (ratio <= 1) return "text-yellow-600";
+    return "text-red-600";
+  };
+
+  const getPercentageColor = (percentage) => {
+    if (percentage >= 50) return "text-green-600";
+    if (percentage >= 30) return "text-yellow-600";
+    return "text-red-600";
   };
 
   const formatDate = (dateString) => {
-    if (!dateString) return 'N/A';
+    if (!dateString) return "N/A";
     try {
       const date = new Date(dateString);
-      return date.toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric'
+      return date.toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "short",
+        day: "numeric"
       });
     } catch {
       return dateString;
     }
   };
 
+  const renderPagination = () => {
+    if (pagination.totalPages <= 1) return null;
+
+    return (
+      <div className="flex items-center justify-start gap-2 mt-6">
+        <button
+          onClick={() => handlePageChange(pagination.currentPage - 1)}
+          disabled={!pagination.hasPrev}
+          className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${
+            pagination.hasPrev
+              ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
+              : "bg-gray-100 text-gray-400 cursor-not-allowed"
+          }`}
+        >
+          ← Prev
+        </button>
+
+        <div className="flex gap-1">
+          {visiblePages.map((page, index) => (
+            <button
+              key={index}
+              onClick={() =>
+                typeof page === "number" ? handlePageChange(page) : null
+              }
+              className={`min-w-[40px] px-3 py-2 rounded-lg cursor-pointer ${
+                page === pagination.currentPage
+                  ? "bg-indigo-600 text-white"
+                  : typeof page === "number"
+                  ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
+                  : "bg-transparent text-gray-500 cursor-default"
+              }`}
+              disabled={typeof page !== "number"}
+            >
+              {page}
+            </button>
+          ))}
+        </div>
+
+        <button
+          onClick={() => handlePageChange(pagination.currentPage + 1)}
+          disabled={!pagination.hasNext}
+          className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${
+            pagination.hasNext
+              ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
+              : "bg-gray-100 text-gray-400 cursor-not-allowed"
+          }`}
+        >
+          Next →
+        </button>
+      </div>
+    );
+  };
+
   const renderSummaryCards = () => (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-blue-500">
+    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-blue-500 border border-gray-200">
         <div className="flex justify-between items-center">
           <div>
-            <div className="text-sm text-gray-600">Total Salary</div>
+            <p className="text-sm text-gray-600">Total Salary</p>
             <div className="text-2xl font-bold text-gray-800">
               {loading ? (
                 <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
@@ -125,15 +573,18 @@ const SalaryCOGSRatio = () => {
                 formatCurrency(data.summary.totalSalary)
               )}
             </div>
+            <p className="text-xs text-gray-500 mt-1">
+              {formatPercentage(data.summary.salarySaleRatio || 0)} of Sales
+            </p>
           </div>
           <Users className="w-8 h-8 text-blue-500" />
         </div>
       </div>
-
-      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-orange-500">
+      
+      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-red-500 border border-gray-200">
         <div className="flex justify-between items-center">
           <div>
-            <div className="text-sm text-gray-600">Total COGS</div>
+            <p className="text-sm text-gray-600">Total COGS</p>
             <div className="text-2xl font-bold text-gray-800">
               {loading ? (
                 <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
@@ -141,166 +592,199 @@ const SalaryCOGSRatio = () => {
                 formatCurrency(data.summary.totalCOGS)
               )}
             </div>
+            <p className="text-xs text-gray-500 mt-1">
+              {formatPercentage(data.summary.cogsPercentage || 0)} of Sales
+            </p>
           </div>
-          <DollarSign className="w-8 h-8 text-orange-500" />
+          <DollarSign className="w-8 h-8 text-red-500" />
         </div>
       </div>
-
-      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-purple-500">
+      
+      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-purple-500 border border-gray-200">
         <div className="flex justify-between items-center">
           <div>
-            <div className="text-sm text-gray-600">Salary/COGS Ratio</div>
-            <div className="text-2xl font-bold text-gray-800">
+            <p className="text-sm text-gray-600">Salary/COGS Ratio</p>
+            <div className={`text-2xl font-bold mt-1 ${getRatioColor(data.summary.salaryCOGSRatio)}`}>
               {loading ? (
                 <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
               ) : (
-                data.summary.ratio?.toFixed(4) || '0.0000'
+                formatRatio(data.summary.salaryCOGSRatio)
               )}
             </div>
+            <p className="text-xs text-gray-500 mt-1">
+              Lower is better
+            </p>
           </div>
           <Scale className="w-8 h-8 text-purple-500" />
         </div>
       </div>
+      
+      <div className="bg-white p-6 rounded-xl shadow-md border-l-4 border-green-500 border border-gray-200">
+        <div className="flex justify-between items-center">
+          <div>
+            <p className="text-sm text-gray-600">Profit Margin</p>
+            <div className={`text-2xl font-bold mt-1 ${getPercentageColor(data.summary.profitMargin || 0)}`}>
+              {loading ? (
+                <div className="h-8 w-20 bg-gray-200 rounded animate-pulse"></div>
+              ) : (
+                formatPercentage(data.summary.profitMargin || 0)
+              )}
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              Profit: {formatCurrency(data.summary.totalProfit)}
+            </p>
+          </div>
+          <TrendingUp className="w-8 h-8 text-green-500" />
+        </div>
+      </div>
     </div>
   );
 
-  const renderTable = () => (
-    <div className="bg-white rounded-xl shadow-md overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse">
-          <thead className="bg-gray-50 border-b border-gray-200">
-            <tr>
-              <th className="p-4 text-left text-sm font-semibold text-gray-700">SR Date</th>
-              <th className="p-4 text-left text-sm font-semibold text-gray-700">MR Name</th>
-              <th className="p-4 text-right text-sm font-semibold text-gray-700">COGS</th>
-              <th className="p-4 text-right text-sm font-semibold text-gray-700">Salary</th>
-              <th className="p-4 text-right text-sm font-semibold text-gray-700">Incentive</th>
-              <th className="p-4 text-right text-sm font-semibold text-gray-700">Allowance</th>
-              <th className="p-4 text-right text-sm font-semibold text-gray-700">Tour Expense</th>
-              <th className="p-4 text-right text-sm font-semibold text-gray-700">Total Expense</th>
-              <th className="p-4 text-right text-sm font-semibold text-gray-700">Salary/Sale Ratio</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200">
-            {currentRecords.map((record, index) => (
-              <tr key={index} className="hover:bg-gray-50 transition-colors">
-                <td className="p-4 text-sm text-gray-600">
-                  {formatDate(record.srDate)}
-                </td>
-                <td className="p-4 text-sm font-medium text-gray-900 capitalize">
-                  {record.mrName || 'N/A'}
-                </td>
-                <td className="p-4 text-sm text-right font-semibold text-red-600">
-                  {formatCurrency(record.cogs)}
-                </td>
-                <td className="p-4 text-sm text-right text-blue-600">
-                  {formatCurrency(record.salary)}
-                </td>
-                <td className="p-4 text-sm text-right text-green-600">
-                  {formatCurrency(record.incentive)}
-                </td>
-                <td className="p-4 text-sm text-right text-purple-600">
-                  {formatCurrency(record.allowance)}
-                </td>
-                <td className="p-4 text-sm text-right text-orange-600">
-                  {formatCurrency(record.tourExpense)}
-                </td>
-                <td className="p-4 text-sm text-right font-semibold text-gray-900">
-                  {formatCurrency(record.totalExpense)}
-                </td>
-                <td className="p-4 text-sm text-right font-semibold text-indigo-600">
-                  {formatRatio(record.salarySaleRatio)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        {currentRecords.length === 0 && !loading && (
-          <div className="p-8 text-center text-gray-500">
-            No records found
+  const renderAdditionalMetrics = () => (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div className="bg-white p-4 rounded-lg shadow-md border">
+        <div className="flex justify-between items-center">
+          <div>
+            <div className="text-sm text-gray-600">Total Sales</div>
+            <div className="text-lg font-bold text-gray-800">
+              {formatCurrency(data.summary.totalSales)}
+            </div>
           </div>
-        )}
+          <BarChart3 className="w-5 h-5 text-gray-400" />
+        </div>
       </div>
 
-      {/* Pagination */}
-      {filteredRecords.length > 0 && (
-        <div className="px-6 py-4 border-t border-gray-200 bg-gray-50">
-          <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
-            <div className="text-sm text-gray-700">
-              Showing {((currentPage - 1) * recordsPerPage) + 1} to {Math.min(currentPage * recordsPerPage, filteredRecords.length)} of {filteredRecords.length} entries
-            </div>
-            
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                disabled={currentPage === 1}
-                className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronLeft size={16} />
-              </button>
-
-              {visiblePages.map((page, index) => (
-                <button
-                  key={index}
-                  onClick={() => typeof page === 'number' && setCurrentPage(page)}
-                  disabled={page === '...'}
-                  className={`min-w-10 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    page === '...' 
-                      ? 'text-gray-500 cursor-default' 
-                      : currentPage === page
-                      ? 'bg-indigo-600 text-white'
-                      : 'text-gray-700 hover:bg-gray-100 border border-gray-300'
-                  }`}
-                >
-                  {page}
-                </button>
-              ))}
-
-              <button
-                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                disabled={currentPage === totalPages}
-                className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                <ChevronRight size={16} />
-              </button>
+      <div className="bg-white p-4 rounded-lg shadow-md border">
+        <div className="flex justify-between items-center">
+          <div>
+            <div className="text-sm text-gray-600">Total Expense</div>
+            <div className="text-lg font-bold text-gray-800">
+              {formatCurrency(data.summary.totalExpense)}
             </div>
           </div>
+          <DollarSign className="w-5 h-5 text-gray-400" />
         </div>
-      )}
+      </div>
+
+      <div className="bg-white p-4 rounded-lg shadow-md border">
+        <div className="flex justify-between items-center">
+          <div>
+            <div className="text-sm text-gray-600">Expense/COGS Ratio</div>
+            <div className={`text-lg font-bold ${getRatioColor(data.summary.expenseCOGSRatio)}`}>
+              {formatRatio(data.summary.expenseCOGSRatio)}
+            </div>
+          </div>
+          <Percent className="w-5 h-5 text-gray-400" />
+        </div>
+      </div>
     </div>
   );
+
+  const renderTableHeaders = () => (
+    <thead className="bg-gray-100 text-gray-700 border-b">
+      <tr>
+        <th className="p-3 text-sm font-medium">Sr.No</th>
+        <th className="p-3 text-sm font-medium">Date</th>
+        <th className="p-3 text-sm font-medium">MR Name</th>
+        <th className="p-3 text-sm font-medium">COGS ($)</th>
+        <th className="p-3 text-sm font-medium">Sales ($)</th>
+        <th className="p-3 text-sm font-medium">Profit ($)</th>
+        <th className="p-3 text-sm font-medium">Salary ($)</th>
+        <th className="p-3 text-sm font-medium">Total Expense ($)</th>
+        <th className="p-3 text-sm font-medium">S/COGS Ratio</th>
+        <th className="p-3 text-sm font-medium">E/COGS Ratio</th>
+        <th className="p-3 text-sm font-medium">Profit %</th>
+      </tr>
+    </thead>
+  );
+
+  const renderTableRow = (record, index) => {
+    return (
+      <tr
+        key={`${record.mrId || record.mrName}-${index}`}
+        className={`hover:bg-gray-50 ${index === data.records.length - 1 ? "" : "border-b"}`}
+      >
+        <td className="p-3">
+          <div className="text-sm text-gray-600 font-medium">
+            {getSerialNumber(index)}
+          </div>
+        </td>
+        <td className="p-3 text-sm text-gray-600">
+          {formatDate(record.srDate)}
+        </td>
+        <td className="p-3">
+          <div className="text-sm font-medium text-gray-900 capitalize">
+            {record.mrName || "N/A"}
+          </div>
+          <div className="text-xs text-gray-500">
+            Sales: {record.saleCount || 0} | Customers: {record.customerCount || 0}
+          </div>
+        </td>
+        <td className="p-3 text-sm font-semibold text-red-600">
+          {formatCurrency(record.cogs)}
+        </td>
+        <td className="p-3 text-sm font-semibold text-blue-600">
+          {formatCurrency(record.totalSales)}
+        </td>
+        <td className="p-3 text-sm font-semibold text-green-600">
+          {formatCurrency(record.profit)}
+        </td>
+        <td className="p-3 text-sm font-semibold text-gray-800">
+          {formatCurrency(record.salary)}
+        </td>
+        <td className="p-3 text-sm font-semibold text-gray-900 font-bold">
+          {formatCurrency(record.totalExpense)}
+        </td>
+        <td className={`p-3 text-sm font-semibold ${getRatioColor(record.salaryCOGSRatio)}`}>
+          {formatRatio(record.salaryCOGSRatio)}
+        </td>
+        <td className={`p-3 text-sm font-semibold ${getRatioColor(record.expenseCOGSRatio)}`}>
+          {formatRatio(record.expenseCOGSRatio)}
+        </td>
+        <td className={`p-3 text-sm font-semibold ${getPercentageColor(record.profitMargin)}`}>
+          {formatPercentage(record.profitMargin)}
+        </td>
+      </tr>
+    );
+  };
+
+  const getColSpan = () => {
+    return 11; // Number of columns in the table
+  };
 
   return (
     <div className="p-6">
-      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800">
-            Salary / COGS Ratio Report
-          </h1>
-          <p className="text-gray-600 mt-1">
-            Analyze salary expenses against cost of goods sold
-          </p>
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+        <div className="flex items-center gap-3">
+          <Scale className="w-8 h-8 text-indigo-600" />
+          <div>
+            <h1 className="text-2xl font-bold text-gray-800">
+              Salary / COGS Ratio Report
+            </h1>
+            <p className="text-sm text-gray-600">
+              Analyze salary and expense efficiency against cost of goods sold
+            </p>
+          </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full lg:w-auto">
-          {/* Search Bar */}
-          <div className="relative w-full sm:w-64">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+          <div className="relative">
             <input
+              ref={inputRef}
               type="text"
-              placeholder="Search by MR name or date..."
+              placeholder="Search MR Name..."
               value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 transition-colors"
+              onChange={handleSearchChange}
+              className="pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full sm:w-64"
+            />
+            <Search
+              className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+              size={18}
             />
             {searchTerm && (
               <button
-                onClick={() => setSearchTerm('')}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                onClick={handleClearSearch}
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
               >
                 <X size={16} />
               </button>
@@ -309,37 +793,215 @@ const SalaryCOGSRatio = () => {
 
           <button
             onClick={exportToExcel}
-            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg shadow-md transition-colors whitespace-nowrap"
+            disabled={exportLoading || data.records.length === 0}
+            className="flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white px-4 py-2 rounded-lg shadow-md transition-colors min-w-[140px]"
           >
-            <Download size={18} />
-            Export Excel
+            {exportLoading ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                <span>Exporting...</span>
+              </>
+            ) : (
+              <>
+                <FileDown size={18} />
+                <span>Export Excel</span>
+              </>
+            )}
           </button>
         </div>
       </div>
 
-      {renderSummaryCards()}
-      
-      <div className="mb-6">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-semibold text-gray-800">
-            Detailed Records
-          </h2>
-          <div className="text-sm text-gray-600">
-            {filteredRecords.length} records found
-          </div>
+      {/* Time Filter Tabs */}
+      <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-gray-200">
+        <div className="flex flex-wrap gap-2 mb-4">
+          <button
+            onClick={() => handleTabChange("today")}
+            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
+              selectedTab === "today"
+                ? "bg-indigo-600 text-white"
+                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+            }`}
+          >
+            Today
+          </button>
+          <button
+            onClick={() => handleTabChange("all")}
+            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
+              selectedTab === "all"
+                ? "bg-indigo-600 text-white"
+                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+            }`}
+          >
+            All Records
+          </button>
+          <button
+            onClick={() => handleTabChange("currentMonth")}
+            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
+              selectedTab === "currentMonth"
+                ? "bg-indigo-600 text-white"
+                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+            }`}
+          >
+            Current Month ({getCurrentMonthName()} {getCurrentYear()})
+          </button>
+          <button
+            onClick={() => handleTabChange("janToPreviousMonth")}
+            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
+              selectedTab === "janToPreviousMonth"
+                ? "bg-indigo-600 text-white"
+                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+            }`}
+          >
+            {getJanToPreviousMonthDisplay()}
+          </button>
+          <button
+            onClick={() => handleTabChange("custom")}
+            className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
+              selectedTab === "custom"
+                ? "bg-indigo-600 text-white"
+                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+            }`}
+          >
+            Custom Filter
+          </button>
         </div>
 
-        {loading ? (
-          <div className="bg-white p-8 rounded-xl shadow-md text-center">
-            <div className="flex justify-center items-center">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
-              <span className="ml-3 text-gray-600">Loading salary COGS ratio data...</span>
+        {/* Active Filter Display */}
+        <div className="flex items-center gap-2 text-sm text-gray-600">
+          <Filter size={16} />
+          <span>Active Filter: </span>
+          <span className="font-medium">{getActiveFilterDisplay()}</span>
+        </div>
+      </div>
+
+      {/* Summary Cards */}
+      {renderSummaryCards()}
+
+      {/* Additional Metrics */}
+      {renderAdditionalMetrics()}
+
+      {/* Data Table */}
+      <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
+        <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
+          {renderTableHeaders()}
+          <tbody>
+            {loading ? (
+              <tr>
+                <td colSpan={getColSpan()} className="p-8 text-center">
+                  <div className="flex flex-col items-center justify-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mb-4"></div>
+                    <span className="text-gray-600">
+                      Loading salary COGS ratio data...
+                    </span>
+                    <span className="text-sm text-gray-500 mt-2">
+                      Please wait while we fetch the latest data
+                    </span>
+                  </div>
+                </td>
+              </tr>
+            ) : data.records.length > 0 ? (
+              data.records.map((record, index) => renderTableRow(record, index))
+            ) : (
+              <tr>
+                <td colSpan={getColSpan()} className="p-8 text-center">
+                  <BarChart3 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">
+                    No data found
+                  </h3>
+                  <p className="text-gray-500 max-w-md mx-auto">
+                    {selectedTab === "custom" &&
+                    (!customDateRange.startDate || !customDateRange.endDate)
+                      ? "Please select start and end dates"
+                      : searchTerm
+                      ? `No salary COGS ratio data found for "${searchTerm}". Try a different search term.`
+                      : "No salary COGS ratio data available for the selected date range."}
+                  </p>
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {renderPagination()}
+
+      {showCustomFilter && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
+          <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-semibold text-gray-800">
+                Custom Filter
+              </h2>
+              <button
+                onClick={() => setShowCustomFilter(false)}
+                className="text-gray-500 hover:text-gray-700 cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="space-y-4 mb-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Start Date
+                </label>
+                <DatePicker
+                  selected={customDateRange.startDate}
+                  onChange={(date) => handleCustomDateChange("startDate", date)}
+                  selectsStart
+                  startDate={customDateRange.startDate}
+                  endDate={customDateRange.endDate}
+                  className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholderText="Start date"
+                  dateFormat="yyyy-MM-dd"
+                  isClearable
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  End Date
+                </label>
+                <DatePicker
+                  selected={customDateRange.endDate}
+                  onChange={(date) => handleCustomDateChange("endDate", date)}
+                  selectsEnd
+                  startDate={customDateRange.startDate}
+                  endDate={customDateRange.endDate}
+                  minDate={customDateRange.startDate}
+                  className="w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholderText="End date"
+                  dateFormat="yyyy-MM-dd"
+                  isClearable
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-between gap-3">
+              <button
+                onClick={handleClearFilters}
+                className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer transition-colors"
+              >
+                Clear All
+              </button>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowCustomFilter(false)}
+                  className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-5 py-2 rounded-lg cursor-pointer transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleApplyCustomFilter}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg cursor-pointer transition-colors"
+                >
+                  Apply Filter
+                </button>
+              </div>
             </div>
           </div>
-        ) : (
-          renderTable()
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 };

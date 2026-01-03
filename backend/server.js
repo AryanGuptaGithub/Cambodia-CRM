@@ -62,6 +62,10 @@ import mrCash from "./routers/accounts/mrCashRoutes.js";
 import overdue from "./routers/overdue.js";
 import productReport from "./routers/reports/productReport.js";
 import outstandingCollections from "./routers/reports/outstandingCollections.js";
+import salaryCogsRatio from "./routers/reports/salaryCOGSRatio.js";
+import operationCostCOGSRatio from "./routers/reports/operationCostCOGSRatio.js";
+import operationCostSalesRatio from "./routers/reports/operationCostSalesRatio.js";
+import tourExpenseSales from "./routers/reports/tourExpenseSales.js";
 
 dotenv.config();
 
@@ -151,6 +155,10 @@ app.use("/api", mrCash);
 app.use("/api", overdue);
 app.use("/api", productReport);
 app.use("/api", outstandingCollections);
+app.use("/api", salaryCogsRatio);
+app.use("/api", operationCostCOGSRatio);
+app.use("/api", operationCostSalesRatio);
+app.use("/api", tourExpenseSales);
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);

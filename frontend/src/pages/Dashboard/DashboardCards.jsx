@@ -46,7 +46,7 @@ const DashboardCard = ({
             <p className="text-sm font-medium text-gray-600">{title}</p>
           </div>
           <p className={`text-2xl font-bold ${colors.text} mt-2`}>
-            ${formatCurrency(amount)}
+            ${formatCurrency(amount || 0)}
           </p>
           {growth !== undefined ? (
             <p className="text-xs text-gray-500 mt-1">
@@ -86,85 +86,98 @@ export const DashboardCards = ({
   dateRanges,
   prevMonthRanges,
   overdueTableData,
-  creditSaleTableData, // ADD THIS PROP
+  creditSaleTableData,
 }) => {
+  // Helper function to safely get numeric values
+  const getSafeNumber = (value) => {
+    return typeof value === 'number' ? value : 0;
+  };
+
   const getCurrentSalesAmount = () => {
+    if (!salesData) return 0;
+    
     switch (activeSalesSubTab) {
       case "Today":
-        return salesData?.todaySales || 0;
+        return getSafeNumber(salesData.todaySales);
       case "Month":
-        return salesData?.monthlySales || 0;
+        return getSafeNumber(salesData.monthlySales);
       case "Year":
-        return salesData?.yearSales || 0;
+        return getSafeNumber(salesData.yearSales);
       case "Credit_Sale":
-        return salesData?.creditSale || 0;
+        return getSafeNumber(salesData.creditSale);
       case "Pending":
-        return salesData?.pendingSales || 0;
+        return getSafeNumber(salesData.pendingSales);
       case "Collected":
-        return salesData?.collectedSales || 0;
+        return getSafeNumber(salesData.collectedSales);
       case "Overdue":
-        return salesData?.overdueAmount || 0;
+        return getSafeNumber(salesData.overdueAmount);
       case "Unreceive_Payment":
-        return salesData?.unreceivePayment || 0;
+        return getSafeNumber(salesData.unreceivePayment);
       default:
-        return salesData?.todaySales || 0;
+        return getSafeNumber(salesData.todaySales);
     }
   };
 
   const getCurrentGrowth = () => {
+    if (!salesData) return 0;
+    
     switch (activeSalesSubTab) {
       case "Today":
-        return salesData?.todayGrowth || 0;
+        return getSafeNumber(salesData.todayGrowth);
       case "Month":
-        return salesData?.monthlyGrowth || 0;
+        return getSafeNumber(salesData.monthlyGrowth);
       case "Year":
-        return salesData?.yearGrowth || 0;
+        return getSafeNumber(salesData.yearGrowth);
       case "Overdue":
-        return salesData?.overdueGrowth || 0;
+        return getSafeNumber(salesData.overdueGrowth);
       case "Unreceive_Payment":
-        return salesData?.unreceivePaymentGrowth || 0;
+        return getSafeNumber(salesData.unreceivePaymentGrowth);
       default:
-        return salesData?.todayGrowth || 0;
+        return getSafeNumber(salesData.todayGrowth);
     }
   };
 
   const getCurrentOutstandingAmount = () => {
+    if (!outstandingData) return 0;
+    
     switch (activeOutstandingSubTab) {
       case "Today":
-        return outstandingData?.todayOutstanding || 0;
+        return getSafeNumber(outstandingData.todayOutstanding);
       case "Month":
-        return outstandingData?.monthlyOutstanding || 0;
+        return getSafeNumber(outstandingData.monthlyOutstanding);
       case "Year":
-        return outstandingData?.yearOutstanding || 0;
+        return getSafeNumber(outstandingData.yearOutstanding);
       case "30+ Days":
-        return outstandingData?.thirtyPlusDays || 0;
+        return getSafeNumber(outstandingData.thirtyPlusDays);
       case "60+ Days":
-        return outstandingData?.sixtyPlusDays || 0;
+        return getSafeNumber(outstandingData.sixtyPlusDays);
       case "90+ Days":
-        return outstandingData?.ninetyPlusDays || 0;
+        return getSafeNumber(outstandingData.ninetyPlusDays);
       case "Overdue":
-        return outstandingData?.overdueAmount || 0;
+        return getSafeNumber(outstandingData.overdueAmount);
       case "Unreceive_Payment":
-        return outstandingData?.unreceivePayment || 0;
+        return getSafeNumber(outstandingData.unreceivePayment);
       default:
-        return outstandingData?.todayOutstanding || 0;
+        return getSafeNumber(outstandingData.todayOutstanding);
     }
   };
 
   const getCurrentOutstandingGrowth = () => {
+    if (!outstandingData) return 0;
+    
     switch (activeOutstandingSubTab) {
       case "Today":
-        return outstandingData?.todayGrowth || 0;
+        return getSafeNumber(outstandingData.todayGrowth);
       case "Month":
-        return outstandingData?.monthlyGrowth || 0;
+        return getSafeNumber(outstandingData.monthlyGrowth);
       case "Year":
-        return outstandingData?.yearGrowth || 0;
+        return getSafeNumber(outstandingData.yearGrowth);
       case "Overdue":
-        return outstandingData?.overdueGrowth || 0;
+        return getSafeNumber(outstandingData.overdueGrowth);
       case "Unreceive_Payment":
-        return outstandingData?.unreceivePaymentGrowth || 0;
+        return getSafeNumber(outstandingData.unreceivePaymentGrowth);
       default:
-        return outstandingData?.todayGrowth || 0;
+        return getSafeNumber(outstandingData.todayGrowth);
     }
   };
 
@@ -236,7 +249,7 @@ export const DashboardCards = ({
     }
 
     return filteredExpenses.reduce(
-      (sum, expense) => sum + (expense.amount || 0),
+      (sum, expense) => sum + getSafeNumber(expense.amount),
       0
     );
   };
@@ -246,46 +259,48 @@ export const DashboardCards = ({
 
     switch (activePayrollSubTab) {
       case "Prev Month":
-        amount = totalPayroll || 0;
+        amount = getSafeNumber(totalPayroll);
         break;
       case "YTD":
-        amount = payrollYTDTotal || 0;
+        amount = getSafeNumber(payrollYTDTotal);
         break;
       case "Pending":
-        amount = expenseData?.pendingPayroll || 0;
+        amount = getSafeNumber(expenseData?.pendingPayroll);
         break;
       case "Paid":
-        amount = expenseData?.paidPayroll || 0;
+        amount = getSafeNumber(expenseData?.paidPayroll);
         break;
       case "Overdue":
-        amount = expenseData?.overduePayroll || 0;
+        amount = getSafeNumber(expenseData?.overduePayroll);
         break;
       case "Unreceive_Payment":
-        amount = expenseData?.unpaidPayroll || 0;
+        amount = getSafeNumber(expenseData?.unpaidPayroll);
         break;
       default:
-        amount = totalPayroll || 0;
+        amount = getSafeNumber(totalPayroll);
     }
 
     return amount;
   };
 
   const getCurrentStockAmount = () => {
+    if (!stockData) return 0;
+    
     switch (activeStockSubTab) {
       case "Today":
-        return stockData?.stockValue || 0;
+        return getSafeNumber(stockData.stockValue);
       case "Low Stock":
-        return stockData?.lowStockValue || 0;
+        return getSafeNumber(stockData.lowStockValue);
       case "Expiring":
-        return stockData?.expiringStockValue || 0;
+        return getSafeNumber(stockData.expiringStockValue);
       case "All":
-        return stockData?.totalStockValue || 0;
+        return getSafeNumber(stockData.totalStockValue);
       case "Overdue":
-        return stockData?.overdueStockValue || 0;
+        return getSafeNumber(stockData.overdueStockValue);
       case "Unreceive_Payment":
-        return stockData?.unreceivedStockValue || 0;
+        return getSafeNumber(stockData.unreceivedStockValue);
       default:
-        return stockData?.stockValue || 0;
+        return getSafeNumber(stockData.stockValue);
     }
   };
 
@@ -294,30 +309,31 @@ export const DashboardCards = ({
     if (overdueTableData && overdueTableData.length > 0) {
       // Calculate from actual overdue data
       return overdueTableData.reduce((sum, invoice) => {
-        const overdueAmount =
+        const overdueAmount = getSafeNumber(
           invoice.overdueAmount ||
           (invoice.dueAmount > 0
             ? invoice.dueAmount
-            : Math.max(0, invoice.totalAmount - (invoice.paidAmount || 0)));
+            : Math.max(0, getSafeNumber(invoice.totalAmount) - getSafeNumber(invoice.paidAmount)))
+        );
         return sum + overdueAmount;
       }, 0);
     }
 
     // Fallback to salesData.overdueAmount
-    return salesData?.overdueAmount || 0;
+    return getSafeNumber(salesData?.overdueAmount);
   };
 
-  // Get credit sale cash not received amount - UPDATED
+  // Get credit sale cash not received amount
   const getCreditSaleCashNotReceived = () => {
-    // First, try to calculate from creditSaleTableData (same as SidePanel)
+    // First, try to calculate from creditSaleTableData
     if (creditSaleTableData && creditSaleTableData.length > 0) {
       return creditSaleTableData.reduce((total, invoice) => {
-        return total + (invoice.outstandingAmount || invoice.dueAmount || 0);
+        return total + getSafeNumber(invoice.outstandingAmount || invoice.dueAmount);
       }, 0);
     }
     
     // Fallback to salesData if creditSaleTableData is not available
-    return salesData?.unreceivePayment || salesData?.creditSale || 0;
+    return getSafeNumber(salesData?.unreceivePayment || salesData?.creditSale);
   };
 
   const getSubtitle = (cardId) => {
@@ -341,7 +357,6 @@ export const DashboardCards = ({
     }
   };
 
-  // Cards array
   const cards = [
     {
       id: "Sales",
@@ -378,9 +393,9 @@ export const DashboardCards = ({
       subtitle: getSubtitle("Expenses"),
     },
     {
-      id: "Total Payroll",
+      id: "Total Payroll", // This is the problematic card
       title: "Total Payroll",
-      amount: getCurrentPayrollAmount(),
+      amount: getCurrentPayrollAmount(), 
       icon: DollarSign,
       color: "purple",
       subtitle: getSubtitle("Total Payroll"),
@@ -392,7 +407,7 @@ export const DashboardCards = ({
       icon: AlertCircle,
       color: "red",
       subtitle: getSubtitle("Overdue"),
-      growth: salesData?.overdueGrowth || 0,
+      growth: getSafeNumber(salesData?.overdueGrowth),
     },
     {
       id: "Credit Sale Cash Not Receive",
@@ -401,7 +416,7 @@ export const DashboardCards = ({
       icon: CreditCard,
       color: "indigo",
       subtitle: getSubtitle("Credit Sale Cash Not Receive"),
-      growth: salesData?.unreceivePaymentGrowth || 0,
+      growth: getSafeNumber(salesData?.unreceivePaymentGrowth),
     },
   ];
 

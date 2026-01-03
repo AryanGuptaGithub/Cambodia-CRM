@@ -17,6 +17,35 @@ const createSessionId = () =>
 
 ///////////////////////
 
+
+const getTableDateRanges = (period) => {
+  const now = new Date();
+
+  switch (period) {
+    case "Today":
+      const todayStart = new Date(now);
+      todayStart.setHours(0, 0, 0, 0);
+      return { start: todayStart, end: now };
+
+    case "Month":
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      return { start: monthStart, end: now };
+
+    case "Year":
+      const yearStart = new Date(now.getFullYear(), 0, 1);
+      return { start: yearStart, end: now };
+
+    case "custom":
+      return null;
+
+    default:
+      const defaultStart = new Date(now);
+      defaultStart.setHours(0, 0, 0, 0);
+      return { start: defaultStart, end: now };
+  }
+};
+
+
 const normalizeProductName = (name) => {
   if (!name || typeof name !== "string") return "";
 
@@ -1864,6 +1893,357 @@ router.get("/sales/profit-loss-summary", async (req, res) => {
       success: false,
       message: "Failed to fetch profit/loss summary",
       error: error.message
+    });
+  }
+});
+
+router.get("/sales/analytics/custom-range", async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+
+    if (!startDate || !endDate) {
+      return res
+        .status(400)
+        .json({ message: "Start date and end date are required" });
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+
+    const sales = await SaleSummary.aggregate([
+      {
+        $match: {
+          invoiceDate: {
+            $gte: start,
+            $lte: end,
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalSales: { $sum: "$totalAmount" },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const result = sales.length > 0 ? sales[0] : { totalSales: 0, count: 0 };
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+router.get("/outstanding/table-data", async (req, res) => {
+  try {
+    const { period, startDate, endDate } = req.query;
+    let dateFilter = {};
+
+    if (period === "custom" && startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+
+      dateFilter = {
+        invoiceDate: {
+          $gte: start,
+          $lte: end,
+        },
+      };
+    } else {
+      const dateRange = getTableDateRanges(period);
+      if (dateRange) {
+        dateFilter = {
+          invoiceDate: {
+            $gte: dateRange.start,
+            $lte: dateRange.end,
+          },
+        };
+      }
+    }
+
+    dateFilter = {
+      ...dateFilter,
+      $or: [
+        { dueAmount: { $gt: 0 } },
+        { paymentStatus: { $in: ["Credit", "Partial Paid"] } },
+      ],
+    };
+
+    const outstandingData = await SaleSummary.aggregate([
+      {
+        $match: dateFilter,
+      },
+      {
+        $project: {
+          recordingDate: 1,
+          invoiceNumber: 1,
+          invoiceDate: 1,
+          mrName: 1,
+          customerName: 1,
+          customerCode: 1,
+          customerId: 1,
+          creditDays: 1,
+          dueDate: 1,
+          deliveryDate: 1,
+          paidAmount: 1,
+          dueAmount: 1,
+          totalAmount: 1,
+          paymentStatus: 1,
+          remark: 1,
+          products: 1,
+        },
+      },
+      {
+        $sort: { recordingDate: -1 },
+      },
+    ]);
+
+    res.json({
+      success: true,
+      data: outstandingData,
+      count: outstandingData.length,
+      period: period,
+    });
+  } catch (error) {
+    console.error("Error fetching outstanding table data:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+      data: [],
+      count: 0,
+    });
+  }
+});
+
+router.get("/sales/credit-sale-not-received", async (req, res) => {
+  try {
+    const creditSales = await SaleSummary.find({
+      $or: [
+        { saleReturn: { $exists: false } },
+        { saleReturn: false },
+        { saleReturn: null },
+      ],
+      paymentStatus: { $ne: "Cash" },
+      $or: [
+        { dueAmount: { $gt: 0 } },
+        { $expr: { $gt: [{ $subtract: ["$totalAmount", "$paidAmount"] }, 0] } },
+      ],
+    })
+      .sort({ invoiceDate: -1 })
+      .lean();
+
+    const totalAmount = creditSales.reduce((total, invoice) => {
+      const outstandingAmount =
+        invoice.dueAmount > 0
+          ? invoice.dueAmount
+          : Math.max(0, invoice.totalAmount - (invoice.paidAmount || 0));
+      return total + outstandingAmount;
+    }, 0);
+
+    const formattedSales = creditSales.map((invoice) => ({
+      ...invoice,
+      outstandingAmount:
+        invoice.dueAmount > 0
+          ? invoice.dueAmount
+          : Math.max(0, invoice.totalAmount - (invoice.paidAmount || 0)),
+    }));
+
+    res.json({
+      success: true,
+      data: formattedSales,
+      totalAmount: totalAmount.toFixed(2),
+      count: formattedSales.length,
+      message: `Found ${formattedSales.length} credit sales where cash is not received`,
+    });
+  } catch (error) {
+    console.error("Error fetching credit sales not received:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error while fetching credit sales",
+      error: error.message,
+      data: [],
+      totalAmount: 0,
+      count: 0,
+    });
+  }
+});
+
+
+router.get("/outstanding/custom-range", async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        message: "Start date and end date are required",
+      });
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+
+    const outstandingData = await SaleSummary.aggregate([
+      {
+        $match: {
+          invoiceDate: {
+            $gte: start,
+            $lte: end,
+          },
+          $or: [
+            { dueAmount: { $gt: 0 } },
+            { paymentStatus: { $in: ["Credit", "Partial Paid"] } },
+          ],
+        },
+      },
+      {
+        $project: {
+          recordingDate: 1,
+          invoiceNumber: 1,
+          invoiceDate: 1,
+          mrName: 1,
+          customerName: 1,
+          customerCode: 1,
+          customerId: 1,
+          creditDays: 1,
+          dueDate: 1,
+          deliveryDate: 1,
+          paidAmount: 1,
+          dueAmount: 1,
+          totalAmount: 1,
+          paymentStatus: 1,
+          remark: 1,
+          products: 1,
+        },
+      },
+      {
+        $sort: { recordingDate: -1 },
+      },
+    ]);
+
+    const totalOutstanding = outstandingData.reduce(
+      (sum, invoice) => sum + (invoice.dueAmount || 0),
+      0
+    );
+
+    res.json({
+      success: true,
+      totalOutstanding,
+      outstandingData,
+      count: outstandingData.length,
+    });
+  } catch (error) {
+    console.error("Error fetching custom range outstanding:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+      totalOutstanding: 0,
+      outstandingData: [],
+    });
+  }
+});
+
+router.get("/sales/table-data", async (req, res) => {
+  try {
+    const { period, startDate, endDate } = req.query;
+    let dateFilter = {};
+
+    if (period === "custom" && startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+
+      dateFilter = {
+        invoiceDate: {
+          $gte: start,
+          $lte: end,
+        },
+      };
+    } else {
+      const dateRange = getTableDateRanges(period);
+      if (dateRange) {
+        dateFilter = {
+          invoiceDate: {
+            $gte: dateRange.start,
+            $lte: dateRange.end,
+          },
+        };
+      }
+    }
+
+    const salesData = await SaleSummary.aggregate([
+      {
+        $match: dateFilter,
+      },
+      {
+        $unwind: "$products",
+      },
+      {
+        $project: {
+          date: { $dateToString: { format: "%Y-%m-%d", date: "$invoiceDate" } },
+          productName: "$products.productName",
+          salesPerson: "$mrName",
+          quantity: "$products.salesQty",
+          amount: "$products.netSellingAmount",
+          customer: "$customerName",
+          invoiceNumber: 1,
+          bonusQty: "$products.bonusQty",
+          totalQty: "$products.totalQty",
+          sellingPrice: "$products.sellingPrice",
+          discount: "$products.discount",
+          paymentStatus: 1,
+          remark: 1,
+          customerId: 1,
+          recordingDate: 1,
+          dueDate: 1,
+          paidAmount: 1,
+          dueAmount: 1,
+          totalAmount: 1,
+        },
+      },
+      {
+        $sort: { date: -1 },
+      },
+    ]);
+
+    const transformedData = salesData.map((sale) => ({
+      date: sale.date,
+      productName: sale.productName,
+      salesPerson: sale.salesPerson,
+      quantity: sale.quantity,
+      amount: sale.amount,
+      customer: sale.customer || "N/A",
+      invoiceNumber: sale.invoiceNumber,
+      bonusQty: sale.bonusQty,
+      totalQty: sale.totalQty,
+      sellingPrice: sale.sellingPrice,
+      discount: sale.discount,
+      paymentStatus: sale.paymentStatus,
+      remark: sale.remark,
+      customerId: sale.customerId,
+      recordingDate: sale.recordingDate,
+      dueDate: sale.dueDate,
+      paidAmount: sale.paidAmount,
+      dueAmount: sale.dueAmount,
+      totalAmount: sale.totalAmount,
+    }));
+
+    res.json({
+      success: true,
+      data: transformedData,
+      count: transformedData.length,
+      period: period,
+    });
+  } catch (error) {
+    console.error("❌ Error fetching sales table data:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+      data: [],
+      count: 0,
     });
   }
 });

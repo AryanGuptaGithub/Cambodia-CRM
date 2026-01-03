@@ -1,3 +1,4 @@
+// Backend: salaryCOGSRatio.js - Fixed version with proper pagination
 import express from "express";
 import SaleSummary from "../../models/sale/saleSummary.js";
 import Payroll from "../../models/Hrm/Payroll.js";
@@ -31,6 +32,7 @@ const getPeriodsFromDateRange = (startDate, endDate) => {
   return periods;
 };
 
+// Enhanced name normalization function
 const normalizeMrName = (name) => {
   if (!name) return "";
   
@@ -41,6 +43,7 @@ const normalizeMrName = (name) => {
     .trim()
     .toLowerCase();
   
+  // Special handling for specific names
   if (normalized.includes('makara')) {
     normalized = 'makara';
   }
@@ -52,6 +55,7 @@ const normalizeMrName = (name) => {
   return normalized;
 };
 
+// Function to normalize MR name in JavaScript
 const normalizeNameInJS = (name) => {
   if (!name) return "";
   
@@ -78,21 +82,12 @@ const normalizeNameInJS = (name) => {
   return normalized;
 };
 
-const calculateSalarySaleRatio = (profit, totalExpense) => {
-  if (totalExpense === 0) return 0;
-  return ((profit - totalExpense) / totalExpense) * 100;
-};
-
-const calculatePerformance = (profit, totalExpense) => {
-  if (totalExpense === 0) return profit > 0 ? 1000 : 0;
-  return (profit / totalExpense) * 100;
-};
-
-const fetchSalesSalaryData = async (params) => {
+// Main function to fetch Salary/COGS ratio data with proper pagination
+const fetchSalaryCOGSData = async (params) => {
   try {
     const { 
       page = 1, 
-      limit = 120, 
+      limit = 7, 
       search = "",
       startDate,
       endDate,
@@ -105,6 +100,7 @@ const fetchSalesSalaryData = async (params) => {
     const limitNum = isExport ? 10000 : parseInt(limit);
     const skip = isExport ? 0 : (pageNum - 1) * limitNum;
     
+    // 🔍 Step 1: Build date filter conditions for sales
     const salesDateConditions = {};
     
     if (startDate && endDate) {
@@ -154,6 +150,7 @@ const fetchSalesSalaryData = async (params) => {
           break;
           
         case 'all':
+          // No date filter for 'all'
           break;
           
         default:
@@ -166,6 +163,7 @@ const fetchSalesSalaryData = async (params) => {
       }
     }
 
+    // 🔍 Step 2: Combine search and date conditions for sales
     const salesMatchConditions = { ...salesDateConditions };
     
     if (search && search.trim() !== "") {
@@ -173,15 +171,39 @@ const fetchSalesSalaryData = async (params) => {
       salesMatchConditions.mrName = searchRegex;
     }
 
+    // 📊 Step 3: Get ALL sales data for summary calculation with COGS
     const allSalesForSummary = await SaleSummary.aggregate([
       { $match: salesMatchConditions },
       {
         $addFields: {
-          totalProfit: {
+          totalCOGS: {
             $reduce: {
               input: "$products",
               initialValue: 0,
-              in: { $add: ["$$value", { $ifNull: ["$$this.profitLoss", 0] }] }
+              in: {
+                $add: [
+                  "$$value",
+                  {
+                    $cond: [
+                      { $and: [
+                        { $ifNull: ["$$this.lc", false] },
+                        { $ifNull: ["$$this.totalQty", false] }
+                      ]},
+                      { $multiply: ["$$this.lc", "$$this.totalQty"] },
+                      {
+                        $cond: [
+                          { $and: [
+                            { $ifNull: ["$$this.amount", false] },
+                            { $ifNull: ["$$this.profitLoss", false] }
+                          ]},
+                          { $subtract: ["$$this.amount", "$$this.profitLoss"] },
+                          0
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
             }
           }
         }
@@ -190,24 +212,50 @@ const fetchSalesSalaryData = async (params) => {
         $group: {
           _id: null,
           totalSales: { $sum: "$totalAmount" },
-          totalProfit: { $sum: "$totalProfit" },
+          totalCOGS: { $sum: "$totalCOGS" },
+          totalProfit: { $sum: "$totalProfitLoss" },
           saleCount: { $sum: 1 }
         }
       }
     ]);
 
     const totalSalesFromAllRecords = allSalesForSummary[0]?.totalSales || 0;
+    const totalCOGSFromAllRecords = allSalesForSummary[0]?.totalCOGS || 0;
     const totalProfitFromAllRecords = allSalesForSummary[0]?.totalProfit || 0;
 
+    // 📊 Step 4: Get sales data with MR grouping including COGS - NO PAGINATION HERE
     const salesAggregate = await SaleSummary.aggregate([
       { $match: salesMatchConditions },
       {
         $addFields: {
-          saleProfit: {
+          saleCOGS: {
             $reduce: {
               input: "$products",
               initialValue: 0,
-              in: { $add: ["$$value", { $ifNull: ["$$this.profitLoss", 0] }] }
+              in: {
+                $add: [
+                  "$$value",
+                  {
+                    $cond: [
+                      { $and: [
+                        { $ifNull: ["$$this.lc", false] },
+                        { $ifNull: ["$$this.totalQty", false] }
+                      ]},
+                      { $multiply: ["$$this.lc", "$$this.totalQty"] },
+                      {
+                        $cond: [
+                          { $and: [
+                            { $ifNull: ["$$this.amount", false] },
+                            { $ifNull: ["$$this.profitLoss", false] }
+                          ]},
+                          { $subtract: ["$$this.amount", "$$this.profitLoss"] },
+                          0
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
             }
           }
         }
@@ -219,10 +267,12 @@ const fetchSalesSalaryData = async (params) => {
             mrId: "$mrId",
           },
           totalSales: { $sum: "$totalAmount" },
-          totalProfit: { $sum: "$saleProfit" },
+          totalCOGS: { $sum: "$saleCOGS" },
+          totalProfit: { $sum: "$totalProfitLoss" },
           saleCount: { $sum: 1 },
           customers: { $addToSet: "$customerCode" },
-          lastSaleDate: { $max: "$recordingDate" }
+          lastSaleDate: { $max: "$recordingDate" },
+          productsSold: { $push: "$products" }
         },
       },
       {
@@ -230,16 +280,20 @@ const fetchSalesSalaryData = async (params) => {
           _id: 0,
           mrName: "$_id.mrName",
           mrId: "$_id.mrId",
-          sale: "$totalSales",
-          profit: "$totalProfit",
+          totalSales: "$totalSales",
+          totalCOGS: "$totalCOGS",
+          totalProfit: "$totalProfit",
           saleCount: 1,
           customerCount: { $size: "$customers" },
-          lastSaleDate: 1
+          lastSaleDate: 1,
+          productsSold: 1
         },
       },
-      { $sort: { sale: -1 } }
+      { $sort: { totalSales: -1 } }
+      // NO SKIP/LIMIT HERE - we need all data to group by normalized names
     ]);
 
+    // Now group by normalized name in JavaScript
     const groupedSales = {};
     salesAggregate.forEach(record => {
       const normalizedName = normalizeNameInJS(record.mrName);
@@ -250,16 +304,18 @@ const fetchSalesSalaryData = async (params) => {
           mrName: record.mrName,
           mrId: record.mrId,
           originalNames: [record.mrName],
-          sale: parseFloat(record.sale) || 0,
-          profit: parseFloat(record.profit) || 0,
+          totalSales: parseFloat(record.totalSales) || 0,
+          totalCOGS: parseFloat(record.totalCOGS) || 0,
+          totalProfit: parseFloat(record.totalProfit) || 0,
           saleCount: parseInt(record.saleCount) || 0,
           customerCount: parseInt(record.customerCount) || 0,
           lastSaleDate: record.lastSaleDate,
           records: [record]
         };
       } else {
-        groupedSales[normalizedName].sale += parseFloat(record.sale) || 0;
-        groupedSales[normalizedName].profit += parseFloat(record.profit) || 0;
+        groupedSales[normalizedName].totalSales += parseFloat(record.totalSales) || 0;
+        groupedSales[normalizedName].totalCOGS += parseFloat(record.totalCOGS) || 0;
+        groupedSales[normalizedName].totalProfit += parseFloat(record.totalProfit) || 0;
         groupedSales[normalizedName].saleCount += parseInt(record.saleCount) || 0;
         groupedSales[normalizedName].customerCount = Math.max(
           groupedSales[normalizedName].customerCount,
@@ -275,7 +331,7 @@ const fetchSalesSalaryData = async (params) => {
           groupedSales[normalizedName].originalNames.push(record.mrName);
         }
         
-        if (parseFloat(record.sale) > parseFloat(groupedSales[normalizedName].records[0].sale)) {
+        if (parseFloat(record.totalSales) > parseFloat(groupedSales[normalizedName].records[0].totalSales)) {
           groupedSales[normalizedName].mrName = record.mrName;
         }
         
@@ -283,10 +339,13 @@ const fetchSalesSalaryData = async (params) => {
       }
     });
 
+    // Convert grouped object to array
     const salesAggregateGrouped = Object.values(groupedSales);
 
+    // 👥 Step 5: Get ALL staff members
     const allStaffMembers = await Staff.find({}).select("_id medicalRepName employeeId");
     
+    // Build staff maps
     const staffMap = {
       idToName: {},
       nameToId: {},
@@ -308,6 +367,7 @@ const fetchSalesSalaryData = async (params) => {
       }
     });
 
+    // 💰 Step 6: Get payroll data for ALL staff
     let payrollAggregate = [];
     
     const allStaffIds = allStaffMembers.map(s => new mongoose.Types.ObjectId(s._id));
@@ -356,6 +416,7 @@ const fetchSalesSalaryData = async (params) => {
             break;
             
           case 'all':
+            // No period filter for all records
             break;
         }
       }
@@ -366,16 +427,71 @@ const fetchSalesSalaryData = async (params) => {
           $group: {
             _id: "$employeeId",
             salary: { $sum: "$basicSalary" },
-            incentive: { $sum: { $ifNull: ["$incentive", 0] } },
-            allowance: { $sum: { $ifNull: ["$totalAllowance", 0] } },
+            incentive: { 
+              $sum: {
+                $reduce: {
+                  input: "$allowances",
+                  initialValue: 0,
+                  in: {
+                    $add: [
+                      "$$value",
+                      {
+                        $cond: [
+                          {
+                            $regexMatch: {
+                              input: { $ifNull: ["$$this.type", ""] },
+                              regex: "incentive",
+                              options: "i"
+                            }
+                          },
+                          { $ifNull: ["$$this.amount", 0] },
+                          0
+                        ]
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            allowance: { 
+              $sum: {
+                $subtract: [
+                  { $ifNull: ["$totalAllowance", 0] },
+                  {
+                    $reduce: {
+                      input: "$allowances",
+                      initialValue: 0,
+                      in: {
+                        $add: [
+                          "$$value",
+                          {
+                            $cond: [
+                              {
+                                $regexMatch: {
+                                  input: { $ifNull: ["$$this.type", ""] },
+                                  regex: "incentive",
+                                  options: "i"
+                                }
+                              },
+                              { $ifNull: ["$$this.amount", 0] },
+                              0
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            },
             tourExpense: { $sum: { $ifNull: ["$tourExpense", 0] } },
-            otherExpense: { $sum: { $ifNull: ["$otherExpense", 0] } },
             payrollCount: { $sum: 1 }
           },
         },
       ]);
     }
 
+    // 📊 Step 7: Calculate TOTAL summary from ALL payroll data
     const totalPayrollSummary = payrollAggregate.reduce(
       (acc, payroll) => {
         return {
@@ -383,15 +499,13 @@ const fetchSalesSalaryData = async (params) => {
           totalIncentive: acc.totalIncentive + (parseFloat(payroll.incentive) || 0),
           totalAllowance: acc.totalAllowance + (parseFloat(payroll.allowance) || 0),
           totalTourExpense: acc.totalTourExpense + (parseFloat(payroll.tourExpense) || 0),
-          totalOtherExpense: acc.totalOtherExpense + (parseFloat(payroll.otherExpense) || 0),
         };
       },
       { 
         totalSalary: 0, 
         totalIncentive: 0, 
         totalAllowance: 0, 
-        totalTourExpense: 0, 
-        totalOtherExpense: 0 
+        totalTourExpense: 0
       }
     );
 
@@ -399,34 +513,66 @@ const fetchSalesSalaryData = async (params) => {
       totalPayrollSummary.totalSalary +
       totalPayrollSummary.totalIncentive +
       totalPayrollSummary.totalAllowance +
-      totalPayrollSummary.totalTourExpense +
-      totalPayrollSummary.totalOtherExpense;
+      totalPayrollSummary.totalTourExpense;
 
-    const ratio = totalSalesFromAllRecords > 0 
-      ? parseFloat((totalExpenseFromAllRecords / totalSalesFromAllRecords).toFixed(4))
+    // Calculate Salary/COGS Ratio
+    const salaryCOGSRatio = totalCOGSFromAllRecords > 0 
+      ? parseFloat((totalPayrollSummary.totalSalary / totalCOGSFromAllRecords).toFixed(4))
+      : 0;
+
+    // Calculate Expense/COGS Ratio
+    const expenseCOGSRatio = totalCOGSFromAllRecords > 0 
+      ? parseFloat((totalExpenseFromAllRecords / totalCOGSFromAllRecords).toFixed(4))
+      : 0;
+
+    // Calculate Salary/Sale Ratio
+    const salarySaleRatio = totalSalesFromAllRecords > 0 
+      ? parseFloat((totalPayrollSummary.totalSalary / totalSalesFromAllRecords).toFixed(4))
+      : 0;
+
+    // Calculate Profit Margin
+    const profitMargin = totalSalesFromAllRecords > 0
+      ? parseFloat(((totalProfitFromAllRecords / totalSalesFromAllRecords) * 100).toFixed(2))
+      : 0;
+
+    // Calculate COGS Percentage
+    const cogsPercentage = totalSalesFromAllRecords > 0
+      ? parseFloat(((totalCOGSFromAllRecords / totalSalesFromAllRecords) * 100).toFixed(2))
       : 0;
 
     const summary = {
-      totalSales: parseFloat(totalSalesFromAllRecords) || 0,
       totalSalary: parseFloat(totalPayrollSummary.totalSalary) || 0,
-      totalExpense: parseFloat(totalExpenseFromAllRecords) || 0,
+      totalCOGS: parseFloat(totalCOGSFromAllRecords) || 0,
+      totalSales: parseFloat(totalSalesFromAllRecords) || 0,
       totalProfit: parseFloat(totalProfitFromAllRecords) || 0,
-      ratio: ratio,
+      totalExpense: parseFloat(totalExpenseFromAllRecords) || 0,
+      salaryCOGSRatio: salaryCOGSRatio,
+      expenseCOGSRatio: expenseCOGSRatio,
+      salarySaleRatio: salarySaleRatio,
+      totalAllowance: parseFloat(totalPayrollSummary.totalAllowance) || 0,
+      totalIncentive: parseFloat(totalPayrollSummary.totalIncentive) || 0,
+      totalTourExpense: parseFloat(totalPayrollSummary.totalTourExpense) || 0,
+      profitMargin: profitMargin,
+      cogsPercentage: cogsPercentage
     };
 
+    // 📘 Convert payroll to map by staff ID
     const payrollByStaffId = {};
     payrollAggregate.forEach((p) => {
       payrollByStaffId[p._id.toString()] = p;
     });
 
-    let combinedData = salesAggregateGrouped.map((record) => {
+    // 🔗 Step 8: Combine sales + payroll with normalized matching
+    const combinedData = salesAggregateGrouped.map((record) => {
       let matchedStaffId = null;
       
+      // First try to match by normalized name
       const normalizedSalesName = record.normalizedName;
       if (normalizedSalesName && staffMap.normalizedNameToId[normalizedSalesName]) {
         matchedStaffId = staffMap.normalizedNameToId[normalizedSalesName];
       }
       
+      // If no match, try to match with staff names that contain the sales name
       if (!matchedStaffId && normalizedSalesName) {
         for (const [staffNormalizedName, staffId] of Object.entries(staffMap.normalizedNameToId)) {
           if (staffNormalizedName.includes(normalizedSalesName) || 
@@ -437,6 +583,7 @@ const fetchSalesSalaryData = async (params) => {
         }
       }
       
+      // If still no match, try original names
       if (!matchedStaffId && record.originalNames && record.originalNames.length > 0) {
         for (const originalName of record.originalNames) {
           if (!originalName) continue;
@@ -458,34 +605,44 @@ const fetchSalesSalaryData = async (params) => {
       const incentive = parseFloat(payroll.incentive) || 0;
       const allowance = parseFloat(payroll.allowance) || 0;
       const tourExpense = parseFloat(payroll.tourExpense) || 0;
-      const otherExpense = parseFloat(payroll.otherExpense) || 0;
-      const sale = parseFloat(record.sale) || 0;
-      const profit = parseFloat(record.profit) || 0;
+      const cogs = parseFloat(record.totalCOGS) || 0;
+      const sales = parseFloat(record.totalSales) || 0;
+      const profit = parseFloat(record.totalProfit) || 0;
 
-      const totalExpense = salary + incentive + allowance + tourExpense + otherExpense;
+      const totalExpense = salary + incentive + allowance + tourExpense;
       
-      const salarySaleRatio = calculateSalarySaleRatio(profit, totalExpense);
-      const performance = calculatePerformance(profit, totalExpense);
+      // Calculate various ratios
+      const salaryCogsRatio = cogs > 0 ? parseFloat((salary / cogs).toFixed(4)) : 0;
+      const expenseCogsRatio = cogs > 0 ? parseFloat((totalExpense / cogs).toFixed(4)) : 0;
+      const salarySaleRatio = sales > 0 ? parseFloat((salary / sales).toFixed(4)) : 0;
+      const profitMargin = sales > 0 ? parseFloat(((profit / sales) * 100).toFixed(2)) : 0;
+      const cogsPercentage = sales > 0 ? parseFloat(((cogs / sales) * 100).toFixed(2)) : 0;
+      const salaryPercentage = sales > 0 ? parseFloat(((salary / sales) * 100).toFixed(2)) : 0;
 
       return {
-        srDate: record.lastSaleDate || "",
+        srDate: record.lastSaleDate || new Date(),
         mrName: record.mrName || "",
         mrId: record.mrId || matchedStaffId || "",
-        sale: sale,
+        cogs: cogs,
+        totalSales: sales,
         profit: profit,
         salary: salary,
         incentive: incentive,
         allowance: allowance,
         tourExpense: tourExpense,
-        otherExpense: otherExpense,
         totalExpense: totalExpense,
-        salarySaleRatio: parseFloat(salarySaleRatio.toFixed(2)),
-        performance: parseFloat(performance.toFixed(2)),
+        salaryCOGSRatio: salaryCogsRatio,
+        expenseCOGSRatio: expenseCogsRatio,
+        salarySaleRatio: salarySaleRatio,
+        profitMargin: profitMargin,
+        cogsPercentage: cogsPercentage,
+        salaryPercentage: salaryPercentage,
         saleCount: parseInt(record.saleCount) || 0,
         customerCount: parseInt(record.customerCount) || 0,
       };
     });
 
+    // Add MRs that have salary but no sales
     Object.keys(staffMap.normalizedNameToId).forEach(normalizedName => {
       const staffId = staffMap.normalizedNameToId[normalizedName];
       const payroll = payrollByStaffId[staffId];
@@ -497,9 +654,9 @@ const fetchSalesSalaryData = async (params) => {
         const incentive = parseFloat(payroll.incentive) || 0;
         const allowance = parseFloat(payroll.allowance) || 0;
         const tourExpense = parseFloat(payroll.tourExpense) || 0;
-        const otherExpense = parseFloat(payroll.otherExpense) || 0;
-        const totalExpense = salary + incentive + allowance + tourExpense + otherExpense;
+        const totalExpense = salary + incentive + allowance + tourExpense;
         
+        // Find the actual staff name
         const staffEntry = allStaffMembers.find(s => 
           s._id.toString() === staffId);
         const mrName = staffEntry?.medicalRepName || normalizedName;
@@ -508,28 +665,35 @@ const fetchSalesSalaryData = async (params) => {
           srDate: new Date(),
           mrName: mrName,
           mrId: staffId,
-          sale: 0,
+          cogs: 0,
+          totalSales: 0,
           profit: 0,
           salary: salary,
           incentive: incentive,
           allowance: allowance,
           tourExpense: tourExpense,
-          otherExpense: otherExpense,
           totalExpense: totalExpense,
+          salaryCOGSRatio: 0,
+          expenseCOGSRatio: 0,
           salarySaleRatio: 0,
-          performance: 0,
+          profitMargin: 0,
+          cogsPercentage: 0,
+          salaryPercentage: 0,
           saleCount: 0,
           customerCount: 0,
         });
       }
     });
 
-    combinedData.sort((a, b) => b.sale - a.sale);
+    // Sort by total sales descending
+    combinedData.sort((a, b) => b.totalSales - a.totalSales);
 
+    // For pagination: get total count
     const totalRecords = combinedData.length;
     const totalPages = Math.ceil(totalRecords / limitNum);
 
     if (isExport) {
+      // For export, return all data
       return {
         success: true,
         data: {
@@ -538,6 +702,7 @@ const fetchSalesSalaryData = async (params) => {
         }
       };
     } else {
+      // Apply pagination to the final combined data
       const startIndex = skip;
       const endIndex = Math.min(skip + limitNum, totalRecords);
       const paginatedData = combinedData.slice(startIndex, endIndex);
@@ -565,28 +730,30 @@ const fetchSalesSalaryData = async (params) => {
     }
     
   } catch (error) {
-    console.error("❌ Error in fetchSalesSalaryData:", error);
+    console.error("❌ Error in fetchSalaryCOGSData:", error);
     throw error;
   }
 };
 
-router.get("/sales-salary-ratio", async (req, res) => {
+// Main API endpoint for Salary/COGS Ratio
+router.get("/salary-cogs-ratio", async (req, res) => {
   try {    
-    const result = await fetchSalesSalaryData(req.query);
+    const result = await fetchSalaryCOGSData(req.query);
     res.status(200).json(result);
   } catch (error) {
-    console.error("❌ Error in /sales-salary-ratio:", error);
+    console.error("❌ Error in /salary-cogs-ratio:", error);
     res.status(500).json({
       success: false,
-      message: "Failed to fetch sales salary ratio data",
+      message: "Failed to fetch salary COGS ratio data",
       error: error.message,
     });
   }
 });
 
-router.get("/sales-salary-ratio/export", async (req, res) => {
+// Export endpoint for Salary/COGS Ratio
+router.get("/salary-cogs-ratio/export", async (req, res) => {
   try {    
-    const result = await fetchSalesSalaryData({
+    const result = await fetchSalaryCOGSData({
       ...req.query,
       export: "true",
       limit: 10000
@@ -598,25 +765,30 @@ router.get("/sales-salary-ratio/export", async (req, res) => {
     
     const { summary, records } = result.data;
     const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Sales Salary Ratio Report');
+    const worksheet = workbook.addWorksheet('Salary COGS Ratio Report');
     
+    // Define columns for Salary/COGS Ratio Report
     worksheet.columns = [
       { header: 'Sr. No', key: 'srNo', width: 10 },
+      { header: 'Date', key: 'date', width: 15 },
       { header: 'MR Name', key: 'mrName', width: 25 },
-      { header: 'Sale ($)', key: 'sale', width: 15 },
+      { header: 'COGS ($)', key: 'cogs', width: 15 },
+      { header: 'Sales ($)', key: 'sales', width: 15 },
       { header: 'Profit ($)', key: 'profit', width: 15 },
       { header: 'Salary ($)', key: 'salary', width: 15 },
       { header: 'Incentive ($)', key: 'incentive', width: 15 },
       { header: 'Allowance ($)', key: 'allowance', width: 15 },
       { header: 'Tour Expense ($)', key: 'tourExpense', width: 15 },
-      { header: 'Other Expense ($)', key: 'otherExpense', width: 15 },
       { header: 'Total Expense ($)', key: 'totalExpense', width: 15 },
-      { header: 'Salary/Sale (%)', key: 'salarySaleRatio', width: 15 },
-      { header: 'Performance (%)', key: 'performance', width: 15 },
+      { header: 'Salary/COGS Ratio', key: 'salaryCOGSRatio', width: 15 },
+      { header: 'Expense/COGS Ratio', key: 'expenseCOGSRatio', width: 15 },
+      { header: 'Salary/Sale Ratio', key: 'salarySaleRatio', width: 15 },
+      { header: 'Profit Margin (%)', key: 'profitMargin', width: 15 },
       { header: 'Sale Count', key: 'saleCount', width: 12 },
       { header: 'Customer Count', key: 'customerCount', width: 12 }
     ];
     
+    // Add header row with styling
     const headerRow = worksheet.getRow(1);
     headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
     headerRow.fill = {
@@ -626,101 +798,138 @@ router.get("/sales-salary-ratio/export", async (req, res) => {
     };
     headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
     
+    // Add data rows
     records.forEach((record, index) => {
       const row = worksheet.addRow({
         srNo: index + 1,
+        date: record.srDate ? new Date(record.srDate).toLocaleDateString() : '',
         mrName: record.mrName || 'N/A',
-        sale: parseFloat(record.sale) || 0,
+        cogs: parseFloat(record.cogs) || 0,
+        sales: parseFloat(record.totalSales) || 0,
         profit: parseFloat(record.profit) || 0,
         salary: parseFloat(record.salary) || 0,
         incentive: parseFloat(record.incentive) || 0,
         allowance: parseFloat(record.allowance) || 0,
         tourExpense: parseFloat(record.tourExpense) || 0,
-        otherExpense: parseFloat(record.otherExpense) || 0,
         totalExpense: parseFloat(record.totalExpense) || 0,
+        salaryCOGSRatio: parseFloat(record.salaryCOGSRatio) || 0,
+        expenseCOGSRatio: parseFloat(record.expenseCOGSRatio) || 0,
         salarySaleRatio: parseFloat(record.salarySaleRatio) || 0,
-        performance: parseFloat(record.performance) || 0,
+        profitMargin: parseFloat(record.profitMargin) || 0,
         saleCount: record.saleCount || 0,
         customerCount: record.customerCount || 0
       });
       
-      const currencyColumns = ['sale', 'profit', 'salary', 'incentive', 'allowance', 'tourExpense', 'otherExpense', 'totalExpense'];
+      // Format currency columns
+      const currencyColumns = ['cogs', 'sales', 'profit', 'salary', 'incentive', 'allowance', 'tourExpense', 'totalExpense'];
       currencyColumns.forEach(col => {
         const cell = row.getCell(col);
         cell.numFmt = '$#,##0.00';
       });
       
-      const percentageColumns = ['salarySaleRatio', 'performance'];
+      // Format ratio columns (as decimals)
+      const ratioColumns = ['salaryCOGSRatio', 'expenseCOGSRatio', 'salarySaleRatio'];
+      ratioColumns.forEach(col => {
+        const cell = row.getCell(col);
+        cell.numFmt = '0.0000';
+      });
+      
+      // Format percentage columns
+      const percentageColumns = ['profitMargin'];
       percentageColumns.forEach(col => {
         const cell = row.getCell(col);
         cell.numFmt = '0.00%';
       });
       
-      const salarySaleCell = row.getCell('salarySaleRatio');
-      const performanceCell = row.getCell('performance');
-      
-      const salarySaleValue = parseFloat(record.salarySaleRatio) || 0;
-      salarySaleCell.font = {
-        color: { argb: salarySaleValue >= 0 ? 'FF16A34A' : 'FFDC2626' }
+      // Color coding for ratios
+      const salaryCogsCell = row.getCell('salaryCOGSRatio');
+      const salaryCogsValue = parseFloat(record.salaryCOGSRatio) || 0;
+      salaryCogsCell.font = {
+        color: { argb: salaryCogsValue <= 1 ? 'FF16A34A' : 'FFDC2626' }
       };
       
-      const performanceValue = parseFloat(record.performance) || 0;
-      performanceCell.font = {
-        color: { argb: performanceValue >= 0 ? 'FF16A34A' : 'FFDC2626' }
+      const profitMarginCell = row.getCell('profitMargin');
+      const profitMarginValue = parseFloat(record.profitMargin) || 0;
+      profitMarginCell.font = {
+        color: { argb: profitMarginValue >= 0 ? 'FF16A34A' : 'FFDC2626' }
       };
     });
     
+    // Add summary section
     worksheet.addRow({});
-    const summaryRow = worksheet.addRow({
-      mrName: 'TOTAL SUMMARY',
-      sale: summary.totalSales,
-      profit: summary.totalProfit,
-      salary: summary.totalSalary,
-      totalExpense: summary.totalExpense,
-      salarySaleRatio: summary.totalExpense > 0 ? 
-        ((summary.totalProfit - summary.totalExpense) / summary.totalExpense) * 100 : 0,
-      performance: summary.totalExpense > 0 ? 
-        (summary.totalProfit / summary.totalExpense) * 100 : 0
+    worksheet.addRow({
+      mrName: 'SUMMARY SECTION',
+      sales: 'Metric',
+      profit: 'Value'
     });
     
-    summaryRow.font = { bold: true };
-    summaryRow.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FFFEF3C7' }
-    };
+    const summaryRows = [
+      { metric: 'Total Salary', value: summary.totalSalary },
+      { metric: 'Total COGS', value: summary.totalCOGS },
+      { metric: 'Total Sales', value: summary.totalSales },
+      { metric: 'Total Profit', value: summary.totalProfit },
+      { metric: 'Total Expense', value: summary.totalExpense },
+      { metric: 'Salary/COGS Ratio', value: summary.salaryCOGSRatio },
+      { metric: 'Expense/COGS Ratio', value: summary.expenseCOGSRatio },
+      { metric: 'Salary/Sale Ratio', value: summary.salarySaleRatio },
+      { metric: 'Total Allowance', value: summary.totalAllowance },
+      { metric: 'Total Incentive', value: summary.totalIncentive },
+      { metric: 'Total Tour Expense', value: summary.totalTourExpense },
+      { metric: 'Profit Margin', value: summary.profitMargin / 100 } // Convert to decimal for Excel percentage
+    ];
     
-    const summaryCurrencyCells = ['sale', 'profit', 'salary', 'totalExpense'];
-    summaryCurrencyCells.forEach(col => {
-      const cell = summaryRow.getCell(col);
-      cell.numFmt = '$#,##0.00';
+    summaryRows.forEach((summaryRow, index) => {
+      const row = worksheet.addRow({
+        mrName: summaryRow.metric,
+        sales: summaryRow.value
+      });
+      
+      // Style summary rows
+      row.font = { bold: true };
+      row.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: index % 2 === 0 ? 'FFFEF3C7' : 'FFE5E7EB' }
+      };
+      
+      // Format currency and ratio cells
+      if (summaryRow.value !== undefined) {
+        const valueCell = row.getCell('sales');
+        if (summaryRow.metric.includes('Ratio')) {
+          valueCell.numFmt = '0.0000';
+        } else if (summaryRow.metric === 'Profit Margin') {
+          valueCell.numFmt = '0.00%';
+        } else {
+          valueCell.numFmt = '$#,##0.00';
+        }
+      }
     });
     
-    const summaryPercentageCells = ['salarySaleRatio', 'performance'];
-    summaryPercentageCells.forEach(col => {
-      const cell = summaryRow.getCell(col);
-      cell.numFmt = '0.00%';
-    });
-    
+    // Add filter info
     worksheet.addRow({});
     const filterInfoRow = worksheet.addRow({
-      mrName: `Filter: ${req.query.dateFilter || 'currentMonth'}`,
-      sale: req.query.startDate ? `From: ${req.query.startDate}` : '',
-      profit: req.query.endDate ? `To: ${req.query.endDate}` : '',
-      salary: req.query.search ? `Search: ${req.query.search}` : ''
+      mrName: `Report: Salary/COGS Ratio`,
+      sales: `Period: ${req.query.period || req.query.dateFilter || 'currentMonth'}`,
+      profit: req.query.startDate ? `From: ${req.query.startDate}` : '',
+      salary: req.query.endDate ? `To: ${req.query.endDate}` : '',
+      incentive: req.query.search ? `Search: ${req.query.search}` : ''
     });
     filterInfoRow.font = { italic: true };
     
+    // Set column widths and alignment
     worksheet.columns.forEach(column => {
       column.alignment = { vertical: 'middle', horizontal: 'center' };
     });
     
+    // Generate filename
     const timestamp = new Date().toISOString().split('T')[0];
-    const filename = `sales-salary-ratio-report-${timestamp}.xlsx`;
+    const filename = `salary-cogs-ratio-report-${timestamp}.xlsx`;
     
+    // Set response headers
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     
+    // Write to response
     await workbook.xlsx.write(res);
   
   } catch (error) {

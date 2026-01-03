@@ -76,13 +76,12 @@ const SalesSalaryRatio = () => {
     return previousMonth.toLocaleString("default", { month: "long" });
   };
 
-  // FIXED: Get Jan-December 2025 for "Jan To Previous Month" tab
   const getJanToPreviousMonthDisplay = () => {
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth();
     
-    if (currentMonth === 0) { // If current month is January
+    if (currentMonth === 0) {
       return `Jan - Dec ${currentYear - 1}`;
     } else {
       return `Jan - ${getPreviousMonthName()} ${currentYear}`;
@@ -96,7 +95,6 @@ const SalesSalaryRatio = () => {
     return `${year}-${month}`;
   };
 
-  // Get date range for sales data
   const getDateRange = () => {
     const today = new Date();
     const currentYear = today.getFullYear();
@@ -183,7 +181,6 @@ const SalesSalaryRatio = () => {
         dateFilter: selectedTab,
       };
 
-      // Add date parameters for all tabs except "all"
       if (selectedTab !== "all") {
         if (
           selectedTab === "custom" &&
@@ -261,19 +258,23 @@ const SalesSalaryRatio = () => {
         },
         records: [],
       });
+      setPagination({
+        currentPage: 1,
+        totalPages: 1,
+        totalRecords: 0,
+        hasNext: false,
+        hasPrev: false,
+      });
     } finally {
       setLoading(false);
     }
   };
 
-  // Fetch data when tab changes
   useEffect(() => {
     if (selectedTab === "custom") {
-      // For custom tab, don't fetch until dates are selected
       if (customDateRange.startDate && customDateRange.endDate) {
         fetchSalesSalaryData(1);
       } else {
-        // Clear data when custom tab is selected but no dates are chosen
         setData({
           summary: {
             totalSales: 0,
@@ -284,14 +285,19 @@ const SalesSalaryRatio = () => {
           },
           records: [],
         });
+        setPagination({
+          currentPage: 1,
+          totalPages: 1,
+          totalRecords: 0,
+          hasNext: false,
+          hasPrev: false,
+        });
       }
     } else {
-      // For other tabs, fetch immediately
       fetchSalesSalaryData(1);
     }
   }, [selectedTab]);
 
-  // Fetch data when custom dates change
   useEffect(() => {
     if (
       selectedTab === "custom" &&
@@ -321,7 +327,6 @@ const SalesSalaryRatio = () => {
     setCustomDateRange((prev) => ({ ...prev, [name]: date }));
   };
 
-  // Debounced search effect
   useEffect(() => {
     const delayDebounce = setTimeout(() => {
       fetchSalesSalaryData(1, searchTerm);
@@ -382,7 +387,7 @@ const SalesSalaryRatio = () => {
       const params = {
         dateFilter: selectedTab,
         search: searchTerm.trim() || undefined,
-        export: "true" // Add export flag
+        export: "true"
       };
 
       if (selectedTab !== "all") {
@@ -449,7 +454,6 @@ const SalesSalaryRatio = () => {
     const num = parseFloat(value);
     if (isNaN(num)) return "0.00%";
     
-    // Show + sign for positive values
     const sign = num > 0 ? "+" : "";
     return `${sign}${num.toFixed(2)}%`;
   };
@@ -459,13 +463,11 @@ const SalesSalaryRatio = () => {
     return isNaN(num) ? "0.0000" : num.toFixed(4);
   };
 
-  // NEW: Calculate Salary/Sale ratio as (Profit - Total Expense) / Expense * 100
   const calculateSalarySaleRatio = (profit, totalExpense) => {
     if (totalExpense === 0) return 0;
     return ((profit - totalExpense) / totalExpense) * 100;
   };
 
-  // Render Pagination Component
   const renderPagination = () => {
     if (pagination.totalPages <= 1) return null;
 
@@ -483,7 +485,6 @@ const SalesSalaryRatio = () => {
           ← Prev
         </button>
 
-        {/* Page Numbers */}
         <div className="flex gap-1">
           {visiblePages.map((page, index) => (
             <button
@@ -505,7 +506,6 @@ const SalesSalaryRatio = () => {
           ))}
         </div>
 
-        {/* Next Button */}
         <button
           onClick={() => handlePageChange(pagination.currentPage + 1)}
           disabled={!pagination.hasNext}
@@ -618,13 +618,11 @@ const SalesSalaryRatio = () => {
   );
 
   const renderTableRow = (record, index) => {
-    // Calculate Salary/Sale ratio based on your formula: (Profit - Total Expense) / Expense * 100
     const salarySaleRatio = calculateSalarySaleRatio(
       parseFloat(record.profit) || 0,
       parseFloat(record.totalExpense) || 0
     );
     
-    // Performance color coding - green for positive, red for negative
     const performance = parseFloat(record.performance) || 0;
     const performanceColor = performance >= 0 ? "text-green-600" : "text-red-600";
     const salarySaleRatioColor = salarySaleRatio >= 0 ? "text-green-600" : "text-red-600";
@@ -658,7 +656,7 @@ const SalesSalaryRatio = () => {
         <td className="p-3 text-sm font-semibold text-green-600">
           {formatCurrency(record.incentive)}
         </td>
-        <td className="p-3 text-sm font-semibold text-indigo-600">
+        <td className="p-3 text-sm font-semibold text-yellow-600">
           {formatCurrency(record.allowance)}
         </td>
         <td className="p-3 text-sm font-semibold text-red-600">
@@ -681,7 +679,7 @@ const SalesSalaryRatio = () => {
   };
 
   const getColSpan = () => {
-    return 12; // Updated to match new column count
+    return 12;
   };
 
   return (
@@ -743,7 +741,6 @@ const SalesSalaryRatio = () => {
         </div>
       </div>
 
-      {/* Time Filter Tabs */}
       <div className="bg-white p-4 rounded-xl shadow-md mb-6 border border-gray-200">
         <div className="flex flex-wrap gap-2 mb-4">
           <button
@@ -798,7 +795,6 @@ const SalesSalaryRatio = () => {
           </button>
         </div>
 
-        {/* Active Filter Display */}
         <div className="flex items-center gap-2 text-sm text-gray-600">
           <Filter size={16} />
           <span>Active Filter: </span>
@@ -806,10 +802,8 @@ const SalesSalaryRatio = () => {
         </div>
       </div>
 
-      {/* Summary Cards */}
       {renderSummaryCards()}
 
-      {/* Data Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           {renderTableHeaders()}
