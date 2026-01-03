@@ -374,7 +374,7 @@ const Dashboard = () => {
       });
 
       const payrolls = response.data?.data || [];
-
+      
       // Calculate and log the total
       const totalNetSalary = payrolls.reduce((sum, item) => {
         const netSalary = item.netSalary || 0;
@@ -382,7 +382,6 @@ const Dashboard = () => {
       }, 0);
 
       setPayrollTableData(payrolls);
-
       // UPDATE THE TOTALS BASED ON THE CURRENT PERIOD
       if (period === "Prev Month") {
         setCurrentPayrollTotal(totalNetSalary);

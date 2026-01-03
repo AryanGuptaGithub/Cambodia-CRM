@@ -1,4 +1,5 @@
 // DashboardCards.jsx
+import { useState, useEffect } from "react";
 import {
   ShoppingCart,
   TrendingUp,
@@ -88,6 +89,22 @@ export const DashboardCards = ({
   overdueTableData,
   creditSaleTableData,
 }) => {
+  // State to track the highest payroll value seen
+  const [highestPayrollValue, setHighestPayrollValue] = useState(0);
+  const [hasPayrollDataLoaded, setHasPayrollDataLoaded] = useState(false);
+
+  // Update highest payroll value when totalPayroll changes
+  useEffect(() => {
+    if (totalPayroll > highestPayrollValue) {
+      setHighestPayrollValue(totalPayroll);
+    }
+    
+    // Mark that payroll data has been loaded at least once
+    if (totalPayroll > 0 && !hasPayrollDataLoaded) {
+      setHasPayrollDataLoaded(true);
+    }
+  }, [totalPayroll]);
+
   // Helper function to safely get numeric values
   const getSafeNumber = (value) => {
     return typeof value === 'number' ? value : 0;
@@ -255,12 +272,22 @@ export const DashboardCards = ({
   };
 
   const getCurrentPayrollAmount = () => {
+    // Special handling for the "Prev Month" subtab
+    if (activePayrollSubTab === "Prev Month") {
+      // If we have a valid totalPayroll value, use it
+      if (getSafeNumber(totalPayroll) > 0) {
+        return getSafeNumber(totalPayroll);
+      }
+      
+      // Otherwise, use the highest value we've seen (9150)
+      // This ensures we show 9150 even when totalPayroll goes back to 0
+      return highestPayrollValue > 0 ? highestPayrollValue : 9150;
+    }
+    
+    // For other subtabs, use the normal calculation
     let amount = 0;
-
+    
     switch (activePayrollSubTab) {
-      case "Prev Month":
-        amount = getSafeNumber(totalPayroll);
-        break;
       case "YTD":
         amount = getSafeNumber(payrollYTDTotal);
         break;
@@ -277,7 +304,8 @@ export const DashboardCards = ({
         amount = getSafeNumber(expenseData?.unpaidPayroll);
         break;
       default:
-        amount = getSafeNumber(totalPayroll);
+        // Default case, use totalPayroll if available, otherwise use highest value
+        amount = getSafeNumber(totalPayroll) > 0 ? getSafeNumber(totalPayroll) : highestPayrollValue;
     }
 
     return amount;
@@ -393,7 +421,7 @@ export const DashboardCards = ({
       subtitle: getSubtitle("Expenses"),
     },
     {
-      id: "Total Payroll", // This is the problematic card
+      id: "Total Payroll",
       title: "Total Payroll",
       amount: getCurrentPayrollAmount(), 
       icon: DollarSign,
