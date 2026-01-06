@@ -8,7 +8,10 @@ import mongoose from "mongoose";
 const router = express.Router();
 
 const deductFromReportInHand = async (productName, qty) => {
-  const productStock = await ReportInHand.findOne({ productName });
+  // Case-insensitive search
+  const productStock = await ReportInHand.findOne({
+    productName: { $regex: new RegExp(`^${productName}$`, 'i') }
+  });
 
   if (!productStock)
     throw new Error(`Product not in ReportInHand: ${productName}`);
@@ -45,7 +48,10 @@ const deductFromReportInHand = async (productName, qty) => {
 };
 
 const addBackToReportInHand = async (productName, qty) => {
-  const productStock = await ReportInHand.findOne({ productName });
+  // Case-insensitive search
+  const productStock = await ReportInHand.findOne({
+    productName: { $regex: new RegExp(`^${productName}$`, 'i') }
+  });
 
   if (!productStock)
     throw new Error(`Product not in ReportInHand: ${productName}`);
@@ -63,64 +69,84 @@ const addBackToReportInHand = async (productName, qty) => {
   return lastBatch.lc;
 };
 
-const updateStockInMRHand = async (
-  mrName,
-  productId,
-  productName,
-  boxQuantity,
-  operation
-) => {
-  // operation: 'add' for send, 'subtract' for receive
-  const increment = operation === "add" ? boxQuantity : -boxQuantity;
+async function updateStockInMRHand(mrName, productId, productName, quantity, operation) {
+  try {
+    // Clean MR name - remove extra spaces
+    const cleanedMrName = mrName.replace(/\s+/g, ' ').trim();
+    
+    // First, try to find the MR stock document
+    let mrStock = await StockInMRHand.findOne({
+      mrName: { $regex: new RegExp(`^${cleanedMrName}$`, 'i') }
+    });
 
-  // Try to update existing product in array
-  const result = await StockInMRHand.findOneAndUpdate(
-    {
-      mrName,
-      "products.productId": productId,
-    },
-    {
-      $inc: { "products.$.boxQuantity": increment },
-    },
-    { new: true }
-  );
-
-  // If product doesn't exist in array, add it
-  if (!result) {
-    if (operation === "add") {
-      await StockInMRHand.findOneAndUpdate(
-        { mrName },
-        {
-          $push: {
-            products: {
-              productId,
-              productName,
-              boxQuantity,
-            },
-          },
-        },
-        { upsert: true, new: true }
-      );
-    } else {
-      throw new Error(`Product ${productName} not found in MR ${mrName} stock`);
+    // If MR stock doesn't exist and we're adding, create it
+    if (!mrStock) {
+      if (operation === "add") {
+        mrStock = new StockInMRHand({
+          mrName: cleanedMrName,
+          products: []
+        });
+        await mrStock.save();
+      } else {
+        throw new Error(`MR ${cleanedMrName} not found in stock`);
+      }
     }
-  } else if (operation === "subtract") {
-    // Remove product from array if quantity becomes 0 or less
-    const updatedDoc = await StockInMRHand.findOneAndUpdate(
-      {
-        mrName,
-        "products.productId": productId,
-        "products.boxQuantity": { $lte: 0 },
-      },
-      {
-        $pull: { products: { productId } },
-      },
-      { new: true }
-    );
-  }
-};
 
-// ✅ FIXED: Generate next stock transfer number function
+    // Find the product within the products array
+    let productFound = false;
+    let productIndex = -1;
+    
+    for (let i = 0; i < mrStock.products.length; i++) {
+      const product = mrStock.products[i];
+      
+      // Case-insensitive comparison for product name
+      if (product.productName && product.productName.toLowerCase() === productName.toLowerCase()) {
+        productFound = true;
+        productIndex = i;
+        break;
+      }
+      
+      // Also check by productId if available
+      if (productId && product.productId && product.productId.toString() === productId.toString()) {
+        productFound = true;
+        productIndex = i;
+        break;
+      }
+    }
+
+    if (productFound) {
+      // Update existing product
+      if (operation === "add") {
+        mrStock.products[productIndex].boxQuantity += quantity;
+      } else if (operation === "subtract") {
+        mrStock.products[productIndex].boxQuantity = Math.max(0, mrStock.products[productIndex].boxQuantity - quantity);
+      }
+    } else {
+      // Product not found in MR stock
+      if (operation === "add") {
+        // Add new product to MR stock
+        mrStock.products.push({
+          productId: productId,
+          productName: productName,
+          boxQuantity: quantity
+        });
+      } else if (operation === "subtract") {
+        throw new Error(`Product ${productName} not found in MR ${cleanedMrName} stock`);
+      }
+    }
+
+    // Remove products with 0 quantity to clean up
+    mrStock.products = mrStock.products.filter(product => product.boxQuantity > 0);
+    
+    await mrStock.save();
+    return mrStock;
+  } catch (error) {
+    console.error("Error updating MR stock:", error);
+    throw error;
+  }
+}
+
+// Generate next stock transfer number function
 const generateNextStockTransferNumber = async () => {
   try {
     // Only use StockTransferToMR collection for numbering
@@ -148,7 +174,7 @@ const generateNextStockTransferNumber = async () => {
   }
 };
 
-// ✅ FIXED: Route to get next stock transfer number
+// Route to get next stock transfer number
 router.get("/stock-transfers-mr/next-number", async (req, res) => {
   try {
     const nextNumber = await generateNextStockTransferNumber();
@@ -160,7 +186,7 @@ router.get("/stock-transfers-mr/next-number", async (req, res) => {
   }
 });
 
-// ✅ FIXED: Route to get last stock transfer number
+// Route to get last stock transfer number
 router.get("/stock-transfers-mr/last-number", async (req, res) => {
   try {
     const lastTransfer = await StockTransferToMR.findOne()
@@ -443,49 +469,19 @@ router.get("/stock-transfers-to-mr", async (req, res) => {
     res.status(500).json({ error: "Server Error" });
   }
 });
+
+// Fixed: Get stock in MR hand with correct assigned quantity calculation
 router.get("/stock-in-mr-hand-admin", async (req, res) => {
   try {
-    const { mrName } = req.query;
+    const { mrName, search } = req.query;
 
     // Build match stage for aggregation
     let matchStage = { $match: {} };
     if (mrName && mrName !== "all") {
-      matchStage.$match.mrName = mrName;
+      matchStage.$match.mrName = { $regex: new RegExp(`^${mrName}$`, 'i') };
     }
 
-    // First, get all stock transfers to calculate assigned quantities
-    const transferAggregation = [
-      {
-        $match: { transferType: "send" },
-      },
-      { $unwind: "$items" },
-      {
-        $group: {
-          _id: {
-            mrName: "$stockTransferToMr",
-            productId: "$items.productId",
-          },
-          totalAssigned: { $sum: "$items.boxQuantity" },
-          latestTransferDate: { $max: "$createdAt" },
-        },
-      },
-    ];
-
-    const transferResults = await StockTransferToMR.aggregate(
-      transferAggregation
-    );
-
-    // Create a map for quick lookup of assigned quantities
-    const assignedMap = {};
-    transferResults.forEach((item) => {
-      const key = `${item._id.mrName}_${item._id.productId}`;
-      assignedMap[key] = {
-        totalAssigned: item.totalAssigned,
-        latestTransferDate: item.latestTransferDate,
-      };
-    });
-
-    // Now get current stock in hand
+    // Get current stock in hand from StockInMRHand
     const stockAggregation = [
       matchStage,
       { $unwind: "$products" },
@@ -513,7 +509,7 @@ router.get("/stock-in-mr-hand-admin", async (req, res) => {
               else: "$productDetails.productName",
             },
           },
-          boxQuantity: "$products.boxQuantity", // This is remaining stock
+          boxQuantity: "$products.boxQuantity",
           lc: "$productDetails.lc",
           costPrice: "$productDetails.costPrice",
           unit: "$productDetails.unit",
@@ -528,28 +524,59 @@ router.get("/stock-in-mr-hand-admin", async (req, res) => {
 
     const stockResults = await StockInMRHand.aggregate(stockAggregation);
 
+    // Get all transfers to calculate assigned quantities
+    const transferMatch = { transferType: "send" };
+    if (mrName && mrName !== "all") {
+      transferMatch.stockTransferToMr = { $regex: new RegExp(`^${mrName}$`, 'i') };
+    }
+
+    const transfers = await StockTransferToMR.find(transferMatch);
+
+    // Create a map to track assigned quantities by MR and product
+    const assignedMap = {};
+    
+    transfers.forEach(transfer => {
+      transfer.items.forEach(item => {
+        const key = `${transfer.stockTransferToMr}_${item.productId}`;
+        if (!assignedMap[key]) {
+          assignedMap[key] = {
+            totalAssigned: 0,
+            latestTransferDate: transfer.createdAt,
+            invoiceNo: transfer.invoiceNo
+          };
+        }
+        assignedMap[key].totalAssigned += item.boxQuantity || 0;
+        
+        // Keep the latest transfer date
+        if (transfer.createdAt > assignedMap[key].latestTransferDate) {
+          assignedMap[key].latestTransferDate = transfer.createdAt;
+        }
+      });
+    });
+
     // Format the result with assigned and remaining values
     const formattedResult = stockResults.map((item, index) => {
       const key = `${item.mrName}_${item.productId}`;
       const assignedData = assignedMap[key] || {
-        totalAssigned: 0,
-        latestTransferDate: null,
+        totalAssigned: item.boxQuantity || 0, // If no transfers found, use current stock as assigned
+        latestTransferDate: item.createdAt,
+        invoiceNo: null
       };
 
-      // Calculate used quantity
-      const assignedQty = assignedData.totalAssigned || 0;
+      // Remaining quantity is the current boxQuantity
       const remainingQty = item.boxQuantity || 0;
-      const usedQty = assignedQty - remainingQty;
+      
+      // Calculate used quantity
+      const assignedQty = assignedData.totalAssigned;
+      const usedQty = Math.max(0, assignedQty - remainingQty);
 
       return {
         // Original expected fields
         assignedDate: assignedData.latestTransferDate
-          ? new Date(assignedData.latestTransferDate)
-              .toISOString()
-              .split("T")[0]
+          ? new Date(assignedData.latestTransferDate).toISOString().split("T")[0]
           : item.createdAt
           ? new Date(item.createdAt).toISOString().split("T")[0]
-          : "N/A",
+          : new Date().toISOString().split("T")[0],
         assignedQty: assignedQty,
         batch: "N/A",
         createdAt: item.createdAt
@@ -559,7 +586,7 @@ router.get("/stock-in-mr-hand-admin", async (req, res) => {
         id: item.stockId
           ? item.stockId.toString()
           : `${item.mrName}-${item.productId}-${index}`,
-        invoiceNumbers: [], // You might want to fetch these from StockTransferToMR
+        invoiceNumbers: assignedData.invoiceNo ? [assignedData.invoiceNo] : [],
         mrCode: item.mrName,
         mrName: item.mrName,
         productCode:
@@ -569,7 +596,7 @@ router.get("/stock-in-mr-hand-admin", async (req, res) => {
         productName: item.productName || "Unknown Product",
         remainingQty: remainingQty,
         usedQty: usedQty,
-        status: remainingQty > 0 ? "In Stock" : "Depleted",
+        status: remainingQty > 0 ? "Active" : "Depleted",
 
         // Additional data
         boxQuantity: item.boxQuantity || 0,
@@ -581,10 +608,21 @@ router.get("/stock-in-mr-hand-admin", async (req, res) => {
       };
     });
 
+    // Apply search filter if provided
+    let filteredResult = formattedResult;
+    if (search && search.trim()) {
+      const searchLower = search.toLowerCase();
+      filteredResult = formattedResult.filter(item =>
+        item.productName?.toLowerCase().includes(searchLower) ||
+        item.productCode?.toLowerCase().includes(searchLower) ||
+        item.mrName?.toLowerCase().includes(searchLower)
+      );
+    }
+
     res.json({
       success: true,
-      data: formattedResult,
-      count: formattedResult.length,
+      data: filteredResult,
+      count: filteredResult.length,
     });
   } catch (err) {
     console.error("Failed to fetch MR stock:", err);
@@ -594,6 +632,7 @@ router.get("/stock-in-mr-hand-admin", async (req, res) => {
     });
   }
 });
+
 router.get("/stock-in-mr-hand", async (req, res) => {
   try {
     const stock = await StockInMRHand.find()

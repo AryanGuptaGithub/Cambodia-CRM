@@ -11,10 +11,6 @@ const stockAdjustmentSchema = new mongoose.Schema(
       type: Number,
       required: true,
     },
-    quantityPerCarton: {
-      type: Number,
-      required: true,
-    },
     totalQuantity: {
       type: Number,
       required: true,
@@ -24,7 +20,7 @@ const stockAdjustmentSchema = new mongoose.Schema(
       enum: ["add", "remove"],
       required: true,
     },
-    notes: {
+    remarks: {
       type: String,
       default: "",
     },
@@ -33,4 +29,3 @@ const stockAdjustmentSchema = new mongoose.Schema(
 );
 
 export default mongoose.model("StockAdjustment", stockAdjustmentSchema);
-

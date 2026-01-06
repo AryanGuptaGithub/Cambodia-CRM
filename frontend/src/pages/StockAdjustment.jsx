@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { Plus, Trash2, Edit, Save, Search, X } from "lucide-react";
+import { Plus, Trash2, Edit, Save, Search, X, Eye } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../utils/toast";
 import { getVisiblePages } from "../utils/useVisiblePages";
 import CustomDropdown from "./Utility/customDropdown";
 import { fetchProducts } from "./ProductManager/common/fetchDropdown.jsx";
+import { confirmDialog } from "../utils/confirmationDialog.js"; // Add this import
 
 // Configuration constants
 const CONFIG = {
@@ -24,20 +25,20 @@ const CONFIG = {
     NO_DATA: "No stock adjustments found",
     SELECT_PRODUCT: "Please select a product",
     ENTER_BOX_QUANTITY: "Please enter box quantity",
-    ENTER_QTY_PER_CARTON: "Please enter quantity per carton",
     SELECT_TYPE: "Please select adjustment type",
     NO_PRODUCTS: "No products available for stock adjustment",
   },
 };
 
 // Helper function to validate MongoDB ObjectId
-const isValidObjectId = (id) => {
-  return /^[0-9a-fA-F]{24}$/.test(id);
-};
+// const isValidObjectId = (id) => {
+//   return /^[0-9a-fA-F]{24}$/.test(id);
+// };
 
 const StockAdjustment = () => {
   const [adjustments, setAdjustments] = useState([]);
   const [products, setProducts] = useState([]);
+  const [stockTransfers, setStockTransfers] = useState([]);
   const [selectedIds, setSelectedIds] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState("");
@@ -45,12 +46,13 @@ const StockAdjustment = () => {
   const [modalVisible, setModalVisible] = useState(false);
   const [editingAdjustment, setEditingAdjustment] = useState(null);
   const [isProductsEmpty, setIsProductsEmpty] = useState(false);
+  const [remarksModalVisible, setRemarksModalVisible] = useState(false);
+  const [viewingRemarks, setViewingRemarks] = useState("");
   const inputRef = useRef(null);
 
   const [formData, setFormData] = useState({
     product: "",
     boxQuantity: "",
-    quantityPerCarton: "",
     adjustmentType: "add",
     remarks: "",
   });
@@ -61,6 +63,7 @@ const StockAdjustment = () => {
   useEffect(() => {
     fetchAdjustments();
     fetchProductsData();
+    fetchStockTransfers();
   }, []);
 
   // Check if products are empty
@@ -99,6 +102,70 @@ const StockAdjustment = () => {
     }
   };
 
+  const fetchStockTransfers = async () => {
+    try {
+      const response = await axios.get(`${backendUrl}/api/stock-transfers`);
+      if (response.data && response.data.success) {
+        setStockTransfers(response.data.data);
+      }
+    } catch (error) {
+      console.error("Fetch stock transfers error:", error);
+      // Don't show error toast for stock transfers as it's not critical
+    }
+  };
+
+  // Get current stock for a product - SIMPLIFIED VERSION
+  const getCurrentStock = (productId) => {
+    if (!productId) return 0;
+
+    const product = products.find((p) => p._id === productId);
+    if (!product) return 0;
+
+    // First get base stock from product batches
+    let baseStock = 0;
+    if (product.batches && product.batches.length > 0) {
+      const totalBoxes = product.batches.reduce((sum, batch) => {
+        return sum + (batch.boxes || 0);
+      }, 0);
+
+      const qtyPerCarton = product.qtyPerCarton || 1;
+      baseStock = totalBoxes * qtyPerCarton;
+    }
+
+    // Adjust for stock transfers
+    if (stockTransfers.length > 0) {
+      stockTransfers.forEach((transfer) => {
+        transfer.items.forEach((item) => {
+          if (item.productId === productId) {
+            const qtyPerCarton = product.qtyPerCarton || 1;
+            const transferredPieces = (item.boxQuantity || 0) * qtyPerCarton;
+
+            if (transfer.transferType === "send") {
+              baseStock -= transferredPieces;
+            } else if (transfer.transferType === "receive") {
+              baseStock += transferredPieces;
+            }
+          }
+        });
+      });
+    }
+
+    // Adjust for stock adjustments
+    const productAdjustments = adjustments.filter(
+      (adj) =>
+        (adj.productId?._id === productId || adj.productId === productId) &&
+        adj._id !== editingAdjustment?._id
+    );
+
+    const adjustmentSum = productAdjustments.reduce((sum, adj) => {
+      const qtyPerCarton = product?.qtyPerCarton || 1;
+      const pieces = (adj.boxQuantity || 0) * qtyPerCarton;
+      return sum + (adj.adjustmentType === "add" ? pieces : -pieces);
+    }, 0);
+
+    return baseStock + adjustmentSum;
+  };
+
   // Memoized filtered adjustments
   const filteredAdjustments = useMemo(() => {
     const lowerSearch = searchTerm.trim().toLowerCase();
@@ -106,17 +173,12 @@ const StockAdjustment = () => {
     return adjustments.filter((adj) => {
       if (!lowerSearch) return true;
 
-      const fields = [
-        adj.quantityPerCarton,
-        adj.boxQuantity,
-        adj.adjustmentType,
-        adj.totalQuantity,
-        adj.productId?.productName,
-        adj.remarks,
-      ];
-
-      return fields.some((field) =>
-        (field ?? "").toString().toLowerCase().includes(lowerSearch)
+      const productName = adj.productId?.productName || "";
+      return (
+        productName.toLowerCase().includes(lowerSearch) ||
+        adj.boxQuantity.toString().includes(lowerSearch) ||
+        adj.adjustmentType.toLowerCase().includes(lowerSearch) ||
+        (adj.remarks || "").toLowerCase().includes(lowerSearch)
       );
     });
   }, [adjustments, searchTerm]);
@@ -137,19 +199,6 @@ const StockAdjustment = () => {
     return getVisiblePages(currentPage, totalPages);
   }, [currentPage, totalPages]);
 
-  // Get current stock for a product
-  const getCurrentStock = (productId) => {
-    if (!productId) return "-";
-    const product = products.find((p) => p._id === productId);
-    if (!product) return "-";
-
-    if (product.inStock) {
-      return `${product.inStock.boxes}`;
-    }
-
-    return product.currentStock || "-";
-  };
-
   // Prepare product options for dropdown with current stock
   const productOptions = useMemo(() => {
     if (isProductsEmpty) {
@@ -166,6 +215,21 @@ const StockAdjustment = () => {
       { value: "", label: "Select Product" },
       ...products.map((product) => {
         const stockInfo = getCurrentStock(product._id);
+        const qtyPerCarton = product.qtyPerCarton || 1;
+        const boxes = Math.floor(stockInfo / qtyPerCarton);
+        const pieces = stockInfo % qtyPerCarton;
+
+        let stockDisplay = `${stockInfo} pieces`;
+        if (qtyPerCarton > 1) {
+          if (boxes > 0 && pieces > 0) {
+            stockDisplay = `${boxes} boxes, ${pieces} pieces`;
+          } else if (boxes > 0) {
+            stockDisplay = `${boxes} boxes`;
+          } else {
+            stockDisplay = `${pieces} pieces`;
+          }
+        }
+
         return {
           value: product._id,
           label: `${product.productName}`,
@@ -173,7 +237,7 @@ const StockAdjustment = () => {
         };
       }),
     ];
-  }, [products, isProductsEmpty]);
+  }, [products, isProductsEmpty, getCurrentStock]);
 
   // Selection handlers
   const handleSelect = (id) => {
@@ -182,73 +246,105 @@ const StockAdjustment = () => {
     );
   };
 
+  // Updated handleBulkDelete with confirmation dialog
   const handleBulkDelete = async () => {
     if (selectedIds.length === 0) {
-      showToast("error", "Please select adjustments to delete.");
+      showToast("error", "Please select at least one adjustment to delete.");
       return;
     }
+console.log('values of selectedIds', selectedIds);
+    // Validate IDs before sending (optional but good)
+    // const invalidIds = selectedIds.filter((id) => !isValidObjectId(id));
+    // if (invalidIds.length > 0) {
+    //   console.error("❌ Invalid IDs found:", invalidIds);
+    //   showToast(
+    //     "error",
+    //     `Invalid adjustment IDs detected. Please refresh the page and try again.`
+    //   );
+    //   return;
+    // }
 
-    // Validate IDs before sending
-    const invalidIds = selectedIds.filter((id) => !isValidObjectId(id));
-    if (invalidIds.length > 0) {
-      console.error("❌ Invalid IDs found:", invalidIds);
-      showToast(
-        "error",
-        `Invalid adjustment IDs detected. Please refresh the page and try again.`
-      );
-      return;
-    }
+    // Use confirmDialog instead of window.confirm
+    const confirm = await confirmDialog({
+      text: `Are you sure you want to delete <b>${selectedIds.length}</b> stock adjustment(s)?`,
+      icon: "warning",
+      confirmButtonText: "Yes, delete",
+      cancelButtonText: "Cancel",
+    });
 
-    try {
-      const response = await axios.delete(
-        `${backendUrl}/api/stock-adjustments/bulk`,
-        {
-          data: { ids: selectedIds },
-          headers: {
-            "Content-Type": "application/json",
-          },
-        }
-      );
-      fetchAdjustments();
+    if (confirm.isConfirmed) {
+      try {
+        setLoading(true);
 
-      showToast(
-        "success",
-        response.data?.message || "Adjustments deleted successfully."
-      );
-    } catch (error) {
-      console.error("❌ Bulk delete error:", error);
+        const response = await axios.delete(
+          `${backendUrl}/api/stock-adjustments/bulk`,
+          {
+            data: { ids: selectedIds },
+            headers: {
+              "Content-Type": "application/json",
+            },
+          }
+        );
 
-      if (error.response) {
-        console.error("🔍 Response data: 278", error.response.data);
-        console.error("🔍 Status:", error.response.status);
-
-        // Show specific error message from backend
-        if (error.response.data.invalidIds) {
-          showToast(
-            "error",
-            `Invalid IDs: ${error.response.data.invalidIds.join(", ")}`
-          );
+        if (response.data.success) {
+          showToast("success", response.data.message);
+          // Refresh the adjustments list
+          fetchAdjustments();
+          // Clear selection
+          setSelectedIds([]);
         } else {
-          showToast(
-            "error",
-            error.response.data.message || "Failed to delete adjustments."
-          );
+          showToast("error", response.data.message);
         }
-      } else {
-        showToast("error", "Failed to delete adjustments.");
+      } catch (error) {
+        console.error("❌ Bulk delete error:", error);
+
+        // Check if error has response data
+        if (error.response) {
+          const errorMsg =
+            error.response.data.message || "Failed to delete adjustments.";
+          showToast("error", errorMsg);
+
+         console.log('error', error);
+          if (error.response.data.invalidIds) {
+            console.log(
+              "Invalid IDs from server:",
+              error.response.data.invalidIds
+            );
+          }
+        } else if (error.request) {
+          showToast("error", "Network error. Please check your connection.");
+        } else {
+          showToast("error", "An error occurred while deleting adjustments.");
+        }
+      } finally {
+        setLoading(false);
       }
     }
   };
 
-  const handleDelete = async (id) => {
-    try {
-      await axios.delete(`${backendUrl}/api/stock-adjustments/${id}`);
+  // Updated handleDelete with confirmation dialog
+  const handleDelete = async (id, productName = "") => {
+    const confirmDelete = await confirmDialog({
+      title: "Delete Stock Adjustment",
+      text: `Are you sure you want to delete stock adjustment${
+        productName ? ` for <b>${productName}</b>` : ""
+      }?`,
+      icon: "warning",
+      confirmButtonText: "Yes, delete",
+      cancelButtonText: "Cancel",
+    });
 
-      setAdjustments((prev) => prev.filter((adj) => adj._id !== id));
-      setSelectedIds((prev) => prev.filter((selectedId) => selectedId !== id));
-      showToast("success", CONFIG.MESSAGES.DELETE_SUCCESS);
-    } catch (error) {
-      showToast("error", CONFIG.MESSAGES.DELETE_ERROR);
+    if (confirmDelete.isConfirmed) {
+      try {
+        await axios.delete(`${backendUrl}/api/stock-adjustments/${id}`);
+
+        // Update local state immediately
+        setAdjustments((prev) => prev.filter((adj) => adj._id !== id));
+        setSelectedIds((prev) => prev.filter((selectedId) => selectedId !== id));
+        showToast("success", CONFIG.MESSAGES.DELETE_SUCCESS);
+      } catch (error) {
+        showToast("error", CONFIG.MESSAGES.DELETE_ERROR);
+      }
     }
   };
 
@@ -262,31 +358,29 @@ const StockAdjustment = () => {
     setFormData({
       product: adjustment.productId?._id || adjustment.productId,
       boxQuantity: adjustment.boxQuantity || 0,
-      quantityPerCarton: adjustment.quantityPerCarton || 0,
       adjustmentType: adjustment.adjustmentType,
       remarks: adjustment.remarks || "",
     });
     setModalVisible(true);
   };
 
+  // Handle view remarks
+  const handleViewRemarks = (remarks) => {
+    setViewingRemarks(remarks || "No remarks provided");
+    setRemarksModalVisible(true);
+  };
+
   // Get qtyPerCarton for the selected product
   const getQtyPerCarton = (productId = formData.product) => {
     if (!productId) return 0;
     const selectedProduct = products.find((p) => p._id === productId);
-    return selectedProduct?.qtyPerCarton || 0;
+    return selectedProduct?.qtyPerCarton || 1;
   };
 
-  // Calculate total quantity for display: (Box Quantity × Pieces per Box) + Open Pieces
-  const calculateTotalQuantity = (currentFormData = formData) => {
-    if (!currentFormData.boxQuantity && !currentFormData.quantityPerCarton)
-      return 0;
-
-    const piecesPerBox = getQtyPerCarton(currentFormData.product);
-    const boxQty = currentFormData.boxQuantity || 0;
-    const openPieces = currentFormData.quantityPerCarton || 0;
-
-    const total = boxQty * piecesPerBox + openPieces;
-    return currentFormData.adjustmentType === "remove" ? -total : total;
+  const calculateTotalPieces = (boxQuantity) => {
+    if (!boxQuantity) return 0;
+    const piecesPerBox = getQtyPerCarton();
+    return boxQuantity * piecesPerBox;
   };
 
   const handleFormChange = (field, value) => {
@@ -294,6 +388,33 @@ const StockAdjustment = () => {
       ...prev,
       [field]: value,
     }));
+  };
+
+  // Format current stock display
+  const formatCurrentStockDisplay = (productId) => {
+    const totalPieces = getCurrentStock(productId);
+
+    if (totalPieces === 0) {
+      return "0";
+    }
+
+    const product = products.find((p) => p._id === productId);
+    const qtyPerCarton = product?.qtyPerCarton || 1;
+
+    if (qtyPerCarton > 1) {
+      const boxes = Math.floor(totalPieces / qtyPerCarton);
+      const pieces = totalPieces % qtyPerCarton;
+
+      if (boxes > 0 && pieces > 0) {
+        return `${boxes} boxes, ${pieces} pieces (${totalPieces} total)`;
+      } else if (boxes > 0) {
+        return `${boxes} boxes (${totalPieces} total)`;
+      } else {
+        return `${pieces} pieces (${totalPieces} total)`;
+      }
+    }
+
+    return `${totalPieces}`;
   };
 
   const toggleSelect = (adjustment) => {
@@ -316,24 +437,18 @@ const StockAdjustment = () => {
     }
   };
 
-  // Handle numeric input with validation
+  // Handle numeric input
   const handleNumericInput = (field, value) => {
-    // Remove any non-numeric characters
     const numericValue = value.replace(/[^0-9]/g, "");
-
-    // If empty, set to empty string (don't convert to number yet)
     if (numericValue === "") {
       handleFormChange(field, "");
     } else {
-      // Convert to number
-      const finalValue = parseInt(numericValue, 10);
-      handleFormChange(field, finalValue);
+      handleFormChange(field, parseInt(numericValue, 10));
     }
   };
 
   // Handle blur event for numeric inputs
   const handleNumericBlur = (field, value) => {
-    // If empty or invalid, set to default value
     if (!value || value === "" || isNaN(value)) {
       handleFormChange(field, 0);
     }
@@ -343,22 +458,11 @@ const StockAdjustment = () => {
     setFormData({
       product: "",
       boxQuantity: 0,
-      quantityPerCarton: 0,
       adjustmentType: "add",
       remarks: "",
     });
     setModalVisible(false);
     setEditingAdjustment(null);
-  };
-
-  // Get quantity display with sign
-  const getQuantityDisplay = (quantity) => {
-    return quantity > 0 ? `+${quantity}` : quantity.toString();
-  };
-
-  // Get quantity color class
-  const getQuantityColor = (quantity) => {
-    return quantity < 0 ? "text-red-600" : "text-green-600";
   };
 
   const handleModalSubmit = async (e) => {
@@ -374,32 +478,28 @@ const StockAdjustment = () => {
       showToast("error", CONFIG.MESSAGES.SELECT_PRODUCT);
       return;
     }
-    if (
-      (formData.boxQuantity === 0 && formData.quantityPerCarton === 0) ||
-      formData.boxQuantity < 0 ||
-      formData.quantityPerCarton < 0
-    ) {
-      showToast("error", "Please enter valid box quantity or open pieces");
+
+    const boxQty = parseInt(formData.boxQuantity) || 0;
+    if (boxQty === 0 || boxQty < 0) {
+      showToast("error", "Please enter valid box quantity");
       return;
     }
+
     if (!formData.adjustmentType) {
       showToast("error", CONFIG.MESSAGES.SELECT_TYPE);
       return;
     }
 
     try {
-      // Calculate total quantity: (Box Quantity × Pieces per Box) + Open Pieces
-      const piecesPerBox = getQtyPerCarton();
-      const boxQty = formData.boxQuantity || 0;
-      const openPieces = formData.quantityPerCarton || 0;
-      const totalQuantity = boxQty * piecesPerBox + openPieces;
+      const product = products.find((p) => p._id === formData.product);
+      const qtyPerCarton = product?.qtyPerCarton || 1;
+      const totalPieces = boxQty * qtyPerCarton;
 
       const adjustmentData = {
         productId: formData.product,
         boxQuantity: boxQty,
-        quantityPerCarton: openPieces,
         totalQuantity:
-          formData.adjustmentType === "remove" ? -totalQuantity : totalQuantity,
+          formData.adjustmentType === "remove" ? -totalPieces : totalPieces,
         adjustmentType: formData.adjustmentType,
         remarks: formData.remarks,
       };
@@ -412,19 +512,11 @@ const StockAdjustment = () => {
         );
 
         if (response.data.success) {
+          // Update local state
           setAdjustments((prev) =>
             prev.map((adj) =>
               adj._id === editingAdjustment._id
-                ? {
-                    ...adj,
-                    ...adjustmentData,
-                    productId: {
-                      ...adj.productId,
-                      productName: products.find(
-                        (p) => p._id === formData.product
-                      )?.productName,
-                    },
-                  }
+                ? { ...response.data.data }
                 : adj
             )
           );
@@ -438,17 +530,8 @@ const StockAdjustment = () => {
         );
 
         if (response.data.success) {
-          const newAdjustment = {
-            _id: response.data.data._id,
-            ...adjustmentData,
-            productId: {
-              _id: formData.product,
-              productName: products.find((p) => p._id === formData.product)
-                ?.productName,
-            },
-            createdAt: new Date().toISOString(),
-          };
-          setAdjustments((prev) => [newAdjustment, ...prev]);
+          // Add to local state
+          setAdjustments((prev) => [response.data.data, ...prev]);
           showToast("success", CONFIG.MESSAGES.CREATE_SUCCESS);
         }
       }
@@ -464,27 +547,6 @@ const StockAdjustment = () => {
       );
     }
   };
-
-  const allFields = [
-    { id: "select", name: "" },
-    { id: "productName", name: "Product Name" },
-    { id: "boxQuantity", name: "Box Quantity" },
-    { id: "openPieces", name: "Open Pieces" },
-    { id: "totalQuantity", name: "Total Quantity" },
-    { id: "adjustmentType", name: "Type" },
-    { id: "remarks", name: "Remarks" },
-    { id: "actions", name: "Actions" },
-  ];
-
-  const tableColumns = [
-    "productName",
-    "boxQuantity",
-    "openPieces",
-    "totalQuantity",
-    "adjustmentType",
-    "remarks",
-    "actions",
-  ];
 
   return (
     <div className="p-6">
@@ -513,8 +575,7 @@ const StockAdjustment = () => {
                 <div className="mt-2 text-sm text-red-700">
                   <p>
                     You need to add at least one product before creating stock
-                    adjustments. Add products in the product management section
-                    first.
+                    adjustments.
                   </p>
                 </div>
               </div>
@@ -562,7 +623,7 @@ const StockAdjustment = () => {
                 <input
                   ref={inputRef}
                   type="text"
-                  placeholder="Search by Product Name,Box Quantity....."
+                  placeholder="Search by Product Name, Box Quantity....."
                   value={searchTerm}
                   onChange={(e) => {
                     setSearchTerm(e.target.value);
@@ -582,141 +643,135 @@ const StockAdjustment = () => {
           <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
             <thead className="bg-gray-100 text-gray-700 border-b">
               <tr>
-                {allFields
-                  .filter((item) => tableColumns.includes(item.id))
-                  .map((item) => (
-                    <th key={item.id} className="p-3">
-                      {item.id === "productName" ? (
-                        <div className="flex justify-left gap-3">
-                          {paginatedAdjustments.length > 0 && (
-                            <input
-                              type="checkbox"
-                              aria-label="Select all adjustments"
-                              checked={
-                                paginatedAdjustments.length > 0 &&
-                                paginatedAdjustments.every((adj) =>
-                                  selectedIds.includes(adj._id)
-                                )
-                              }
-                              ref={(input) => {
-                                if (input) {
-                                  input.indeterminate =
-                                    selectedIds.length > 0 &&
-                                    selectedIds.length <
-                                      paginatedAdjustments.length;
-                                }
-                              }}
-                              onChange={(e) =>
-                                toggleSelectAll(e.target.checked)
-                              }
-                              className="cursor-pointer"
-                              disabled={isProductsEmpty}
-                            />
-                          )}
-                          <span className="text-sm font-medium">
-                            {item.name}
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="text-sm font-medium">{item.name}</span>
-                      )}
-                    </th>
-                  ))}
+                <th className="p-3">
+                  <div className="flex justify-left gap-3">
+                    {paginatedAdjustments.length > 0 && (
+                      <input
+                        type="checkbox"
+                        aria-label="Select all adjustments"
+                        checked={
+                          paginatedAdjustments.length > 0 &&
+                          paginatedAdjustments.every((adj) =>
+                            selectedIds.includes(adj._id)
+                          )
+                        }
+                        ref={(input) => {
+                          if (input) {
+                            input.indeterminate =
+                              selectedIds.length > 0 &&
+                              selectedIds.length < paginatedAdjustments.length;
+                          }
+                        }}
+                        onChange={(e) => toggleSelectAll(e.target.checked)}
+                        className="cursor-pointer"
+                        disabled={isProductsEmpty}
+                      />
+                    )}
+                    <span className="text-sm font-medium">Product Name</span>
+                  </div>
+                </th>
+                <th className="p-3 text-sm font-medium">Box Quantity</th>
+                <th className="p-3 text-sm font-medium">Type</th>
+                <th className="p-3 text-sm font-medium">Remarks</th>
+                <th className="p-3 text-sm font-medium">Actions</th>
               </tr>
             </thead>
 
             <tbody>
               {paginatedAdjustments.length === 0 ? (
                 <tr>
-                  <td
-                    colSpan={tableColumns.length}
-                    className="p-4 text-center text-gray-500"
-                  >
+                  <td colSpan={5} className="p-4 text-center text-gray-500">
                     {loading ? "Loading..." : CONFIG.MESSAGES.NO_DATA}
                   </td>
                 </tr>
               ) : (
-                paginatedAdjustments.map((adj, index) => (
-                  <tr
-                    key={adj._id}
-                    className={`hover:bg-gray-50 ${
-                      index < paginatedAdjustments.length - 1 ? "border-b" : ""
-                    }`}
-                  >
-                    {allFields
-                      .filter((item) => tableColumns.includes(item.id))
-                      .map((item) => (
-                        <td key={item.id} className="p-3 text-sm">
-                          {item.id === "productName" ? (
-                            <div className="flex gap-4 items-center">
-                              <input
-                                type="checkbox"
-                                checked={selectedIds.includes(adj._id)}
-                                onChange={() => toggleSelect(adj)}
-                                className={`rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 ${
-                                  isProductsEmpty
-                                    ? "cursor-not-allowed opacity-50"
-                                    : "cursor-pointer"
-                                }`}
-                                disabled={isProductsEmpty}
-                              />
-                              <span className="font-medium text-left">
-                                {adj.productId?.productName || "N/A"}
-                              </span>
-                            </div>
-                          ) : item.id === "boxQuantity" ? (
-                            adj.boxQuantity
-                          ) : item.id === "openPieces" ? (
-                            adj.quantityPerCarton
-                          ) : item.id === "totalQuantity" ? (
-                            <span
-                              className={`font-medium ${getQuantityColor(
-                                adj.totalQuantity
-                              )}`}
-                            >
-                              {getQuantityDisplay(adj.totalQuantity)}
-                            </span>
-                          ) : item.id === "adjustmentType" ? (
-                            <span
-                              className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                adj.adjustmentType === "add"
-                                  ? "bg-green-100 text-green-800"
-                                  : "bg-red-100 text-red-800"
-                              }`}
-                            >
-                              {adj.adjustmentType}
-                            </span>
-                          ) : item.id === "remarks" ? (
-                            adj.remarks || "-"
-                          ) : item.id === "actions" ? (
-                            <div className="flex items-center justify-center gap-3 min-w-[150px]">
-                              <button
-                                className={`${
-                                  isProductsEmpty
-                                    ? "text-gray-400 cursor-not-allowed"
-                                    : "text-indigo-600 hover:text-indigo-800 cursor-pointer"
-                                }`}
-                                onClick={() => handleEdit(adj)}
-                                title="Edit"
-                                disabled={isProductsEmpty}
-                              >
-                                <Edit size={18} />
-                              </button>
-                              <button
-                                className="text-red-600 hover:text-red-800 cursor-pointer"
-                                onClick={() => handleDelete(adj._id)}
-                                title="Delete"
-                              >
-                                <Trash2 size={18} />
-                              </button>
-                            </div>
-                          ) : (
-                            "-"
-                          )}
-                        </td>
-                      ))}
-                  </tr>
-                ))
+                paginatedAdjustments.map((adj, index) => {
+                  const product = products.find(
+                    (p) => p._id === (adj.productId?._id || adj.productId)
+                  );
+                  const qtyPerCarton = product?.qtyPerCarton || 1;
+                  const totalPieces = (adj.boxQuantity || 0) * qtyPerCarton;
+                  const productName = adj.productId?.productName || "N/A";
+
+                  return (
+                    <tr
+                      key={adj._id}
+                      className={`hover:bg-gray-50 ${
+                        index < paginatedAdjustments.length - 1
+                          ? "border-b"
+                          : ""
+                      }`}
+                    >
+                      <td className="p-3 text-sm">
+                        <div className="flex gap-4 items-center">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.includes(adj._id)}
+                            onChange={() => toggleSelect(adj)}
+                            className={`rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 ${
+                              isProductsEmpty
+                                ? "cursor-not-allowed opacity-50"
+                                : "cursor-pointer"
+                            }`}
+                            disabled={isProductsEmpty}
+                          />
+                          <span className="font-medium">{productName}</span>
+                        </div>
+                      </td>
+                      <td className="p-3 text-sm">{adj.boxQuantity}</td>
+                      <td className="p-3 text-sm">
+                        <span
+                          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                            adj.adjustmentType === "add"
+                              ? "bg-green-100 text-green-800"
+                              : "bg-red-100 text-red-800"
+                          }`}
+                        >
+                          {adj.adjustmentType === "add"
+                            ? "Add Stock"
+                            : "Remove Stock"}
+                        </span>
+                      </td>
+                      <td className="p-3 flex items-center justify-center">
+                        {adj.remarks ? (
+                          <button
+                            onClick={() => handleViewRemarks(adj.remarks)}
+                            className="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                            title="View Remarks"
+                          >
+                            <Eye size={16} />
+                            <span>View Remarks</span>
+                          </button>
+                        ) : (
+                          <span className="text-gray-400">No remarks</span>
+                        )}
+                      </td>
+                      <td className="p-3 text-sm">
+                        <div className="flex items-center justify-center gap-3 min-w-[150px]">
+                          <button
+                            className={`${
+                              isProductsEmpty
+                                ? "text-gray-400 cursor-not-allowed"
+                                : "text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                            }`}
+                            onClick={() => handleEdit(adj)}
+                            title="Edit"
+                            disabled={isProductsEmpty}
+                          >
+                            <Edit size={18} />
+                          </button>
+                          <button
+                            className="text-red-600 hover:text-red-800 cursor-pointer"
+                            onClick={() => handleDelete(adj._id, productName)}
+                            title="Delete"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -776,6 +831,7 @@ const StockAdjustment = () => {
           )}
         </div>
 
+        {/* Add/Edit Adjustment Modal */}
         {modalVisible && (
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
             <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -792,7 +848,6 @@ const StockAdjustment = () => {
               </div>
 
               <form onSubmit={handleModalSubmit} className="p-6">
-                {/* First Row: Product and Adjustment Type */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -800,7 +855,10 @@ const StockAdjustment = () => {
                     </label>
                     <CustomDropdown
                       value={formData.product}
-                      onChange={(value) => handleFormChange("product", value)}
+                      onChange={(value) => {
+                        handleFormChange("product", value);
+                        handleFormChange("boxQuantity", 0);
+                      }}
                       disabled={!!editingAdjustment || isProductsEmpty}
                       placeholder={
                         isProductsEmpty
@@ -838,7 +896,6 @@ const StockAdjustment = () => {
                   </div>
                 </div>
 
-                {/* Second Row: Current Stock and Box Quantity */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -848,13 +905,18 @@ const StockAdjustment = () => {
                       type="text"
                       value={
                         formData.product
-                          ? getCurrentStock(formData.product)
+                          ? formatCurrentStockDisplay(formData.product)
                           : "-"
                       }
                       readOnly
                       disabled
                       className="w-full border border-gray-300 rounded-md px-3 py-2 bg-gray-100 text-gray-700 cursor-not-allowed"
                     />
+                    {formData.product && (
+                      <div className="mt-2 text-xs text-gray-500">
+                        <p>Includes stock transfers and previous adjustments</p>
+                      </div>
+                    )}
                   </div>
 
                   <div>
@@ -877,10 +939,19 @@ const StockAdjustment = () => {
                       placeholder="Enter box quantity"
                       required
                     />
+                    {formData.product && formData.boxQuantity > 0 && (
+                      <div className="mt-2 text-sm text-gray-600">
+                        Total pieces:{" "}
+                        {calculateTotalPieces(formData.boxQuantity)}
+                        {formData.adjustmentType === "remove"
+                          ? " (will be removed)"
+                          : " (will be added)"}
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                {/* Remarks Field - Full Width */}
+                {/* Remarks Field */}
                 <div className="mb-6">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Remarks
@@ -924,6 +995,41 @@ const StockAdjustment = () => {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* View Remarks Modal */}
+        {remarksModalVisible && (
+          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-md max-h-[80vh] overflow-y-auto">
+              <div className="flex items-center justify-between p-6 border-b border-gray-200">
+                <h2 className="text-xl font-semibold text-gray-900">Remarks</h2>
+                <button
+                  onClick={() => setRemarksModalVisible(false)}
+                  className="text-gray-400 hover:text-gray-600 transition-colors duration-200 cursor-pointer"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="p-6">
+                <div className="bg-gray-50 p-4 rounded-lg min-h-[150px]">
+                  <p className="text-gray-700 whitespace-pre-wrap">
+                    {viewingRemarks}
+                  </p>
+                </div>
+
+                <div className="mt-6 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setRemarksModalVisible(false)}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors duration-200 cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}

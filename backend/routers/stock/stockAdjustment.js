@@ -6,10 +6,12 @@ import ReportInHand from "../../models/reports/reportsInHand.js";
 
 const router = express.Router();
 
-/* ==========================================================================
-   🔧 Function: Update Product Current Stock after Adjustment
-   ========================================================================== */
-const updateProductCurrentStock = async (productId, boxQuantity, adjustmentType) => {
+const updateProductCurrentStock = async (
+  productId,
+  boxQuantity,
+  adjustmentType,
+  qtyPerCarton
+) => {
   try {
     if (boxQuantity <= 0) return;
 
@@ -18,21 +20,30 @@ const updateProductCurrentStock = async (productId, boxQuantity, adjustmentType)
       throw new Error(`Product not found with ID: ${productId}`);
     }
 
-    // Calculate quantity change based on adjustment type
-    const quantityChange = adjustmentType === "add" ? boxQuantity : -boxQuantity;
+    // Calculate quantity change in pieces based on adjustment type
+    const piecesPerBox = qtyPerCarton || product.qtyPerCarton || 1;
+    const piecesChange =
+      adjustmentType === "add"
+        ? boxQuantity * piecesPerBox
+        : -(boxQuantity * piecesPerBox);
 
     // Prevent removing more than available stock
-    if (adjustmentType === "remove" && product.currentStock < boxQuantity) {
+    if (
+      adjustmentType === "remove" &&
+      product.currentStock < Math.abs(piecesChange)
+    ) {
       throw new Error(
-        `Insufficient stock for product "${product.productName}". Available: ${product.currentStock}, Required: ${boxQuantity}`
+        `Insufficient stock for product "${product.productName}". Available: ${
+          product.currentStock
+        }, Required: ${Math.abs(piecesChange)}`
       );
     }
 
-    const updatedStock = product.currentStock + quantityChange;
+    const updatedStock = product.currentStock + piecesChange;
 
     // Update product current stock
     await Product.findByIdAndUpdate(productId, {
-      currentStock: updatedStock,
+      currentStock: Math.max(0, updatedStock),
     });
 
     return product;
@@ -42,30 +53,37 @@ const updateProductCurrentStock = async (productId, boxQuantity, adjustmentType)
   }
 };
 
-/* ==========================================================================
-   🔧 Function: Update ReportInHand after Stock Adjustment
-   ========================================================================== */
-const updateReportInHandAfterAdjustment = async (productName, boxQuantity, adjustmentType) => {
+const updateReportInHandAfterAdjustment = async (
+  productName,
+  boxQuantity,
+  adjustmentType
+) => {
   try {
     if (boxQuantity <= 0) return;
 
     const existingProduct = await ReportInHand.findOne({ productName });
     if (!existingProduct) {
-      console.warn(`⚠️ Product "${productName}" not found in ReportInHand inventory`);
+      console.warn(
+        `⚠️ Product "${productName}" not found in ReportInHand inventory`
+      );
       return;
     }
 
     // Determine change direction
-    const quantityChange = adjustmentType === "add" ? boxQuantity : -boxQuantity;
+    const quantityChange =
+      adjustmentType === "add" ? boxQuantity : -boxQuantity;
 
     // Prevent removing more than available
-    if (adjustmentType === "remove" && existingProduct.quantity.boxes < boxQuantity) {
+    if (
+      adjustmentType === "remove" &&
+      existingProduct.totalBoxes < boxQuantity
+    ) {
       throw new Error(
-        `Insufficient stock in ReportInHand for "${productName}". Available: ${existingProduct.quantity.boxes}, Required: ${boxQuantity}`
+        `Insufficient stock in ReportInHand for "${productName}". Available: ${existingProduct.totalBoxes}, Required: ${boxQuantity}`
       );
     }
 
-    const updatedBoxes = existingProduct.quantity.boxes + quantityChange;
+    const updatedBoxes = existingProduct.totalBoxes + quantityChange;
 
     // Determine new stock status
     let updatedStatus = "In Stock";
@@ -75,20 +93,24 @@ const updateReportInHandAfterAdjustment = async (productName, boxQuantity, adjus
 
     await ReportInHand.findByIdAndUpdate(existingProduct._id, {
       $set: {
-        "quantity.boxes": updatedBoxes,
+        totalBoxes: Math.max(0, updatedBoxes),
         status: updatedStatus,
       },
     });
   } catch (error) {
-    console.error(`❌ Error updating ReportInHand for product "${productName}":`, error.message);
+    console.error(
+      `❌ Error updating ReportInHand for product "${productName}":`,
+      error.message
+    );
     throw error;
   }
 };
 
-/* ==========================================================================
-   🔧 Function: Restore Stock after Adjustment Deletion
-   ========================================================================== */
-const restoreStockAfterAdjustmentDeletion = async (productName, boxQuantity, adjustmentType) => {
+const restoreStockAfterAdjustmentDeletion = async (
+  productName,
+  boxQuantity,
+  adjustmentType
+) => {
   try {
     if (boxQuantity <= 0) return;
 
@@ -96,8 +118,9 @@ const restoreStockAfterAdjustmentDeletion = async (productName, boxQuantity, adj
     if (!existingProduct) return;
 
     // Reverse the previous operation
-    const quantityChange = adjustmentType === "add" ? -boxQuantity : boxQuantity;
-    const updatedBoxes = existingProduct.quantity.boxes + quantityChange;
+    const quantityChange =
+      adjustmentType === "add" ? -boxQuantity : boxQuantity;
+    const updatedBoxes = existingProduct.totalBoxes + quantityChange;
 
     // Determine new stock status
     let updatedStatus = "In Stock";
@@ -107,25 +130,25 @@ const restoreStockAfterAdjustmentDeletion = async (productName, boxQuantity, adj
 
     await ReportInHand.findByIdAndUpdate(existingProduct._id, {
       $set: {
-        "quantity.boxes": updatedBoxes,
+        totalBoxes: Math.max(0, updatedBoxes),
         status: updatedStatus,
       },
     });
   } catch (error) {
-    console.error(`❌ Error restoring ReportInHand for product "${productName}":`, error.message);
+    console.error(
+      `❌ Error restoring ReportInHand for product "${productName}":`,
+      error.message
+    );
     throw error;
   }
 };
 
-/* ==========================================================================
-   🔹 GET: All Stock Adjustments
-   ========================================================================== */
 router.get("/stock-adjustments", async (req, res) => {
   try {
     const adjustments = await StockAdjustment.find()
       .populate({
         path: "productId",
-        select: "productName type qtyPerCarton currentStock",
+        select: "productName qtyPerCarton currentStock",
       })
       .sort({ createdAt: -1 });
 
@@ -143,15 +166,12 @@ router.get("/stock-adjustments", async (req, res) => {
   }
 });
 
-/* ==========================================================================
-   🔹 POST: Create New Stock Adjustment
-   ========================================================================== */
 router.post("/stock-adjustments", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const { productId, boxQuantity, quantityPerCarton, adjustmentType, notes } = req.body;
+    const { productId, boxQuantity, adjustmentType, remarks } = req.body;
 
     // Validation
     if (!productId || !adjustmentType) {
@@ -162,19 +182,11 @@ router.post("/stock-adjustments", async (req, res) => {
       });
     }
 
-    if (boxQuantity === undefined || boxQuantity === null || boxQuantity < 0) {
+    if (boxQuantity === undefined || boxQuantity === null || boxQuantity < 1) {
       await session.abortTransaction();
       return res.status(400).json({
         success: false,
-        message: "Valid box quantity is required",
-      });
-    }
-
-    if (quantityPerCarton === undefined || quantityPerCarton === null || quantityPerCarton < 0) {
-      await session.abortTransaction();
-      return res.status(400).json({
-        success: false,
-        message: "Valid quantity per carton is required",
+        message: "Valid box quantity (minimum 1) is required",
       });
     }
 
@@ -196,34 +208,45 @@ router.post("/stock-adjustments", async (req, res) => {
       });
     }
 
-    // Calculate total quantity based on product's pieces per box
+    // Calculate total quantity in pieces
     const piecesPerBox = product.qtyPerCarton || 1;
-    const totalQuantity = boxQuantity * piecesPerBox + quantityPerCarton;
-    const finalTotalQuantity = adjustmentType === "remove" ? -totalQuantity : totalQuantity;
+    const totalPieces = boxQuantity * piecesPerBox;
+    const totalQuantity =
+      adjustmentType === "remove" ? -totalPieces : totalPieces;
 
     // Create the adjustment
     const adjustment = new StockAdjustment({
       productId,
       boxQuantity: parseInt(boxQuantity),
-      quantityPerCarton: parseInt(quantityPerCarton),
-      totalQuantity: finalTotalQuantity,
+      totalQuantity,
       adjustmentType,
-      notes: notes || "",
+      remarks: remarks || "",
     });
 
     const savedAdjustment = await adjustment.save({ session });
 
-    // Update Product current stock
-    await updateProductCurrentStock(productId, boxQuantity, adjustmentType);
+    // Update Product current stock (in pieces)
+    await updateProductCurrentStock(
+      productId,
+      boxQuantity,
+      adjustmentType,
+      piecesPerBox
+    );
 
-    // Update ReportInHand inventory
-    await updateReportInHandAfterAdjustment(product.productName, boxQuantity, adjustmentType);
+    // Update ReportInHand inventory (in boxes)
+    await updateReportInHandAfterAdjustment(
+      product.productName,
+      boxQuantity,
+      adjustmentType
+    );
 
     // Populate the product data in response
-    const populatedAdjustment = await StockAdjustment.findById(savedAdjustment._id)
+    const populatedAdjustment = await StockAdjustment.findById(
+      savedAdjustment._id
+    )
       .populate({
         path: "productId",
-        select: "productName type qtyPerCarton currentStock",
+        select: "productName qtyPerCarton currentStock",
       })
       .session(session);
 
@@ -238,7 +261,7 @@ router.post("/stock-adjustments", async (req, res) => {
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
-    
+
     console.error("Error creating adjustment:", err);
 
     if (err.name === "ValidationError") {
@@ -273,9 +296,6 @@ router.post("/stock-adjustments", async (req, res) => {
   }
 });
 
-/* ==========================================================================
-   🔹 PUT: Update Stock Adjustment
-   ========================================================================== */
 router.put("/stock-adjustments/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -301,88 +321,92 @@ router.put("/stock-adjustments/:id", async (req, res) => {
       });
     }
 
-    // Restore previous stock first
+    // Get the product
     const oldProduct = await Product.findById(existingAdjustment.productId);
-    if (oldProduct) {
-      await restoreStockAfterAdjustmentDeletion(
-        oldProduct.productName,
-        existingAdjustment.boxQuantity,
-        existingAdjustment.adjustmentType
-      );
-
-      // Restore product current stock
-      const reverseChange = existingAdjustment.adjustmentType === "add" ? -existingAdjustment.boxQuantity : existingAdjustment.boxQuantity;
-      await Product.findByIdAndUpdate(
-        existingAdjustment.productId,
-        { $inc: { currentStock: reverseChange } },
-        { session }
-      );
+    if (!oldProduct) {
+      await session.abortTransaction();
+      return res.status(404).json({
+        success: false,
+        message: "Product not found",
+      });
     }
 
+    // Restore previous stock first
+    await restoreStockAfterAdjustmentDeletion(
+      oldProduct.productName,
+      existingAdjustment.boxQuantity,
+      existingAdjustment.adjustmentType
+    );
+
+    // Restore product current stock
+    const reversePiecesPerBox = oldProduct.qtyPerCarton || 1;
+    const reversePiecesChange =
+      existingAdjustment.adjustmentType === "add"
+        ? -(existingAdjustment.boxQuantity * reversePiecesPerBox)
+        : existingAdjustment.boxQuantity * reversePiecesPerBox;
+
+    await Product.findByIdAndUpdate(
+      existingAdjustment.productId,
+      { $inc: { currentStock: reversePiecesChange } },
+      { session }
+    );
+
     // If product is being updated, validate it exists
-    if (req.body.productId) {
-      const product = await Product.findById(req.body.productId);
+    let product = oldProduct;
+    if (
+      req.body.productId &&
+      req.body.productId !== existingAdjustment.productId.toString()
+    ) {
+      product = await Product.findById(req.body.productId);
       if (!product) {
         await session.abortTransaction();
         return res.status(404).json({
           success: false,
-          message: "Product not found",
+          message: "New product not found",
         });
       }
     }
 
-    // Recalculate total quantity if boxQuantity, quantityPerCarton, or productId changes
-    if (
-      req.body.boxQuantity !== undefined ||
-      req.body.quantityPerCarton !== undefined ||
-      req.body.productId
-    ) {
-      const productId = req.body.productId || existingAdjustment.productId;
-      const product = await Product.findById(productId);
-      const piecesPerBox = product?.qtyPerCarton || 1;
+    // Recalculate total quantity if boxQuantity, productId, or adjustmentType changes
+    const boxQuantity =
+      req.body.boxQuantity !== undefined
+        ? req.body.boxQuantity
+        : existingAdjustment.boxQuantity;
+    const adjustmentType =
+      req.body.adjustmentType || existingAdjustment.adjustmentType;
+    const productId = req.body.productId || existingAdjustment.productId;
 
-      const boxQuantity =
-        req.body.boxQuantity !== undefined
-          ? req.body.boxQuantity
-          : existingAdjustment.boxQuantity;
-      const quantityPerCarton =
-        req.body.quantityPerCarton !== undefined
-          ? req.body.quantityPerCarton
-          : existingAdjustment.quantityPerCarton;
-      const adjustmentType =
-        req.body.adjustmentType || existingAdjustment.adjustmentType;
+    const piecesPerBox = product.qtyPerCarton || 1;
+    const totalPieces = boxQuantity * piecesPerBox;
+    req.body.totalQuantity =
+      adjustmentType === "remove" ? -totalPieces : totalPieces;
 
-      const totalQuantity = boxQuantity * piecesPerBox + quantityPerCarton;
-      req.body.totalQuantity =
-        adjustmentType === "remove" ? -totalQuantity : totalQuantity;
-    }
-
-    const updatedAdjustment = await StockAdjustment.findByIdAndUpdate(id, req.body, {
-      new: true,
-      runValidators: true,
-      session,
-    }).populate({
+    // Update the adjustment
+    const updatedAdjustment = await StockAdjustment.findByIdAndUpdate(
+      id,
+      req.body,
+      {
+        new: true,
+        runValidators: true,
+        session,
+      }
+    ).populate({
       path: "productId",
-      select: "productName type qtyPerCarton currentStock",
+      select: "productName qtyPerCarton currentStock",
     });
 
     // Apply new stock changes
-    if (updatedAdjustment) {
-      const product = await Product.findById(updatedAdjustment.productId);
-      if (product) {
-        await updateProductCurrentStock(
-          updatedAdjustment.productId,
-          updatedAdjustment.boxQuantity,
-          updatedAdjustment.adjustmentType
-        );
-
-        await updateReportInHandAfterAdjustment(
-          product.productName,
-          updatedAdjustment.boxQuantity,
-          updatedAdjustment.adjustmentType
-        );
-      }
-    }
+    await updateProductCurrentStock(
+      productId,
+      boxQuantity,
+      adjustmentType,
+      piecesPerBox
+    );
+    await updateReportInHandAfterAdjustment(
+      product.productName,
+      boxQuantity,
+      adjustmentType
+    );
 
     await session.commitTransaction();
     session.endSession();
@@ -423,9 +447,102 @@ router.put("/stock-adjustments/:id", async (req, res) => {
   }
 });
 
-/* ==========================================================================
-   🔹 DELETE: Single Stock Adjustment
-   ========================================================================== */
+router.delete("/stock-adjustments/bulk", async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const { ids } = req.body;
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "No adjustment IDs provided for bulk deletion.",
+      });
+    }
+
+    // Validate IDs
+    const validIds = [];
+    const invalidIds = [];
+
+    ids.forEach((id) => {
+      if (mongoose.Types.ObjectId.isValid(id)) {
+        validIds.push(new mongoose.Types.ObjectId(id));
+      } else {
+        invalidIds.push(id);
+      }
+    });
+
+    if (invalidIds.length > 0) {
+      await session.abortTransaction();
+      session.endSession();
+
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ID(s) provided.",
+        invalidIds,
+      });
+    }
+
+    const adjustments = await StockAdjustment.find({
+      _id: { $in: validIds },
+    }).session(session);
+
+    if (adjustments.length === 0) {
+      await session.abortTransaction();
+      session.endSession();
+
+      return res.status(404).json({
+        success: false,
+        message: "No adjustments found with the provided IDs.",
+      });
+    }
+
+    // Restore stock
+    for (const adjustment of adjustments) {
+      const product = await Product.findById(adjustment.productId).session(
+        session
+      );
+
+      if (product) {
+        const reversePiecesChange =
+          adjustment.adjustmentType === "add"
+            ? -adjustment.boxQuantity
+            : adjustment.boxQuantity;
+
+        await Product.findByIdAndUpdate(
+          adjustment.productId,
+          { $inc: { currentStock: reversePiecesChange } },
+          { session }
+        );
+      }
+    }
+
+    const result = await StockAdjustment.deleteMany(
+      { _id: { $in: validIds } },
+      { session }
+    );
+
+    await session.commitTransaction();
+    session.endSession();
+    return res.status(200).json({
+      success: true,
+      message: `${result.deletedCount} adjustment(s) deleted successfully.`,
+      deletedCount: result.deletedCount,
+    });
+  } catch (error) {
+    console.error("🔥 Error occurred:", error);
+
+    await session.abortTransaction();
+    session.endSession();
+    return res.status(500).json({
+      success: false,
+      message: "Server error during bulk delete operation.",
+      error: error.message,
+    });
+  }
+});
+
 router.delete("/stock-adjustments/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -450,25 +567,39 @@ router.delete("/stock-adjustments/:id", async (req, res) => {
       });
     }
 
-    // Restore stock before deletion
+    // Get product details
     const product = await Product.findById(adjustment.productId);
-    if (product) {
-      await restoreStockAfterAdjustmentDeletion(
-        product.productName,
-        adjustment.boxQuantity,
-        adjustment.adjustmentType
-      );
-
-      // Restore product current stock
-      const reverseChange = adjustment.adjustmentType === "add" ? -adjustment.boxQuantity : adjustment.boxQuantity;
-      await Product.findByIdAndUpdate(
-        adjustment.productId,
-        { $inc: { currentStock: reverseChange } },
-        { session }
-      );
+    if (!product) {
+      await session.abortTransaction();
+      return res.status(404).json({
+        success: false,
+        message: "Product not found",
+      });
     }
 
-    const deletedAdjustment = await StockAdjustment.findByIdAndDelete(id, { session });
+    // Restore stock before deletion
+    await restoreStockAfterAdjustmentDeletion(
+      product.productName,
+      adjustment.boxQuantity,
+      adjustment.adjustmentType
+    );
+
+    // Restore product current stock
+    const piecesPerBox = product.qtyPerCarton || 1;
+    const reversePiecesChange =
+      adjustment.adjustmentType === "add"
+        ? -(adjustment.boxQuantity * piecesPerBox)
+        : adjustment.boxQuantity * piecesPerBox;
+
+    await Product.findByIdAndUpdate(
+      adjustment.productId,
+      { $inc: { currentStock: reversePiecesChange } },
+      { session }
+    );
+
+    const deletedAdjustment = await StockAdjustment.findByIdAndDelete(id, {
+      session,
+    });
 
     await session.commitTransaction();
     session.endSession();
@@ -490,102 +621,6 @@ router.delete("/stock-adjustments/:id", async (req, res) => {
   }
 });
 
-/* ==========================================================================
-   🔹 DELETE: Bulk Stock Adjustments
-   ========================================================================== */
-router.delete("/stock-adjustments/bulk", async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  try {
-    const { ids } = req.body;
-
-    if (!Array.isArray(ids) || ids.length === 0) {
-      await session.abortTransaction();
-      return res.status(400).json({
-        success: false,
-        message: "No adjustment IDs provided for bulk deletion.",
-      });
-    }
-
-    // Validate all IDs
-    const validIds = [];
-    const invalidIds = [];
-
-    ids.forEach((id) => {
-      if (mongoose.Types.ObjectId.isValid(id)) {
-        validIds.push(new mongoose.Types.ObjectId(id));
-      } else {
-        invalidIds.push(id);
-      }
-    });
-
-    if (invalidIds.length > 0) {
-      await session.abortTransaction();
-      return res.status(400).json({
-        success: false,
-        message: "Invalid ID(s) provided.",
-        invalidIds,
-        validIds: validIds.map((id) => id.toString()),
-      });
-    }
-
-    const adjustments = await StockAdjustment.find({ _id: { $in: validIds } }).session(session);
-
-    // Restore stock for all adjustments
-    for (const adjustment of adjustments) {
-      const product = await Product.findById(adjustment.productId).session(session);
-      if (product) {
-        await restoreStockAfterAdjustmentDeletion(
-          product.productName,
-          adjustment.boxQuantity,
-          adjustment.adjustmentType
-        );
-
-        // Restore product current stock
-        const reverseChange = adjustment.adjustmentType === "add" ? -adjustment.boxQuantity : adjustment.boxQuantity;
-        await Product.findByIdAndUpdate(
-          adjustment.productId,
-          { $inc: { currentStock: reverseChange } },
-          { session }
-        );
-      }
-    }
-
-    const result = await StockAdjustment.deleteMany({ _id: { $in: validIds } }, { session });
-
-    if (result.deletedCount === 0) {
-      await session.abortTransaction();
-      return res.status(404).json({
-        success: false,
-        message: "No adjustments found to delete.",
-      });
-    }
-
-    await session.commitTransaction();
-    session.endSession();
-
-    return res.status(200).json({
-      success: true,
-      message: `${result.deletedCount} adjustment(s) deleted successfully.`,
-      deletedCount: result.deletedCount,
-    });
-  } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-
-    console.error("❗ Bulk delete error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Server error during bulk delete operation.",
-      error: error.message,
-    });
-  }
-});
-
-/* ==========================================================================
-   🔹 GET: Single Stock Adjustment by ID
-   ========================================================================== */
 router.get("/stock-adjustments/:id", async (req, res) => {
   const { id } = req.params;
 
@@ -599,7 +634,7 @@ router.get("/stock-adjustments/:id", async (req, res) => {
   try {
     const adjustment = await StockAdjustment.findById(id).populate({
       path: "productId",
-      select: "productName type qtyPerCarton currentStock",
+      select: "productName qtyPerCarton currentStock",
     });
 
     if (!adjustment) {

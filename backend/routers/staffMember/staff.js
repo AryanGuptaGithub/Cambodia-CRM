@@ -33,9 +33,6 @@ router.get("/staffs", async (_, res) => {
   }
 });
 
-// -----------------------------------------------------------
-// GET UNIQUE TEAMS
-// -----------------------------------------------------------
 router.get("/staff/teams", async (_, res) => {
   try {
     const staff = await staffSchema.find({}, "teamName");

@@ -29,13 +29,6 @@ const staffSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User"
     },
-    products: [
-      {
-        productId: String,
-        boxQuantity: Number,
-        updatedAt: Date,
-      }
-    ]
   },
   { timestamps: true }
 );

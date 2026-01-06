@@ -12,7 +12,7 @@ import product from "./routers/projectManager/product.js";
 import authRoutes from "./routers/authRoutes.js";
 import staff from "./routers/staffMember/staff.js";
 import priceList from "./routers/projectManager/pricelist.js";
-import saleSummary from "./routers/sale/saleSummary.js";
+import sales from "./routers/sale/saleSummary.js";
 import payments from "./routers/reports/payments.js";
 import dailySample from "./routers/reports/dailysample.js";
 import purcharse from "./routers/purcharsing/purcharsing.js";
@@ -66,6 +66,7 @@ import salaryCogsRatio from "./routers/reports/salaryCOGSRatio.js";
 import operationCostCOGSRatio from "./routers/reports/operationCostCOGSRatio.js";
 import operationCostSalesRatio from "./routers/reports/operationCostSalesRatio.js";
 import tourExpenseSales from "./routers/reports/tourExpenseSales.js";
+import SaleSummaryReport from "./routers/reports/SaleSummary.js";
 
 dotenv.config();
 
@@ -105,7 +106,7 @@ app.use("/api", product);
 app.use("/api", authRoutes);
 app.use("/api", staff);
 app.use("/api", priceList);
-app.use("/api", saleSummary);
+app.use("/api", sales);
 app.use("/api", payments);
 app.use("/api", dailySample);
 app.use("/api", purcharse);
@@ -159,6 +160,7 @@ app.use("/api", salaryCogsRatio);
 app.use("/api", operationCostCOGSRatio);
 app.use("/api", operationCostSalesRatio);
 app.use("/api", tourExpenseSales);
+app.use("/api/sales-summary", SaleSummaryReport);
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);

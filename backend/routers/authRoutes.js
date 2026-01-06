@@ -10,7 +10,7 @@ dotenv.config();
 const router = express.Router();
 
 // ------------------------------------------------------
-// LOGIN
+// LOGIN - ADMIN ONLY
 // ------------------------------------------------------
 router.post("/login", async (req, res) => {
   try {
@@ -23,7 +23,6 @@ router.post("/login", async (req, res) => {
       });
     }
 
-    // Allow login using either email or username
     const user = await User.findOne({
       $or: [
         { email: username.toLowerCase() },
@@ -38,6 +37,14 @@ router.post("/login", async (req, res) => {
       });
     }
 
+    // ✅ NEW: Check if user is admin
+    if (user.role !== "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied. Admin users only.",
+      });
+    }
+
     const isMatch = await bcrypt.compare(password, user.password);
 
     if (!isMatch) {
@@ -47,11 +54,9 @@ router.post("/login", async (req, res) => {
       });
     }
 
-    // Update last login timestamp
     user.lastLogin = new Date();
     await user.save();
 
-    // Create JWT token
     const token = jwt.sign(
       {
         id: user._id,
@@ -66,8 +71,10 @@ router.post("/login", async (req, res) => {
       success: true,
       token,
       role: user.role,
+      username: user.username, // Changed from 'name' to 'username' to match frontend
       name: user.name,
       lastLogin: user.lastLogin,
+      isAdmin: user.role === "admin",
     });
   } catch (error) {
     console.error("❌ Login error:", error);
@@ -78,9 +85,6 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// ------------------------------------------------------
-// LOGOUT (client removes token, so this is optional)
-// ------------------------------------------------------
 router.post("/logout", (req, res) => {
   return res.json({
     success: true,

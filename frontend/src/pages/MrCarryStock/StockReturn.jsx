@@ -32,12 +32,55 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
   const [selectedMr, setSelectedMr] = useState("");
   const [mrStock, setMrStock] = useState([]);
   const [selectedProduct, setSelectedProduct] = useState(null);
-  const [returnQty, setReturnQty] = useState(1);
+  const [returnQty, setReturnQty] = useState("1");
   const [returnDate, setReturnDate] = useState(new Date());
   const [returnItems, setReturnItems] = useState([]);
   const [remarks, setRemarks] = useState("");
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // Handle quantity input change
+  const handleQtyChange = (e) => {
+    const value = e.target.value;
+    
+    // Allow only numbers
+    const numericValue = value.replace(/[^0-9]/g, '');
+    
+    if (numericValue === '') {
+      setReturnQty("");
+      return;
+    }
+    
+    const num = parseInt(numericValue, 10);
+    
+    if (selectedProduct) {
+      // Auto-correct if above max
+      if (num > selectedProduct.remainingQty) {
+        setReturnQty(selectedProduct.remainingQty.toString());
+      } else if (num < 1) {
+        setReturnQty("1");
+      } else {
+        setReturnQty(numericValue);
+      }
+    } else {
+      setReturnQty(numericValue);
+    }
+  };
+
+  // Validate quantity on blur
+  const handleQtyBlur = () => {
+    if (!returnQty || returnQty.trim() === "") {
+      setReturnQty("1");
+      return;
+    }
+    
+    const num = parseInt(returnQty, 10);
+    if (isNaN(num) || num < 1) {
+      setReturnQty("1");
+    } else if (selectedProduct && num > selectedProduct.remainingQty) {
+      setReturnQty(selectedProduct.remainingQty.toString());
+    }
+  };
 
   // Fetch MR stock when MR is selected
   const fetchMrStock = useCallback(
@@ -67,7 +110,6 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
             },
           }
         );
-
         if (response.data.success) {
           const transformedData = transformStockData(response.data.data);
           setMrStock(transformedData);
@@ -109,6 +151,7 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
     setSelectedProduct(null);
     setMrStock([]);
     setReturnItems([]);
+    setReturnQty("1");
     if (value) fetchMrStock(value);
   };
 
@@ -121,7 +164,7 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
 
     const product = mrStock.find((p) => p.stockRecordId === value);
     setSelectedProduct(product);
-    setReturnQty(1);
+    setReturnQty("1");
   };
 
   // Add item to return list
@@ -131,9 +174,11 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
       return;
     }
 
-    if (returnQty < 1 || returnQty > selectedProduct.remainingQty) {
+    // Parse quantity
+    const parsedQty = parseInt(returnQty, 10);
+    if (isNaN(parsedQty) || parsedQty < 1 || parsedQty > selectedProduct.remainingQty) {
       toast.error(
-        `Invalid quantity. Available: ${selectedProduct.remainingQty}`
+        `Invalid quantity. Must be between 1 and ${selectedProduct.remainingQty}`
       );
       return;
     }
@@ -151,7 +196,7 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
     if (existingItemIndex > -1) {
       // Update existing item
       const updatedItems = [...returnItems];
-      const newQty = updatedItems[existingItemIndex].returnQty + returnQty;
+      const newQty = updatedItems[existingItemIndex].returnQty + parsedQty;
 
       if (newQty > selectedProduct.remainingQty) {
         toast.error(
@@ -171,7 +216,7 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
         stockRecordId: selectedProduct.stockRecordId,
         productId: selectedProduct.productId,
         productName: selectedProduct.productName,
-        returnQty: returnQty,
+        returnQty: parsedQty,
         returnDate: returnDate.toISOString().split("T")[0],
         remarks: "",
       };
@@ -181,7 +226,7 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
 
     // Reset form for next item
     setSelectedProduct(null);
-    setReturnQty(1);
+    setReturnQty("1");
     setReturnDate(new Date());
   };
 
@@ -288,7 +333,7 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
     .filter((item) => item.remainingQty > 0)
     .map((p) => ({
       value: p.stockRecordId,
-      label: `${p.productName} (${p.productCode}) - Batch: ${p.batch} - Avail: ${p.remainingQty} ${p.unit}`,
+      label: `${p.productName} - Avail: ${p.remainingQty} ${p.unit}`,
       disabled: p.remainingQty <= 0,
     }));
 
@@ -335,12 +380,12 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
                   Quantity (1 - {selectedProduct.remainingQty})
                 </label>
                 <input
-                  type="number"
-                  min={1}
-                  max={selectedProduct.remainingQty}
+                  type="text"
                   value={returnQty}
-                  onChange={(e) => setReturnQty(parseInt(e.target.value) || 1)}
+                  onChange={handleQtyChange}
+                  onBlur={handleQtyBlur}
                   className="w-full border rounded px-3 py-2"
+                  placeholder="Enter quantity"
                 />
               </div>
               <div>

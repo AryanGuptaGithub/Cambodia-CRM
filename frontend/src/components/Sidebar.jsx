@@ -59,39 +59,132 @@ import {
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-// Helper function to format tab labels
+// Complete mapping dictionary for tab labels
+const tabLabelMap = {
+  // Reports tab IDs
+  reports_dailyreport: 'Daily Report',
+  reports_averageprice: 'Average Price',
+  reports_newcustomeraddition: 'New Customer Addition',
+  reports_masterCustomerReports: 'Master Customer Report',
+  reports_monthlyrepeatrate: 'Monthly Repeat Rate',
+  reports_annualrepeatrate: 'Annual Repeat Rate',
+  reports_productreport: 'Product Report',
+  reports_mrwiseoutstanding: 'MR Wise Outstanding',
+  reports_mrwisesales: 'MR Wise Sales',
+  reports_cashsales: 'Cash Sales',
+  reports_outstandingcollection: 'Outstanding Collection',
+  reports_totalexpense: 'Total Expense',
+  reports_remittance: 'Remittance',
+  reports_provincewisesale: 'Province Wise Sale',
+  reports_provincewisecustomer: 'Province Wise Customer',
+  reports_profitloss: 'Profit Loss',
+  reports_financeReports: 'Finance Reports',
+  reports_reportsinhand: 'Reports in Hand',
+  reports_salesummary: 'Sale Summary',
+  reports_dailysample: 'Daily Sample',
+  reports_expirystock: 'Expiry Stock',
+  
+  // Master Customer Report sub-tabs
+  masterCustomerReports_retention: 'Customer Retention Rate',
+  masterCustomerReports_acceptance: 'Product Acceptance Rate',
+  masterCustomerReports_zonewise: 'Zone Wise Customers',
+  
+  // Finance Reports sub-tabs
+  financeReports_salessalary: 'Sales Salary Ratio',
+  financeReports_salarycogs: 'Salary COGS Ratio',
+  financeReports_operationcostcogs: 'Operation Cost COGS Ratio',
+  financeReports_operationcostsales: 'Operation Cost Sales Ratio',
+  financeReports_tourexpensesales: 'Tour Expense Sales Ratio',
+  
+  // Other main tabs
+  dashboard: 'Dashboard',
+  master: 'Master',
+  settings: 'Settings',
+  products: 'Product Manager',
+  purchase: 'Purchase',
+  sales: 'Sales',
+  stockAdjustment: 'Stock Adjustment',
+  stockTransfer: 'Stock Transfer',
+  mrCarryStock: 'MR Carry Stock',
+  accounts: 'Accounts',
+  expense: 'Expense',
+  reports: 'Reports',
+  staff: 'Staff',
+  utility: 'Utility',
+  onlineOrders: 'Online Orders',
+  hrm: 'HRM',
+  
+  // Master sub-tabs
+  master_customers: 'Customers',
+  master_suppliers: 'Suppliers',
+  
+  // Products sub-tabs
+  products_products: 'Products',
+  products_pricelist: 'Price List',
+  
+  // Purchase sub-tabs
+  purchase_purchase: 'Purchase',
+  purchase_purchasereturn: 'Purchase Return',
+  purchase_purchaseout: 'Purchase Out',
+  
+  // Sales sub-tabs
+  sales_sale: 'Sale',
+  sales_salereturn: 'Sale Return',
+  
+  // Expense sub-tabs
+  expense_categories: 'Expense Categories',
+  expense_expenses: 'Expenses',
+  
+  // MR Carry Stock sub-tabs
+  mrCarryStock_carrystockview: 'Carry Stock View',
+  mrCarryStock_stockreturn: 'Stock Return',
+  
+  // Accounts sub-tabs
+  accounts_cashbank: 'Cash & Bank',
+  accounts_mrcash: 'MR Cash',
+  
+  // HRM sub-tabs
+  hrm_dashboard: 'Dashboard',
+  hrm_holidays: 'Holidays',
+  hrm_leaveattendance: 'Leave & Attendance',
+  hrm_payroll: 'Payroll',
+  
+  // Utility sub-tabs
+  utility_companyprofile: 'Company Profile',
+  utility_tabhideview: 'Tab Hide and Show',
+  
+  // Settings sub-tabs
+  settings_companyprofile: 'Company Profile',
+  settings_tabmanipulation: 'Tab Manipulation',
+};
+
+// Helper function to format tab labels using mapping dictionary
 const formatTabLabel = (tabId) => {
+  // First check the mapping dictionary
+  if (tabLabelMap[tabId]) {
+    return tabLabelMap[tabId];
+  }
+  
+  // Fallback for unmapped labels
   const parts = tabId.split('_');
   const label = parts.length > 1 ? parts[1] : parts[0];
   
-  let formatted = label;
+  // Add spaces before capital letters
+  let formatted = label.replace(/([a-z])([A-Z])/g, '$1 $2');
   
-  const commonWords = [
-    'daily', 'monthly', 'annual', 'weekly', 'yearly',
-    'report', 'price', 'customer', 'product', 'sales',
-    'expense', 'collection', 'summary', 'sample', 'stock',
-    'payment', 'remittance', 'province', 'wise', 'outstanding',
-    'cash', 'bank', 'mrcash', 'return', 'view', 'categories',
-    'profile', 'manipulation', 'attendance', 'dashboard', 'holidays'
-  ];
-  
-  commonWords.forEach(word => {
-    const regex = new RegExp(`(${word})`, 'gi');
-    formatted = formatted.replace(regex, ' $1 ');
-  });
-  
-  formatted = formatted.replace(/\s+/g, ' ').trim();
-  
+  // Capitalize first letter of each word
   formatted = formatted
     .split(' ')
     .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
     .join(' ');
   
+  // Handle acronyms
   formatted = formatted
     .replace(/\bMr\b/gi, 'MR')
     .replace(/\bCogs\b/gi, 'COGS')
     .replace(/\bPl\b/gi, 'PL')
-    .replace(/\bHrm\b/gi, 'HRM');
+    .replace(/\bHrm\b/gi, 'HRM')
+    .replace(/\bMrcash\b/gi, 'MR Cash');
   
   return formatted;
 };
@@ -216,7 +309,7 @@ const tabService = {
       reports_remittance: { visible: true, sequence: 13 },
       reports_provincewisesale: { visible: true, sequence: 14 },
       reports_provincewisecustomer: { visible: true, sequence: 15 },
-      reports_profitloss: { visible: true, sequence: 16 }, // PL report as standalone
+      reports_profitloss: { visible: true, sequence: 16 },
       reports_financeReports: { visible: true, sequence: 17 },
       reports_reportsinhand: { visible: true, sequence: 18 },
       reports_salesummary: { visible: true, sequence: 19 },
@@ -228,13 +321,12 @@ const tabService = {
       masterCustomerReports_acceptance: { visible: true, sequence: 2 },
       masterCustomerReports_zonewise: { visible: true, sequence: 3 },
 
-      // Finance Reports sub-tabs (without PL report)
+      // Finance Reports sub-tabs
       financeReports_salessalary: { visible: true, sequence: 1 },
       financeReports_salarycogs: { visible: true, sequence: 2 },
       financeReports_operationcostcogs: { visible: true, sequence: 3 },
       financeReports_operationcostsales: { visible: true, sequence: 4 },
       financeReports_tourexpensesales: { visible: true, sequence: 5 },
-      // REMOVED: financeReports_plreport from here
     };
   },
 };
@@ -303,7 +395,7 @@ const reportPaths = [
   "/reportlayout/expensereport",
   "/reportlayout/userreport",
   "/reportlayout/ratelist",
-  "/reportlayout/profitloss", // PL report path
+  "/reportlayout/profitloss",
   "/reportlayout/mrwiseoutstanding",
   "/reportlayout/mrwisesales",
   "/reportlayout/cashsales",
@@ -321,14 +413,13 @@ const reportPaths = [
   "/reportlayout/expiry-stock-report",
 ];
 
-// Finance Report paths (without PL report)
+// Finance Report paths
 const financeReportPaths = [
   "/reportlayout/sales-salary-ratio",
   "/reportlayout/salary-cogs-ratio",
   "/reportlayout/operation-cost-cogs-ratio",
   "/reportlayout/operation-cost-sales-ratio",
   "/reportlayout/tour-expense-sales-ratio",
-  // REMOVED: "/reportlayout/pl-report" from here
 ];
 
 // Reports in Hand paths
@@ -1093,7 +1184,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                   "reports_remittance",
                   "reports_provincewisesale",
                   "reports_provincewisecustomer",
-                  "reports_profitloss", // PL report as standalone
+                  "reports_profitloss",
                   "reports_financeReports",
                   "reports_reportsinhand",
                   "reports_salesummary",
@@ -1172,7 +1263,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                     );
                   }
 
-                  // Handle finance reports dropdown (without PL report)
+                  // Handle finance reports dropdown
                   if (tabId === "reports_financeReports" && shouldShowTab("reports_financeReports")) {
                     return (
                       <div key={tabId}>
@@ -1203,7 +1294,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                               "financeReports_operationcostcogs",
                               "financeReports_operationcostsales",
                               "financeReports_tourexpensesales",
-                              // REMOVED: "financeReports_plreport"
                             ]).map((subTabId) => {
                               const linkMap = {
                                 financeReports_salessalary: "/reportlayout/sales-salary-ratio",
@@ -1211,7 +1301,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                                 financeReports_operationcostcogs: "/reportlayout/operation-cost-cogs-ratio",
                                 financeReports_operationcostsales: "/reportlayout/operation-cost-sales-ratio",
                                 financeReports_tourexpensesales: "/reportlayout/tour-expense-sales-ratio",
-                                // REMOVED: financeReports_plreport: "/reportlayout/pl-report"
                               };
 
                               const iconMap = {
@@ -1220,7 +1309,6 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                                 financeReports_operationcostcogs: TrendingDown,
                                 financeReports_operationcostsales: BarChart3,
                                 financeReports_tourexpensesales: MapPin,
-                                // REMOVED: financeReports_plreport: FileBarChart
                               };
 
                               const IconComponent = iconMap[subTabId];

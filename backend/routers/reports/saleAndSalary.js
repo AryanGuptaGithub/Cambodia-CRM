@@ -4,6 +4,7 @@ import Payroll from "../../models/Hrm/Payroll.js";
 import Staff from "../../models/staffMember/staff.js";
 import mongoose from "mongoose";
 import ExcelJS from 'exceljs';
+import stockTransferToMR from "../../models/stock/stockTransferToMR.js";
 
 const router = express.Router();
 
@@ -728,6 +729,54 @@ router.get("/sales-salary-ratio/export", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to export data",
+      error: error.message,
+    });
+  }
+});
+
+router.get("/mrs", async (req, res) => {
+  try {
+    const mrList = await stockTransferToMR.aggregate([
+      {
+        // Normalize spaces first
+        $project: {
+          cleanedMrName: {
+            $trim: {
+              input: {
+                $replaceAll: {
+                  input: "$stockTransferToMr",
+                  find: "  ",
+                  replacement: " ",
+                },
+              },
+            },
+          },
+        },
+      },
+      {
+        // Group by cleaned MR name
+        $group: {
+          _id: "$cleanedMrName",
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          mrName: "$_id",
+        },
+      },
+      { $sort: { mrName: 1 } },
+    ]);
+    
+    res.status(200).json({
+      success: true,
+      data: mrList,
+    });
+  } catch (error) {
+    console.error("❌ Error fetching MR list:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch MR list",
       error: error.message,
     });
   }

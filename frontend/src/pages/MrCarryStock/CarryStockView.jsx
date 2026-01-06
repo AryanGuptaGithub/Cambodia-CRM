@@ -41,7 +41,7 @@ const CarryStockView = () => {
   const [filteredData, setFilteredData] = useState([]);
   const inputRef = useRef(null);
 
-  const STOCK_PER_PAGE = 5; // Changed from 6 to 5
+  const STOCK_PER_PAGE = 5;
 
   // Fetch MR List for dropdown
   const fetchMRList = useCallback(async () => {
@@ -72,14 +72,9 @@ const CarryStockView = () => {
 
       // Add MR filter - use mrName parameter for backend
       if (selectedMr !== "all") {
-        const selectedMrObj = mrList.find(
-          (mr) => mr.mrCode === selectedMr || mr.mrName === selectedMr
-        );
-        if (selectedMrObj) {
-          params.mrName = selectedMrObj.mrName || selectedMrObj.mrCode;
-        } else {
-          params.mrName = selectedMr;
-        }
+        // If selectedMr is an object from dropdown, extract the value
+        const mrValue = typeof selectedMr === 'object' ? selectedMr.value : selectedMr;
+        params.mrName = mrValue;
       }
 
       // Add search term if needed
@@ -92,9 +87,31 @@ const CarryStockView = () => {
         { params }
       );
 
-
       if (response.data.success) {
-        const transformedData = transformAPIData(response.data.data);
+        const transformedData = response.data.data.map((item, index) => ({
+          id: item.id || `${item.mrName}-${item.productId}-${index}`,
+          mrCode: item.mrName || "N/A",
+          mrName: item.mrName || "N/A",
+          productId: item.productId || `PROD-${index}`,
+          productCode: item.productCode || `PROD-${index}`,
+          productName: item.productName || "Unknown Product",
+          batch: item.batch || "N/A",
+          expiry: item.expiry || "N/A",
+          assignedQty: item.assignedQty || 0,
+          remainingQty: item.remainingQty || item.boxQuantity || 0,
+          usedQty: item.usedQty || 0,
+          assignedDate: item.assignedDate || new Date().toISOString().split("T")[0],
+          createdAt: item.createdAt || item.assignedDate,
+          status: (item.remainingQty || 0) > 0 ? "Active" : "Depleted",
+          invoiceNumbers: item.invoiceNumbers || [],
+          lc: item.lc || 0,
+          unit: item.unit || "pcs",
+          category: item.category || "General",
+          packSize: item.packSize || 0,
+          costPrice: item.costPrice || 0,
+          boxQuantity: item.boxQuantity || item.remainingQty || 0,
+        }));
+
         // Store all data
         setAllStockData(transformedData);
 
@@ -128,16 +145,15 @@ const CarryStockView = () => {
       console.error("Error fetching stock data:", error);
       toast.error("Failed to load carry stock data");
       setAllStockData([]);
-      setFilteredData([]);
-      setStockData([]);
-      setTotalCount(0);
+        setFilteredData([]);
+        setStockData([]);
+        setTotalCount(0);
     } finally {
       setLoading(false);
     }
   }, [
     selectedMr,
     searchTerm,
-    mrList,
     dateFilter,
     customStartDate,
     customEndDate,
@@ -153,6 +169,20 @@ const CarryStockView = () => {
   ) => {
     let filtered = [...data];
 
+    // Apply MR filter if needed (client-side for better UX)
+    if (selectedMr !== "all") {
+      // Extract MR value from selectedMr (could be string or object)
+      const selectedMrValue = typeof selectedMr === 'object' 
+        ? (selectedMr.value || selectedMr.label || selectedMr.mrName)
+        : selectedMr;
+      
+      filtered = filtered.filter(
+        (item) =>
+          item.mrName === selectedMrValue || 
+          item.mrCode === selectedMrValue
+      );
+    }
+
     // Apply search filter
     if (searchTerm.trim()) {
       filtered = filtered.filter(
@@ -160,7 +190,8 @@ const CarryStockView = () => {
           item.productName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
           item.productCode?.toLowerCase().includes(searchTerm.toLowerCase()) ||
           item.mrName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          item.mrCode?.toLowerCase().includes(searchTerm.toLowerCase())
+          item.mrCode?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          item.batch?.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
 
@@ -219,45 +250,39 @@ const CarryStockView = () => {
     });
   };
 
-  // Transform API response to match our data structure
-  const transformAPIData = (apiData) => {
-    if (!apiData || !Array.isArray(apiData)) return [];
-
-    return apiData.map((item, index) => ({
-      id: item.id || `${item.mrCode}-${item.productId}-${index}`,
-      mrCode: item.mrCode || item.mrName || "N/A",
-      mrName: item.mrName || item.mrCode || "N/A",
-      productId: item.productId || `PROD-${index}`,
-      productCode: item.productCode || `PROD-${index}`,
-      productName: item.productName || "Unknown Product",
-      batch: item.batch || "N/A",
-      expiry: item.expiry || item.expiryDate || "N/A",
-      assignedQty: item.assignedQty || 0,
-      remainingQty: item.remainingQty || 0,
-      usedQty:
-        item.usedQty || (item.assignedQty || 0) - (item.remainingQty || 0),
-      assignedDate: item.assignedDate || new Date().toISOString().split("T")[0],
-      createdAt: item.createdAt || item.assignedDate,
-      status: (item.remainingQty || 0) > 0 ? "Active" : "Depleted",
-      invoiceNumbers: item.invoiceNumbers || [],
-      lc: item.lc || 0,
-      unit: item.unit,
-      category: item.category || "General",
-      packSize: item.packSize || 0,
-      costPrice: item.costPrice || 0,
-    }));
-  };
-
   // Initial fetch
   useEffect(() => {
     fetchMRList();
   }, []);
 
-  // Re-fetch when filters that require API call change
+  // Fetch stock data when MR list is loaded and MR is selected
   useEffect(() => {
-    setCurrentPage(1);
-    fetchStockData();
-  }, [selectedMr, searchTerm, dateFilter, customStartDate, customEndDate]);
+    if (mrList.length > 0 || selectedMr === "all") {
+      fetchStockData();
+    }
+  }, [selectedMr, fetchStockData]);
+
+  // Handle filters change (search and date)
+  useEffect(() => {
+    if (allStockData.length > 0) {
+      const filtered = applyAllFilters(
+        allStockData,
+        searchTerm,
+        dateFilter,
+        customStartDate,
+        customEndDate
+      );
+      setFilteredData(filtered);
+      setTotalCount(filtered.length);
+      setCurrentPage(1);
+      
+      // Update paginated data
+      const startIndex = 0;
+      const endIndex = STOCK_PER_PAGE;
+      const paginatedData = filtered.slice(startIndex, endIndex);
+      setStockData(paginatedData);
+    }
+  }, [searchTerm, dateFilter, customStartDate, customEndDate, allStockData]);
 
   // Handle page change
   useEffect(() => {
@@ -274,7 +299,7 @@ const CarryStockView = () => {
   // Calculate utilization percentage
   const calculateUtilization = (assigned, remaining) => {
     if (!assigned || assigned === 0) return 0;
-    const used = assigned - remaining;
+    const used = Math.max(0, assigned - remaining);
     return Math.round((used / assigned) * 100);
   };
 
@@ -285,7 +310,7 @@ const CarryStockView = () => {
     // Add MRs from API
     mrList.forEach((mr) => {
       options.push({
-        value: mr.mrCode || mr.mrName,
+        value: mr.mrName, // Use mrName as value for consistency
         label: `${mr.mrName}`,
       });
     });
@@ -380,8 +405,32 @@ const CarryStockView = () => {
   };
 
   // Handle MR change
-  const handleMrChange = (value) => {
-    setSelectedMr(value);
+  const handleMrChange = (selectedOption) => {
+    if (!selectedOption) {
+      setSelectedMr("all");
+      return;
+    }
+    console.log('values of selectedOption', selectedOption);
+    if (typeof selectedOption === 'string') {
+      setSelectedMr(selectedOption);
+    } else if (typeof selectedOption === 'object') {
+      setSelectedMr(selectedOption.value || selectedOption.label || "all");
+    } else {
+      setSelectedMr("all");
+    }
+  };
+
+  // Get current MR display name
+  const getCurrentMrDisplayName = () => {
+    if (selectedMr === "all") return "All MRs";
+    
+    // Try to find the MR in options
+    const mrOption = mrOptions.find(opt => 
+      opt.value === selectedMr || 
+      opt.label === selectedMr
+    );
+    
+    return mrOption ? mrOption.label : selectedMr;
   };
 
   // Handle export
@@ -390,7 +439,10 @@ const CarryStockView = () => {
       const params = { export: true };
 
       if (selectedMr !== "all") {
-        params.mrName = selectedMr;
+        const mrValue = typeof selectedMr === 'object' 
+          ? (selectedMr.value || selectedMr.label)
+          : selectedMr;
+        params.mrName = mrValue;
       }
 
       if (dateFilter === "custom" && customStartDate && customEndDate) {
@@ -494,6 +546,7 @@ const CarryStockView = () => {
         return (
           <div>
             <div className="font-semibold text-gray-900">{item.mrName}</div>
+            <div className="text-xs text-gray-500">{item.mrCode}</div>
           </div>
         );
 
@@ -503,11 +556,15 @@ const CarryStockView = () => {
             <div className="font-semibold text-gray-900">
               {item.productName}
             </div>
+            <div className="text-xs text-gray-500">{item.productCode}</div>
+            {item.category && (
+              <div className="text-xs text-gray-500">{item.category}</div>
+            )}
           </div>
         );
 
       case "quantity":
-        const used = item.usedQty || item.assignedQty - item.remainingQty;
+        const used = item.usedQty || Math.max(0, (item.assignedQty || 0) - (item.remainingQty || 0));
         return (
           <div className="text-sm">
             <div className="flex justify-between">
@@ -781,7 +838,7 @@ const CarryStockView = () => {
               )}
               {selectedMr !== "all" && (
                 <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">
-                  MR: {selectedMr}
+                  MR: {getCurrentMrDisplayName()}
                 </span>
               )}
               {searchTerm && (
@@ -814,7 +871,10 @@ const CarryStockView = () => {
             <div className="w-full">
               <SearchableDropdown
                 label="Filter by MR"
-                value={selectedMr}
+                value={selectedMr === "all" 
+                  ? { value: "all", label: "All MRs" }
+                  : mrOptions.find(opt => opt.value === selectedMr) || { value: selectedMr, label: selectedMr }
+                }
                 onChange={handleMrChange}
                 options={mrOptions}
                 placeholder={mrListLoading ? "Loading MRs..." : "Select MR"}
@@ -861,7 +921,7 @@ const CarryStockView = () => {
                         </div>
                         <div className="text-sm text-gray-400">
                           {selectedMr !== "all"
-                            ? `No stock found for selected MR: ${selectedMr}`
+                            ? `No stock found for selected MR: ${getCurrentMrDisplayName()}`
                             : "Try changing your filters or search term"}
                         </div>
                       </div>
@@ -1061,7 +1121,7 @@ const CarryStockView = () => {
                         Remaining Quantity
                       </label>
                       <p className="border px-3 py-2 rounded-lg bg-gray-100 text-lg font-semibold">
-                        {selectedStock?.remainingQty || 0}
+                        {selectedStock?.remainingQty || selectedStock?.boxQuantity || 0}
                       </p>
                     </div>
 
@@ -1070,8 +1130,7 @@ const CarryStockView = () => {
                         Used Quantity
                       </label>
                       <p className="border px-3 py-2 rounded-lg bg-gray-100 text-lg font-semibold">
-                        {(selectedStock?.assignedQty || 0) -
-                          (selectedStock?.remainingQty || 0)}
+                        {selectedStock?.usedQty || Math.max(0, (selectedStock?.assignedQty || 0) - (selectedStock?.remainingQty || 0))}
                       </p>
                     </div>
 

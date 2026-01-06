@@ -320,6 +320,74 @@ const ImportSalesModal = ({
     return isNaN(num) ? 0 : Math.abs(num);
   };
 
+  // Helper function to parse Excel dates
+  const parseExcelDate = (dateStr) => {
+    if (!dateStr) return new Date().toISOString().split("T")[0];
+    
+    try {
+      // Try direct Date parsing first
+      const date = new Date(dateStr);
+      if (!isNaN(date.getTime())) {
+        return date.toISOString().split("T")[0];
+      }
+      
+      // Try Excel serial number (days since 1899-12-30)
+      if (typeof dateStr === 'number') {
+        const excelEpoch = new Date(1899, 11, 30); // 1899-12-30
+        const date = new Date(excelEpoch.getTime() + dateStr * 24 * 60 * 60 * 1000);
+        if (!isNaN(date.getTime())) {
+          return date.toISOString().split("T")[0];
+        }
+      }
+      
+      // Try string formats
+      const str = String(dateStr).trim();
+      
+      // Try DD/MM/YYYY or MM/DD/YYYY with slashes
+      const slashParts = str.split('/');
+      if (slashParts.length === 3) {
+        // Try DD/MM/YYYY first
+        const [day, month, year] = slashParts;
+        const fullYear = year.length === 2 ? `20${year}` : year;
+        const date = new Date(fullYear, month - 1, day);
+        if (!isNaN(date.getTime())) {
+          return date.toISOString().split("T")[0];
+        }
+        
+        // Try MM/DD/YYYY
+        const date2 = new Date(fullYear, day - 1, month);
+        if (!isNaN(date2.getTime())) {
+          return date2.toISOString().split("T")[0];
+        }
+      }
+      
+      // Try DD-MM-YYYY or MM-DD-YYYY with dashes
+      const dashParts = str.split('-');
+      if (dashParts.length === 3) {
+        const [part1, part2, part3] = dashParts;
+        const fullYear = part3.length === 2 ? `20${part3}` : part3;
+        
+        // Try DD-MM-YYYY
+        const date = new Date(fullYear, part2 - 1, part1);
+        if (!isNaN(date.getTime())) {
+          return date.toISOString().split("T")[0];
+        }
+        
+        // Try MM-DD-YYYY
+        const date2 = new Date(fullYear, part1 - 1, part2);
+        if (!isNaN(date2.getTime())) {
+          return date2.toISOString().split("T")[0];
+        }
+      }
+      
+      // If all parsing fails, return today's date as fallback
+      return new Date().toISOString().split("T")[0];
+    } catch (error) {
+      console.warn("Date parsing error:", error);
+      return new Date().toISOString().split("T")[0];
+    }
+  };
+
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -436,13 +504,26 @@ const ImportSalesModal = ({
 
         if (!groupedInvoices[invoiceNumber]) {
           const creditDays = Number(row[getColIndex("Credit Days")]) || 0;
-          const dueDate = new Date();
+          
+          // Parse invoice date from Excel
+          const invoiceDateStr = row[getColIndex("Invoice Date")];
+          const invoiceDate = parseExcelDate(invoiceDateStr);
+          
+          // Calculate due date based on invoice date + credit days
+          const dueDate = new Date(invoiceDate);
           dueDate.setDate(dueDate.getDate() + creditDays);
+          
+          // Parse delivery date if exists
+          let deliveryDate = new Date().toISOString().split("T")[0];
+          const deliveryDateStr = row[getColIndex("Delivery Date")];
+          if (deliveryDateStr) {
+            deliveryDate = parseExcelDate(deliveryDateStr);
+          }
 
           groupedInvoices[invoiceNumber] = {
             recordingDate: new Date().toISOString().split("T")[0],
             invoiceNumber,
-            invoiceDate: new Date().toISOString().split("T")[0],
+            invoiceDate: invoiceDate, // ✅ Use parsed date from Excel
             mrName: String(row[getColIndex("MR Name")] || "").trim(),
             customerName,
             customerCode: String(
@@ -457,7 +538,7 @@ const ImportSalesModal = ({
             totalAmount: 0,
             dueAmount: 0,
             dueDate: dueDate.toISOString().split("T")[0],
-            deliveryDate: new Date().toISOString().split("T")[0],
+            deliveryDate: deliveryDate,
           };
         }
 

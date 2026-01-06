@@ -629,16 +629,17 @@ router.delete("/stock-returns/bulk", async (req, res) => {
 // Get MR stock
 router.get("/mr-stock/:mrName", async (req, res) => {
   try {
-    const { mrName } = req.params;
-
+    let { mrName } = req.params;
+    mrName = mrName.replace(/\s+/g, ' ').trim();
     const stockRecord = await StockInMrHand.findOne({
-      mrName: mrName,
+      mrName: { $regex: new RegExp(`^${mrName}$`, 'i') }
     }).populate("products.productId", "productName productCode");
-
+    
     if (!stockRecord) {
       return res.status(200).json({
         success: true,
         data: [],
+        message: `No stock found for MR: ${mrName}`
       });
     }
 
@@ -646,6 +647,7 @@ router.get("/mr-stock/:mrName", async (req, res) => {
       return res.status(200).json({
         success: true,
         data: [],
+        message: `No products in stock for MR: ${mrName}`
       });
     }
 
@@ -788,7 +790,7 @@ router.post("/stock-returns", async (req, res) => {
 
   try {
     const { mrName, items, remarks, returnDate } = req.body;
-
+    console.log('values of req.body', req.body);
     if (!mrName || !items || !Array.isArray(items) || items.length === 0) {
       await session.abortTransaction();
       session.endSession();
@@ -798,22 +800,6 @@ router.post("/stock-returns", async (req, res) => {
       });
     }
 
-    // Check if MR exists in MRCash
-    const mrCash = await MRCash.findOne({ 
-      mrName: mrName,
-      isActive: true 
-    }).session(session);
-
-    if (!mrCash) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({
-        success: false,
-        message: "Medical Representative not found or not active",
-      });
-    }
-
-    // Get MR stock
     const mrStock = await StockInMrHand.findOne({ mrName: mrName }).session(session);
 
     if (!mrStock) {

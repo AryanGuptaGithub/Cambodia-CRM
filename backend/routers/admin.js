@@ -14,4 +14,7 @@ router.get("/admin-dashboard", authenticate, authorizeRoles("admin", "super-admi
   res.json({ message: "Welcome Admin!" });
 });
 
+// middlewares/authMiddleware.js
+
+
 export default router;

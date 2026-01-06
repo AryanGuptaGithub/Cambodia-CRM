@@ -1,19 +1,22 @@
 import React, { useState } from "react";
-import { Eye, EyeOff } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 const Login = () => {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false); // Add loading state
   const navigate = useNavigate();
   const backendUrl = import.meta.env.VITE_BACKEND_URL;
+
   const handleLogin = async (e) => {
     e.preventDefault();
+    setError("");
+    setLoading(true);
 
     if (!username || !password) {
       setError("Username and password are required");
+      setLoading(false);
       return;
     }
 
@@ -27,122 +30,148 @@ const Login = () => {
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.message || "Login failed");
+        // More specific error handling
+        if (res.status === 403) {
+          setError("Access denied. Admin users only.");
+        } else if (res.status === 401) {
+          setError("Invalid username or password");
+        } else {
+          setError(data.message || "Login failed");
+        }
+        setLoading(false);
         return;
       }
 
-      // Save token + role in localStorage
+      // ✅ Save auth data in localStorage
       localStorage.setItem("token", data.token);
       localStorage.setItem("role", data.role);
-      localStorage.setItem("username", data.username);
+      localStorage.setItem("username", data.username || data.name);
+      localStorage.setItem("isAdmin", data.isAdmin || data.role === "admin");
 
+      // Optional: Save timestamp for token expiry check
+      localStorage.setItem("loginTime", new Date().toISOString());
+
+      // Navigate to graph page
       navigate("/graph");
     } catch (err) {
-      setError("Something went wrong. Please try again.");
+      setError("Network error. Please check your connection.");
+      console.error("Login error:", err);
+    } finally {
+      setLoading(false);
     }
   };
 
-  //   try {
-  //     const response = await axios.post(`${backendUrl}/api/login`, {
-  //       username,
-  //       password,
-  //     });
-
-  //     const { token, role } = response.data;
-
-  //     // Store token and username in localStorage
-  //     localStorage.setItem("token", token);
-  //     localStorage.setItem("username", username); // Store the username
-
-  //     // Update user state immediately
-  //     setUser({
-  //       name: username,
-  //       role: role,
-  //       initials: username.substring(0, 2).toUpperCase(),
-  //     });
-
-  //     // Redirect or update state
-  //  //   navigate("/dashboard");
-  //   } catch (error) {
-  //     console.error("Login failed:", error);
-  //     showToast("error", "Login failed");
-  //   }
-  // };
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#c9d6ff] via-[#e2e2e2] to-[#fdfbfb]">
       {/* Decorative Blobs */}
-      <div className="absolute top-10 left-10 w-80 h-80 bg-cyan-300 opacity-30 rounded-full blur-3xl animate-pulse" />
-      <div className="absolute bottom-20 right-10 w-52 h-52 bg-blue-400 opacity-30 rounded-full blur-2xl animate-pulse" />
-      <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 w-72 h-72 bg-purple-300 opacity-20 rounded-full blur-3xl animate-pulse" />
+      <div className="absolute top-10 left-10 w-80 h-80 bg-cyan-300 opacity-30 rounded-full blur-3xl" />
+      <div className="absolute bottom-20 right-10 w-52 h-52 bg-blue-400 opacity-30 rounded-full blur-2xl" />
+      <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 w-72 h-72 bg-purple-300 opacity-20 rounded-full blur-3xl" />
 
       <form
         onSubmit={handleLogin}
-        className="fade-in w-full max-w-md p-8 rounded-2xl shadow-2xl bg-white/20 backdrop-blur-md border border-white/30 text-gray-800 relative overflow-hidden"
+        className="w-full max-w-md p-8 rounded-2xl shadow-2xl bg-white/20 backdrop-blur-md border border-white/30 text-gray-800 relative overflow-hidden"
       >
-        {/* Decorative Gradient Layer */}
-        <div className="absolute inset-0 bg-gradient-to-br from-cyan-200/10 via-white/10 to-blue-200/10 rounded-2xl pointer-events-none blur-[3px]" />
-
-        {/* Logo / Image Container */}
-        <div className="w-28 h-28 mx-auto mb-6 relative group">
+        {/* Logo */}
+        <div className="w-28 h-28 mx-auto mb-6 relative">
           <img
-            src="/mainlogo.png" // replace with your image path
+            src="/mainlogo.png"
             alt="Nezal HealthCare Logo"
-            className="w-full h-full object-cover rounded-2xl shadow-lg transition-transform duration-300 group-hover:scale-110 group-hover:rotate-3"
+            className="w-full h-full object-cover rounded-2xl shadow-lg"
           />
-          <div className="absolute inset-0 rounded-full bg-cyan-500/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300 blur-lg"></div>
+        </div>
+
+        {/* Title Section */}
+        <div className="text-center mb-6">
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">
+            Admin Login
+          </h2>
+          <p className="text-xs text-gray-600 mb-1">
+            Only administrator accounts can access this portal
+          </p>
+          <p className="text-xs text-gray-500 italic">
+            Demo: admin@example.com / 123456
+          </p>
         </div>
 
         {error && (
-          <p className="text-red-600 text-sm mb-4 text-center font-medium z-10 relative">
-            {error}
-          </p>
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+            <p className="text-red-600 text-sm text-center font-medium">
+              ⚠️ {error}
+            </p>
+          </div>
         )}
 
-        <input
-          type="text"
-          placeholder="Username"
-          value={username}
-          onChange={(e) => {
-            setUsername(e.target.value);
-            setError("");
-          }}
-          className="w-full px-4 py-3 mb-4 rounded-lg bg-white/30 placeholder-gray-700 text-gray-900
-   focus:outline-none focus:ring-4 focus:ring-cyan-400 focus:ring-opacity-75 shadow-[0_0_10px_2px_rgba(0,255,255,0.1)]
-   transition-shadow duration-300"
-        />
-
-        <div className="relative mb-4 z-10">
+        {/* Username Field */}
+        <div className="mb-4">
           <input
-            type={showPassword ? "text" : "password"}
+            type="text"
+            placeholder="Username or Email"
+            value={username}
+            onChange={(e) => {
+              setUsername(e.target.value);
+              setError("");
+            }}
+            className="w-full px-4 py-3 rounded-lg bg-white/70 placeholder-gray-500 text-gray-900
+              focus:outline-none focus:ring-2 focus:ring-cyan-400 border border-gray-300
+              transition-all duration-200"
+            autoComplete="username"
+            disabled={loading}
+          />
+        </div>
+
+        {/* Password Field */}
+        <div className="mb-6">
+          <input
+            type="password"
             placeholder="Password"
             value={password}
             onChange={(e) => {
               setPassword(e.target.value);
               setError("");
             }}
-            className="w-full px-4 py-3 mb-4 rounded-lg bg-white/30 placeholder-gray-700 text-gray-900
-   focus:outline-none focus:ring-4 focus:ring-cyan-400 focus:ring-opacity-75 shadow-[0_0_10px_2px_rgba(0,255,255,0.1)]
-   transition-shadow duration-300"
+            className="w-full px-4 py-3 rounded-lg bg-white/70 placeholder-gray-500 text-gray-900
+              focus:outline-none focus:ring-2 focus:ring-cyan-400 border border-gray-300
+              transition-all duration-200"
+            autoComplete="current-password"
+            disabled={loading}
           />
-          <span
-            onClick={() => setShowPassword((prev) => !prev)}
-            className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-700 cursor-pointer hover:text-cyan-600 transition"
-          >
-            {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
-          </span>
         </div>
 
+        {/* Login Button */}
         <button
           type="submit"
-          className="w-full py-3 mt-2 rounded-md bg-gradient-to-r from-cyan-600 to-blue-500 text-white font-semibold
-    shadow-[0_8px_24px_4px_rgba(34,197,255,0.18)] border-2 border-cyan-400
-    transition-transform  duration-300
-    hover:scale-105 hover:shadow-[0_0_40px_5px_rgba(34,197,255,0.4),0_8px_24px_4px_rgba(34,197,255,0.18)]
-    focus:outline-none focus:ring-4 focus:ring-cyan-300
-    active:scale-95"
+          disabled={loading}
+          className={`w-full py-3 mt-2 rounded-md text-white font-semibold
+            border border-cyan-500 transition-all duration-200
+            focus:outline-none focus:ring-2 focus:ring-cyan-300 focus:ring-offset-2
+            active:scale-[0.98] ${loading ? 'opacity-70 cursor-not-allowed' : ''}`}
+          style={{
+            background: loading 
+              ? 'linear-gradient(to right, #9ca3af, #6b7280)'
+              : 'linear-gradient(to right, #0891b2, #3b82f6)'
+          }}
         >
-          Login
+          {loading ? (
+            <div className="flex items-center justify-center">
+              <svg className="animate-spin h-5 w-5 mr-3 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Authenticating...
+            </div>
+          ) : (
+            'Login as Admin'
+          )}
         </button>
+
+        {/* Admin Only Notice */}
+        <div className="mt-6 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <p className="text-xs text-blue-700 text-center">
+            <span className="font-semibold">Note:</span> This portal is restricted to administrator accounts only. 
+            Contact system administrator for access.
+          </p>
+        </div>
       </form>
     </div>
   );
