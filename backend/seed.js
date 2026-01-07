@@ -122,7 +122,6 @@ async function seedProvinces() {
   await Province.insertMany(provinces);
 }
 
-
 async function seedZones() {
   try {
     await Zone.deleteMany({});
@@ -198,7 +197,6 @@ async function seedZones() {
     console.error("❌ Error seeding zones:", error.message);
   }
 }
-
 
 async function seedSaleTypes() {
   await SaleType.deleteMany({});
@@ -349,17 +347,7 @@ async function seedHTabs() {
       category: "main",
       reportType: "Hide/Show Tabs",
     },
-    {
-      tabId: "settings",
-      name: "Settings",
-      description: "System settings",
-      path: "",
-      icon: "Settings",
-      level: 0,
-      sequence: 3,
-      category: "main",
-      reportType: "Hide/Show Tabs",
-    },
+
     {
       tabId: "products",
       name: "Product Manager",

@@ -18,9 +18,10 @@ const updateReportInHandAfterStockTransfer = async (
       return 0;
     }
 
-    const existingProduct = await ReportInHand.findOne({ productName }).session(
-      session
-    );
+    // Search with case-insensitive regex since productName is stored in lowercase
+    const existingProduct = await ReportInHand.findOne({
+      productName: { $regex: new RegExp(`^${productName}$`, "i") }
+    }).session(session);
 
     if (!existingProduct) {
       return 0;
@@ -168,8 +169,9 @@ router.post("/stock-transfers", async (req, res) => {
 
       // Inventory check for send transfers
       if (transferType === "send") {
+        // Use case-insensitive search for productName
         const existingProduct = await ReportInHand.findOne({
-          productName: item.productName,
+          productName: { $regex: new RegExp(`^${item.productName}$`, "i") }
         }).session(session);
 
         if (!existingProduct) {
@@ -228,7 +230,6 @@ router.post("/stock-transfers", async (req, res) => {
     const savedTransfer = await stockTransfer.save({ session });
 
     // Update inventory
-
     for (const item of items) {
       await updateReportInHandAfterStockTransfer(
         item.productName,
@@ -278,7 +279,11 @@ const restoreReportInHandAfterStockTransferDeletion = async (
   try {
     if (boxQuantity <= 0) return;
 
-    const existingProduct = await ReportInHand.findOne({ productName });
+    // Use case-insensitive search for productName
+    const existingProduct = await ReportInHand.findOne({
+      productName: { $regex: new RegExp(`^${productName}$`, "i") }
+    });
+    
     if (!existingProduct) return;
 
     // Reverse the previous operation

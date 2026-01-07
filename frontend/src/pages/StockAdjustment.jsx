@@ -252,7 +252,7 @@ const StockAdjustment = () => {
       showToast("error", "Please select at least one adjustment to delete.");
       return;
     }
-console.log('values of selectedIds', selectedIds);
+
     // Validate IDs before sending (optional but good)
     // const invalidIds = selectedIds.filter((id) => !isValidObjectId(id));
     // if (invalidIds.length > 0) {
@@ -303,14 +303,6 @@ console.log('values of selectedIds', selectedIds);
           const errorMsg =
             error.response.data.message || "Failed to delete adjustments.";
           showToast("error", errorMsg);
-
-         console.log('error', error);
-          if (error.response.data.invalidIds) {
-            console.log(
-              "Invalid IDs from server:",
-              error.response.data.invalidIds
-            );
-          }
         } else if (error.request) {
           showToast("error", "Network error. Please check your connection.");
         } else {

@@ -96,7 +96,7 @@ const StockTransfer = () => {
     source: "",
     destination: "",
     mrName: "",
-    mrId: "",
+    mrId: "", // Added mrId field
     stockTransferToMr: "",
     stockTransferFromMrToMain: "",
   });
@@ -133,7 +133,6 @@ const StockTransfer = () => {
       setMrListLoading(true);
       const response = await axios.get(`${backendUrl}/api/staffs`);
       const data = response.data || [];
-
       if (data && data.length > 0) {
         setMrList(data);
         setIsMrListEmpty(false);
@@ -159,6 +158,7 @@ const StockTransfer = () => {
     return mrList.map((mr) => ({
       value: mr._id,
       label: mr.medicalRepName || mr.employeeName || `MR ${mr._id}`,
+      mrData: mr // Include the entire mr object for reference
     }));
   }, [mrList, isMrListEmpty]);
 
@@ -629,6 +629,10 @@ const StockTransfer = () => {
         if (requestData.stockTransferToMr) {
           requestData.mrName = requestData.stockTransferToMr;
         }
+        // Ensure mrId is included for MR transfers
+        if (requestData.mrId) {
+          requestData.mrId = requestData.mrId;
+        }
       }
 
       requestData.items = formData.items.map((item) => {
@@ -636,9 +640,6 @@ const StockTransfer = () => {
           productId: item.productId || item.product?.value,
           productName: item.productName || item.product?.label,
           boxQuantity: parseInt(item.boxQuantity) || 0,
-          openPieces: parseInt(item.openPieces) || 0,
-          qtyPerCarton: parseInt(item.qtyPerCarton) || 0,
-          totalPieces: parseInt(item.totalPieces) || 0,
           expenses: parseFloat(item.expenses) || 0,
         };
 
@@ -936,6 +937,8 @@ const StockTransfer = () => {
       shipping: parseFloat(transfer.shipping || 0).toFixed(2),
       totalExpenses: parseFloat(transfer.totalExpenses || 0).toFixed(2),
       grandTotal: parseFloat(transfer.grandTotal || 0).toFixed(2),
+      // Ensure mrId is properly set from the transfer data
+      mrId: transfer.mrId || "", 
     });
     setIsViewModalOpen(true);
   };
@@ -948,7 +951,7 @@ const StockTransfer = () => {
       shipping: parseFloat(transfer.shipping || 0).toFixed(2),
       totalExpenses: parseFloat(transfer.totalExpenses || 0).toFixed(2),
       grandTotal: parseFloat(transfer.grandTotal || 0).toFixed(2),
-      mrId: transfer.mrId || "", // Added mrId for dropdown
+      mrId: transfer.mrId || "", // Set mrId from transfer data
     });
     setIsEditModalOpen(true);
   };
@@ -1513,13 +1516,21 @@ const StockTransfer = () => {
                   </>
                 ) : (
                   <>
-                    {/* Row 2: MR Name and Product Cost */}
+                    {/* Row 2: MR Name and MR ID */}
                     <div>
                       <label className="block text-sm font-medium text-gray-600">
                         MR Name
                       </label>
                       <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
                         {form.stockTransferToMr || form.mrName || "-"}
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-600">
+                        MR ID
+                      </label>
+                      <p className="border px-3 py-2 rounded-lg bg-gray-100 font-mono text-gray-600">
+                        {form.mrId || "-"}
                       </p>
                     </div>
                   </>
@@ -1743,8 +1754,8 @@ const StockTransfer = () => {
                   </div>
                 </div>
 
-                {/* Row 3: Source/Destination for General Transfer */}
-                {activeTab === "general" && (
+                {/* Row 3: Source/Destination for General Transfer or MR ID display for MR transfer */}
+                {activeTab === "general" ? (
                   <div className="md:col-span-3">
                     {form.transferType === "send" ? (
                       <div>
@@ -1777,6 +1788,24 @@ const StockTransfer = () => {
                         />
                       </div>
                     )}
+                  </div>
+                ) : (
+                  <div className="md:col-span-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">
+                        MR ID (Reference)
+                      </label>
+                      <input
+                        type="text"
+                        name="mrId"
+                        value={form.mrId || ""}
+                        readOnly
+                        className="w-full border px-3 py-2 rounded-lg bg-gray-100 font-mono text-gray-600"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        This ID is automatically linked to the selected MR
+                      </p>
+                    </div>
                   </div>
                 )}
 

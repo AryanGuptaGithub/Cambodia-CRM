@@ -38,23 +38,21 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
   const [remarks, setRemarks] = useState("");
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [selectedMrId, setSelectedMrId] = useState("");
 
   // Handle quantity input change
   const handleQtyChange = (e) => {
     const value = e.target.value;
-    
-    // Allow only numbers
-    const numericValue = value.replace(/[^0-9]/g, '');
-    
-    if (numericValue === '') {
+    const numericValue = value.replace(/[^0-9]/g, "");
+
+    if (numericValue === "") {
       setReturnQty("");
       return;
     }
-    
+
     const num = parseInt(numericValue, 10);
-    
+
     if (selectedProduct) {
-      // Auto-correct if above max
       if (num > selectedProduct.remainingQty) {
         setReturnQty(selectedProduct.remainingQty.toString());
       } else if (num < 1) {
@@ -73,7 +71,7 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
       setReturnQty("1");
       return;
     }
-    
+
     const num = parseInt(returnQty, 10);
     if (isNaN(num) || num < 1) {
       setReturnQty("1");
@@ -82,15 +80,16 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
     }
   };
 
-  // Fetch MR stock when MR is selected
-  const fetchMrStock = useCallback(
-    async (mrName) => {
+  // Get MR stock directly from mrList
+  const getMrStockFromList = useCallback(
+    (mrName) => {
       try {
         setLoading(true);
         setMrStock([]);
         setSelectedProduct(null);
+        setSelectedMrId("");
 
-        // Find MR to get correct name
+        // Find MR in the list
         const selectedMrObj = mrList.find(
           (mr) => mr.mrName === mrName || mr.mrCode === mrName
         );
@@ -100,50 +99,46 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
           return;
         }
 
-        const actualMrName = selectedMrObj.mrName;
+        console.log("Selected MR object:", selectedMrObj);
 
-        const response = await axios.get(
-          `${backendUrl}/api/mr-stock/${actualMrName}`,
-          {
-            headers: {
-              Authorization: `Bearer ${localStorage.getItem("token")}`,
-            },
-          }
-        );
-        if (response.data.success) {
-          const transformedData = transformStockData(response.data.data);
-          setMrStock(transformedData);
-        } else {
-          toast.error(response.data.message || "Failed to load MR stock");
+        // Store MR ID (use mrId field if available)
+        setSelectedMrId(selectedMrObj.mrId || selectedMrObj._id);
+
+        // Check if productsInHand exists
+        if (!selectedMrObj.productsInHand || !Array.isArray(selectedMrObj.productsInHand) || selectedMrObj.productsInHand.length === 0) {
+          toast.info("No stock found for this MR");
           setMrStock([]);
+          return;
         }
+
+        // Transform the productsInHand data to match our expected format
+        const transformedData = selectedMrObj.productsInHand.map((product) => ({
+          // Create a unique identifier for the stock record
+          stockRecordId: `${selectedMrObj.mrId || selectedMrObj._id}_${product.productId}`,
+          mrId: selectedMrObj.mrId || selectedMrObj._id,
+          productId: product.productId,
+          productName: product.productName || "Unknown Product",
+          remainingQty: product.quantity || 0,
+          costPrice: product.lc || 0,
+          unit: "box",
+          lastUpdated: product.lastUpdated || new Date(),
+          // Store the original product data for reference
+          originalProductData: product
+        }));
+
+        console.log("Transformed MR stock:", transformedData);
+        setMrStock(transformedData);
       } catch (error) {
-        toast.error(error.response?.data?.message || "Failed to load MR stock");
+        console.error("Error getting MR stock from list:", error);
+        toast.error("Failed to load MR stock");
         setMrStock([]);
+        setSelectedMrId("");
       } finally {
         setLoading(false);
       }
     },
     [mrList]
   );
-
-  // Transform stock data from API
-  const transformStockData = (apiData) => {
-    if (!apiData || !Array.isArray(apiData)) return [];
-
-    return apiData.map((item) => ({
-      stockRecordId: item._id || item.productId,
-      productId: item.productId || item._id,
-      productCode: item.productCode || "N/A",
-      productName: item.productName || "Unknown Product",
-      batch: item.batch || "N/A",
-      expiry: item.expiry || item.expiryDate || "N/A",
-      remainingQty: item.remainingQty || item.assignedQty || 0,
-      costPrice: item.costPrice || 0,
-      unit: item.unit,
-      assignedDate: item.assignedDate,
-    }));
-  };
 
   // Handle MR selection
   const handleMrChange = (value) => {
@@ -152,7 +147,8 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
     setMrStock([]);
     setReturnItems([]);
     setReturnQty("1");
-    if (value) fetchMrStock(value);
+    setSelectedMrId("");
+    if (value) getMrStockFromList(value);
   };
 
   // Handle product selection
@@ -176,7 +172,11 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
 
     // Parse quantity
     const parsedQty = parseInt(returnQty, 10);
-    if (isNaN(parsedQty) || parsedQty < 1 || parsedQty > selectedProduct.remainingQty) {
+    if (
+      isNaN(parsedQty) ||
+      parsedQty < 1 ||
+      parsedQty > selectedProduct.remainingQty
+    ) {
       toast.error(
         `Invalid quantity. Must be between 1 and ${selectedProduct.remainingQty}`
       );
@@ -190,7 +190,7 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
 
     // Check if product already exists in return items
     const existingItemIndex = returnItems.findIndex(
-      (item) => item.stockRecordId === selectedProduct.stockRecordId
+      (item) => item.productId === selectedProduct.productId
     );
 
     if (existingItemIndex > -1) {
@@ -213,12 +213,16 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
     } else {
       // Add new item
       const item = {
-        stockRecordId: selectedProduct.stockRecordId,
+        // Send both mrId and productId for backend to find the correct stock
+        mrId: selectedProduct.mrId,
         productId: selectedProduct.productId,
         productName: selectedProduct.productName,
         returnQty: parsedQty,
         returnDate: returnDate.toISOString().split("T")[0],
         remarks: "",
+        costPrice: selectedProduct.costPrice,
+        // Optional: Include the original product data if needed by backend
+        originalProductData: selectedProduct.originalProductData
       };
       setReturnItems([...returnItems, item]);
       toast.success(`${selectedProduct.productName} added to return list`);
@@ -255,6 +259,11 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
       return;
     }
 
+    if (!selectedMrId) {
+      toast.error("MR ID not found. Please select MR again.");
+      return;
+    }
+
     // Get MR details
     const selectedMrObj = mrList.find(
       (mr) => mr.mrName === selectedMr || mr.mrCode === selectedMr
@@ -266,23 +275,28 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
     }
 
     const mrNameToUse = selectedMrObj.mrName;
+    const mrIdToUse = selectedMrObj.mrId || selectedMrObj._id;
 
     try {
       setSubmitting(true);
 
       const returnData = {
+        mrId: mrIdToUse,
         mrName: mrNameToUse,
         items: returnItems.map((item) => ({
-          stockRecordId: item.stockRecordId,
+          mrId: item.mrId || mrIdToUse,
           productId: item.productId,
           productName: item.productName,
           returnQty: parseInt(item.returnQty),
           returnDate: item.returnDate,
           remarks: item.remarks || "",
+          costPrice: item.costPrice || 0
         })),
         remarks: remarks,
         returnDate: returnDate.toISOString().split("T")[0],
       };
+
+      console.log("Submitting return data:", returnData);
 
       const response = await axios.post(
         `${backendUrl}/api/stock-returns`,
@@ -294,7 +308,7 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
           },
         }
       );
-      
+
       if (response.data.success) {
         toast.success("Stock return created successfully!");
         onSuccess();
@@ -303,10 +317,16 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
         toast.error(response.data.message || "Failed to create return");
       }
     } catch (error) {
+      console.error("Submit error:", error);
+      // Log the exact error response
+      if (error.response) {
+        console.error("Error response data:", error.response.data);
+        console.error("Error response status:", error.response.status);
+      }
       toast.error(
         error.response?.data?.message ||
-          error.response?.data?.error ||
-          "Failed to create stock return"
+        error.response?.data?.error ||
+        "Failed to create stock return"
       );
     } finally {
       setSubmitting(false);
@@ -319,7 +339,7 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
     0
   );
   const totalValue = returnItems.reduce(
-    (sum, item) => sum + item.returnQty * (item.costPrice || 0),
+    (sum, item) => sum + (item.returnQty * (item.costPrice || 0)),
     0
   );
 
@@ -333,7 +353,7 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
     .filter((item) => item.remainingQty > 0)
     .map((p) => ({
       value: p.stockRecordId,
-      label: `${p.productName} - Avail: ${p.remainingQty} ${p.unit}`,
+      label: `${p.productName || "Unknown"} - Avail: ${p.remainingQty} ${p.unit || "box"}`,
       disabled: p.remainingQty <= 0,
     }));
 
@@ -435,7 +455,7 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
                     <tr key={index} className="border-b">
                       <td className="p-3">{item.productName}</td>
                       <td className="p-3">
-                        {item.returnQty} {item.unit}
+                        {item.returnQty} box(es)
                       </td>
                       <td className="p-3">
                         {formatDateToReadable(item.returnDate)}
@@ -480,7 +500,7 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
         </button>
         <button
           onClick={handleSubmit}
-          disabled={submitting || returnItems.length === 0}
+          disabled={submitting || returnItems.length === 0 || !selectedMrId}
           className="px-5 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center gap-2"
         >
           {submitting ? (
@@ -521,12 +541,21 @@ const StockReturn = () => {
           Authorization: `Bearer ${localStorage.getItem("token")}`,
         },
       });
+      console.log("MR List API Response:", response.data);
       if (response.data.success) {
-        setMrList(response.data.data || []);
+        const mrData = response.data.data || [];
+        console.log("MR Data structure:", mrData);
+        
+        if (mrData.length > 0) {
+          console.log("First MR object:", mrData[0]);
+        }
+        
+        setMrList(mrData);
       } else {
         toast.error("Failed to load MR list");
       }
     } catch (error) {
+      console.error("Error fetching MR list:", error);
       toast.error("Failed to load MR list");
     }
   }, []);
@@ -787,8 +816,7 @@ const StockReturn = () => {
 
   // Helper to get currentCash value from return item
   const getCurrentCash = (returnItem) => {
-    // Try to get from mrCashDetails first, then from root level
-    return returnItem.mrCashDetails?.currentCash || returnItem.currentCash || 0;
+    return returnItem.currentCash || 0;
   };
 
   if (loading) {
@@ -875,7 +903,6 @@ const StockReturn = () => {
                 <th className="p-3 text-sm font-medium"># Products</th>
                 <th className="p-3 text-sm font-medium">Total Qty</th>
                 <th className="p-3 text-sm font-medium">Total Value</th>
-                <th className="p-3 text-sm font-medium">Current Cash</th>
                 <th className="p-3 text-sm font-medium">Status</th>
                 <th className="p-3 text-sm font-medium">Actions</th>
               </tr>
@@ -883,7 +910,7 @@ const StockReturn = () => {
             <tbody>
               {currentReturns.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="p-4 text-center text-gray-500">
+                  <td colSpan={8} className="p-4 text-center text-gray-500">
                     No returns found.
                   </td>
                 </tr>
@@ -896,7 +923,6 @@ const StockReturn = () => {
                       0
                     ) || 0;
                   const totalValue = returnItem.totalValue || 0;
-                  const currentCash = getCurrentCash(returnItem);
 
                   return (
                     <tr
@@ -940,11 +966,6 @@ const StockReturn = () => {
                       <td className="p-3">
                         <span className="font-medium text-green-700">
                           ${formatCurrency(totalValue)}
-                        </span>
-                      </td>
-                      <td className="p-3">
-                        <span className="font-medium text-green-700">
-                          ${formatCurrency(currentCash)}
                         </span>
                       </td>
                       <td className="p-3">
@@ -1076,10 +1097,10 @@ const StockReturn = () => {
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-1">
-                      MR Code
+                      MR ID
                     </label>
-                    <p className="border rounded-lg px-3 py-2 bg-gray-50">
-                      {displayValue(selectedReturn.mrCode)}
+                    <p className="border rounded-lg px-3 py-2 bg-gray-50 font-mono">
+                      {displayValue(selectedReturn.mrId)}
                     </p>
                   </div>
                   <div>
@@ -1106,14 +1127,6 @@ const StockReturn = () => {
                       ${formatCurrency(selectedReturn.totalValue)}
                     </p>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Current Cash
-                    </label>
-                    <p className="border rounded-lg px-3 py-2 bg-gray-50 font-medium text-green-700">
-                      ${formatCurrency(getCurrentCash(selectedReturn))}
-                    </p>
-                  </div>
                   {selectedReturn.approvedAt && (
                     <div>
                       <label className="block text-sm font-medium mb-1">
@@ -1131,7 +1144,7 @@ const StockReturn = () => {
                       </label>
                       <p className="border rounded-lg px-3 py-2 bg-gray-50">
                         {selectedReturn.rejectedReason}
-                    </p>
+                      </p>
                     </div>
                   )}
                 </div>
@@ -1143,7 +1156,6 @@ const StockReturn = () => {
                   <thead className="bg-gray-100">
                     <tr>
                       <th className="p-3 text-left">Product</th>
-                      <th className="p-3 text-left">Batch</th>
                       <th className="p-3 text-left">Return Qty</th>
                       <th className="p-3 text-left">Return Date</th>
                       <th className="p-3 text-left">Cost Price</th>
@@ -1157,9 +1169,7 @@ const StockReturn = () => {
                             <p className="font-medium">{item.productName}</p>
                           </div>
                         </td>
-
-                        <td className="p-3">{item.batch}</td>
-                        <td className="p-3">{item.returnQty}</td>
+                        <td className="p-3">{item.returnQty} box(es)</td>
                         <td className="p-3">{formatDate(item.returnDate)}</td>
                         <td className="p-3">
                           <span className="text-green-700">
@@ -1235,8 +1245,6 @@ const StockReturn = () => {
                     <thead className="bg-gray-100 text-gray-700 border-b">
                       <tr>
                         <th className="p-3">Product Name</th>
-                        <th className="p-3">Product Code</th>
-                        <th className="p-3">Batch</th>
                         <th className="p-3">Return Qty</th>
                         <th className="p-3">Return Date</th>
                         <th className="p-3">Cost Price</th>
@@ -1254,9 +1262,7 @@ const StockReturn = () => {
                             }`}
                           >
                             <td className="p-3">{item.productName}</td>
-                            <td className="p-3">{item.productCode}</td>
-                            <td className="p-3">{item.batch}</td>
-                            <td className="p-3">{item.returnQty}</td>
+                            <td className="p-3">{item.returnQty} box(es)</td>
                             <td className="p-3">
                               {formatDate(item.returnDate)}
                             </td>
@@ -1270,7 +1276,7 @@ const StockReturn = () => {
                       ) : (
                         <tr>
                           <td
-                            colSpan={6}
+                            colSpan={4}
                             className="p-4 text-center text-gray-500"
                           >
                             No products found

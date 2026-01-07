@@ -410,7 +410,6 @@ const CarryStockView = () => {
       setSelectedMr("all");
       return;
     }
-    console.log('values of selectedOption', selectedOption);
     if (typeof selectedOption === 'string') {
       setSelectedMr(selectedOption);
     } else if (typeof selectedOption === 'object') {

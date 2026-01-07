@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 import StockReturn from "../../models/stock/StockReturn.js";
 import StockInMrHand from "../../models/stock/StockInMRHand.js";
 import MRCash from "../../models/accounts/MRCash.js";
-import MR from "../../models/staffMember/staff.js"; // Add this import - adjust path as needed
+import MR from "../../models/staffMember/staff.js";
 
 const router = express.Router();
 
@@ -46,7 +46,6 @@ const findMR = async (returnItem) => {
   let mrCashData = null;
 
   try {
-    // First try exact match
     mrCashData = await MRCash.findOne({
       mrName: mrName,
       isActive: true,
@@ -77,7 +76,6 @@ router.get("/stock-returns", async (req, res) => {
 
     const query = { isDeleted: false };
 
-    // Search filter
     if (search) {
       query.$or = [
         { returnId: { $regex: search, $options: "i" } },
@@ -86,30 +84,25 @@ router.get("/stock-returns", async (req, res) => {
       ];
     }
 
-    // MR Code filter
     if (mrCode) {
       query.mrCode = mrCode;
     }
 
-    // Status filter
     if (status) {
       query.status = status;
     }
 
-    // Date range filter
     if (startDate || endDate) {
       query.returnDate = {};
       if (startDate) query.returnDate.$gte = new Date(startDate);
       if (endDate) query.returnDate.$lte = new Date(endDate);
     }
 
-    // Sorting options
     const sortOptions = {};
     sortOptions[sortBy] = sortOrder === "desc" ? -1 : 1;
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // Fetch stock returns
     const stockReturns = await StockReturn.find(query)
       .sort(sortOptions)
       .skip(skip)
@@ -118,7 +111,6 @@ router.get("/stock-returns", async (req, res) => {
       .populate("approvedBy", "name email")
       .lean();
 
-    // Enhance returns with MR Cash details
     const enhancedReturns = await Promise.all(
       stockReturns.map(async (item) => {
         try {
@@ -189,7 +181,6 @@ router.get("/stock-returns/:id", async (req, res) => {
       });
     }
 
-    // Get MR data
     const mrCashData = await findMR(stockReturn);
 
     const enhancedReturn = {
@@ -212,7 +203,7 @@ router.get("/stock-returns/:id", async (req, res) => {
   }
 });
 
-// Update stock return status - FIXED VERSION
+// Update stock return status
 router.put("/stock-returns/:id/status", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -255,46 +246,57 @@ router.put("/stock-returns/:id/status", async (req, res) => {
 
     const previousStatus = stockReturn.status;
 
-    // If trying to approve but MR doesn't exist in MRCash
-      // if (status === "Approved") {
-      //   const mrCashData = await MRCash.findOne({
-      //     mrName: stockReturn.mrName,
-      //     isActive: true,
-      //   }).session(session);
-
-      //   if (!mrCashData) {
-      //     await session.abortTransaction();
-      //     session.endSession();
-      //     return res.status(400).json({
-      //       success: false,
-      //       message: `MR ${stockReturn.mrName} not found in active MR list`,
-      //     });
-      //   }
-      // }
-
     const stockUpdates = [];
     const stockInMrUpdates = [];
     const mrCashUpdates = [];
 
     // Handle Rejected status
     if (status === "Rejected" && previousStatus !== "Rejected") {
-      // Restore stock quantities in StockInMrHand
       for (const item of stockReturn.items) {
         stockInMrUpdates.push({
           updateOne: {
-            filter: { 
-              mrName: stockReturn.mrName,
-              "products.productId": item.productId 
+            filter: {
+              mrId: stockReturn.mrId,
+              "productsInHand.productId": item.productId,
             },
             update: {
-              $inc: { "products.$.boxQuantity": item.returnQty },
-              $set: { updatedAt: new Date() },
+              $inc: { "productsInHand.$.quantity": item.returnQty },
+              $set: {
+                "productsInHand.$.lastUpdated": new Date(),
+                updatedAt: new Date(),
+              },
             },
           },
         });
 
-        // If previously approved, restore MR stock
         if (previousStatus === "Approved") {
+          // If you have a Stock model, you would update it here
+          // For now, only update StockInMrHand
+        }
+      }
+    }
+
+    // Handle Approved status
+    if (status === "Approved" && previousStatus === "Pending") {
+      for (const item of stockReturn.items) {
+        stockInMrUpdates.push({
+          updateOne: {
+            filter: {
+              mrId: stockReturn.mrId,
+              "productsInHand.productId": item.productId,
+            },
+            update: {
+              $inc: { "productsInHand.$.quantity": -item.returnQty },
+              $set: {
+                "productsInHand.$.lastUpdated": new Date(),
+                updatedAt: new Date(),
+              },
+            },
+          },
+        });
+
+        // If you have a Stock model for warehouse stock, update it here
+        if (item.stockRecordId) {
           stockUpdates.push({
             updateOne: {
               filter: { _id: item.stockRecordId },
@@ -308,76 +310,46 @@ router.put("/stock-returns/:id/status", async (req, res) => {
       }
     }
 
-    // Handle Approved status
-    if (status === "Approved" && previousStatus === "Pending") {
-      // Deduct from MR's stock in StockInMrHand
-      for (const item of stockReturn.items) {
-        stockInMrUpdates.push({
-          updateOne: {
-            filter: { 
-              mrName: stockReturn.mrName,
-              "products.productId": item.productId 
-            },
-            update: {
-              $inc: { "products.$.boxQuantity": -item.returnQty },
-              $set: { updatedAt: new Date() },
-            },
-          },
-        });
-
-        // Add to main stock
-        stockUpdates.push({
-          updateOne: {
-            filter: { _id: item.stockRecordId },
-            update: {
-              $inc: { remainingQty: item.returnQty },
-              $set: { updatedAt: new Date() },
-            },
-          },
-        });
-      }
-    }
-
     // Handle Approved after Rejected
     if (status === "Approved" && previousStatus === "Rejected") {
       for (const item of stockReturn.items) {
-        // Deduct from MR's stock again
         stockInMrUpdates.push({
           updateOne: {
-            filter: { 
-              mrName: stockReturn.mrName,
-              "products.productId": item.productId 
+            filter: {
+              mrId: stockReturn.mrId,
+              "productsInHand.productId": item.productId,
             },
             update: {
-              $inc: { "products.$.boxQuantity": -item.returnQty },
-              $set: { updatedAt: new Date() },
+              $inc: { "productsInHand.$.quantity": -item.returnQty },
+              $set: {
+                "productsInHand.$.lastUpdated": new Date(),
+                updatedAt: new Date(),
+              },
             },
           },
         });
 
-        // Add to main stock
-        stockUpdates.push({
-          updateOne: {
-            filter: { _id: item.stockRecordId },
-            update: {
-              $inc: { remainingQty: item.returnQty },
-              $set: { updatedAt: new Date() },
+        if (item.stockRecordId) {
+          stockUpdates.push({
+            updateOne: {
+              filter: { _id: item.stockRecordId },
+              update: {
+                $inc: { remainingQty: item.returnQty },
+                $set: { updatedAt: new Date() },
+              },
             },
-          },
-        });
+          });
+        }
       }
     }
 
-    // Execute updates if any
-    if (stockUpdates.length > 0) {
-      await StockInMrHand.bulkWrite(stockUpdates, { session });
-    }
-
+    // Only execute if we have updates
     if (stockInMrUpdates.length > 0) {
-      await StockInMrHand.bulkWrite(stockInMrUpdates, { session });
+      const bulkWriteResult = await StockInMrHand.bulkWrite(stockInMrUpdates, {
+        session,
+      });
     }
 
-    // Update stock return status
     stockReturn.status = status;
 
     if (status === "Approved") {
@@ -395,13 +367,11 @@ router.put("/stock-returns/:id/status", async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
-    // Fetch updated data
     const updatedReturn = await StockReturn.findById(id)
       .populate("createdBy", "name email")
       .populate("approvedBy", "name email")
       .lean();
 
-    // Get MR cash data
     const mrCashData = await findMR(updatedReturn);
 
     return res.status(200).json({
@@ -467,18 +437,20 @@ router.delete("/stock-returns/:id", async (req, res) => {
       });
     }
 
-    // Restore stock quantities in StockInMrHand
     const stockInMrUpdates = [];
     for (const item of stockReturn.items) {
       stockInMrUpdates.push({
         updateOne: {
-          filter: { 
-            mrName: stockReturn.mrName,
-            "products.productId": item.productId 
+          filter: {
+            mrId: stockReturn.mrId,
+            "productsInHand.productId": item.productId,
           },
           update: {
-            $inc: { "products.$.boxQuantity": item.returnQty },
-            $set: { updatedAt: new Date() },
+            $inc: { "productsInHand.$.quantity": item.returnQty },
+            $set: {
+              "productsInHand.$.lastUpdated": new Date(),
+              updatedAt: new Date(),
+            },
           },
         },
       });
@@ -488,7 +460,6 @@ router.delete("/stock-returns/:id", async (req, res) => {
       await StockInMrHand.bulkWrite(stockInMrUpdates, { session });
     }
 
-    // Mark as deleted
     stockReturn.isDeleted = true;
     await stockReturn.save({ session });
 
@@ -565,14 +536,13 @@ router.delete("/stock-returns/bulk", async (req, res) => {
       });
     }
 
-    // Group updates by MR name
     const updatesByMR = {};
     for (const returnDoc of stockReturns) {
       for (const item of returnDoc.items) {
-        const key = `${returnDoc.mrName}-${item.productId}`;
+        const key = `${returnDoc.mrId}-${item.productId}`;
         if (!updatesByMR[key]) {
           updatesByMR[key] = {
-            mrName: returnDoc.mrName,
+            mrId: returnDoc.mrId,
             productId: item.productId,
             totalQty: 0,
           };
@@ -581,16 +551,18 @@ router.delete("/stock-returns/bulk", async (req, res) => {
       }
     }
 
-    // Create bulk update operations
     const stockInMrUpdates = Object.values(updatesByMR).map((update) => ({
       updateOne: {
-        filter: { 
-          mrName: update.mrName,
-          "products.productId": update.productId 
+        filter: {
+          mrId: update.mrId,
+          "productsInHand.productId": update.productId,
         },
         update: {
-          $inc: { "products.$.boxQuantity": update.totalQty },
-          $set: { updatedAt: new Date() },
+          $inc: { "productsInHand.$.quantity": update.totalQty },
+          $set: {
+            "productsInHand.$.lastUpdated": new Date(),
+            updatedAt: new Date(),
+          },
         },
       },
     }));
@@ -599,7 +571,6 @@ router.delete("/stock-returns/bulk", async (req, res) => {
       await StockInMrHand.bulkWrite(stockInMrUpdates, { session });
     }
 
-    // Mark as deleted
     await StockReturn.updateMany(
       { _id: { $in: validIds } },
       { $set: { isDeleted: true } },
@@ -621,69 +592,6 @@ router.delete("/stock-returns/bulk", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to delete stock returns",
-      error: error.message,
-    });
-  }
-});
-
-// Get MR stock
-router.get("/mr-stock/:mrName", async (req, res) => {
-  try {
-    let { mrName } = req.params;
-    mrName = mrName.replace(/\s+/g, ' ').trim();
-    const stockRecord = await StockInMrHand.findOne({
-      mrName: { $regex: new RegExp(`^${mrName}$`, 'i') }
-    }).populate("products.productId", "productName productCode");
-    
-    if (!stockRecord) {
-      return res.status(200).json({
-        success: true,
-        data: [],
-        message: `No stock found for MR: ${mrName}`
-      });
-    }
-
-    if (!stockRecord.products || stockRecord.products.length === 0) {
-      return res.status(200).json({
-        success: true,
-        data: [],
-        message: `No products in stock for MR: ${mrName}`
-      });
-    }
-
-    const stockItems = stockRecord.products.map((product, index) => {
-      const transformedProduct = {
-        _id: product.productId?._id || product._id || `temp-${index}`,
-        productId:
-          product.productId?._id || product.productId || `product-${index}`,
-        productCode: product.productId?.productCode || "N/A",
-        productName:
-          product.productId?.productName ||
-          product.productName ||
-          "Unknown Product",
-        batch: product.batch || "N/A",
-        expiry: product.expiry || "N/A",
-        assignedQty: product.boxQuantity || 0,
-        remainingQty: product.boxQuantity || 0,
-        unit: product.unit || "box",
-        costPrice: product.costPrice || 0,
-        assignedDate:
-          stockRecord.assignedDate || stockRecord.createdAt || new Date(),
-      };
-
-      return transformedProduct;
-    });
-
-    return res.status(200).json({
-      success: true,
-      data: stockItems,
-      message: `Found ${stockItems.length} stock items for ${mrName}`,
-    });
-  } catch (error) {
-    console.error("Error fetching MR stock:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch MR stock",
       error: error.message,
     });
   }
@@ -783,31 +691,68 @@ router.get("/stock-returns/statistics", async (req, res) => {
   }
 });
 
-// Create stock return
+// Create stock return - FIXED VERSION
 router.post("/stock-returns", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const { mrName, items, remarks, returnDate } = req.body;
-    console.log('values of req.body', req.body);
-    if (!mrName || !items || !Array.isArray(items) || items.length === 0) {
+    const { mrId, mrName, items, remarks, returnDate } = req.body;
+    if (!mrId || !items || !Array.isArray(items) || items.length === 0) {
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({
         success: false,
-        message: "Medical Representative name and items are required",
+        message: "Medical Representative ID and items are required",
       });
     }
 
-    const mrStock = await StockInMrHand.findOne({ mrName: mrName }).session(session);
+    // Validate mrId
+    if (!mongoose.Types.ObjectId.isValid(mrId)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Invalid Medical Representative ID format",
+      });
+    }
+
+    // Get MR info first
+    let mrInfo = null;
+    let mrNameToUse = mrName;
+
+    if (mrId) {
+      mrInfo = await MR.findOne({ _id: mrId }).session(session);
+      if (mrInfo) {
+        mrNameToUse = mrInfo.mrName || mrName;
+      }
+    }
+
+    if (!mrNameToUse) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Medical Representative name is required",
+      });
+    }
+
+    // Get MR stock using mrId (primary) and mrName (fallback)
+    let mrStock = await StockInMrHand.findOne({ mrId: mrId }).session(session);
+
+    // If not found by mrId, try by mrName
+    if (!mrStock) {
+      mrStock = await StockInMrHand.findOne({ mrName: mrNameToUse }).session(
+        session
+      );
+    }
 
     if (!mrStock) {
       await session.abortTransaction();
       session.endSession();
       return res.status(404).json({
         success: false,
-        message: "No stock found for this MR",
+        message: "No stock found for this Medical Representative",
       });
     }
 
@@ -816,8 +761,11 @@ router.post("/stock-returns", async (req, res) => {
     let totalQuantity = 0;
     let totalValue = 0;
 
+    // Validate and process each item
     for (const [index, item] of items.entries()) {
-      if (!item.stockRecordId || !item.returnQty || item.returnQty <= 0) {
+
+      // Check for required fields
+      if (!item.productId || !item.returnQty || item.returnQty <= 0) {
         await session.abortTransaction();
         session.endSession();
         return res.status(400).json({
@@ -828,39 +776,43 @@ router.post("/stock-returns", async (req, res) => {
         });
       }
 
-      const productInMr = mrStock.products?.find(
-        (p) =>
-          p.productId?.toString() === item.stockRecordId ||
-          p._id?.toString() === item.stockRecordId
-      );
+      // Find product in MR's stock (productsInHand array)
+      const productInMr = mrStock.productsInHand?.find((p) => {
+        // Handle both string and ObjectId comparison
+        const productIdStr = p.productId?.toString();
+        const itemProductIdStr = item.productId?.toString();
+        return productIdStr === itemProductIdStr;
+      });
+
 
       if (!productInMr) {
         await session.abortTransaction();
         session.endSession();
-        return res.status(400).json({
+        return res.status(404).json({
           success: false,
           message: `Product "${
-            item.productName || item.stockRecordId
-          }" not found in stock for MR: ${mrName}`,
+            item.productName || item.productId
+          }" not found in stock for MR: ${mrNameToUse}`,
         });
       }
 
-      if (productInMr.boxQuantity < item.returnQty) {
+      // Check available quantity
+      const availableQuantity = productInMr.quantity || 0;
+
+      if (availableQuantity < item.returnQty) {
         await session.abortTransaction();
         session.endSession();
         return res.status(400).json({
           success: false,
           message: `Insufficient stock for "${
             item.productName || productInMr.productName
-          }". Available: ${productInMr.boxQuantity}, Requested: ${
-            item.returnQty
-          }`,
+          }". Available: ${availableQuantity}, Requested: ${item.returnQty}`,
         });
       }
 
       const returnItem = {
-        stockRecordId: item.stockRecordId,
         productId: productInMr.productId,
+        stockRecordId: productInMr._id, // Use the _id from productsInHand
         productCode:
           item.productCode ||
           productInMr.productCode ||
@@ -871,24 +823,27 @@ router.post("/stock-returns", async (req, res) => {
         returnQty: Number(item.returnQty),
         returnDate: item.returnDate || new Date(),
         remarks: item.remarks || "",
-        costPrice: productInMr.costPrice || item.costPrice || 10,
-        unit: productInMr.unit || item.unit || "pcs",
+        costPrice: item.costPrice || productInMr.costPrice || 0,
+        unit: productInMr.unit || item.unit || "box",
       };
 
       returnItems.push(returnItem);
       totalQuantity += returnItem.returnQty;
       totalValue += returnItem.returnQty * returnItem.costPrice;
 
-      // Prepare update for StockInMrHand
+      // Prepare update - decrement the MR's stock in productsInHand
       stockInMrUpdates.push({
         updateOne: {
           filter: {
             _id: mrStock._id,
-            "products._id": productInMr._id,
+            "productsInHand._id": productInMr._id,
           },
           update: {
-            $inc: { "products.$.boxQuantity": -item.returnQty },
-            $set: { updatedAt: new Date() },
+            $inc: { "productsInHand.$.quantity": -item.returnQty },
+            $set: {
+              "productsInHand.$.lastUpdated": new Date(),
+              updatedAt: new Date(),
+            },
           },
         },
       });
@@ -908,13 +863,29 @@ router.post("/stock-returns", async (req, res) => {
       createdById = new mongoose.Types.ObjectId("000000000000000000000001");
     }
 
+    // Get MR details from MR model if available
+    let mrDetails = null;
+    let mrCodeValue = "";
+
+    if (mrId && mongoose.Types.ObjectId.isValid(mrId)) {
+      const mrDoc = await MR.findOne({ _id: mrId }).session(session);
+      if (mrDoc) {
+        mrDetails = mrDoc;
+        mrCodeValue =
+          mrDoc.mrCode || `MR-${mrNameToUse.toUpperCase().slice(0, 4)}`;
+      }
+    }
+
+    // Fallback if still no MR code
+    if (!mrCodeValue) {
+      mrCodeValue = `MR-${mrNameToUse.toUpperCase().slice(0, 4)}`;
+    }
+
     const stockReturn = new StockReturn({
       returnId: returnId,
-      mrId: mrCash._id,
-      mrCode: mrCash.mrCode || `MR-${mrCash.mrName.toUpperCase().slice(0, 4)}-${mrCash._id
-        .toString()
-        .slice(-4)}`,
-      mrName: mrName,
+      mrId: new mongoose.Types.ObjectId(mrId),
+      mrCode: mrCodeValue,
+      mrName: mrNameToUse,
       returnDate: returnDate || new Date(),
       items: returnItems,
       totalItems: returnItems.length,
@@ -927,7 +898,9 @@ router.post("/stock-returns", async (req, res) => {
 
     // Execute stock updates
     if (stockInMrUpdates.length > 0) {
-      await StockInMrHand.bulkWrite(stockInMrUpdates, { session });
+      const bulkResult = await StockInMrHand.bulkWrite(stockInMrUpdates, {
+        session,
+      });
     }
 
     // Save stock return

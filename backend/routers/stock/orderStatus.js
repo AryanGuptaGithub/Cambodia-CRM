@@ -1,5 +1,4 @@
 import express from "express";
-import Warehouse from "../../models/stock/warehouse.js";
 import OrderStatus from "../../models/stock/orderStatus.js"; // ✅ Import OrderStatus model
 
 const router = express.Router();

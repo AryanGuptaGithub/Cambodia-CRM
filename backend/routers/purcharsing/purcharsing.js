@@ -98,6 +98,17 @@ const productNameFixMap = {
   "kamzole 200": "KAMZOLE 200",
   "suprafen 500": "SUPRAFEN 500",
   "ecoflaz 6": "ECOFLAZ 6",
+
+  // 🔥 ADDED: ROSUKAM variations
+  "rosukam 10": "ROSUKAM 10",
+  "rosukam10": "ROSUKAM 10",
+  "rosukam-10": "ROSUKAM 10",
+  "rosukam 5": "ROSUKAM 5",
+  "rosukam5": "ROSUKAM 5",
+  "rosukam-5": "ROSUKAM 5",
+  "rosukam 20": "ROSUKAM 20",
+  "rosukam20": "ROSUKAM 20",
+  "rosukam-20": "ROSUKAM 20",
 };
 
 const getStrictNormalizedProductName = (name) => {
@@ -216,6 +227,10 @@ const updateReportInHand = async (productData, operation = "add") => {
     const normalized = normalizeProductName(productName);
     const fixedProductName =
       productNameFixMap[normalized] || productName.trim().toUpperCase();
+    
+    // 🔥 FORCE UPPERCASE: Ensure the final name is always uppercase
+    const finalProductName = fixedProductName.toUpperCase();
+
     if (operation === "add") {
       const amount = qty * (lc || 0);
       const newBatch = {
@@ -228,9 +243,9 @@ const updateReportInHand = async (productData, operation = "add") => {
         date: new Date(),
       };
 
-      // Try to find existing document
+      // Try to find existing document - search with uppercase name
       const existingDoc = await ReportInHand.findOne({
-        productName: { $regex: new RegExp(`^${fixedProductName}$`, "i") },
+        productName: { $regex: new RegExp(`^${finalProductName}$`, "i") },
       }).lean();
 
       if (existingDoc) {
@@ -260,10 +275,10 @@ const updateReportInHand = async (productData, operation = "add") => {
           }
         );
       } else {
-        // Create new document
+        // Create new document with uppercase name
         const averagePrice = qty > 0 ? amount / qty : 0;
         await ReportInHand.create({
-          productName: fixedProductName,
+          productName: finalProductName, // 🔥 Use finalProductName here
           supplierName: validSupplier,
           type: type || "",
           batches: [newBatch],
@@ -276,18 +291,18 @@ const updateReportInHand = async (productData, operation = "add") => {
     } else if (operation === "subtract") {
       // For subtraction (purchase return or deletion)
       const item = await ReportInHand.findOne({
-        productName: { $regex: new RegExp(`^${fixedProductName}$`, "i") },
+        productName: { $regex: new RegExp(`^${finalProductName}$`, "i") },
       }).lean();
 
       if (!item) {
         console.warn(
-          `Cannot subtract: "${fixedProductName}" not found in ReportInHand`
+          `Cannot subtract: "${finalProductName}" not found in ReportInHand`
         );
         return;
       }
 
       if (!item.batches || item.batches.length === 0) {
-        console.warn(`No batches to subtract from for "${fixedProductName}"`);
+        console.warn(`No batches to subtract from for "${finalProductName}"`);
         return;
       }
 

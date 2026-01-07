@@ -5,6 +5,7 @@ import Staff from "../../models/staffMember/staff.js";
 import mongoose from "mongoose";
 import ExcelJS from 'exceljs';
 import stockTransferToMR from "../../models/stock/stockTransferToMR.js";
+import stockinmrhands from "../../models/stock/StockInMRHand.js";
 
 const router = express.Router();
 
@@ -736,41 +737,38 @@ router.get("/sales-salary-ratio/export", async (req, res) => {
 
 router.get("/mrs", async (req, res) => {
   try {
-    const mrList = await stockTransferToMR.aggregate([
+    const mrList = await stockinmrhands.aggregate([
       {
-        // Normalize spaces first
-        $project: {
+        $match: {
+          productsInHand: { $exists: true, $ne: [] },
+          "productsInHand.quantity": { $gt: 0 }
+        }
+      },
+      {
+        $addFields: {
           cleanedMrName: {
             $trim: {
               input: {
                 $replaceAll: {
-                  input: "$stockTransferToMr",
+                  input: "$mrName",
                   find: "  ",
-                  replacement: " ",
-                },
-              },
-            },
-          },
-        },
+                  replacement: " "
+                }
+              }
+            }
+          }
+        }
       },
       {
-        // Group by cleaned MR name
-        $group: {
-          _id: "$cleanedMrName",
-        },
-      },
-      {
-        $project: {
-          _id: 0,
-          mrName: "$_id",
-        },
-      },
-      { $sort: { mrName: 1 } },
+        $sort: { cleanedMrName: 1 }
+      }
+
     ]);
-    
+
     res.status(200).json({
       success: true,
       data: mrList,
+      count: mrList.length
     });
   } catch (error) {
     console.error("❌ Error fetching MR list:", error);
@@ -781,5 +779,6 @@ router.get("/mrs", async (req, res) => {
     });
   }
 });
+
 
 export default router;

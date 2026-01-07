@@ -401,6 +401,11 @@ const useStockTransferForm = () => {
               updatedItem.expenses = boxQty * lc;
             }
 
+            // If quantity is being set directly
+            if (field === "quantity" && typeof value === "object") {
+              updatedItem.quantity = value;
+            }
+
             return updatedItem;
           }
           return item;
@@ -688,13 +693,8 @@ const GeneralTransferForm = ({ navigate, products, productsLoading }) => {
           updateItem(id, field, numericValue, lc);
 
           const boxQuantity = parseFloat(numericValue) || 0;
-          setItems((prev) =>
-            prev.map((item) =>
-              item.id === id
-                ? { ...item, quantity: convertToQuantityStructure(boxQuantity) }
-                : item
-            )
-          );
+          // Use updateItem to update the quantity field
+          updateItem(id, "quantity", convertToQuantityStructure(boxQuantity));
         }
       }
     },
@@ -1096,7 +1096,7 @@ const GeneralTransferForm = ({ navigate, products, productsLoading }) => {
                     </div>
 
                     <div className="flex flex-col">
-                      <label className="text-sm font-medium text-gray-700 mb-1">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
                         Expenses ($){" "}
                         <span className="text-xs text-gray-500">
                           (Auto-calculated)
@@ -1371,6 +1371,7 @@ const CreateStockTransfer = () => {
     return mrList.map((mr) => ({
       value: mr._id,
       label: mr.medicalRepName || mr.employeeName || `MR ${mr._id}`,
+      mrData: mr
     }));
   }, [mrList, isMrListEmpty]);
 
@@ -1513,6 +1514,7 @@ const CreateStockTransfer = () => {
           mrTransfer.transferType === "send" ? selectedMr?.label || "" : "",
         stockTransferFromMrToMain:
           mrTransfer.transferType === "receive" ? selectedMr?.label || "" : "",
+        mrId: mrTransfer.mrId, // FIXED: Added mrId to payload
         items: validProducts.map((p) => ({
           productId: p.productId,
           productName: p.productName,
@@ -1526,7 +1528,7 @@ const CreateStockTransfer = () => {
         grandTotal: totalExpensesFromItems,
       };
 
-      await axios.post(`${backendUrl}/api/stock-transfers-to-mr`, payload);
+      const response = await axios.post(`${backendUrl}/api/stock-transfers-to-mr`, payload);
       showToast(
         "success",
         `Stock ${
