@@ -12,7 +12,6 @@ export const getDateRanges = () => {
   const currentMonth = today.getMonth();
   const currentYear = today.getFullYear();
 
-  // Today
   const todayStart = new Date(today);
   todayStart.setHours(0, 0, 0, 0);
   const todayEnd = new Date(today);
@@ -157,7 +156,6 @@ export const formatDateToReadableFixed = (dateString) => {
 export const getStockDateRanges = () => {
   const today = new Date();
 
-  // Today
   const todayStart = new Date(today);
   todayStart.setHours(0, 0, 0, 0);
   const todayEnd = new Date(today);

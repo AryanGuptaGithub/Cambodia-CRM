@@ -278,10 +278,8 @@ export const DashboardCards = ({
       if (getSafeNumber(totalPayroll) > 0) {
         return getSafeNumber(totalPayroll);
       }
-      
-      // Otherwise, use the highest value we've seen (9150)
-      // This ensures we show 9150 even when totalPayroll goes back to 0
-      return highestPayrollValue > 0 ? highestPayrollValue : 9150;
+   
+      return highestPayrollValue > 0 ? highestPayrollValue : 0;
     }
     
     // For other subtabs, use the normal calculation

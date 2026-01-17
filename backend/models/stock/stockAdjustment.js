@@ -17,7 +17,7 @@ const stockAdjustmentSchema = new mongoose.Schema(
     },
     adjustmentType: {
       type: String,
-      enum: ["add", "remove"],
+      enum: ["add", "remove", "deduct"],
       required: true,
     },
     remarks: {

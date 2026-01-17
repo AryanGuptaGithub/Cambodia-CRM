@@ -1,4 +1,3 @@
-// In your ReportInHand model (models/reports/reportsInHand.js)
 import mongoose from "mongoose";
 
 const ReportInHandSchema = new mongoose.Schema(
@@ -45,9 +44,30 @@ const ReportInHandSchema = new mongoose.Schema(
           type: Date,
           default: Date.now,
         },
+        adjustmentType: {
+          type: String,
+          enum: ["batch", "add", "remove"],
+          default: "batch",
+        },
+        adjustmentId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "StockAdjustment",
+        },
       },
     ],
     totalBoxes: {
+      type: Number,
+      default: 0,
+    },
+    totalBoxesFromBatches: {
+      type: Number,
+      default: 0,
+    },
+    addStockAdjustment: {
+      type: Number,
+      default: 0,
+    },
+    removeStockAdjustment: {
       type: Number,
       default: 0,
     },
@@ -71,5 +91,39 @@ const ReportInHandSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// Calculate totals before saving
+ReportInHandSchema.pre("save", function (next) {
+  // Calculate total boxes from batches (excluding adjustments)
+  const batchBoxes = this.batches
+    .filter(batch => batch.adjustmentType === "batch")
+    .reduce((sum, batch) => sum + (batch.boxes || 0), 0);
+  
+  this.totalBoxesFromBatches = batchBoxes;
+  
+  // Calculate adjustment totals
+  this.addStockAdjustment = this.batches
+    .filter(batch => batch.adjustmentType === "add")
+    .reduce((sum, batch) => sum + (batch.boxes || 0), 0);
+    
+  this.removeStockAdjustment = this.batches
+    .filter(batch => batch.adjustmentType === "remove")
+    .reduce((sum, batch) => sum + (batch.boxes || 0), 0);
+  
+  // Total boxes = batches + add adjustments - remove adjustments
+  this.totalBoxes = this.totalBoxesFromBatches + 
+                    this.addStockAdjustment - 
+                    this.removeStockAdjustment;
+  
+  // Calculate total amount and average price from batches only
+  const batchEntries = this.batches.filter(batch => batch.adjustmentType === "batch");
+  const totalBatchAmount = batchEntries.reduce((sum, batch) => sum + (batch.amount || 0), 0);
+  const totalBatchBoxes = batchEntries.reduce((sum, batch) => sum + (batch.boxes || 0), 0);
+  
+  this.totalAmount = totalBatchAmount;
+  this.averagePrice = totalBatchBoxes > 0 ? totalBatchAmount / totalBatchBoxes : 0;
+  
+  next();
+});
 
 export default mongoose.model("ReportInHand", ReportInHandSchema);

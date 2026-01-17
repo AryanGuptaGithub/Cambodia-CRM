@@ -769,9 +769,6 @@ const Dashboard = () => {
               }
             }
 
-            // Map to backend expected format
-            // Based on your logs, backend expects tab-separated string format
-            // Or if sending JSON, use these field names
             const result = {
               name: (item["mr name"] || item["medicalrepname"] || "")
                 .toString()
@@ -789,8 +786,8 @@ const Dashboard = () => {
               password: (item["password"] || "123456").toString().trim(), // Default password if empty
               date:
                 parsedDate && !isNaN(parsedDate.getTime())
-                  ? parsedDate.toISOString().split("T")[0] // Format as YYYY-MM-DD
-                  : new Date().toISOString().split("T")[0], // Default to today
+                  ? parsedDate.toISOString().split("T")[0] 
+                  : new Date().toISOString().split("T")[0], 
               rawDate: rawDate, // For debugging
             };
 
@@ -805,10 +802,6 @@ const Dashboard = () => {
           );
 
         setParsedData(mappedData);
-        showToast(
-          "success",
-          `Parsed ${mappedData.length} valid records successfully`
-        );
       } catch (error) {
         console.error("Error parsing file:", error);
         showToast("error", "Error parsing Excel file: " + error.message);

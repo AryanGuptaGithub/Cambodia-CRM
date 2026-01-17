@@ -20,14 +20,12 @@ const updateProductCurrentStock = async (
       throw new Error(`Product not found with ID: ${productId}`);
     }
 
-    // Calculate quantity change in pieces based on adjustment type
     const piecesPerBox = qtyPerCarton || product.qtyPerCarton || 1;
     const piecesChange =
       adjustmentType === "add"
         ? boxQuantity * piecesPerBox
         : -(boxQuantity * piecesPerBox);
 
-    // Prevent removing more than available stock
     if (
       adjustmentType === "remove" &&
       product.currentStock < Math.abs(piecesChange)
@@ -40,8 +38,6 @@ const updateProductCurrentStock = async (
     }
 
     const updatedStock = product.currentStock + piecesChange;
-
-    // Update product current stock
     await Product.findByIdAndUpdate(productId, {
       currentStock: Math.max(0, updatedStock),
     });
@@ -53,15 +49,23 @@ const updateProductCurrentStock = async (
   }
 };
 
+// UPDATED: Function to update ReportInHand after adjustment
 const updateReportInHandAfterAdjustment = async (
   productName,
   boxQuantity,
-  adjustmentType
+  adjustmentType,
+  adjustmentId,
+  remarks = ""
 ) => {
   try {
     if (boxQuantity <= 0) return;
-
-    const existingProduct = await ReportInHand.findOne({ productName });
+    
+    const normalizedProductName = productName.toLowerCase().trim();
+    
+    let existingProduct = await ReportInHand.findOne({
+      productName: { $regex: new RegExp(`^${normalizedProductName}$`, "i") }
+    });
+    
     if (!existingProduct) {
       console.warn(
         `⚠️ Product "${productName}" not found in ReportInHand inventory`
@@ -69,34 +73,40 @@ const updateReportInHandAfterAdjustment = async (
       return;
     }
 
-    // Determine change direction
-    const quantityChange =
-      adjustmentType === "add" ? boxQuantity : -boxQuantity;
-
-    // Prevent removing more than available
-    if (
-      adjustmentType === "remove" &&
-      existingProduct.totalBoxes < boxQuantity
-    ) {
-      throw new Error(
-        `Insufficient stock in ReportInHand for "${productName}". Available: ${existingProduct.totalBoxes}, Required: ${boxQuantity}`
-      );
+    // Validate stock for removal
+    if (adjustmentType === "remove") {
+      const availableStock = existingProduct.totalBoxesFromBatches + 
+                            existingProduct.addStockAdjustment - 
+                            existingProduct.removeStockAdjustment;
+      
+      if (availableStock < boxQuantity) {
+        throw new Error(
+          `Insufficient stock in ReportInHand for "${productName}". Available: ${availableStock}, Required: ${boxQuantity}`
+        );
+      }
     }
 
-    const updatedBoxes = existingProduct.totalBoxes + quantityChange;
+    // Add adjustment as a new batch entry with adjustmentType
+    const newBatchEntry = {
+      boxes: boxQuantity,
+      lc: 0,
+      fob: 0,
+      cif: 0,
+      amount: 0,
+      date: new Date(),
+      adjustmentType: adjustmentType,
+      adjustmentId: adjustmentId,
+      remarks: remarks || `${adjustmentType} adjustment`
+    };
 
-    // Determine new stock status
-    let updatedStatus = "In Stock";
-    if (updatedBoxes <= 0) updatedStatus = "Out of Stock";
-    else if (updatedBoxes < 10) updatedStatus = "Critical";
-    else if (updatedBoxes < 25) updatedStatus = "Low Stock";
-
-    await ReportInHand.findByIdAndUpdate(existingProduct._id, {
-      $set: {
-        totalBoxes: Math.max(0, updatedBoxes),
-        status: updatedStatus,
-      },
-    });
+    // Add the adjustment batch entry
+    existingProduct.batches.push(newBatchEntry);
+    
+    // Recalculate totals (pre-save hook will handle this)
+    await existingProduct.save();
+    
+    console.log(`✅ Updated ReportInHand for "${productName}": ${adjustmentType} ${boxQuantity} boxes`);
+    
   } catch (error) {
     console.error(
       `❌ Error updating ReportInHand for product "${productName}":`,
@@ -106,43 +116,103 @@ const updateReportInHandAfterAdjustment = async (
   }
 };
 
-const restoreStockAfterAdjustmentDeletion = async (
-  productName,
-  boxQuantity,
-  adjustmentType
-) => {
+// UPDATED: Function to restore stock after adjustment deletion
+const restoreStockAfterAdjustmentDeletion = async (adjustmentId) => {
   try {
-    if (boxQuantity <= 0) return;
-
-    const existingProduct = await ReportInHand.findOne({ productName });
-    if (!existingProduct) return;
-
-    // Reverse the previous operation
-    const quantityChange =
-      adjustmentType === "add" ? -boxQuantity : boxQuantity;
-    const updatedBoxes = existingProduct.totalBoxes + quantityChange;
-
-    // Determine new stock status
-    let updatedStatus = "In Stock";
-    if (updatedBoxes <= 0) updatedStatus = "Out of Stock";
-    else if (updatedBoxes < 10) updatedStatus = "Critical";
-    else if (updatedBoxes < 25) updatedStatus = "Low Stock";
-
-    await ReportInHand.findByIdAndUpdate(existingProduct._id, {
-      $set: {
-        totalBoxes: Math.max(0, updatedBoxes),
-        status: updatedStatus,
-      },
+    // Find the product by looking for the batch with this adjustmentId
+    const product = await ReportInHand.findOne({
+      "batches.adjustmentId": adjustmentId
     });
+    
+    if (!product) {
+      console.warn(`⚠️ Adjustment ${adjustmentId} not found in ReportInHand batches`);
+      return;
+    }
+
+    // Remove the batch entry with this adjustmentId
+    const batchIndex = product.batches.findIndex(
+      batch => batch.adjustmentId && batch.adjustmentId.toString() === adjustmentId.toString()
+    );
+    
+    if (batchIndex === -1) {
+      console.warn(`⚠️ Batch entry not found for adjustment ${adjustmentId}`);
+      return;
+    }
+    
+    // Remove the batch entry
+    product.batches.splice(batchIndex, 1);
+    
+    // Recalculate totals
+    await product.save();
+    
+    console.log(`✅ Removed adjustment batch from "${product.productName}"`);
+    
   } catch (error) {
     console.error(
-      `❌ Error restoring ReportInHand for product "${productName}":`,
+      `❌ Error restoring ReportInHand for adjustment ${adjustmentId}:`,
       error.message
     );
     throw error;
   }
 };
 
+// UPDATED: Function to update existing adjustment
+const updateExistingAdjustmentInReport = async (
+  oldAdjustmentId,
+  newAdjustmentId,
+  productName,
+  newBoxQuantity,
+  newAdjustmentType,
+  remarks = ""
+) => {
+  try {
+    const normalizedProductName = productName.toLowerCase().trim();
+    
+    let existingProduct = await ReportInHand.findOne({
+      productName: { $regex: new RegExp(`^${normalizedProductName}$`, "i") }
+    });
+    
+    if (!existingProduct) {
+      throw new Error(`Product "${productName}" not found in ReportInHand`);
+    }
+
+    // Find and remove old batch entry
+    const oldBatchIndex = existingProduct.batches.findIndex(
+      batch => batch.adjustmentId && batch.adjustmentId.toString() === oldAdjustmentId.toString()
+    );
+    
+    if (oldBatchIndex !== -1) {
+      existingProduct.batches.splice(oldBatchIndex, 1);
+    }
+
+    // Add new batch entry
+    const newBatchEntry = {
+      boxes: newBoxQuantity,
+      lc: 0,
+      fob: 0,
+      cif: 0,
+      amount: 0,
+      date: new Date(),
+      adjustmentType: newAdjustmentType,
+      adjustmentId: newAdjustmentId,
+      remarks: remarks || `${newAdjustmentType} adjustment`
+    };
+
+    existingProduct.batches.push(newBatchEntry);
+    await existingProduct.save();
+    
+    console.log(`✅ Updated adjustment in ReportInHand for "${productName}"`);
+    
+  } catch (error) {
+    console.error(
+      `❌ Error updating adjustment in ReportInHand:`,
+      error.message
+    );
+    throw error;
+  }
+};
+
+// GET all stock adjustments
 router.get("/stock-adjustments", async (req, res) => {
   try {
     const adjustments = await StockAdjustment.find()
@@ -166,6 +236,7 @@ router.get("/stock-adjustments", async (req, res) => {
   }
 });
 
+// POST create new stock adjustment
 router.post("/stock-adjustments", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -173,7 +244,6 @@ router.post("/stock-adjustments", async (req, res) => {
   try {
     const { productId, boxQuantity, adjustmentType, remarks } = req.body;
 
-    // Validation
     if (!productId || !adjustmentType) {
       await session.abortTransaction();
       return res.status(400).json({
@@ -198,7 +268,6 @@ router.post("/stock-adjustments", async (req, res) => {
       });
     }
 
-    // Validate product exists
     const product = await Product.findById(productId);
     if (!product) {
       await session.abortTransaction();
@@ -208,7 +277,6 @@ router.post("/stock-adjustments", async (req, res) => {
       });
     }
 
-    // Calculate total quantity in pieces
     const piecesPerBox = product.qtyPerCarton || 1;
     const totalPieces = boxQuantity * piecesPerBox;
     const totalQuantity =
@@ -225,7 +293,7 @@ router.post("/stock-adjustments", async (req, res) => {
 
     const savedAdjustment = await adjustment.save({ session });
 
-    // Update Product current stock (in pieces)
+    // Update Product current stock
     await updateProductCurrentStock(
       productId,
       boxQuantity,
@@ -233,14 +301,15 @@ router.post("/stock-adjustments", async (req, res) => {
       piecesPerBox
     );
 
-    // Update ReportInHand inventory (in boxes)
+    // Update ReportInHand with adjustment batch entry
     await updateReportInHandAfterAdjustment(
       product.productName,
       boxQuantity,
-      adjustmentType
+      adjustmentType,
+      savedAdjustment._id,
+      remarks
     );
 
-    // Populate the product data in response
     const populatedAdjustment = await StockAdjustment.findById(
       savedAdjustment._id
     )
@@ -275,13 +344,6 @@ router.post("/stock-adjustments", async (req, res) => {
       });
     }
 
-    if (err.name === "CastError") {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid product ID format",
-      });
-    }
-
     if (err.message.includes("Insufficient stock")) {
       return res.status(400).json({
         success: false,
@@ -296,6 +358,7 @@ router.post("/stock-adjustments", async (req, res) => {
   }
 });
 
+// PUT update stock adjustment
 router.put("/stock-adjustments/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -311,7 +374,6 @@ router.put("/stock-adjustments/:id", async (req, res) => {
       });
     }
 
-    // Check if adjustment exists
     const existingAdjustment = await StockAdjustment.findById(id);
     if (!existingAdjustment) {
       await session.abortTransaction();
@@ -321,7 +383,6 @@ router.put("/stock-adjustments/:id", async (req, res) => {
       });
     }
 
-    // Get the product
     const oldProduct = await Product.findById(existingAdjustment.productId);
     if (!oldProduct) {
       await session.abortTransaction();
@@ -332,13 +393,6 @@ router.put("/stock-adjustments/:id", async (req, res) => {
     }
 
     // Restore previous stock first
-    await restoreStockAfterAdjustmentDeletion(
-      oldProduct.productName,
-      existingAdjustment.boxQuantity,
-      existingAdjustment.adjustmentType
-    );
-
-    // Restore product current stock
     const reversePiecesPerBox = oldProduct.qtyPerCarton || 1;
     const reversePiecesChange =
       existingAdjustment.adjustmentType === "add"
@@ -350,6 +404,9 @@ router.put("/stock-adjustments/:id", async (req, res) => {
       { $inc: { currentStock: reversePiecesChange } },
       { session }
     );
+
+    // Remove old adjustment from ReportInHand
+    await restoreStockAfterAdjustmentDeletion(id);
 
     // If product is being updated, validate it exists
     let product = oldProduct;
@@ -367,7 +424,7 @@ router.put("/stock-adjustments/:id", async (req, res) => {
       }
     }
 
-    // Recalculate total quantity if boxQuantity, productId, or adjustmentType changes
+    // Recalculate total quantity
     const boxQuantity =
       req.body.boxQuantity !== undefined
         ? req.body.boxQuantity
@@ -384,7 +441,7 @@ router.put("/stock-adjustments/:id", async (req, res) => {
     // Update the adjustment
     const updatedAdjustment = await StockAdjustment.findByIdAndUpdate(
       id,
-      req.body,
+      { ...req.body, _id: id }, // Keep the same ID
       {
         new: true,
         runValidators: true,
@@ -402,10 +459,15 @@ router.put("/stock-adjustments/:id", async (req, res) => {
       adjustmentType,
       piecesPerBox
     );
-    await updateReportInHandAfterAdjustment(
+
+    // Add updated adjustment to ReportInHand
+    await updateExistingAdjustmentInReport(
+      id,
+      updatedAdjustment._id,
       product.productName,
       boxQuantity,
-      adjustmentType
+      adjustmentType,
+      req.body.remarks
     );
 
     await session.commitTransaction();
@@ -422,17 +484,6 @@ router.put("/stock-adjustments/:id", async (req, res) => {
 
     console.error("Error updating adjustment:", err);
 
-    if (err.name === "ValidationError") {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Validation error: " +
-          Object.values(err.errors)
-            .map((e) => e.message)
-            .join(", "),
-      });
-    }
-
     if (err.message.includes("Insufficient stock")) {
       return res.status(400).json({
         success: false,
@@ -447,6 +498,81 @@ router.put("/stock-adjustments/:id", async (req, res) => {
   }
 });
 
+// DELETE stock adjustment
+router.delete("/stock-adjustments/:id", async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      await session.abortTransaction();
+      return res.status(400).json({
+        success: false,
+        message: "Invalid adjustment ID format",
+      });
+    }
+
+    const adjustment = await StockAdjustment.findById(id);
+    if (!adjustment) {
+      await session.abortTransaction();
+      return res.status(404).json({
+        success: false,
+        message: "Adjustment not found",
+      });
+    }
+
+    const product = await Product.findById(adjustment.productId);
+    if (!product) {
+      await session.abortTransaction();
+      return res.status(404).json({
+        success: false,
+        message: "Product not found",
+      });
+    }
+
+    // Restore product current stock
+    const piecesPerBox = product.qtyPerCarton || 1;
+    const reversePiecesChange =
+      adjustment.adjustmentType === "add"
+        ? -(adjustment.boxQuantity * piecesPerBox)
+        : adjustment.boxQuantity * piecesPerBox;
+
+    await Product.findByIdAndUpdate(
+      adjustment.productId,
+      { $inc: { currentStock: reversePiecesChange } },
+      { session }
+    );
+
+    // Remove adjustment from ReportInHand
+    await restoreStockAfterAdjustmentDeletion(id);
+
+    const deletedAdjustment = await StockAdjustment.findByIdAndDelete(id, {
+      session,
+    });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.status(200).json({
+      success: true,
+      data: deletedAdjustment,
+      message: "Adjustment deleted successfully",
+    });
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+
+    console.error("Error deleting adjustment:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server error while deleting adjustment",
+    });
+  }
+});
+
+// Bulk delete (similar structure, needs ReportInHand update)
 router.delete("/stock-adjustments/bulk", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -461,7 +587,6 @@ router.delete("/stock-adjustments/bulk", async (req, res) => {
       });
     }
 
-    // Validate IDs
     const validIds = [];
     const invalidIds = [];
 
@@ -498,23 +623,27 @@ router.delete("/stock-adjustments/bulk", async (req, res) => {
       });
     }
 
-    // Restore stock
+    // Restore stock for each adjustment
     for (const adjustment of adjustments) {
       const product = await Product.findById(adjustment.productId).session(
         session
       );
 
       if (product) {
+        const piecesPerBox = product.qtyPerCarton || 1;
         const reversePiecesChange =
           adjustment.adjustmentType === "add"
-            ? -adjustment.boxQuantity
-            : adjustment.boxQuantity;
+            ? -(adjustment.boxQuantity * piecesPerBox)
+            : adjustment.boxQuantity * piecesPerBox;
 
         await Product.findByIdAndUpdate(
           adjustment.productId,
           { $inc: { currentStock: reversePiecesChange } },
           { session }
         );
+
+        // Remove from ReportInHand
+        await restoreStockAfterAdjustmentDeletion(adjustment._id);
       }
     }
 
@@ -543,84 +672,7 @@ router.delete("/stock-adjustments/bulk", async (req, res) => {
   }
 });
 
-router.delete("/stock-adjustments/:id", async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  try {
-    const { id } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      await session.abortTransaction();
-      return res.status(400).json({
-        success: false,
-        message: "Invalid adjustment ID format",
-      });
-    }
-
-    const adjustment = await StockAdjustment.findById(id);
-    if (!adjustment) {
-      await session.abortTransaction();
-      return res.status(404).json({
-        success: false,
-        message: "Adjustment not found",
-      });
-    }
-
-    // Get product details
-    const product = await Product.findById(adjustment.productId);
-    if (!product) {
-      await session.abortTransaction();
-      return res.status(404).json({
-        success: false,
-        message: "Product not found",
-      });
-    }
-
-    // Restore stock before deletion
-    await restoreStockAfterAdjustmentDeletion(
-      product.productName,
-      adjustment.boxQuantity,
-      adjustment.adjustmentType
-    );
-
-    // Restore product current stock
-    const piecesPerBox = product.qtyPerCarton || 1;
-    const reversePiecesChange =
-      adjustment.adjustmentType === "add"
-        ? -(adjustment.boxQuantity * piecesPerBox)
-        : adjustment.boxQuantity * piecesPerBox;
-
-    await Product.findByIdAndUpdate(
-      adjustment.productId,
-      { $inc: { currentStock: reversePiecesChange } },
-      { session }
-    );
-
-    const deletedAdjustment = await StockAdjustment.findByIdAndDelete(id, {
-      session,
-    });
-
-    await session.commitTransaction();
-    session.endSession();
-
-    return res.status(200).json({
-      success: true,
-      data: deletedAdjustment,
-      message: "Adjustment deleted successfully",
-    });
-  } catch (err) {
-    await session.abortTransaction();
-    session.endSession();
-
-    console.error("Error deleting adjustment:", err);
-    return res.status(500).json({
-      success: false,
-      message: "Server error while deleting adjustment",
-    });
-  }
-});
-
+// GET single adjustment
 router.get("/stock-adjustments/:id", async (req, res) => {
   const { id } = req.params;
 

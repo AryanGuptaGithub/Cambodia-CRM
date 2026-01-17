@@ -776,9 +776,7 @@ router.post("/stock-returns", async (req, res) => {
         });
       }
 
-      // Find product in MR's stock (productsInHand array)
       const productInMr = mrStock.productsInHand?.find((p) => {
-        // Handle both string and ObjectId comparison
         const productIdStr = p.productId?.toString();
         const itemProductIdStr = item.productId?.toString();
         return productIdStr === itemProductIdStr;
