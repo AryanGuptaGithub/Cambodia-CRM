@@ -14,21 +14,21 @@ const getProductMappingFromDatabase = async () => {
   try {
     const products = await Product.find({}, "productName").lean();
     const productMap = {};
-    
-    products.forEach(product => {
+
+    products.forEach((product) => {
       if (product.productName) {
         const normalized = normalizeProductName(product.productName);
         // Store the original product name with its normalized version as key
         productMap[normalized] = product.productName;
-        
+
         // Also add common spelling variations
         const variations = getCommonSpellingVariations(normalized);
-        variations.forEach(variation => {
+        variations.forEach((variation) => {
           productMap[variation] = product.productName;
         });
       }
     });
-    
+
     return productMap;
   } catch (error) {
     console.error("Error getting product mapping from database:", error);
@@ -44,11 +44,11 @@ const normalizeProductName = (name) => {
   normalized = normalized.replace(/alu\s*alu/gi, "alu alu");
   normalized = normalized.replace(
     /n-lycopene\s*\+\s*wheatgerm\s*oil/gi,
-    "n-lycopene + wheatgerm oil"
+    "n-lycopene + wheatgerm oil",
   );
   normalized = normalized.replace(
     /n\s*lycopene\s*\+\s*wheatgerm\s*oil/gi,
-    "n-lycopene + wheatgerm oil"
+    "n-lycopene + wheatgerm oil",
   );
   normalized = normalized.replace(/\s+/g, " ").trim();
   normalized = normalized.replace(/(\d+)\.(\d+)/g, "$1.$2");
@@ -61,7 +61,7 @@ const normalizeProductName = (name) => {
 
 const getCommonSpellingVariations = (normalizedName) => {
   const variations = [];
-  
+
   // Common spelling mistakes patterns
   if (normalizedName.includes("carboxykam")) {
     variations.push("caboxykam");
@@ -152,8 +152,13 @@ const getStandardizedProductName = async (productName) => {
     const similarProducts = await Product.find({
       $or: [
         { productName: { $regex: normalized, $options: "i" } },
-        { productName: { $regex: normalized.replace(/\s+/g, ".*"), $options: "i" } }
-      ]
+        {
+          productName: {
+            $regex: normalized.replace(/\s+/g, ".*"),
+            $options: "i",
+          },
+        },
+      ],
     }).lean();
 
     if (similarProducts.length > 0) {
@@ -163,7 +168,10 @@ const getStandardizedProductName = async (productName) => {
 
       for (const product of similarProducts) {
         const productNormalized = normalizeProductName(product.productName);
-        const similarity = calculateStringSimilarity(normalized, productNormalized);
+        const similarity = calculateStringSimilarity(
+          normalized,
+          productNormalized,
+        );
         if (similarity > bestSimilarity) {
           bestSimilarity = similarity;
           bestMatch = product.productName;
@@ -190,7 +198,6 @@ const getStandardizedProductName = async (productName) => {
     if (normalized.includes("ecocid")) {
       return "alu alu ecocid 20".toLowerCase();
     }
-
   } catch (error) {
     console.error("Error in getStandardizedProductName:", error);
   }
@@ -208,19 +215,19 @@ const calculateStringSimilarity = (str1, str2) => {
   // Simple similarity calculation based on common substrings
   const longer = str1.length > str2.length ? str1 : str2;
   const shorter = str1.length > str2.length ? str2 : str1;
-  
+
   if (longer.length === 0) return 1.0;
-  
+
   // Check if one contains the other
   if (longer.includes(shorter)) return 0.9;
   if (shorter.includes(longer)) return 0.9;
-  
+
   // Calculate Jaccard similarity of character sets
   const set1 = new Set(longer);
   const set2 = new Set(shorter);
-  const intersection = new Set([...set1].filter(x => set2.has(x)));
+  const intersection = new Set([...set1].filter((x) => set2.has(x)));
   const union = new Set([...set1, ...set2]);
-  
+
   return intersection.size / union.size;
 };
 
@@ -246,7 +253,8 @@ const updateReportInHand = async (productData, operation = "add") => {
     const validSupplier = supplierName?.trim() || "Unknown Supplier";
 
     // **Get standardized product name using database**
-    const standardizedProductName = await getStandardizedProductName(productName);
+    const standardizedProductName =
+      await getStandardizedProductName(productName);
 
     // Ensure it's lowercase
     const finalProductName = standardizedProductName.toLowerCase();
@@ -275,19 +283,16 @@ const updateReportInHand = async (productData, operation = "add") => {
         // If the stored name is different from standardized lowercase, update it
         if (existingDoc.productName.toLowerCase() !== finalProductName) {
           updatedDoc.productName = finalProductName;
-          console.log(
-            `Updating product name from "${existingDoc.productName}" to "${finalProductName}"`
-          );
         }
 
         const updatedBatches = [...(updatedDoc.batches || []), newBatch];
         const totalBoxes = updatedBatches.reduce(
           (sum, b) => sum + (b.boxes || 0),
-          0
+          0,
         );
         const totalAmount = updatedBatches.reduce(
           (sum, b) => sum + (b.amount || 0),
-          0
+          0,
         );
 
         // Calculate weighted average price
@@ -304,7 +309,7 @@ const updateReportInHand = async (productData, operation = "add") => {
               averagePrice,
               status: calculateStockStatus(totalBoxes),
             },
-          }
+          },
         );
       } else {
         // Create new document with lowercase standardized name
@@ -328,7 +333,7 @@ const updateReportInHand = async (productData, operation = "add") => {
 
       if (!item) {
         console.warn(
-          `Cannot subtract: "${finalProductName}" not found in ReportInHand`
+          `Cannot subtract: "${finalProductName}" not found in ReportInHand`,
         );
         return;
       }
@@ -339,7 +344,7 @@ const updateReportInHand = async (productData, operation = "add") => {
       }
 
       const sortedBatches = [...item.batches].sort(
-        (a, b) => new Date(a.date) - new Date(b.date)
+        (a, b) => new Date(a.date) - new Date(b.date),
       );
       let remaining = qty;
       const updatedBatches = [];
@@ -373,11 +378,11 @@ const updateReportInHand = async (productData, operation = "add") => {
       // Calculate new totals
       const totalBoxes = finalBatches.reduce(
         (sum, b) => sum + (b.boxes || 0),
-        0
+        0,
       );
       const totalAmount = finalBatches.reduce(
         (sum, b) => sum + (b.amount || 0),
-        0
+        0,
       );
 
       // Calculate new weighted average price
@@ -398,7 +403,7 @@ const updateReportInHand = async (productData, operation = "add") => {
               averagePrice,
               status,
             },
-          }
+          },
         );
       }
     }
@@ -445,7 +450,7 @@ const findProductInReportInHand = async (productName) => {
 
     for (const doc of allItems) {
       const strictNormalizedDoc = getStrictNormalizedProductName(
-        doc.productName
+        doc.productName,
       );
 
       // Exact match on strict normalized
@@ -478,7 +483,7 @@ const findProductInReportInHand = async (productName) => {
   } catch (error) {
     console.error(
       `Error finding "${productName}" in ReportInHand:`,
-      error.message
+      error.message,
     );
     return null;
   }
@@ -493,7 +498,7 @@ const calculateStockStatus = (boxes) => {
 
 const filterReportsWithBatches = (reports) => {
   return reports.filter(
-    (report) => Array.isArray(report.batches) && report.batches.length > 0
+    (report) => Array.isArray(report.batches) && report.batches.length > 0,
   );
 };
 
@@ -520,7 +525,7 @@ router.get("/purchase", async (req, res) => {
 
     const productList = await Product.find(
       {},
-      "productName type packing qtyPerBoxStrip sellingPrice batches"
+      "productName type packing qtyPerBoxStrip sellingPrice batches",
     ).lean();
 
     // 🔹 Build product map with normalized names
@@ -606,7 +611,7 @@ router.put("/purchase/:id", async (req, res) => {
           expiryDate: oldProduct.expiryDate,
           type: oldProduct.type || "",
         },
-        "subtract"
+        "subtract",
       );
     }
 
@@ -616,7 +621,7 @@ router.put("/purchase/:id", async (req, res) => {
     const productIds = newProducts.map((p) => p.productId).filter((id) => id);
     const productsInfo = await Product.find(
       { _id: { $in: productIds } },
-      "productName type batches"
+      "productName type batches",
     ).lean();
 
     const productTypeMap = new Map();
@@ -676,7 +681,7 @@ router.put("/purchase/:id", async (req, res) => {
         new: true,
         runValidators: true,
         lean: true,
-      }
+      },
     );
 
     if (!updated) {
@@ -697,7 +702,7 @@ router.put("/purchase/:id", async (req, res) => {
           expiryDate: newProduct.expiryDate,
           type: newProduct.type || "",
         },
-        "add"
+        "add",
       );
     }
 
@@ -724,7 +729,7 @@ router.delete("/purchase/:id", async (req, res) => {
           expiryDate: p.expiryDate,
           type: p.type || "",
         },
-        "subtract"
+        "subtract",
       );
     }
 
@@ -771,12 +776,12 @@ router.delete("/purchase", async (req, res) => {
               expiryDate: p.expiryDate,
               type: p.type || "",
             },
-            "subtract"
+            "subtract",
           );
         } catch (productError) {
           console.error(
             `Error processing product ${p.productName}:`,
-            productError
+            productError,
           );
         }
       }
@@ -823,7 +828,7 @@ router.post("/purchase", async (req, res) => {
     const productIds = data.products.map((p) => p.productId).filter((id) => id);
     const productsInfo = await Product.find(
       { _id: { $in: productIds } },
-      "productName type batches"
+      "productName type batches",
     ).lean();
 
     const productTypeMap = new Map();
@@ -895,15 +900,9 @@ router.post("/purchase", async (req, res) => {
           expiryDate: p.expiryDate,
           type: p.type,
         },
-        "add"
+        "add",
       );
     }
-
-    // **DEBUG: Log what was stored**
-    console.log("Purchase created with products:");
-    processedProducts.forEach((p) => {
-      console.log(`  - ${p.productName} (qty: ${p.quantityPerBoxStrip})`);
-    });
 
     res.status(201).json({
       success: true,
@@ -938,9 +937,9 @@ router.post("/purchase/import", async (req, res) => {
 
     const allProducts = await Product.find(
       {},
-      "productName type batches"
+      "productName type batches",
     ).lean();
-    
+
     // Create a product mapping from database
     const productMap = await getProductMappingFromDatabase();
 
@@ -987,7 +986,7 @@ router.post("/purchase/import", async (req, res) => {
         }
 
         const alreadyProcessedInThisBatch = importedInvoices.some(
-          (inv) => inv.invoiceNumber === invoiceNumber
+          (inv) => inv.invoiceNumber === invoiceNumber,
         );
 
         if (alreadyProcessedInThisBatch) {
@@ -998,58 +997,68 @@ router.post("/purchase/import", async (req, res) => {
         const deliveryNumber = invoiceData.deliveryNumber || invoiceNumber;
 
         // Process each product with database-based standardization
-        const processedProductsPromises = invoiceData.products.map(async (product, idx) => {
-          const quantityPerBoxStrip =
-            parseFloat(product.quantityPerBoxStrip) || 0;
-          let lc = parseFloat(product.lc) || parseFloat(product.lcNumber) || 0;
-          let fob = parseFloat(product.fob) || 0;
-          let cif = parseFloat(product.cif) || 0;
+        const processedProductsPromises = invoiceData.products.map(
+          async (product, idx) => {
+            const quantityPerBoxStrip =
+              parseFloat(product.quantityPerBoxStrip) || 0;
+            let lc =
+              parseFloat(product.lc) || parseFloat(product.lcNumber) || 0;
+            let fob = parseFloat(product.fob) || 0;
+            let cif = parseFloat(product.cif) || 0;
 
-          // **STANDARDIZE PRODUCT NAME USING DATABASE**
-          const standardizedName = await getStandardizedProductName(product.productName);
-          
-          // Find product info in database
-          const normalizedSearch = normalizeProductName(standardizedName);
-          let productInfo = null;
-          
-          // Search in allProducts array
-          for (const prod of allProducts) {
-            if (prod.productName && normalizeProductName(prod.productName) === normalizedSearch) {
-              productInfo = prod;
-              break;
-            }
-          }
+            // **STANDARDIZE PRODUCT NAME USING DATABASE**
+            const standardizedName = await getStandardizedProductName(
+              product.productName,
+            );
 
-          let productNameToUse = standardizedName;
+            // Find product info in database
+            const normalizedSearch = normalizeProductName(standardizedName);
+            let productInfo = null;
 
-          if (productInfo) {
-            // Use the standardized name from productInfo
-            productNameToUse = await getStandardizedProductName(productInfo.productName);
-            if (fob === 0) {
-              fob = productInfo.batches?.[0]?.fob || 0;
+            // Search in allProducts array
+            for (const prod of allProducts) {
+              if (
+                prod.productName &&
+                normalizeProductName(prod.productName) === normalizedSearch
+              ) {
+                productInfo = prod;
+                break;
+              }
             }
-            if (cif === 0) {
-              cif = productInfo.batches?.[0]?.cif || 0;
-            }
-            if (lc === 0) {
-              lc = productInfo.batches?.[0]?.lc || 0;
-            }
-          }
 
-          const amount = quantityPerBoxStrip * lc;
-          return {
-            productName: productNameToUse, // Store standardized name
-            type: product.type || productInfo?.type || "",
-            expiryDate: product.expiryDate
-              ? new Date(product.expiryDate)
-              : null,
-            quantityPerBoxStrip,
-            lc,
-            fob,
-            cif,
-            amount,
-          };
-        });
+            let productNameToUse = standardizedName;
+
+            if (productInfo) {
+              // Use the standardized name from productInfo
+              productNameToUse = await getStandardizedProductName(
+                productInfo.productName,
+              );
+              if (fob === 0) {
+                fob = productInfo.batches?.[0]?.fob || 0;
+              }
+              if (cif === 0) {
+                cif = productInfo.batches?.[0]?.cif || 0;
+              }
+              if (lc === 0) {
+                lc = productInfo.batches?.[0]?.lc || 0;
+              }
+            }
+
+            const amount = quantityPerBoxStrip * lc;
+            return {
+              productName: productNameToUse, // Store standardized name
+              type: product.type || productInfo?.type || "",
+              expiryDate: product.expiryDate
+                ? new Date(product.expiryDate)
+                : null,
+              quantityPerBoxStrip,
+              lc,
+              fob,
+              cif,
+              amount,
+            };
+          },
+        );
 
         // Wait for all product standardization to complete
         const processedProducts = await Promise.all(processedProductsPromises);
@@ -1057,7 +1066,7 @@ router.post("/purchase/import", async (req, res) => {
         // Calculate total amount
         const totalAmount = processedProducts.reduce(
           (sum, product) => sum + (product.amount || 0),
-          0
+          0,
         );
 
         // Create invoice
@@ -1085,21 +1094,15 @@ router.post("/purchase/import", async (req, res) => {
               expiryDate: product.expiryDate,
               type: product.type,
             },
-            "add"
+            "add",
           );
         }
 
         importedInvoices.push(invoice);
-
-        // **LOG SUCCESS**
-        console.log(`Imported invoice ${invoiceNumber} with products:`);
-        processedProducts.forEach((p) => {
-          console.log(`  - ${p.productName} (${p.quantityPerBoxStrip} boxes)`);
-        });
       } catch (err) {
         console.error(
           `❌ Error processing invoice ${invoiceData.invoiceNumber}:`,
-          err.message
+          err.message,
         );
         skipped.push(invoiceData.invoiceNumber || "Unknown");
       }
@@ -1139,7 +1142,9 @@ router.post("/reports-in-hand/cleanup-names", async (req, res) => {
 
     for (const report of allReports) {
       try {
-        const standardizedName = await getStandardizedProductName(report.productName);
+        const standardizedName = await getStandardizedProductName(
+          report.productName,
+        );
 
         // If name needs to be standardized
         if (standardizedName !== report.productName) {
@@ -1150,11 +1155,6 @@ router.post("/reports-in-hand/cleanup-names", async (req, res) => {
           }).lean();
 
           if (existingWithNewName) {
-            // Merge with existing entry
-            console.log(
-              `Merging "${report.productName}" into "${standardizedName}"`
-            );
-
             const mergedBatches = [
               ...(existingWithNewName.batches || []),
               ...(report.batches || []),
@@ -1162,11 +1162,11 @@ router.post("/reports-in-hand/cleanup-names", async (req, res) => {
 
             const totalBoxes = mergedBatches.reduce(
               (sum, b) => sum + (b.boxes || 0),
-              0
+              0,
             );
             const totalAmount = mergedBatches.reduce(
               (sum, b) => sum + (b.amount || 0),
-              0
+              0,
             );
             const averagePrice = totalBoxes > 0 ? totalAmount / totalBoxes : 0;
 
@@ -1181,7 +1181,7 @@ router.post("/reports-in-hand/cleanup-names", async (req, res) => {
                   averagePrice,
                   status: calculateStockStatus(totalBoxes),
                 },
-              }
+              },
             );
 
             // Delete the old entry
@@ -1194,7 +1194,7 @@ router.post("/reports-in-hand/cleanup-names", async (req, res) => {
                 $set: {
                   productName: standardizedName,
                 },
-              }
+              },
             );
           }
           updatedCount++;
@@ -1241,18 +1241,20 @@ router.get("/debug/product-name-standardization", async (req, res) => {
       "n lycopene + wheatgerm oil",
     ];
 
-    const results = await Promise.all(testNames.map(async (name) => {
-      const normalized = normalizeProductName(name);
-      const standardized = await getStandardizedProductName(name);
-      const productMap = await getProductMappingFromDatabase();
-      
-      return {
-        input: name,
-        normalized: normalized,
-        standardized: standardized,
-        inDatabaseMap: !!productMap[normalized],
-      };
-    }));
+    const results = await Promise.all(
+      testNames.map(async (name) => {
+        const normalized = normalizeProductName(name);
+        const standardized = await getStandardizedProductName(name);
+        const productMap = await getProductMappingFromDatabase();
+
+        return {
+          input: name,
+          normalized: normalized,
+          standardized: standardized,
+          inDatabaseMap: !!productMap[normalized],
+        };
+      }),
+    );
 
     // Also check what's in ReportInHand
     const reportInHandEntries = await ReportInHand.find({})
@@ -1347,11 +1349,11 @@ router.put("/reports-in-hand/:id/standardize-name", async (req, res) => {
 
       const totalBoxes = mergedBatches.reduce(
         (sum, b) => sum + (b.boxes || 0),
-        0
+        0,
       );
       const totalAmount = mergedBatches.reduce(
         (sum, b) => sum + (b.amount || 0),
-        0
+        0,
       );
       const averagePrice = totalBoxes > 0 ? totalAmount / totalBoxes : 0;
 
@@ -1365,7 +1367,7 @@ router.put("/reports-in-hand/:id/standardize-name", async (req, res) => {
             averagePrice,
             status: calculateStockStatus(totalBoxes),
           },
-        }
+        },
       );
 
       // Delete the old entry
@@ -1387,7 +1389,7 @@ router.put("/reports-in-hand/:id/standardize-name", async (req, res) => {
           $set: {
             productName: newName,
           },
-        }
+        },
       );
 
       return res.json({
@@ -1444,7 +1446,7 @@ router.post("/reports-in-hand/download-excel", async (req, res) => {
 
     // Filter out reports with no batches
     const filteredReports = reports.filter(
-      (report) => Array.isArray(report.batches) && report.batches.length > 0
+      (report) => Array.isArray(report.batches) && report.batches.length > 0,
     );
 
     // If date range is provided, filter batches within that range
@@ -1464,11 +1466,11 @@ router.post("/reports-in-hand/download-excel", async (req, res) => {
           // Calculate totals for filtered batches only
           const totalBoxes = filteredBatches.reduce(
             (sum, b) => sum + b.boxes,
-            0
+            0,
           );
           const totalAmount = filteredBatches.reduce(
             (sum, b) => sum + b.amount,
-            0
+            0,
           );
 
           filteredBatches.forEach((batch) => {
@@ -1632,11 +1634,11 @@ router.post("/reports-in-hand/download-excel", async (req, res) => {
     // Calculate totals
     const totalBoxes = finalData.reduce(
       (sum, item) => sum + item.batchData.boxes,
-      0
+      0,
     );
     const totalAmount = finalData.reduce(
       (sum, item) => sum + item.batchData.amount,
-      0
+      0,
     );
 
     totalRow.getCell(6).value = totalBoxes;
@@ -1653,7 +1655,7 @@ router.post("/reports-in-hand/download-excel", async (req, res) => {
     let fileName = "reports_in_hand";
     if (startDate && endDate) {
       fileName += `_${dayjs(startDate).format("DD-MM-YYYY")}_to_${dayjs(
-        endDate
+        endDate,
       ).format("DD-MM-YYYY")}`;
     } else {
       fileName += `_${dayjs().format("DD-MM-YYYY")}`;
@@ -1663,7 +1665,7 @@ router.post("/reports-in-hand/download-excel", async (req, res) => {
     // Set response headers
     res.setHeader(
       "Content-Type",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
 
@@ -1798,12 +1800,12 @@ router.post("/purchases/download-excel", async (req, res) => {
     });
 
     const fileName = `purchase_summary_${dayjs(startDate).format(
-      "DD-MM-YYYY"
+      "DD-MM-YYYY",
     )}_to_${dayjs(endDate).format("DD-MM-YYYY")}.xlsx`;
 
     res.setHeader(
       "Content-Type",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     );
     res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
 
@@ -1841,7 +1843,7 @@ router.get("/debug/purchase-product-match/:productName", async (req, res) => {
       $or: [
         { productName: { $regex: productName, $options: "i" } },
         { productName: { $regex: standardized, $options: "i" } },
-      ]
+      ],
     }).lean();
 
     // Search in ReportInHand
@@ -1849,7 +1851,7 @@ router.get("/debug/purchase-product-match/:productName", async (req, res) => {
       $or: [
         { productName: { $regex: productName, $options: "i" } },
         { productName: { $regex: standardized, $options: "i" } },
-      ]
+      ],
     }).lean();
 
     res.json({

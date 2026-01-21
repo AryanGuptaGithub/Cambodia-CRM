@@ -387,7 +387,6 @@ router.put("/customers/:id", async (req, res) => {
 router.get("/customers", async (req, res) => {
   try {
     const customers = await Customer.find().sort({ createdAt: -1 });
-
     // Format dates for response
     const formattedCustomers = customers.map(customer => {
       const customerObj = customer.toObject();

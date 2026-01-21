@@ -55,6 +55,8 @@ import {
   ShoppingBag,
   UserCheck,
   RefreshCw,
+  BanknoteIcon,
+  ReceiptText,
 } from "lucide-react";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
@@ -148,6 +150,7 @@ const tabLabelMap = {
   hrm_holidays: 'Holidays',
   hrm_leaveattendance: 'Leave & Attendance',
   hrm_payroll: 'Payroll',
+  hrm_mrbasicpayroll: 'MR Basic Payroll',
   
   // Utility sub-tabs
   utility_companyprofile: 'Company Profile',
@@ -293,6 +296,13 @@ const tabService = {
       accounts_cashbank: { visible: true, sequence: 1 },
       accounts_mrcash: { visible: true, sequence: 2 },
 
+      // HRM sub-tabs
+      hrm_dashboard: { visible: true, sequence: 1 },
+      hrm_holidays: { visible: true, sequence: 2 },
+      hrm_leaveattendance: { visible: true, sequence: 3 },
+      hrm_payroll: { visible: true, sequence: 4 },
+      hrm_mrbasicpayroll: { visible: true, sequence: 5 },
+
       // Reports sub-tabs
       reports_dailyreport: { visible: true, sequence: 1 },
       reports_averageprice: { visible: true, sequence: 2 },
@@ -353,12 +363,13 @@ const productPaths = [
   "/productmanagerlayout/printbarcode",
 ];
 
-// HRM paths
+// HRM paths - UPDATED with MR Basic Payroll
 const hrmPaths = [
   "/hrmlayout/dashboard",
   "/hrmlayout/holidays",
   "/hrmlayout/leaveattendance",
   "/hrmlayout/payroll",
+  "/hrmlayout/mrbasicpayroll",
 ];
 
 const salesPaths = [
@@ -1491,12 +1502,14 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                   "hrm_holidays",
                   "hrm_leaveattendance",
                   "hrm_payroll",
+                  "hrm_mrbasicpayroll",
                 ]).map((tabId) => {
                   const linkMap = {
                     hrm_dashboard: "/hrmlayout/dashboard",
                     hrm_holidays: "/hrmlayout/holidays",
                     hrm_leaveattendance: "/hrmlayout/leaveattendance",
                     hrm_payroll: "/hrmlayout/payroll",
+                    hrm_mrbasicpayroll: "/hrmlayout/mrbasicpayroll",
                   };
 
                   const iconMap = {
@@ -1504,6 +1517,7 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                     hrm_holidays: Umbrella,
                     hrm_leaveattendance: Calendar,
                     hrm_payroll: DollarSign,
+                    hrm_mrbasicpayroll: BanknoteIcon,
                   };
 
                   const IconComponent = iconMap[tabId];

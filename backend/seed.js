@@ -33,10 +33,10 @@ async function seedUsers() {
   await User.deleteMany({});
   const users = [
     {
-      name: "superAdmin",
-      username: "superAdmin",
-      email: "superadmin@example.com",
-      password: "123456",
+      name: "ktan",
+      username: "Ketan",
+      email: "ktan178@gmail.com",
+      password: "Ktan@2026",
       role: "admin",
     },
     {
@@ -1141,7 +1141,7 @@ async function seedHTabs() {
       reportType: "Hide/Show Tabs",
     },
 
-    // HRM Sub-tabs (Level 1)
+    // HRM Sub-tabs (Level 1) - UPDATED with MR Basic Payroll
     {
       tabId: "hrm_dashboard",
       name: "Dashboard",
@@ -1191,6 +1191,18 @@ async function seedHTabs() {
       reportType: "Hide/Show Tabs",
     },
     {
+      tabId: "hrm_mrbasicpayroll",
+      name: "MR Basic Payroll",
+      description: "MR basic payroll calculation and management",
+      path: "/hrmlayout/mrbasicpayroll",
+      icon: "BanknoteIcon",
+      parentTabId: "hrm",
+      level: 1,
+      sequence: 5,
+      category: "hrm",
+      reportType: "Hide/Show Tabs",
+    },
+    {
       tabId: "hrm_settings",
       name: "HRM Settings",
       description: "HRM system settings",
@@ -1198,7 +1210,7 @@ async function seedHTabs() {
       icon: "Settings",
       parentTabId: "hrm",
       level: 1,
-      sequence: 5,
+      sequence: 6,
       category: "hrm",
       reportType: "Hide/Show Tabs",
     },
@@ -1252,6 +1264,7 @@ async function seedMRCash() {
     console.error("❌ Error seeding MRCash:", error.message);
   }
 }
+
 // Run all seeders in order
 async function runSeeders() {
   await connectDB();

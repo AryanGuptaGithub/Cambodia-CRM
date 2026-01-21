@@ -119,6 +119,10 @@ import Leaves from "./pages/HRM/Leaves";
 import Payroll from "./pages/HRM/Payroll";
 import AddPayroll from "./pages/HRM/addPayroll";
 
+// NEW: MR Basic Payroll pages
+import MrBasicPayroll from "./pages/HRM/MrBasicPayroll";
+import AddMrBasicPayroll from "./pages/HRM/AddMrBasicPayroll";
+
 // Account pages
 import CashAndBank from "./pages/Account/CashAndBank";
 import MRCash from "./pages/Account/MRCash";
@@ -344,9 +348,17 @@ function App() {
             <Route path="holidays" element={<Holidays />} />
             {/* Combined leaves and attendance */}
             <Route path="leaveattendance" element={<LeaveAndAttendance />} />
+            
+            {/* Regular Payroll */}
             <Route path="payroll">
               <Route index element={<Payroll />} />
               <Route path="new" element={<AddPayroll />} />
+            </Route>
+            
+            {/* NEW: MR Basic Payroll - Separate from regular payroll */}
+            <Route path="mr-basic-payroll">
+              <Route index element={<MrBasicPayroll />} />
+              <Route path="new" element={<AddMrBasicPayroll />} />
             </Route>
           </Route>
           {/* NEW: MR Carry Stock routes */}

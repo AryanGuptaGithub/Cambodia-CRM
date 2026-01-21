@@ -147,9 +147,9 @@ export const ExpenseTable = ({
     
     switch (activeExpenseSubTab) {
       case "Month":
-        return `Monthly Expenses ${dateRange}`;
+        return `Monthly Expenses`;
       case "Year":
-        return `Yearly Expenses ${dateRange}`;
+        return `Yearly Expenses`;
       case "Pending":
         return "Pending Expenses";
       case "Approved":

@@ -1,4 +1,3 @@
-// DashboardCards.jsx
 import { useState, useEffect } from "react";
 import {
   ShoppingCart,
@@ -8,6 +7,8 @@ import {
   DollarSign,
   AlertCircle,
   CreditCard,
+  Calendar,
+  X,
 } from "lucide-react";
 import { formatCurrency } from "./DashboardUtil";
 
@@ -20,6 +21,10 @@ const DashboardCard = ({
   growth,
   isActive,
   onClick,
+  onDateFilterClick,
+  onClearDateFilter,
+  isCustomDateActive = false,
+  customDateRanges = {},
 }) => {
   const colorClasses = {
     blue: { text: "text-blue-600", bg: "bg-blue-100" },
@@ -33,13 +38,76 @@ const DashboardCard = ({
 
   const colors = colorClasses[color] || colorClasses.blue;
 
+  // Cards that should show date filter
+  const showDateFilterButton = ["Total Sales", "Outstanding", "Total Expense", "Total Payroll"].includes(title);
+  
+  // Format date range for display
+  const formatDateRange = () => {
+    if (!isCustomDateActive || !customDateRanges[title]) {
+      return null;
+    }
+    
+    const start = customDateRanges[title]?.start;
+    const end = customDateRanges[title]?.end;
+    
+    if (!start || !end) return null;
+    
+    const formatDate = (dateString) => {
+      const date = new Date(dateString);
+      return date.toLocaleDateString("en-US", {
+        day: "numeric",
+        month: "short",
+      });
+    };
+    
+    return `${formatDate(start)} - ${formatDate(end)}`;
+  };
+
+  const customDateText = formatDateRange();
+
+  // Handle date filter button click
+  const handleDateFilterButtonClick = (e) => {
+    e.stopPropagation(); // Prevent triggering the card click
+    
+    if (isCustomDateActive && onClearDateFilter) {
+      onClearDateFilter(title, e);
+    } else if (onDateFilterClick) {
+      onDateFilterClick(title);
+    }
+  };
+
   return (
     <div
-      className={`rounded-xl shadow-md border border-gray-200 p-6 cursor-pointer transition-all ${
+      className={`rounded-xl shadow-md border border-gray-200 p-6 cursor-pointer transition-all relative ${
         isActive ? "bg-gray-200" : "bg-white"
       }`}
       onClick={onClick}
     >
+      {/* Date Filter Button - Only for specific cards */}
+      {showDateFilterButton && (
+        <button
+          onClick={handleDateFilterButtonClick}
+          className={`absolute top-2 right-2 p-1.5 rounded-md transition-colors flex items-center gap-1 ${
+            isCustomDateActive 
+              ? "bg-red-100 text-red-600 hover:bg-red-200" 
+              : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+          }`}
+          title={isCustomDateActive ? "Clear date filter" : "Set custom date range"}
+        >
+          {isCustomDateActive ? (
+            <>
+              <X size={14} />
+              <span className="text-xs">Clear</span>
+            </>
+          ) : (
+            <>
+              <Calendar size={14} />
+              <span className="text-xs">Custom</span>
+            </>
+          )}
+        </button>
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center gap-2">
@@ -49,16 +117,32 @@ const DashboardCard = ({
           <p className={`text-2xl font-bold ${colors.text} mt-2`}>
             ${formatCurrency(amount || 0)}
           </p>
-          {growth !== undefined ? (
-            <p className="text-xs text-gray-500 mt-1">
-              {subtitle} •{" "}
-              <span className={growth >= 0 ? "text-green-600" : "text-red-600"}>
-                {growth >= 0 ? "↗" : "↘"} {growth.toFixed(1)}%
-              </span>
-            </p>
-          ) : (
-            <p className="text-xs text-gray-500 mt-1">{subtitle}</p>
-          )}
+          <div className="text-xs text-gray-500 mt-1">
+            {/* Show custom date range in a yellow rounded box if active */}
+            {isCustomDateActive && customDateText ? (
+              <>
+                <span className="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded">
+                  {customDateText}
+                </span>
+                {growth !== undefined && " • "}
+                {growth !== undefined && (
+                  <span className={growth >= 0 ? "text-green-600" : "text-red-600"}>
+                    {growth >= 0 ? "↗" : "↘"} {growth.toFixed(1)}%
+                  </span>
+                )}
+              </>
+            ) : (
+              <>
+                {subtitle}
+                {growth !== undefined && " • "}
+                {growth !== undefined && (
+                  <span className={growth >= 0 ? "text-green-600" : "text-red-600"}>
+                    {growth >= 0 ? "↗" : "↘"} {growth.toFixed(1)}%
+                  </span>
+                )}
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -88,6 +172,10 @@ export const DashboardCards = ({
   prevMonthRanges,
   overdueTableData,
   creditSaleTableData,
+  onDateFilterClick,
+  onClearDateFilter,
+  isCustomDateActive = {},
+  customDateRanges = {},
 }) => {
   // State to track the highest payroll value seen
   const [highestPayrollValue, setHighestPayrollValue] = useState(0);
@@ -110,8 +198,16 @@ export const DashboardCards = ({
     return typeof value === 'number' ? value : 0;
   };
 
+  // Helper function to get date range text for subtitle
+
+
   const getCurrentSalesAmount = () => {
     if (!salesData) return 0;
+    
+    // If custom date is active, use custom sales data
+    if (isCustomDateActive["Total Sales"] && salesData.customSales !== undefined) {
+      return getSafeNumber(salesData.customSales);
+    }
     
     switch (activeSalesSubTab) {
       case "Today":
@@ -138,6 +234,11 @@ export const DashboardCards = ({
   const getCurrentGrowth = () => {
     if (!salesData) return 0;
     
+    // If custom date is active, use custom growth
+    if (isCustomDateActive["Total Sales"] && salesData.customGrowth !== undefined) {
+      return getSafeNumber(salesData.customGrowth);
+    }
+    
     switch (activeSalesSubTab) {
       case "Today":
         return getSafeNumber(salesData.todayGrowth);
@@ -156,6 +257,11 @@ export const DashboardCards = ({
 
   const getCurrentOutstandingAmount = () => {
     if (!outstandingData) return 0;
+    
+    // If custom date is active, use custom outstanding data
+    if (isCustomDateActive["Outstanding"] && outstandingData.customOutstanding !== undefined) {
+      return getSafeNumber(outstandingData.customOutstanding);
+    }
     
     switch (activeOutstandingSubTab) {
       case "Today":
@@ -182,6 +288,11 @@ export const DashboardCards = ({
   const getCurrentOutstandingGrowth = () => {
     if (!outstandingData) return 0;
     
+    // If custom date is active, use custom growth
+    if (isCustomDateActive["Outstanding"] && outstandingData.customGrowth !== undefined) {
+      return getSafeNumber(outstandingData.customGrowth);
+    }
+    
     switch (activeOutstandingSubTab) {
       case "Today":
         return getSafeNumber(outstandingData.todayGrowth);
@@ -199,7 +310,14 @@ export const DashboardCards = ({
   };
 
   const getCurrentExpenseAmount = () => {
-    if (!expenseData || !expenseData.latestExpenses) {
+    if (!expenseData) return 0;
+    
+    // If custom date is active, use custom expense data
+    if (isCustomDateActive["Total Expense"] && expenseData.customExpenseTotal !== undefined) {
+      return getSafeNumber(expenseData.customExpenseTotal);
+    }
+    
+    if (!expenseData.latestExpenses) {
       return 0;
     }
 
@@ -273,7 +391,7 @@ export const DashboardCards = ({
 
   const getCurrentPayrollAmount = () => {
     // Special handling for the "Prev Month" subtab
-    if (activePayrollSubTab === "Prev Month") {
+    if (activePayrollSubTab === "Prev Month" && !isCustomDateActive["Total Payroll"]) {
       // If we have a valid totalPayroll value, use it
       if (getSafeNumber(totalPayroll) > 0) {
         return getSafeNumber(totalPayroll);
@@ -282,7 +400,7 @@ export const DashboardCards = ({
       return highestPayrollValue > 0 ? highestPayrollValue : 0;
     }
     
-    // For other subtabs, use the normal calculation
+  
     let amount = 0;
     
     switch (activePayrollSubTab) {
@@ -302,8 +420,8 @@ export const DashboardCards = ({
         amount = getSafeNumber(expenseData?.unpaidPayroll);
         break;
       default:
-        // Default case, use totalPayroll if available, otherwise use highest value
-        amount = getSafeNumber(totalPayroll) > 0 ? getSafeNumber(totalPayroll) : highestPayrollValue;
+        // For Custom date or default, use currentPayrollTotal
+        amount = getSafeNumber(totalPayroll);
     }
 
     return amount;
@@ -362,13 +480,22 @@ export const DashboardCards = ({
     return getSafeNumber(salesData?.unreceivePayment || salesData?.creditSale);
   };
 
+  // Update getSubtitle to show custom date range or default subtab
   const getSubtitle = (cardId) => {
+    // Check if custom date is active for this card
+    if (isCustomDateActive[cardId]) {
+      const customRange = getDateRangeText(cardId);
+      if (customRange) {
+        return customRange;
+      }
+    }
+    
     switch (cardId) {
-      case "Sales":
+      case "Total Sales":
         return activeSalesSubTab;
       case "Outstanding":
         return activeOutstandingSubTab;
-      case "Expenses":
+      case "Total Expense":
         return activeExpenseSubTab;
       case "Total Payroll":
         return activePayrollSubTab;
@@ -376,7 +503,7 @@ export const DashboardCards = ({
         return activeStockSubTab;
       case "Overdue":
         return "Total Overdue";
-      case "Credit Sale Cash Not Receive":
+      case "Pending Collection":
         return "Unreceive Payment";
       default:
         return "";
@@ -385,12 +512,12 @@ export const DashboardCards = ({
 
   const cards = [
     {
-      id: "Sales",
+      id: "Total Sales",
       title: "Total Sales",
       amount: getCurrentSalesAmount(),
       icon: ShoppingCart,
       color: "blue",
-      subtitle: getSubtitle("Sales"),
+      subtitle: getSubtitle("Total Sales"),
       growth: getCurrentGrowth(),
     },
     {
@@ -411,12 +538,12 @@ export const DashboardCards = ({
       subtitle: getSubtitle("Stock in Hands"),
     },
     {
-      id: "Expenses",
+      id: "Total Expense",
       title: "Total Expense",
       amount: getCurrentExpenseAmount(),
       icon: Receipt,
       color: "red",
-      subtitle: getSubtitle("Expenses"),
+      subtitle: getSubtitle("Total Expense"),
     },
     {
       id: "Total Payroll",
@@ -436,26 +563,60 @@ export const DashboardCards = ({
       growth: getSafeNumber(salesData?.overdueGrowth),
     },
     {
-      id: "Credit Sale Cash Not Receive",
+      id: "Pending Collection",
       title: "Pending Collection",
       amount: getCreditSaleCashNotReceived(), 
       icon: CreditCard,
       color: "indigo",
-      subtitle: getSubtitle("Credit Sale Cash Not Receive"),
+      subtitle: getSubtitle("Pending Collection"),
       growth: getSafeNumber(salesData?.unreceivePaymentGrowth),
     },
   ];
 
+  // Split cards into first row (4 cards) and second row (3 cards + 1 empty space)
+  const firstRowCards = cards.slice(0, 4);
+  const secondRowCards = cards.slice(4); // This will have 3 cards
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-7 gap-6 mb-8">
-      {cards.map((card) => (
-        <DashboardCard
-          key={card.id}
-          {...card}
-          isActive={activeTab === card.id}
-          onClick={() => onTabChange(card.id)}
-        />
-      ))}
+    <div className="space-y-6 mb-8">
+      {/* First row with 4 boxes */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {firstRowCards.map((card) => (
+          <DashboardCard
+            key={card.id}
+            {...card}
+            isActive={activeTab === card.title}
+            onClick={() => onTabChange(card.title === "Total Sales" ? "Sales" : 
+                                     card.title === "Total Expense" ? "Expenses" : 
+                                     card.title === "Total Payroll" ? "Total Payroll" : 
+                                     card.title === "Pending Collection" ? "Credit Sale Cash Not Receive" : card.title)}
+            onDateFilterClick={onDateFilterClick}
+            onClearDateFilter={onClearDateFilter}
+            isCustomDateActive={isCustomDateActive[card.title] || false}
+            customDateRanges={customDateRanges}
+          />
+        ))}
+      </div>
+      
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {secondRowCards.map((card) => (
+          <DashboardCard
+            key={card.id}
+            {...card}
+            isActive={activeTab === card.title}
+            onClick={() => onTabChange(card.title === "Total Sales" ? "Sales" : 
+                                     card.title === "Total Expense" ? "Expenses" : 
+                                     card.title === "Total Payroll" ? "Total Payroll" : 
+                                     card.title === "Pending Collection" ? "Credit Sale Cash Not Receive" : card.title)}
+            onDateFilterClick={onDateFilterClick}
+            onClearDateFilter={onClearDateFilter}
+            isCustomDateActive={isCustomDateActive[card.title] || false}
+            customDateRanges={customDateRanges}
+          />
+        ))}
+        {/* Empty space for the 4th position in the second row */}
+        <div className="hidden lg:block"></div>
+      </div>
     </div>
   );
 };

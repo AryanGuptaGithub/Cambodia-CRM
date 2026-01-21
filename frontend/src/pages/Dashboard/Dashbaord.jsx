@@ -25,6 +25,7 @@ import { StockTable } from "./StockTable";
 import BatchDetailsModal from "./BatchDetailsModal";
 import { OverdueTable } from "./OverdueTable";
 import { CreditSaleTable } from "./CreditSaleTable";
+import { Calendar, X, Filter } from "lucide-react";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
@@ -130,11 +131,310 @@ const Dashboard = () => {
     initials: "U",
   });
 
-  // ------------------ FETCH FUNCTIONS ------------------
+  // =================== CUSTOM DATE FILTER STATES ===================
+  const [showDateFilter, setShowDateFilter] = useState(false);
+  const [selectedCardForFilter, setSelectedCardForFilter] = useState(null);
+  const [customStartDate, setCustomStartDate] = useState("");
+  const [customEndDate, setCustomEndDate] = useState("");
+  const [isCustomDateActive, setIsCustomDateActive] = useState({
+    "Total Sales": false,
+    "Outstanding": false,
+    "Total Expense": false,
+    "Total Payroll": false,
+  });
+  
+  // Store custom date ranges for each card
+  const [customDateRanges, setCustomDateRanges] = useState({
+    "Total Sales": { start: "", end: "" },
+    "Outstanding": { start: "", end: "" },
+    "Total Expense": { start: "", end: "" },
+    "Total Payroll": { start: "", end: "" },
+  });
+
+  // Initialize dates to current month
+  useEffect(() => {
+    const today = new Date();
+    const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    const lastDayOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    
+    const defaultStartDate = firstDayOfMonth.toISOString().split('T')[0];
+    const defaultEndDate = lastDayOfMonth.toISOString().split('T')[0];
+    
+    setCustomStartDate(defaultStartDate);
+    setCustomEndDate(defaultEndDate);
+    
+    // Initialize all custom date ranges with default values
+    const defaultRanges = {
+      "Total Sales": { start: defaultStartDate, end: defaultEndDate },
+      "Outstanding": { start: defaultStartDate, end: defaultEndDate },
+      "Total Expense": { start: defaultStartDate, end: defaultEndDate },
+      "Total Payroll": { start: defaultStartDate, end: defaultEndDate },
+    };
+    setCustomDateRanges(defaultRanges);
+  }, []);
+
+  // =================== CUSTOM DATE FILTER HANDLERS ===================
+  const handleDateFilterClick = (cardId) => {
+    setSelectedCardForFilter(cardId);
+    
+    // Load saved custom dates for this card, or use current month
+    const savedRange = customDateRanges[cardId];
+    if (savedRange.start && savedRange.end) {
+      setCustomStartDate(savedRange.start);
+      setCustomEndDate(savedRange.end);
+    } else {
+      // Default to current month
+      const today = new Date();
+      const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+      const lastDayOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+      
+      setCustomStartDate(firstDayOfMonth.toISOString().split('T')[0]);
+      setCustomEndDate(lastDayOfMonth.toISOString().split('T')[0]);
+    }
+    
+    setShowDateFilter(true);
+  };
+
+  const handleApplyDateFilter = () => {
+    if (!selectedCardForFilter || !customStartDate || !customEndDate) return;
+
+    // Save the custom date range for this card
+    setCustomDateRanges(prev => ({
+      ...prev,
+      [selectedCardForFilter]: {
+        start: customStartDate,
+        end: customEndDate
+      }
+    }));
+
+    // Mark this card as using custom date filter
+    setIsCustomDateActive(prev => ({
+      ...prev,
+      [selectedCardForFilter]: true
+    }));
+
+    // Reset the subtab for the selected card to "Custom"
+    switch (selectedCardForFilter) {
+      case "Total Sales":
+        setActiveSalesSubTab("Custom");
+        fetchSalesWithCustomDates();
+        break;
+      case "Outstanding":
+        setActiveOutstandingSubTab("Custom");
+        fetchOutstandingWithCustomDates();
+        break;
+      case "Total Expense":
+        setActiveExpenseSubTab("Custom");
+        fetchExpensesWithCustomDates();
+        break;
+      case "Total Payroll":
+        setActivePayrollSubTab("Custom");
+        fetchPayrollWithCustomDates();
+        break;
+      default:
+        break;
+    }
+
+    setShowDateFilter(false);
+  };
+
+  const handleClearDateFilter = (cardId, e) => {
+    e.stopPropagation(); // Prevent triggering the card click
+    
+    // Clear custom date filter for this card
+    setIsCustomDateActive(prev => ({
+      ...prev,
+      [cardId]: false
+    }));
+
+    // Clear saved custom dates for this card
+    setCustomDateRanges(prev => ({
+      ...prev,
+      [cardId]: { start: "", end: "" }
+    }));
+
+    // Reset to default subtab
+    switch (cardId) {
+      case "Total Sales":
+        setActiveSalesSubTab("Today");
+        fetchSalesTableData("Today");
+        break;
+      case "Outstanding":
+        setActiveOutstandingSubTab("Today");
+        fetchOutstandingTableData("Today");
+        break;
+      case "Total Expense":
+        setActiveExpenseSubTab("Month");
+        fetchExpenseTableData("Month");
+        break;
+      case "Total Payroll":
+        setActivePayrollSubTab("Prev Month");
+        fetchPayrollTableData("Prev Month");
+        break;
+      default:
+        break;
+    }
+  };
+
+  // =================== CUSTOM DATE FETCH FUNCTIONS ===================
+  const fetchSalesWithCustomDates = async () => {
+    try {
+      setLoadingSalesData(true);
+      const response = await axios.get(`${backendUrl}/api/sales/table-data`, {
+        params: {
+          period: "custom",
+          startDate: customStartDate,
+          endDate: customEndDate
+        }
+      });
+      setSalesTableData(response.data.success ? response.data.data : []);
+      
+      // Update sales data for the card display
+      if (response.data.success && response.data.summary) {
+        setSalesData(prev => ({
+          ...prev,
+          customSales: response.data.summary.totalSales || 0,
+          customGrowth: 0
+        }));
+      }
+    } catch (error) {
+      console.error("Error fetching custom sales data:", error);
+      setSalesTableData([]);
+    } finally {
+      setLoadingSalesData(false);
+    }
+  };
+
+  const fetchOutstandingWithCustomDates = async () => {
+    try {
+      setLoadingOutstandingData(true);
+      const response = await axios.get(
+        `${backendUrl}/api/outstanding/table-data`,
+        {
+          params: {
+            period: "custom",
+            startDate: customStartDate,
+            endDate: customEndDate
+          }
+        }
+      );
+      setOutstandingTableData(response.data.success ? response.data.data : []);
+      
+      // Update outstanding data for the card display
+      if (response.data.success && response.data.summary) {
+        setOutstandingData(prev => ({
+          ...prev,
+          customOutstanding: response.data.summary.totalOutstanding || 0,
+          customGrowth: 0
+        }));
+      }
+    } catch (error) {
+      console.error("Error fetching custom outstanding data:", error);
+      setOutstandingTableData([]);
+    } finally {
+      setLoadingOutstandingData(false);
+    }
+  };
+
+  const fetchExpensesWithCustomDates = async () => {
+    try {
+      setLoadingExpenseData(true);
+      const response = await axios.get(`${backendUrl}/api/expenses`, {
+        params: {
+          period: "custom",
+          startDate: customStartDate,
+          endDate: customEndDate
+        }
+      });
+
+      let expenses = [];
+      if (response.data?.success) {
+        expenses = response.data.data || [];
+      } else if (Array.isArray(response.data)) {
+        expenses = response.data;
+      }
+
+      const formattedExpenses = Array.isArray(expenses)
+        ? expenses.map((expense) => ({
+            id: expense._id || expense.id,
+            category:
+              expense.category?.category ||
+              (typeof expense.category === "string"
+                ? expense.category
+                : "Uncategorized"),
+            amount: expense.amount || 0,
+            date: expense.date
+              ? new Date(expense.date).toLocaleDateString()
+              : expense.createdAt
+              ? new Date(expense.createdAt).toLocaleDateString()
+              : new Date().toLocaleDateString(),
+            description:
+              expense.description || expense.remarks || "No description",
+            paymentMethod: expense.paymentMethod || "N/A",
+            sourceAccount: expense.sourceAccount?.name || "N/A",
+            details: [
+              `Amount: ₹${expense.amount || 0}`,
+              `Date: ${
+                expense.date
+                  ? new Date(expense.date).toLocaleDateString()
+                  : "N/A"
+              }`,
+              `Category: ${expense.category?.category || "Uncategorized"}`,
+              `Payment Method: ${expense.paymentMethod || "N/A"}`,
+              `Source: ${expense.sourceAccount?.name || "N/A"}`,
+              `Remarks: ${expense.remarks || "No remarks"}`,
+            ],
+          }))
+        : [];
+
+      setExpenseTableData(
+        formattedExpenses.sort((a, b) => b.amount - a.amount)
+      );
+      
+      // Update expense data structure if needed
+      if (!expenseData.latestExpenses) {
+        setExpenseData(prev => ({
+          ...prev,
+          latestExpenses: expenses,
+          customExpenseTotal: expenses.reduce((sum, expense) => sum + (expense.amount || 0), 0)
+        }));
+      }
+    } catch (error) {
+      console.error("Error fetching custom expense data:", error);
+      setExpenseTableData([]);
+    } finally {
+      setLoadingExpenseData(false);
+    }
+  };
+
+  const fetchPayrollWithCustomDates = async () => {
+    try {
+      setLoadingPayrollData(true);
+      const response = await axios.get(`${backendUrl}/api/payrolls`, {
+        params: {
+          period: "custom",
+          startDate: customStartDate,
+          endDate: customEndDate
+        }
+      });
+
+      const payrolls = response.data?.data || [];
+      const totalNetSalary = payrolls.reduce((sum, item) => sum + (item.netSalary || 0), 0);
+
+      setPayrollTableData(payrolls);
+      setCurrentPayrollTotal(totalNetSalary);
+    } catch (error) {
+      console.error("Error fetching custom payroll data:", error);
+      setPayrollTableData([]);
+    } finally {
+      setLoadingPayrollData(false);
+    }
+  };
+
+  // =================== ORIGINAL FETCH FUNCTIONS (UPDATED) ===================
   const fetchStockTableData = async (period = "Today") => {
     try {
       setLoadingStockData(true);
-
       const response = await axios.get(`${backendUrl}/api/reports-in-hand`, {
         params: { period },
       });
@@ -189,9 +489,16 @@ const Dashboard = () => {
   const fetchSalesTableData = async (period) => {
     try {
       setLoadingSalesData(true);
+      
+      const params = { period };
+      if (period === "Custom" && isCustomDateActive["Total Sales"]) {
+        params.period = "custom";
+        params.startDate = customDateRanges["Total Sales"].start;
+        params.endDate = customDateRanges["Total Sales"].end;
+      }
 
       const response = await axios.get(`${backendUrl}/api/sales/table-data`, {
-        params: { period },
+        params,
       });
 
       setSalesTableData(response.data.success ? response.data.data : []);
@@ -207,9 +514,16 @@ const Dashboard = () => {
     try {
       setLoadingOutstandingData(true);
 
+      const params = { period };
+      if (period === "Custom" && isCustomDateActive["Outstanding"]) {
+        params.period = "custom";
+        params.startDate = customDateRanges["Outstanding"].start;
+        params.endDate = customDateRanges["Outstanding"].end;
+      }
+
       const response = await axios.get(
         `${backendUrl}/api/outstanding/table-data`,
-        { params: { period } }
+        { params }
       );
       setOutstandingTableData(response.data.success ? response.data.data : []);
     } catch (error) {
@@ -224,8 +538,15 @@ const Dashboard = () => {
     try {
       setLoadingExpenseData(true);
 
+      const params = { period };
+      if (period === "Custom" && isCustomDateActive["Total Expense"]) {
+        params.period = "custom";
+        params.startDate = customDateRanges["Total Expense"].start;
+        params.endDate = customDateRanges["Total Expense"].end;
+      }
+
       const response = await axios.get(`${backendUrl}/api/expenses`, {
-        params: { period },
+        params,
       });
 
       let expenses = [];
@@ -239,65 +560,68 @@ const Dashboard = () => {
         expenses = response.data.latestExpenses;
       }
 
-      // Filter expenses based on period
-      const currentDate = new Date();
-      let filteredExpenses = [];
+      // Filter expenses based on period (if not custom)
+      if (period !== "Custom") {
+        const currentDate = new Date();
+        let filteredExpenses = [];
 
-      switch (period) {
-        case "Month":
-          filteredExpenses = expenses.filter((expense) => {
-            const expenseDate = new Date(expense.date);
-            return (
-              expenseDate.getMonth() === currentDate.getMonth() &&
-              expenseDate.getFullYear() === currentDate.getFullYear()
-            );
-          });
-          break;
+        switch (period) {
+          case "Month":
+            filteredExpenses = expenses.filter((expense) => {
+              const expenseDate = new Date(expense.date);
+              return (
+                expenseDate.getMonth() === currentDate.getMonth() &&
+                expenseDate.getFullYear() === currentDate.getFullYear()
+              );
+            });
+            break;
 
-        case "Year":
-          filteredExpenses = expenses.filter((expense) => {
-            const expenseDate = new Date(expense.date);
-            return expenseDate.getFullYear() === currentDate.getFullYear();
-          });
-          break;
+          case "Year":
+            filteredExpenses = expenses.filter((expense) => {
+              const expenseDate = new Date(expense.date);
+              return expenseDate.getFullYear() === currentDate.getFullYear();
+            });
+            break;
 
-        case "Overdue":
-          filteredExpenses = expenses.filter((expense) => {
-            const dueDate = new Date(expense.dueDate || expense.date);
-            return dueDate < currentDate && expense.status !== "Paid";
-          });
-          break;
+          case "Overdue":
+            filteredExpenses = expenses.filter((expense) => {
+              const dueDate = new Date(expense.dueDate || expense.date);
+              return dueDate < currentDate && expense.status !== "Paid";
+            });
+            break;
 
-        case "Unreceive_Payment":
-          filteredExpenses = expenses.filter((expense) => {
-            return expense.status === "Pending" || expense.status === "Unpaid";
-          });
-          break;
+          case "Unreceive_Payment":
+            filteredExpenses = expenses.filter((expense) => {
+              return expense.status === "Pending" || expense.status === "Unpaid";
+            });
+            break;
 
-        case "Pending":
-          filteredExpenses = expenses.filter((expense) => {
-            return expense.status === "Pending";
-          });
-          break;
+          case "Pending":
+            filteredExpenses = expenses.filter((expense) => {
+              return expense.status === "Pending";
+            });
+            break;
 
-        case "Approved":
-          filteredExpenses = expenses.filter((expense) => {
-            return expense.status === "Approved";
-          });
-          break;
+          case "Approved":
+            filteredExpenses = expenses.filter((expense) => {
+              return expense.status === "Approved";
+            });
+            break;
 
-        case "Rejected":
-          filteredExpenses = expenses.filter((expense) => {
-            return expense.status === "Rejected";
-          });
-          break;
+          case "Rejected":
+            filteredExpenses = expenses.filter((expense) => {
+              return expense.status === "Rejected";
+            });
+            break;
 
-        default:
-          filteredExpenses = expenses;
+          default:
+            filteredExpenses = expenses;
+        }
+        expenses = filteredExpenses;
       }
 
-      const formattedExpenses = Array.isArray(filteredExpenses)
-        ? filteredExpenses.map((expense) => ({
+      const formattedExpenses = Array.isArray(expenses)
+        ? expenses.map((expense) => ({
             id: expense._id || expense.id,
             category:
               expense.category?.category ||
@@ -344,33 +668,43 @@ const Dashboard = () => {
   const fetchPayrollTableData = async (period) => {
     try {
       setLoadingPayrollData(true);
-      const currentDate = new Date();
+      
+      let params = {};
+      
+      if (period === "Custom" && isCustomDateActive["Total Payroll"]) {
+        params.period = "custom";
+        params.startDate = customDateRanges["Total Payroll"].start;
+        params.endDate = customDateRanges["Total Payroll"].end;
+      } else {
+        const currentDate = new Date();
+        let payrollPeriod;
 
-      let payrollPeriod;
+        if (period === "Prev Month") {
+          let prevMonth = currentDate.getMonth() - 1;
+          let year = currentDate.getFullYear();
 
-      if (period === "Prev Month") {
-        let prevMonth = currentDate.getMonth() - 1;
-        let year = currentDate.getFullYear();
+          if (prevMonth < 0) {
+            prevMonth = 11;
+            year = year - 1;
+          }
 
-        if (prevMonth < 0) {
-          prevMonth = 11;
-          year = year - 1;
+          const month = String(prevMonth + 1).padStart(2, "0");
+
+          payrollPeriod = `${year}-${month}`;
+        } else if (period === "YTD") {
+          const year = currentDate.getFullYear();
+          payrollPeriod = `${year}-YTD`;
+        } else if (period === "Overdue") {
+          payrollPeriod = "overdue";
+        } else if (period === "Unreceive_Payment") {
+          payrollPeriod = "unreceived";
         }
-
-        const month = String(prevMonth + 1).padStart(2, "0");
-
-        payrollPeriod = `${year}-${month}`;
-      } else if (period === "YTD") {
-        const year = currentDate.getFullYear();
-        payrollPeriod = `${year}-YTD`;
-      } else if (period === "Overdue") {
-        payrollPeriod = "overdue";
-      } else if (period === "Unreceive_Payment") {
-        payrollPeriod = "unreceived";
+        
+        params.period = payrollPeriod;
       }
 
       const response = await axios.get(`${backendUrl}/api/payrolls`, {
-        params: { period: payrollPeriod },
+        params,
       });
 
       const payrolls = response.data?.data || [];
@@ -383,7 +717,7 @@ const Dashboard = () => {
 
       setPayrollTableData(payrolls);
       // UPDATE THE TOTALS BASED ON THE CURRENT PERIOD
-      if (period === "Prev Month") {
+      if (period === "Prev Month" || period === "Custom") {
         setCurrentPayrollTotal(totalNetSalary);
       } else if (period === "YTD") {
         setCurrentYTDTotal(totalNetSalary);
@@ -437,7 +771,7 @@ const Dashboard = () => {
     }
   };
 
-  // Fetch credit sale cash not received data - CORRECTED ENDPOINT
+  // Fetch credit sale cash not received data
   const fetchCreditSaleTableData = async () => {
     try {
       setLoadingCreditSaleData(true);
@@ -638,20 +972,20 @@ const Dashboard = () => {
         fetchStockTableData("Today");
         break;
       case "Sales":
-        setActiveSalesSubTab("Today");
-        fetchSalesTableData("Today");
+        setActiveSalesSubTab(isCustomDateActive["Total Sales"] ? "Custom" : "Today");
+        fetchSalesTableData(isCustomDateActive["Total Sales"] ? "Custom" : "Today");
         break;
       case "Outstanding":
-        setActiveOutstandingSubTab("Today");
-        fetchOutstandingTableData("Today");
+        setActiveOutstandingSubTab(isCustomDateActive["Outstanding"] ? "Custom" : "Today");
+        fetchOutstandingTableData(isCustomDateActive["Outstanding"] ? "Custom" : "Today");
         break;
       case "Total Payroll":
-        setActivePayrollSubTab("Prev Month");
-        fetchPayrollTableData("Prev Month");
+        setActivePayrollSubTab(isCustomDateActive["Total Payroll"] ? "Custom" : "Prev Month");
+        fetchPayrollTableData(isCustomDateActive["Total Payroll"] ? "Custom" : "Prev Month");
         break;
       case "Expenses":
-        setActiveExpenseSubTab("Month");
-        fetchExpenseTableData("Month");
+        setActiveExpenseSubTab(isCustomDateActive["Total Expense"] ? "Custom" : "Month");
+        fetchExpenseTableData(isCustomDateActive["Total Expense"] ? "Custom" : "Month");
         break;
       case "Overdue":
         fetchOverdueTableData();
@@ -660,7 +994,7 @@ const Dashboard = () => {
         fetchCreditSaleTableData();
         break;
       case "Pending Collection":
-        fetchPendingCollectionData(); // NEW: Fetch pending collections
+        fetchPendingCollectionData();
         break;
       default:
         break;
@@ -668,7 +1002,7 @@ const Dashboard = () => {
   };
 
   // ------------------ EFFECTS ------------------
-  // Initial data fetch - UPDATED TO INCLUDE CREDIT SALE DATA
+  // Initial data fetch
   useEffect(() => {
     const initializeData = async () => {
       await Promise.all([
@@ -676,7 +1010,7 @@ const Dashboard = () => {
         fetchOutstandingTableData("Today"),
         fetchExpenseTableData("Month"),
         fetchStockTableData("Today"),
-        fetchCreditSaleTableData(), // ADD THIS: Fetch credit sale data on initial load
+        fetchCreditSaleTableData(),
       ]);
 
       // Initialize payroll totals with data from useDashboardData hook
@@ -731,6 +1065,22 @@ const Dashboard = () => {
 
   // ------------------ RENDER MAIN TABLE ------------------
   const renderMainTable = () => {
+    const getCustomDateRangeText = (cardTitle) => {
+      if (!isCustomDateActive[cardTitle] || !customDateRanges[cardTitle]) return null;
+      
+      const start = new Date(customDateRanges[cardTitle].start);
+      const end = new Date(customDateRanges[cardTitle].end);
+      
+      const formatDate = (date) => {
+        return date.toLocaleDateString("en-US", {
+          day: "numeric",
+          month: "short",
+        });
+      };
+      
+      return `${formatDate(start)} - ${formatDate(end)}`;
+    };
+
     switch (activeTab) {
       case "Sales":
         return (
@@ -740,6 +1090,8 @@ const Dashboard = () => {
             activeSalesSubTab={activeSalesSubTab}
             dateRanges={dateRanges}
             onViewProducts={handleViewProducts}
+            isCustomDateActive={isCustomDateActive["Total Sales"]}
+            customDateRange={getCustomDateRangeText("Total Sales")}
           />
         );
       case "Outstanding":
@@ -750,6 +1102,8 @@ const Dashboard = () => {
             activeOutstandingSubTab={activeOutstandingSubTab}
             dateRanges={dateRanges}
             onViewInvoices={handleViewInvoices}
+            isCustomDateActive={isCustomDateActive["Outstanding"]}
+            customDateRange={getCustomDateRangeText("Outstanding")}
           />
         );
       case "Total Payroll":
@@ -759,6 +1113,8 @@ const Dashboard = () => {
             loading={loadingPayrollData}
             activePayrollSubTab={activePayrollSubTab}
             prevMonthRanges={prevMonthRanges}
+            isCustomDateActive={isCustomDateActive["Total Payroll"]}
+            customDateRange={getCustomDateRangeText("Total Payroll")}
           />
         );
       case "Expenses":
@@ -769,6 +1125,8 @@ const Dashboard = () => {
             activeExpenseSubTab={activeExpenseSubTab}
             dateRanges={dateRanges}
             onViewExpenseDetails={handleViewExpenseDetails}
+            isCustomDateActive={isCustomDateActive["Total Expense"]}
+            customDateRange={getCustomDateRangeText("Total Expense")}
           />
         );
       case "Stock in Hands":
@@ -802,6 +1160,99 @@ const Dashboard = () => {
     }
   };
 
+  // =================== CUSTOM DATE FILTER MODAL ===================
+  const DateFilterModal = () => {
+    if (!showDateFilter || !selectedCardForFilter) return null;
+
+    // Format dates for display
+    const formatDateForDisplay = (dateString) => {
+      if (!dateString) return "";
+      const date = new Date(dateString);
+      return date.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+    };
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-white rounded-lg p-6 w-full max-w-md">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-semibold">
+              <Calendar className="inline-block w-5 h-5 mr-2" />
+              Custom Date Range for {selectedCardForFilter}
+            </h3>
+            <button
+              onClick={() => setShowDateFilter(false)}
+              className="text-gray-500 hover:text-gray-700"
+            >
+              <X size={20} />
+            </button>
+          </div>
+          
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Start Date
+              </label>
+              <input
+                type="date"
+                value={customStartDate}
+                onChange={(e) => setCustomStartDate(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                max={customEndDate || undefined}
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                End Date
+              </label>
+              <input
+                type="date"
+                value={customEndDate}
+                onChange={(e) => setCustomEndDate(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                min={customStartDate || undefined}
+              />
+            </div>
+            
+            {/* Selected Date Range Preview */}
+            {customStartDate && customEndDate && (
+              <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+                <p className="text-sm font-medium text-blue-800">Selected Range:</p>
+                <p className="text-sm text-blue-600">
+                  {formatDateForDisplay(customStartDate)} to {formatDateForDisplay(customEndDate)}
+                </p>
+              </div>
+            )}
+            
+            <div className="flex justify-end space-x-3 pt-4">
+              <button
+                onClick={() => setShowDateFilter(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleApplyDateFilter}
+                disabled={!customStartDate || !customEndDate}
+                className={`px-4 py-2 text-sm font-medium text-white rounded-md ${
+                  !customStartDate || !customEndDate
+                    ? "bg-gray-400 cursor-not-allowed"
+                    : "bg-blue-600 hover:bg-blue-700"
+                }`}
+              >
+                Apply Filter
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="p-6">
       <DashboardHeader
@@ -833,8 +1284,15 @@ const Dashboard = () => {
         dateRanges={dateRanges}
         prevMonthRanges={prevMonthRanges}
         overdueTableData={overdueTableData}
-        creditSaleTableData={creditSaleTableData} // PASS THE CREDIT SALE DATA
+        creditSaleTableData={creditSaleTableData}
+        // Pass date filter handlers to DashboardCards
+        onDateFilterClick={handleDateFilterClick}
+        onClearDateFilter={handleClearDateFilter}
+        isCustomDateActive={isCustomDateActive}
+        customDateRanges={customDateRanges}
       />
+
+      <DateFilterModal />
 
       <SubTabs
         activeTab={activeTab}
@@ -850,6 +1308,8 @@ const Dashboard = () => {
         onStockSubTabChange={handleStockSubTabChange}
         dateRanges={dateRanges}
         prevMonthRanges={prevMonthRanges}
+        isCustomDateActive={isCustomDateActive}
+        customDateRanges={customDateRanges}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -875,8 +1335,8 @@ const Dashboard = () => {
           loadingOverdueData={loadingOverdueData}
           pendingCollectionData={pendingCollectionData || []}
           loadingPendingCollectionData={loadingPendingCollectionData || false}
-          creditSaleTableData={creditSaleTableData || []} // ADD THIS
-          loadingCreditSaleData={loadingCreditSaleData || false} // ADD THIS
+          creditSaleTableData={creditSaleTableData || []}
+          loadingCreditSaleData={loadingCreditSaleData || false}
         />
         <div className="lg:col-span-2">{renderMainTable()}</div>
       </div>
