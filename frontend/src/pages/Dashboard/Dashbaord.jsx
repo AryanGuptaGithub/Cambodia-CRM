@@ -1,4 +1,3 @@
-// Dashboard.jsx
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { DashboardCards } from "./DashboardCards";
@@ -213,23 +212,23 @@ const Dashboard = () => {
       [selectedCardForFilter]: true
     }));
 
-    // Reset the subtab for the selected card to "Custom"
+    // Switch to Custom subtab and fetch data
     switch (selectedCardForFilter) {
       case "Total Sales":
         setActiveSalesSubTab("Custom");
-        fetchSalesWithCustomDates();
+        fetchSalesTableData("Custom");
         break;
       case "Outstanding":
         setActiveOutstandingSubTab("Custom");
-        fetchOutstandingWithCustomDates();
+        fetchOutstandingTableData("Custom");
         break;
       case "Total Expense":
         setActiveExpenseSubTab("Custom");
-        fetchExpensesWithCustomDates();
+        fetchExpenseTableData("Custom");
         break;
       case "Total Payroll":
         setActivePayrollSubTab("Custom");
-        fetchPayrollWithCustomDates();
+        fetchPayrollTableData("Custom");
         break;
       default:
         break;
@@ -253,7 +252,7 @@ const Dashboard = () => {
       [cardId]: { start: "", end: "" }
     }));
 
-    // Reset to default subtab
+    // Reset to default subtab and fetch data
     switch (cardId) {
       case "Total Sales":
         setActiveSalesSubTab("Today");
@@ -273,6 +272,55 @@ const Dashboard = () => {
         break;
       default:
         break;
+    }
+  };
+
+  // =================== UPDATED SUBTAB CHANGE HANDLERS ===================
+  const handleSalesSubTabChange = (subTab) => {
+    setActiveSalesSubTab(subTab);
+    if (activeTab === "Sales") {
+      if (subTab === "Custom" && !isCustomDateActive["Total Sales"]) {
+        // Don't fetch if custom is not set yet
+        return;
+      }
+      fetchSalesTableData(subTab);
+    }
+  };
+
+  const handleOutstandingSubTabChange = (subTab) => {
+    setActiveOutstandingSubTab(subTab);
+    if (activeTab === "Outstanding") {
+      if (subTab === "Custom" && !isCustomDateActive["Outstanding"]) {
+        return;
+      }
+      fetchOutstandingTableData(subTab);
+    }
+  };
+
+  const handleStockSubTabChange = (subTab) => {
+    setActiveStockSubTab(subTab);
+    if (activeTab === "Stock in Hands") {
+      fetchStockTableData(subTab);
+    }
+  };
+
+  const handleExpenseSubTabChange = (subTab) => {
+    setActiveExpenseSubTab(subTab);
+    if (activeTab === "Expenses") {
+      if (subTab === "Custom" && !isCustomDateActive["Total Expense"]) {
+        return;
+      }
+      fetchExpenseTableData(subTab);
+    }
+  };
+
+  const handlePayrollSubTabChange = (subTab) => {
+    setActivePayrollSubTab(subTab);
+    if (activeTab === "Total Payroll") {
+      if (subTab === "Custom" && !isCustomDateActive["Total Payroll"]) {
+        return;
+      }
+      fetchPayrollTableData(subTab);
     }
   };
 
@@ -791,6 +839,31 @@ const Dashboard = () => {
     }
   };
 
+  const fetchPendingCollectionData = async () => {
+    try {
+      setLoadingPendingCollectionData(true);
+
+      const response = await axios.get(
+        `${backendUrl}/api/sales/pending-collection-today`
+      );
+
+      if (response.data.success) {
+        const data = response.data.data || [];
+
+        setPendingCollectionData(data);
+      } else {
+        console.error("❌ API returned success: false", response.data.message);
+        setPendingCollectionData([]);
+      }
+    } catch (error) {
+      console.error("❌ Error fetching pending collection data:", error);
+      console.error("❌ Error details:", error.response?.data || error.message);
+      setPendingCollectionData([]);
+    } finally {
+      setLoadingPendingCollectionData(false);
+    }
+  };
+
   // ------------------ HANDLERS ------------------
   const handleViewProducts = (mrName, products) => {
     setSelectedMRName(mrName);
@@ -900,67 +973,6 @@ const Dashboard = () => {
     setShowProductsModal(true);
   };
 
-  // SUB-TAB CHANGE HANDLERS
-  const handleSalesSubTabChange = (subTab) => {
-    setActiveSalesSubTab(subTab);
-    if (activeTab === "Sales") {
-      fetchSalesTableData(subTab);
-    }
-  };
-
-  const handleOutstandingSubTabChange = (subTab) => {
-    setActiveOutstandingSubTab(subTab);
-    if (activeTab === "Outstanding") {
-      fetchOutstandingTableData(subTab);
-    }
-  };
-
-  const handleStockSubTabChange = (subTab) => {
-    setActiveStockSubTab(subTab);
-    if (activeTab === "Stock in Hands") {
-      fetchStockTableData(subTab);
-    }
-  };
-
-  const handleExpenseSubTabChange = (subTab) => {
-    setActiveExpenseSubTab(subTab);
-    if (activeTab === "Expenses") {
-      fetchExpenseTableData(subTab);
-    }
-  };
-
-  const handlePayrollSubTabChange = (subTab) => {
-    setActivePayrollSubTab(subTab);
-    if (activeTab === "Total Payroll") {
-      fetchPayrollTableData(subTab);
-    }
-  };
-
-  const fetchPendingCollectionData = async () => {
-    try {
-      setLoadingPendingCollectionData(true);
-
-      const response = await axios.get(
-        `${backendUrl}/api/sales/pending-collection-today`
-      );
-
-      if (response.data.success) {
-        const data = response.data.data || [];
-
-        setPendingCollectionData(data);
-      } else {
-        console.error("❌ API returned success: false", response.data.message);
-        setPendingCollectionData([]);
-      }
-    } catch (error) {
-      console.error("❌ Error fetching pending collection data:", error);
-      console.error("❌ Error details:", error.response?.data || error.message);
-      setPendingCollectionData([]);
-    } finally {
-      setLoadingPendingCollectionData(false);
-    }
-  };
-
   const handleParentTabChange = (newTab) => {
     setPreviousActiveTab(activeTab);
     setActiveTab(newTab);
@@ -973,19 +985,35 @@ const Dashboard = () => {
         break;
       case "Sales":
         setActiveSalesSubTab(isCustomDateActive["Total Sales"] ? "Custom" : "Today");
-        fetchSalesTableData(isCustomDateActive["Total Sales"] ? "Custom" : "Today");
+        if (isCustomDateActive["Total Sales"]) {
+          fetchSalesTableData("Custom");
+        } else {
+          fetchSalesTableData("Today");
+        }
         break;
       case "Outstanding":
         setActiveOutstandingSubTab(isCustomDateActive["Outstanding"] ? "Custom" : "Today");
-        fetchOutstandingTableData(isCustomDateActive["Outstanding"] ? "Custom" : "Today");
+        if (isCustomDateActive["Outstanding"]) {
+          fetchOutstandingTableData("Custom");
+        } else {
+          fetchOutstandingTableData("Today");
+        }
         break;
       case "Total Payroll":
         setActivePayrollSubTab(isCustomDateActive["Total Payroll"] ? "Custom" : "Prev Month");
-        fetchPayrollTableData(isCustomDateActive["Total Payroll"] ? "Custom" : "Prev Month");
+        if (isCustomDateActive["Total Payroll"]) {
+          fetchPayrollTableData("Custom");
+        } else {
+          fetchPayrollTableData("Prev Month");
+        }
         break;
       case "Expenses":
         setActiveExpenseSubTab(isCustomDateActive["Total Expense"] ? "Custom" : "Month");
-        fetchExpenseTableData(isCustomDateActive["Total Expense"] ? "Custom" : "Month");
+        if (isCustomDateActive["Total Expense"]) {
+          fetchExpenseTableData("Custom");
+        } else {
+          fetchExpenseTableData("Month");
+        }
         break;
       case "Overdue":
         fetchOverdueTableData();
@@ -1217,28 +1245,19 @@ const Dashboard = () => {
                 min={customStartDate || undefined}
               />
             </div>
-            
-            {/* Selected Date Range Preview */}
-            {customStartDate && customEndDate && (
-              <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
-                <p className="text-sm font-medium text-blue-800">Selected Range:</p>
-                <p className="text-sm text-blue-600">
-                  {formatDateForDisplay(customStartDate)} to {formatDateForDisplay(customEndDate)}
-                </p>
-              </div>
-            )}
+  
             
             <div className="flex justify-end space-x-3 pt-4">
               <button
                 onClick={() => setShowDateFilter(false)}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 onClick={handleApplyDateFilter}
                 disabled={!customStartDate || !customEndDate}
-                className={`px-4 py-2 text-sm font-medium text-white rounded-md ${
+                className={`px-4 py-2 text-sm font-medium text-white rounded-md cursor-pointer ${
                   !customStartDate || !customEndDate
                     ? "bg-gray-400 cursor-not-allowed"
                     : "bg-blue-600 hover:bg-blue-700"
@@ -1310,6 +1329,7 @@ const Dashboard = () => {
         prevMonthRanges={prevMonthRanges}
         isCustomDateActive={isCustomDateActive}
         customDateRanges={customDateRanges}
+        onDateFilterClick={handleDateFilterClick}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

@@ -83,30 +83,7 @@ const DashboardCard = ({
       }`}
       onClick={onClick}
     >
-      {/* Date Filter Button - Only for specific cards */}
-      {showDateFilterButton && (
-        <button
-          onClick={handleDateFilterButtonClick}
-          className={`absolute top-2 right-2 p-1.5 rounded-md transition-colors flex items-center gap-1 ${
-            isCustomDateActive 
-              ? "bg-red-100 text-red-600 hover:bg-red-200" 
-              : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-          }`}
-          title={isCustomDateActive ? "Clear date filter" : "Set custom date range"}
-        >
-          {isCustomDateActive ? (
-            <>
-              <X size={14} />
-              <span className="text-xs">Clear</span>
-            </>
-          ) : (
-            <>
-              <Calendar size={14} />
-              <span className="text-xs">Custom</span>
-            </>
-          )}
-        </button>
-      )}
+   
 
       <div className="flex items-center justify-between">
         <div>
@@ -199,7 +176,26 @@ export const DashboardCards = ({
   };
 
   // Helper function to get date range text for subtitle
-
+  const getDateRangeText = (cardId) => {
+    if (!isCustomDateActive[cardId] || !customDateRanges[cardId]) {
+      return null;
+    }
+    
+    const start = customDateRanges[cardId]?.start;
+    const end = customDateRanges[cardId]?.end;
+    
+    if (!start || !end) return null;
+    
+    const formatDate = (dateString) => {
+      const date = new Date(dateString);
+      return date.toLocaleDateString("en-US", {
+        day: "numeric",
+        month: "short",
+      });
+    };
+    
+    return `${formatDate(start)} - ${formatDate(end)}`;
+  };
 
   const getCurrentSalesAmount = () => {
     if (!salesData) return 0;
@@ -510,6 +506,19 @@ export const DashboardCards = ({
     }
   };
 
+  // Map card titles to activeTab values for consistent comparison
+  const getActiveTabForCard = (cardTitle) => {
+    const mapping = {
+      "Total Sales": "Sales",
+      "Total Expense": "Expenses", 
+      "Total Payroll": "Total Payroll",
+      "Pending Collection": "Credit Sale Cash Not Receive",
+    };
+    
+    // Return mapped value or original title if not in mapping
+    return mapping[cardTitle] || cardTitle;
+  };
+
   const cards = [
     {
       id: "Total Sales",
@@ -585,11 +594,8 @@ export const DashboardCards = ({
           <DashboardCard
             key={card.id}
             {...card}
-            isActive={activeTab === card.title}
-            onClick={() => onTabChange(card.title === "Total Sales" ? "Sales" : 
-                                     card.title === "Total Expense" ? "Expenses" : 
-                                     card.title === "Total Payroll" ? "Total Payroll" : 
-                                     card.title === "Pending Collection" ? "Credit Sale Cash Not Receive" : card.title)}
+            isActive={activeTab === getActiveTabForCard(card.title)}
+            onClick={() => onTabChange(getActiveTabForCard(card.title))}
             onDateFilterClick={onDateFilterClick}
             onClearDateFilter={onClearDateFilter}
             isCustomDateActive={isCustomDateActive[card.title] || false}
@@ -603,11 +609,8 @@ export const DashboardCards = ({
           <DashboardCard
             key={card.id}
             {...card}
-            isActive={activeTab === card.title}
-            onClick={() => onTabChange(card.title === "Total Sales" ? "Sales" : 
-                                     card.title === "Total Expense" ? "Expenses" : 
-                                     card.title === "Total Payroll" ? "Total Payroll" : 
-                                     card.title === "Pending Collection" ? "Credit Sale Cash Not Receive" : card.title)}
+            isActive={activeTab === getActiveTabForCard(card.title)}
+            onClick={() => onTabChange(getActiveTabForCard(card.title))}
             onDateFilterClick={onDateFilterClick}
             onClearDateFilter={onClearDateFilter}
             isCustomDateActive={isCustomDateActive[card.title] || false}
@@ -619,4 +622,4 @@ export const DashboardCards = ({
       </div>
     </div>
   );
-};
+};  

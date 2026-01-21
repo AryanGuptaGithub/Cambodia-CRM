@@ -1,31 +1,35 @@
 import React from "react";
 import { Calendar } from "lucide-react";
 
-const TabButton = ({ isActive, onClick, children, showCalendar = false, onCalendarClick }) => {
+const TabButton = ({ isActive, onClick, children, showCalendar = false, onCalendarClick, isCustomActive = false }) => {
   return (
-    <div className="relative">
+    <div className="relative flex items-center">
       <button
-        className={`px-3 py-1 text-sm font-medium rounded-md transition-colors flex items-center gap-2 ${
+        className={`px-3 py-1 text-sm font-medium rounded-md transition-colors cursor-pointer ${
           isActive
             ? "bg-white text-gray-800 shadow-sm"
-            : "text-gray-600 hover:text-gray-800"
+            : "text-gray-600 hover:text-gray-800 hover:bg-gray-50"
         }`}
         onClick={onClick}
       >
         {children}
-        {showCalendar && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onCalendarClick();
-            }}
-            className="text-gray-400 hover:text-blue-600 transition-colors"
-            title="Set custom date range"
-          >
-            <Calendar size={14} />
-          </button>
-        )}
       </button>
+      {showCalendar && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onCalendarClick();
+          }}
+          className={`flex items-center justify-center h-7 rounded-md transition-colors cursor-pointer ${
+            isCustomActive
+              ? "bg-white text-blue-600 shadow-sm border border-gray-200"
+              : "text-gray-400 hover:text-blue-600 hover:bg-gray-50"
+          }`}
+          title={isCustomActive ? "Custom date range active" : "Set custom date range"}
+        >
+          <Calendar size={14} />
+        </button>
+      )}
     </div>
   );
 };
@@ -92,25 +96,10 @@ export const SubTabs = ({
         return "";
     }
   };
-  const getDateRangeText = (cardId) => {
-    if (isCustomDateActive[cardId] && customDateRanges[cardId]) {
-      const start = new Date(customDateRanges[cardId].start);
-      const end = new Date(customDateRanges[cardId].end);
-      
-      const formatDate = (date) => {
-        return date.toLocaleDateString("en-US", {
-          day: "numeric",
-          month: "short",
-        });
-      };
-      
-      return `${formatDate(start)} - ${formatDate(end)}`;
-    }
-    return null;
-  };
 
   const renderTabs = () => {
     const cardTitle = getCardTitle(activeTab);
+    const isCustomActive = isCustomDateActive[cardTitle];
     let tabs = [];
 
     switch (activeTab) {
@@ -121,36 +110,31 @@ export const SubTabs = ({
           { key: "Year", label: dateRanges.year.rangeLabel },
         ];
         
-        // Check if custom date is active for this card
-        if (isCustomDateActive[cardTitle]) {
-          const customRange = getDateRangeText(cardTitle);
-          if (customRange) {
-            tabs.push({ 
-              key: "Custom", 
-              label: customRange, 
-              showCalendar: true 
-            });
-          } else {
-            tabs.push({ 
-              key: "Custom", 
-              label: "Custom", 
-              showCalendar: true 
-            });
-          }
-        } else {
-          // Add Custom button even if not active (to allow setting custom date)
-          tabs.push({ 
-            key: "Custom", 
-            label: "Custom", 
-            showCalendar: true 
-          });
-        }
+        // Always show Custom tab
+        const customRange = getFormattedDateRange(cardTitle);
+        tabs.push({ 
+          key: "Custom", 
+          label: customRange || "Custom", 
+          showCalendar: true 
+        });
         
         return tabs.map((tab) => (
           <TabButton
             key={tab.key}
             isActive={activeSalesSubTab === tab.key}
-            onClick={() => onSalesSubTabChange(tab.key)}
+            isCustomActive={tab.key === "Custom" && isCustomActive}
+            onClick={() => {
+              if (tab.key === "Custom") {
+                // If custom is not active yet, open the modal to set dates
+                if (!isCustomActive) {
+                  onDateFilterClick(cardTitle);
+                } else {
+                  onSalesSubTabChange(tab.key);
+                }
+              } else {
+                onSalesSubTabChange(tab.key);
+              }
+            }}
             showCalendar={tab.showCalendar || false}
             onCalendarClick={() => onDateFilterClick(cardTitle)}
           >
@@ -164,34 +148,29 @@ export const SubTabs = ({
           { key: "Year", label: dateRanges.year.rangeLabel },
         ];
         
-        if (isCustomDateActive[cardTitle]) {
-          const customRange = getFormattedDateRange(cardTitle);
-          if (customRange) {
-            tabs.push({ 
-              key: "Custom", 
-              label: customRange, 
-              showCalendar: true 
-            });
-          } else {
-            tabs.push({ 
-              key: "Custom", 
-              label: "Custom", 
-              showCalendar: true 
-            });
-          }
-        } else {
-          tabs.push({ 
-            key: "Custom", 
-            label: "Custom", 
-            showCalendar: true 
-          });
-        }
+        const expenseCustomRange = getFormattedDateRange(cardTitle);
+        tabs.push({ 
+          key: "Custom", 
+          label: expenseCustomRange || "Custom", 
+          showCalendar: true 
+        });
         
         return tabs.map((tab) => (
           <TabButton
             key={tab.key}
             isActive={activeExpenseSubTab === tab.key}
-            onClick={() => onExpenseSubTabChange(tab.key)}
+            isCustomActive={tab.key === "Custom" && isCustomActive}
+            onClick={() => {
+              if (tab.key === "Custom") {
+                if (!isCustomActive) {
+                  onDateFilterClick(cardTitle);
+                } else {
+                  onExpenseSubTabChange(tab.key);
+                }
+              } else {
+                onExpenseSubTabChange(tab.key);
+              }
+            }}
             showCalendar={tab.showCalendar || false}
             onCalendarClick={() => onDateFilterClick(cardTitle)}
           >
@@ -205,34 +184,29 @@ export const SubTabs = ({
           { key: "YTD", label: prevMonthRanges.ytd.rangeLabel },
         ];
         
-        if (isCustomDateActive[cardTitle]) {
-          const customRange = getFormattedDateRange(cardTitle);
-          if (customRange) {
-            tabs.push({ 
-              key: "Custom", 
-              label: customRange, 
-              showCalendar: true 
-            });
-          } else {
-            tabs.push({ 
-              key: "Custom", 
-              label: "Custom", 
-              showCalendar: true 
-            });
-          }
-        } else {
-          tabs.push({ 
-            key: "Custom", 
-            label: "Custom", 
-            showCalendar: true 
-          });
-        }
+        const payrollCustomRange = getFormattedDateRange(cardTitle);
+        tabs.push({ 
+          key: "Custom", 
+          label: payrollCustomRange || "Custom", 
+          showCalendar: true 
+        });
         
         return tabs.map((tab) => (
           <TabButton
             key={tab.key}
             isActive={activePayrollSubTab === tab.key}
-            onClick={() => onPayrollSubTabChange(tab.key)}
+            isCustomActive={tab.key === "Custom" && isCustomActive}
+            onClick={() => {
+              if (tab.key === "Custom") {
+                if (!isCustomActive) {
+                  onDateFilterClick(cardTitle);
+                } else {
+                  onPayrollSubTabChange(tab.key);
+                }
+              } else {
+                onPayrollSubTabChange(tab.key);
+              }
+            }}
             showCalendar={tab.showCalendar || false}
             onCalendarClick={() => onDateFilterClick(cardTitle)}
           >
@@ -247,34 +221,29 @@ export const SubTabs = ({
           { key: "Year", label: dateRanges.year.rangeLabel },
         ];
         
-        if (isCustomDateActive[cardTitle]) {
-          const customRange = getFormattedDateRange(cardTitle);
-          if (customRange) {
-            tabs.push({ 
-              key: "Custom", 
-              label: customRange, 
-              showCalendar: true 
-            });
-          } else {
-            tabs.push({ 
-              key: "Custom", 
-              label: "Custom", 
-              showCalendar: true 
-            });
-          }
-        } else {
-          tabs.push({ 
-            key: "Custom", 
-            label: "Custom", 
-            showCalendar: true 
-          });
-        }
+        const outstandingCustomRange = getFormattedDateRange(cardTitle);
+        tabs.push({ 
+          key: "Custom", 
+          label: outstandingCustomRange || "Custom", 
+          showCalendar: true 
+        });
         
         return tabs.map((tab) => (
           <TabButton
             key={tab.key}
             isActive={activeOutstandingSubTab === tab.key}
-            onClick={() => onOutstandingSubTabChange(tab.key)}
+            isCustomActive={tab.key === "Custom" && isCustomActive}
+            onClick={() => {
+              if (tab.key === "Custom") {
+                if (!isCustomActive) {
+                  onDateFilterClick(cardTitle);
+                } else {
+                  onOutstandingSubTabChange(tab.key);
+                }
+              } else {
+                onOutstandingSubTabChange(tab.key);
+              }
+            }}
             showCalendar={tab.showCalendar || false}
             onCalendarClick={() => onDateFilterClick(cardTitle)}
           >
