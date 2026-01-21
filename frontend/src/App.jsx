@@ -120,8 +120,9 @@ import Payroll from "./pages/HRM/Payroll";
 import AddPayroll from "./pages/HRM/addPayroll";
 
 // NEW: MR Basic Payroll pages
-import MrBasicPayroll from "./pages/HRM/MrBasicPayroll";
+
 import AddMrBasicPayroll from "./pages/HRM/AddMrBasicPayroll";
+import MrBasicPayroll from "./pages/HRM/MRBasicPayroll";
 
 // Account pages
 import CashAndBank from "./pages/Account/CashAndBank";
@@ -355,8 +356,8 @@ function App() {
               <Route path="new" element={<AddPayroll />} />
             </Route>
             
-            {/* NEW: MR Basic Payroll - Separate from regular payroll */}
-            <Route path="mr-basic-payroll">
+            {/* FIXED: MR Basic Payroll route - changed from hyphen to camelCase to match sidebar */}
+            <Route path="mrbasicpayroll">
               <Route index element={<MrBasicPayroll />} />
               <Route path="new" element={<AddMrBasicPayroll />} />
             </Route>

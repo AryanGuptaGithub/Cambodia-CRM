@@ -310,7 +310,7 @@ const tabService = {
       reports_masterCustomerReports: { visible: true, sequence: 4 },
       reports_monthlyrepeatrate: { visible: true, sequence: 5 },
       reports_annualrepeatrate: { visible: true, sequence: 6 },
-      reports_productreport: { visible: true, sequence: 7 },
+      reports_productreport: { productReports: true, sequence: 7 },
       reports_mrwiseoutstanding: { visible: true, sequence: 8 },
       reports_mrwisesales: { visible: true, sequence: 9 },
       reports_cashsales: { visible: true, sequence: 10 },
@@ -363,13 +363,13 @@ const productPaths = [
   "/productmanagerlayout/printbarcode",
 ];
 
-// HRM paths - UPDATED with MR Basic Payroll
+// FIXED: HRM paths - Changed from hyphenated to camelCase to match App.jsx route
 const hrmPaths = [
   "/hrmlayout/dashboard",
   "/hrmlayout/holidays",
   "/hrmlayout/leaveattendance",
   "/hrmlayout/payroll",
-  "/hrmlayout/mrbasicpayroll",
+  "/hrmlayout/mrbasicpayroll",  // FIXED: Changed from /mr-basic-payroll to /mrbasicpayroll
 ];
 
 const salesPaths = [
@@ -1504,12 +1504,13 @@ function Sidebar({ isOpen, toggleSidebar, openSettingsSidebar }) {
                   "hrm_payroll",
                   "hrm_mrbasicpayroll",
                 ]).map((tabId) => {
+                  // FIXED: Changed linkMap to use camelCase instead of hyphenated
                   const linkMap = {
                     hrm_dashboard: "/hrmlayout/dashboard",
                     hrm_holidays: "/hrmlayout/holidays",
                     hrm_leaveattendance: "/hrmlayout/leaveattendance",
                     hrm_payroll: "/hrmlayout/payroll",
-                    hrm_mrbasicpayroll: "/hrmlayout/mrbasicpayroll",
+                    hrm_mrbasicpayroll: "/hrmlayout/mrbasicpayroll", // FIXED: Changed from /mr-basic-payroll to /mrbasicpayroll
                   };
 
                   const iconMap = {

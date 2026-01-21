@@ -564,9 +564,6 @@ const checkStockAvailability = async (
 
 const validateStockBeforeImport = async (invoices) => {
   try {
-    console.log("Starting stock validation for import...");
-
-    // Always allow import, backend will handle stock adjustments
     return {
       success: true,
       hasStockIssues: false,
@@ -7546,9 +7543,7 @@ router.post("/sales/check-stock", async (req, res) => {
         route: "/sales/check-stock",
       },
     });
-    
-    console.log("17. Error response sent");
-    console.log("=== END WITH ERROR: /sales/check-stock API CALL ===\n\n");
+  
   }
 });
 

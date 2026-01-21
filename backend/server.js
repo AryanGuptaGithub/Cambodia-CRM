@@ -1,4 +1,3 @@
-// server.js - Fix the import and route registration
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
@@ -65,7 +64,7 @@ import operationCostCOGSRatio from "./routers/reports/operationCostCOGSRatio.js"
 import operationCostSalesRatio from "./routers/reports/operationCostSalesRatio.js";
 import tourExpenseSales from "./routers/reports/tourExpenseSales.js";
 import SaleSummaryReport from "./routers/reports/SaleSummary.js";
-
+import mrBasicPayrollRoutes from "./routers/hrm/mrBasicPayrollRoutes.js"; 
 dotenv.config();
 
 const app = express();
@@ -97,6 +96,7 @@ app.use(
 connectDB(process.env.MONGODB_URI);
 app.use(express.json());
 
+// Register all routes
 app.use("/api", customerRoutes);
 app.use("/api", suppilerRoutes);
 app.use("/api", product);
@@ -157,6 +157,7 @@ app.use("/api", operationCostCOGSRatio);
 app.use("/api", operationCostSalesRatio);
 app.use("/api", tourExpenseSales);
 app.use("/api/sales-summary", SaleSummaryReport);
+app.use("/api/mr-basic-payrolls", mrBasicPayrollRoutes);  // Correct route registration
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);

@@ -13,20 +13,13 @@ import InputField from "../../components/common/InputField";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-// Months array
-const months = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December"
-];
-
 // Custom hook for MR Basic Payroll form
 const useMrBasicPayrollForm = () => {
   const navigate = useNavigate();
 
   const [form, setForm] = useState({
     employeeId: "",
-    month: "",
-    year: new Date().getFullYear().toString(),
+    employeeName: "",
     basicSalary: "",
     remarks: "",
   });
@@ -41,18 +34,34 @@ const useMrBasicPayrollForm = () => {
   const fetchMRList = useCallback(async () => {
     try {
       setMrListLoading(true);
-      const response = await axios.get(`${backendUrl}/api/staffs`);
+      // Try different endpoints to get MRs
+      let response;
       
-      if (response.data && response.data.length > 0) {
-        setMrList(response.data);
+      try {
+        // First try /api/mrs endpoint
+        response = await axios.get(`${backendUrl}/api/mr-basic-payrolls/mrs/list`);
+      } catch (error) {
+        response = await axios.get(`${backendUrl}/api/staffs`);
+        
+        // Filter only MRs if staffs endpoint is used
+        if (response.data && Array.isArray(response.data)) {
+          response.data = response.data.filter(staff => 
+            staff.designation === "MR" || 
+            staff.role === "MR" || 
+            staff.medicalRepName // If it has medicalRepName field, it's likely an MR
+          );
+        }
+      }
+      if (response.data.success && response.data.data.length > 0) {
+        setMrList(response.data.data);
         setIsMrListEmpty(false);
       } else {
         setMrList([]);
         setIsMrListEmpty(true);
       }
     } catch (error) {
-      console.error("Error fetching employees:", error);
-      toast.error(error.message || "Failed to load MR list");
+      console.error("Error fetching MR list:", error);
+      toast.error(error.response?.data?.message || "Failed to load MR list");
       setMrList([]);
       setIsMrListEmpty(true);
     } finally {
@@ -65,9 +74,8 @@ const useMrBasicPayrollForm = () => {
     const newErrors = {};
 
     if (!form.employeeId.trim()) newErrors.employeeId = "MR is required";
-    if (!form.month) newErrors.month = "Month is required";
-    if (!form.year) newErrors.year = "Year is required";
     if (!form.basicSalary) newErrors.basicSalary = "Basic Salary is required";
+    if (!form.employeeName.trim()) newErrors.employeeName = "Employee name is required";
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -83,9 +91,15 @@ const useMrBasicPayrollForm = () => {
   }, []);
 
   const handleEmployeeChange = useCallback((employeeId) => {
-    setForm((prev) => ({ ...prev, employeeId }));
-    setErrors((prev) => ({ ...prev, employeeId: "" }));
-  }, []);
+    // Find the selected MR to get their name
+    const selectedMR = mrList.find(mr => mr._id === employeeId);
+    setForm((prev) => ({ 
+      ...prev, 
+      employeeId,
+      employeeName: selectedMR ? (selectedMR.medicalRepName || selectedMR.employeeName || selectedMR.name || "") : ""
+    }));
+    setErrors((prev) => ({ ...prev, employeeId: "", employeeName: "" }));
+  }, [mrList]);
 
   /* -------------------------- Form Submission -------------------------- */
   const handleSubmit = async (e) => {
@@ -95,7 +109,15 @@ const useMrBasicPayrollForm = () => {
     try {
       setLoading(true);
       
-      const res = await axios.post(`${backendUrl}/api/mr-basic-payrolls`, form);
+      // Prepare the data to send
+      const formData = {
+        employeeId: form.employeeId,
+        employeeName: form.employeeName,
+        basicSalary: parseFloat(form.basicSalary),
+        remarks: form.remarks || ""
+      };
+      
+      const res = await axios.post(`${backendUrl}/api/mr-basic-payrolls`, formData);
       
       if (res.status === 201 || res.status === 200) {
         toast.success(res.data.message || "MR Basic Payroll added successfully");
@@ -103,10 +125,11 @@ const useMrBasicPayrollForm = () => {
         // Refresh MR list after successful submission
         await fetchMRList();
         
-        navigate("/hrmlayout/mr-basic-payroll");
+        navigate("/hrmlayout/mrbasicpayroll");
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Network error");
+      console.error("Submission error:", err.response?.data || err);
+      toast.error(err.response?.data?.message || err.message || "Network error");
     } finally {
       setLoading(false);
     }
@@ -171,38 +194,18 @@ const AddMrBasicPayroll = () => {
 
     return mrList.map((mr) => ({
       value: mr._id,
-      label: mr.medicalRepName || mr.employeeName || `MR ${mr._id}`,
+      label: mr.medicalRepName || mr.employeeName || mr.name || `MR ${mr._id}`,
     }));
   }, [mrList, isMrListEmpty]);
-
-  /* -------------------------- Month options -------------------------- */
-  const monthOptions = useMemo(() => {
-    return months.map((month, index) => ({
-      value: month,
-      label: month,
-    }));
-  }, []);
-
-  /* -------------------------- Year options -------------------------- */
-  const yearOptions = useMemo(() => {
-    const currentYear = new Date().getFullYear();
-    const years = [];
-    for (let i = currentYear - 5; i <= currentYear + 5; i++) {
-      years.push({ value: i.toString(), label: i.toString() });
-    }
-    return years;
-  }, []);
 
   /* -------------------------- Form validity for button -------------------------- */
   const isFormValid = useMemo(
     () =>
       form.employeeId &&
-      form.month &&
-      form.year &&
+      form.employeeName &&
       form.basicSalary &&
       !errors.employeeId &&
-      !errors.month &&
-      !errors.year &&
+      !errors.employeeName &&
       !errors.basicSalary,
     [form, errors]
   );
@@ -212,6 +215,10 @@ const AddMrBasicPayroll = () => {
     await refreshMRList();
     toast.success("MR list refreshed successfully");
   };
+
+  // Debug: Log MR list
+  useEffect(() => {
+  }, [mrList]);
 
   return (
     <div className="max-w-4xl mx-auto p-8 bg-white rounded-3xl shadow-lg">
@@ -233,6 +240,15 @@ const AddMrBasicPayroll = () => {
         </button>
       </div>
 
+      {/* Debug info */}
+      {mrList.length > 0 && (
+        <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded-md">
+          <p className="text-xs text-gray-600">
+            Found {mrList.length} MR(s) in the system
+          </p>
+        </div>
+      )}
+
       {/* Warning message if MR list is empty */}
       {isMrListEmpty && (
         <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
@@ -250,6 +266,9 @@ const AddMrBasicPayroll = () => {
                 <p>
                   You need to add at least one MR before creating basic payroll records.
                 </p>
+                <p className="mt-1">
+                  Check if your backend has an MRs endpoint or if staffs endpoint returns MR data.
+                </p>
               </div>
             </div>
           </div>
@@ -257,8 +276,7 @@ const AddMrBasicPayroll = () => {
       )}
 
       <form onSubmit={handleSubmit}>
-        {/* First Row: MR Name*, Month*, Year* */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
           <div>
             <SearchableDropdown
               label="MR Name"
@@ -268,59 +286,19 @@ const AddMrBasicPayroll = () => {
               placeholder={isMrListEmpty ? "No MR Available" : "Select MR"}
               required={true}
               loading={mrListLoading}
-              error={errors.employeeId}
+              error={errors.employeeId || errors.employeeName}
               disabled={isMrListEmpty}
             />
             {mrListLoading && (
               <p className="text-xs text-gray-500 mt-1">Loading MR list...</p>
             )}
+            {!mrListLoading && mrList.length === 0 && (
+              <p className="text-xs text-red-500 mt-1">No MRs found. Please add MRs first.</p>
+            )}
           </div>
 
-          <div className="flex flex-col">
-            <label className="text-sm font-medium text-gray-700 mb-1">
-              Month *
-            </label>
-            <select
-              value={form.month}
-              onChange={(e) => setForm((prev) => ({ ...prev, month: e.target.value }))}
-              disabled={isMrListEmpty}
-              className={`w-full border ${errors.month ? 'border-red-500' : 'border-gray-300'} rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed`}
-            >
-              <option value="">Select Month</option>
-              {monthOptions.map((month) => (
-                <option key={month.value} value={month.value}>
-                  {month.label}
-                </option>
-              ))}
-            </select>
-            {errors.month && <p className="text-red-500 text-xs mt-1">{errors.month}</p>}
-          </div>
-
-          <div className="flex flex-col">
-            <label className="text-sm font-medium text-gray-700 mb-1">
-              Year *
-            </label>
-            <select
-              value={form.year}
-              onChange={(e) => setForm((prev) => ({ ...prev, year: e.target.value }))}
-              disabled={isMrListEmpty}
-              className={`w-full border ${errors.year ? 'border-red-500' : 'border-gray-300'} rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed`}
-            >
-              <option value="">Select Year</option>
-              {yearOptions.map((year) => (
-                <option key={year.value} value={year.value}>
-                  {year.label}
-                </option>
-              ))}
-            </select>
-            {errors.year && <p className="text-red-500 text-xs mt-1">{errors.year}</p>}
-          </div>
-        </div>
-
-        {/* Second Row: Basic Salary*, Remarks */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           <InputField
-            label="Basic Salary *"
+            label="Basic Salary"
             name="basicSalary"
             value={form.basicSalary}
             onChange={handleNumeric}
@@ -329,7 +307,19 @@ const AddMrBasicPayroll = () => {
             required
             disabled={isMrListEmpty}
           />
+        </div>
 
+        {/* Display selected MR name */}
+        {form.employeeId && (
+          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-md">
+            <p className="text-sm text-green-700">
+              <span className="font-medium">Selected MR:</span> {form.employeeName || "Unknown"}
+            </p>
+          </div>
+        )}
+
+        {/* Second Row: Remarks */}
+        <div className="grid grid-cols-1 gap-6 mb-8">
           <div className="flex flex-col">
             <label className="text-sm font-medium text-gray-700 mb-1">
               Remarks
@@ -351,22 +341,11 @@ const AddMrBasicPayroll = () => {
             MR Basic Payroll Summary
           </h3>
           
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="text-center">
               <p className="text-sm text-blue-600">Selected MR</p>
               <p className="font-semibold text-blue-800">
-                {form.employeeId 
-                  ? mrOptions.find(mr => mr.value === form.employeeId)?.label || "Not selected"
-                  : "Not selected"}
-              </p>
-            </div>
-            
-            <div className="text-center">
-              <p className="text-sm text-blue-600">Period</p>
-              <p className="font-semibold text-blue-800">
-                {form.month && form.year 
-                  ? `${form.month} ${form.year}`
-                  : "Not selected"}
+                {form.employeeName || "Not selected"}
               </p>
             </div>
             
@@ -395,7 +374,7 @@ const AddMrBasicPayroll = () => {
 
           <button
             type="button"
-            onClick={() => navigate("/hrmlayout/mr-basic-payroll")}
+            onClick={() => navigate("/hrmlayout/mrbasicpayroll")}
             className="bg-gray-300 hover:bg-gray-400 text-gray-800 px-4 py-3 rounded-lg cursor-pointer transition-colors
              text-lg font-medium transform hover:scale-105 transition-transform focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
           >

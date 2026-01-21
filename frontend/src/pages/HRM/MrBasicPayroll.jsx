@@ -14,13 +14,14 @@ import {
   X,
   Search,
   DollarSign,
+  Save,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import axios from "axios";
-import SampleExcelDownloadPayroll from "../../excels/SampleExcelDownloadPayroll";
 import { showToast } from "../../utils/toast";
 import { confirmDialog } from "../../utils/confirmationDialog";
+import SampleExcelDownloadMRBasicPayroll from "../../excels/SampleExcelDownloadMRBasicPayroll";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
@@ -39,56 +40,80 @@ const MrBasicPayroll = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [isUploading, setIsUploading] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingPayroll, setEditingPayroll] = useState(null);
+  const [editFormData, setEditFormData] = useState({
+    employeeName: "",
+    basicSalary: "",
+    remarks: "",
+  });
+
   const inputRef = useRef(null);
 
   // Fetch MR Basic Payrolls
-  const fetchMrBasicPayrolls = async () => {
+  const fetchMrBasicPayrolls = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
       const url = `${backendUrl}/api/mr-basic-payrolls`;
-      const response = await fetch(url);
-      if (!response.ok) throw new Error("Failed to fetch MR basic payrolls");
-      const data = await response.json();
-
-      const payrollData = data.data || [];
-      setPayrolls(payrollData);
+      const response = await axios.get(url);
+      if (response.data.success) {
+        const payrollData = response.data.data || [];
+        setPayrolls(payrollData);
+      } else {
+        throw new Error(response.data.message || "Failed to fetch MR basic payrolls");
+      }
     } catch (err) {
       setError(err.message || "Something went wrong");
       showToast("error", "Failed to load MR basic payroll data");
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchMrBasicPayrolls();
-  }, []);
+  }, [fetchMrBasicPayrolls]);
 
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm]);
 
+  // Helper function to get employee name
+  const getEmployeeName = useCallback((payroll) => {
+    if (payroll.employeeName) return payroll.employeeName;
+    if (payroll.employeeId && typeof payroll.employeeId === 'object' && payroll.employeeId.medicalRepName) {
+      return payroll.employeeId.medicalRepName;
+    }
+    if (payroll.employeeId && typeof payroll.employeeId === 'string') {
+      return payroll.employeeId;
+    }
+    return "Unknown";
+  }, []);
+
   const filteredPayrolls = useMemo(() => {
     if (!payrolls.length) return [];
 
-    return payrolls.filter(
-      (r) =>
-        r.employeeName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        r.employeeId?.medicalRepName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        r.month?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        r.year?.toString().includes(searchTerm)
-    );
-  }, [payrolls, searchTerm]);
+    return payrolls.filter((payroll) => {
+      const employeeName = getEmployeeName(payroll).toLowerCase();
+      const searchLower = searchTerm.toLowerCase();
+      
+      return (
+        employeeName.includes(searchLower)
+      );
+    });
+  }, [payrolls, searchTerm, getEmployeeName]);
 
   // Pagination calculations
-  const totalPages = Math.ceil(filteredPayrolls.length / payrollsPerPage);
+  const totalPages = Math.max(1, Math.ceil(filteredPayrolls.length / payrollsPerPage));
   const visiblePages = getVisiblePages(currentPage, totalPages);
-  const currentPayrolls = filteredPayrolls.slice(
-    (currentPage - 1) * payrollsPerPage,
-    currentPage * payrollsPerPage
-  );
+  
+  const currentPayrolls = useMemo(() => {
+    const startIndex = (currentPage - 1) * payrollsPerPage;
+    const endIndex = startIndex + payrollsPerPage;
+    return filteredPayrolls.slice(startIndex, endIndex);
+  }, [filteredPayrolls, currentPage]);
 
   function getVisiblePages(currentPage, totalPages) {
     if (totalPages <= 5) {
@@ -107,37 +132,42 @@ const MrBasicPayroll = () => {
   }
 
   // Select/unselect a payroll by id
-  const toggleSelect = (payroll) => {
+  const toggleSelect = useCallback((payroll) => {
     setSelected((prev) => {
       const exists = prev.some((p) => p.id === payroll._id);
 
       if (exists) {
         return prev.filter((p) => p.id !== payroll._id);
       } else {
-        return [...prev, { id: payroll._id, name: payroll.employeeName }];
+        return [...prev, { 
+          id: payroll._id, 
+          name: getEmployeeName(payroll) 
+        }];
       }
     });
-  };
+  }, [getEmployeeName]);
 
-  const toggleSelectAll = (checked) => {
+  const toggleSelectAll = useCallback((checked) => {
     if (checked) {
-      const allSelected = currentPayrolls.map((s) => ({
-        id: s._id,
-        name: s.employeeName,
+      const allSelected = currentPayrolls.map((payroll) => ({
+        id: payroll._id,
+        name: getEmployeeName(payroll),
       }));
       setSelected(allSelected);
     } else {
       setSelected([]);
     }
-  };
+  }, [currentPayrolls, getEmployeeName]);
 
   const handleDeleteSelected = async () => {
+    if (selected.length === 0) return;
+
     const confirm = await confirmDialog({
-      text: `Are you sure you want to delete <b>${selected.length}</b> MR basic payroll records`,
+      title: "Confirm Delete",
+      text: `Are you sure you want to delete ${selected.length} MR basic payroll record(s)?`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
-      selected,
     });
 
     if (confirm.isConfirmed) {
@@ -146,25 +176,27 @@ const MrBasicPayroll = () => {
           data: { ids: selected.map((s) => s.id) },
         });
 
-        if (res.status === 200) {
+        if (res.data.success) {
           showToast("success", "Selected MR basic payroll records deleted successfully");
           await fetchMrBasicPayrolls();
           setSelected([]);
+        } else {
+          throw new Error(res.data.message);
         }
       } catch (error) {
-        showToast("error", "Failed to delete selected MR basic payroll records.");
+        showToast("error", error.message || "Failed to delete selected MR basic payroll records");
       }
-    } else {
-      setSelected([]);
     }
   };
 
   // Delete single payroll
   const deletePayroll = async (payroll) => {
     if (!payroll._id) return;
+    
+    const employeeName = getEmployeeName(payroll);
     const confirmDelete = await confirmDialog({
-      title: "Delete",
-      text: `Are you sure you want to delete MR basic payroll record for <b>${payroll.employeeName}</b>?`,
+      title: "Confirm Delete",
+      text: `Are you sure you want to delete MR basic payroll record for ${employeeName}?`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
@@ -176,24 +208,81 @@ const MrBasicPayroll = () => {
           `${backendUrl}/api/mr-basic-payrolls/${payroll._id}`
         );
 
-        if (res.status === 200) {
+        if (res.data.success) {
           showToast(
             "success",
-            `MR basic payroll record for <b>${payroll.employeeName}</b> deleted successfully`
+            `MR basic payroll record for ${employeeName} deleted successfully`
           );
           await fetchMrBasicPayrolls();
-          setSelected([]);
+          setSelected((prev) => prev.filter(p => p.id !== payroll._id));
+        } else {
+          throw new Error(res.data.message);
         }
       } catch (error) {
-        showToast("error", "Failed to delete MR basic payroll record.");
+        showToast("error", error.message || "Failed to delete MR basic payroll record");
       }
     }
   };
 
+  // Handle edit button click
+  const handleEditClick = (payroll) => {
+    setEditingPayroll(payroll);
+    setEditFormData({
+      employeeName: getEmployeeName(payroll),
+      basicSalary: payroll.basicSalary ? parseFloat(payroll.basicSalary) : 0,
+      remarks: payroll.remarks || "",
+    });
+    setShowEditModal(true);
+  };
+
+  // Handle edit form input change
+  const handleEditInputChange = (e) => {
+    const { name, value } = e.target;
+    setEditFormData(prev => ({
+      ...prev,
+      [name]: name === 'basicSalary' ? parseFloat(value) || 0 : value
+    }));
+  };
+
+  // Save edited payroll
+  const handleSaveEdit = async () => {
+    if (!editingPayroll) return;
+
+    try {
+      const updatedData = {
+        employeeId: editingPayroll.employeeId?._id || editingPayroll.employeeId,
+        employeeName: editFormData.employeeName,
+        basicSalary: editFormData.basicSalary,
+        remarks: editFormData.remarks,
+      };
+
+      const res = await axios.put(
+        `${backendUrl}/api/mr-basic-payrolls/${editingPayroll._id}`,
+        updatedData
+      );
+
+      if (res.data.success) {
+        showToast("success", "MR basic payroll updated successfully");
+        setShowEditModal(false);
+        await fetchMrBasicPayrolls();
+      } else {
+        throw new Error(res.data.message);
+      }
+    } catch (error) {
+      showToast("error", error.message || "Failed to update MR basic payroll");
+    }
+  };
+
   const handleIconClick = () => {
-    inputRef.current?.focus();
-    inputRef.current?.classList.add("highlight");
-    setTimeout(() => inputRef.current?.classList.remove("highlight"), 1000);
+    if (inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.classList.add("highlight");
+      setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.classList.remove("highlight");
+        }
+      }, 1000);
+    }
   };
 
   // File upload and parsing logic for import
@@ -202,11 +291,10 @@ const MrBasicPayroll = () => {
     if (!file) return;
 
     // Validate file type and size
-    const validTypes = [".csv", ".xlsx", ".xls"];
-    const fileExtension = file.name
-      .toLowerCase()
-      .slice(file.name.lastIndexOf("."));
-    if (!validTypes.includes(fileExtension)) {
+    const validTypes = ["application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "text/csv"];
+    const fileExtension = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
+    
+    if (!validTypes.includes(file.type) && !['.csv', '.xlsx', '.xls'].includes(fileExtension)) {
       showToast("error", "Please upload a valid Excel or CSV file");
       return;
     }
@@ -225,27 +313,37 @@ const MrBasicPayroll = () => {
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
 
+        // Convert to JSON with header row (3 columns now including remarks)
         const rows = XLSX.utils.sheet_to_json(worksheet, {
-          header: 1,
+          header: ["employeeName", "basicSalary", "remarks"],
           defval: "",
+          raw: false,
         });
 
-        if (rows.length === 0) {
-          showToast("warning", "Excel file is empty");
+        // Skip the header row (first item will be the header names)
+        const dataRows = rows.slice(1);
+
+        const mappedData = dataRows
+          .filter(row => row && row.employeeName)
+          .map(row => {
+            // Parse basicSalary - remove commas and convert to number
+            let basicSalary = 0;
+            if (row.basicSalary) {
+              const salaryStr = String(row.basicSalary).replace(/,/g, '');
+              basicSalary = parseFloat(salaryStr) || 0;
+            }
+            
+            return {
+              employeeName: row.employeeName?.toString()?.trim() || "",
+              basicSalary: basicSalary,
+              remarks: row.remarks?.toString()?.trim() || "",
+            };
+          });
+
+        if (mappedData.length === 0) {
+          showToast("warning", "No valid data found in the file");
           return;
         }
-
-        // Parse the data (you'll need to adjust this based on your Excel structure)
-        const mappedData = rows.slice(1) // Skip header
-          .filter(row => row.length > 0)
-          .map(row => ({
-            employeeId: row[0] || "",
-            employeeName: row[1] || "",
-            month: row[2] || "",
-            year: row[3] || "",
-            basicSalary: parseFloat(row[4]) || 0,
-            remarks: row[5] || "",
-          }));
 
         setParsedData(mappedData);
         showToast(
@@ -271,53 +369,90 @@ const MrBasicPayroll = () => {
       showToast("warning", "Please upload a valid file first");
       return;
     }
+    
     setIsUploading(true);
 
     try {
       const res = await axios.post(
         `${backendUrl}/api/mr-basic-payrolls/import`,
-        parsedData
+        { payrolls: parsedData }
       );
 
-      if (res.status === 200) {
+      if (res.data.success) {
         showToast(
           "success",
           res.data.message || "MR basic payroll records imported successfully!"
         );
         setShowImportModal(false);
         setParsedData([]);
+        if (inputRef.current) {
+          inputRef.current.value = "";
+        }
         await fetchMrBasicPayrolls();
+      } else {
+        throw new Error(res.data.message);
       }
     } catch (err) {
       console.error("Import error:", err);
       if (err.response) {
-        const { message } = err.response.data;
-        const cleanMessage = message.replace(/<[^>]+>/g, "");
-        showToast("error", cleanMessage || "Failed to import MR basic payroll records.");
+        const message = err.response.data?.message || "Failed to import MR basic payroll records";
+        showToast("error", message.replace(/<[^>]+>/g, ""));
+      } else if (err.request) {
+        showToast("error", "Network error. Please check your connection.");
       } else {
-        showToast("error", "Network error. Please try again.");
+        showToast("error", "An unexpected error occurred.");
       }
     } finally {
       setIsUploading(false);
     }
   };
 
-  // Format currency
+  // Reset import modal
+  const resetImportModal = () => {
+    setShowImportModal(false);
+    setParsedData([]);
+    if (inputRef.current) {
+      inputRef.current.value = "";
+    }
+  };
+
+  // Reset edit modal
+  const resetEditModal = () => {
+    setShowEditModal(false);
+    setEditingPayroll(null);
+    setEditFormData({
+      employeeName: "",
+      basicSalary: "",
+      remarks: "",
+    });
+  };
+
+  // Format currency - FIXED: Properly format numbers with commas
   const formatCurrency = (amount) => {
+    // Ensure amount is a number
+    const numAmount = typeof amount === 'string' ? 
+      parseFloat(amount.replace(/,/g, '')) : 
+      Number(amount);
+    
+    if (isNaN(numAmount)) return "$0.00";
+    
     return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: "USD",
-    }).format(amount || 0);
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(numAmount);
   };
 
-  if (loading)
+  if (loading) {
     return (
       <div className="p-6 flex justify-center items-center h-64">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
       </div>
     );
+  }
 
-  if (error)
+  if (error) {
     return (
       <div className="p-6">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
@@ -331,6 +466,7 @@ const MrBasicPayroll = () => {
         </div>
       </div>
     );
+  }
 
   return (
     <div className="p-6">
@@ -338,7 +474,7 @@ const MrBasicPayroll = () => {
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-6">
         <div className="flex flex-wrap gap-3">
           <button
-            onClick={() => navigate("/hrmlayout/mr-basic-payroll/new")}
+            onClick={() => navigate("/hrmlayout/mrbasicpayroll/new")}
             className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md transition-colors"
           >
             <UserPlus size={18} /> Add New MR Basic Payroll
@@ -348,7 +484,7 @@ const MrBasicPayroll = () => {
             onClick={() => setShowImportModal(true)}
             className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md transition-colors"
           >
-            <Upload size={18} /> Import CSV
+            <Upload size={18} /> Import Excel
           </button>
           {selected.length > 0 && (
             <button
@@ -409,9 +545,7 @@ const MrBasicPayroll = () => {
                   <span className="text-sm font-medium">MR Name</span>
                 </div>
               </th>
-              <th className="p-3 text-sm font-medium">Month</th>
-              <th className="p-3 text-sm font-medium">Year</th>
-              <th className="p-3 text-sm font-medium">Basic Salary ($)</th>
+              <th className="p-3 text-sm font-medium">Basic Salary</th>
               <th className="p-3 text-sm font-medium">Remarks</th>
               <th className="p-3 text-sm font-medium">Actions</th>
             </tr>
@@ -419,65 +553,64 @@ const MrBasicPayroll = () => {
           <tbody>
             {currentPayrolls.length === 0 ? (
               <tr>
-                <td colSpan={6} className="p-4 text-center text-gray-500">
+                <td colSpan={4} className="p-4 text-center text-gray-500">
                   No MR basic payroll records found.
                 </td>
               </tr>
             ) : (
-              currentPayrolls.map((payroll, idx) => (
-                <tr
-                  key={payroll._id}
-                  className={`hover:bg-gray-50 ${
-                    idx < currentPayrolls.length - 1 ? "border-b" : ""
-                  }`}
-                >
-                  <td className="p-3 text-left">
-                    <div className="flex items-center gap-4">
-                      <input
-                        type="checkbox"
-                        checked={selected.some((s) => s.id === payroll._id)}
-                        onChange={() => toggleSelect(payroll)}
-                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                      />
-                      <span className="font-medium text-gray-900 capitalize">
-                        {payroll.employeeName || payroll.employeeId?.medicalRepName}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="p-3 text-gray-600 font-medium">
-                    {payroll.month}
-                  </td>
-                  <td className="p-3 text-gray-600">{payroll.year}</td>
-                  <td className="p-3 text-gray-600">
-                    {formatCurrency(payroll.basicSalary)}
-                  </td>
-                  <td className="p-3 text-gray-600">
-                    {payroll.remarks || "-"}
-                  </td>
-                  <td className="p-3 flex items-center justify-center gap-3">
-                    <button
-                      onClick={() => navigate(`/hrmlayout/mr-basic-payroll/${payroll._id}/edit`)}
-                      className="text-green-600 hover:text-green-800 cursor-pointer"
-                      title="Edit"
-                    >
-                      <Edit size={18} />
-                    </button>
-                    <button
-                      onClick={() => deletePayroll(payroll)}
-                      className="text-red-600 hover:text-red-800 cursor-pointer"
-                      title="Delete"
-                    >
-                      <Trash2 size={18} />
-                    </button>
-                  </td>
-                </tr>
-              ))
+              currentPayrolls.map((payroll, idx) => {
+                const employeeName = getEmployeeName(payroll);
+                return (
+                  <tr
+                    key={payroll._id}
+                    className={`hover:bg-gray-50 ${
+                      idx < currentPayrolls.length - 1 ? "border-b" : ""
+                    }`}
+                  >
+                    <td className="p-3 text-left">
+                      <div className="flex items-center gap-4">
+                        <input
+                          type="checkbox"
+                          checked={selected.some((s) => s.id === payroll._id)}
+                          onChange={() => toggleSelect(payroll)}
+                          className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span className="font-medium text-gray-900 capitalize">
+                          {employeeName}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="p-3 text-gray-600">
+                      {formatCurrency(payroll.basicSalary)}
+                    </td>
+                    <td className="p-3 text-gray-600">
+                      {payroll.remarks || "-"}
+                    </td>
+                    <td className="p-3 flex items-center justify-center gap-3">
+                      <button
+                        onClick={() => handleEditClick(payroll)}
+                        className="text-green-600 hover:text-green-800 cursor-pointer"
+                        title="Edit"
+                      >
+                        <Edit size={18} />
+                      </button>
+                      <button
+                        onClick={() => deletePayroll(payroll)}
+                        className="text-red-600 hover:text-red-800 cursor-pointer"
+                        title="Delete"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
 
         {/* Pagination */}
-        {currentPayrolls.length > 0 && (
+        {filteredPayrolls.length > payrollsPerPage && (
           <div className="mt-4 p-5 flex justify-start gap-2">
             <button
               onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
@@ -522,10 +655,7 @@ const MrBasicPayroll = () => {
                 Import MR Basic Payroll
               </h2>
               <button
-                onClick={() => {
-                  setShowImportModal(false);
-                  setParsedData([]);
-                }}
+                onClick={resetImportModal}
                 className="text-gray-400 hover:text-gray-600 transition-colors"
                 disabled={isUploading}
               >
@@ -534,10 +664,11 @@ const MrBasicPayroll = () => {
             </div>
 
             <div className="p-6">
-              {isSampleFile && <SampleExcelDownloadPayroll />}
+              {isSampleFile && <SampleExcelDownloadMRBasicPayroll />}
+
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Upload File
+                  Upload File *
                 </label>
                 <input
                   type="file"
@@ -546,23 +677,13 @@ const MrBasicPayroll = () => {
                   className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
                   disabled={isUploading}
                 />
-                <p className="text-xs text-gray-500 mt-1">
-                  Supported formats: CSV, XLSX, XLS (Max 10MB)
-                </p>
-                {parsedData.length > 0 && (
-                  <p className="text-sm text-green-600 mt-2">
-                    ✅ {parsedData.length} records ready to import
-                  </p>
-                )}
+            
               </div>
             </div>
 
             <div className="flex justify-end gap-3 p-6 border-t border-gray-200 bg-gray-50">
               <button
-                onClick={() => {
-                  setShowImportModal(false);
-                  setParsedData([]);
-                }}
+                onClick={resetImportModal}
                 disabled={isUploading}
                 className="px-5 py-2 text-gray-700 bg-gray-300 hover:bg-gray-400 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -574,6 +695,92 @@ const MrBasicPayroll = () => {
                 className="px-5 py-2 text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isUploading ? "Uploading..." : "Import Records"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Modal */}
+      {showEditModal && editingPayroll && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-[100] p-4">
+          <div className="bg-white w-full max-w-md rounded-xl shadow-lg relative">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-800">
+                Edit MR Basic Payroll
+              </h2>
+              <button
+                onClick={resetEditModal}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="p-6">
+              <div className="space-y-4">
+                {/* Employee Name (Read-only) */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    MR Name
+                  </label>
+                  <input
+                    type="text"
+                    value={editFormData.employeeName}
+                    readOnly
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 cursor-not-allowed"
+                  />
+                </div>
+
+                {/* Basic Salary */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Basic Salary ($) *
+                  </label>
+                  <input
+                    type="number"
+                    name="basicSalary"
+                    value={editFormData.basicSalary}
+                    onChange={handleEditInputChange}
+                    step="0.01"
+                    min="0"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-200 focus:border-blue-500"
+                    placeholder="Enter basic salary"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Current value: {formatCurrency(editFormData.basicSalary)}
+                  </p>
+                </div>
+
+                {/* Remarks */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Remarks
+                  </label>
+                  <textarea
+                    name="remarks"
+                    value={editFormData.remarks}
+                    onChange={handleEditInputChange}
+                    rows="3"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-200 focus:border-blue-500"
+                    placeholder="Enter remarks"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 p-6 border-t border-gray-200 bg-gray-50">
+              <button
+                onClick={resetEditModal}
+                className="px-5 py-2 text-gray-700 bg-gray-300 hover:bg-gray-400 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                className="px-5 py-2 text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors flex items-center gap-2"
+              >
+                <Save size={18} /> Save Changes
               </button>
             </div>
           </div>

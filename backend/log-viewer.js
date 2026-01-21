@@ -102,22 +102,10 @@ if (process.argv[2] === '--recent') {
   const count = process.argv[3] || 20;
   const level = process.argv[4] || 'all';
   const logs = logViewer.showRecent(parseInt(count), level);
-  console.log(JSON.stringify(logs, null, 2));
 } else if (process.argv[2] === '--search') {
   const term = process.argv[3];
   const level = process.argv[4] || 'all';
   const results = logViewer.search(term, level);
-  console.log(JSON.stringify(results, null, 2));
 } else if (process.argv[2] === '--stats') {
   const stats = logViewer.getStats();
-  console.log(JSON.stringify(stats, null, 2));
-} else {
-  console.log(`
-Log Viewer Commands:
-  --recent [count] [level]   Show recent logs
-  --search [term] [level]    Search logs
-  --stats                    Get log statistics
-  
-Levels: error, warn, info, debug, all
-  `);
 }
