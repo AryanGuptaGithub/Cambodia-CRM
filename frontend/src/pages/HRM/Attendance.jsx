@@ -17,6 +17,7 @@ import {
   Info,
   User,
   Users,
+  LogOut,
 } from "lucide-react";
 import axios from "axios";
 import { showToast } from "../../utils/toast";
@@ -118,7 +119,6 @@ const Attendance = () => {
   const [showCalendarView, setShowCalendarView] = useState(false);
   const [calendarViewType, setCalendarViewType] = useState("monthly");
 
-  // Set initial state to current date
   const currentDate = new Date();
   const [currentMonth, setCurrentMonth] = useState(currentDate.getMonth());
   const [currentYear, setCurrentYear] = useState(currentDate.getFullYear());
@@ -131,8 +131,8 @@ const Attendance = () => {
 
   // State for date range in modal
   const [startDate, setStartDate] = useState("");
-  const [startTime, setStartTime] = useState("");
-  const [endTime, setEndTime] = useState("");
+  const [startTime, setStartTime] = useState("09:00");
+  const [endTime, setEndTime] = useState("17:00");
 
   // Holiday state
   const [holidays, setHolidays] = useState([]);
@@ -143,92 +143,108 @@ const Attendance = () => {
     totalExtraMinutes: 0,
     leaveDaysAvailable: 0,
     remainingMinutes: 0,
+    totalWorkedHours: 0,
+    totalWorkedMinutes: 0,
     monthlyExtraHours: 0,
     monthlyExtraMinutes: 0,
     monthlyLeaveDaysAvailable: 0,
     monthlyRemainingMinutes: 0,
+    monthlyWorkedHours: 0,
+    monthlyWorkedMinutes: 0,
     attendanceRecordsWithExtraHours: [],
     monthlyRecordsWithExtraHours: [],
     loading: false,
     useMonthlyOnly: true,
+    showLeaveDaysAvailable: 0,
+    showExtraHours: 0,
+    showExtraMinutes: 0,
+    showRemainingMinutes: 0,
+    showWorkedHours: 0,
+    isMonthlyData: false
   });
+  
+  // Leave conversion states
   const [selectedDateForLeave, setSelectedDateForLeave] = useState("");
+  const [selectedLeaveDays, setSelectedLeaveDays] = useState(1);
   const [convertingLeave, setConvertingLeave] = useState(false);
 
-  // State for filtered MRs based on date selection
+  // State for filtered MRs
   const [filteredMrOptions, setFilteredMrOptions] = useState([]);
   const [dateValidation, setDateValidation] = useState({
     isValid: false,
     message: "",
     isHoliday: false,
     isSunday: false,
-    holidayName: ""
+    holidayName: "",
   });
 
+  // Fetch initial data
   useEffect(() => {
     fetchMRList();
     fetchAttendanceRecords();
     fetchHolidays();
   }, []);
 
-  // Fetch extra hours data when MR is selected
+  // Fetch extra hours when MR is selected in modal
   useEffect(() => {
-    if (selectedAttendanceMr) {
+    if (selectedAttendanceMr && startDate) {
       fetchExtraHoursData(selectedAttendanceMr);
     } else {
-      // Reset extra hours data when no MR is selected
-      setExtraHoursData({
-        totalExtraHours: 0,
-        totalExtraMinutes: 0,
-        leaveDaysAvailable: 0,
-        remainingMinutes: 0,
-        monthlyExtraHours: 0,
-        monthlyExtraMinutes: 0,
-        monthlyLeaveDaysAvailable: 0,
-        monthlyRemainingMinutes: 0,
-        attendanceRecordsWithExtraHours: [],
-        monthlyRecordsWithExtraHours: [],
-        loading: false,
-        useMonthlyOnly: true,
-      });
+      resetExtraHoursData();
     }
-  }, [selectedAttendanceMr]);
-
-  // Fetch extra hours for calendar view when MR is selected
-  useEffect(() => {
-    if (selectedMr && showCalendarView) {
-      fetchExtraHoursData(selectedMr._id);
-    }
-  }, [selectedMr, showCalendarView, currentMonth, currentYear]);
+  }, [selectedAttendanceMr, startDate]);
 
   // Update filtered MR options when date changes
   useEffect(() => {
     if (startDate) {
       validateAndFilterMRs(startDate);
     } else {
-      // If no date selected, show all MRs
-      setFilteredMrOptions(mrList.map((mr) => ({
-        value: mr._id,
-        label: `${mr.medicalRepName} (${mr.MRId})`,
-      })));
+      setFilteredMrOptions(
+        mrList.map((mr) => ({
+          value: mr._id,
+          label: `${mr.medicalRepName} (${mr.MRId})`,
+        }))
+      );
       setDateValidation({
         isValid: false,
         message: "Please select a date first",
         isHoliday: false,
         isSunday: false,
-        holidayName: ""
+        holidayName: "",
       });
-      setSelectedAttendanceMr(null);
     }
-  }, [startDate, mrList]);
+  }, [startDate, mrList, attendanceRecords]);
+
+  // Format date to YYYY-MM-DD for input fields
+  const formatDateForInput = (date) => {
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // Fix for date selection issue
+  const handleStartDateChange = (e) => {
+    const selectedDate = e.target.value;
+    setStartDate(selectedDate);
+    setSelectedDateForLeave(selectedDate);
+  };
 
   const fetchMRList = async () => {
     try {
       setLoading(true);
       const response = await axios.get(`${backendUrl}/api/staffs`);
       setMrList(response.data || []);
+      setFilteredMrOptions(
+        response.data.map((mr) => ({
+          value: mr._id,
+          label: `${mr.medicalRepName} (${mr.MRId})`,
+        }))
+      );
     } catch (err) {
       setError(err.message || "Failed to fetch MR list");
+      showToast("error", "Failed to fetch MR list");
     } finally {
       setLoading(false);
     }
@@ -240,6 +256,7 @@ const Attendance = () => {
       setAttendanceRecords(response.data || []);
     } catch (err) {
       console.error("Failed to fetch attendance records:", err);
+      showToast("error", "Failed to fetch attendance records");
     }
   };
 
@@ -253,7 +270,33 @@ const Attendance = () => {
     }
   };
 
-  // Validate date and filter MRs who haven't recorded attendance on that date
+  const resetExtraHoursData = () => {
+    setExtraHoursData({
+      totalExtraHours: 0,
+      totalExtraMinutes: 0,
+      leaveDaysAvailable: 0,
+      remainingMinutes: 0,
+      totalWorkedHours: 0,
+      totalWorkedMinutes: 0,
+      monthlyExtraHours: 0,
+      monthlyExtraMinutes: 0,
+      monthlyLeaveDaysAvailable: 0,
+      monthlyRemainingMinutes: 0,
+      monthlyWorkedHours: 0,
+      monthlyWorkedMinutes: 0,
+      attendanceRecordsWithExtraHours: [],
+      monthlyRecordsWithExtraHours: [],
+      loading: false,
+      useMonthlyOnly: true,
+      showLeaveDaysAvailable: 0,
+      showExtraHours: 0,
+      showExtraMinutes: 0,
+      showRemainingMinutes: 0,
+      showWorkedHours: 0,
+      isMonthlyData: false
+    });
+  };
+
   const validateAndFilterMRs = (date) => {
     // Check if date is Sunday
     if (isSunday(date)) {
@@ -262,7 +305,7 @@ const Attendance = () => {
         message: "Cannot record attendance on Sunday",
         isHoliday: false,
         isSunday: true,
-        holidayName: ""
+        holidayName: "",
       });
       setFilteredMrOptions([]);
       setSelectedAttendanceMr(null);
@@ -277,7 +320,7 @@ const Attendance = () => {
         message: `Cannot record attendance on holiday: ${holidayName}`,
         isHoliday: true,
         isSunday: false,
-        holidayName: holidayName
+        holidayName: holidayName,
       });
       setFilteredMrOptions([]);
       setSelectedAttendanceMr(null);
@@ -285,17 +328,17 @@ const Attendance = () => {
     }
 
     // Check if date is in the future
-    const selectedDate = new Date(date);
+    const selectedDate = new Date(date + 'T00:00:00');
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
+
     if (selectedDate > today) {
       setDateValidation({
         isValid: false,
         message: "Cannot record attendance for future dates",
         isHoliday: false,
         isSunday: false,
-        holidayName: ""
+        holidayName: "",
       });
       setFilteredMrOptions([]);
       setSelectedAttendanceMr(null);
@@ -303,34 +346,34 @@ const Attendance = () => {
     }
 
     // Date is valid, now filter MRs
-    const selectedDateStart = new Date(date);
-    selectedDateStart.setHours(0, 0, 0, 0);
-    
-    const selectedDateEnd = new Date(date);
-    selectedDateEnd.setHours(23, 59, 59, 999);
+    const selectedDateStart = new Date(date + 'T00:00:00');
+    const selectedDateEnd = new Date(date + 'T23:59:59');
 
     // Get MRs who have already recorded attendance on this date
     const mrIdsWithAttendance = attendanceRecords
-      .filter(record => {
+      .filter((record) => {
+        if (!record.loginTime) return false;
         const recordDate = new Date(record.loginTime);
         return recordDate >= selectedDateStart && recordDate <= selectedDateEnd;
       })
-      .map(record => record.userId?._id);
+      .map((record) => record.userId?._id || record.userId);
 
     // Filter MRs who haven't recorded attendance on this date
-    const availableMRs = mrList.filter(mr => !mrIdsWithAttendance.includes(mr._id));
+    const availableMRs = mrList.filter(
+      (mr) => !mrIdsWithAttendance.includes(mr._id)
+    );
 
     // Create dropdown options
     const options = availableMRs.map((mr) => ({
       value: mr._id,
       label: `${mr.medicalRepName} (${mr.MRId})`,
-      disabled: false
+      disabled: false,
     }));
 
     setFilteredMrOptions(options);
-    
+
     // Reset selected MR if it's not in the filtered list
-    if (selectedAttendanceMr && !availableMRs.find(mr => mr._id === selectedAttendanceMr)) {
+    if (selectedAttendanceMr && !availableMRs.find((mr) => mr._id === selectedAttendanceMr)) {
       setSelectedAttendanceMr(null);
     }
 
@@ -340,154 +383,189 @@ const Attendance = () => {
       message: `Valid working day. ${availableMRs.length} MRs available for attendance.`,
       isHoliday: false,
       isSunday: false,
-      holidayName: ""
+      holidayName: "",
     });
   };
 
-  // Fetch extra hours data for selected MR from backend
+  // Fetch extra hours data for selected MR
   const fetchExtraHoursData = async (mrId) => {
     try {
       setExtraHoursData(prev => ({ ...prev, loading: true }));
+
+      let year = currentYear;
+      let month = currentMonth;
       
-      // Get monthly extra hours for the current view month
-      const response = await axios.get(`${backendUrl}/api/attendance/extra-hours/${mrId}`, {
-        params: {
-          year: currentYear,
-          month: currentMonth
+      if (startDate) {
+        const dateObj = new Date(startDate + 'T00:00:00');
+        year = dateObj.getFullYear();
+        month = dateObj.getMonth();
+      }
+
+      const response = await axios.get(
+        `${backendUrl}/api/attendance/extra-hours/${mrId}`,
+        {
+          params: {
+            year: year,
+            month: month,
+          },
         }
-      });
-      
+      );
+
       if (response.data.success) {
         const data = response.data.data;
         
-        // Determine which leave days available to show
-        const showLeaveDaysAvailable = data.isMonthly ? 
-          data.monthlyLeaveDaysAvailable : data.leaveDaysAvailable;
+        const useMonthlyOnly = extraHoursData.useMonthlyOnly;
         
-        // Determine which extra hours to show
-        const showExtraHours = data.isMonthly ? 
-          data.monthlyExtraHours : data.totalExtraHours;
-        
-        // Determine which minutes to show
-        const showExtraMinutes = data.isMonthly ? 
-          data.monthlyExtraMinutes : data.totalExtraMinutes;
-        
-        // Determine which remaining minutes to show
-        const showRemainingMinutes = data.isMonthly ? 
-          data.monthlyRemainingMinutes : data.remainingMinutes;
-        
-        setExtraHoursData({
+        const showLeaveDaysAvailable = useMonthlyOnly && data.isMonthly
+          ? data.monthlyLeaveDaysAvailable
+          : data.leaveDaysAvailable;
+
+        const showExtraHours = useMonthlyOnly && data.isMonthly
+          ? data.monthlyExtraHours
+          : data.totalExtraHours;
+
+        const showExtraMinutes = useMonthlyOnly && data.isMonthly
+          ? data.monthlyExtraMinutes
+          : data.totalExtraMinutes;
+
+        const showRemainingMinutes = useMonthlyOnly && data.isMonthly
+          ? data.monthlyRemainingMinutes
+          : data.remainingMinutes;
+
+        const showWorkedHours = useMonthlyOnly && data.isMonthly
+          ? data.monthlyWorkedHours
+          : data.totalWorkedHours;
+
+        setExtraHoursData(prev => ({
+          ...prev,
           totalExtraHours: data.totalExtraHours || 0,
           totalExtraMinutes: data.totalExtraMinutes || 0,
           leaveDaysAvailable: data.leaveDaysAvailable || 0,
           remainingMinutes: data.remainingMinutes || 0,
+          totalWorkedHours: data.totalWorkedHours || 0,
+          totalWorkedMinutes: data.totalWorkedMinutes || 0,
           monthlyExtraHours: data.monthlyExtraHours || 0,
           monthlyExtraMinutes: data.monthlyExtraMinutes || 0,
           monthlyLeaveDaysAvailable: data.monthlyLeaveDaysAvailable || 0,
           monthlyRemainingMinutes: data.monthlyRemainingMinutes || 0,
+          monthlyWorkedHours: data.monthlyWorkedHours || 0,
+          monthlyWorkedMinutes: data.monthlyWorkedMinutes || 0,
           attendanceRecordsWithExtraHours: data.recordsWithExtraHours || [],
           monthlyRecordsWithExtraHours: data.monthlyRecordsWithExtraHours || [],
           loading: false,
-          useMonthlyOnly: extraHoursData.useMonthlyOnly,
           showLeaveDaysAvailable,
           showExtraHours,
           showExtraMinutes,
           showRemainingMinutes,
-          isMonthlyData: data.isMonthly
-        });
+          showWorkedHours,
+          isMonthlyData: data.isMonthly,
+        }));
       } else {
         throw new Error(response.data.message);
       }
     } catch (err) {
       console.error("Failed to fetch extra hours data:", err);
-      setExtraHoursData({
-        totalExtraHours: 0,
-        totalExtraMinutes: 0,
-        leaveDaysAvailable: 0,
-        remainingMinutes: 0,
-        monthlyExtraHours: 0,
-        monthlyExtraMinutes: 0,
-        monthlyLeaveDaysAvailable: 0,
-        monthlyRemainingMinutes: 0,
-        attendanceRecordsWithExtraHours: [],
-        monthlyRecordsWithExtraHours: [],
-        loading: false,
-        useMonthlyOnly: true,
-        showLeaveDaysAvailable: 0,
-        showExtraHours: 0,
-        showExtraMinutes: 0,
-        showRemainingMinutes: 0,
-        isMonthlyData: false
-      });
+      resetExtraHoursData();
       showToast("error", "Failed to load extra hours data");
     }
   };
 
   // Toggle between monthly and total extra hours
   const toggleUseMonthlyOnly = () => {
-    setExtraHoursData(prev => {
+    setExtraHoursData((prev) => {
       const useMonthlyOnly = !prev.useMonthlyOnly;
       
-      // Determine which values to show based on toggle
-      const showLeaveDaysAvailable = useMonthlyOnly ? 
-        prev.monthlyLeaveDaysAvailable : prev.leaveDaysAvailable;
-      
-      const showExtraHours = useMonthlyOnly ? 
-        prev.monthlyExtraHours : prev.totalExtraHours;
-      
-      const showExtraMinutes = useMonthlyOnly ? 
-        prev.monthlyExtraMinutes : prev.totalExtraMinutes;
-      
-      const showRemainingMinutes = useMonthlyOnly ? 
-        prev.monthlyRemainingMinutes : prev.remainingMinutes;
-      
+      const showLeaveDaysAvailable = useMonthlyOnly
+        ? prev.monthlyLeaveDaysAvailable
+        : prev.leaveDaysAvailable;
+
+      const showExtraHours = useMonthlyOnly
+        ? prev.monthlyExtraHours
+        : prev.totalExtraHours;
+
+      const showExtraMinutes = useMonthlyOnly
+        ? prev.monthlyExtraMinutes
+        : prev.totalExtraMinutes;
+
+      const showRemainingMinutes = useMonthlyOnly
+        ? prev.monthlyRemainingMinutes
+        : prev.remainingMinutes;
+
+      const showWorkedHours = useMonthlyOnly
+        ? prev.monthlyWorkedHours
+        : prev.totalWorkedHours;
+
       return {
         ...prev,
         useMonthlyOnly,
         showLeaveDaysAvailable,
         showExtraHours,
         showExtraMinutes,
-        showRemainingMinutes
+        showRemainingMinutes,
+        showWorkedHours,
       };
     });
   };
 
   // Format minutes to time string
   const formatMinutesToTime = (minutes) => {
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:00`;
+    const totalMinutes = Number(minutes) || 0;
+    const hours = Math.floor(totalMinutes / 60);
+    const mins = Math.floor(totalMinutes % 60);
+    const secs = 0;
+    return `${hours.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  // Format decimal hours to HH:MM string
+  const formatDecimalHoursToHHMM = (decimalHours) => {
+    const hours = Math.floor(decimalHours);
+    const minutes = Math.round((decimalHours - hours) * 60);
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+  };
+
+  // Format minutes to HH:MM string
+  const formatMinutesToHHMM = (minutes) => {
+    const totalMinutes = Number(minutes) || 0;
+    const hours = Math.floor(totalMinutes / 60);
+    const mins = Math.floor(totalMinutes % 60);
+    return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
   };
 
   // Format date for display
   const formatDate = (dateString) => {
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      weekday: 'short',
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
+    return date.toLocaleDateString("en-US", {
+      weekday: "short",
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
     });
   };
 
-  // Convert extra hours to leave
   const handleConvertToLeave = async () => {
     if (!selectedAttendanceMr || !selectedDateForLeave) {
       showToast("error", "Please select MR and date for leave");
       return;
     }
 
-    // Check which leave days are available based on selection
-    const availableLeaveDays = extraHoursData.useMonthlyOnly ? 
-      extraHoursData.monthlyLeaveDaysAvailable : extraHoursData.leaveDaysAvailable;
-    
-    if (availableLeaveDays < 1) {
-      const source = extraHoursData.useMonthlyOnly ? "monthly" : "total";
-      showToast("error", `Insufficient ${source} extra hours. Minimum 9 hours required for 1 leave day.`);
+    if (selectedLeaveDays < 1) {
+      showToast("error", "Please select at least 1 leave day");
       return;
     }
 
-    // Check if date is valid (not Sunday, not holiday)
+    const availableLeaveDays = extraHoursData.showLeaveDaysAvailable;
+    
+    if (availableLeaveDays < selectedLeaveDays) {
+      const source = extraHoursData.useMonthlyOnly ? "monthly" : "total";
+      showToast(
+        "error",
+        `Insufficient ${source} extra hours. Available: ${availableLeaveDays} days, Required: ${selectedLeaveDays} days`,
+      );
+      return;
+    }
+
     if (isSunday(selectedDateForLeave)) {
       showToast("error", "Cannot take leave on Sunday");
       return;
@@ -499,11 +577,10 @@ const Attendance = () => {
       return;
     }
 
-    // Check if date is in the future
-    const selectedDate = new Date(selectedDateForLeave);
+    const selectedDate = new Date(selectedDateForLeave + 'T00:00:00');
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
+
     if (selectedDate < today) {
       showToast("error", "Cannot convert leave for past dates");
       return;
@@ -515,29 +592,28 @@ const Attendance = () => {
       const convertData = {
         userId: selectedAttendanceMr,
         date: selectedDateForLeave,
-        hoursToConvert: 9, // Convert 9 hours to 1 leave day
-        useMonthlyOnly: extraHoursData.useMonthlyOnly
+        leaveDays: selectedLeaveDays,
+        useMonthlyOnly: extraHoursData.useMonthlyOnly,
       };
 
       const response = await axios.post(
         `${backendUrl}/api/attendance/convert-to-leave`,
-        convertData
+        convertData,
       );
 
       if (response.data.success) {
-        // Update extra hours data locally
+        const minutesDeducted = selectedLeaveDays * 480;
+        
         if (extraHoursData.useMonthlyOnly) {
-          // Deduct from monthly hours
-          const updatedMonthlyMinutes = extraHoursData.monthlyExtraMinutes - (9 * 60);
-          const updatedMonthlyLeaveDays = Math.max(0, Math.floor(updatedMonthlyMinutes / 540));
-          const updatedMonthlyRemainingMinutes = updatedMonthlyMinutes % 540;
+          const updatedMonthlyMinutes = Math.max(0, extraHoursData.monthlyExtraMinutes - minutesDeducted);
+          const updatedMonthlyLeaveDays = Math.max(0, Math.floor(updatedMonthlyMinutes / 480));
+          const updatedMonthlyRemainingMinutes = updatedMonthlyMinutes % 480;
 
-          // Also update total (since monthly is part of total)
-          const updatedTotalMinutes = extraHoursData.totalExtraMinutes - (9 * 60);
-          const updatedTotalLeaveDays = Math.max(0, Math.floor(updatedTotalMinutes / 540));
-          const updatedTotalRemainingMinutes = updatedTotalMinutes % 540;
+          const updatedTotalMinutes = Math.max(0, extraHoursData.totalExtraMinutes - minutesDeducted);
+          const updatedTotalLeaveDays = Math.max(0, Math.floor(updatedTotalMinutes / 480));
+          const updatedTotalRemainingMinutes = updatedTotalMinutes % 480;
 
-          setExtraHoursData(prev => ({
+          setExtraHoursData((prev) => ({
             ...prev,
             monthlyExtraMinutes: updatedMonthlyMinutes,
             monthlyExtraHours: parseFloat((updatedMonthlyMinutes / 60).toFixed(2)),
@@ -550,31 +626,28 @@ const Attendance = () => {
             showLeaveDaysAvailable: updatedMonthlyLeaveDays,
             showExtraHours: parseFloat((updatedMonthlyMinutes / 60).toFixed(2)),
             showExtraMinutes: updatedMonthlyMinutes,
-            showRemainingMinutes: updatedMonthlyRemainingMinutes
+            showRemainingMinutes: updatedMonthlyRemainingMinutes,
           }));
         } else {
-          // Deduct from total hours
-          const updatedTotalMinutes = extraHoursData.totalExtraMinutes - (9 * 60);
-          const updatedTotalLeaveDays = Math.max(0, Math.floor(updatedTotalMinutes / 540));
-          const updatedTotalRemainingMinutes = updatedTotalMinutes % 540;
+          const updatedTotalMinutes = Math.max(0, extraHoursData.totalExtraMinutes - minutesDeducted);
+          const updatedTotalLeaveDays = Math.max(0, Math.floor(updatedTotalMinutes / 480));
+          const updatedTotalRemainingMinutes = updatedTotalMinutes % 480;
 
-          // Also try to update monthly if possible
-          const selectedDateObj = new Date(selectedDateForLeave);
+          const selectedDateObj = new Date(selectedDateForLeave + 'T00:00:00');
           const selectedMonth = selectedDateObj.getMonth();
           const selectedYear = selectedDateObj.getFullYear();
-          
+
           let updatedMonthlyMinutes = extraHoursData.monthlyExtraMinutes;
           let updatedMonthlyLeaveDays = extraHoursData.monthlyLeaveDaysAvailable;
           let updatedMonthlyRemainingMinutes = extraHoursData.monthlyRemainingMinutes;
-          
-          // If the leave date is in the current month, deduct from monthly too
+
           if (selectedMonth === currentMonth && selectedYear === currentYear) {
-            updatedMonthlyMinutes = Math.max(0, extraHoursData.monthlyExtraMinutes - (9 * 60));
-            updatedMonthlyLeaveDays = Math.max(0, Math.floor(updatedMonthlyMinutes / 540));
-            updatedMonthlyRemainingMinutes = updatedMonthlyMinutes % 540;
+            updatedMonthlyMinutes = Math.max(0, extraHoursData.monthlyExtraMinutes - minutesDeducted);
+            updatedMonthlyLeaveDays = Math.max(0, Math.floor(updatedMonthlyMinutes / 480));
+            updatedMonthlyRemainingMinutes = updatedMonthlyMinutes % 480;
           }
 
-          setExtraHoursData(prev => ({
+          setExtraHoursData((prev) => ({
             ...prev,
             totalExtraMinutes: updatedTotalMinutes,
             totalExtraHours: parseFloat((updatedTotalMinutes / 60).toFixed(2)),
@@ -587,17 +660,16 @@ const Attendance = () => {
             showLeaveDaysAvailable: updatedTotalLeaveDays,
             showExtraHours: parseFloat((updatedTotalMinutes / 60).toFixed(2)),
             showExtraMinutes: updatedTotalMinutes,
-            showRemainingMinutes: updatedTotalRemainingMinutes
+            showRemainingMinutes: updatedTotalRemainingMinutes,
           }));
         }
 
-        showToast("success", "Leave successfully converted from extra hours!");
+        showToast("success", `${selectedLeaveDays} leave day${selectedLeaveDays > 1 ? 's' : ''} successfully converted from extra hours!`);
         setSelectedDateForLeave("");
+        setSelectedLeaveDays(1);
 
-        // Refresh attendance records
         fetchAttendanceRecords();
-        
-        // Refresh extra hours data
+
         if (selectedAttendanceMr) {
           fetchExtraHoursData(selectedAttendanceMr);
         }
@@ -611,17 +683,18 @@ const Attendance = () => {
   };
 
   // Helper functions for date calculations
-  const isSunday = (date) => {
-    const day = new Date(date).getDay();
+  const isSunday = (dateString) => {
+    const date = new Date(dateString + 'T00:00:00');
+    const day = date.getDay();
     return day === 0;
   };
 
-  const isHoliday = (date) => {
+  const isHoliday = (dateString) => {
     if (!Array.isArray(holidays) || holidays.length === 0) {
       return false;
     }
 
-    const checkDate = new Date(date);
+    const checkDate = new Date(dateString + 'T00:00:00');
     checkDate.setHours(0, 0, 0, 0);
 
     return holidays.some((holiday) => {
@@ -634,12 +707,12 @@ const Attendance = () => {
     });
   };
 
-  const getHolidayName = (date) => {
+  const getHolidayName = (dateString) => {
     if (!Array.isArray(holidays) || holidays.length === 0) {
       return null;
     }
 
-    const checkDate = new Date(date);
+    const checkDate = new Date(dateString + 'T00:00:00');
     checkDate.setHours(0, 0, 0, 0);
 
     const holiday = holidays.find((holiday) => {
@@ -665,25 +738,30 @@ const Attendance = () => {
     (mr) =>
       mr.medicalRepName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       mr.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      mr.contactNo?.includes(searchTerm)
+      mr.contactNo?.includes(searchTerm) ||
+      mr.MRId?.toLowerCase().includes(searchTerm.toLowerCase()),
   );
 
   // Pagination
   const totalPages = Math.ceil(filteredMRList.length / itemsPerPage);
   const currentMRs = filteredMRList.slice(
     (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
+    currentPage * itemsPerPage,
   );
 
   // Calendar functions
   const getAttendanceForDate = (date, mrId) => {
     if (!mrId) return null;
+    
     const dateString = date.toISOString().split("T")[0];
-    const records = attendanceRecords.filter(
-      (record) =>
-        record.userId?._id === mrId &&
-        new Date(record.loginTime).toDateString() === date.toDateString()
-    );
+    const records = attendanceRecords.filter((record) => {
+      if (!record.loginTime) return false;
+      const recordDate = new Date(record.loginTime);
+      const recordDateString = recordDate.toISOString().split("T")[0];
+      const recordUserId = record.userId?._id || record.userId;
+      return recordUserId === mrId && recordDateString === dateString;
+    });
+    
     return records.length > 0 ? records[0] : null;
   };
 
@@ -763,7 +841,10 @@ const Attendance = () => {
   // Calculate attendance statistics
   const getAttendanceStats = (mrId) => {
     const mrRecords = attendanceRecords.filter(
-      (record) => record.userId?._id === mrId
+      (record) => {
+        const recordUserId = record.userId?._id || record.userId;
+        return recordUserId === mrId;
+      }
     );
 
     const currentMonthStart = new Date(currentYear, currentMonth, 1);
@@ -773,12 +854,14 @@ const Attendance = () => {
 
     // Monthly attendance count
     const monthlyAttendance = mrRecords.filter((record) => {
+      if (!record.loginTime) return false;
       const recordDate = new Date(record.loginTime);
       return recordDate >= currentMonthStart && recordDate <= currentMonthEnd;
     }).length;
 
     // Annual attendance count
     const annualAttendance = mrRecords.filter((record) => {
+      if (!record.loginTime) return false;
       const recordDate = new Date(record.loginTime);
       return recordDate >= yearStart && recordDate <= yearEnd;
     }).length;
@@ -792,6 +875,7 @@ const Attendance = () => {
 
     const today = new Date();
     const todayRecord = mrRecords.find((record) => {
+      if (!record.loginTime) return false;
       const recordDate = new Date(record.loginTime);
       return (
         recordDate.toDateString() === today.toDateString() && !record.logoutTime
@@ -799,16 +883,17 @@ const Attendance = () => {
     });
 
     // Calculate extra hours for this MR
-    const mrExtraHoursRecords = mrRecords.filter(record => 
-      record.extraHoursInMinutes && record.extraHoursInMinutes > 0
+    const mrExtraHoursRecords = mrRecords.filter(
+      (record) => record.extraHoursInMinutes && record.extraHoursInMinutes > 0,
     );
-    
-    const totalExtraMinutes = mrExtraHoursRecords.reduce((sum, record) => 
-      sum + (record.extraHoursInMinutes || 0), 0
+
+    const totalExtraMinutes = mrExtraHoursRecords.reduce(
+      (sum, record) => sum + (record.extraHoursInMinutes || 0),
+      0,
     );
-    
+
     const extraHoursAvailable = totalExtraMinutes / 60;
-    const extraLeaveDaysAvailable = Math.floor(totalExtraMinutes / 540);
+    const extraLeaveDaysAvailable = Math.floor(totalExtraMinutes / 480);
 
     return {
       monthly: monthlyAttendance,
@@ -817,7 +902,7 @@ const Attendance = () => {
       currentStatus: todayRecord ? "Logged In" : "Logged Out",
       currentAttendanceId: todayRecord?._id,
       extraHoursAvailable: parseFloat(extraHoursAvailable.toFixed(2)),
-      extraLeaveDaysAvailable
+      extraLeaveDaysAvailable,
     };
   };
 
@@ -847,19 +932,16 @@ const Attendance = () => {
       return;
     }
 
-    // Validate time
     if (startTime >= endTime) {
       showToast("error", "End time must be after start time");
       return;
     }
 
-    // Check if date is Sunday
     if (isSunday(startDate)) {
       showToast("error", "Cannot record attendance on Sunday");
       return;
     }
 
-    // Check if date is holiday
     if (isHoliday(startDate)) {
       const holidayName = getHolidayName(startDate);
       showToast("error", `Cannot record attendance on holiday: ${holidayName}`);
@@ -869,19 +951,23 @@ const Attendance = () => {
     try {
       setAttendanceLoading(true);
 
-      const loginDateTime = new Date(`${startDate}T${startTime}`);
-      const logoutDateTime = new Date(`${startDate}T${endTime}`);
+      const loginDateTime = new Date(`${startDate}T${startTime}:00`);
+      const logoutDateTime = new Date(`${startDate}T${endTime}:00`);
+
+      if (logoutDateTime < loginDateTime) {
+        logoutDateTime.setDate(logoutDateTime.getDate() + 1);
+      }
 
       const attendanceData = {
         userId: selectedAttendanceMr,
         loginTime: loginDateTime.toISOString(),
         logoutTime: logoutDateTime.toISOString(),
-        workingHoursPerDay: 9 // 9 hours per day
+        workingHoursPerDay: 8,
       };
 
       const response = await axios.post(
         `${backendUrl}/api/attendance/record`,
-        attendanceData
+        attendanceData,
       );
 
       if (response.data.success) {
@@ -889,23 +975,18 @@ const Attendance = () => {
         setShowAddAttendanceModal(false);
         setSelectedAttendanceMr(null);
         setStartDate("");
-        setStartTime("");
-        setEndTime("");
-        
-        // Reset date validation
+        setStartTime("09:00");
+        setEndTime("17:00");
+
         setDateValidation({
           isValid: false,
           message: "Please select a date first",
           isHoliday: false,
           isSunday: false,
-          holidayName: ""
+          holidayName: "",
         });
 
-        // Refresh attendance records and extra hours data
         fetchAttendanceRecords();
-        if (selectedAttendanceMr) {
-          fetchExtraHoursData(selectedAttendanceMr);
-        }
       }
     } catch (err) {
       const errorMessage = err.response?.data?.message || err.message;
@@ -920,39 +1001,45 @@ const Attendance = () => {
     setShowAddAttendanceModal(true);
     setSelectedAttendanceMr(null);
     setSelectedDateForLeave("");
-    setStartDate("");
-    setStartTime("");
-    setEndTime("");
+    setSelectedLeaveDays(1);
+    
+    const today = new Date();
+    const todayString = formatDateForInput(today);
+    
+    setStartDate(todayString);
+    setSelectedDateForLeave(todayString);
+    setStartTime("09:00");
+    setEndTime("17:00");
 
-    // Reset date validation
     setDateValidation({
       isValid: false,
       message: "Please select a date first",
       isHoliday: false,
       isSunday: false,
-      holidayName: ""
+      holidayName: "",
     });
-
-    // Set default dates to today
-    const today = new Date();
-    const todayString = today.toISOString().split("T")[0];
-    setStartDate(todayString);
-
-    // Set default times (9 AM to 5 PM)
-    setStartTime("09:00");
-    setEndTime("17:00");
   };
 
   // Get month name
   const getMonthName = (month) => {
     const monthNames = [
-      "January", "February", "March", "April", "May", "June",
-      "July", "August", "September", "October", "November", "December"
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December",
     ];
     return monthNames[month];
   };
 
-  // Render monthly calendar
+  // Render monthly calendar - FIXED DUPLICATE KEY ISSUE
   const renderMonthlyCalendar = () => {
     const days = getDaysInMonth();
     const monthNames = [
@@ -972,13 +1059,13 @@ const Attendance = () => {
 
     const attendanceStats = selectedMr
       ? getAttendanceStats(selectedMr._id)
-      : { 
-          monthly: 0, 
-          annual: 0, 
-          percentage: 0, 
+      : {
+          monthly: 0,
+          annual: 0,
+          percentage: 0,
           currentStatus: "Logged Out",
           extraHoursAvailable: 0,
-          extraLeaveDaysAvailable: 0
+          extraLeaveDaysAvailable: 0,
         };
 
     const today = new Date();
@@ -1004,7 +1091,7 @@ const Attendance = () => {
                 Monthly Attendance: {attendanceStats.monthly}
               </div>
             </div>
-            
+
             {attendanceStats.extraLeaveDaysAvailable > 0 && (
               <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-2">
                 <div className="text-sm font-medium text-green-800">
@@ -1012,20 +1099,20 @@ const Attendance = () => {
                 </div>
               </div>
             )}
-            
+
             <div className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-2">
               <div className="text-sm font-medium text-gray-800">
                 Status: {attendanceStats.currentStatus}
               </div>
             </div>
-            
+
             <button
               onClick={() => navigateMonth("prev")}
               className="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer transition-colors"
             >
               <ChevronLeft size={20} />
             </button>
-            
+
             <button
               onClick={() => navigateMonth("next")}
               disabled={!canNavigateNext("next", "monthly")}
@@ -1047,10 +1134,12 @@ const Attendance = () => {
               <div className="flex items-center gap-3">
                 <Clock className="text-blue-600" size={20} />
                 <div>
-                  <h3 className="font-semibold text-blue-800">Extra Hours Summary for {getMonthName(currentMonth)}</h3>
+                  <h3 className="font-semibold text-blue-800">
+                    Extra Hours Summary for {getMonthName(currentMonth)}
+                  </h3>
                   <p className="text-sm text-blue-600">
-                    Monthly: {extraHoursData.monthlyExtraHours.toFixed(2)} hours • 
-                    Total: {extraHoursData.totalExtraHours.toFixed(2)} hours
+                    Monthly: {formatDecimalHoursToHHMM(extraHoursData.monthlyExtraHours)} hours
+                    • Total: {formatDecimalHoursToHHMM(extraHoursData.totalExtraHours)} hours
                   </p>
                 </div>
               </div>
@@ -1059,7 +1148,7 @@ const Attendance = () => {
                   {extraHoursData.monthlyLeaveDaysAvailable} Leave Days Available
                 </div>
                 <div className="text-sm text-gray-600">
-                  (9 hours = 1 leave day)
+                  (8 hours = 1 leave day)
                 </div>
               </div>
             </div>
@@ -1067,9 +1156,9 @@ const Attendance = () => {
         )}
 
         <div className="grid grid-cols-7 gap-2 mb-6">
-          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day, idx) => (
             <div
-              key={day}
+              key={`${currentYear}-${currentMonth}-${day}-${idx}`}
               className={`text-center font-semibold py-2 ${
                 day === "Sun" ? "text-red-600" : "text-gray-700"
               }`}
@@ -1080,43 +1169,35 @@ const Attendance = () => {
 
           {days.map((date, index) => {
             if (date === null) {
-              return <div key={`empty-${index}`} className="h-12" />;
+              return <div key={`empty-${currentYear}-${currentMonth}-${index}`} className="h-12" />;
             }
 
             const attendance = getAttendanceForDate(date, selectedMr?._id);
-            const isSundayDay = isSunday(date);
-            const isHolidayDay = isHoliday(date);
+            const isSundayDay = isSunday(date.toISOString().split('T')[0]);
+            const isHolidayDay = isHoliday(date.toISOString().split('T')[0]);
 
             const isCurrentMonth = date.getMonth() === currentMonth;
             const isToday = date.toDateString() === new Date().toDateString();
             const isFuture = isFutureDate(date);
 
-            // Determine cell style
             let cellStyle =
               "h-12 flex items-center justify-center rounded-lg border-2 relative ";
 
             if (attendance) {
               if (attendance.isLeaveDay) {
-                // Leave day - purple
                 cellStyle += "bg-purple-500 text-white border-purple-600 ";
               } else if (attendance.extraHoursInMinutes > 0) {
-                // Has extra hours - dark green
                 cellStyle += "bg-green-600 text-white border-green-700 ";
               } else {
-                // Regular attendance - light green
                 cellStyle += "bg-green-400 text-white border-green-500 ";
               }
             } else if (isSundayDay) {
-              // Sundays - red
               cellStyle += "bg-red-400 text-white border-red-500 ";
             } else if (isHolidayDay) {
-              // Holidays - gray
               cellStyle += "bg-gray-400 text-white border-gray-500 ";
             } else if (isToday) {
-              // Today - blue highlight
               cellStyle += "border-blue-500 bg-blue-50 ";
             } else {
-              // Normal working days
               cellStyle += "border-gray-200 bg-gray-50 ";
             }
 
@@ -1125,34 +1206,36 @@ const Attendance = () => {
             }
 
             // Show extra hours badge
-            const hasExtraHours = attendance && attendance.extraHoursInMinutes > 0;
-            const extraHoursDisplay = hasExtraHours ? 
-              `+${Math.floor(attendance.extraHoursInMinutes / 60)}h${attendance.extraHoursInMinutes % 60}m` : "";
+            const hasExtraHours =
+              attendance && attendance.extraHoursInMinutes > 0;
+            const extraHoursDisplay = hasExtraHours
+              ? `+${Math.floor(attendance.extraHoursInMinutes / 60)}h${(attendance.extraHoursInMinutes % 60).toString().padStart(2, '0')}m`
+              : "";
 
             return (
               <div
-                key={date.toISOString()}
+                key={`${currentYear}-${currentMonth}-${date.toISOString()}-${index}`}
                 className={cellStyle.trim()}
                 title={
                   isHolidayDay
-                    ? `Holiday: ${getHolidayName(date)}`
+                    ? `Holiday: ${getHolidayName(date.toISOString().split('T')[0])}`
                     : attendance
-                    ? `${attendance.isLeaveDay ? 'Leave Day' : 'Present'}\nLogin: ${new Date(
-                        attendance.loginTime
-                      ).toLocaleTimeString()} ${
-                        attendance.logoutTime
-                          ? `\nLogout: ${new Date(
-                              attendance.logoutTime
-                            ).toLocaleTimeString()}`
-                          : ""
-                      }${
-                        attendance.extraHoursInMinutes > 0
-                          ? `\nExtra Hours: ${attendance.extraHours}`
-                          : ""
-                      }`
-                    : isSundayDay
-                    ? "Sunday"
-                    : "No attendance"
+                      ? `${attendance.isLeaveDay ? "Leave Day" : "Present"}\nLogin: ${new Date(
+                          attendance.loginTime,
+                        ).toLocaleTimeString()} ${
+                          attendance.logoutTime
+                            ? `\nLogout: ${new Date(
+                                attendance.logoutTime,
+                              ).toLocaleTimeString()}`
+                            : ""
+                        }${
+                          attendance.extraHoursInMinutes > 0
+                            ? `\nExtra Hours: ${attendance.extraHours}`
+                            : ""
+                        }`
+                      : isSundayDay
+                        ? "Sunday"
+                        : "No attendance"
                 }
               >
                 {date.getDate()}
@@ -1223,7 +1306,7 @@ const Attendance = () => {
               <div className="text-lg font-semibold text-gray-700">
                 Extra Hours:{" "}
                 <span className="text-2xl font-bold text-yellow-600">
-                  {attendanceStats.extraHoursAvailable}h
+                  {formatDecimalHoursToHHMM(attendanceStats.extraHoursAvailable)}
                 </span>
               </div>
             )}
@@ -1258,13 +1341,14 @@ const Attendance = () => {
                   setShowAddAttendanceModal(false);
                   setSelectedAttendanceMr(null);
                   setSelectedDateForLeave("");
+                  setSelectedLeaveDays(1);
                   setStartDate("");
                   setDateValidation({
                     isValid: false,
                     message: "Please select a date first",
                     isHoliday: false,
                     isSunday: false,
-                    holidayName: ""
+                    holidayName: "",
                   });
                 }}
                 className="text-gray-400 hover:text-gray-600 text-2xl"
@@ -1276,7 +1360,7 @@ const Attendance = () => {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               {/* Left side: Record Attendance Form */}
               <div>
-                {/* Date Selection - NOW FIRST */}
+                {/* Date Selection */}
                 <div className="mb-6">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Date <span className="text-red-500">*</span>
@@ -1286,7 +1370,7 @@ const Attendance = () => {
                     <input
                       type="date"
                       value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
+                      onChange={handleStartDateChange}
                       className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                       required
                     />
@@ -1298,7 +1382,10 @@ const Attendance = () => {
                   <div className="mb-6">
                     {dateValidation.isSunday ? (
                       <div className="bg-red-50 border border-red-200 rounded-md p-3 flex items-start gap-2">
-                        <AlertCircle size={20} className="text-red-600 flex-shrink-0 mt-0.5" />
+                        <AlertCircle
+                          size={20}
+                          className="text-red-600 flex-shrink-0 mt-0.5"
+                        />
                         <div>
                           <p className="text-red-700 text-sm font-medium">
                             Cannot record attendance on Sunday
@@ -1310,7 +1397,10 @@ const Attendance = () => {
                       </div>
                     ) : dateValidation.isHoliday ? (
                       <div className="bg-red-50 border border-red-200 rounded-md p-3 flex items-start gap-2">
-                        <AlertCircle size={20} className="text-red-600 flex-shrink-0 mt-0.5" />
+                        <AlertCircle
+                          size={20}
+                          className="text-red-600 flex-shrink-0 mt-0.5"
+                        />
                         <div>
                           <p className="text-red-700 text-sm font-medium">
                             Cannot record attendance on holiday
@@ -1322,21 +1412,27 @@ const Attendance = () => {
                       </div>
                     ) : dateValidation.isValid ? (
                       <div className="bg-green-50 border border-green-200 rounded-md p-3 flex items-start gap-2">
-                        <CalendarDays size={20} className="text-green-600 flex-shrink-0 mt-0.5" />
+                        <CalendarDays
+                          size={20}
+                          className="text-green-600 flex-shrink-0 mt-0.5"
+                        />
                         <div>
                           <p className="text-green-700 text-sm font-medium">
                             {dateValidation.message}
                           </p>
                           <p className="text-green-600 text-xs mt-1">
-                            {filteredMrOptions.length === 0 
-                              ? "All MRs have already recorded attendance for this date" 
+                            {filteredMrOptions.length === 0
+                              ? "All MRs have already recorded attendance for this date"
                               : "Select an MR from the list below"}
                           </p>
                         </div>
                       </div>
                     ) : (
                       <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3 flex items-start gap-2">
-                        <AlertCircle size={20} className="text-yellow-600 flex-shrink-0 mt-0.5" />
+                        <AlertCircle
+                          size={20}
+                          className="text-yellow-600 flex-shrink-0 mt-0.5"
+                        />
                         <div>
                           <p className="text-yellow-700 text-sm font-medium">
                             {dateValidation.message}
@@ -1347,11 +1443,12 @@ const Attendance = () => {
                   </div>
                 )}
 
-                {/* MR Selection Dropdown - ONLY SHOW IF DATE IS VALID */}
+                {/* MR Selection Dropdown */}
                 {dateValidation.isValid && filteredMrOptions.length > 0 && (
                   <div className="mb-6">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Select Medical Representative <span className="text-red-500">*</span>
+                      Select Medical Representative{" "}
+                      <span className="text-red-500">*</span>
                     </label>
                     <CustomDropdown
                       value={selectedAttendanceMr}
@@ -1359,16 +1456,21 @@ const Attendance = () => {
                       options={filteredMrOptions}
                       placeholder="Select MR"
                       required={true}
-                      disabled={!dateValidation.isValid || filteredMrOptions.length === 0}
+                      disabled={
+                        !dateValidation.isValid ||
+                        filteredMrOptions.length === 0
+                      }
                     />
                     <div className="mt-2 flex items-center gap-2 text-sm text-gray-500">
                       <Users size={14} />
-                      <span>{filteredMrOptions.length} MRs available for this date</span>
+                      <span>
+                        {filteredMrOptions.length} MRs available for this date
+                      </span>
                     </div>
                   </div>
                 )}
 
-                {/* Start & End Time - ONLY SHOW IF MR IS SELECTED */}
+                {/* Start & End Time */}
                 {selectedAttendanceMr && (
                   <>
                     <div className="grid grid-cols-2 gap-4 mb-6">
@@ -1410,11 +1512,11 @@ const Attendance = () => {
                       <div className="flex items-center gap-2 mb-2">
                         <Briefcase size={16} className="text-blue-600" />
                         <p className="text-sm font-medium text-blue-800">
-                          Standard Working Hours: 9 hours per day (9 AM - 6 PM)
+                          Standard Working Hours: 8 hours per day (9 AM - 5 PM)
                         </p>
                       </div>
                       <p className="text-xs text-blue-600">
-                        Hours worked beyond 9 hours will be counted as extra hours. 9 extra hours = 1 leave day.
+                        Hours worked beyond 8 hours will be counted as extra hours. 8 extra hours = 1 leave day.
                       </p>
                     </div>
 
@@ -1453,7 +1555,7 @@ const Attendance = () => {
                 )}
 
                 {/* Message when no MRs available for selected date */}
-                {dateValidation.isValid && filteredMrOptions.length === 0 && (
+                {/* {dateValidation.isValid && filteredMrOptions.length === 0 && (
                   <div className="mt-6 text-center py-8 bg-gray-50 rounded-lg border border-gray-200">
                     <User size={48} className="mx-auto text-gray-400 mb-3" />
                     <p className="text-gray-500 font-medium">
@@ -1463,7 +1565,7 @@ const Attendance = () => {
                       All MRs have already recorded attendance for {startDate}
                     </p>
                   </div>
-                )}
+                )} */}
               </div>
 
               {/* Right side: Extra Hours & Leave Management */}
@@ -1474,7 +1576,10 @@ const Attendance = () => {
 
                 {!selectedAttendanceMr ? (
                   <div className="text-center py-8 bg-gray-50 rounded-lg border border-gray-200">
-                    <Briefcase size={48} className="mx-auto text-gray-400 mb-3" />
+                    <Briefcase
+                      size={48}
+                      className="mx-auto text-gray-400 mb-3"
+                    />
                     <p className="text-gray-500 font-medium">
                       Select an MR to view extra hours
                     </p>
@@ -1485,7 +1590,9 @@ const Attendance = () => {
                 ) : extraHoursData.loading ? (
                   <div className="text-center py-8">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-                    <p className="text-gray-500 mt-3">Loading extra hours data...</p>
+                    <p className="text-gray-500 mt-3">
+                      Loading extra hours data...
+                    </p>
                   </div>
                 ) : extraHoursData.showExtraHours > 0 ? (
                   <>
@@ -1494,7 +1601,9 @@ const Attendance = () => {
                       <div className="flex items-center gap-2">
                         <CalendarRange size={18} className="text-blue-600" />
                         <span className="font-medium text-gray-700">
-                          {extraHoursData.useMonthlyOnly ? 'Monthly Extra Hours' : 'Total Extra Hours'}
+                          {extraHoursData.useMonthlyOnly
+                            ? "Monthly Extra Hours"
+                            : "Total Extra Hours"}
                         </span>
                       </div>
                       <button
@@ -1502,7 +1611,9 @@ const Attendance = () => {
                         className="flex items-center gap-2 px-3 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-md text-sm transition-colors"
                       >
                         <CalendarIcon size={14} />
-                        {extraHoursData.useMonthlyOnly ? 'Show Total' : 'Show Monthly'}
+                        {extraHoursData.useMonthlyOnly
+                          ? "Show Total"
+                          : "Show Monthly"}
                       </button>
                     </div>
 
@@ -1510,44 +1621,73 @@ const Attendance = () => {
                     <div className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-5">
                       <h3 className="text-lg font-semibold text-blue-800 mb-4 flex items-center gap-2">
                         <Clock size={20} />
-                        {extraHoursData.useMonthlyOnly ? 'Monthly' : 'Total'} Extra Working Hours Summary
+                        {extraHoursData.useMonthlyOnly
+                          ? "Monthly"
+                          : "Total"}{" "}
+                        Extra Working Hours Summary
                       </h3>
 
                       <div className="space-y-4">
                         <div className="flex justify-between items-center bg-white p-3 rounded-lg shadow-sm">
                           <div>
                             <p className="text-gray-700 font-medium">
-                              {extraHoursData.useMonthlyOnly ? 'Monthly' : 'Total'} Extra Hours
+                              Total Worked Hours
                             </p>
                             <p className="text-xs text-gray-500">
-                              {extraHoursData.useMonthlyOnly 
-                                ? 'Hours beyond 9-hour workday this month' 
-                                : 'Total hours beyond 9-hour workday'}
+                              {extraHoursData.useMonthlyOnly
+                                ? "This month"
+                                : "All time"}
                             </p>
                           </div>
                           <span className="text-2xl font-bold text-blue-700">
-                            {extraHoursData.showExtraHours.toFixed(2)} hrs
+                            {formatDecimalHoursToHHMM(extraHoursData.showWorkedHours)}
                           </span>
                         </div>
 
                         <div className="flex justify-between items-center bg-white p-3 rounded-lg shadow-sm">
                           <div>
-                            <p className="text-gray-700 font-medium">Leave Days Available</p>
-                            <p className="text-xs text-gray-500">9 hours = 1 leave day</p>
+                            <p className="text-gray-700 font-medium">
+                              {extraHoursData.useMonthlyOnly
+                                ? "Monthly"
+                                : "Total"}{" "}
+                              Extra Hours
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {extraHoursData.useMonthlyOnly
+                                ? "Hours beyond 8-hour workday this month"
+                                : "Total hours beyond 8-hour workday"}
+                            </p>
                           </div>
                           <span className="text-2xl font-bold text-green-700">
-                            {extraHoursData.showLeaveDaysAvailable} days
+                            {formatMinutesToHHMM(extraHoursData.showExtraMinutes)}
                           </span>
                         </div>
 
                         <div className="flex justify-between items-center bg-white p-3 rounded-lg shadow-sm">
                           <div>
-                            <p className="text-gray-700 font-medium">Remaining Hours</p>
-                            <p className="text-xs text-gray-500">After leave conversion</p>
+                            <p className="text-gray-700 font-medium">
+                              Leave Days Available
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              8 extra hours = 1 leave day
+                            </p>
+                          </div>
+                          <span className="text-2xl font-bold text-purple-700">
+                            {extraHoursData.showLeaveDaysAvailable} day{extraHoursData.showLeaveDaysAvailable !== 1 ? 's' : ''}
+                          </span>
+                        </div>
+
+                        <div className="flex justify-between items-center bg-white p-3 rounded-lg shadow-sm">
+                          <div>
+                            <p className="text-gray-700 font-medium">
+                              Remaining Hours
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              After leave conversion
+                            </p>
                           </div>
                           <span className="text-xl font-bold text-gray-700">
-                            {Math.floor(extraHoursData.showRemainingMinutes / 60)}h{" "}
-                            {extraHoursData.showRemainingMinutes % 60}m
+                            {formatMinutesToHHMM(extraHoursData.showRemainingMinutes)}
                           </span>
                         </div>
 
@@ -1556,14 +1696,17 @@ const Attendance = () => {
                           <div className="mt-3 pt-3 border-t border-blue-100">
                             <div className="flex items-center gap-2 text-sm text-blue-600">
                               <Info size={14} />
-                              <span>Total available extra hours: {extraHoursData.totalExtraHours.toFixed(2)} hours</span>
+                              <span>
+                                Total available extra hours:{" "}
+                                {formatDecimalHoursToHHMM(extraHoursData.totalExtraHours)}
+                                ({Math.floor(extraHoursData.totalExtraMinutes / 480)} days)
+                              </span>
                             </div>
                           </div>
                         )}
                       </div>
                     </div>
-
-                    {/* Convert to Leave Section */}
+{/* 
                     <div className="mb-6 bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-lg p-5">
                       <h3 className="text-lg font-semibold text-green-800 mb-4 flex items-center gap-2">
                         <PlusCircle size={20} />
@@ -1582,9 +1725,47 @@ const Attendance = () => {
                               setSelectedDateForLeave(e.target.value)
                             }
                             className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"
-                            min={new Date().toISOString().split('T')[0]}
+                            min={new Date().toISOString().split("T")[0]}
                           />
                         </div>
+
+                        {selectedDateForLeave && (
+                          <div className="mb-4">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Number of Leave Days
+                            </label>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => setSelectedLeaveDays(prev => Math.max(1, prev - 1))}
+                                disabled={selectedLeaveDays <= 1}
+                                className="px-3 py-1 bg-gray-200 rounded disabled:opacity-50"
+                              >
+                                -
+                              </button>
+                              <input
+                                type="number"
+                                min="1"
+                                max={extraHoursData.showLeaveDaysAvailable}
+                                value={selectedLeaveDays}
+                                onChange={(e) => {
+                                  const value = parseInt(e.target.value) || 1;
+                                  setSelectedLeaveDays(Math.min(Math.max(1, value), extraHoursData.showLeaveDaysAvailable));
+                                }}
+                                className="w-20 text-center border border-gray-300 rounded-md px-2 py-1"
+                              />
+                              <button
+                                onClick={() => setSelectedLeaveDays(prev => Math.min(extraHoursData.showLeaveDaysAvailable, prev + 1))}
+                                disabled={selectedLeaveDays >= extraHoursData.showLeaveDaysAvailable}
+                                className="px-3 py-1 bg-gray-200 rounded disabled:opacity-50"
+                              >
+                                +
+                              </button>
+                              <span className="text-sm text-gray-600 ml-2">
+                                of {extraHoursData.showLeaveDaysAvailable} available
+                              </span>
+                            </div>
+                          </div>
+                        )}
 
                         {selectedDateForLeave && (
                           <div>
@@ -1606,6 +1787,9 @@ const Attendance = () => {
                                 <p className="text-green-700 text-sm font-medium">
                                   ✅ Valid date for leave
                                 </p>
+                                <p className="text-green-600 text-xs mt-1">
+                                  Converting {selectedLeaveDays} day{selectedLeaveDays > 1 ? 's' : ''} ({selectedLeaveDays * 8} hours)
+                                </p>
                               </div>
                             )}
                           </div>
@@ -1614,7 +1798,11 @@ const Attendance = () => {
                         <div className="flex items-center gap-2 text-sm text-gray-600 bg-gray-50 p-2 rounded">
                           <Info size={14} />
                           <span>
-                            Using {extraHoursData.useMonthlyOnly ? 'monthly' : 'total'} extra hours for conversion
+                            Using{" "}
+                            {extraHoursData.useMonthlyOnly
+                              ? "monthly"
+                              : "total"}{" "}
+                            extra hours for conversion
                           </span>
                         </div>
 
@@ -1623,14 +1811,16 @@ const Attendance = () => {
                           disabled={
                             convertingLeave ||
                             !selectedDateForLeave ||
-                            extraHoursData.showLeaveDaysAvailable < 1 ||
+                            extraHoursData.showLeaveDaysAvailable < selectedLeaveDays ||
+                            selectedLeaveDays < 1 ||
                             isSunday(selectedDateForLeave) ||
                             isHoliday(selectedDateForLeave)
                           }
                           className={`w-full py-3 px-4 rounded-lg flex items-center justify-center gap-2 ${
                             convertingLeave ||
                             !selectedDateForLeave ||
-                            extraHoursData.showLeaveDaysAvailable < 1 ||
+                            extraHoursData.showLeaveDaysAvailable < selectedLeaveDays ||
+                            selectedLeaveDays < 1 ||
                             isSunday(selectedDateForLeave) ||
                             isHoliday(selectedDateForLeave)
                               ? "bg-gray-400 cursor-not-allowed"
@@ -1645,34 +1835,39 @@ const Attendance = () => {
                           ) : (
                             <>
                               <PlusCircle size={18} />
-                              Convert 9 Hours to 1 Leave Day
+                              Convert {selectedLeaveDays * 8} Hours to {selectedLeaveDays} Leave Day{selectedLeaveDays > 1 ? 's' : ''}
                             </>
                           )}
                         </button>
 
                         <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded">
                           <AlertCircle size={12} className="inline mr-1" />
-                          Each leave day requires 9 extra working hours. After conversion, the leave day will be marked in attendance records.
+                          Each leave day requires 8 extra working hours. After conversion, the leave day will be marked in attendance records.
                         </div>
                       </div>
-                    </div>
+                    </div> */}
 
                     {/* Extra Hours Breakdown */}
-                    {extraHoursData.attendanceRecordsWithExtraHours.length > 0 && (
+                    {(extraHoursData.useMonthlyOnly
+                      ? extraHoursData.monthlyRecordsWithExtraHours.length
+                      : extraHoursData.attendanceRecordsWithExtraHours.length) > 0 && (
                       <div className="mt-4">
                         <h4 className="font-medium text-gray-700 mb-3 flex items-center gap-2">
                           <Calendar size={16} />
-                          {extraHoursData.useMonthlyOnly ? 'Monthly' : 'Total'} Extra Hours Breakdown
+                          {extraHoursData.useMonthlyOnly
+                            ? "Monthly"
+                            : "Total"}{" "}
+                          Extra Hours Breakdown
                         </h4>
                         <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
-                          {(extraHoursData.useMonthlyOnly 
-                            ? extraHoursData.monthlyRecordsWithExtraHours 
+                          {(extraHoursData.useMonthlyOnly
+                            ? extraHoursData.monthlyRecordsWithExtraHours
                             : extraHoursData.attendanceRecordsWithExtraHours
                           )
                             .slice(0, 10)
                             .map((record, index) => (
                               <div
-                                key={index}
+                                key={`${record.date}-${index}-${extraHoursData.useMonthlyOnly ? 'monthly' : 'total'}`}
                                 className="flex justify-between items-center text-sm bg-gradient-to-r from-blue-50 to-indigo-50 p-3 rounded-lg border border-blue-100"
                               >
                                 <div>
@@ -1680,12 +1875,12 @@ const Attendance = () => {
                                     {formatDate(record.date)}
                                   </span>
                                   <p className="text-xs text-gray-500 mt-1">
-                                    Extra hours earned
+                                    Worked: {record.workedHours.toFixed(2)}h • Extra: +{formatMinutesToHHMM(record.extraHoursInMinutes)}
                                   </p>
                                 </div>
                                 <div className="text-right">
                                   <span className="font-bold text-blue-700 text-lg">
-                                    +{formatMinutesToTime(record.extraHoursInMinutes).slice(0, 5)}
+                                    +{formatMinutesToHHMM(record.extraHoursInMinutes)}
                                   </span>
                                   <p className="text-xs text-gray-500 mt-1">
                                     Total: {record.totalTime}
@@ -1693,16 +1888,17 @@ const Attendance = () => {
                                 </div>
                               </div>
                             ))}
-                          {(extraHoursData.useMonthlyOnly 
-                            ? extraHoursData.monthlyRecordsWithExtraHours.length 
-                            : extraHoursData.attendanceRecordsWithExtraHours.length
-                          ) > 10 && (
+                          {(extraHoursData.useMonthlyOnly
+                            ? extraHoursData.monthlyRecordsWithExtraHours.length
+                            : extraHoursData.attendanceRecordsWithExtraHours
+                                .length) > 10 && (
                             <div className="text-center text-xs text-gray-500 bg-gray-100 p-2 rounded">
                               +
-                              {(extraHoursData.useMonthlyOnly 
-                                ? extraHoursData.monthlyRecordsWithExtraHours.length 
-                                : extraHoursData.attendanceRecordsWithExtraHours.length
-                              ) - 10}{" "}
+                              {(extraHoursData.useMonthlyOnly
+                                ? extraHoursData.monthlyRecordsWithExtraHours
+                                    .length
+                                : extraHoursData.attendanceRecordsWithExtraHours
+                                    .length) - 10}{" "}
                               more records
                             </div>
                           )}
@@ -1717,8 +1913,7 @@ const Attendance = () => {
                       No extra hours available
                     </p>
                     <p className="text-sm text-gray-400 mt-1 max-w-sm mx-auto">
-                      This MR hasn't worked beyond the standard 9-hour workday yet. 
-                      Extra hours are calculated when working hours exceed 9 hours per day.
+                      This MR hasn't worked beyond the standard 8-hour workday yet. Extra hours are calculated when working hours exceed 8 hours per day.
                     </p>
                   </div>
                 )}
@@ -1783,23 +1978,11 @@ const Attendance = () => {
               >
                 Monthly View
               </button>
-              <button
-                onClick={() => setCalendarViewType("annual")}
-                className={`px-4 py-2 rounded-lg font-medium cursor-pointer transition-colors ${
-                  calendarViewType === "annual"
-                    ? "bg-blue-600 text-white shadow-md"
-                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                }`}
-              >
-                Annual View
-              </button>
             </div>
           </div>
 
           {/* Calendar Display */}
-          {calendarViewType === "monthly"
-            ? renderMonthlyCalendar()
-            : renderAnnualCalendar()}
+          {renderMonthlyCalendar()}
         </div>
       ) : (
         /* Table View */
@@ -1814,7 +1997,8 @@ const Attendance = () => {
                 Record Attendance
               </button>
               <div className="text-sm text-gray-500">
-                Showing {Math.min(itemsPerPage, currentMRs.length)} of {filteredMRList.length} MRs
+                Showing {Math.min(itemsPerPage, currentMRs.length)} of{" "}
+                {filteredMRList.length} MRs
               </div>
             </div>
           )}
@@ -1874,18 +2058,17 @@ const Attendance = () => {
 
                       <td className="p-4">
                         <div className="relative">
-                          <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium ${
-                            parseFloat(attendanceStats.percentage) >= 80 
-                              ? "bg-green-100 text-green-800"
-                              : parseFloat(attendanceStats.percentage) >= 60
-                              ? "bg-yellow-100 text-yellow-800"
-                              : "bg-red-100 text-red-800"
-                          }`}>
+                          <span
+                            className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium ${
+                              parseFloat(attendanceStats.percentage) >= 80
+                                ? "bg-green-100 text-green-800"
+                                : parseFloat(attendanceStats.percentage) >= 60
+                                  ? "bg-yellow-100 text-yellow-800"
+                                  : "bg-red-100 text-red-800"
+                            }`}
+                          >
                             {attendanceStats.percentage}%
                           </span>
-                          <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-1 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                            Monthly attendance percentage
-                          </div>
                         </div>
                       </td>
 
@@ -1894,7 +2077,7 @@ const Attendance = () => {
                           <div className="inline-flex flex-col items-center">
                             <span className="inline-flex items-center gap-1 bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-medium">
                               <Clock size={12} />
-                              {attendanceStats.extraHoursAvailable}h
+                              {formatDecimalHoursToHHMM(attendanceStats.extraHoursAvailable)}
                             </span>
                             {attendanceStats.extraLeaveDaysAvailable > 0 && (
                               <span className="text-xs text-green-600 mt-1">
@@ -1903,7 +2086,9 @@ const Attendance = () => {
                             )}
                           </div>
                         ) : (
-                          <span className="text-gray-400 text-sm">No extra hours</span>
+                          <span className="text-gray-400 text-sm">
+                            No extra hours
+                          </span>
                         )}
                       </td>
 
@@ -1925,7 +2110,9 @@ const Attendance = () => {
                     <div className="text-gray-400 mb-2">
                       <Search size={48} className="mx-auto" />
                     </div>
-                    <p className="text-gray-500 text-lg font-medium">No MR records found</p>
+                    <p className="text-gray-500 text-lg font-medium">
+                      No MR records found
+                    </p>
                     <p className="text-gray-400 text-sm mt-1">
                       Try adjusting your search criteria
                     </p>
@@ -1943,7 +2130,9 @@ const Attendance = () => {
               </div>
               <div className="flex gap-2">
                 <button
-                  onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                  onClick={() =>
+                    setCurrentPage((prev) => Math.max(prev - 1, 1))
+                  }
                   disabled={currentPage === 1}
                   className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50 cursor-pointer transition-colors flex items-center gap-1"
                 >
@@ -1965,7 +2154,7 @@ const Attendance = () => {
                     }
                     return (
                       <button
-                        key={pageNum}
+                        key={`page-${pageNum}`}
                         onClick={() => setCurrentPage(pageNum)}
                         className={`px-4 py-2 rounded-lg w-12 text-center transition cursor-pointer ${
                           currentPage === pageNum
@@ -1998,4 +2187,4 @@ const Attendance = () => {
   );
 };
 
-export default Attendance;
+export default Attendance;  
