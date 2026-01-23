@@ -26,7 +26,7 @@ import { showToast } from "../../utils/toast";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-// Custom Dropdown Component (unchanged)
+// Custom Dropdown Component
 const CustomDropdown = ({
   value,
   onChange,
@@ -142,7 +142,6 @@ const LeaveAttendance = () => {
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [leaveDate, setLeaveDate] = useState("");
   const [leaveReason, setLeaveReason] = useState("");
-  const [leaveType, setLeaveType] = useState("paid");
   const [leaveLoading, setLeaveLoading] = useState(false);
 
   // State for Extra Hours Conversion
@@ -159,7 +158,7 @@ const LeaveAttendance = () => {
     monthlyLeaveDaysAvailable: 0,
     monthlyRemainingMinutes: 0,
     loading: false,
-    useMonthlyOnly: false, // Changed to false by default to show total hours
+    useMonthlyOnly: false,
   });
 
   // Holiday state
@@ -167,17 +166,6 @@ const LeaveAttendance = () => {
 
   // Leave data
   const [mrLeaves, setMrLeaves] = useState({});
-
-  // COLLAPSIBLE SECTION STATES - INITIALIZED TO FALSE (HIDDEN BY DEFAULT)
-  const [showExtraHoursSummary, setShowExtraHoursSummary] = useState(false);
-  const [showConvertToLeave, setShowConvertToLeave] = useState(false);
-
-  // Helper function to convert decimal hours to hours and minutes
-  const decimalToHoursMinutes = (decimalHours) => {
-    const hours = Math.floor(decimalHours);
-    const minutes = Math.round((decimalHours - hours) * 60);
-    return { hours, minutes };
-  };
 
   // Helper function to calculate remaining time after converting to days
   const calculateRemainingTime = (totalMinutes) => {
@@ -211,6 +199,16 @@ const LeaveAttendance = () => {
     return inputDate > today;
   };
 
+  // Helper function to get date string in YYYY-MM-DD format from a Date object
+  const getDateString = (date) => {
+    if (!date) return "";
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
   useEffect(() => {
     fetchMRList();
     fetchAttendanceRecords();
@@ -222,9 +220,6 @@ const LeaveAttendance = () => {
   useEffect(() => {
     if (selectedAttendanceMr && showExtraHoursModal) {
       fetchExtraHoursData(selectedAttendanceMr);
-      // Reset collapsible states when MR changes
-      setShowExtraHoursSummary(false);
-      setShowConvertToLeave(false);
     } else {
       resetExtraHoursData();
     }
@@ -250,15 +245,12 @@ const LeaveAttendance = () => {
 
   const fetchAttendanceRecords = async () => {
     try {
-      console.log("📥 Fetching attendance records...");
       const response = await axios.get(`${backendUrl}/api/attendance`);
       const records = response.data || [];
-      console.log("✅ Fetched attendance records:", records.length);
       setAttendanceRecords(records);
 
       // If we have a selected MR in extra hours modal, refresh their data too
       if (selectedAttendanceMr && showExtraHoursModal) {
-        console.log("🔄 Auto-refreshing extra hours for selected MR");
         await fetchExtraHoursData(selectedAttendanceMr);
       }
     } catch (err) {
@@ -300,9 +292,38 @@ const LeaveAttendance = () => {
   const fetchHolidays = async () => {
     try {
       const response = await axios.get(`${backendUrl}/api/holidays`);
-      const holidaysData = response.data.holidays;
+      let holidaysData = response.data.holidays || response.data || [];
+
+      // Transform holiday data to have a consistent format
       if (Array.isArray(holidaysData)) {
-        setHolidays(holidaysData);
+        // If holidays have startDate/endDate, convert them to date field
+        const transformedHolidays = holidaysData
+          .map((holiday) => {
+            // Use date field if it exists, otherwise use startDate
+            const holidayDate = holiday.date || holiday.startDate;
+
+            // For multi-day holidays, we'll create an entry for each day
+            const startDate = new Date(holiday.startDate || holiday.date);
+            const endDate = new Date(holiday.endDate || holiday.date);
+
+            const holidays = [];
+
+            // Create a date for each day in the range
+            const currentDate = new Date(startDate);
+            while (currentDate <= endDate) {
+              holidays.push({
+                ...holiday,
+                date: new Date(currentDate), // Store as Date object
+                name: holiday.name,
+              });
+              currentDate.setDate(currentDate.getDate() + 1);
+            }
+
+            return holidays;
+          })
+          .flat(); // Flatten the array
+
+        setHolidays(transformedHolidays);
       } else {
         console.warn("Holidays API did not return an array:", holidaysData);
         setHolidays([]);
@@ -326,12 +347,9 @@ const LeaveAttendance = () => {
       loading: false,
       useMonthlyOnly: false,
     });
-    // Reset collapsible states when data is reset
-    setShowExtraHoursSummary(false);
-    setShowConvertToLeave(false);
   };
 
-  // Fetch extra hours data - FIXED: Fetch both monthly and total data
+  // Fetch extra hours data
   const fetchExtraHoursData = async (mrId) => {
     try {
       setExtraHoursData((prev) => ({ ...prev, loading: true }));
@@ -403,7 +421,6 @@ const LeaveAttendance = () => {
     };
   };
 
-  // Calculate months of service for paid leave calculation
   const getMonthsOfService = (joinDate) => {
     if (!joinDate) return 0;
 
@@ -420,29 +437,9 @@ const LeaveAttendance = () => {
     return Math.max(0, adjustedMonths);
   };
 
-  // Calculate paid leaves based on months of service (1.25 days per month)
   const calculatePaidLeaves = (joinDate) => {
     const monthsOfService = getMonthsOfService(joinDate);
     return (monthsOfService * 1.25).toFixed(2);
-  };
-
-  // Calculate all dates between start and end date
-  const getDatesBetween = (startDateStr, endDateStr) => {
-    const start = new Date(startDateStr);
-    const end = new Date(endDateStr);
-    const dates = [];
-
-    if (start.toDateString() === end.toDateString()) {
-      return [start];
-    }
-
-    const current = new Date(start);
-    while (current <= end) {
-      dates.push(new Date(current));
-      current.setDate(current.getDate() + 1);
-    }
-
-    return dates;
   };
 
   // Check if date is Sunday
@@ -451,7 +448,7 @@ const LeaveAttendance = () => {
     return day === 0;
   };
 
-  // Check if date is holiday
+  // Check if date is holiday - FIXED: Now handles both date formats
   const isHoliday = (date) => {
     if (!Array.isArray(holidays) || holidays.length === 0) {
       return false;
@@ -461,22 +458,25 @@ const LeaveAttendance = () => {
     checkDate.setHours(0, 0, 0, 0);
 
     return holidays.some((holiday) => {
-      if (!holiday || !holiday.date) return false;
+      if (!holiday) return false;
 
-      const holidayDate = new Date(holiday.date);
+      // Get the holiday date from either 'date' or 'startDate' field
+      const holidayDateObj = holiday.date
+        ? new Date(holiday.date)
+        : holiday.startDate
+          ? new Date(holiday.startDate)
+          : null;
+
+      if (!holidayDateObj) return false;
+
+      const holidayDate = new Date(holidayDateObj);
       holidayDate.setHours(0, 0, 0, 0);
 
       return holidayDate.getTime() === checkDate.getTime();
     });
   };
 
-  // Check if any date in range is holiday
-  const isDateRangeHasHoliday = (startDateStr, endDateStr) => {
-    const datesInRange = getDatesBetween(startDateStr, endDateStr);
-    return datesInRange.some((date) => isHoliday(date));
-  };
-
-  // Get holiday name for a date
+  // Get holiday name for a date - FIXED: Now handles both date formats
   const getHolidayName = (date) => {
     if (!Array.isArray(holidays) || holidays.length === 0) {
       return null;
@@ -486,30 +486,24 @@ const LeaveAttendance = () => {
     checkDate.setHours(0, 0, 0, 0);
 
     const holiday = holidays.find((holiday) => {
-      if (!holiday || !holiday.date) return false;
+      if (!holiday) return false;
 
-      const holidayDate = new Date(holiday.date);
+      // Get the holiday date from either 'date' or 'startDate' field
+      const holidayDateObj = holiday.date
+        ? new Date(holiday.date)
+        : holiday.startDate
+          ? new Date(holiday.startDate)
+          : null;
+
+      if (!holidayDateObj) return false;
+
+      const holidayDate = new Date(holidayDateObj);
       holidayDate.setHours(0, 0, 0, 0);
 
       return holidayDate.getTime() === checkDate.getTime();
     });
 
     return holiday ? holiday.name : null;
-  };
-
-  // Get all holiday names in date range
-  const getHolidayNamesInRange = (startDateStr, endDateStr) => {
-    const datesInRange = getDatesBetween(startDateStr, endDateStr);
-    const holidayNames = [];
-
-    datesInRange.forEach((date) => {
-      const holidayName = getHolidayName(date);
-      if (holidayName && !holidayNames.includes(holidayName)) {
-        holidayNames.push(holidayName);
-      }
-    });
-
-    return holidayNames;
   };
 
   // Filter MR list based on search
@@ -527,76 +521,104 @@ const LeaveAttendance = () => {
     currentPage * itemsPerPage,
   );
 
-  // Calendar functions to handle string userId
+  // Get attendance for a specific date and MR
   const getAttendanceForDate = (date, mrId) => {
-    if (!mrId) return null;
-    const dateString = date.toISOString().split("T")[0];
+    if (!mrId || !date) return null;
+
+    // Create date object for comparison (ignore time)
+    const checkDate = new Date(date);
+    checkDate.setHours(0, 0, 0, 0);
 
     // Handle both object and string userId
     const records = attendanceRecords.filter((record) => {
       const recordUserId = record.userId?._id || record.userId;
-      const recordDate = new Date(record.loginTime).toISOString().split("T")[0];
-      return recordUserId === mrId && recordDate === dateString;
+      if (recordUserId !== mrId) return false;
+
+      if (!record.loginTime) return false;
+
+      // Create date from record's loginTime (which is in UTC)
+      const recordDate = new Date(record.loginTime);
+      recordDate.setHours(0, 0, 0, 0);
+
+      // Compare dates (ignoring time)
+      return recordDate.getTime() === checkDate.getTime();
     });
 
     return records.length > 0 ? records[0] : null;
   };
 
-  // Get leave count for a specific MR - count only approved leaves
-  const getLeaveCountForMr = (mrId) => {
-    if (!mrId) return 0;
-    const leaves = mrLeaves[mrId] || [];
-
-    // Count only approved leaves
-    const approvedLeaves = leaves.filter(
-      (leave) => leave.status === "approved",
-    );
-
-    return approvedLeaves.length;
-  };
-
-  // Check if date is leave using actual leave data - only approved leaves
+  // Enhanced isLeave function to properly handle all leave types
   const isLeave = (date, mrId) => {
-    if (!mrId) return false;
+    if (!mrId) return { isLeave: false, type: null };
 
     const leaves = mrLeaves[mrId] || [];
-    const dateString = date.toISOString().split("T")[0];
 
-    return leaves.some((leave) => {
-      const leaveDate = new Date(leave.leaveDate).toISOString().split("T")[0];
-      return leaveDate === dateString && leave.status === "approved";
-    });
+    // Create date object for comparison (ignore time)
+    const checkDate = new Date(date);
+    checkDate.setHours(0, 0, 0, 0);
+
+    // Check if there's a leave in the Leave collection
+    for (let leave of leaves) {
+      if (!leave.leaveDate || leave.status !== "approved") continue;
+
+      // Create date from leave's leaveDate
+      const leaveDate = new Date(leave.leaveDate);
+      leaveDate.setHours(0, 0, 0, 0);
+
+      // Compare dates (ignoring time)
+      if (leaveDate.getTime() === checkDate.getTime()) {
+        // Return the actual leaveType from the leave record
+        return { 
+          isLeave: true, 
+          type: leave.leaveType || "unpaid",
+          leaveDate: leave.leaveDate,
+          reason: leave.reason
+        };
+      }
+    }
+
+    // Check attendance records for converted leaves (isLeaveDay = true)
+    const attendance = getAttendanceForDate(date, mrId);
+    if (attendance && attendance.isLeaveDay) {
+      // Check if there's a corresponding swapleave in the leaves collection
+      const swapLeave = leaves.find(leave => {
+        if (!leave.leaveDate || leave.status !== "approved" || leave.leaveType !== "swapleave") 
+          return false;
+        
+        const leaveDate = new Date(leave.leaveDate);
+        leaveDate.setHours(0, 0, 0, 0);
+        return leaveDate.getTime() === checkDate.getTime();
+      });
+
+      if (swapLeave) {
+        return { isLeave: true, type: "swapleave", fromAttendance: true };
+      }
+      
+      // If it's a leave day from attendance but no swapleave record, it's a paid leave
+      return { isLeave: true, type: "paid", fromAttendance: true };
+    }
+
+    return { isLeave: false, type: null };
   };
 
-  // Get leave details for tooltip - only for approved leaves
-  const getLeaveDetails = (date, mrId) => {
-    if (!mrId) return null;
-
-    const leaves = mrLeaves[mrId] || [];
-    const dateString = date.toISOString().split("T")[0];
-
-    const leaveOnDate = leaves.find((leave) => {
-      const leaveDate = new Date(leave.leaveDate).toISOString().split("T")[0];
-      return leaveDate === dateString && leave.status === "approved";
-    });
-
-    return leaveOnDate
-      ? {
-          reason: leaveOnDate.reason,
-          type: leaveOnDate.leaveType,
-          status: leaveOnDate.status,
-        }
-      : null;
-  };
-
-  // Get leave counts with proper user ID matching
+  // Get leave counts with proper user ID matching - ONLY count unpaid leaves
   const getLeaveCounts = (mrId, joinDate) => {
     // Get leaves for this MR - mrId should match the userId in leaves data
     const leaves = mrLeaves[mrId] || [];
 
-    // Filter only approved leaves
-    const approvedLeaves = leaves.filter(
-      (leave) => leave.status === "approved",
+    // Filter only approved UNPAID leaves (not swapleave or paid)
+    const approvedUnpaidLeaves = leaves.filter(
+      (leave) => leave.status === "approved" && leave.leaveType === "unpaid"
+    );
+
+    // Also get swapleave leaves separately for display
+    const swapLeaves = leaves.filter(
+      (leave) => leave.status === "approved" && leave.leaveType === "swapleave"
+    );
+
+    // Get paid leaves (from attendance conversion but not recorded in leaves collection)
+    const paidLeaves = leaves.filter(
+      (leave) => leave.status === "approved" && leave.leaveType === "paid"
     );
 
     const currentDate = new Date();
@@ -607,21 +629,59 @@ const LeaveAttendance = () => {
     const yearStart = new Date(currentYear, 0, 1);
     const yearEnd = new Date(currentYear, 11, 31);
 
-    // Filter leaves to include only past and current dates
-    const validLeaves = approvedLeaves.filter((leave) => {
+    // Filter unpaid leaves to include only past and current dates
+    const validUnpaidLeaves = approvedUnpaidLeaves.filter((leave) => {
       const date = new Date(leave.leaveDate);
       date.setHours(0, 0, 0, 0);
       return date <= currentDate;
     });
 
-    // Monthly leaves count
-    const monthlyLeaves = validLeaves.filter((leave) => {
+    // Filter swap leaves
+    const validSwapLeaves = swapLeaves.filter((leave) => {
+      const date = new Date(leave.leaveDate);
+      date.setHours(0, 0, 0, 0);
+      return date <= currentDate;
+    });
+
+    // Filter paid leaves
+    const validPaidLeaves = paidLeaves.filter((leave) => {
+      const date = new Date(leave.leaveDate);
+      date.setHours(0, 0, 0, 0);
+      return date <= currentDate;
+    });
+
+    // Monthly unpaid leaves count
+    const monthlyUnpaidLeaves = validUnpaidLeaves.filter((leave) => {
       const date = new Date(leave.leaveDate);
       return date >= currentMonthStart && date <= currentMonthEnd;
     }).length;
 
-    // Annual leaves count
-    const annualLeaves = validLeaves.filter((leave) => {
+    // Monthly swap leaves count
+    const monthlySwapLeaves = validSwapLeaves.filter((leave) => {
+      const date = new Date(leave.leaveDate);
+      return date >= currentMonthStart && date <= currentMonthEnd;
+    }).length;
+
+    // Monthly paid leaves count
+    const monthlyPaidLeaves = validPaidLeaves.filter((leave) => {
+      const date = new Date(leave.leaveDate);
+      return date >= currentMonthStart && date <= currentMonthEnd;
+    }).length;
+
+    // Annual unpaid leaves count
+    const annualUnpaidLeaves = validUnpaidLeaves.filter((leave) => {
+      const date = new Date(leave.leaveDate);
+      return date >= yearStart && date <= yearEnd;
+    }).length;
+
+    // Annual swap leaves count
+    const annualSwapLeaves = validSwapLeaves.filter((leave) => {
+      const date = new Date(leave.leaveDate);
+      return date >= yearStart && date <= yearEnd;
+    }).length;
+
+    // Annual paid leaves count
+    const annualPaidLeaves = validPaidLeaves.filter((leave) => {
       const date = new Date(leave.leaveDate);
       return date >= yearStart && date <= yearEnd;
     }).length;
@@ -630,17 +690,24 @@ const LeaveAttendance = () => {
     const paidLeavesEntitlement = calculatePaidLeaves(joinDate);
 
     return {
-      monthly: monthlyLeaves,
-      annual: annualLeaves,
+      monthly: monthlyUnpaidLeaves,
+      annual: annualUnpaidLeaves,
       paid: parseFloat(paidLeavesEntitlement),
-      total: validLeaves.length, // Total approved leaves
+      total: validUnpaidLeaves.length, // Total approved UNPAID leaves only
+      swapLeaves: validSwapLeaves.length, // Total swap leaves
+      paidLeaves: validPaidLeaves.length, // Total paid leaves
+      monthlySwapLeaves: monthlySwapLeaves,
+      annualSwapLeaves: annualSwapLeaves,
+      monthlyPaidLeaves: monthlyPaidLeaves,
+      annualPaidLeaves: annualPaidLeaves,
     };
   };
 
-  // Calculate remaining paid leaves correctly
+  // Calculate remaining paid leaves correctly - only deduct unpaid leaves
   const getRemainingPaidLeaves = (mrId, joinDate) => {
     const leaveCounts = getLeaveCounts(mrId, joinDate);
-    const remaining = leaveCounts.paid - leaveCounts.total; // Use total approved leaves
+    // Only deduct unpaid leaves from the paid leave entitlement
+    const remaining = leaveCounts.paid - leaveCounts.total;
     return Math.max(0, remaining).toFixed(2);
   };
 
@@ -711,7 +778,7 @@ const LeaveAttendance = () => {
     }
   };
 
-  // Calculate attendance statistics
+  // Calculate attendance statistics - FIXED: Proper date comparison
   const getAttendanceStats = (mrId) => {
     // Handle both object and string userId
     const mrRecords = attendanceRecords.filter((record) => {
@@ -727,13 +794,47 @@ const LeaveAttendance = () => {
     // Monthly attendance count
     const monthlyAttendance = mrRecords.filter((record) => {
       const recordDate = new Date(record.loginTime);
-      return recordDate >= currentMonthStart && recordDate <= currentMonthEnd;
+      // Compare dates (ignoring time)
+      const recordDateOnly = new Date(
+        recordDate.getFullYear(),
+        recordDate.getMonth(),
+        recordDate.getDate(),
+      );
+      const monthStartOnly = new Date(
+        currentMonthStart.getFullYear(),
+        currentMonthStart.getMonth(),
+        currentMonthStart.getDate(),
+      );
+      const monthEndOnly = new Date(
+        currentMonthEnd.getFullYear(),
+        currentMonthEnd.getMonth(),
+        currentMonthEnd.getDate(),
+      );
+
+      return recordDateOnly >= monthStartOnly && recordDateOnly <= monthEndOnly;
     }).length;
 
     // Annual attendance count
     const annualAttendance = mrRecords.filter((record) => {
       const recordDate = new Date(record.loginTime);
-      return recordDate >= yearStart && recordDate <= yearEnd;
+      // Compare dates (ignoring time)
+      const recordDateOnly = new Date(
+        recordDate.getFullYear(),
+        recordDate.getMonth(),
+        recordDate.getDate(),
+      );
+      const yearStartOnly = new Date(
+        yearStart.getFullYear(),
+        yearStart.getMonth(),
+        yearStart.getDate(),
+      );
+      const yearEndOnly = new Date(
+        yearEnd.getFullYear(),
+        yearEnd.getMonth(),
+        yearEnd.getDate(),
+      );
+
+      return recordDateOnly >= yearStartOnly && recordDateOnly <= yearEndOnly;
     }).length;
 
     // Calculate attendance percentage
@@ -746,8 +847,20 @@ const LeaveAttendance = () => {
     const today = new Date();
     const todayRecord = mrRecords.find((record) => {
       const recordDate = new Date(record.loginTime);
+      // Compare dates (ignoring time)
+      const recordDateOnly = new Date(
+        recordDate.getFullYear(),
+        recordDate.getMonth(),
+        recordDate.getDate(),
+      );
+      const todayOnly = new Date(
+        today.getFullYear(),
+        today.getMonth(),
+        today.getDate(),
+      );
+
       return (
-        recordDate.toDateString() === today.toDateString() && !record.logoutTime
+        recordDateOnly.getTime() === todayOnly.getTime() && !record.logoutTime
       );
     });
 
@@ -797,25 +910,32 @@ const LeaveAttendance = () => {
       return;
     }
 
-    const loginDateTime = new Date(`${startDate}T${startTime}`);
-    const logoutDateTime = new Date(`${startDate}T${endTime}`);
+    // Create date strings with timezone offset
+    const loginDateTime = `${startDate}T${startTime}`;
+    const logoutDateTime = `${startDate}T${endTime}`;
+
+    // Get timezone offset
+    const timezoneOffset = new Date().getTimezoneOffset();
+    const offsetHours = Math.floor(Math.abs(timezoneOffset) / 60);
+    const offsetMinutes = Math.abs(timezoneOffset) % 60;
+    const offsetSign = timezoneOffset > 0 ? "-" : "+";
+    const timezoneString = `${offsetSign}${offsetHours.toString().padStart(2, "0")}:${offsetMinutes.toString().padStart(2, "0")}`;
 
     if (isSunday(startDate)) {
       showToast("error", "Cannot record attendance on Sunday");
       return;
     }
 
-    if (isDateRangeHasHoliday(startDate, startDate)) {
-      const holidayNames = getHolidayNamesInRange(startDate, startDate);
-      showToast(
-        "error",
-        `Cannot record attendance on holiday: ${holidayNames.join(", ")}`,
-      );
+    // Check if holiday
+    const holidayName = getHolidayName(startDate);
+    if (isHoliday(startDate)) {
+      showToast("error", `Cannot record attendance on holiday: ${holidayName}`);
       return;
     }
 
     const selectedDate = new Date(startDate);
-    if (isLeave(selectedDate, selectedAttendanceMr)) {
+    const leaveInfo = isLeave(selectedDate, selectedAttendanceMr);
+    if (leaveInfo.isLeave) {
       showToast("error", "Cannot record attendance on a leave day");
       return;
     }
@@ -823,12 +943,15 @@ const LeaveAttendance = () => {
     try {
       setAttendanceLoading(true);
 
+      // Send attendance data with timezone
       const attendanceData = {
         userId: selectedAttendanceMr,
-        loginTime: loginDateTime.toISOString(),
-        logoutTime: logoutDateTime.toISOString(),
-        workingHoursPerDay: 8, // 8 hour workday
+        loginTime: `${loginDateTime}${timezoneString}`,
+        logoutTime: `${logoutDateTime}${timezoneString}`,
+        workingHoursPerDay: 8,
       };
+
+      console.log("📤 Sending attendance data:", attendanceData);
 
       const response = await axios.post(
         `${backendUrl}/api/attendance/record`,
@@ -874,16 +997,19 @@ const LeaveAttendance = () => {
       return;
     }
 
+    // Check if holiday
+    const holidayName = getHolidayName(leaveDate);
     if (isHoliday(leaveDate)) {
-      showToast(
-        "error",
-        `Cannot apply for leave on holiday: ${getHolidayName(leaveDate)}`,
-      );
+      showToast("error", `Cannot apply for leave on holiday: ${holidayName}`);
       return;
     }
 
     const selectedDate = new Date(leaveDate);
-    if (getAttendanceForDate(selectedDate, selectedAttendanceMr)) {
+    const attendanceOnDate = getAttendanceForDate(
+      selectedDate,
+      selectedAttendanceMr,
+    );
+    if (attendanceOnDate) {
       showToast(
         "error",
         "Cannot apply for leave on a day with existing attendance",
@@ -898,7 +1024,7 @@ const LeaveAttendance = () => {
         userId: selectedAttendanceMr,
         leaveDate: new Date(leaveDate).toISOString(),
         reason: leaveReason,
-        leaveType: leaveType,
+        leaveType: "unpaid", // Always set as unpaid for manual leave application
         status: "approved",
       };
 
@@ -910,7 +1036,6 @@ const LeaveAttendance = () => {
         setSelectedAttendanceMr(null);
         setLeaveDate("");
         setLeaveReason("");
-        setLeaveType("paid");
 
         fetchLeaves();
       }
@@ -955,8 +1080,9 @@ const LeaveAttendance = () => {
       return;
     }
 
+    // Check if holiday
+    const holidayName = getHolidayName(extraHoursDate);
     if (isHoliday(extraHoursDate)) {
-      const holidayName = getHolidayName(extraHoursDate);
       showToast("error", `Cannot take leave on holiday: ${holidayName}`);
       return;
     }
@@ -964,14 +1090,29 @@ const LeaveAttendance = () => {
     // Check if there's already an attendance record for this date
     const existingAttendance = attendanceRecords.find((record) => {
       const recordUserId = record.userId?._id || record.userId;
-      const recordDate = new Date(record.loginTime).toISOString().split("T")[0];
-      return (
-        recordUserId === selectedAttendanceMr && recordDate === extraHoursDate
-      );
+      if (recordUserId !== selectedAttendanceMr) return false;
+
+      if (!record.loginTime) return false;
+
+      // Create dates for comparison (ignoring time)
+      const recordDate = new Date(record.loginTime);
+      recordDate.setHours(0, 0, 0, 0);
+
+      const checkDate = new Date(extraHoursDate);
+      checkDate.setHours(0, 0, 0, 0);
+
+      return recordDate.getTime() === checkDate.getTime();
     });
 
-    if (existingAttendance) {
-      showToast("error", "Attendance already exists for this date");
+    // If there's an existing attendance record that is NOT a leave day, we can't convert
+    if (existingAttendance && !existingAttendance.isLeaveDay) {
+      showToast("error", "Regular attendance already exists for this date");
+      return;
+    }
+
+    // If there's already a paid leave attendance, we can't convert again
+    if (existingAttendance && existingAttendance.isLeaveDay) {
+      showToast("error", "This date is already marked as a leave day");
       return;
     }
 
@@ -983,9 +1124,9 @@ const LeaveAttendance = () => {
         date: extraHoursDate,
         leaveDays: extraHoursDays,
         useMonthlyOnly: extraHoursData.useMonthlyOnly,
+        convertExtraHours: true,
       };
 
-      console.log("📤 Sending convert request with data:", convertData);
       const response = await axios.post(
         `${backendUrl}/api/attendance/convert-to-leave`,
         convertData,
@@ -997,16 +1138,8 @@ const LeaveAttendance = () => {
           `${extraHoursDays} leave day${extraHoursDays > 1 ? "s" : ""} successfully converted from extra hours!`,
         );
 
-        // Refresh attendance records
-        console.log("🔄 Refreshing attendance records...");
         await fetchAttendanceRecords();
-
-        // Refresh leaves
-        console.log("🔄 Refreshing leaves...");
         await fetchLeaves();
-
-        // Refresh extra hours data with the selected MR
-        console.log("🔄 Refreshing extra hours data...");
         if (selectedAttendanceMr) {
           await fetchExtraHoursData(selectedAttendanceMr);
         }
@@ -1014,17 +1147,6 @@ const LeaveAttendance = () => {
         // Reset form
         setExtraHoursDate("");
         setExtraHoursDays(1);
-
-        // Reset collapsible states
-        setShowExtraHoursSummary(false);
-        setShowConvertToLeave(false);
-
-        // Show success details
-        const result = response.data.data;
-        console.log("✅ Conversion successful:", result);
-
-        // Force a re-render by updating state
-        setAttendanceRecords([...attendanceRecords]); // This triggers re-render
       } else {
         showToast(
           "error",
@@ -1040,8 +1162,7 @@ const LeaveAttendance = () => {
     }
   };
 
-  // Calculate extra hours for a specific MR - UPDATED to use stored extra hours
-  // Calculate extra hours for a specific MR - UPDATED to use stored extra hours
+  // Calculate extra hours for a specific MR
   const getExtraHoursForMR = (mrId) => {
     // Filter records for this MR
     const mrRecords = attendanceRecords.filter((record) => {
@@ -1050,39 +1171,16 @@ const LeaveAttendance = () => {
     });
 
     let totalExtraMinutes = 0;
-    console.log(
-      `📊 Calculating extra hours for MR ${mrId}: Found ${mrRecords.length} records`,
-    );
-
     mrRecords.forEach((record, index) => {
       if (record.extraHoursInMinutes && record.extraHoursInMinutes > 0) {
-        console.log(
-          `   Record ${index + 1}: ${record.extraHoursInMinutes} minutes (${record.extraHours}) on ${record.loginTime}`,
-        );
         totalExtraMinutes += record.extraHoursInMinutes;
       }
     });
 
     const hours = totalExtraMinutes / 60;
-    console.log(
-      `   Total: ${hours.toFixed(2)} hours (${totalExtraMinutes} minutes)`,
-    );
     return hours;
   };
-  // Add this function to force UI refresh
-  const forceRefreshData = async () => {
-    console.log("🔄 Force refreshing all data...");
-    await fetchAttendanceRecords();
-    await fetchLeaves();
 
-    // If we have a selected MR, refresh their extra hours
-    if (selectedAttendanceMr && showExtraHoursModal) {
-      await fetchExtraHoursData(selectedAttendanceMr);
-    }
-
-    // Force state update
-    setAttendanceRecords((prev) => [...prev]);
-  };
   // Open attendance modal
   const handleOpenAttendanceModal = () => {
     setShowAttendanceModal(true);
@@ -1104,10 +1202,9 @@ const LeaveAttendance = () => {
     const todayString = today.toISOString().split("T")[0];
     setLeaveDate(todayString);
     setLeaveReason("");
-    setLeaveType("paid");
   };
 
-  // Open extra hours modal - WITH RESET LOGIC
+  // Open extra hours modal
   const handleOpenExtraHoursModal = () => {
     setShowExtraHoursModal(true);
     setSelectedAttendanceMr(null);
@@ -1116,10 +1213,6 @@ const LeaveAttendance = () => {
     const todayString = today.toISOString().split("T")[0];
     setExtraHoursDate(todayString);
     setExtraHoursDays(1);
-
-    // RESET COLLAPSIBLE STATES WHEN MODAL OPENS
-    setShowExtraHoursSummary(false);
-    setShowConvertToLeave(false);
   };
 
   // Convert mrList to dropdown options
@@ -1143,7 +1236,7 @@ const LeaveAttendance = () => {
 
   return (
     <div className="p-6">
-      {/* Attendance Modal (unchanged) */}
+      {/* Attendance Modal */}
       {showAttendanceModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
@@ -1197,7 +1290,8 @@ const LeaveAttendance = () => {
                       {getHolidayName(startDate)}
                     </p>
                   </div>
-                ) : isLeave(new Date(startDate), selectedAttendanceMr) ? (
+                ) : isLeave(new Date(startDate), selectedAttendanceMr)
+                    .isLeave ? (
                   <div className="bg-red-50 border border-red-200 rounded-md p-3">
                     <p className="text-red-700 text-sm font-medium">
                       ⚠️ Cannot record attendance on leave day
@@ -1261,7 +1355,7 @@ const LeaveAttendance = () => {
                   isFutureDate(startDate) || // Disable if future date
                   isSunday(startDate) ||
                   isHoliday(startDate) ||
-                  isLeave(new Date(startDate), selectedAttendanceMr)
+                  isLeave(new Date(startDate), selectedAttendanceMr).isLeave
                 }
                 className={`flex-1 py-2 px-4 rounded-lg flex items-center justify-center gap-2 ${
                   attendanceLoading ||
@@ -1272,7 +1366,7 @@ const LeaveAttendance = () => {
                   isFutureDate(startDate) ||
                   isSunday(startDate) ||
                   isHoliday(startDate) ||
-                  isLeave(new Date(startDate), selectedAttendanceMr)
+                  isLeave(new Date(startDate), selectedAttendanceMr).isLeave
                     ? "bg-gray-400 cursor-not-allowed"
                     : "bg-green-600 hover:bg-green-700"
                 } text-white`}
@@ -1294,7 +1388,7 @@ const LeaveAttendance = () => {
         </div>
       )}
 
-      {/* Leave Modal (unchanged) */}
+      {/* Leave Modal */}
       {showLeaveModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
@@ -1358,24 +1452,25 @@ const LeaveAttendance = () => {
                       attendance
                     </p>
                   </div>
-                ) : null}
+                ) : (
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id="validLeaveDay"
+                      checked={true}
+                      readOnly
+                      className="mr-2 h-4 w-4 text-green-600 rounded"
+                    />
+                    <label
+                      htmlFor="validLeaveDay"
+                      className="text-green-700 text-sm font-medium"
+                    >
+                      Valid leave day
+                    </label>
+                  </div>
+                )}
               </div>
             )}
-
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Leave Type
-              </label>
-              <select
-                value={leaveType}
-                onChange={(e) => setLeaveType(e.target.value)}
-                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              >
-                <option value="paid">Paid Leave</option>
-                <option value="unpaid">Unpaid Leave</option>
-                <option value="sick">Sick Leave</option>
-              </select>
-            </div>
 
             <div className="mb-6">
               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1439,10 +1534,10 @@ const LeaveAttendance = () => {
         </div>
       )}
 
-      {/* Extra Hours Modal - CORRECTED */}
+      {/* Extra Hours Modal */}
       {showExtraHoursModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
             <h2 className="text-xl font-bold mb-4">
               Convert Extra Hours to Leave
             </h2>
@@ -1481,30 +1576,28 @@ const LeaveAttendance = () => {
             ) : (
               <>
                 {/* Mode Toggle */}
-                <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                  <div className="flex items-center justify-between">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={extraHoursData.useMonthlyOnly}
-                        onChange={(e) =>
-                          setExtraHoursData((prev) => ({
-                            ...prev,
-                            useMonthlyOnly: e.target.checked,
-                          }))
-                        }
-                        className="h-4 w-4 text-blue-600 rounded focus:ring-blue-500"
-                      />
-                      <span className="text-gray-700 font-medium">
-                        Use only this month's extra hours
-                      </span>
-                    </label>
-                    <div className="text-sm text-gray-500">
-                      {extraHoursData.useMonthlyOnly
-                        ? `Showing: Current month only (${new Date().toLocaleString("default", { month: "long" })} ${new Date().getFullYear()})`
-                        : "Showing: All extra hours from all months"}
-                    </div>
-                  </div>
+                <div className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={extraHoursData.useMonthlyOnly}
+                      onChange={(e) =>
+                        setExtraHoursData((prev) => ({
+                          ...prev,
+                          useMonthlyOnly: e.target.checked,
+                        }))
+                      }
+                      className="h-4 w-4 text-blue-600 rounded focus:ring-blue-500"
+                    />
+                    <span className="text-blue-700 font-medium text-sm">
+                      Use only this month's extra hours
+                    </span>
+                  </label>
+                  <p className="text-xs text-blue-600 mt-1 ml-6">
+                    {extraHoursData.useMonthlyOnly
+                      ? `Showing: Current month only (${new Date().toLocaleString("default", { month: "long" })} ${new Date().getFullYear()})`
+                      : "Showing: All extra hours from all months"}
+                  </p>
                 </div>
 
                 {/* Get display values */}
@@ -1514,306 +1607,162 @@ const LeaveAttendance = () => {
 
                   return hasExtraHours ? (
                     <>
-                      <div className="mb-6 border border-blue-200 rounded-lg overflow-hidden">
-                        {/* Collapsible Header */}
-                        <button
-                          onClick={() =>
-                            setShowExtraHoursSummary(!showExtraHoursSummary)
-                          }
-                          className="w-full flex items-center justify-between p-5 bg-gradient-to-r from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 transition-all"
-                        >
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                              <Clock size={20} className="text-blue-600" />
-                            </div>
-                            <div className="text-left">
-                              <h3 className="font-semibold text-blue-800">
-                                {extraHoursData.useMonthlyOnly
-                                  ? "Monthly"
-                                  : "Total"}{" "}
-                                Extra Hours (
-                                {displayValues.showLeaveDaysAvailable}) View
-                                Details
-                              </h3>
-                              <p className="text-sm text-blue-600">
-                                {extraHoursData.useMonthlyOnly
-                                  ? "Extra hours from current month only"
-                                  : "Extra hours from all months combined"}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-lg font-bold text-green-700">
+                      {/* Extra Hours Summary */}
+                      <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                        <h3 className="font-semibold text-gray-800 mb-2">
+                          Extra Hours Summary
+                        </h3>
+                        <div className="space-y-2">
+                          <div className="flex justify-between">
+                            <span className="text-gray-600">Total Hours:</span>
+                            <span className="font-bold text-green-700">
                               {displayValues.showExtraHours.toFixed(2)} hrs
                             </span>
-                            {showExtraHoursSummary ? (
-                              <ChevronUp size={20} className="text-blue-600" />
-                            ) : (
-                              <ChevronDown
-                                size={20}
-                                className="text-blue-600"
-                              />
-                            )}
                           </div>
-                        </button>
-
-                        {/* Collapsible Content - HIDDEN BY DEFAULT */}
-                        {showExtraHoursSummary && (
-                          <div className="p-5 bg-white border-t border-gray-100">
-                            <div className="space-y-4">
-                              <div>
-                                <p className="text-gray-700 font-medium mb-1">
-                                  {extraHoursData.useMonthlyOnly
-                                    ? "Monthly"
-                                    : "Total"}{" "}
-                                  Extra Working Hours Summary
-                                </p>
-                                <p className="text-sm text-gray-500 mb-4">
-                                  <span className="font-semibold">
-                                    {extraHoursData.useMonthlyOnly
-                                      ? "Monthly"
-                                      : "Total"}{" "}
-                                    Extra Hours
-                                  </span>
-                                  <br />
-                                  Hours beyond 8-hour workday{" "}
-                                  {extraHoursData.useMonthlyOnly
-                                    ? "this month"
-                                    : "across all months"}
-                                </p>
-
-                                <div className="bg-white p-4 rounded-lg shadow-sm">
-                                  <div className="flex justify-between items-center mb-3">
-                                    <span className="text-gray-700 font-medium">
-                                      Total Hours
-                                    </span>
-                                    <span className="text-2xl font-bold text-green-700">
-                                      {displayValues.showExtraHours.toFixed(2)}{" "}
-                                      hrs
-                                    </span>
-                                  </div>
-
-                                  <div className="flex justify-between items-center mb-3">
-                                    <div>
-                                      <span className="text-gray-700 font-medium">
-                                        Leave Days Available
-                                      </span>
-                                      <p className="text-xs text-gray-500">
-                                        8 extra hours = 1 leave day
-                                      </p>
-                                    </div>
-                                    <span className="text-2xl font-bold text-purple-700">
-                                      {displayValues.showLeaveDaysAvailable} day
-                                      {displayValues.showLeaveDaysAvailable !==
-                                      1
-                                        ? "s"
-                                        : ""}
-                                    </span>
-                                  </div>
-
-                                  <div className="flex justify-between items-center">
-                                    <div>
-                                      <span className="text-gray-700 font-medium">
-                                        Remaining Hours
-                                      </span>
-                                      <p className="text-xs text-gray-500">
-                                        After leave conversion
-                                      </p>
-                                    </div>
-                                    <span className="text-xl font-bold text-gray-700">
-                                      {displayValues.showRemainingHours}h{" "}
-                                      {displayValues.showRemainingMinutes}m
-                                    </span>
-                                  </div>
-                                </div>
-
-                                <div className="mt-4 text-sm text-gray-500">
-                                  <p>
-                                    *Total available extra hours:{" "}
-                                    {extraHoursData.totalExtraHours.toFixed(2)}{" "}
-                                    hours (
-                                    {Math.floor(
-                                      extraHoursData.totalExtraMinutes / 480,
-                                    )}{" "}
-                                    days)
-                                  </p>
-                                  <p>
-                                    *Monthly extra hours:{" "}
-                                    {extraHoursData.monthlyExtraHours.toFixed(
-                                      2,
-                                    )}{" "}
-                                    hours (
-                                    {Math.floor(
-                                      extraHoursData.monthlyExtraMinutes / 480,
-                                    )}{" "}
-                                    days)
-                                  </p>
-                                  <p className="text-xs mt-1">
-                                    8 extra hours = 1 leave day
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-600">
+                              Available Days:
+                            </span>
+                            <span className="font-bold text-purple-700">
+                              {displayValues.showLeaveDaysAvailable} day
+                              {displayValues.showLeaveDaysAvailable !== 1
+                                ? "s"
+                                : ""}
+                            </span>
                           </div>
-                        )}
+                          <div className="flex justify-between">
+                            <span className="text-gray-600">Remaining:</span>
+                            <span className="font-bold text-gray-700">
+                              {displayValues.showRemainingHours}h{" "}
+                              {displayValues.showRemainingMinutes}m
+                            </span>
+                          </div>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-3">
+                          8 extra hours = 1 leave day
+                        </p>
                       </div>
 
-                      {/* Convert Extra Hours to Leave - COLLAPSIBLE SECTION (HIDDEN BY DEFAULT) */}
-                      <div className="mb-6 border border-green-200 rounded-lg overflow-hidden">
-                        {/* Collapsible Header */}
-                        <button
-                          onClick={() =>
-                            setShowConvertToLeave(!showConvertToLeave)
-                          }
-                          className="w-full flex items-center justify-between p-5 bg-gradient-to-r from-green-50 to-emerald-50 hover:from-green-100 hover:to-emerald-100 transition-all"
-                        >
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-                              <PlusCircle
-                                size={20}
-                                className="text-green-600"
-                              />
-                            </div>
-                            <div className="text-left">
-                              <h3 className="font-semibold text-green-800">
-                                Convert Extra Hours to Leave
-                              </h3>
-                              <p className="text-sm text-green-600">
-                                {displayValues.showLeaveDaysAvailable} days
-                                available
-                              </p>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {showConvertToLeave ? (
-                              <ChevronUp size={20} className="text-green-600" />
-                            ) : (
-                              <ChevronDown
-                                size={20}
-                                className="text-green-600"
-                              />
-                            )}
-                          </div>
-                        </button>
+                      {/* Convert Extra Hours to Leave Form */}
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Select Date for Leave
+                          </label>
+                          <input
+                            type="date"
+                            value={extraHoursDate}
+                            onChange={(e) => setExtraHoursDate(e.target.value)}
+                            className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"
+                          />
+                        </div>
 
-                        {/* Collapsible Content - HIDDEN BY DEFAULT */}
-                        {showConvertToLeave && (
-                          <div className="p-5 bg-white border-t border-gray-100">
-                            <div className="space-y-4">
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                  Select Date for Leave
-                                </label>
-                                <input
-                                  type="date"
-                                  value={extraHoursDate}
-                                  onChange={(e) =>
-                                    setExtraHoursDate(e.target.value)
-                                  }
-                                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"
-                                />
-                              </div>
-
-                              {extraHoursDate && (
-                                <div>
-                                  {isSunday(extraHoursDate) ? (
-                                    <div className="bg-red-50 border border-red-200 rounded-md p-3">
-                                      <p className="text-red-700 text-sm font-medium">
-                                        ⚠️ Cannot take leave on Sunday
-                                      </p>
-                                    </div>
-                                  ) : isHoliday(extraHoursDate) ? (
-                                    <div className="bg-red-50 border border-red-200 rounded-md p-3">
-                                      <p className="text-red-700 text-sm font-medium">
-                                        ⚠️ Cannot take leave on holiday:{" "}
-                                        {getHolidayName(extraHoursDate)}
-                                      </p>
-                                    </div>
-                                  ) : null}
-                                </div>
-                              )}
-
-                              <div className="mb-4">
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                  Convert 8 Hours to 1 Leave Day
-                                </label>
-                                <div className="flex items-center gap-3">
-                                  <input
-                                    type="number"
-                                    min="1"
-                                    max={displayValues.showLeaveDaysAvailable}
-                                    value={extraHoursDays}
-                                    onChange={(e) =>
-                                      setExtraHoursDays(
-                                        parseInt(e.target.value) || 1,
-                                      )
-                                    }
-                                    className="w-24 border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"
-                                  />
-                                  <span className="text-gray-600">day(s)</span>
-                                  <span className="text-gray-500 text-sm">
-                                    (Each day requires 8 extra hours)
-                                  </span>
-                                </div>
-                                <p className="text-xs text-gray-500 mt-1">
-                                  Available:{" "}
-                                  {displayValues.showLeaveDaysAvailable} days (
-                                  {displayValues.showExtraHours.toFixed(2)}{" "}
-                                  hours)
+                        {extraHoursDate && (
+                          <div className="mb-4">
+                            {isSunday(extraHoursDate) ? (
+                              <div className="bg-red-50 border border-red-200 rounded-md p-3">
+                                <p className="text-red-700 text-sm font-medium">
+                                  ⚠️ Cannot take leave on Sunday
                                 </p>
                               </div>
-
-                              <button
-                                onClick={handleConvertExtraHoursToLeave}
-                                disabled={
-                                  convertingExtraHours ||
-                                  !extraHoursDate ||
-                                  displayValues.showLeaveDaysAvailable <
-                                    extraHoursDays ||
-                                  extraHoursDays < 1 ||
-                                  isSunday(extraHoursDate) ||
-                                  isHoliday(extraHoursDate)
-                                }
-                                className={`w-full py-3 px-4 rounded-lg flex items-center justify-center gap-2 ${
-                                  convertingExtraHours ||
-                                  !extraHoursDate ||
-                                  displayValues.showLeaveDaysAvailable <
-                                    extraHoursDays ||
-                                  extraHoursDays < 1 ||
-                                  isSunday(extraHoursDate) ||
-                                  isHoliday(extraHoursDate)
-                                    ? "bg-gray-400 cursor-not-allowed"
-                                    : "bg-green-600 hover:bg-green-700"
-                                } text-white font-medium transition-colors`}
-                              >
-                                {convertingExtraHours ? (
-                                  <>
-                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                                    Processing...
-                                  </>
-                                ) : (
-                                  <>
-                                    <PlusCircle size={18} />
-                                    Convert {extraHoursDays * 8} Hours to{" "}
-                                    {extraHoursDays} Leave Day
-                                    {extraHoursDays > 1 ? "s" : ""}
-                                  </>
-                                )}
-                              </button>
-
-                              <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded">
-                                <AlertCircle
-                                  size={12}
-                                  className="inline mr-1"
-                                />
-                                Each leave day requires 8 extra working hours.
-                                Leave can be converted for any date (past,
-                                present, or future) that is not Sunday or
-                                holiday.
+                            ) : isHoliday(extraHoursDate) ? (
+                              <div className="bg-red-50 border border-red-200 rounded-md p-3">
+                                <p className="text-red-700 text-sm font-medium">
+                                  ⚠️ Cannot take leave on holiday:{" "}
+                                  {getHolidayName(extraHoursDate)}
+                                </p>
                               </div>
-                            </div>
+                            ) : (
+                              <div className="flex items-center">
+                                <input
+                                  type="checkbox"
+                                  id="validConvertDay"
+                                  checked={true}
+                                  readOnly
+                                  className="mr-2 h-4 w-4 text-green-600 rounded"
+                                />
+                                <label
+                                  htmlFor="validConvertDay"
+                                  className="text-green-700 text-sm font-medium"
+                                >
+                                  Valid day for leave conversion
+                                </label>
+                              </div>
+                            )}
                           </div>
                         )}
+
+                        <div className="mb-4">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Convert 8 Hours to 1 Leave Day
+                          </label>
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="number"
+                              min="1"
+                              max={displayValues.showLeaveDaysAvailable}
+                              value={extraHoursDays}
+                              onChange={(e) =>
+                                setExtraHoursDays(parseInt(e.target.value) || 1)
+                              }
+                              className="w-24 border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"
+                            />
+                            <span className="text-gray-600">day(s)</span>
+                            <span className="text-gray-500 text-sm">
+                              (Each day requires 8 extra hours)
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1">
+                            Available: {displayValues.showLeaveDaysAvailable}{" "}
+                            days ({displayValues.showExtraHours.toFixed(2)}{" "}
+                            hours)
+                          </p>
+                        </div>
+
+                        <button
+                          onClick={handleConvertExtraHoursToLeave}
+                          disabled={
+                            convertingExtraHours ||
+                            !extraHoursDate ||
+                            displayValues.showLeaveDaysAvailable <
+                              extraHoursDays ||
+                            extraHoursDays < 1 ||
+                            isSunday(extraHoursDate) ||
+                            isHoliday(extraHoursDate)
+                          }
+                          className={`w-full py-3 px-4 rounded-lg flex items-center justify-center gap-2 ${
+                            convertingExtraHours ||
+                            !extraHoursDate ||
+                            displayValues.showLeaveDaysAvailable <
+                              extraHoursDays ||
+                            extraHoursDays < 1 ||
+                            isSunday(extraHoursDate) ||
+                            isHoliday(extraHoursDate)
+                              ? "bg-gray-400 cursor-not-allowed"
+                              : "bg-green-600 hover:bg-green-700"
+                          } text-white font-medium transition-colors`}
+                        >
+                          {convertingExtraHours ? (
+                            <>
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                              Processing...
+                            </>
+                          ) : (
+                            <>
+                              <PlusCircle size={18} />
+                              Convert {extraHoursDays * 8} Hours to{" "}
+                              {extraHoursDays} Leave Day
+                              {extraHoursDays > 1 ? "s" : ""}
+                            </>
+                          )}
+                        </button>
+
+                        <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded">
+                          <AlertCircle size={12} className="inline mr-1" />
+                          Each leave day requires 8 extra working hours. Leave
+                          can be converted for any date (past, present, or
+                          future) that is not Sunday or holiday.
+                        </div>
                       </div>
                     </>
                   ) : (
@@ -1834,13 +1783,10 @@ const LeaveAttendance = () => {
               </>
             )}
 
-            <div className="flex justify-end gap-3">
+            <div className="flex justify-end gap-3 mt-6">
               <button
                 onClick={() => {
                   setShowExtraHoursModal(false);
-                  // Reset collapsible states when modal closes
-                  setShowExtraHoursSummary(false);
-                  setShowConvertToLeave(false);
                 }}
                 className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
               >
@@ -1929,9 +1875,9 @@ const LeaveAttendance = () => {
                 <h2 className="text-xl font-bold text-gray-800">
                   {selectedMr?.medicalRepName} - Calendar View
                   {selectedMr && (
-                    <span className="ml-2 text-lg font-normal text-red-600">
-                      (Leave Taken:{" "}
-                      {getLeaveCounts(selectedMr._id, selectedMr.date).total})
+                    <span className="ml-2 text-lg font-normal">
+                      (Unpaid Leave Taken: {getLeaveCounts(selectedMr._id, selectedMr.date).total}, 
+                      Swap Leaves: {getLeaveCounts(selectedMr._id, selectedMr.date).swapLeaves})
                     </span>
                   )}
                 </h2>
@@ -1986,29 +1932,49 @@ const LeaveAttendance = () => {
                     date,
                     selectedMr?._id,
                   );
-                  const isLeaveDay = isLeave(date, selectedMr?._id);
-                  const leaveDetails = getLeaveDetails(date, selectedMr?._id);
+                  const leaveInfo = isLeave(date, selectedMr?._id);
+                  const isLeaveDay = leaveInfo.isLeave;
+                  const leaveType = leaveInfo.type;
                   const isSundayDay = isSunday(date);
                   const isHolidayDay = isHoliday(date);
                   const isCurrentMonth = date.getMonth() === currentMonth;
                   const isToday =
                     date.toDateString() === new Date().toDateString();
 
-                  let cellStyle =
-                    "h-12 flex items-center justify-center rounded-lg border-2 ";
+                  let cellStyle = "h-12 flex items-center justify-center rounded-lg border-2 ";
+                  let titleText = "";
 
-                  if (isLeaveDay) {
-                    cellStyle += "bg-red-500 text-white border-red-600 ";
-                  } else if (attendance) {
+                  if (attendance && !attendance.isLeaveDay) {
+                    // Regular attendance (not leave) - green
                     cellStyle += "bg-green-500 text-white border-green-600 ";
+                    titleText = "Present";
+                  } else if (isLeaveDay) {
+                    // It's a leave day
+                    if (leaveType === "swapleave") {
+                      // Leave swap (converted from extra hours) - purple
+                      cellStyle += "bg-purple-500 text-white border-purple-600 ";
+                      titleText = "Leave Swap (Converted from extra hours)";
+                    } else if (leaveType === "paid") {
+                      // Paid leave (converted from extra hours via attendance) - blue
+                      cellStyle += "bg-blue-500 text-white border-blue-600 ";
+                      titleText = "Paid Leave (From extra hours)";
+                    } else {
+                      // Unpaid leave - red
+                      cellStyle += "bg-red-500 text-white border-red-600 ";
+                      titleText = "Unpaid Leave";
+                    }
                   } else if (isSundayDay) {
                     cellStyle += "bg-red-400 text-white border-red-500 ";
+                    titleText = "Sunday";
                   } else if (isHolidayDay) {
                     cellStyle += "bg-gray-400 text-white border-gray-500 ";
+                    titleText = `Holiday: ${getHolidayName(date)}`;
                   } else if (isToday) {
                     cellStyle += "border-blue-500 bg-blue-50 ";
+                    titleText = "Today - Working Day";
                   } else {
                     cellStyle += "border-gray-200 bg-gray-50 ";
+                    titleText = "Working Day";
                   }
 
                   if (!isCurrentMonth) {
@@ -2019,19 +1985,7 @@ const LeaveAttendance = () => {
                     <div
                       key={date.toISOString()}
                       className={cellStyle.trim()}
-                      title={
-                        isHolidayDay
-                          ? `Holiday: ${getHolidayName(date)}`
-                          : isLeaveDay
-                            ? `Leave: ${
-                                leaveDetails?.reason || "No reason provided"
-                              } (${leaveDetails?.type})`
-                            : attendance
-                              ? "Present"
-                              : isSundayDay
-                                ? "Sunday"
-                                : "Working Day"
-                      }
+                      title={titleText}
                     >
                       {date.getDate()}
                     </div>
@@ -2045,8 +1999,16 @@ const LeaveAttendance = () => {
                   <span>Present</span>
                 </div>
                 <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 bg-purple-500 rounded border-2 border-purple-600"></div>
+                  <span>Leave Swap</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 bg-blue-500 rounded border-2 border-blue-600"></div>
+                  <span>Paid Leave</span>
+                </div>
+                <div className="flex items-center gap-2">
                   <div className="w-4 h-4 bg-red-500 rounded border-2 border-red-600"></div>
-                  <span>Leave</span>
+                  <span>Unpaid Leave</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-4 h-4 bg-red-400 rounded border-2 border-red-500"></div>
@@ -2068,9 +2030,9 @@ const LeaveAttendance = () => {
                 <h2 className="text-xl font-bold text-gray-800">
                   {selectedMr?.medicalRepName} - Annual Calendar
                   {selectedMr && (
-                    <span className="ml-2 text-lg font-normal text-red-600">
-                      (Leave Taken:{" "}
-                      {getLeaveCounts(selectedMr._id, selectedMr.date).total})
+                    <span className="ml-2 text-lg font-normal">
+                      (Unpaid Leave Taken: {getLeaveCounts(selectedMr._id, selectedMr.date).total}, 
+                      Swap Leaves: {getLeaveCounts(selectedMr._id, selectedMr.date).swapLeaves})
                     </span>
                   )}
                 </h2>
@@ -2138,17 +2100,25 @@ const LeaveAttendance = () => {
                             date,
                             selectedMr?._id,
                           );
-                          const isLeaveDay = isLeave(date, selectedMr?._id);
+                          const leaveInfo = isLeave(date, selectedMr?._id);
+                          const isLeaveDay = leaveInfo.isLeave;
+                          const leaveType = leaveInfo.type;
                           const isSundayDay = isSunday(date);
                           const isHolidayDay = isHoliday(date);
 
                           let cellStyle =
                             "h-6 flex items-center justify-center rounded text-xs ";
 
-                          if (isLeaveDay) {
-                            cellStyle += "bg-red-500 text-white ";
-                          } else if (attendance) {
+                          if (attendance && !attendance.isLeaveDay) {
                             cellStyle += "bg-green-500 text-white ";
+                          } else if (isLeaveDay) {
+                            if (leaveType === "swapleave") {
+                              cellStyle += "bg-purple-500 text-white ";
+                            } else if (leaveType === "paid") {
+                              cellStyle += "bg-blue-500 text-white ";
+                            } else {
+                              cellStyle += "bg-red-500 text-white ";
+                            }
                           } else if (isSundayDay) {
                             cellStyle += "bg-red-400 text-white ";
                           } else if (isHolidayDay) {
@@ -2165,7 +2135,11 @@ const LeaveAttendance = () => {
                                 isHolidayDay
                                   ? `Holiday: ${getHolidayName(date)}`
                                   : isLeaveDay
-                                    ? "Leave"
+                                    ? leaveType === "swapleave"
+                                      ? "Leave Swap"
+                                      : leaveType === "paid"
+                                        ? "Paid Leave"
+                                        : "Unpaid Leave"
                                     : attendance
                                       ? "Present"
                                       : isSundayDay
@@ -2224,7 +2198,7 @@ const LeaveAttendance = () => {
                 <th className="p-3">Paid Leave</th>
                 <th className="p-3">Leave Taken</th>
                 <th className="p-3">Remaining Paid</th>
-                <th className="p-3">Extra Hours (Days)</th>
+                <th className="p-3">Extra Hours</th>
                 <th className="p-3">Actions</th>
               </tr>
             </thead>
@@ -2234,10 +2208,10 @@ const LeaveAttendance = () => {
                 currentMRs.map((mr, index) => {
                   const leaveCounts = getLeaveCounts(mr._id, mr.date);
                   const remainingPaid = getRemainingPaidLeaves(mr._id, mr.date);
-                  const leaveTaken = leaveCounts.total;
+                  const leaveTaken = leaveCounts.total; // This now only counts unpaid leaves
                   const attendanceStats = getAttendanceStats(mr._id);
 
-                  // UPDATED: Calculate extra hours using stored extraHoursInMinutes
+                  // Calculate extra hours
                   const totalExtraHours = getExtraHoursForMR(mr._id);
                   const extraHoursCalc = calculateRemainingTime(
                     totalExtraHours * 60,
@@ -2277,6 +2251,11 @@ const LeaveAttendance = () => {
                         <span className="bg-red-100 text-red-800 px-2 py-1 rounded-full text-sm font-medium">
                           {leaveTaken}
                         </span>
+                        {leaveCounts.swapLeaves > 0 && (
+                          <span className="ml-2 bg-purple-100 text-purple-800 px-2 py-1 rounded-full text-sm font-medium">
+                            +{leaveCounts.swapLeaves} swap
+                          </span>
+                        )}
                       </td>
 
                       <td className="p-3">
@@ -2294,15 +2273,30 @@ const LeaveAttendance = () => {
                       </td>
 
                       <td className="p-3">
-                        {extraHoursDaysAvailable > 0 ? (
-                          <div className="inline-flex flex-col items-center">
-                            <span className="inline-flex items-center gap-1 bg-gray-100 text-gray-800 px-2 py-1 rounded-full text-sm font-medium">
-                              <Clock size={12} />
-                              {extraHoursDaysAvailable} day
-                              {extraHoursDaysAvailable !== 1 ? "s" : ""}
-                            </span>
-                            <span className="text-xs text-gray-500 mt-1">
-                              ({totalExtraHours.toFixed(2)} hours)
+                        {totalExtraHours > 0 ? (
+                          <div className="flex flex-col items-center gap-1">
+                            {/* Days in blue badge */}
+                            {extraHoursCalc.days > 0 && (
+                              <span className="inline-flex items-center gap-1 bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-medium">
+                                <Clock size={10} />
+                                {extraHoursCalc.days} day
+                                {extraHoursCalc.days !== 1 ? "s" : ""}
+                              </span>
+                            )}
+
+                            {/* Remaining hours in yellow badge */}
+                            {(extraHoursCalc.hours > 0 ||
+                              extraHoursCalc.minutes > 0) && (
+                              <span className="inline-flex items-center gap-1 bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full text-xs font-medium">
+                                <Clock size={10} />
+                                {extraHoursCalc.hours}h {extraHoursCalc.minutes}
+                                m
+                              </span>
+                            )}
+
+                            {/* Total hours in small text */}
+                            <span className="text-xs text-gray-500">
+                              Total: {totalExtraHours.toFixed(2)} hours
                             </span>
                           </div>
                         ) : (

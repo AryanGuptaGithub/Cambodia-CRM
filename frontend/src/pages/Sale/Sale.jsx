@@ -179,11 +179,6 @@ const findProductStockInHandOptimized = async (
   tolerance = 0,
 ) => {
   try {
-    console.log(
-      `Checking stock for: ${productName}, Required: ${requiredQty}`,
-    );
-
-    // Always return that we have enough stock
     return {
       success: true,
       productName: productName,
@@ -493,11 +488,7 @@ const findProductStockInHandOptimized = async (
 const validateStockBeforeImport = async (invoices) => {
   try {
     setIsValidatingStock(true);
-    setImportMessage(`Checking stock for ${invoices.length} invoices...`);
-
-    // Skip detailed stock validation, backend will handle it
-    console.log("Skipping detailed stock validation - backend will handle adjustments");
-    
+    setImportMessage(`Checking stock for ${invoices.length} invoices...`);    
     return true; // Always return true
   } catch (error) {
     console.error("Stock validation error:", error);
@@ -1595,7 +1586,6 @@ const Sales = () => {
       } else if (response.data.data && Array.isArray(response.data.data)) {
         setProductsList(response.data.data);
       }
-      console.log("Fetched products list:", productsList.length);
     } catch (error) {
       console.warn("Could not fetch products list:", error.message);
       // Continue without products list

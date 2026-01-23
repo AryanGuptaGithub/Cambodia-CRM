@@ -19,7 +19,7 @@ const attendanceSchema = new mongoose.Schema(
     },
     workingHoursPerDay: {
       type: Number,
-      default: 9, // 9 hours per day
+      default: 8, // Changed from 9 to 8 as per your logic
     },
     extraHours: {
       type: String,
@@ -33,11 +33,7 @@ const attendanceSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-    leaveType: {
-      type: String,
-      enum: ["regular", "extra_hours_converted", "other"],
-      default: "regular",
-    },
+    // REMOVED leaveType from Attendance model
     remarks: {
       type: String,
     },

@@ -704,22 +704,15 @@ const processSingleInvoiceWithAutoAdjustment = async (invoiceData, index) => {
         continue; // Skip this product but continue with others
       }
 
-      // Get current stock (including adjustments)
       const stockData = await getTotalProductStock(
         productRecord._id,
         productRecord.productName,
       );
-      console.log('values of stockData', stockData);
       const availableStock = stockData.availableStock;
-
-      // Calculate if we need to create an adjustment
       let adjustmentCreated = false;
       let adjustmentId = null;
- 
+
       if (availableStock < totalQty) {
-        console.log('inside the if block availableStock', availableStock);
-        console.log('values of totalQty if block', totalQty);
-        // Create a stock adjustment to cover the shortage
         const shortage = fixPrecision(totalQty - availableStock);
 
         // FIXED: Include all required fields including totalQuantity
@@ -1305,8 +1298,6 @@ const retryFailedInvoices = async (sessionId, invoices) => {
   progress.totalTime = progress.endTime - progress.startTime;
   progress.errors = errors;
   progress.status = "completed";
-
-  console.log(`Retry completed: ${successful} successful, ${failed} failed`);
 };
 
 //*** */
@@ -1410,8 +1401,6 @@ const processBatchImport = async (sessionId, invoices) => {
   progress.totalTime = progress.endTime - progress.startTime;
   progress.errors = errors;
   progress.status = "completed";
-
-  console.log(`Import completed: ${successful} successful, ${failed} failed`);
 };
 
 const processSingleInvoice = async (invoiceData, index) => {
@@ -1939,9 +1928,6 @@ const checkBatchStockAvailabilityOptimized = async (salesData) => {
     }
   }
 
-  console.log(`Phase 1: Aggregated ${stockRequirements.size} unique products`);
-
-  // Phase 2: Get REAL stock calculation for each product
   const stockCalculations = new Map();
 
   for (const [normalizedName, requirement] of stockRequirements.entries()) {
@@ -2004,7 +1990,6 @@ const checkBatchStockAvailabilityOptimized = async (salesData) => {
           ...stockData,
         });
       } else {
-        console.log(`No product found for: ${requirement.originalName}`);
         stockCalculations.set(normalizedName, {
           productId: null,
           productName: requirement.originalName,
@@ -2339,9 +2324,6 @@ const findProductStockInHandOptimized = async (
   tolerance = 0,
 ) => {
   try {
-    console.log(`Checking stock for: ${productName}, Required: ${requiredQty}`);
-
-    // First, try to make API call to the correct endpoint
     try {
       const response = await axios.post(
         `${backendUrl}/api/sales/check-stock`,
@@ -2379,15 +2361,7 @@ const findProductStockInHandOptimized = async (
         };
       }
     } catch (apiError) {
-      console.log(
-        "API stock check failed, falling back to local check:",
-        apiError.message,
-      );
-      // If it's a 404 error, the endpoint might not exist
       if (apiError.response && apiError.response.status === 404) {
-        console.log(
-          "Endpoint not found. Make sure backend has /api/sales/check-stock endpoint.",
-        );
       }
     }
 
@@ -2455,7 +2429,6 @@ const createIndexes = async () => {
       createdAt: -1,
     });
     await SaleSummary.collection.createIndex({ invoiceNumber: 1 });
-    console.log("Database indexes created successfully");
   } catch (error) {
     console.error("Error creating indexes:", error);
   }
@@ -2472,7 +2445,6 @@ setInterval(() => {
     stockCache.clear();
     adjustmentCache.clear();
     lastCacheClear = now;
-    console.log("Cache cleared for fresh data");
   }
 }, 30000);
 
@@ -2674,10 +2646,6 @@ const processImportBatchWithStockDeduction = async (
   progress.completed = true;
   progress.endTime = Date.now();
   progress.totalTime = progress.endTime - progress.startTime;
-
-  console.log(
-    `Import completed: ${progress.successful} successful, ${progress.failed} failed`,
-  );
 };
 
 const processSingleInvoiceWithStockDeduction = async (saleData, index) => {
@@ -2741,7 +2709,7 @@ const processSingleInvoiceWithStockDeduction = async (saleData, index) => {
           productRecord._id,
           productRecord.productName,
         );
-        console.log("values of stockData 2874", stockData);
+
         const availableStock = Math.max(0, stockData.availableStock || 0);
 
         if (availableStock < totalQty) {
@@ -3018,8 +2986,6 @@ const processImportWithStockDeduction = async (
   progress.endTime = Date.now();
   progress.totalTime = progress.endTime - progress.startTime;
   progress.errors = errors;
-
-  console.log(`Import completed: ${successful} successful, ${failed} failed`);
 };
 
 const getProductAdjustments = async (productId) => {
@@ -3063,40 +3029,22 @@ const getProductAdjustments = async (productId) => {
 };
 
 async function calculateStockForProduct(productName, requiredQty) {
-  console.log("\n=== START calculateStockForProduct ===");
-  console.log("Input - productName:", productName);
-  console.log("Input - requiredQty:", requiredQty);
-  
-  // Handle product name variations
   let correctedName = productName;
-  console.log("1. Original productName:", productName);
-  
   if (productName.toLowerCase().includes("iotekam")) {
     correctedName = productName.toLowerCase().replace(/^i/, "l");
-    console.log("2. Corrected iotekam to lotekam:", correctedName);
   }
   if (productName.toLowerCase() === "profokam") {
     correctedName = "Profokam 1%";
-    console.log("3. Corrected profokam to Profokam 1%:", correctedName);
   }
 
   const normalizedName = normalizeProductName(correctedName);
-  console.log("4. Normalized name:", normalizedName);
-
-  // Clear cache for fresh data
-  console.log("5. Clearing cache for:", normalizedName);
   stockCache.delete(normalizedName);
   productCache.delete(normalizedName);
-
-  // Find product
-  console.log("6. Searching for product in database...");
   const product = await Product.findOne({
     productName: buildProductNameRegex(normalizedName),
   }).lean();
 
   if (!product) {
-    console.log("7. PRODUCT NOT FOUND!");
-    console.log("   - Searched for regex:", buildProductNameRegex(normalizedName));
     return {
       success: false,
       productName,
@@ -3112,41 +3060,11 @@ async function calculateStockForProduct(productName, requiredQty) {
     };
   }
 
-  console.log("8. Product found:");
-  console.log("   - Product ID:", product._id);
-  console.log("   - Actual productName in DB:", product.productName);
-  console.log("   - LC:", product.lc);
-  console.log("   - FOB:", product.fob);
-
-  // Get real-time stock calculation
-  console.log("9. Calling calculateRealStock...");
   const stockData = await calculateRealStock(product._id, product.productName);
-  
-  console.log("10. Stock data received:");
-  console.log("   - baseStock:", stockData.baseStock);
-  console.log("   - totalAdjustments:", stockData.totalAdjustments);
-  console.log("   - availableStock:", stockData.availableStock);
-  console.log("   - calculationMethod:", stockData.calculationMethod);
-
-  // Use availableStock which includes both batches and adjustments
   const availableStock = Math.max(0, stockData.availableStock || 0);
   const insufficient = Math.max(0, fixPrecision(requiredQty - availableStock));
-
-  console.log("11. Stock calculation:");
-  console.log("   - availableStock:", availableStock);
-  console.log("   - requiredQty:", requiredQty);
-  console.log("   - insufficient amount:", insufficient);
-
-  // IMPORTANT: Use the SAME tolerance as checkBatchStockAvailabilityOptimized
   const tolerance = 0.01; // 1% tolerance
-  console.log("12. Applying tolerance:", tolerance);
-  console.log("   - availableStock + tolerance:", availableStock + tolerance);
-  console.log("   - requiredQty:", requiredQty);
-  
   const hasEnoughStock = availableStock + tolerance >= requiredQty;
-  console.log("13. hasEnoughStock:", hasEnoughStock);
-
-  console.log("14. Building final response...");
   const result = {
     success: true,
     productName: product.productName,
@@ -3170,14 +3088,6 @@ async function calculateStockForProduct(productName, requiredQty) {
       : `Insufficient stock. Required: ${requiredQty}, Available: ${availableStock}, Shortfall: ${insufficient}`,
   };
 
-  console.log("15. Final result:");
-  console.log("   - success:", result.success);
-  console.log("   - message:", result.message);
-  console.log("   - hasEnoughStock:", result.hasEnoughStock);
-  console.log("   - availableStock:", result.availableStock);
-  console.log("   - breakdown:", JSON.stringify(result.breakdown, null, 2));
-  
-  console.log("=== END calculateStockForProduct ===\n");
   return result;
 }
 
@@ -3549,10 +3459,6 @@ router.post("/sales/create-initial-adjustments", async (req, res) => {
           quantity: parseFloat(quantity),
           type: adjustmentType,
         });
-
-        console.log(
-          `Created adjustment for ${product.productName}: ${quantity} units`,
-        );
       } catch (error) {
         errors.push({ productName: adj.productName, error: error.message });
       }
@@ -3949,10 +3855,6 @@ router.post("/sales/fix-stock-sync-all/:productName", async (req, res) => {
       });
     }
 
-    console.log(`Fixing stock sync for: ${stockItem.productName}`);
-    console.log(`Current totalBoxes: ${stockItem.totalBoxes}`);
-
-    // Calculate real stock from batches
     let totalFromBatches = 0;
     const validBatches = [];
 
@@ -3973,11 +3875,6 @@ router.post("/sales/fix-stock-sync-all/:productName", async (req, res) => {
     const oldTotal = fixPrecision(stockItem.totalBoxes || 0);
     const newTotal = fixPrecision(totalFromBatches);
     const difference = fixPrecision(newTotal - oldTotal);
-
-    console.log(`Calculated from batches: ${totalFromBatches}`);
-    console.log(`Difference: ${difference}`);
-
-    // Only update if there's a difference or force sync
     if (Math.abs(difference) > 0.0001 || forceSync) {
       stockItem.totalBoxes = newTotal;
       stockItem.batches = validBatches;
@@ -3988,8 +3885,6 @@ router.post("/sales/fix-stock-sync-all/:productName", async (req, res) => {
       // Clear cache
       stockCache.delete(normalizedName);
       productCache.delete(normalizedName);
-
-      console.log(`Stock synchronized: ${oldTotal} -> ${newTotal}`);
     }
 
     await session.commitTransaction();
@@ -4168,13 +4063,6 @@ router.get("/sales/stock-analysis/:productName", async (req, res) => {
 router.post("/sales/check-stock-batch", async (req, res) => {
   try {
     const { invoices, products, productName, requiredQty } = req.body;
-
-    console.log(`Batch stock check received:`, {
-      hasInvoices: invoices && Array.isArray(invoices),
-      invoiceCount: invoices?.length || 0,
-    });
-
-    // Handle individual product check
     if (productName && requiredQty !== undefined) {
       return res.json({
         success: true,
@@ -4217,7 +4105,8 @@ router.post("/sales/check-stock-batch", async (req, res) => {
         totalInvoices: invoices?.length || products?.length || 0,
       },
       stockIssues: [],
-      message: "Stock validation passed - Backend will handle any stock shortages",
+      message:
+        "Stock validation passed - Backend will handle any stock shortages",
       timestamp: Date.now(),
     });
   } catch (error) {
@@ -4337,8 +4226,6 @@ router.post("/sales/import-proceed-anyway", async (req, res) => {
       });
     }
 
-
-
     // Create session for import progress
     sessionId = `import_${Date.now()}_${Math.random()
       .toString(36)
@@ -4396,8 +4283,6 @@ router.post("/sales/import-bulk", async (req, res) => {
         message: "No invoices provided",
       });
     }
-
-    console.log(`Starting bulk import for ${invoiceData.length} invoices...`);
 
     // Clear caches
     productCache.clear();
@@ -4516,10 +4401,7 @@ router.post("/sales/import", async (req, res) => {
         message: "No invoices provided",
       });
     }
-
-    console.log(`Starting import for ${invoiceData.length} invoices...`);
-
-    // Create session for import progress
+  
     sessionId = `import_${Date.now()}_${Math.random()
       .toString(36)
       .substr(2, 9)}`;
@@ -4632,8 +4514,6 @@ router.post("/sales/pre-import-stock-check", async (req, res) => {
       });
     }
 
-    console.log("\n=== PRE-IMPORT STOCK CHECK ===");
-
     const productMap = new Map();
     const stockResults = [];
 
@@ -4705,18 +4585,6 @@ router.post("/sales/pre-import-stock-check", async (req, res) => {
           invoiceCount: productData.invoices.size,
           invoices: Array.from(productData.invoices).slice(0, 5),
         });
-
-        // Console log
-        console.log(
-          `\n${hasEnoughStock ? "✅" : "❌"} ${productData.originalName}`,
-        );
-        console.log(`   Actual: ${product.productName}`);
-        console.log(`   Required: ${productData.required}`);
-        console.log(`   Available: ${availableStock}`);
-        console.log(`   Base Stock: ${stockData.baseStock || 0}`);
-        console.log(`   Adjustments: ${stockData.totalAdjustments || 0}`);
-        console.log(`   Shortfall: ${shortfall}`);
-        console.log(`   Invoices: ${productData.invoices.size}`);
       } else {
         stockResults.push({
           product: productData.originalName,
@@ -4727,11 +4595,6 @@ router.post("/sales/pre-import-stock-check", async (req, res) => {
           error: "Product not found",
           invoiceCount: productData.invoices.size,
         });
-
-        console.log(`\n❌ ${productData.originalName} - PRODUCT NOT FOUND`);
-        console.log(`   Required: ${productData.required}`);
-        console.log(`   Available: 0`);
-        console.log(`   Shortfall: ${productData.required}`);
       }
     }
 
@@ -4745,14 +4608,6 @@ router.post("/sales/pre-import-stock-check", async (req, res) => {
       0,
     );
     const productsWithIssues = stockResults.filter((p) => !p.hasEnoughStock);
-
-    console.log("\n=== SUMMARY ===");
-    console.log(`Total Products: ${stockResults.length}`);
-    console.log(`Total Required: ${totalRequired}`);
-    console.log(`Total Available: ${totalAvailable}`);
-    console.log(`Total Shortfall: ${totalShortfall}`);
-    console.log(`Products with Issues: ${productsWithIssues.length}`);
-
     res.json({
       success: true,
       summary: {
@@ -7380,9 +7235,6 @@ router.post("/sales/fix-stock-sync/:productName", async (req, res) => {
 });
 
 router.post("/sales/check-stock", async (req, res) => {
-  console.log("=== START: /sales/check-stock API CALL ===");
-  console.log("Request received at:", new Date().toISOString());
-  
   try {
     const {
       productName,
@@ -7392,50 +7244,29 @@ router.post("/sales/check-stock", async (req, res) => {
       tolerance = 0,
     } = req.body;
 
-    console.log("1. Request body received:");
-    console.log("   - productName:", productName);
-    console.log("   - requiredQty:", requiredQty);
-    console.log("   - salesQty:", salesQty);
-    console.log("   - bonusQty:", bonusQty);
-    console.log("   - tolerance:", tolerance);
-    console.log("   - Full body:", JSON.stringify(req.body, null, 2));
-
     stockLogger.debug?.(
       `Stock check request received for: ${productName}`,
       req.body,
     );
 
     let totalRequiredQty = requiredQty;
-    console.log("2. Initial totalRequiredQty from requiredQty field:", totalRequiredQty);
+
 
     if (totalRequiredQty === undefined || totalRequiredQty === null) {
-      console.log("3. totalRequiredQty is undefined/null, calculating from salesQty + bonusQty");
       totalRequiredQty = fixPrecision((salesQty || 0) + (bonusQty || 0));
-      console.log("   - salesQty || 0:", salesQty || 0);
-      console.log("   - bonusQty || 0:", bonusQty || 0);
-      console.log("   - Calculated totalRequiredQty:", totalRequiredQty);
     }
-
-    console.log("4. Validation check:");
-    console.log("   - productName exists?:", !!productName);
-    console.log("   - totalRequiredQty exists?:", totalRequiredQty !== undefined && totalRequiredQty !== null);
-    console.log("   - totalRequiredQty value:", totalRequiredQty);
 
     if (
       !productName ||
       totalRequiredQty === undefined ||
       totalRequiredQty === null
     ) {
-      console.log("5. VALIDATION FAILED!");
-      console.log("   - Missing productName?:", !productName);
-      console.log("   - Missing totalRequiredQty?:", totalRequiredQty === undefined || totalRequiredQty === null);
-      
+
       stockLogger.warn?.("Invalid stock check request", {
         productName,
         requiredQty,
       });
-      
-      console.log("6. Returning 400 error");
+
       return res.status(400).json({
         success: false,
         message: "Product name and quantity are required",
@@ -7449,31 +7280,10 @@ router.post("/sales/check-stock", async (req, res) => {
       });
     }
 
-    console.log("7. Validation passed, proceeding with stock calculation");
-    console.log("   - Final productName:", productName);
-    console.log("   - Final totalRequiredQty:", totalRequiredQty);
-
-    // FIX: Add try-catch for the stock calculation
     let result;
     try {
-      console.log("8. Calling calculateStockForProduct function");
-      console.log("   - Parameters:");
-      console.log("     * productName:", productName);
-      console.log("     * totalRequiredQty:", totalRequiredQty);
-      
       result = await calculateStockForProduct(productName, totalRequiredQty);
-      
-      console.log("9. calculateStockForProduct returned successfully");
-      console.log("   - Result object keys:", Object.keys(result || {}));
-      console.log("   - Result availableStock:", result?.availableStock);
-      console.log("   - Result insufficient:", result?.insufficient);
-      console.log("   - Full result:", JSON.stringify(result, null, 2));
-      
     } catch (calcError) {
-      console.log("10. ERROR in calculateStockForProduct!");
-      console.log("   - Error message:", calcError.message);
-      console.log("   - Error stack:", calcError.stack);
-      
       stockLogger.error?.("Stock calculation error", {
         productName,
         error: calcError.message,
@@ -7498,42 +7308,14 @@ router.post("/sales/check-stock", async (req, res) => {
         },
         message: `Error checking stock: ${calcError.message}`,
       };
-      
-      console.log("11. Created error result object:");
-      console.log("   - Success:", result.success);
-      console.log("   - Message:", result.message);
     }
-
-    console.log("12. Final result before sending response:");
-    console.log("   - Result success:", result?.success);
-    console.log("   - Result message:", result?.message);
-    console.log("   - Result hasEnoughStock:", result?.hasEnoughStock);
-    console.log("   - Result availableStock:", result?.availableStock);
-    console.log("   - Result requiredQty:", result?.requiredQty);
-    
     stockLogger.info?.("Stock check result", result);
-
-    console.log("13. Sending response back to client");
-    console.log("   - Response status: 200 OK");
-    console.log("   - Response body keys:", Object.keys(result || {}));
-    
     res.json(result);
-    
-    console.log("14. Response sent successfully");
-    console.log("=== END: /sales/check-stock API CALL ===\n\n");
-    
   } catch (error) {
-    console.log("15. UNEXPECTED ERROR in /sales/check-stock!");
-    console.log("   - Error message:", error?.message);
-    console.log("   - Error stack:", error?.stack);
-    console.log("   - Error type:", error?.constructor?.name);
-    
     stockLogger.error?.("Stock check error", {
       error: error?.message || "Unknown error",
       stack: error?.stack,
     });
-
-    console.log("16. Sending 500 error response");
     res.status(500).json({
       success: false,
       message: "Failed to check stock",
@@ -7543,7 +7325,6 @@ router.post("/sales/check-stock", async (req, res) => {
         route: "/sales/check-stock",
       },
     });
-  
   }
 });
 

@@ -99,9 +99,6 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
           return;
         }
 
-        console.log("Selected MR object:", selectedMrObj);
-
-        // Store MR ID (use mrId field if available)
         setSelectedMrId(selectedMrObj.mrId || selectedMrObj._id);
 
         // Check if productsInHand exists
@@ -126,7 +123,6 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
           originalProductData: product
         }));
 
-        console.log("Transformed MR stock:", transformedData);
         setMrStock(transformedData);
       } catch (error) {
         console.error("Error getting MR stock from list:", error);
@@ -295,8 +291,6 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
         remarks: remarks,
         returnDate: returnDate.toISOString().split("T")[0],
       };
-
-      console.log("Submitting return data:", returnData);
 
       const response = await axios.post(
         `${backendUrl}/api/stock-returns`,
@@ -541,15 +535,9 @@ const StockReturn = () => {
           Authorization: `Bearer ${localStorage.getItem("token")}`,
         },
       });
-      console.log("MR List API Response:", response.data);
+
       if (response.data.success) {
-        const mrData = response.data.data || [];
-        console.log("MR Data structure:", mrData);
-        
-        if (mrData.length > 0) {
-          console.log("First MR object:", mrData[0]);
-        }
-        
+        const mrData = response.data.data || [];    
         setMrList(mrData);
       } else {
         toast.error("Failed to load MR list");

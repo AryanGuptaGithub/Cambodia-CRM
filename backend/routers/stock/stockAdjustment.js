@@ -99,14 +99,8 @@ const updateReportInHandAfterAdjustment = async (
       remarks: remarks || `${adjustmentType} adjustment`
     };
 
-    // Add the adjustment batch entry
     existingProduct.batches.push(newBatchEntry);
-    
-    // Recalculate totals (pre-save hook will handle this)
-    await existingProduct.save();
-    
-    console.log(`✅ Updated ReportInHand for "${productName}": ${adjustmentType} ${boxQuantity} boxes`);
-    
+    await existingProduct.save();  
   } catch (error) {
     console.error(
       `❌ Error updating ReportInHand for product "${productName}":`,
@@ -135,18 +129,11 @@ const restoreStockAfterAdjustmentDeletion = async (adjustmentId) => {
     );
     
     if (batchIndex === -1) {
-      console.warn(`⚠️ Batch entry not found for adjustment ${adjustmentId}`);
       return;
     }
     
-    // Remove the batch entry
     product.batches.splice(batchIndex, 1);
-    
-    // Recalculate totals
     await product.save();
-    
-    console.log(`✅ Removed adjustment batch from "${product.productName}"`);
-    
   } catch (error) {
     console.error(
       `❌ Error restoring ReportInHand for adjustment ${adjustmentId}:`,
@@ -200,9 +187,6 @@ const updateExistingAdjustmentInReport = async (
 
     existingProduct.batches.push(newBatchEntry);
     await existingProduct.save();
-    
-    console.log(`✅ Updated adjustment in ReportInHand for "${productName}"`);
-    
   } catch (error) {
     console.error(
       `❌ Error updating adjustment in ReportInHand:`,

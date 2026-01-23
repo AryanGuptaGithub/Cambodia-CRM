@@ -31,12 +31,7 @@ const SampleExcelDownloadMRBasicPayroll = () => {
           mrData = response.data;
         }
       } catch (err) {
-        console.log(
-          "Primary endpoint failed, trying staffs endpoint:",
-          err.message,
-        );
 
-        // Fall back to /api/staffs
         try {
           response = await axios.get(`${backendUrl}/api/staffs`);
 
