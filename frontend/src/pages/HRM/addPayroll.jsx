@@ -1,4 +1,3 @@
-// src/pages/payroll/AddPayroll.jsx
 import React, {
   useState,
   useEffect,
@@ -16,9 +15,6 @@ import { getTodayDate } from "../../utils/dateUtil";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
-/* -------------------------------------------------------------------------- */
-/*  Allowance list – replace with API call if you have one                   */
-/* -------------------------------------------------------------------------- */
 const allowanceTypes = [
   "House Rent Allowance",
   "Dearness Allowance",
@@ -32,271 +28,11 @@ const allowanceTypes = [
   "Other",
 ];
 
-/* -------------------------------------------------------------------------- */
-/*  Helper: current month in YYYY-MM format                                  */
-/* -------------------------------------------------------------------------- */
 const getCurrentMonth = () => {
   const now = new Date();
-  return now.toISOString().slice(0, 7); // "2025-11"
+  return now.toISOString().slice(0, 7);
 };
 
-/* -------------------------------------------------------------------------- */
-/*  Custom hook – all payroll logic in one place                             */
-/* -------------------------------------------------------------------------- */
-const usePayrollForm = () => {
-  const navigate = useNavigate();
-
-  const [form, setForm] = useState({
-    employeeId: "",
-    period: "", // YYYY-MM
-    basicSalary: "",
-    allowances: [], // Changed to array of objects with type and amount
-    deductions: "",
-    netSalary: "0.00",
-    status: "pending",
-    source: "", // Added source field
-  });
-
-  const [errors, setErrors] = useState({});
-  const [loading, setLoading] = useState(false);
-  const [mrList, setMrList] = useState([]);
-  const [mrListLoading, setMrListLoading] = useState(true);
-  const [isMrListEmpty, setIsMrListEmpty] = useState(false);
-  const [showAllowanceBreakdown, setShowAllowanceBreakdown] = useState(false);
-
-  // Added state for source/destination options
-  const [sourceOptions, setSourceOptions] = useState([]);
-  const [sourceLoading, setSourceLoading] = useState(true);
-
-  /* -------------------------- Fetch MR List -------------------------- */
-  const fetchMRList = useCallback(async () => {
-    try {
-      setMrListLoading(true);
-      const response = await fetch(`${backendUrl}/api/staffs`);
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || "Failed to fetch employees");
-      }
-
-      if (data && data.length > 0) {
-        setMrList(data);
-        setIsMrListEmpty(false);
-      } else {
-        setMrList([]);
-        setIsMrListEmpty(true);
-      }
-    } catch (error) {
-      console.error("Error fetching employees:", error);
-      toast.error(error.message || "Failed to load employees");
-      setMrList([]);
-      setIsMrListEmpty(true);
-    } finally {
-      setMrListLoading(false);
-    }
-  }, []);
-
-  /* -------------------------- Fetch Source/Destination Options -------------------------- */
-  const fetchSourceOptions = useCallback(async () => {
-    try {
-      setSourceLoading(true);
-      const destinationResponse = await axios.get(
-        `${backendUrl}/api/accounts/destinations`
-      );
-
-      if (destinationResponse.data && Array.isArray(destinationResponse.data)) {
-        const options = destinationResponse.data
-          .filter((destination) => destination.totalAmount > 0) // Filter where totalAmount > 0
-          .map((destination) => ({
-            value: destination._id || destination.id,
-            label:
-              destination.name ||
-              destination.destinationName ||
-              `Destination ${destination._id}`,
-          }));
-        setSourceOptions(options);
-      } else {
-        setSourceOptions([]);
-        console.warn(
-          "Unexpected response format for destinations:",
-          destinationResponse.data
-        );
-      }
-    } catch (error) {
-      console.error("Error fetching destination options:", error);
-      toast.error("Failed to load source options");
-      setSourceOptions([]);
-    } finally {
-      setSourceLoading(false);
-    }
-  }, []);
-
-  const validate = useCallback(() => {
-    const newErrors = {};
-
-    if (!form.employeeId.trim()) newErrors.employeeId = "Employee is required";
-    if (!form.period) newErrors.period = "Pay period is required";
-    else if (form.period > getCurrentMonth())
-      newErrors.period = "Future months are not allowed";
-
-    if (!form.basicSalary) newErrors.basicSalary = "Basic Salary is required";
-    if (!form.source) newErrors.source = "Source is required"; // Added source validation
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  }, [form]);
-
-  /* -------------------------- numeric input -------------------------- */
-  const handleNumeric = useCallback((e) => {
-    const { name, value } = e.target;
-    if (value === "" || /^\d*\.?\d*$/.test(value)) {
-      setForm((prev) => ({ ...prev, [name]: value }));
-      setErrors((prev) => ({ ...prev, [name]: "" }));
-    }
-  }, []);
-
-  /* -------------------------- source handling -------------------------- */
-  const handleSourceChange = useCallback((sourceId) => {
-    setForm((prev) => ({ ...prev, source: sourceId }));
-    setErrors((prev) => ({ ...prev, source: "" }));
-  }, []);
-
-  /* -------------------------- allowance handling -------------------------- */
-  const allowanceOptions = useMemo(
-    () =>
-      allowanceTypes.map((t) => ({
-        value: t,
-        label: t,
-      })),
-    []
-  );
-
-  const handleAllowanceChange = useCallback((selectedTypes) => {
-    setForm((prev) => {
-      const currentAllowances = prev.allowances || [];
-
-      // Remove allowances that are no longer selected
-      const updatedAllowances = currentAllowances.filter((allowance) =>
-        selectedTypes.includes(allowance.type)
-      );
-
-      // Add new allowances that weren't previously selected
-      selectedTypes.forEach((type) => {
-        if (!updatedAllowances.some((allowance) => allowance.type === type)) {
-          updatedAllowances.push({ type, amount: "" });
-        }
-      });
-
-      return { ...prev, allowances: updatedAllowances };
-    });
-  }, []);
-
-  const handleAllowanceAmountChange = useCallback((type, amount) => {
-    setForm((prev) => ({
-      ...prev,
-      allowances: prev.allowances.map((allowance) =>
-        allowance.type === type ? { ...allowance, amount } : allowance
-      ),
-    }));
-  }, []);
-
-  const removeAllowance = useCallback((type) => {
-    setForm((prev) => ({
-      ...prev,
-      allowances: prev.allowances.filter(
-        (allowance) => allowance.type !== type
-      ),
-    }));
-  }, []);
-
-  const handleEmployeeChange = useCallback((employeeId) => {
-    setForm((prev) => ({ ...prev, employeeId }));
-    setErrors((prev) => ({ ...prev, employeeId: "" }));
-  }, []);
-
-  /* -------------------------- calculate totals -------------------------- */
-  const totalAllowance = useMemo(() => {
-    return form.allowances.reduce((total, allowance) => {
-      return total + (parseFloat(allowance.amount) || 0);
-    }, 0);
-  }, [form.allowances]);
-
-  const netSalary = useMemo(() => {
-    const basic = parseFloat(form.basicSalary) || 0;
-    const ded = parseFloat(form.deductions) || 0;
-    return (basic + totalAllowance - ded).toFixed(2);
-  }, [form.basicSalary, totalAllowance, form.deductions]);
-
-  // Update net salary whenever dependencies change
-  useEffect(() => {
-    setForm((prev) => ({ ...prev, netSalary }));
-  }, [netSalary]);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!validate()) return;
-    try {
-      setLoading(true);
-      const payload = {
-        ...form,
-        totalAllowance: totalAllowance.toFixed(2),
-      };
-    
-      const res = await fetch(`${backendUrl}/api/payrolls`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-
-      if (!res.ok) {
-        toast.error(data.message || "Failed to save payroll");
-        return;
-      }
-
-      toast.success(data.message || "Payroll added successfully");
-      navigate("/hrmlayout/payroll");
-    } catch (err) {
-      toast.error(err.message || "Network error");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  /* -------------------------- load data on mount -------------------------- */
-  useEffect(() => {
-    fetchMRList();
-    fetchSourceOptions();
-  }, [fetchMRList, fetchSourceOptions]);
-
-  return {
-    form,
-    errors,
-    loading,
-    mrList,
-    mrListLoading,
-    isMrListEmpty,
-    allowanceOptions,
-    totalAllowance,
-    showAllowanceBreakdown,
-    setShowAllowanceBreakdown,
-    sourceOptions,
-    sourceLoading,
-    handleNumeric,
-    handleAllowanceChange,
-    handleAllowanceAmountChange,
-    removeAllowance,
-    handleEmployeeChange,
-    handleSourceChange,
-    handleSubmit,
-    setForm,
-    validate,
-  };
-};
-
-/* -------------------------------------------------------------------------- */
-/*  Custom MultipleSelectDropdown Component                                  */
-/* -------------------------------------------------------------------------- */
 const MultipleSelectDropdown = ({
   label,
   value = [],
@@ -312,7 +48,7 @@ const MultipleSelectDropdown = ({
   const dropdownRef = useRef(null);
 
   const filteredOptions = options.filter((option) =>
-    option.label.toLowerCase().includes(searchTerm.toLowerCase())
+    option.label.toLowerCase().includes(searchTerm.toLowerCase()),
   );
 
   const toggleOption = (optionValue) => {
@@ -329,7 +65,6 @@ const MultipleSelectDropdown = ({
     });
   };
 
-  // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -370,7 +105,6 @@ const MultipleSelectDropdown = ({
 
         {isOpen && !disabled && (
           <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-auto">
-            {/* Search input */}
             <div className="p-2 border-b border-gray-200">
               <input
                 type="text"
@@ -382,7 +116,6 @@ const MultipleSelectDropdown = ({
               />
             </div>
 
-            {/* Options list */}
             {loading ? (
               <div className="px-3 py-2 text-gray-500">Loading...</div>
             ) : filteredOptions.length === 0 ? (
@@ -399,7 +132,7 @@ const MultipleSelectDropdown = ({
                   <input
                     type="checkbox"
                     checked={value.includes(option.value)}
-                    onChange={() => {}} // Handled by parent div click
+                    onChange={() => {}}
                     className="mr-2 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                   />
                   <span
@@ -420,9 +153,6 @@ const MultipleSelectDropdown = ({
   );
 };
 
-/* -------------------------------------------------------------------------- */
-/*  Allowance Breakdown Modal Component                                      */
-/* -------------------------------------------------------------------------- */
 const AllowanceBreakdownModal = ({
   allowances,
   isOpen,
@@ -434,7 +164,7 @@ const AllowanceBreakdownModal = ({
 
   const handleNumeric = (e, type) => {
     const { value } = e.target;
-    if (value === "" || /^\d*\.?\d*$/.test(value)) {
+    if (value === "" || /^\d*\.?\d{0,2}$/.test(value)) {
       onAmountChange(type, value);
     }
   };
@@ -500,9 +230,569 @@ const AllowanceBreakdownModal = ({
   );
 };
 
-/* -------------------------------------------------------------------------- */
-/*  Main component with requested layout                                     */
-/* -------------------------------------------------------------------------- */
+const usePayrollForm = () => {
+  const navigate = useNavigate();
+
+  const [form, setForm] = useState({
+    employeeId: "",
+    period: "",
+    basicSalary: "",
+    allowances: [],
+    deductions: "",
+    netSalary: "0.00",
+    status: "pending",
+    source: "",
+  });
+
+  const [errors, setErrors] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [mrList, setMrList] = useState([]);
+  const [mrListLoading, setMrListLoading] = useState(true);
+  const [isMrListEmpty, setIsMrListEmpty] = useState(false);
+  const [showAllowanceBreakdown, setShowAllowanceBreakdown] = useState(false);
+  const [sourceOptions, setSourceOptions] = useState([]);
+  const [sourceLoading, setSourceLoading] = useState(true);
+  const [salaryCalculation, setSalaryCalculation] = useState(null);
+  const [calculatingSalary, setCalculatingSalary] = useState(false);
+  const [showSalaryDetails, setShowSalaryDetails] = useState(false);
+
+  // Fetch MR list from the correct endpoint
+// Update the fetchMRList function in your AddPayroll.jsx:
+const fetchMRList = useCallback(async () => {
+  try {
+    setMrListLoading(true);
+    
+    // Use the new endpoint to get MRs from basic payroll
+    const response = await axios.get(`${backendUrl}/api/mrs/from-basic-payroll`);
+    
+    if (response.data.success) {
+      const mrData = response.data.data || [];
+      
+      if (mrData.length > 0) {
+        setMrList(mrData);
+        setIsMrListEmpty(false);
+      } else {
+        setMrList([]);
+        setIsMrListEmpty(true);
+        toast.error("No MRs found with basic salary. Please add basic salary for MRs first.");
+      }
+    } else {
+      throw new Error(response.data.message || "Failed to fetch MR list");
+    }
+  } catch (error) {
+    console.error("Error fetching MR list:", error);
+    
+    // Try alternative endpoint if the new one fails
+    try {
+      // Fallback to the original endpoint
+      const fallbackResponse = await axios.get(`${backendUrl}/api/mrs/from-basic-payroll`);
+       console.log('values fallbackResponse', fallbackResponse)
+      if (fallbackResponse.data.success) {
+        const mrData = fallbackResponse.data.data || [];
+        
+        if (mrData.length > 0) {
+          setMrList(mrData);
+          setIsMrListEmpty(false);
+        } else {
+          setMrList([]);
+          setIsMrListEmpty(true);
+          toast.error("No MRs available for payroll.");
+        }
+      } else {
+        throw new Error("Failed to fetch MR list from fallback endpoint");
+      }
+    } catch (fallbackError) {
+      console.error("Fallback also failed:", fallbackError);
+      toast.error("Failed to load MR list. Please check the server connection.");
+      setMrList([]);
+      setIsMrListEmpty(true);
+    }
+  } finally {
+    setMrListLoading(false);
+  }
+}, []);
+
+  const fetchSourceOptions = useCallback(async () => {
+    try {
+      setSourceLoading(true);
+      const response = await axios.get(
+        `${backendUrl}/api/accounts/destinations`,
+      );
+
+      if (response.data.success && Array.isArray(response.data.data)) {
+        const options = response.data.data
+          .filter((destination) => destination.totalAmount > 0)
+          .map((destination) => ({
+            value: destination._id,
+            label: destination.name || `Account ${destination.code || destination._id}`,
+          }));
+        setSourceOptions(options);
+      } else {
+        setSourceOptions([]);
+        console.warn(
+          "Unexpected response format for destinations:",
+          response.data,
+        );
+      }
+    } catch (error) {
+      console.error("Error fetching destination options:", error);
+      toast.error("Failed to load source options");
+      setSourceOptions([]);
+    } finally {
+      setSourceLoading(false);
+    }
+  }, []);
+
+  // Calculate salary for employee and period
+  const calculateSalary = useCallback(async (employeeId, period) => {
+    if (!employeeId || !period) {
+      setSalaryCalculation(null);
+      setForm((prev) => ({
+        ...prev,
+        basicSalary: "",
+        deductions: "",
+      }));
+      return;
+    }
+
+    try {
+      setCalculatingSalary(true);
+      const endpoint = `${backendUrl}/api/payrolls/calculate/${employeeId}/${period}`;      
+      const response = await axios.get(endpoint);
+      if (response.data.success && response.data.data) {
+        const { salaryCalculation } = response.data.data;
+        setSalaryCalculation(salaryCalculation);
+
+        // Safely update form with calculated values
+        setForm((prev) => ({
+          ...prev,
+          basicSalary: salaryCalculation?.totalSalary?.toFixed(2) || "",
+          deductions: salaryCalculation?.leaveDeduction?.toFixed(2) || "",
+        }));
+
+        // Clear any previous errors
+        setErrors((prev) => ({
+          ...prev,
+          basicSalary: "",
+          deductions: "",
+        }));
+        
+        toast.success("Salary calculated successfully based on attendance and leaves");
+      }
+    } catch (error) {
+      console.error("❌ Error calculating salary:", error);
+      console.error("Error details:", error.response?.data);
+
+      if (error.response?.status === 404) {
+        if (error.response.data?.message?.includes("Basic payroll record not found")) {
+          toast.error(
+            "Basic payroll record not found for this employee. Please set basic salary first in MR Basic Payroll.",
+            { duration: 5000 }
+          );
+        } else {
+          toast.error("Employee or payroll data not found");
+        }
+        setSalaryCalculation(null);
+        setForm((prev) => ({
+          ...prev,
+          basicSalary: "",
+          deductions: "",
+        }));
+      } else if (error.response?.status === 400) {
+        toast.error(error.response.data?.message || "Invalid period format");
+      } else if (error.response?.status === 500) {
+        toast.error("Server error calculating salary. Please try again.");
+      } else if (error.code === "ERR_NETWORK") {
+        toast.error("Network error. Please check connection.");
+      } else {
+        toast.error("Failed to calculate salary");
+      }
+      
+      setSalaryCalculation(null);
+    } finally {
+      setCalculatingSalary(false);
+    }
+  }, []);
+
+  const validate = useCallback(() => {
+    const newErrors = {};
+
+    if (!form.employeeId.trim()) newErrors.employeeId = "Employee is required";
+    if (!form.period) newErrors.period = "Pay period is required";
+    else if (form.period > getCurrentMonth())
+      newErrors.period = "Future months are not allowed";
+
+    if (!form.basicSalary) newErrors.basicSalary = "Basic Salary is required";
+    if (!form.source) newErrors.source = "Source is required";
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  }, [form]);
+
+  const handleNumeric = useCallback((e) => {
+    const { name, value } = e.target;
+    if (value === "" || /^\d*\.?\d{0,2}$/.test(value)) {
+      setForm((prev) => ({ ...prev, [name]: value }));
+      setErrors((prev) => ({ ...prev, [name]: "" }));
+    }
+  }, []);
+
+  const handleSourceChange = useCallback((sourceId) => {
+    setForm((prev) => ({ ...prev, source: sourceId }));
+    setErrors((prev) => ({ ...prev, source: "" }));
+  }, []);
+
+  const allowanceOptions = useMemo(
+    () =>
+      allowanceTypes.map((t) => ({
+        value: t,
+        label: t,
+      })),
+    [],
+  );
+
+  const handleAllowanceChange = useCallback((selectedTypes) => {
+    setForm((prev) => {
+      const currentAllowances = prev.allowances || [];
+      const updatedAllowances = currentAllowances.filter((allowance) =>
+        selectedTypes.includes(allowance.type),
+      );
+
+      selectedTypes.forEach((type) => {
+        if (!updatedAllowances.some((allowance) => allowance.type === type)) {
+          updatedAllowances.push({ type, amount: "" });
+        }
+      });
+
+      return { ...prev, allowances: updatedAllowances };
+    });
+  }, []);
+
+  const handleAllowanceAmountChange = useCallback((type, amount) => {
+    setForm((prev) => ({
+      ...prev,
+      allowances: prev.allowances.map((allowance) =>
+        allowance.type === type ? { ...allowance, amount } : allowance,
+      ),
+    }));
+  }, []);
+
+  const removeAllowance = useCallback((type) => {
+    setForm((prev) => ({
+      ...prev,
+      allowances: prev.allowances.filter(
+        (allowance) => allowance.type !== type,
+      ),
+    }));
+  }, []);
+
+  const handleEmployeeChange = useCallback(
+    (employeeId) => {
+      setForm((prev) => ({ ...prev, employeeId }));
+      setErrors((prev) => ({ ...prev, employeeId: "" }));
+
+      // Reset salary calculation when employee changes
+      setSalaryCalculation(null);
+      setForm((prev) => ({
+        ...prev,
+        basicSalary: "",
+        deductions: "",
+      }));
+
+      if (employeeId && form.period) {
+        calculateSalary(employeeId, form.period);
+      }
+    },
+    [form.period, calculateSalary],
+  );
+
+  const handlePeriodChange = useCallback(
+    (period) => {
+      setForm((prev) => ({ ...prev, period }));
+      setErrors((prev) => ({ ...prev, period: "" }));
+
+      // Reset salary calculation when period changes
+      setSalaryCalculation(null);
+      setForm((prev) => ({
+        ...prev,
+        basicSalary: "",
+        deductions: "",
+      }));
+
+      if (form.employeeId && period) {
+        calculateSalary(form.employeeId, period);
+      }
+    },
+    [form.employeeId, calculateSalary],
+  );
+
+  const totalAllowance = useMemo(() => {
+    if (!form.allowances || !Array.isArray(form.allowances)) return 0;
+    return form.allowances.reduce((total, allowance) => {
+      return total + (parseFloat(allowance.amount) || 0);
+    }, 0);
+  }, [form.allowances]);
+
+  const netSalary = useMemo(() => {
+    const basic = parseFloat(form.basicSalary) || 0;
+    const ded = parseFloat(form.deductions) || 0;
+    return (basic + totalAllowance - ded).toFixed(2);
+  }, [form.basicSalary, totalAllowance, form.deductions]);
+
+  useEffect(() => {
+    setForm((prev) => ({ ...prev, netSalary }));
+  }, [netSalary]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!validate()) {
+      toast.error("Please fix the form errors");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      
+      // Validate allowances
+      const processedAllowances = form.allowances
+        .filter(allowance => allowance.type && allowance.amount)
+        .map(allowance => ({
+          type: allowance.type,
+          amount: parseFloat(allowance.amount) || 0
+        }));
+
+      const payload = {
+        ...form,
+        totalAllowance: totalAllowance.toFixed(2),
+        allowances: processedAllowances,
+        basicSalary: parseFloat(form.basicSalary) || 0,
+        deductions: parseFloat(form.deductions) || 0,
+        netSalary: parseFloat(form.netSalary) || 0,
+      };
+
+      const res = await axios.post(`${backendUrl}/api/payrolls`, payload, {
+        headers: { "Content-Type": "application/json" },
+      });
+      
+      const data = res.data;
+
+      if (res.status === 201 || res.status === 200) {
+        toast.success(data.message || "Payroll added successfully");
+        setTimeout(() => {
+          navigate("/hrmlayout/payroll");
+        }, 1000);
+      } else {
+        throw new Error(data.message || "Failed to save payroll");
+      }
+    } catch (error) {
+      console.error("❌ Payroll submission error:", error);
+      
+      if (error.response?.status === 400) {
+        if (error.response.data?.errors) {
+          error.response.data.errors.forEach(err => {
+            toast.error(err.message || err.msg);
+          });
+        } else if (error.response.data?.message) {
+          toast.error(error.response.data.message);
+        } else {
+          toast.error("Invalid data. Please check your inputs.");
+        }
+      } else if (error.response?.status === 404) {
+        toast.error(error.response.data?.message || "Employee or account not found");
+      } else if (error.response?.status === 409) {
+        toast.error(error.response.data?.message || "Payroll already exists for this period");
+      } else if (error.code === "ERR_NETWORK") {
+        toast.error("Network error. Please check your connection.");
+      } else {
+        toast.error(error.message || "Failed to save payroll");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchMRList();
+    fetchSourceOptions();
+  }, [fetchMRList, fetchSourceOptions]);
+
+  return {
+    form,
+    errors,
+    loading,
+    mrList,
+    mrListLoading,
+    isMrListEmpty,
+    allowanceOptions,
+    totalAllowance,
+    showAllowanceBreakdown,
+    setShowAllowanceBreakdown,
+    sourceOptions,
+    sourceLoading,
+    salaryCalculation,
+    calculatingSalary,
+    showSalaryDetails,
+    setShowSalaryDetails,
+    handleNumeric,
+    handleAllowanceChange,
+    handleAllowanceAmountChange,
+    removeAllowance,
+    handleEmployeeChange,
+    handlePeriodChange,
+    handleSourceChange,
+    handleSubmit,
+    setForm,
+    validate,
+  };
+};
+
+const SalaryDetailsModal = ({ calculation, isOpen, onClose }) => {
+  if (!isOpen || !calculation) return null;
+
+  const formatNumber = (value) => {
+    if (value === null || value === undefined) return "0.00";
+    if (typeof value === "number") return value.toFixed(2);
+    if (typeof value === "string") {
+      const num = parseFloat(value);
+      return isNaN(num) ? "0.00" : num.toFixed(2);
+    }
+    return "0.00";
+  };
+
+  const formatCount = (value) => {
+    if (value === null || value === undefined) return 0;
+    if (typeof value === "number") return value;
+    if (typeof value === "string") {
+      const num = parseFloat(value);
+      return isNaN(num) ? 0 : num;
+    }
+    return 0;
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg p-6 w-full max-w-md">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-lg font-semibold">Salary Calculation Details</h3>
+          <button
+            onClick={onClose}
+            className="text-gray-500 hover:text-gray-700"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <div className="text-sm font-medium text-gray-700">
+              Basic Salary:
+            </div>
+            <div className="text-sm">
+              ${formatNumber(calculation.basicSalary)}
+            </div>
+
+            <div className="text-sm font-medium text-gray-700">
+              Per Day Salary:
+            </div>
+            <div className="text-sm">
+              ${formatNumber(calculation.perDaySalary)}
+            </div>
+
+            <div className="text-sm font-medium text-gray-700">
+              Per Minute Salary:
+            </div>
+            <div className="text-sm">
+              ${formatNumber(calculation.perMinuteSalary)}
+            </div>
+
+            <div className="text-sm font-medium text-gray-700">
+              Working Days:
+            </div>
+            <div className="text-sm">
+              {formatCount(calculation.totalWorkingDays)}
+            </div>
+
+            <div className="text-sm font-medium text-gray-700">
+              Present Days:
+            </div>
+            <div className="text-sm">
+              {formatCount(calculation.presentDays)}
+            </div>
+
+            <div className="text-sm font-medium text-gray-700">
+              Total Leaves:
+            </div>
+            <div className="text-sm">
+              {formatCount(calculation.totalLeaves)}
+            </div>
+
+            <div className="text-sm font-medium text-gray-700">
+              Paid Leaves:
+            </div>
+            <div className="text-sm">{formatCount(calculation.paidLeaves)}</div>
+
+            <div className="text-sm font-medium text-gray-700">
+              Unpaid Leaves:
+            </div>
+            <div className="text-sm">
+              {formatCount(calculation.unpaidLeaves)}
+            </div>
+
+            <div className="text-sm font-medium text-gray-700">
+              Swap Leaves:
+            </div>
+            <div className="text-sm">{formatCount(calculation.swapLeaves)}</div>
+
+            <div className="text-sm font-medium text-gray-700 text-red-600">
+              Leave Deduction:
+            </div>
+            <div className="text-sm text-red-600">
+              -${formatNumber(calculation.leaveDeduction)}
+            </div>
+
+            <div className="text-sm font-medium text-gray-700">
+              Adjusted Basic Salary:
+            </div>
+            <div className="text-sm">
+              ${formatNumber(calculation.adjustedBasicSalary)}
+            </div>
+
+            <div className="text-sm font-medium text-gray-700 text-green-600">
+              Extra Minutes:
+            </div>
+            <div className="text-sm text-green-600">
+              {formatNumber(calculation.extraMinutes)} mins
+            </div>
+
+            <div className="text-sm font-medium text-gray-700 text-green-600">
+              Extra Time Amount:
+            </div>
+            <div className="text-sm text-green-600">
+              +${formatNumber(calculation.extraTimeAmount)}
+            </div>
+
+            <div className="text-sm font-medium text-gray-700">
+              Total Salary:
+            </div>
+            <div className="text-sm font-semibold">
+              ${formatNumber(calculation.totalSalary)}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 flex justify-end">
+          <button
+            onClick={onClose}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const AddPayroll = () => {
   const {
     form,
@@ -517,11 +807,16 @@ const AddPayroll = () => {
     setShowAllowanceBreakdown,
     sourceOptions,
     sourceLoading,
+    salaryCalculation,
+    calculatingSalary,
+    showSalaryDetails,
+    setShowSalaryDetails,
     handleNumeric,
     handleAllowanceChange,
     handleAllowanceAmountChange,
     removeAllowance,
     handleEmployeeChange,
+    handlePeriodChange,
     handleSourceChange,
     handleSubmit,
     setForm,
@@ -529,18 +824,27 @@ const AddPayroll = () => {
 
   const navigate = useNavigate();
 
-  /* default to current month */
   useEffect(() => {
-    setForm((prev) => ({ ...prev, period: getCurrentMonth() }));
+    const currentMonth = getCurrentMonth();
+    setForm((prev) => ({ ...prev, period: currentMonth }));
   }, [setForm]);
 
-  /* -------------------------- MR/Employee options -------------------------- */
   const mrOptions = useMemo(() => {
+    if (mrListLoading) {
+      return [
+        {
+          value: "",
+          label: "Loading MRs...",
+          disabled: true,
+        },
+      ];
+    }
+
     if (isMrListEmpty) {
       return [
         {
           value: "",
-          label: "No Employees Available",
+          label: "No MRs Available",
           disabled: true,
         },
       ];
@@ -548,27 +852,26 @@ const AddPayroll = () => {
 
     return mrList.map((mr) => ({
       value: mr._id,
-      label: mr.medicalRepName || mr.employeeName || `Employee ${mr._id}`,
+      label: mr.medicalRepName || mr.employeeName || `MR ${mr._id}`,
     }));
-  }, [mrList, isMrListEmpty]);
+  }, [mrList, isMrListEmpty, mrListLoading]);
 
-  /* -------------------------- get selected allowance types -------------------------- */
   const selectedAllowanceTypes = useMemo(() => {
+    if (!form.allowances || !Array.isArray(form.allowances)) return [];
     return form.allowances.map((allowance) => allowance.type);
   }, [form.allowances]);
 
-  /* -------------------------- form validity for button -------------------------- */
   const isFormValid = useMemo(
     () =>
       form.employeeId &&
       form.period &&
       form.basicSalary &&
-      form.source && // Added source to form validation
+      form.source &&
       !errors.period &&
       !errors.employeeId &&
       !errors.basicSalary &&
       !errors.source,
-    [form, errors]
+    [form, errors],
   );
 
   return (
@@ -577,7 +880,6 @@ const AddPayroll = () => {
         Add New Payroll
       </h2>
 
-      {/* Warning message if employee list is empty */}
       {isMrListEmpty && (
         <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
           <div className="flex items-center">
@@ -596,12 +898,12 @@ const AddPayroll = () => {
             </div>
             <div className="ml-3">
               <h3 className="text-sm font-medium text-red-800">
-                No Employees Available
+                No MRs Available
               </h3>
               <div className="mt-2 text-sm text-red-700">
                 <p>
-                  You need to add at least one Employee before creating payroll
-                  records.
+                  You need to add at least one MR with basic salary before creating payroll
+                  records. Please go to MR Basic Payroll first.
                 </p>
               </div>
             </div>
@@ -610,36 +912,43 @@ const AddPayroll = () => {
       )}
 
       <form onSubmit={handleSubmit}>
-        {/* First Row: Employee ID*, Pay Period*, and Source* */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
           <SearchableDropdown
             label="MR Name"
             value={form.employeeId}
             onChange={handleEmployeeChange}
             options={mrOptions}
-            placeholder={isMrListEmpty ? "No MR List Available" : "Select MR"}
+            placeholder={mrListLoading ? "Loading..." : isMrListEmpty ? "No MRs Available" : "Select MR"}
             required={true}
             loading={mrListLoading}
             error={errors.employeeId}
-            disabled={isMrListEmpty}
+            disabled={isMrListEmpty || mrListLoading}
           />
 
-          <InputField
-            label="Pay Period"
-            name="period"
-            type="month"
-            value={form.period}
-            onChange={(e) =>
-              setForm((prev) => ({ ...prev, period: e.target.value }))
-            }
-            error={errors.period}
-            max={getCurrentMonth()}
-            required
-            disabled={isMrListEmpty}
-          />
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Pay Period <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="month"
+              name="period"
+              value={form.period}
+              onChange={(e) => handlePeriodChange(e.target.value)}
+              max={getCurrentMonth()}
+              disabled={isMrListEmpty}
+              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:outline-none transition-colors ${
+                errors.period
+                  ? "border-red-500 focus:ring-red-200 focus:border-red-500"
+                  : "border-gray-300 focus:ring-blue-200 focus:border-blue-500"
+              } ${isMrListEmpty ? "bg-gray-100 cursor-not-allowed" : "bg-white"}`}
+            />
+            {errors.period && (
+              <p className="mt-1 text-sm text-red-600">{errors.period}</p>
+            )}
+          </div>
 
           <SearchableDropdown
-            label="Source"
+            label="Source Account"
             value={form.source}
             onChange={handleSourceChange}
             options={sourceOptions}
@@ -651,33 +960,100 @@ const AddPayroll = () => {
           />
         </div>
 
-        {/* Second Row: Allowance Type, Allowance Amount, Basic Salary* */}
+        {salaryCalculation && (
+          <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="flex justify-between items-center">
+              <div>
+                <h4 className="text-sm font-medium text-blue-800">
+                  Salary Calculated Automatically
+                </h4>
+                <p className="text-sm text-blue-700">
+                  Based on attendance and leave records (including swap leaves
+                  and extra time)
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSalaryDetails(true)}
+                className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+              >
+                View Details
+              </button>
+            </div>
+          </div>
+        )}
+
+        {calculatingSalary && (
+          <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <div className="flex items-center">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-yellow-600 mr-2"></div>
+              <span className="text-sm text-yellow-700">
+                Calculating salary based on attendance, leaves, and extra
+                time...
+              </span>
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-          <InputField
-            label="Basic Salary"
-            name="basicSalary"
-            value={form.basicSalary}
-            onChange={handleNumeric}
-            placeholder="0.00"
-            error={errors.basicSalary}
-            required
-            disabled={isMrListEmpty}
-          />
-          <InputField
-            label="Deductions"
-            name="deductions"
-            value={form.deductions}
-            onChange={handleNumeric}
-            placeholder="0.00"
-            disabled={isMrListEmpty}
-          />
-          <InputField
-            label="Net Salary"
-            name="netSalary"
-            value={form.netSalary}
-            className="border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 border-gray-300 bg-gray-200 cursor-not-allowed"
-            disabled
-          />
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Basic Salary ($) <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              name="basicSalary"
+              value={form.basicSalary}
+              onChange={handleNumeric}
+              placeholder="0.00"
+              disabled={isMrListEmpty || calculatingSalary}
+              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:outline-none transition-colors ${
+                errors.basicSalary
+                  ? "border-red-500 focus:ring-red-200 focus:border-red-500"
+                  : "border-gray-300 focus:ring-blue-200 focus:border-blue-500"
+              } ${
+                isMrListEmpty || calculatingSalary
+                  ? "bg-gray-100 cursor-not-allowed"
+                  : "bg-white"
+              }`}
+            />
+            {errors.basicSalary && (
+              <p className="mt-1 text-sm text-red-600">{errors.basicSalary}</p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Deductions ($)
+            </label>
+            <input
+              type="text"
+              name="deductions"
+              value={form.deductions}
+              readOnly
+              placeholder="0.00"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Automatically calculated based on unpaid leaves
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Net Salary ($)
+            </label>
+            <input
+              type="text"
+              name="netSalary"
+              value={form.netSalary}
+              readOnly
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed font-semibold"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Basic Salary + Allowances - Deductions
+            </p>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -687,11 +1063,11 @@ const AddPayroll = () => {
             onChange={handleAllowanceChange}
             options={allowanceOptions}
             placeholder="Select allowance types"
-            disabled={isMrListEmpty}
+            disabled={isMrListEmpty || calculatingSalary}
           />
           <div className="flex flex-col">
             <label className="text-sm font-medium text-gray-700 mb-1">
-              Total Allowance
+              Total Allowance ($)
             </label>
             <div className="flex gap-2">
               <input
@@ -703,34 +1079,20 @@ const AddPayroll = () => {
               <button
                 type="button"
                 onClick={() => setShowAllowanceBreakdown(true)}
-                disabled={isMrListEmpty || form.allowances.length === 0}
+                disabled={
+                  isMrListEmpty ||
+                  !form.allowances ||
+                  form.allowances.length === 0 ||
+                  calculatingSalary
+                }
                 className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-md disabled:bg-gray-400 disabled:cursor-not-allowed"
               >
                 View
               </button>
             </div>
           </div>
-          <div className="flex flex-col">
-            <label className="text-sm font-medium text-gray-700 mb-1">
-              Status
-            </label>
-            <select
-              name="status"
-              value={form.status}
-              onChange={(e) =>
-                setForm((prev) => ({ ...prev, status: e.target.value }))
-              }
-              disabled={isMrListEmpty}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
-            >
-              <option value="pending">Pending</option>
-              <option value="approved">Approved</option>
-              <option value="paid">Paid</option>
-            </select>
-          </div>
         </div>
 
-        {/* ---------- Salary Summary ---------- */}
         <div className="mt-8 p-4 bg-white rounded-md shadow-md">
           <h3 className="text-lg font-semibold mb-4 text-center">
             Salary Summary
@@ -770,20 +1132,7 @@ const AddPayroll = () => {
           </table>
         </div>
 
-        {/* ---------- Action Buttons ---------- */}
         <div className="flex justify-end mt-10 gap-4">
-          <button
-            type="submit"
-            disabled={loading || !isFormValid || isMrListEmpty}
-            className={`px-4 py-3 rounded-lg shadow transition-colors text-lg font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 ${
-              loading || !isFormValid || isMrListEmpty
-                ? "bg-gray-400 text-gray-200 cursor-not-allowed"
-                : "bg-green-600 hover:bg-green-700 text-white cursor-pointer transform hover:scale-105 transition-transform focus:ring-green-500"
-            }`}
-          >
-            {loading ? "Saving…" : "Save Payroll"}
-          </button>
-
           <button
             type="button"
             onClick={() => navigate("/hrmlayout/payroll")}
@@ -792,12 +1141,35 @@ const AddPayroll = () => {
           >
             Cancel
           </button>
+
+          <button
+            type="submit"
+            disabled={
+              loading || !isFormValid || isMrListEmpty || calculatingSalary
+            }
+            className={`px-4 py-3 rounded-lg shadow transition-colors text-lg font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+              loading || !isFormValid || isMrListEmpty || calculatingSalary
+                ? "bg-gray-400 text-gray-200 cursor-not-allowed"
+                : "bg-green-600 hover:bg-green-700 text-white cursor-pointer transform hover:scale-105 transition-transform focus:ring-green-500"
+            }`}
+          >
+            {loading
+              ? "Saving…"
+              : calculatingSalary
+                ? "Calculating…"
+                : "Save Payroll"}
+          </button>
         </div>
       </form>
 
-      {/* Allowance Breakdown Modal */}
+      <SalaryDetailsModal
+        calculation={salaryCalculation}
+        isOpen={showSalaryDetails}
+        onClose={() => setShowSalaryDetails(false)}
+      />
+
       <AllowanceBreakdownModal
-        allowances={form.allowances}
+        allowances={form.allowances || []}
         isOpen={showAllowanceBreakdown}
         onClose={() => setShowAllowanceBreakdown(false)}
         onAmountChange={handleAllowanceAmountChange}

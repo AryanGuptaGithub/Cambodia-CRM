@@ -17,6 +17,7 @@ import {
   View,
   List,
   Calendar,
+  Download,
 } from "lucide-react";
 
 import { useNavigate } from "react-router-dom";
@@ -761,6 +762,7 @@ const Payroll = () => {
   const [isAllowanceModalOpen, setIsAllowanceModalOpen] = useState(false);
   const [currentAllowances, setCurrentAllowances] = useState([]);
 
+
   // Use custom hook for form management
   const {
     form,
@@ -781,6 +783,208 @@ const Payroll = () => {
     handleEmployeeChange,
     fetchMRList,
   } = usePayrollForm();
+
+  // Fix the CSVImportModal component
+  const CSVImportModal = ({ isOpen, onClose, onImport }) => {
+    const [file, setFile] = useState(null);
+    const [loading, setLoading] = useState(false);
+    const [importResult, setImportResult] = useState(null);
+    const fileInputRef = useRef(null);
+
+    const handleFileChange = (e) => {
+      const selectedFile = e.target.files[0];
+      if (selectedFile) {
+        if (selectedFile.type === 'text/csv' || selectedFile.name.endsWith('.csv')) {
+          setFile(selectedFile);
+          setImportResult(null);
+        } else {
+          showToast('error', 'Please select a CSV file');
+        }
+      }
+    };
+
+    const handleImport = async () => {
+      if (!file) {
+        showToast('error', 'Please select a CSV file first');
+        return;
+      }
+
+      try {
+        setLoading(true);
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const response = await axios.post(
+          `${backendUrl}/api/payrolls/import/csv`,
+          formData,
+          {
+            headers: {
+              'Content-Type': 'multipart/form-data',
+            },
+          }
+        );
+
+        if (response.data.success) {
+          setImportResult(response.data.data);
+          showToast('success', `Imported ${response.data.data.success} payrolls successfully`);
+          if (response.data.data.failed > 0) {
+            showToast('error', `${response.data.data.failed} payrolls failed to import`);
+          }
+          if (onImport) {
+            onImport();
+          }
+        }
+      } catch (error) {
+        console.error('CSV import error:', error);
+        showToast('error', error.response?.data?.message || 'Failed to import CSV');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const downloadTemplate = async () => {
+      try {
+        const response = await axios.get(
+          `${backendUrl}/api/payrolls/import/template`,
+          {
+            responseType: 'blob',
+          }
+        );
+
+        const url = window.URL.createObjectURL(new Blob([response.data]));
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', 'payroll_import_template.csv');
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+
+        showToast('success', 'Template downloaded successfully');
+      } catch (error) {
+        console.error('Template download error:', error);
+        showToast('error', 'Failed to download template');
+      }
+    };
+
+    if (!isOpen) return null;
+
+    return ReactDOM.createPortal(
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-white rounded-lg p-6 w-full max-w-md">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-semibold">Import Payrolls from CSV</h3>
+            <button
+              onClick={onClose}
+              className="text-gray-500 hover:text-gray-700"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Upload CSV File
+              </label>
+              <div
+                className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer ${
+                  file ? 'border-green-500 bg-green-50' : 'border-gray-300 hover:border-gray-400'
+                }`}
+                onClick={() => fileInputRef.current.click()}
+              >
+                {file ? (
+                  <div>
+                    <p className="text-green-600 font-medium">{file.name}</p>
+                    <p className="text-sm text-gray-500">
+                      {(file.size / 1024).toFixed(2)} KB
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <p className="text-gray-600">Click to select CSV file</p>
+                    <p className="text-sm text-gray-500 mt-1">
+                      or drag and drop here
+                    </p>
+                  </div>
+                )}
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  accept=".csv"
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
+              </div>
+            </div>
+
+            {importResult && (
+              <div className="p-4 bg-gray-50 rounded-lg">
+                <h4 className="font-medium text-gray-800 mb-2">Import Results</h4>
+                <div className="space-y-1 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Total:</span>
+                    <span className="font-medium">{importResult.total}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-green-600">Successful:</span>
+                    <span className="font-medium text-green-600">{importResult.success}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-red-600">Failed:</span>
+                    <span className="font-medium text-red-600">{importResult.failed}</span>
+                  </div>
+                </div>
+
+                {importResult.errors && importResult.errors.length > 0 && (
+                  <div className="mt-3">
+                    <h5 className="text-sm font-medium text-gray-700 mb-1">Errors:</h5>
+                    <div className="max-h-40 overflow-y-auto text-xs">
+                      {importResult.errors.map((error, index) => (
+                        <p key={index} className="text-red-600 mb-1">
+                          {error}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex justify-between items-center pt-2">
+              <button
+                type="button"
+                onClick={downloadTemplate}
+                className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+              >
+                Download Template
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-6 flex justify-end gap-3">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleImport}
+              disabled={!file || loading}
+              className={`px-4 py-2 rounded-md text-white ${
+                !file || loading
+                  ? 'bg-gray-400 cursor-not-allowed'
+                  : 'bg-blue-600 hover:bg-blue-700'
+              }`}
+            >
+              {loading ? 'Importing...' : 'Import CSV'}
+            </button>
+          </div>
+        </div>
+      </div>,
+      document.body
+    );
+  };
 
   // Fetch source options - Fixed version
   const fetchSourceOptions = useCallback(async () => {
@@ -835,6 +1039,36 @@ const Payroll = () => {
     setErrors((prev) => ({ ...prev, source: "" }));
   };
 
+  // CSV Export Function - FIXED
+  const exportToCSV = async () => {
+    try {
+      const response = await axios.get(
+        `${backendUrl}/api/payrolls/export/csv`,
+        {
+          responseType: 'blob',
+        }
+      );
+
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `payrolls_export_${new Date().toISOString().slice(0, 10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      showToast('success', 'Payrolls exported successfully');
+    } catch (error) {
+      console.error('Export error:', error);
+      showToast('error', 'Failed to export payrolls');
+    }
+  };
+
+  const handleCSVImportSuccess = () => {
+    setShowCSVImport(false);
+    fetchPayrolls(); // Refresh the payroll list
+  };
+
   useEffect(() => {
     fetchPayrolls();
     fetchSourceOptions();
@@ -846,20 +1080,23 @@ const Payroll = () => {
       setLoading(true);
       setError(null);
 
+      // ✅ FIXED: Changed from /api/payrolls to /api/payrolls
       const url = `${backendUrl}/api/payrolls`;
-      const response = await fetch(url);
-      if (!response.ok) throw new Error("Failed to fetch payrolls");
-      const data = await response.json();
+      const response = await axios.get(url);
+      
+      if (response.data.success) {
+        const payrollData = response.data.data || [];
+        setAllPayrolls(payrollData);
+        setPayrolls(payrollData);
 
-      const payrollData = data.data || [];
-
-      setAllPayrolls(payrollData);
-      setPayrolls(payrollData);
-
-      if (data.nextPayrollCode) {
-        setNextPayrollCode(data.nextPayrollCode);
+        if (response.data.nextPayrollCode) {
+          setNextPayrollCode(response.data.nextPayrollCode);
+        }
+      } else {
+        throw new Error(response.data.message || "Failed to fetch payrolls");
       }
     } catch (err) {
+      console.error("Error fetching payrolls:", err);
       setError(err.message || "Something went wrong");
       showToast("error", "Failed to load payroll data");
     } finally {
@@ -899,32 +1136,6 @@ const Payroll = () => {
     });
 
     return filteredPayrolls;
-  };
-
-  // Helper function to extract date from payroll object
-  const getPayrollDate = (payroll) => {
-    // Try different possible date fields
-    if (payroll.paymentDate) {
-      return new Date(payroll.paymentDate);
-    }
-    if (payroll.date) {
-      return new Date(payroll.date);
-    }
-    if (payroll.createdAt) {
-      return new Date(payroll.createdAt);
-    }
-    if (payroll.period) {
-      // If period is in format "YYYY-MM", convert to first day of month
-      const periodMatch = payroll.period.match(/^(\d{4})-(\d{2})$/);
-      if (periodMatch) {
-        return new Date(
-          parseInt(periodMatch[1]),
-          parseInt(periodMatch[2]) - 1,
-          1
-        );
-      }
-    }
-    return null;
   };
 
   // Handle date range selection - now filters on client side
@@ -1015,12 +1226,16 @@ const Payroll = () => {
   };
 
   const handleDeleteSelected = async () => {
+    if (selected.length === 0) {
+      showToast("warning", "Please select payroll records to delete");
+      return;
+    }
+
     const confirm = await confirmDialog({
-      text: `Are you sure you want to delete <b>${selected.length}</b> payroll records`,
+      text: `Are you sure you want to delete ${selected.length} payroll records?`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
-      selected,
     });
 
     if (confirm.isConfirmed) {
@@ -1029,24 +1244,26 @@ const Payroll = () => {
           data: { ids: selected.map((s) => s.id) },
         });
 
-        if (res.status === 200) {
+        if (res.data.success) {
           showToast("success", "Selected payroll records deleted successfully");
           await fetchPayrolls();
           setSelected([]);
+        } else {
+          throw new Error(res.data.message);
         }
       } catch (error) {
-        showToast("error", "Failed to delete selected payroll records.");
+        console.error("Delete error:", error);
+        showToast("error", error.response?.data?.message || "Failed to delete selected payroll records");
       }
-    } else {
-      setSelected([]);
     }
   };
 
   // Delete single payroll
   const deletePayroll = async (payroll) => {
     if (!payroll._id) return;
+    
     const confirmDelete = await confirmDialog({
-      title: "Delete",
+      title: "Delete Payroll",
       text: `Are you sure you want to delete payroll record for <b>${payroll.employeeName}</b>?`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
@@ -1059,16 +1276,19 @@ const Payroll = () => {
           `${backendUrl}/api/payrolls/${payroll._id}`
         );
 
-        if (res.status === 200) {
+        if (res.data.success) {
           showToast(
             "success",
             `Payroll record for <b>${payroll.employeeName}</b> deleted successfully`
           );
           await fetchPayrolls();
-          setSelected([]);
+          setSelected((prev) => prev.filter(p => p.id !== payroll._id));
+        } else {
+          throw new Error(res.data.message);
         }
       } catch (error) {
-        showToast("error", "Failed to delete payroll record.");
+        console.error("Delete error:", error);
+        showToast("error", error.response?.data?.message || "Failed to delete payroll record");
       }
     }
   };
@@ -1148,7 +1368,7 @@ const Payroll = () => {
         paymentDate: payroll.paymentDate || "",
         remarks: payroll.remarks || "",
         payrollCode: payroll.payrollCode || "",
-        // FIX: Handle source object properly
+        // Handle source object properly
         source:
           (typeof payroll.source === "object"
             ? payroll.source._id
@@ -1203,7 +1423,7 @@ const Payroll = () => {
         paymentDate: payroll.paymentDate || "",
         remarks: payroll.remarks || "",
         payrollCode: payroll.payrollCode || "",
-        // FIX: Handle source object properly
+        // Handle source object properly
         source:
           (typeof payroll.source === "object"
             ? payroll.source._id
@@ -1246,214 +1466,13 @@ const Payroll = () => {
     setTimeout(() => inputRef.current?.classList.remove("highlight"), 1000);
   };
 
-  // File upload and parsing logic for import
-  const handleFileUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // Validate file type and size
-    const validTypes = [".csv", ".xlsx", ".xls"];
-    const fileExtension = file.name
-      .toLowerCase()
-      .slice(file.name.lastIndexOf("."));
-    if (!validTypes.includes(fileExtension)) {
-      showToast("error", "Please upload a valid Excel or CSV file");
-      return;
-    }
-
-    if (file.size > 10 * 1024 * 1024) {
-      showToast("error", "File size must be less than 10MB");
-      return;
-    }
-
-    const reader = new FileReader();
-
-    reader.onload = (evt) => {
-      try {
-        const data = new Uint8Array(evt.target.result);
-        const workbook = XLSX.read(data, { type: "array" });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-
-        const rows = XLSX.utils.sheet_to_json(worksheet, {
-          header: 1,
-          defval: "",
-        });
-
-        if (rows.length === 0) {
-          showToast("warning", "Excel file is empty");
-          return;
-        }
-
-        const requiredHeaders = [
-          "payroll code",
-          "date",
-          "employee name",
-          "department",
-          "designation",
-          "basic salary",
-          "allowances",
-          "deductions",
-          "net salary",
-          "bank account",
-          "payment date",
-          "status",
-          "remarks",
-        ];
-
-        let headerRowIndex = -1;
-        let matchedHeaders = [];
-
-        for (let i = 0; i < Math.min(rows.length, 10); i++) {
-          const row = rows[i].map((cell) =>
-            cell?.toString().trim().toLowerCase()
-          );
-          const matched = requiredHeaders.filter((header) =>
-            row.includes(header)
-          );
-          if (matched.length >= 5) {
-            headerRowIndex = i;
-            matchedHeaders = matched;
-            break;
-          }
-        }
-
-        if (
-          headerRowIndex === -1 ||
-          matchedHeaders.length < requiredHeaders.length
-        ) {
-          const missingHeaders = requiredHeaders.filter(
-            (header) => !matchedHeaders.includes(header)
-          );
-          const errorMsg = `Required headers not found in Excel file: ${missingHeaders.join(
-            ", "
-          )}`;
-          showToast("error", errorMsg);
-          return;
-        }
-
-        const rawHeaders = rows[headerRowIndex];
-        const headersMap = {};
-        rawHeaders.forEach((header, index) => {
-          if (!header) return;
-          const cleaned = header.toString().trim().toLowerCase();
-          headersMap[index] = cleaned;
-        });
-
-        const dataRows = rows.slice(headerRowIndex + 1);
-        if (dataRows.length === 0) {
-          showToast("warning", "No data rows found in Excel file");
-          return;
-        }
-
-        const mappedData = dataRows
-          .map((row, rowIndex) => {
-            const item = {};
-            Object.entries(headersMap).forEach(([index, key]) => {
-              item[key] = row[index] || "";
-            });
-
-            const basicSalary = parseFloat(item["basic salary"]) || 0;
-            const allowances = parseFloat(item["allowances"]) || 0;
-            const deductions = parseFloat(item["deductions"]) || 0;
-            const netSalary =
-              parseFloat(item["net salary"]) ||
-              basicSalary + allowances - deductions;
-
-            return {
-              payrollCode: item["payroll code"]?.toString().trim(),
-              date: parseExcelDate(item["date"]),
-              employeeName: item["employee name"]?.toString().trim(),
-              department: item["department"]?.toString().trim(),
-              designation: item["designation"]?.toString().trim(),
-              basicSalary: basicSalary,
-              allowances: allowances,
-              deductions: deductions,
-              netSalary: netSalary,
-              paymentDate: parseExcelDate(item["payment date"]),
-              status: (item["status"] || "pending")?.toString().trim(),
-              remarks: item["remarks"]?.toString().trim(),
-            };
-          })
-          .filter((entry, index) => {
-            const keep = !!entry.payrollCode && !!entry.employeeName;
-            if (!keep) {
-              console.warn(
-                `Skipping row ${
-                  index + headerRowIndex + 2
-                }: Missing payrollCode or employeeName`
-              );
-            }
-            return keep;
-          });
-
-        if (mappedData.length === 0) {
-          showToast("warning", "No valid data found after parsing");
-          return;
-        }
-
-        setParsedData(mappedData);
-        showToast(
-          "success",
-          `Successfully parsed ${mappedData.length} records`
-        );
-      } catch (error) {
-        console.error("File parsing error:", error);
-        showToast("error", "Error parsing file. Please check the format.");
-      }
-    };
-
-    reader.onerror = () => {
-      showToast("error", "Error reading file");
-    };
-
-    reader.readAsArrayBuffer(file);
-  };
-
-  // Import parsed payrolls to backend
-  const handleImport = async () => {
-    if (parsedData.length === 0) {
-      showToast("warning", "Please upload a valid file first");
-      return;
-    }
-    setIsUploading(true);
-
-    try {
-      const res = await axios.post(
-        `${backendUrl}/api/payrolls/import`,
-        parsedData
-      );
-
-      if (res.status === 200) {
-        showToast(
-          "success",
-          res.data.message || "Payroll records imported successfully!"
-        );
-        setShowImportModal(false);
-        setParsedData([]);
-        await fetchPayrolls();
-      }
-    } catch (err) {
-      console.error("Import error:", err);
-      if (err.response) {
-        const { message } = err.response.data;
-        const cleanMessage = message.replace(/<[^>]+>/g, "");
-        showToast("error", cleanMessage || "Failed to import payroll records.");
-      } else {
-        showToast("error", "Network error. Please try again.");
-      }
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
+  // Handle update payroll
   const handleUpdatePayroll = async (e) => {
     e.preventDefault();
     try {
       const payload = {
         ...form,
         totalAllowance: totalAllowance.toFixed(2),
-        // Convert allowances array to the format expected by backend
         allowances: form.allowances,
       };
 
@@ -1462,26 +1481,31 @@ const Payroll = () => {
         payload
       );
 
-      if (res.status === 200) {
+      if (res.data.success) {
         showToast(
           "success",
           `Payroll record for <b>${form.employeeName}</b> updated successfully`
         );
         setIsEditModalOpen(false);
         await fetchPayrolls();
+      } else {
+        throw new Error(res.data.message);
       }
     } catch (err) {
       console.error("Update error:", err);
-      showToast("error", "Failed to update payroll record.");
+      showToast("error", err.response?.data?.message || "Failed to update payroll record.");
     }
   };
 
   // Format currency
   const formatCurrency = (amount) => {
+    const num = parseFloat(amount) || 0;
     return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: "USD",
-    }).format(amount || 0);
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(num);
   };
 
   // Helper function to get total allowance amount
@@ -1559,7 +1583,7 @@ const Payroll = () => {
     return (form.allowances || []).map((allowance) => allowance.type);
   }, [form.allowances]);
 
-  // FIXED: Get source label for display - handle objects properly
+  // Get source label for display - handle objects properly
   const getSourceLabel = (sourceId) => {
     if (!sourceId) return "Not specified";
 
@@ -1589,6 +1613,7 @@ const Payroll = () => {
         setIsAllowanceModalOpen(false);
         setShowImportModal(false);
         setShowAllowanceBreakdown(false);
+        setShowCSVImport(false);
       }
     };
 
@@ -1633,13 +1658,13 @@ const Payroll = () => {
           >
             <UserPlus size={18} /> Add New Payroll
           </button>
-
           <button
-            onClick={() => setShowImportModal(true)}
+            onClick={exportToCSV}
             className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md transition-colors"
           >
-            <Upload size={18} /> Import CSV
+            <Download size={18} /> Export CSV
           </button>
+
           {selected.length > 0 && (
             <button
               className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md transition-colors"
@@ -1684,6 +1709,18 @@ const Payroll = () => {
         selectedRange={selectedDateRange}
       />
 
+      {/* Clear Date Filter Button */}
+      {selectedDateRange && (
+        <div className="mb-4">
+          <button
+            onClick={handleClearDateFilter}
+            className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+          >
+            Clear Date Filter
+          </button>
+        </div>
+      )}
+
       {/* Payroll Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center">
@@ -1708,10 +1745,10 @@ const Payroll = () => {
               <th className="p-3 text-sm font-medium">Month</th>
               <th className="p-3 text-sm font-medium">Team Name</th>
               <th className="p-3 text-sm font-medium">Contact No</th>
-              <th className="p-3 text-sm font-medium">Basic Salary ($)</th>
+              <th className="p-3 text-sm font-medium">Basic Salary</th>
               <th className="p-3 text-sm font-medium">Allowances</th>
-              <th className="p-3 text-sm font-medium">Deductions ($)</th>
-              <th className="p-3 text-sm font-medium">Net Salary ($)</th>
+              <th className="p-3 text-sm font-medium">Deductions</th>
+              <th className="p-3 text-sm font-medium">Net Salary</th>
               <th className="p-3 text-sm font-medium">Actions</th>
             </tr>
           </thead>
@@ -1749,16 +1786,18 @@ const Payroll = () => {
                     {formatPeriodToMonth(payroll.period)}
                   </td>
                   <td className="p-3 text-gray-600 capitalize">
-                    {payroll.employeeId?.teamName}
+                    {payroll.employeeId?.teamName || "N/A"}
                   </td>
-                  <td className="p-3 text-gray-600 capitalize">
-                    {payroll.employeeId?.contactNo}
+                  <td className="p-3 text-gray-600">
+                    {payroll.employeeId?.contactNo || "N/A"}
                   </td>
-                  <td className="p-3 text-gray-600">{payroll.basicSalary}</td>
+                  <td className="p-3 text-gray-600">
+                    {formatCurrency(payroll.basicSalary)}
+                  </td>
                   <td className="p-3">
                     <div className="flex gap-1 justify-center">
                       <span className="text-gray-600">
-                        {getTotalAllowance(payroll)}
+                        {formatCurrency(getTotalAllowance(payroll))}
                       </span>
                       <button
                         onClick={() => handleViewAllowances(payroll)}
@@ -1769,9 +1808,11 @@ const Payroll = () => {
                       </button>
                     </div>
                   </td>
-                  <td className="p-3 text-red-600">{-payroll.deductions}</td>
-                  <td className="p-3 font-semibold text-green-400">
-                    {payroll.netSalary}
+                  <td className="p-3 text-red-600">
+                    {formatCurrency(payroll.deductions)}
+                  </td>
+                  <td className="p-3 font-semibold text-green-600">
+                    {formatCurrency(payroll.netSalary)}
                   </td>
                   <td className="p-3 flex items-center justify-center gap-3">
                     <button
@@ -1970,75 +2011,6 @@ const Payroll = () => {
           document.body
         )}
 
-      {/* Import Modal */}
-      {showImportModal &&
-        ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-[100] p-4">
-            <div className="bg-white w-full max-w-md rounded-xl shadow-lg relative">
-              <div className="flex items-center justify-between p-6 border-b border-gray-200">
-                <h2 className="text-lg font-semibold text-gray-800">
-                  Import Payroll
-                </h2>
-                <button
-                  onClick={() => {
-                    setShowImportModal(false);
-                    setParsedData([]);
-                  }}
-                  className="text-gray-400 hover:text-gray-600 transition-colors"
-                  disabled={isUploading}
-                >
-                  <X size={24} />
-                </button>
-              </div>
-
-              <div className="p-6">
-                {isSampleFile && <SampleExcelDownloadPayroll />}
-                <div className="mb-6">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Upload File
-                  </label>
-                  <input
-                    type="file"
-                    accept=".csv, .xlsx, .xls"
-                    onChange={handleFileUpload}
-                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-                    disabled={isUploading}
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Supported formats: CSV, XLSX, XLS (Max 10MB)
-                  </p>
-                  {parsedData.length > 0 && (
-                    <p className="text-sm text-green-600 mt-2">
-                      ✅ {parsedData.length} records ready to import
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-3 p-6 border-t border-gray-200 bg-gray-50">
-                <button
-                  onClick={() => {
-                    setShowImportModal(false);
-                    setParsedData([]);
-                  }}
-                  disabled={isUploading}
-                  className="px-5 py-2 text-gray-700 bg-gray-300 hover:bg-gray-400 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleImport}
-                  disabled={isUploading || parsedData.length === 0}
-                  className="px-5 py-2 text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isUploading ? "Uploading..." : "Import Records"}
-                </button>
-              </div>
-            </div>
-          </div>,
-          document.body
-        )}
-
       {/* Edit Payroll Modal */}
       {isEditModalOpen &&
         ReactDOM.createPortal(
@@ -2147,7 +2119,7 @@ const Payroll = () => {
                       </div>
                     </div>
                     <div className="flex flex-col">
-                      <label className="text-sm font-medium text-gray-700 mb-1">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
                         Status
                       </label>
                       <select
@@ -2212,32 +2184,32 @@ const Payroll = () => {
                       <thead className="bg-gray-200 text-gray-700 border-b">
                         <tr>
                           <th className="p-3 font-medium text-gray-700">
-                            Basic Salary ($)
+                            Basic Salary
                           </th>
                           <th className="p-3 font-medium text-gray-700">
-                            Allowance ($)
+                            Allowance
                           </th>
                           <th className="p-3 font-medium text-gray-700">
-                            Deductions ($)
+                            Deductions
                           </th>
                           <th className="p-3 font-medium text-gray-700">
-                            Net Salary ($)
+                            Net Salary
                           </th>
                         </tr>
                       </thead>
                       <tbody>
                         <tr className="bg-white hover:bg-gray-50">
                           <td className="p-3 font-semibold">
-                            {form.basicSalary || "0.00"}
+                            {formatCurrency(form.basicSalary || 0)}
                           </td>
                           <td className="p-3 font-semibold">
-                            {totalAllowance.toFixed(2)}
+                            {formatCurrency(totalAllowance)}
                           </td>
                           <td className="p-3 font-semibold text-red-600">
-                            -{form.deductions || "0.00"}
+                            -{formatCurrency(form.deductions || 0)}
                           </td>
                           <td className="p-3 font-semibold text-green-600">
-                            {form.netSalary}
+                            {formatCurrency(form.netSalary || 0)}
                           </td>
                         </tr>
                       </tbody>
@@ -2345,7 +2317,7 @@ const Payroll = () => {
                     </p>
                   </div>
 
-                  {/* Show Source in view modal - FIXED: Using getSourceLabel safely */}
+                  {/* Show Source in view modal */}
                   <div>
                     <label className="block text-sm font-medium text-gray-600 mb-1">
                       Source
@@ -2450,6 +2422,8 @@ const Payroll = () => {
           onRemove={removeAllowance}
         />
       )}
+
+
     </div>
   );
 };

@@ -155,7 +155,7 @@ app.use("/api", operationCostCOGSRatio);
 app.use("/api", operationCostSalesRatio);
 app.use("/api", tourExpenseSales);
 app.use("/api/sales-summary", SaleSummaryReport);
-app.use("/api/mr-basic-payrolls", mrBasicPayrollRoutes);  // Correct route registration
+app.use("/api/mr-basic-payrolls", mrBasicPayrollRoutes);  
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);

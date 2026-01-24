@@ -15,6 +15,7 @@ import {
   Search,
   DollarSign,
   Save,
+  Calendar,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
@@ -45,6 +46,7 @@ const MrBasicPayroll = () => {
   const [editFormData, setEditFormData] = useState({
     employeeName: "",
     basicSalary: "",
+    effectiveFrom: "",
     remarks: "",
   });
 
@@ -83,13 +85,29 @@ const MrBasicPayroll = () => {
   // Helper function to get employee name
   const getEmployeeName = useCallback((payroll) => {
     if (payroll.employeeName) return payroll.employeeName;
-    if (payroll.employeeId && typeof payroll.employeeId === 'object' && payroll.employeeId.medicalRepName) {
-      return payroll.employeeId.medicalRepName;
+    if (payroll.employeeId && typeof payroll.employeeId === 'object') {
+      return payroll.employeeId.medicalRepName || 
+             payroll.employeeId.name || 
+             payroll.employeeId.fullName ||
+             `${payroll.employeeId.firstName || ''} ${payroll.employeeId.lastName || ''}`.trim();
     }
     if (payroll.employeeId && typeof payroll.employeeId === 'string') {
       return payroll.employeeId;
     }
     return "Unknown";
+  }, []);
+
+  // Helper function to get effective date
+  const getEffectiveDate = useCallback((payroll) => {
+    if (payroll.currentEffectiveFrom) return payroll.currentEffectiveFrom;
+    if (payroll.salaryHistory && payroll.salaryHistory.length > 0) {
+      // Find the most recent salary entry
+      const sortedHistory = [...payroll.salaryHistory].sort(
+        (a, b) => new Date(b.effectiveFrom) - new Date(a.effectiveFrom)
+      );
+      return sortedHistory[0]?.effectiveFrom || "";
+    }
+    return "";
   }, []);
 
   const filteredPayrolls = useMemo(() => {
@@ -224,12 +242,36 @@ const MrBasicPayroll = () => {
     }
   };
 
+  // Handle numeric input for basic salary (allows only numbers and decimal point)
+  const handleNumericInputChange = useCallback((e, fieldName) => {
+    const { value } = e.target;
+    
+    // Allow only numbers, decimal point, and empty string
+    // Regex: allows empty string, numbers, and numbers with decimal point
+    if (value === "" || /^\d*\.?\d{0,2}$/.test(value)) {
+      setEditFormData(prev => ({
+        ...prev,
+        [fieldName]: value
+      }));
+    }
+  }, []);
+
+  // Handle date change
+  const handleDateChange = useCallback((e) => {
+    const { name, value } = e.target;
+    setEditFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  }, []);
+
   // Handle edit button click
   const handleEditClick = (payroll) => {
     setEditingPayroll(payroll);
     setEditFormData({
       employeeName: getEmployeeName(payroll),
-      basicSalary: payroll.basicSalary ? parseFloat(payroll.basicSalary) : 0,
+      basicSalary: payroll.currentBasicSalary ? payroll.currentBasicSalary.toString() : "",
+      effectiveFrom: getEffectiveDate(payroll) || new Date().toISOString().split('T')[0],
       remarks: payroll.remarks || "",
     });
     setShowEditModal(true);
@@ -238,27 +280,63 @@ const MrBasicPayroll = () => {
   // Handle edit form input change
   const handleEditInputChange = (e) => {
     const { name, value } = e.target;
-    setEditFormData(prev => ({
-      ...prev,
-      [name]: name === 'basicSalary' ? parseFloat(value) || 0 : value
-    }));
+    
+    // Special handling for different field types
+    if (name === 'basicSalary') {
+      handleNumericInputChange(e, name);
+    } else if (name === 'effectiveFrom') {
+      handleDateChange(e);
+    } else {
+      setEditFormData(prev => ({
+        ...prev,
+        [name]: value
+      }));
+    }
   };
 
   // Save edited payroll
   const handleSaveEdit = async () => {
     if (!editingPayroll) return;
 
+    // Validate basic salary
+    if (!editFormData.basicSalary || editFormData.basicSalary.trim() === "") {
+      showToast("error", "Basic Salary is required");
+      return;
+    }
+
+    const basicSalary = parseFloat(editFormData.basicSalary);
+    if (isNaN(basicSalary) || basicSalary <= 0) {
+      showToast("error", "Basic Salary must be a positive number");
+      return;
+    }
+
+    // Validate effective date
+    if (!editFormData.effectiveFrom || editFormData.effectiveFrom.trim() === "") {
+      showToast("error", "Effective From date is required");
+      return;
+    }
+
+    // Validate effective date is not in the past
+    const selectedDate = new Date(editFormData.effectiveFrom);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    if (selectedDate < today) {
+      showToast("error", "Effective date cannot be in the past");
+      return;
+    }
+
     try {
-      const updatedData = {
-        employeeId: editingPayroll.employeeId?._id || editingPayroll.employeeId,
-        employeeName: editFormData.employeeName,
-        basicSalary: editFormData.basicSalary,
-        remarks: editFormData.remarks,
+      // Prepare data for updating payroll
+      const updateData = {
+        basicSalary: basicSalary,
+        effectiveFrom: editFormData.effectiveFrom,
+        remarks: editFormData.remarks || ""
       };
 
       const res = await axios.put(
         `${backendUrl}/api/mr-basic-payrolls/${editingPayroll._id}`,
-        updatedData
+        updateData
       );
 
       if (res.data.success) {
@@ -269,7 +347,8 @@ const MrBasicPayroll = () => {
         throw new Error(res.data.message);
       }
     } catch (error) {
-      showToast("error", error.message || "Failed to update MR basic payroll");
+      console.error("Update error:", error);
+      showToast("error", error.response?.data?.message || error.message || "Failed to update MR basic payroll");
     }
   };
 
@@ -313,9 +392,9 @@ const MrBasicPayroll = () => {
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
 
-        // Convert to JSON with header row (3 columns now including remarks)
+        // Convert to JSON with header row (now including effectiveFrom)
         const rows = XLSX.utils.sheet_to_json(worksheet, {
-          header: ["employeeName", "basicSalary", "remarks"],
+          header: ["employeeName", "basicSalary", "effectiveFrom", "remarks"],
           defval: "",
           raw: false,
         });
@@ -333,9 +412,23 @@ const MrBasicPayroll = () => {
               basicSalary = parseFloat(salaryStr) || 0;
             }
             
+            // Parse effectiveFrom date
+            let effectiveFrom = "";
+            if (row.effectiveFrom) {
+              // Try to parse various date formats
+              const date = new Date(row.effectiveFrom);
+              if (!isNaN(date.getTime())) {
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                effectiveFrom = `${year}-${month}-${day}`;
+              }
+            }
+            
             return {
               employeeName: row.employeeName?.toString()?.trim() || "",
               basicSalary: basicSalary,
+              effectiveFrom: effectiveFrom || new Date().toISOString().split('T')[0],
               remarks: row.remarks?.toString()?.trim() || "",
             };
           });
@@ -423,6 +516,7 @@ const MrBasicPayroll = () => {
     setEditFormData({
       employeeName: "",
       basicSalary: "",
+      effectiveFrom: "",
       remarks: "",
     });
   };
@@ -430,9 +524,14 @@ const MrBasicPayroll = () => {
   // Format currency - FIXED: Properly format numbers with commas
   const formatCurrency = (amount) => {
     // Ensure amount is a number
-    const numAmount = typeof amount === 'string' ? 
-      parseFloat(amount.replace(/,/g, '')) : 
-      Number(amount);
+    let numAmount;
+    if (typeof amount === 'string') {
+      // Remove any non-numeric characters except decimal point
+      const cleanStr = amount.replace(/[^0-9.]/g, '');
+      numAmount = parseFloat(cleanStr);
+    } else {
+      numAmount = Number(amount);
+    }
     
     if (isNaN(numAmount)) return "$0.00";
     
@@ -442,6 +541,43 @@ const MrBasicPayroll = () => {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(numAmount);
+  };
+
+  // Format date for display
+  const formatDate = (dateString) => {
+    if (!dateString) return "-";
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return "-";
+      
+      return date.toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      });
+    } catch (error) {
+      return "-";
+    }
+  };
+
+  // Helper to parse basic salary for display in table
+  const parseBasicSalary = (salary) => {
+    if (typeof salary === 'string') {
+      // Remove commas and parse
+      const cleanStr = salary.replace(/,/g, '');
+      return parseFloat(cleanStr) || 0;
+    }
+    return salary || 0;
+  };
+
+  // Get max date for effective date in edit modal
+  const getMaxDate = () => {
+    const today = new Date();
+    const nextYear = new Date(today.getFullYear() + 1, today.getMonth(), today.getDate());
+    const year = nextYear.getFullYear();
+    const month = String(nextYear.getMonth() + 1).padStart(2, "0");
+    const day = String(nextYear.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
   };
 
   if (loading) {
@@ -546,6 +682,7 @@ const MrBasicPayroll = () => {
                 </div>
               </th>
               <th className="p-3 text-sm font-medium">Basic Salary</th>
+              <th className="p-3 text-sm font-medium">Effective From</th>
               <th className="p-3 text-sm font-medium">Remarks</th>
               <th className="p-3 text-sm font-medium">Actions</th>
             </tr>
@@ -553,13 +690,15 @@ const MrBasicPayroll = () => {
           <tbody>
             {currentPayrolls.length === 0 ? (
               <tr>
-                <td colSpan={4} className="p-4 text-center text-gray-500">
+                <td colSpan={5} className="p-4 text-center text-gray-500">
                   No MR basic payroll records found.
                 </td>
               </tr>
             ) : (
               currentPayrolls.map((payroll, idx) => {
                 const employeeName = getEmployeeName(payroll);
+                const effectiveDate = getEffectiveDate(payroll);
+                
                 return (
                   <tr
                     key={payroll._id}
@@ -581,7 +720,13 @@ const MrBasicPayroll = () => {
                       </div>
                     </td>
                     <td className="p-3 text-gray-600">
-                      {formatCurrency(payroll.basicSalary)}
+                      {formatCurrency(parseBasicSalary(payroll.currentBasicSalary))}
+                    </td>
+                    <td className="p-3 text-gray-600">
+                      <div className="flex items-center justify-center gap-2">
+                        <Calendar size={14} className="text-gray-400" />
+                        {formatDate(effectiveDate)}
+                      </div>
                     </td>
                     <td className="p-3 text-gray-600">
                       {payroll.remarks || "-"}
@@ -677,7 +822,6 @@ const MrBasicPayroll = () => {
                   className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
                   disabled={isUploading}
                 />
-            
               </div>
             </div>
 
@@ -722,7 +866,7 @@ const MrBasicPayroll = () => {
                 {/* Employee Name (Read-only) */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    MR Name
+                    MR Name <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
@@ -735,20 +879,38 @@ const MrBasicPayroll = () => {
                 {/* Basic Salary */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Basic Salary ($) *
+                    Basic Salary ($) <span className="text-red-500">*</span>
                   </label>
                   <input
-                    type="number"
+                    type="text"
                     name="basicSalary"
                     value={editFormData.basicSalary}
                     onChange={handleEditInputChange}
-                    step="0.01"
-                    min="0"
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-200 focus:border-blue-500"
-                    placeholder="Enter basic salary"
+                    placeholder="0.00"
+                    inputMode="decimal"
                   />
                   <p className="text-xs text-gray-500 mt-1">
-                    Current value: {formatCurrency(editFormData.basicSalary)}
+                    Enter numeric value only. Current: {formatCurrency(editFormData.basicSalary)}
+                  </p>
+                </div>
+
+                {/* Effective From Date */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Effective From <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    name="effectiveFrom"
+                    value={editFormData.effectiveFrom}
+                    onChange={handleEditInputChange}
+                    min={new Date().toISOString().split('T')[0]}
+                    max={getMaxDate()}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-200 focus:border-blue-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Date when this salary becomes effective
                   </p>
                 </div>
 

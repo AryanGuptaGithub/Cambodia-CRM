@@ -142,6 +142,7 @@ const LeaveAttendance = () => {
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [leaveDate, setLeaveDate] = useState("");
   const [leaveReason, setLeaveReason] = useState("");
+  const [leaveType, setLeaveType] = useState("unpaid"); // Added leaveType state
   const [leaveLoading, setLeaveLoading] = useState(false);
 
   // State for Extra Hours Conversion
@@ -951,8 +952,6 @@ const LeaveAttendance = () => {
         workingHoursPerDay: 8,
       };
 
-      console.log("📤 Sending attendance data:", attendanceData);
-
       const response = await axios.post(
         `${backendUrl}/api/attendance/record`,
         attendanceData,
@@ -979,9 +978,9 @@ const LeaveAttendance = () => {
     }
   };
 
-  // Handle leave application
+  // Handle leave application - UPDATED to include leaveType
   const handleApplyLeave = async () => {
-    if (!selectedAttendanceMr || !leaveDate || !leaveReason) {
+    if (!selectedAttendanceMr || !leaveDate || !leaveReason || !leaveType) {
       showToast("error", "Please fill all required fields");
       return;
     }
@@ -1017,6 +1016,16 @@ const LeaveAttendance = () => {
       return;
     }
 
+    // Check if user has enough paid leaves for paid leave type
+    if (leaveType === "paid") {
+      const mr = mrList.find(mr => mr._id === selectedAttendanceMr);
+      const remainingPaid = getRemainingPaidLeaves(selectedAttendanceMr, mr?.date);
+      if (parseFloat(remainingPaid) < 1) {
+        showToast("error", "Insufficient paid leave balance. Please apply for unpaid leave.");
+        return;
+      }
+    }
+
     try {
       setLeaveLoading(true);
 
@@ -1024,18 +1033,19 @@ const LeaveAttendance = () => {
         userId: selectedAttendanceMr,
         leaveDate: new Date(leaveDate).toISOString(),
         reason: leaveReason,
-        leaveType: "unpaid", // Always set as unpaid for manual leave application
+        leaveType: leaveType, // Use the selected leaveType
         status: "approved",
       };
 
       const response = await axios.post(`${backendUrl}/api/leaves`, leaveData);
 
       if (response.data.success) {
-        showToast("success", "Leave applied successfully!");
+        showToast("success", `${leaveType === 'paid' ? 'Paid' : 'Unpaid'} leave applied successfully!`);
         setShowLeaveModal(false);
         setSelectedAttendanceMr(null);
         setLeaveDate("");
         setLeaveReason("");
+        setLeaveType("unpaid"); // Reset to default
 
         fetchLeaves();
       }
@@ -1193,7 +1203,7 @@ const LeaveAttendance = () => {
     setEndTime("17:00");
   };
 
-  // Open leave modal
+  // Open leave modal - UPDATED to reset leaveType
   const handleOpenLeaveModal = () => {
     setShowLeaveModal(true);
     setSelectedAttendanceMr(null);
@@ -1202,6 +1212,7 @@ const LeaveAttendance = () => {
     const todayString = today.toISOString().split("T")[0];
     setLeaveDate(todayString);
     setLeaveReason("");
+    setLeaveType("unpaid"); // Reset to default
   };
 
   // Open extra hours modal
@@ -1388,7 +1399,7 @@ const LeaveAttendance = () => {
         </div>
       )}
 
-      {/* Leave Modal */}
+      {/* Leave Modal - UPDATED with Leave Type dropdown */}
       {showLeaveModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
@@ -1419,6 +1430,30 @@ const LeaveAttendance = () => {
                 max={getTodayDate()} // Prevent future date selection
                 className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
+            </div>
+
+            {/* Leave Type Dropdown - NEW */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Leave Type
+              </label>
+              <select
+                value={leaveType}
+                onChange={(e) => setLeaveType(e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="unpaid">Unpaid Leave</option>
+                <option value="paid">Paid Leave</option>
+              </select>
+              {selectedAttendanceMr && leaveType === "paid" && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Available paid leaves: {
+                    mrList.find(mr => mr._id === selectedAttendanceMr) ? 
+                    getRemainingPaidLeaves(selectedAttendanceMr, mrList.find(mr => mr._id === selectedAttendanceMr).date) 
+                    : "0.00"
+                  }
+                </p>
+              )}
             </div>
 
             {leaveDate && (
@@ -1493,6 +1528,7 @@ const LeaveAttendance = () => {
                   !selectedAttendanceMr ||
                   !leaveDate ||
                   !leaveReason ||
+                  !leaveType ||
                   isFutureDate(leaveDate) || // Disable if future date
                   isSunday(leaveDate) ||
                   isHoliday(leaveDate) ||
@@ -1506,6 +1542,7 @@ const LeaveAttendance = () => {
                   !selectedAttendanceMr ||
                   !leaveDate ||
                   !leaveReason ||
+                  !leaveType ||
                   isFutureDate(leaveDate) ||
                   isSunday(leaveDate) ||
                   isHoliday(leaveDate) ||

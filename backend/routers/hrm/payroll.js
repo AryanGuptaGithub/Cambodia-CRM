@@ -1,8 +1,12 @@
 import express from "express";
 import Payroll from "../../models/Hrm/Payroll.js";
 import Staff from "../../models/staffMember/staff.js";
+import MrBasicPayroll from "../../models/Hrm/MRBasicPayroll.js"; 
 import Account from "../../models/accounts/Destination.js";
+import Attendance from "../../models/Hrm/Attendance.js";
+import Leave from "../../models/Hrm/Leaves.js";
 import mongoose from "mongoose";
+import { Parser } from "json2csv";
 
 const router = express.Router();
 
@@ -20,7 +24,6 @@ const generateNextPayrollCode = async () => {
   return `PR-${nextNumber.toString().padStart(4, "0")}`;
 };
 
-// Helper function to update account balance
 const updateAccountBalance = async (
   accountId,
   amount,
@@ -47,12 +50,191 @@ const updateAccountBalance = async (
     await account.save({ session });
     return account;
   } catch (error) {
-    console.error("❌ Error updating account balance:", error);
     throw error;
   }
 };
 
-// ==================== GET ALL PAYROLLS ====================
+const calculateExtraTimeAmount = (extraMinutes, perMinuteSalary) => {
+  if (!extraMinutes || extraMinutes <= 0) return 0;
+  return extraMinutes * perMinuteSalary;
+};
+
+const calculateSalaryForPeriod = async (employeeId, period, session = null) => {
+  try {
+    const employee = await Staff.findById(employeeId).session(session);
+    if (!employee) {
+      throw new Error("Employee not found in staff records");
+    }
+
+    const basicPayroll = await MrBasicPayroll.findOne({
+      employeeId: employeeId
+    }).session(session);
+
+    if (!basicPayroll) {
+      throw new Error("Basic payroll record not found for employee");
+    }
+
+    const basicSalary = basicPayroll.currentBasicSalary || 0; // Changed from basicSalary to currentBasicSalary
+    const basicSalaryNum = parseFloat(basicSalary);
+
+    const [year, month] = period.split('-').map(Number);
+    const startDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
+    const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
+    
+    const currentDate = new Date();
+    const currentYear = currentDate.getFullYear();
+    const currentMonth = currentDate.getMonth() + 1;
+    
+    const calculationEndDate = (year === currentYear && month === currentMonth) 
+      ? currentDate 
+      : endDate;
+
+    const attendanceRecords = await Attendance.find({
+      userId: employeeId,
+      loginTime: {
+        $gte: startDate,
+        $lte: calculationEndDate
+      }
+    }).session(session || null);
+
+    const leaveRecords = await Leave.find({
+      userId: employeeId,
+      leaveDate: {
+        $gte: startDate,
+        $lte: calculationEndDate
+      }
+    }).session(session || null);
+
+    let totalWorkingDays = 0;
+    let workingDaysUntilCalculationDate = 0;
+    let totalLeaveDays = 0;
+    let paidLeaveDays = 0;
+    let unpaidLeaveDays = 0;
+    let swapLeaveDays = 0;
+
+    let currentDateIter = new Date(startDate);
+    while (currentDateIter <= calculationEndDate) {
+      const dayOfWeek = currentDateIter.getUTCDay();
+      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+        totalWorkingDays++;
+        workingDaysUntilCalculationDate++;
+      }
+      currentDateIter.setUTCDate(currentDateIter.getUTCDate() + 1);
+    }
+
+    let totalWorkingDaysInMonth = 0;
+    currentDateIter = new Date(startDate);
+    while (currentDateIter <= endDate) {
+      const dayOfWeek = currentDateIter.getUTCDay();
+      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+        totalWorkingDaysInMonth++;
+      }
+      currentDateIter.setUTCDate(currentDateIter.getUTCDate() + 1);
+    }
+
+    const leaveDatesSet = new Set();
+    for (const leave of leaveRecords) {
+      const leaveDate = new Date(leave.leaveDate);
+      const dateStr = leaveDate.toISOString().split('T')[0];
+      
+      const dayOfWeek = leaveDate.getUTCDay();
+      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+        if (!leaveDatesSet.has(dateStr)) {
+          leaveDatesSet.add(dateStr);
+          totalLeaveDays++;
+          
+          if (leave.leaveType === 'unpaid') {
+            unpaidLeaveDays++;
+          } else if (leave.leaveType === 'paid') {
+            paidLeaveDays++;
+          } else if (leave.leaveType === 'swapleave' && leave.status === 'approved') {
+            swapLeaveDays++;
+            paidLeaveDays++;
+          } else if (leave.leaveType === 'holiday' || leave.leaveType === 'sunday') {
+            paidLeaveDays++;
+          }
+        }
+      }
+    }
+
+    const perDaySalary = basicSalaryNum / totalWorkingDaysInMonth;
+    const perMinuteSalary = perDaySalary / (8 * 60);
+
+    const unpaidLeaveDeduction = unpaidLeaveDays * perDaySalary;
+    const proratedBasicSalary = (workingDaysUntilCalculationDate / totalWorkingDaysInMonth) * basicSalaryNum;
+    const adjustedBasicSalary = proratedBasicSalary - unpaidLeaveDeduction;
+
+    const presentDaysSet = new Set();
+    attendanceRecords.forEach(record => {
+      const dateStr = record.loginTime.toISOString().split('T')[0];
+      presentDaysSet.add(dateStr);
+    });
+    const presentDays = presentDaysSet.size;
+
+    let totalExtraMinutes = 0;
+    
+    const attendanceByDate = {};
+    attendanceRecords.forEach(record => {
+      const dateStr = record.loginTime.toISOString().split('T')[0];
+      if (!attendanceByDate[dateStr]) {
+        attendanceByDate[dateStr] = [];
+      }
+      attendanceByDate[dateStr].push(record);
+    });
+
+    Object.entries(attendanceByDate).forEach(([date, records]) => {
+      let totalMinutes = 0;
+      records.forEach(record => {
+        if (record.loginTime && record.logoutTime) {
+          const login = new Date(record.loginTime);
+          const logout = new Date(record.logoutTime);
+          const minutes = (logout - login) / (1000 * 60);
+          totalMinutes += minutes;
+        }
+      });
+      
+      const standardWorkMinutes = 480;
+      if (totalMinutes > standardWorkMinutes) {
+        const extraMinutes = totalMinutes - standardWorkMinutes;
+        totalExtraMinutes += extraMinutes;
+      }
+    });
+
+    const extraTimeAmount = calculateExtraTimeAmount(totalExtraMinutes, perMinuteSalary);
+    const totalSalary = adjustedBasicSalary + extraTimeAmount;
+
+    return {
+      employee: {
+        id: employee._id,
+        name: employee.medicalRepName,
+        basicSalary: basicSalaryNum
+      },
+      period,
+      salaryCalculation: {
+        basicSalary: basicSalaryNum,
+        perDaySalary: perDaySalary,
+        perMinuteSalary: perMinuteSalary,
+        totalWorkingDays: totalWorkingDaysInMonth,
+        workingDaysUntilCalculationDate,
+        presentDays,
+        totalLeaves: totalLeaveDays,
+        paidLeaves: paidLeaveDays,
+        unpaidLeaves: unpaidLeaveDays,
+        swapLeaves: swapLeaveDays,
+        leaveDeduction: unpaidLeaveDeduction,
+        proratedBasicSalary: proratedBasicSalary,
+        adjustedBasicSalary: adjustedBasicSalary,
+        extraMinutes: totalExtraMinutes,
+        extraTimeAmount: extraTimeAmount,
+        totalSalary: totalSalary,
+        calculationDate: calculationEndDate.toISOString().split('T')[0]
+      }
+    };
+  } catch (error) {
+    throw error;
+  }
+};
+
 router.get("/payrolls", async (req, res) => {
   try {
     const {
@@ -71,31 +253,19 @@ router.get("/payrolls", async (req, res) => {
 
     const matchConditions = { enabled: true };
 
-    // -----------------------------
-    // STATUS FILTER
-    // -----------------------------
     if (status && status !== "all") {
       matchConditions.status = status;
     }
 
-    // -----------------------------
-    // PERIOD FILTER (FIXED HERE)
-    // -----------------------------
     if (period) {
-      // Example: 2025-YTD → match all like "2025-*"
       if (period.endsWith("-YTD")) {
         const year = period.split("-")[0];
         matchConditions.period = { $regex: `^${year}-`, $options: "i" };
-      }
-      // Specific period like "2025-10"
-      else if (period !== "all") {
+      } else if (period !== "all") {
         matchConditions.period = period;
       }
     }
 
-    // -----------------------------
-    // SEARCH FILTER
-    // -----------------------------
     let searchConditions = {};
     if (search && search.trim()) {
       const searchRegex = new RegExp(search.trim(), "i");
@@ -120,21 +290,14 @@ router.get("/payrolls", async (req, res) => {
       };
     }
 
-    // -----------------------------
-    // FINAL QUERY CONDITIONS
-    // -----------------------------
     const finalConditions = {
       ...matchConditions,
       ...(Object.keys(searchConditions).length > 0 ? searchConditions : {}),
     };
 
-    // Sorting
     const sort = {};
     sort[sortBy] = sortOrder === "desc" ? -1 : 1;
 
-    // -----------------------------
-    // FETCH PAYROLLS
-    // -----------------------------
     const payrolls = await Payroll.find(finalConditions)
       .populate(
         "employeeId",
@@ -146,17 +309,20 @@ router.get("/payrolls", async (req, res) => {
       .limit(limitNum)
       .lean();
 
-    // -----------------------------
-    // TRANSFORM PAYROLL DATA
-    // -----------------------------
+    const employeeIds = payrolls.map(p => p.employeeId?._id).filter(id => id);
+    const basicPayrolls = await MrBasicPayroll.find({
+      employeeId: { $in: employeeIds }
+    }).lean();
+
+    const basicSalaryMap = {};
+    basicPayrolls.forEach(bp => {
+      basicSalaryMap[bp.employeeId] = bp.currentBasicSalary || 0; // Changed to currentBasicSalary
+    });
+
     const transformedPayrolls = payrolls.map((payroll) => {
       const payrollObj = { ...payroll };
 
-      if (
-        payrollObj.employeeId &&
-        typeof payrollObj.employeeId === "object" &&
-        payrollObj.employeeId._id
-      ) {
+      if (payrollObj.employeeId && typeof payrollObj.employeeId === "object" && payrollObj.employeeId._id) {
         payrollObj.employeeName = payrollObj.employeeId.medicalRepName;
         payrollObj.teamName = payrollObj.employeeId.teamName;
         payrollObj.contactNo = payrollObj.employeeId.contactNo;
@@ -164,6 +330,7 @@ router.get("/payrolls", async (req, res) => {
         payrollObj.joiningDate = payrollObj.employeeId.date;
         payrollObj.employeeEnabled = payrollObj.employeeId.enabled;
         payrollObj.MRId = payrollObj.employeeId.MRId;
+        payrollObj.employeeBasicSalary = basicSalaryMap[payrollObj.employeeId._id] || 0;
       } else {
         payrollObj.employeeName = "Unknown";
         payrollObj.teamName = "Unknown";
@@ -172,12 +339,12 @@ router.get("/payrolls", async (req, res) => {
         payrollObj.joiningDate = null;
         payrollObj.employeeEnabled = false;
         payrollObj.MRId = "N/A";
+        payrollObj.employeeBasicSalary = 0;
       }
 
       return payrollObj;
     });
 
-    // Count
     const total = await Payroll.countDocuments(finalConditions);
     const totalPages = Math.ceil(total / limitNum);
     const nextPayrollCode = await generateNextPayrollCode();
@@ -194,8 +361,6 @@ router.get("/payrolls", async (req, res) => {
       nextPayrollCode,
     });
   } catch (error) {
-    console.error("❌ Error in payrolls API:", error);
-
     res.status(500).json({
       success: false,
       message: "Failed to fetch payrolls",
@@ -204,14 +369,149 @@ router.get("/payrolls", async (req, res) => {
   }
 });
 
-// ==================== GET SINGLE PAYROLL BY ID ====================
+router.get("/payrolls/export/csv", async (req, res) => {
+  try {
+    const {
+      search = "",
+      status = "",
+      period = "",
+    } = req.query;
+
+    const matchConditions = { enabled: true };
+
+    if (status && status !== "all") {
+      matchConditions.status = status;
+    }
+
+    if (period) {
+      if (period.endsWith("-YTD")) {
+        const year = period.split("-")[0];
+        matchConditions.period = { $regex: `^${year}-`, $options: "i" };
+      } else if (period !== "all") {
+        matchConditions.period = period;
+      }
+    }
+
+    let searchConditions = {};
+    if (search && search.trim()) {
+      const searchRegex = new RegExp(search.trim(), "i");
+
+      const matchingStaff = await Staff.find({
+        $or: [
+          { medicalRepName: searchRegex },
+          { teamName: searchRegex },
+          { contactNo: searchRegex },
+          { email: searchRegex },
+        ],
+      }).select("_id");
+
+      const staffIds = matchingStaff.map((s) => s._id);
+
+      searchConditions = {
+        $or: [
+          { payrollCode: searchRegex },
+          { paymentMethod: searchRegex },
+          { employeeId: { $in: staffIds } },
+        ],
+      };
+    }
+
+    const finalConditions = {
+      ...matchConditions,
+      ...(Object.keys(searchConditions).length > 0 ? searchConditions : {}),
+    };
+
+    const payrolls = await Payroll.find(finalConditions)
+      .populate(
+        "employeeId",
+        "medicalRepName teamName contactNo email date enabled MRId"
+      )
+      .populate("source", "name code totalAmount")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const employeeIds = payrolls.map(p => p.employeeId?._id).filter(id => id);
+    const basicPayrolls = await MrBasicPayroll.find({
+      employeeId: { $in: employeeIds }
+    }).lean();
+
+    const basicSalaryMap = {};
+    basicPayrolls.forEach(bp => {
+      basicSalaryMap[bp.employeeId] = bp.currentBasicSalary || 0; // Changed to currentBasicSalary
+    });
+
+    const transformedPayrolls = payrolls.map((payroll) => {
+      const payrollObj = { ...payroll };
+
+      if (payrollObj.employeeId && typeof payrollObj.employeeId === "object" && payrollObj.employeeId._id) {
+        payrollObj.employeeName = payrollObj.employeeId.medicalRepName;
+        payrollObj.teamName = payrollObj.employeeId.teamName;
+        payrollObj.contactNo = payrollObj.employeeId.contactNo;
+        payrollObj.email = payrollObj.employeeId.email;
+        payrollObj.joiningDate = payrollObj.employeeId.date;
+        payrollObj.employeeEnabled = payrollObj.employeeId.enabled;
+        payrollObj.MRId = payrollObj.employeeId.MRId;
+        payrollObj.employeeBasicSalary = basicSalaryMap[payrollObj.employeeId._id] || 0;
+      } else {
+        payrollObj.employeeName = "Unknown";
+        payrollObj.teamName = "Unknown";
+        payrollObj.contactNo = "N/A";
+        payrollObj.email = "N/A";
+        payrollObj.joiningDate = null;
+        payrollObj.employeeEnabled = false;
+        payrollObj.MRId = "N/A";
+        payrollObj.employeeBasicSalary = 0;
+      }
+
+      payrollObj.allowancesCSV = payrollObj.allowances 
+        ? payrollObj.allowances.map(a => `${a.type}: $${a.amount}`).join('; ')
+        : '';
+
+      return payrollObj;
+    });
+
+    const fields = [
+      { label: 'Payroll Code', value: 'payrollCode' },
+      { label: 'Employee Name', value: 'employeeName' },
+      { label: 'Team', value: 'teamName' },
+      { label: 'Period', value: 'period' },
+      { label: 'Basic Salary', value: 'basicSalary' },
+      { label: 'Allowances', value: 'allowancesCSV' },
+      { label: 'Total Allowance', value: 'totalAllowance' },
+      { label: 'Deductions', value: 'deductions' },
+      { label: 'Net Salary', value: 'netSalary' },
+      { label: 'Status', value: 'status' },
+      { label: 'Payment Method', value: 'paymentMethod' },
+      { label: 'Bank Account', value: 'bankAccount' },
+      { label: 'Payment Date', value: 'paymentDate' },
+      { label: 'Source Account', value: 'source.name' },
+      { label: 'Created At', value: 'createdAt' },
+    ];
+
+    const json2csvParser = new Parser({ fields });
+    const csvData = json2csvParser.parse(transformedPayrolls);
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=payrolls_export.csv');
+    
+    res.status(200).send(csvData);
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to export payrolls",
+      error: error.message,
+    });
+  }
+});
+
 router.get("/payrolls/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
     const payroll = await Payroll.findById(id)
       .populate("employeeId", "medicalRepName teamName contactNo email")
-      .populate("source", "name code totalAmount"); // Populate source account
+      .populate("source", "name code totalAmount");
 
     if (!payroll) {
       return res.status(404).json({
@@ -220,13 +520,17 @@ router.get("/payrolls/:id", async (req, res) => {
       });
     }
 
-    // Transform the response to include employee data in a more accessible format
+    const basicPayroll = await MrBasicPayroll.findOne({
+      employeeId: payroll.employeeId._id
+    });
+
     const payrollData = payroll.toObject();
     if (payrollData.employeeId) {
       payrollData.employeeName = payrollData.employeeId.medicalRepName;
       payrollData.teamName = payrollData.employeeId.teamName;
       payrollData.contactNo = payrollData.employeeId.contactNo;
       payrollData.email = payrollData.employeeId.email;
+      payrollData.employeeBasicSalary = basicPayroll?.currentBasicSalary || 0; // Changed to currentBasicSalary
     }
 
     res.status(200).json({
@@ -234,8 +538,6 @@ router.get("/payrolls/:id", async (req, res) => {
       data: payrollData,
     });
   } catch (error) {
-    console.error("❌ Error fetching payroll:", error);
-
     if (error.name === "CastError") {
       return res.status(400).json({
         success: false,
@@ -251,7 +553,100 @@ router.get("/payrolls/:id", async (req, res) => {
   }
 });
 
-// ==================== CREATE NEW PAYROLL ====================
+router.get("/mrs/from-basic-payroll", async (req, res) => {
+  try {
+    console.log("🔍 Starting to fetch MRs from basic payroll...");
+    
+    // Fetch all basic payroll records with employee details
+    const mrBasicPayrolls = await MrBasicPayroll.find({})
+      .populate("employeeId", "medicalRepName")
+      .lean();
+
+    console.log(`✅ Found ${mrBasicPayrolls.length} basic payroll records`);
+
+    // Transform the data to get only id and name
+    const mrList = mrBasicPayrolls.map((p) => {
+      let employeeId, employeeName;
+      
+      if (p.employeeId && typeof p.employeeId === 'object' && p.employeeId._id) {
+        // Employee is populated
+        employeeId = p.employeeId._id;
+        employeeName = p.employeeId.medicalRepName;
+      } else if (p.employeeId) {
+        // Employee is just an ObjectId string
+        employeeId = p.employeeId;
+        employeeName = p.employeeName || "Unknown Employee";
+      } else {
+        // No employeeId at all
+        employeeId = null;
+        employeeName = "Unknown Employee";
+      }
+
+      return {
+        employeeId: employeeId,
+        employeeName: employeeName
+      };
+    });
+
+    // Filter out any null employeeIds
+    const validMrList = mrList.filter(mr => mr.employeeId !== null);
+    
+    console.log(`✅ Valid records: ${validMrList.length}`);
+
+    return res.status(200).json({
+      success: true,
+      count: validMrList.length,
+      data: validMrList,
+      message: validMrList.length === 0
+        ? "No employee found in basic payroll."
+        : "Employee list fetched successfully."
+    });
+
+  } catch (error) {
+    console.error("❌ Error in /mrs/from-basic-payroll endpoint:", error.message);
+    
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch employee list.",
+      error: error.message
+    });
+  }
+});
+
+router.get("/payrolls/calculate/:employeeId/:period", async (req, res) => {
+  try {
+    const { employeeId, period } = req.params;
+
+    const periodRegex = /^\d{4}-\d{2}$/;
+    if (!periodRegex.test(period)) {
+      return res.status(400).json({
+        success: false,
+        message: "Period must be in YYYY-MM format",
+      });
+    }
+
+    const calculation = await calculateSalaryForPeriod(employeeId, period);
+
+    res.status(200).json({
+      success: true,
+      data: calculation,
+    });
+  } catch (error) {
+    if (error.message === "Employee not found" || error.message === "Basic payroll record not found for employee") {
+      return res.status(404).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to calculate salary",
+      error: error.message,
+    });
+  }
+});
+
 router.post("/payrolls", async (req, res) => {
   const session = await mongoose.startSession();
 
@@ -261,7 +656,6 @@ router.post("/payrolls", async (req, res) => {
     const {
       employeeId,
       period,
-      basicSalary,
       allowances,
       deductions,
       status,
@@ -269,25 +663,16 @@ router.post("/payrolls", async (req, res) => {
       bankAccount,
       paymentDate,
       remarks,
-      source, // Source account ID
+      source,
     } = req.body;
-    // Validate required fields
-    if (!employeeId || !period || !basicSalary) {
+
+    if (!employeeId || !period || !source) {
       return res.status(400).json({
         success: false,
-        message: "Employee ID, period, and basic salary are required",
+        message: "Employee ID, period, and source account are required",
       });
     }
 
-    // Validate source account
-    if (!source) {
-      return res.status(400).json({
-        success: false,
-        message: "Source account is required",
-      });
-    }
-
-    // Validate period format (YYYY-MM)
     const periodRegex = /^\d{4}-\d{2}$/;
     if (!periodRegex.test(period)) {
       return res.status(400).json({
@@ -296,7 +681,6 @@ router.post("/payrolls", async (req, res) => {
       });
     }
 
-    // Check if employee exists
     const employee = await Staff.findById(employeeId).session(session);
     if (!employee) {
       return res.status(404).json({
@@ -305,7 +689,17 @@ router.post("/payrolls", async (req, res) => {
       });
     }
 
-    // Check if source account exists
+    const basicPayroll = await MrBasicPayroll.findOne({
+      employeeId: employeeId
+    }).session(session);
+
+    if (!basicPayroll) {
+      return res.status(404).json({
+        success: false,
+        message: "Basic payroll record not found for employee. Please set basic salary first.",
+      });
+    }
+
     const sourceAccount = await Account.findById(source).session(session);
     if (!sourceAccount) {
       return res.status(404).json({
@@ -314,7 +708,6 @@ router.post("/payrolls", async (req, res) => {
       });
     }
 
-    // Check for duplicate payroll (same employee and period)
     const existingPayroll = await Payroll.findOne({
       employeeId,
       period,
@@ -328,11 +721,13 @@ router.post("/payrolls", async (req, res) => {
       });
     }
 
-    // Parse numeric values
-    const basicSalaryNum = parseFloat(basicSalary);
+    const salaryCalculation = await calculateSalaryForPeriod(employeeId, period, session);
+    
+    const basicSalaryNum = salaryCalculation.salaryCalculation.totalSalary;
     const deductionsNum = parseFloat(deductions) || 0;
+    const leaveDeduction = salaryCalculation.salaryCalculation.leaveDeduction;
+    const extraTimeAmount = salaryCalculation.salaryCalculation.extraTimeAmount;
 
-    // Validate allowances array and calculate total allowance
     let totalAllowance = 0;
     let processedAllowances = [];
     if (allowances && Array.isArray(allowances)) {
@@ -360,10 +755,8 @@ router.post("/payrolls", async (req, res) => {
       }
     }
 
-    // Calculate net salary (required field)
     const netSalary = basicSalaryNum + totalAllowance - deductionsNum;
 
-    // Validate that net salary is not negative
     if (netSalary < 0) {
       return res.status(400).json({
         success: false,
@@ -372,14 +765,15 @@ router.post("/payrolls", async (req, res) => {
       });
     }
 
-    // Generate payroll code
     const payrollCode = await generateNextPayrollCode();
 
-    // Create payroll object with ALL required fields
     const payrollData = {
       employeeId,
       period,
-      basicSalary: basicSalaryNum,
+      basicSalary: basicPayroll.currentBasicSalary, // Changed to currentBasicSalary
+      adjustedBasicSalary: salaryCalculation.salaryCalculation.adjustedBasicSalary,
+      proratedBasicSalary: salaryCalculation.salaryCalculation.proratedBasicSalary,
+      extraTimeAmount: extraTimeAmount,
       allowances: processedAllowances,
       totalAllowance: totalAllowance,
       deductions: deductionsNum,
@@ -390,32 +784,43 @@ router.post("/payrolls", async (req, res) => {
       paymentDate: paymentDate || null,
       remarks: remarks || "",
       payrollCode: payrollCode,
-      source: source, // Store source account reference
+      source: source,
       createdBy: req.user?._id,
+      attendanceInfo: {
+        totalWorkingDays: salaryCalculation.salaryCalculation.totalWorkingDays,
+        workingDaysUntilCalculationDate: salaryCalculation.salaryCalculation.workingDaysUntilCalculationDate,
+        presentDays: salaryCalculation.salaryCalculation.presentDays,
+        totalLeaves: salaryCalculation.salaryCalculation.totalLeaves,
+        paidLeaves: salaryCalculation.salaryCalculation.paidLeaves,
+        unpaidLeaves: salaryCalculation.salaryCalculation.unpaidLeaves,
+        swapLeaves: salaryCalculation.salaryCalculation.swapLeaves,
+        perDaySalary: salaryCalculation.salaryCalculation.perDaySalary,
+        perMinuteSalary: salaryCalculation.salaryCalculation.perMinuteSalary,
+        leaveDeduction: leaveDeduction,
+        extraMinutes: salaryCalculation.salaryCalculation.extraMinutes,
+        extraTimeAmount: extraTimeAmount,
+        calculationDate: salaryCalculation.salaryCalculation.calculationDate
+      }
     };
 
-    // Create payroll
     const payroll = new Payroll(payrollData);
     await payroll.save({ session });
 
-    // Update source account balance (subtract net salary)
     await updateAccountBalance(source, netSalary, "subtract", session);
 
-    // Commit transaction
     await session.commitTransaction();
 
-    // Populate employee details in response
     await payroll.populate(
       "employeeId",
       "medicalRepName teamName contactNo email"
     );
     await payroll.populate("source", "name code totalAmount");
 
-    // Transform the response
     const responseData = payroll.toObject();
     if (responseData.employeeId) {
       responseData.employeeName = responseData.employeeId.medicalRepName;
       responseData.teamName = responseData.employeeId.teamName;
+      responseData.employeeBasicSalary = basicPayroll.currentBasicSalary; // Changed to currentBasicSalary
     }
 
     res.status(201).json({
@@ -424,15 +829,11 @@ router.post("/payrolls", async (req, res) => {
       data: responseData,
     });
   } catch (error) {
-    // Only abort transaction if it was started
     if (session.transaction?.isActive) {
       try {
         await session.abortTransaction();
-      } catch (abortError) {
-        console.error("❌ Error aborting transaction:", abortError);
-      }
+      } catch (abortError) {}
     }
-    console.error("❌ Payroll creation error:", error);
 
     if (error.name === "ValidationError") {
       const messages = Object.values(error.errors).map((val) => val.message);
@@ -457,6 +858,13 @@ router.post("/payrolls", async (req, res) => {
       });
     }
 
+    if (error.message.includes("Employee not found") || error.message.includes("Basic payroll record not found")) {
+      return res.status(404).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
     res.status(500).json({
       success: false,
       message: "Failed to create payroll",
@@ -467,7 +875,6 @@ router.post("/payrolls", async (req, res) => {
   }
 });
 
-// ==================== UPDATE PAYROLL ====================
 router.put("/payrolls/:id", async (req, res) => {
   const session = await mongoose.startSession();
 
@@ -485,10 +892,9 @@ router.put("/payrolls/:id", async (req, res) => {
       paymentDate,
       remarks,
       enabled,
-      source, // New source account (if changing)
+      source,
     } = req.body;
 
-    // Find payroll with current source account
     const payroll = await Payroll.findById(id)
       .populate("source")
       .session(session);
@@ -502,9 +908,7 @@ router.put("/payrolls/:id", async (req, res) => {
     const oldNetSalary = payroll.netSalary;
     const oldSource = payroll.source;
 
-    // Update fields
-    if (basicSalary !== undefined)
-      payroll.basicSalary = parseFloat(basicSalary);
+    if (basicSalary !== undefined) payroll.basicSalary = parseFloat(basicSalary);
     if (deductions !== undefined) payroll.deductions = parseFloat(deductions);
     if (status) payroll.status = status;
     if (paymentMethod) payroll.paymentMethod = paymentMethod;
@@ -514,30 +918,25 @@ router.put("/payrolls/:id", async (req, res) => {
     if (enabled !== undefined) payroll.enabled = enabled;
     if (source !== undefined) payroll.source = source;
 
-    // Update allowances if provided and recalculate total allowance
     if (allowances && Array.isArray(allowances)) {
       payroll.allowances = allowances.map((allowance) => ({
         type: allowance.type.trim(),
         amount: parseFloat(allowance.amount),
       }));
 
-      // Recalculate total allowance
       payroll.totalAllowance = payroll.allowances.reduce(
         (total, allowance) => total + allowance.amount,
         0
       );
     }
 
-    // Recalculate net salary
     payroll.netSalary =
       payroll.basicSalary + payroll.totalAllowance - payroll.deductions;
 
-    // Handle account balance updates
     const newNetSalary = payroll.netSalary;
     const newSource = payroll.source;
 
     if (oldSource && oldSource._id.toString() === newSource.toString()) {
-      // Same source account, adjust balance by difference
       const amountDifference = newNetSalary - oldNetSalary;
       if (amountDifference !== 0) {
         await updateAccountBalance(
@@ -548,12 +947,9 @@ router.put("/payrolls/:id", async (req, res) => {
         );
       }
     } else {
-      // Different source account
-      // Add back to old source
       if (oldSource) {
         await updateAccountBalance(oldSource._id, oldNetSalary, "add", session);
       }
-      // Subtract from new source
       await updateAccountBalance(newSource, newNetSalary, "subtract", session);
     }
 
@@ -564,14 +960,17 @@ router.put("/payrolls/:id", async (req, res) => {
     );
     await payroll.populate("source", "name code totalAmount");
 
-    // Commit transaction
     await session.commitTransaction();
 
-    // Transform the response
+    const basicPayroll = await MrBasicPayroll.findOne({
+      employeeId: payroll.employeeId._id
+    });
+
     const responseData = payroll.toObject();
     if (responseData.employeeId) {
       responseData.employeeName = responseData.employeeId.medicalRepName;
       responseData.teamName = responseData.employeeId.teamName;
+      responseData.employeeBasicSalary = basicPayroll?.currentBasicSalary || 0; // Changed to currentBasicSalary
     }
 
     res.status(200).json({
@@ -580,15 +979,11 @@ router.put("/payrolls/:id", async (req, res) => {
       data: responseData,
     });
   } catch (error) {
-    // Only abort transaction if it was started
     if (session.transaction?.isActive) {
       try {
         await session.abortTransaction();
-      } catch (abortError) {
-        console.error("❌ Error aborting transaction:", abortError);
-      }
+      } catch (abortError) {}
     }
-    console.error("❌ Error updating payroll:", error);
 
     if (error.name === "ValidationError") {
       const messages = Object.values(error.errors).map((val) => val.message);
@@ -623,7 +1018,6 @@ router.put("/payrolls/:id", async (req, res) => {
   }
 });
 
-// ==================== DELETE PAYROLL ====================
 router.delete("/payrolls/:id", async (req, res) => {
   const session = await mongoose.startSession();
 
@@ -643,7 +1037,6 @@ router.delete("/payrolls/:id", async (req, res) => {
       });
     }
 
-    // Add the net salary back to the source account
     if (payroll.source) {
       await updateAccountBalance(
         payroll.source._id,
@@ -655,7 +1048,6 @@ router.delete("/payrolls/:id", async (req, res) => {
 
     await Payroll.findByIdAndDelete(id).session(session);
 
-    // Commit transaction
     await session.commitTransaction();
 
     res.status(200).json({
@@ -664,15 +1056,11 @@ router.delete("/payrolls/:id", async (req, res) => {
       data: { id },
     });
   } catch (error) {
-    // Only abort transaction if it was started
     if (session.transaction?.isActive) {
       try {
         await session.abortTransaction();
-      } catch (abortError) {
-        console.error("❌ Error aborting transaction:", abortError);
-      }
+      } catch (abortError) {}
     }
-    console.error("❌ Error deleting payroll:", error);
 
     if (error.name === "CastError") {
       return res.status(400).json({
@@ -691,7 +1079,6 @@ router.delete("/payrolls/:id", async (req, res) => {
   }
 });
 
-// ==================== BULK DELETE PAYROLLS ====================
 router.delete("/payrolls", async (req, res) => {
   const session = await mongoose.startSession();
 
@@ -707,7 +1094,6 @@ router.delete("/payrolls", async (req, res) => {
       });
     }
 
-    // Validate IDs
     const validIds = ids.filter((id) => mongoose.Types.ObjectId.isValid(id));
     if (validIds.length !== ids.length) {
       return res.status(400).json({
@@ -716,7 +1102,6 @@ router.delete("/payrolls", async (req, res) => {
       });
     }
 
-    // Find all payrolls to be deleted with their source accounts
     const payrollsToDelete = await Payroll.find({ _id: { $in: validIds } })
       .populate("source")
       .session(session);
@@ -728,7 +1113,6 @@ router.delete("/payrolls", async (req, res) => {
       });
     }
 
-    // Add back net salaries to respective source accounts
     for (const payroll of payrollsToDelete) {
       if (payroll.source) {
         await updateAccountBalance(
@@ -744,7 +1128,6 @@ router.delete("/payrolls", async (req, res) => {
       session
     );
 
-    // Commit transaction
     await session.commitTransaction();
 
     res.status(200).json({
@@ -753,15 +1136,12 @@ router.delete("/payrolls", async (req, res) => {
       data: { deletedCount: result.deletedCount },
     });
   } catch (error) {
-    // Only abort transaction if it was started
     if (session.transaction?.isActive) {
       try {
         await session.abortTransaction();
-      } catch (abortError) {
-        console.error("❌ Error aborting transaction:", abortError);
-      }
+      } catch (abortError) {}
     }
-    console.error("❌ Error deleting multiple payrolls:", error);
+    
     res.status(500).json({
       success: false,
       message: "Failed to delete payrolls",
