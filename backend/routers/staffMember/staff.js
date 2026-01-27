@@ -171,81 +171,46 @@ router.post("/staffs", async (req, res) => {
 // UPDATE STAFF
 // -----------------------------------------------------------
 router.put("/staff/:id", async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
   try {
-    const { email, medicalRepName, contactNo } = req.body;
-
-    const staff = await staffSchema.findById(req.params.id).session(session);
-    if (!staff) throw new Error("Staff not found");
-
-    // Duplicate Checks
-    if (contactNo && contactNo !== staff.contactNo) {
-      if (
-        await staffSchema
-          .findOne({ contactNo, _id: { $ne: staff._id } })
-          .session(session)
-      )
-        throw new Error(`Contact number already exists`);
-    }
-
-    if (medicalRepName && medicalRepName.trim() !== staff.medicalRepName) {
-      if (
-        await staffSchema
-          .findOne({ medicalRepName, _id: { $ne: staff._id } })
-          .session(session)
-      )
-        throw new Error(`Name already exists`);
-    }
-
-    if (email && email.toLowerCase() !== staff.email) {
-      if (
-        await User.findOne({
-          email: email.toLowerCase(),
-          _id: { $ne: staff.userId },
-        }).session(session)
-      )
-        throw new Error(`Email already exists`);
-    }
+    const { id } = req.params;
+    const { medicalRepName, teamName, contactNo, email, date, isActive } = req.body;
 
     // Update staff
     const updatedStaff = await staffSchema.findByIdAndUpdate(
-      staff._id,
-      req.body,
-      { new: true, session }
-    );
+      id,
+      {
+        medicalRepName,
+        teamName,
+        contactNo,
+        email,
+        date,
+      },
+      { new: true }
+    ).populate("userId", "name email isActive");
 
-    // Update user
-    if (staff.userId) {
-      const updateUser = {};
-
-      if (email) updateUser.email = email.toLowerCase();
-      if (medicalRepName) updateUser.name = medicalRepName;
-
-      if (req.body.enabled !== undefined) {
-        updateUser.isActive =
-          req.body.enabled === true ||
-          req.body.enabled === "true" ||
-          req.body.enabled === "enabled";
-      }
-
-      if (Object.keys(updateUser).length > 0) {
-        await User.findByIdAndUpdate(staff.userId, updateUser, { session });
-      }
+    // Update user's isActive status if changed
+    if (updatedStaff.userId && isActive !== undefined) {
+      await User.findByIdAndUpdate(
+        updatedStaff.userId._id,
+        { isActive },
+        { new: true }
+      );
     }
 
-    await session.commitTransaction();
+    // Re-populate to get updated user data
+    const finalStaff = await staffSchema.findById(id).populate("userId");
 
     res.json({
       success: true,
-      updated: updatedStaff,
+      message: "Staff updated successfully",
+      data: finalStaff
     });
   } catch (error) {
-    await session.abortTransaction();
-    sendError(res, error);
-  } finally {
-    session.endSession();
+    console.error("Error updating staff:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Internal server error" 
+    });
   }
 });
 
@@ -550,4 +515,42 @@ router.post("/staffs/import", async (req, res) => {
   }
 });
 
+
+// Add this route in your backend
+router.put("/staff/status/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isActive } = req.body;
+
+    // Find staff
+    const staff = await staffSchema.findById(id);
+    if (!staff) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Staff not found" 
+      });
+    }
+
+    // Update user's isActive status
+    if (staff.userId) {
+      await User.findByIdAndUpdate(
+        staff.userId, 
+        { isActive },
+        { new: true }
+      );
+    }
+
+    res.json({
+      success: true,
+      message: `Staff status updated to ${isActive ? "active" : "inactive"}`,
+      data: { isActive }
+    });
+  } catch (error) {
+    console.error("Error updating staff status:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Internal server error" 
+    });
+  }
+});
 export default router;

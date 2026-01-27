@@ -74,8 +74,12 @@ const calculateSalaryForPeriod = async (employeeId, period, session = null) => {
       throw new Error("Basic payroll record not found for employee");
     }
 
-    const basicSalary = basicPayroll.currentBasicSalary || 0; // Changed from basicSalary to currentBasicSalary
+    const basicSalary = basicPayroll.currentBasicSalary || 0;
     const basicSalaryNum = parseFloat(basicSalary);
+
+    // Fixed: Always divide by 30 days
+    const perDaySalary = basicSalaryNum / 30;
+    const perMinuteSalary = perDaySalary / (8 * 60); // 8 working hours per day
 
     const [year, month] = period.split('-').map(Number);
     const startDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
@@ -85,10 +89,51 @@ const calculateSalaryForPeriod = async (employeeId, period, session = null) => {
     const currentYear = currentDate.getFullYear();
     const currentMonth = currentDate.getMonth() + 1;
     
-    const calculationEndDate = (year === currentYear && month === currentMonth) 
-      ? currentDate 
-      : endDate;
+    // Determine calculation end date
+    let calculationEndDate;
+    let isCurrentMonth = false;
+    
+    if (year === currentYear && month === currentMonth) {
+      // Current month: calculate until today (include today)
+      calculationEndDate = new Date(currentDate);
+      calculationEndDate.setUTCHours(23, 59, 59, 999);
+      isCurrentMonth = true;
+    } else if (year < currentYear || (year === currentYear && month < currentMonth)) {
+      // Past month: calculate full month
+      calculationEndDate = endDate;
+      isCurrentMonth = false;
+    } else {
+      // Future month: shouldn't happen, but handle it
+      calculationEndDate = startDate;
+      isCurrentMonth = false;
+    }
 
+    // Calculate total days in the period (from 1st to calculationEndDate)
+    const totalDaysInPeriod = Math.floor((calculationEndDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+    
+    // Calculate working days in full month (for reference only)
+    let totalWorkingDaysInMonth = 0;
+    let currentDateIter = new Date(startDate);
+    while (currentDateIter <= endDate) {
+      const dayOfWeek = currentDateIter.getUTCDay();
+      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+        totalWorkingDaysInMonth++;
+      }
+      currentDateIter.setUTCDate(currentDateIter.getUTCDate() + 1);
+    }
+
+    // Calculate working days until calculation date
+    let workingDaysUntilCalculation = 0;
+    currentDateIter = new Date(startDate);
+    while (currentDateIter <= calculationEndDate) {
+      const dayOfWeek = currentDateIter.getUTCDay();
+      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+        workingDaysUntilCalculation++;
+      }
+      currentDateIter.setUTCDate(currentDateIter.getUTCDate() + 1);
+    }
+
+    // Fetch attendance and leave records
     const attendanceRecords = await Attendance.find({
       userId: employeeId,
       loginTime: {
@@ -102,36 +147,16 @@ const calculateSalaryForPeriod = async (employeeId, period, session = null) => {
       leaveDate: {
         $gte: startDate,
         $lte: calculationEndDate
-      }
+      },
+      status: 'approved'
     }).session(session || null);
 
-    let totalWorkingDays = 0;
-    let workingDaysUntilCalculationDate = 0;
+    // Calculate leaves
     let totalLeaveDays = 0;
     let paidLeaveDays = 0;
     let unpaidLeaveDays = 0;
     let swapLeaveDays = 0;
-
-    let currentDateIter = new Date(startDate);
-    while (currentDateIter <= calculationEndDate) {
-      const dayOfWeek = currentDateIter.getUTCDay();
-      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-        totalWorkingDays++;
-        workingDaysUntilCalculationDate++;
-      }
-      currentDateIter.setUTCDate(currentDateIter.getUTCDate() + 1);
-    }
-
-    let totalWorkingDaysInMonth = 0;
-    currentDateIter = new Date(startDate);
-    while (currentDateIter <= endDate) {
-      const dayOfWeek = currentDateIter.getUTCDay();
-      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-        totalWorkingDaysInMonth++;
-      }
-      currentDateIter.setUTCDate(currentDateIter.getUTCDate() + 1);
-    }
-
+    
     const leaveDatesSet = new Set();
     for (const leave of leaveRecords) {
       const leaveDate = new Date(leave.leaveDate);
@@ -147,9 +172,9 @@ const calculateSalaryForPeriod = async (employeeId, period, session = null) => {
             unpaidLeaveDays++;
           } else if (leave.leaveType === 'paid') {
             paidLeaveDays++;
-          } else if (leave.leaveType === 'swapleave' && leave.status === 'approved') {
+          } else if (leave.leaveType === 'swapleave') {
             swapLeaveDays++;
-            paidLeaveDays++;
+            paidLeaveDays++; // Swap leaves are paid
           } else if (leave.leaveType === 'holiday' || leave.leaveType === 'sunday') {
             paidLeaveDays++;
           }
@@ -157,13 +182,7 @@ const calculateSalaryForPeriod = async (employeeId, period, session = null) => {
       }
     }
 
-    const perDaySalary = basicSalaryNum / totalWorkingDaysInMonth;
-    const perMinuteSalary = perDaySalary / (8 * 60);
-
-    const unpaidLeaveDeduction = unpaidLeaveDays * perDaySalary;
-    const proratedBasicSalary = (workingDaysUntilCalculationDate / totalWorkingDaysInMonth) * basicSalaryNum;
-    const adjustedBasicSalary = proratedBasicSalary - unpaidLeaveDeduction;
-
+    // Calculate present days from attendance
     const presentDaysSet = new Set();
     attendanceRecords.forEach(record => {
       const dateStr = record.loginTime.toISOString().split('T')[0];
@@ -171,8 +190,8 @@ const calculateSalaryForPeriod = async (employeeId, period, session = null) => {
     });
     const presentDays = presentDaysSet.size;
 
+    // Calculate extra time
     let totalExtraMinutes = 0;
-    
     const attendanceByDate = {};
     attendanceRecords.forEach(record => {
       const dateStr = record.loginTime.toISOString().split('T')[0];
@@ -193,14 +212,24 @@ const calculateSalaryForPeriod = async (employeeId, period, session = null) => {
         }
       });
       
-      const standardWorkMinutes = 480;
+      const standardWorkMinutes = 480; // 8 hours
       if (totalMinutes > standardWorkMinutes) {
         const extraMinutes = totalMinutes - standardWorkMinutes;
         totalExtraMinutes += extraMinutes;
       }
     });
 
-    const extraTimeAmount = calculateExtraTimeAmount(totalExtraMinutes, perMinuteSalary);
+    // Calculate salaries
+    const extraTimeAmount = totalExtraMinutes * perMinuteSalary;
+    
+    // Prorated salary based on days in period (including weekends)
+    const proratedBasicSalary = (totalDaysInPeriod / 30) * basicSalaryNum;
+    
+    // Deduct unpaid leaves
+    const unpaidLeaveDeduction = unpaidLeaveDays * perDaySalary;
+    const adjustedBasicSalary = proratedBasicSalary - unpaidLeaveDeduction;
+    
+    // Total salary
     const totalSalary = adjustedBasicSalary + extraTimeAmount;
 
     return {
@@ -210,12 +239,15 @@ const calculateSalaryForPeriod = async (employeeId, period, session = null) => {
         basicSalary: basicSalaryNum
       },
       period,
+      isCurrentMonth,
       salaryCalculation: {
         basicSalary: basicSalaryNum,
         perDaySalary: perDaySalary,
         perMinuteSalary: perMinuteSalary,
-        totalWorkingDays: totalWorkingDaysInMonth,
-        workingDaysUntilCalculationDate,
+        totalDaysInMonth: 30, // Fixed: Always 30 days
+        totalDaysInPeriod: totalDaysInPeriod,
+        totalWorkingDaysInMonth: totalWorkingDaysInMonth, // For reference
+        workingDaysUntilCalculation: workingDaysUntilCalculation,
         presentDays,
         totalLeaves: totalLeaveDays,
         paidLeaves: paidLeaveDays,
@@ -227,13 +259,59 @@ const calculateSalaryForPeriod = async (employeeId, period, session = null) => {
         extraMinutes: totalExtraMinutes,
         extraTimeAmount: extraTimeAmount,
         totalSalary: totalSalary,
-        calculationDate: calculationEndDate.toISOString().split('T')[0]
+        calculationStartDate: startDate.toISOString().split('T')[0],
+        calculationEndDate: calculationEndDate.toISOString().split('T')[0],
+        isCurrentMonth: isCurrentMonth
       }
     };
   } catch (error) {
+    console.error("Error in calculateSalaryForPeriod:", error);
     throw error;
   }
 };
+
+// Add new endpoint to fetch basic salary
+router.get("/basic-payroll/employee/:employeeId", async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    
+    if (!mongoose.Types.ObjectId.isValid(employeeId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid employee ID"
+      });
+    }
+    
+    const basicPayroll = await MrBasicPayroll.findOne({
+      employeeId: employeeId
+    });
+    
+    if (!basicPayroll) {
+      return res.status(404).json({
+        success: false,
+        message: "Basic payroll record not found for employee"
+      });
+    }
+    
+    res.status(200).json({
+      success: true,
+      data: {
+        _id: basicPayroll._id,
+        employeeId: basicPayroll.employeeId,
+        currentBasicSalary: basicPayroll.currentBasicSalary || 0,
+        currentEffectiveFrom: basicPayroll.currentEffectiveFrom,
+        employeeName: basicPayroll.employeeName
+      }
+    });
+  } catch (error) {
+    console.error("Error fetching basic payroll:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch basic payroll",
+      error: error.message
+    });
+  }
+});
 
 router.get("/payrolls", async (req, res) => {
   try {
@@ -316,7 +394,7 @@ router.get("/payrolls", async (req, res) => {
 
     const basicSalaryMap = {};
     basicPayrolls.forEach(bp => {
-      basicSalaryMap[bp.employeeId] = bp.currentBasicSalary || 0; // Changed to currentBasicSalary
+      basicSalaryMap[bp.employeeId] = bp.currentBasicSalary || 0;
     });
 
     const transformedPayrolls = payrolls.map((payroll) => {
@@ -437,7 +515,7 @@ router.get("/payrolls/export/csv", async (req, res) => {
 
     const basicSalaryMap = {};
     basicPayrolls.forEach(bp => {
-      basicSalaryMap[bp.employeeId] = bp.currentBasicSalary || 0; // Changed to currentBasicSalary
+      basicSalaryMap[bp.employeeId] = bp.currentBasicSalary || 0;
     });
 
     const transformedPayrolls = payrolls.map((payroll) => {
@@ -530,7 +608,7 @@ router.get("/payrolls/:id", async (req, res) => {
       payrollData.teamName = payrollData.employeeId.teamName;
       payrollData.contactNo = payrollData.employeeId.contactNo;
       payrollData.email = payrollData.employeeId.email;
-      payrollData.employeeBasicSalary = basicPayroll?.currentBasicSalary || 0; // Changed to currentBasicSalary
+      payrollData.employeeBasicSalary = basicPayroll?.currentBasicSalary || 0;
     }
 
     res.status(200).json({
@@ -583,13 +661,13 @@ router.get("/mrs/from-basic-payroll", async (req, res) => {
       }
 
       return {
-        employeeId: employeeId,
-        employeeName: employeeName
+        _id: employeeId,
+        medicalRepName: employeeName
       };
     });
 
     // Filter out any null employeeIds
-    const validMrList = mrList.filter(mr => mr.employeeId !== null);
+    const validMrList = mrList.filter(mr => mr._id !== null);
     
     console.log(`✅ Valid records: ${validMrList.length}`);
 
@@ -770,7 +848,7 @@ router.post("/payrolls", async (req, res) => {
     const payrollData = {
       employeeId,
       period,
-      basicSalary: basicPayroll.currentBasicSalary, // Changed to currentBasicSalary
+      basicSalary: basicPayroll.currentBasicSalary,
       adjustedBasicSalary: salaryCalculation.salaryCalculation.adjustedBasicSalary,
       proratedBasicSalary: salaryCalculation.salaryCalculation.proratedBasicSalary,
       extraTimeAmount: extraTimeAmount,
@@ -788,7 +866,7 @@ router.post("/payrolls", async (req, res) => {
       createdBy: req.user?._id,
       attendanceInfo: {
         totalWorkingDays: salaryCalculation.salaryCalculation.totalWorkingDays,
-        workingDaysUntilCalculationDate: salaryCalculation.salaryCalculation.workingDaysUntilCalculationDate,
+        workingDaysUntilCalculationDate: salaryCalculation.salaryCalculation.workingDaysUntilCalculation,
         presentDays: salaryCalculation.salaryCalculation.presentDays,
         totalLeaves: salaryCalculation.salaryCalculation.totalLeaves,
         paidLeaves: salaryCalculation.salaryCalculation.paidLeaves,
@@ -799,7 +877,7 @@ router.post("/payrolls", async (req, res) => {
         leaveDeduction: leaveDeduction,
         extraMinutes: salaryCalculation.salaryCalculation.extraMinutes,
         extraTimeAmount: extraTimeAmount,
-        calculationDate: salaryCalculation.salaryCalculation.calculationDate
+        calculationDate: salaryCalculation.salaryCalculation.calculationEndDate
       }
     };
 
@@ -820,7 +898,7 @@ router.post("/payrolls", async (req, res) => {
     if (responseData.employeeId) {
       responseData.employeeName = responseData.employeeId.medicalRepName;
       responseData.teamName = responseData.employeeId.teamName;
-      responseData.employeeBasicSalary = basicPayroll.currentBasicSalary; // Changed to currentBasicSalary
+      responseData.employeeBasicSalary = basicPayroll.currentBasicSalary;
     }
 
     res.status(201).json({
@@ -970,7 +1048,7 @@ router.put("/payrolls/:id", async (req, res) => {
     if (responseData.employeeId) {
       responseData.employeeName = responseData.employeeId.medicalRepName;
       responseData.teamName = responseData.employeeId.teamName;
-      responseData.employeeBasicSalary = basicPayroll?.currentBasicSalary || 0; // Changed to currentBasicSalary
+      responseData.employeeBasicSalary = basicPayroll?.currentBasicSalary || 0;
     }
 
     res.status(200).json({

@@ -186,14 +186,14 @@ const Dashboard = () => {
     initials: "",
   });
 
-  // Form State
+  // Form State - Updated to handle status correctly
   const [form, setForm] = useState({
     medicalRepName: "",
     teamName: "",
     contactNo: "",
     email: "",
     date: "",
-    enabled: "",
+    isActive: true, // Use isActive instead of enabled
     _id: null,
     userId: null,
   });
@@ -519,6 +519,7 @@ const Dashboard = () => {
   const handleMRView = useCallback((mr) => {
     setForm({
       ...mr,
+      isActive: mr.userId?.isActive, // Use userId.isActive
       date: mr.date ? parseDateFromString(mr.date) : null,
     });
     setIsViewModalOpen(true);
@@ -527,6 +528,7 @@ const Dashboard = () => {
   const handleMREdit = useCallback((mr) => {
     setForm({
       ...mr,
+      isActive: mr.userId?.isActive, // Use userId.isActive
       date: mr.date ? parseDateFromString(mr.date) : null,
     });
     setIsEditModalOpen(true);
@@ -605,8 +607,10 @@ const Dashboard = () => {
   const handleStatusToggle = async (mr) => {
     try {
       const newStatus = !mr.userId?.isActive;
-      const res = await axios.put(`${backendUrl}/api/staff/${mr._id}`, {
-        enabled: newStatus,
+      
+      // Update both staff and user status
+      const res = await axios.put(`${backendUrl}/api/staff/status/${mr._id}`, {
+        isActive: newStatus,
       });
 
       if (res.status === 200) {
@@ -615,7 +619,6 @@ const Dashboard = () => {
             item._id === mr._id
               ? {
                   ...item,
-                  enabled: newStatus,
                   userId: {
                     ...item.userId,
                     isActive: newStatus,
@@ -632,9 +635,11 @@ const Dashboard = () => {
         );
       }
     } catch (err) {
+      console.error("Status toggle error:", err);
       showToast("error", "Failed to update MR status.");
     }
   };
+
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -703,8 +708,6 @@ const Dashboard = () => {
         const mappedData = rows
           .slice(headerRowIndex + 1)
           .map((row, rowIndex) => {
-            // Log raw row data for debugging
-
             const item = {};
             Object.entries(headersMap).forEach(([index, key]) => {
               item[key] = row[index] || "";
@@ -783,12 +786,13 @@ const Dashboard = () => {
                 .toString()
                 .trim(),
               email: (item["email"] || "").toString().trim().toLowerCase(),
-              password: (item["password"] || "123456").toString().trim(), // Default password if empty
+              password: (item["password"] || "123456").toString().trim(),
               date:
                 parsedDate && !isNaN(parsedDate.getTime())
                   ? parsedDate.toISOString().split("T")[0] 
-                  : new Date().toISOString().split("T")[0], 
-              rawDate: rawDate, // For debugging
+                  : new Date().toISOString().split("T")[0],
+              isActive: true, // Default to active when importing
+              rawDate: rawDate,
             };
 
             return result;
@@ -824,7 +828,6 @@ const Dashboard = () => {
       // Validate all required fields
       const validData = parsedData
         .map((item) => {
-          // Map frontend field names to backend expected field names
           return {
             medicalRepName: item.name || item["MR Name"] || item["mr name"],
             teamName: item.teamName || item["Team Name"] || item["team name"],
@@ -840,7 +843,7 @@ const Dashboard = () => {
               item.Date ||
               item["Joining Date"] ||
               item["joining date"],
-            enabled: item.enabled !== undefined ? item.enabled : true,
+            isActive: item.isActive !== undefined ? item.isActive : true, // Use isActive
           };
         })
         .filter(
@@ -933,8 +936,12 @@ const Dashboard = () => {
 
     try {
       const updatedData = {
-        ...form,
+        medicalRepName: form.medicalRepName,
+        teamName: form.teamName,
+        contactNo: form.contactNo,
+        email: form.email,
         date: form.date ? new Date(form.date).toISOString() : null,
+        isActive: form.isActive, // Use isActive
       };
 
       const res = await axios.put(
@@ -1105,7 +1112,7 @@ const Dashboard = () => {
   const RecentActivity = () => {
     const recentMRs = useMemo(() => {
       return mrList
-        .filter((mr) => mr.date) // Filter out MRs without date
+        .filter((mr) => mr.date)
         .sort((a, b) => {
           const dateA = parseDateFromString(a.date);
           const dateB = parseDateFromString(b.date);
@@ -1454,7 +1461,7 @@ const Dashboard = () => {
           item.date ? formatDateToDDMMMYYYY(item.date) : "No Date",
       },
       {
-        key: "enabled",
+        key: "status",
         title: "Status",
         render: (item) => (
           <button
@@ -1677,7 +1684,7 @@ const Dashboard = () => {
                     Status
                   </label>
                   <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                    {form.userId?.isActive ? "Enabled" : "Disabled"}
+                    {form.isActive ? "Enabled" : "Disabled"}
                   </p>
                 </div>
               </div>
@@ -1827,9 +1834,9 @@ const Dashboard = () => {
                       Status
                     </label>
                     <select
-                      value={form.userId?.isActive ?? form.enabled}
+                      value={form.isActive}
                       onChange={(e) =>
-                        setForm({ ...form, enabled: e.target.value === "true" })
+                        setForm({ ...form, isActive: e.target.value === "true" })
                       }
                       className="w-full border px-3 py-2 rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500"
                     >

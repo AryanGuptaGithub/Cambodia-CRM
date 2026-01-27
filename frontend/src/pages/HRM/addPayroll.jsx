@@ -255,40 +255,16 @@ const usePayrollForm = () => {
   const [salaryCalculation, setSalaryCalculation] = useState(null);
   const [calculatingSalary, setCalculatingSalary] = useState(false);
   const [showSalaryDetails, setShowSalaryDetails] = useState(false);
+  const [selectedSourceAccount, setSelectedSourceAccount] = useState(null);
 
-  // Fetch MR list from the correct endpoint
-// Update the fetchMRList function in your AddPayroll.jsx:
-const fetchMRList = useCallback(async () => {
-  try {
-    setMrListLoading(true);
-    
-    // Use the new endpoint to get MRs from basic payroll
-    const response = await axios.get(`${backendUrl}/api/mrs/from-basic-payroll`);
-    
-    if (response.data.success) {
-      const mrData = response.data.data || [];
-      
-      if (mrData.length > 0) {
-        setMrList(mrData);
-        setIsMrListEmpty(false);
-      } else {
-        setMrList([]);
-        setIsMrListEmpty(true);
-        toast.error("No MRs found with basic salary. Please add basic salary for MRs first.");
-      }
-    } else {
-      throw new Error(response.data.message || "Failed to fetch MR list");
-    }
-  } catch (error) {
-    console.error("Error fetching MR list:", error);
-    
-    // Try alternative endpoint if the new one fails
+  const fetchMRList = useCallback(async () => {
     try {
-      // Fallback to the original endpoint
-      const fallbackResponse = await axios.get(`${backendUrl}/api/mrs/from-basic-payroll`);
-       console.log('values fallbackResponse', fallbackResponse)
-      if (fallbackResponse.data.success) {
-        const mrData = fallbackResponse.data.data || [];
+      setMrListLoading(true);
+      
+      const response = await axios.get(`${backendUrl}/api/mrs/from-basic-payroll`);
+      
+      if (response.data.success) {
+        const mrData = response.data.data || [];
         
         if (mrData.length > 0) {
           setMrList(mrData);
@@ -296,21 +272,41 @@ const fetchMRList = useCallback(async () => {
         } else {
           setMrList([]);
           setIsMrListEmpty(true);
-          toast.error("No MRs available for payroll.");
+          toast.error("No MRs found with basic salary. Please add basic salary for MRs first.");
         }
       } else {
-        throw new Error("Failed to fetch MR list from fallback endpoint");
+        throw new Error(response.data.message || "Failed to fetch MR list");
       }
-    } catch (fallbackError) {
-      console.error("Fallback also failed:", fallbackError);
-      toast.error("Failed to load MR list. Please check the server connection.");
-      setMrList([]);
-      setIsMrListEmpty(true);
+    } catch (error) {
+      console.error("Error fetching MR list:", error);
+      
+      try {
+        const fallbackResponse = await axios.get(`${backendUrl}/api/mrs/from-basic-payroll`);
+        
+        if (fallbackResponse.data.success) {
+          const mrData = fallbackResponse.data.data || [];
+          
+          if (mrData.length > 0) {
+            setMrList(mrData);
+            setIsMrListEmpty(false);
+          } else {
+            setMrList([]);
+            setIsMrListEmpty(true);
+            toast.error("No MRs available for payroll.");
+          }
+        } else {
+          throw new Error("Failed to fetch MR list from fallback endpoint");
+        }
+      } catch (fallbackError) {
+        console.error("Fallback also failed:", fallbackError);
+        toast.error("Failed to load MR list. Please check the server connection.");
+        setMrList([]);
+        setIsMrListEmpty(true);
+      }
+    } finally {
+      setMrListLoading(false);
     }
-  } finally {
-    setMrListLoading(false);
-  }
-}, []);
+  }, []);
 
   const fetchSourceOptions = useCallback(async () => {
     try {
@@ -319,20 +315,45 @@ const fetchMRList = useCallback(async () => {
         `${backendUrl}/api/accounts/destinations`,
       );
 
-      if (response.data.success && Array.isArray(response.data.data)) {
-        const options = response.data.data
-          .filter((destination) => destination.totalAmount > 0)
-          .map((destination) => ({
-            value: destination._id,
-            label: destination.name || `Account ${destination.code || destination._id}`,
-          }));
-        setSourceOptions(options);
+      // Handle different response formats
+      let destinations = [];
+      
+      if (Array.isArray(response.data)) {
+        // If response.data is directly an array
+        destinations = response.data;
+      } else if (response.data && Array.isArray(response.data.data)) {
+        // If response.data has a data property that's an array
+        destinations = response.data.data;
+      } else if (response.data && response.data.success && Array.isArray(response.data.destinations)) {
+        // Alternative format with success property
+        destinations = response.data.destinations;
+      } else if (response.data && Array.isArray(response.data.results)) {
+        // Alternative format with results property
+        destinations = response.data.results;
       } else {
-        setSourceOptions([]);
         console.warn(
           "Unexpected response format for destinations:",
           response.data,
         );
+      }
+
+      // Filter and transform the destinations
+      const options = destinations
+        .filter((destination) => {
+          // Handle different property names for amount
+          const amount = destination.totalAmount || destination.amount || destination.balance || 0;
+          return amount > 0;
+        })
+        .map((destination) => ({
+          value: destination._id || destination.id,
+          label: `${destination.name || `Account ${destination.code || destination._id || destination.id}`} ($${(destination.totalAmount || destination.amount || destination.balance || 0).toFixed(2)})`,
+          ...destination
+        }));
+      
+      setSourceOptions(options);
+      
+      if (options.length === 0) {
+        toast.warning("No source accounts with balance available. Please add funds to an account first.");
       }
     } catch (error) {
       console.error("Error fetching destination options:", error);
@@ -343,7 +364,15 @@ const fetchMRList = useCallback(async () => {
     }
   }, []);
 
-  // Calculate salary for employee and period
+  const handleSourceChange = useCallback((sourceId) => {
+    setForm((prev) => ({ ...prev, source: sourceId }));
+    setErrors((prev) => ({ ...prev, source: "" }));
+    
+    // Find and set the selected source account details
+    const selectedSource = sourceOptions.find(option => option.value === sourceId);
+    setSelectedSourceAccount(selectedSource);
+  }, [sourceOptions]);
+
   const calculateSalary = useCallback(async (employeeId, period) => {
     if (!employeeId || !period) {
       setSalaryCalculation(null);
@@ -363,14 +392,12 @@ const fetchMRList = useCallback(async () => {
         const { salaryCalculation } = response.data.data;
         setSalaryCalculation(salaryCalculation);
 
-        // Safely update form with calculated values
         setForm((prev) => ({
           ...prev,
           basicSalary: salaryCalculation?.totalSalary?.toFixed(2) || "",
           deductions: salaryCalculation?.leaveDeduction?.toFixed(2) || "",
         }));
 
-        // Clear any previous errors
         setErrors((prev) => ({
           ...prev,
           basicSalary: "",
@@ -380,8 +407,7 @@ const fetchMRList = useCallback(async () => {
         toast.success("Salary calculated successfully based on attendance and leaves");
       }
     } catch (error) {
-      console.error("❌ Error calculating salary:", error);
-      console.error("Error details:", error.response?.data);
+      console.error("Error calculating salary:", error);
 
       if (error.response?.status === 404) {
         if (error.response.data?.message?.includes("Basic payroll record not found")) {
@@ -425,9 +451,19 @@ const fetchMRList = useCallback(async () => {
     if (!form.basicSalary) newErrors.basicSalary = "Basic Salary is required";
     if (!form.source) newErrors.source = "Source is required";
 
+    // Check if source account has sufficient balance
+    if (selectedSourceAccount && form.netSalary) {
+      const netSalaryNum = parseFloat(form.netSalary) || 0;
+      const sourceBalance = selectedSourceAccount.totalAmount || selectedSourceAccount.amount || selectedSourceAccount.balance || 0;
+      
+      if (sourceBalance < netSalaryNum) {
+        newErrors.source = `Insufficient balance. Available: $${sourceBalance.toFixed(2)}, Required: $${netSalaryNum.toFixed(2)}`;
+      }
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
-  }, [form]);
+  }, [form, selectedSourceAccount]);
 
   const handleNumeric = useCallback((e) => {
     const { name, value } = e.target;
@@ -435,11 +471,6 @@ const fetchMRList = useCallback(async () => {
       setForm((prev) => ({ ...prev, [name]: value }));
       setErrors((prev) => ({ ...prev, [name]: "" }));
     }
-  }, []);
-
-  const handleSourceChange = useCallback((sourceId) => {
-    setForm((prev) => ({ ...prev, source: sourceId }));
-    setErrors((prev) => ({ ...prev, source: "" }));
   }, []);
 
   const allowanceOptions = useMemo(
@@ -491,7 +522,6 @@ const fetchMRList = useCallback(async () => {
       setForm((prev) => ({ ...prev, employeeId }));
       setErrors((prev) => ({ ...prev, employeeId: "" }));
 
-      // Reset salary calculation when employee changes
       setSalaryCalculation(null);
       setForm((prev) => ({
         ...prev,
@@ -511,7 +541,6 @@ const fetchMRList = useCallback(async () => {
       setForm((prev) => ({ ...prev, period }));
       setErrors((prev) => ({ ...prev, period: "" }));
 
-      // Reset salary calculation when period changes
       setSalaryCalculation(null);
       setForm((prev) => ({
         ...prev,
@@ -553,7 +582,6 @@ const fetchMRList = useCallback(async () => {
     try {
       setLoading(true);
       
-      // Validate allowances
       const processedAllowances = form.allowances
         .filter(allowance => allowance.type && allowance.amount)
         .map(allowance => ({
@@ -585,7 +613,7 @@ const fetchMRList = useCallback(async () => {
         throw new Error(data.message || "Failed to save payroll");
       }
     } catch (error) {
-      console.error("❌ Payroll submission error:", error);
+      console.error("Payroll submission error:", error);
       
       if (error.response?.status === 400) {
         if (error.response.data?.errors) {
@@ -633,6 +661,7 @@ const fetchMRList = useCallback(async () => {
     calculatingSalary,
     showSalaryDetails,
     setShowSalaryDetails,
+    selectedSourceAccount,
     handleNumeric,
     handleAllowanceChange,
     handleAllowanceAmountChange,
@@ -811,6 +840,7 @@ const AddPayroll = () => {
     calculatingSalary,
     showSalaryDetails,
     setShowSalaryDetails,
+    selectedSourceAccount,
     handleNumeric,
     handleAllowanceChange,
     handleAllowanceAmountChange,
@@ -947,17 +977,40 @@ const AddPayroll = () => {
             )}
           </div>
 
-          <SearchableDropdown
-            label="Source Account"
-            value={form.source}
-            onChange={handleSourceChange}
-            options={sourceOptions}
-            placeholder={sourceLoading ? "Loading sources..." : "Select Source"}
-            required={true}
-            loading={sourceLoading}
-            error={errors.source}
-            disabled={isMrListEmpty || sourceLoading}
-          />
+          <div className="flex flex-col">
+            <label className="text-sm font-medium text-gray-700 mb-1">
+              Source Account <span className="text-red-500">*</span>
+            </label>
+            <SearchableDropdown
+              value={form.source}
+              onChange={handleSourceChange}
+              options={sourceOptions}
+              placeholder={sourceLoading ? "Loading sources..." : sourceOptions.length === 0 ? "No accounts available" : "Select Source"}
+              required={true}
+              loading={sourceLoading}
+              error={errors.source}
+              disabled={isMrListEmpty || sourceLoading || sourceOptions.length === 0}
+            />
+            {selectedSourceAccount && (
+              <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded">
+                <p className="text-sm text-green-700">
+                  <span className="font-medium">Account Balance:</span> $
+                  {(selectedSourceAccount.totalAmount || 
+                    selectedSourceAccount.amount || 
+                    selectedSourceAccount.balance || 0).toFixed(2)}
+                </p>
+                {form.netSalary && parseFloat(form.netSalary) > 0 && (
+                  <p className="text-sm text-blue-700 mt-1">
+                    <span className="font-medium">After Payment:</span> $
+                    {((selectedSourceAccount.totalAmount || 
+                      selectedSourceAccount.amount || 
+                      selectedSourceAccount.balance || 0) - 
+                      parseFloat(form.netSalary)).toFixed(2)}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         {salaryCalculation && (
@@ -1130,6 +1183,46 @@ const AddPayroll = () => {
               </tr>
             </tbody>
           </table>
+          
+          {/* Source Account Summary */}
+          {selectedSourceAccount && (
+            <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+              <h4 className="text-md font-semibold mb-2 text-center">
+                Source Account Summary
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-white p-3 rounded border">
+                  <p className="text-sm text-gray-600">Account Name</p>
+                  <p className="font-medium">{selectedSourceAccount.name || `Account ${selectedSourceAccount.code || selectedSourceAccount._id}`}</p>
+                </div>
+                <div className="bg-white p-3 rounded border">
+                  <p className="text-sm text-gray-600">Current Balance</p>
+                  <p className="font-medium text-green-600">
+                    ${(selectedSourceAccount.totalAmount || 
+                      selectedSourceAccount.amount || 
+                      selectedSourceAccount.balance || 0).toFixed(2)}
+                  </p>
+                </div>
+                {form.netSalary && parseFloat(form.netSalary) > 0 && (
+                  <>
+                    <div className="bg-white p-3 rounded border">
+                      <p className="text-sm text-gray-600">Payment Amount</p>
+                      <p className="font-medium text-red-600">-${parseFloat(form.netSalary).toFixed(2)}</p>
+                    </div>
+                    <div className="bg-white p-3 rounded border">
+                      <p className="text-sm text-gray-600">Balance After Payment</p>
+                      <p className="font-medium text-blue-600">
+                        ${((selectedSourceAccount.totalAmount || 
+                          selectedSourceAccount.amount || 
+                          selectedSourceAccount.balance || 0) - 
+                          parseFloat(form.netSalary)).toFixed(2)}
+                      </p>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex justify-end mt-10 gap-4">
@@ -1145,10 +1238,10 @@ const AddPayroll = () => {
           <button
             type="submit"
             disabled={
-              loading || !isFormValid || isMrListEmpty || calculatingSalary
+              loading || !isFormValid || isMrListEmpty || calculatingSalary || sourceOptions.length === 0
             }
             className={`px-4 py-3 rounded-lg shadow transition-colors text-lg font-medium focus:outline-none focus:ring-2 focus:ring-offset-2 ${
-              loading || !isFormValid || isMrListEmpty || calculatingSalary
+              loading || !isFormValid || isMrListEmpty || calculatingSalary || sourceOptions.length === 0
                 ? "bg-gray-400 text-gray-200 cursor-not-allowed"
                 : "bg-green-600 hover:bg-green-700 text-white cursor-pointer transform hover:scale-105 transition-transform focus:ring-green-500"
             }`}
@@ -1157,7 +1250,9 @@ const AddPayroll = () => {
               ? "Saving…"
               : calculatingSalary
                 ? "Calculating…"
-                : "Save Payroll"}
+                : sourceOptions.length === 0
+                  ? "No Source Account"
+                  : "Save Payroll"}
           </button>
         </div>
       </form>

@@ -1822,13 +1822,13 @@ const Payroll = () => {
                     >
                       <Eye size={18} />
                     </button>
-                    <button
+                    {/* <button
                       onClick={() => editPayroll(payroll)}
                       className="text-green-600 hover:text-green-800 cursor-pointer"
                       title="Edit"
                     >
                       <Edit size={18} />
-                    </button>
+                    </button> */}
                     <button
                       onClick={() => deletePayroll(payroll)}
                       className="text-red-600 hover:text-red-800 cursor-pointer"
@@ -2118,7 +2118,7 @@ const Payroll = () => {
                         </button>
                       </div>
                     </div>
-                    <div className="flex flex-col">
+                    {/* <div className="flex flex-col">
                       <label className="block text-sm font-medium text-gray-700 mb-1">
                         Status
                       </label>
@@ -2138,7 +2138,7 @@ const Payroll = () => {
                         <option value="approved">Approved</option>
                         <option value="paid">Paid</option>
                       </select>
-                    </div>
+                    </div> */}
                   </div>
 
                   {/* Source Field - SearchableDropdown */}
