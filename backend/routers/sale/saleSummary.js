@@ -385,42 +385,20 @@ const handleProceedAnyway = async () => {
   setShowStockValidation(false);
   setShouldProceedDespiteStockIssues(true);
 
-  // Separate missing products from low stock products
-  const missingProducts = stockValidationResult.stockIssues.filter(
-    (issue) => !issue.productExists,
-  );
-  const lowStockProducts = stockValidationResult.stockIssues.filter(
-    (issue) => issue.productExists,
-  );
+  // Show confirmation but always allow proceeding
+  const confirmProceed = await confirmDialog({
+    title: "Proceed with Import",
+    text: `${stockValidationResult.stockIssues.length} products have stock issues. The backend will create stock adjustments automatically. Do you want to proceed?`,
+    icon: "info",
+    confirmButtonText: "Yes, Proceed",
+    cancelButtonText: "Cancel",
+  });
 
-  if (missingProducts.length > 0) {
-    // Can't proceed with missing products
-    showToast(
-      "error",
-      `Cannot proceed: ${missingProducts.length} products not found in system. Please add them first.`,
-    );
-    setShouldProceedDespiteStockIssues(false);
-    return;
-  }
-
-  if (lowStockProducts.length > 0) {
-    // Warn about low stock but allow proceeding
-    const confirmProceed = await confirmDialog({
-      title: "Warning: Insufficient Stock",
-      text: `${lowStockProducts.length} products have insufficient stock. The system will attempt to process these invoices and create stock adjustments. Continue?`,
-      icon: "warning",
-      confirmButtonText: "Proceed Anyway",
-      cancelButtonText: "Cancel",
-    });
-
-    if (confirmProceed.isConfirmed) {
-      await handleProductImport(parsedData, true);
-    } else {
-      setShouldProceedDespiteStockIssues(false);
-    }
+  if (confirmProceed.isConfirmed) {
+    // Always proceed - backend will handle everything
+    await handleProductImport(parsedData, true);
   } else {
-    // No issues, proceed normally
-    await handleProductImport(parsedData, false);
+    setShouldProceedDespiteStockIssues(false);
   }
 };
 

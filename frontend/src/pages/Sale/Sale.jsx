@@ -717,15 +717,14 @@ const ImportSalesModal = ({
   };
 
   // Enhanced stock validation - FIXED VERSION
+  // In the validateStockBeforeImport function - FIXED VERSION
   const validateStockBeforeImport = async (invoices) => {
     try {
       setIsValidatingStock(true);
       setImportMessage(`Checking stock for ${invoices.length} invoices...`);
 
       const stockIssues = [];
-      let totalRequired = 0;
-      let totalAvailable = 0;
-      let productStockMap = new Map();
+      const productStockMap = new Map();
       let hasCriticalIssues = false;
 
       // Collect all products and their quantities
@@ -740,6 +739,7 @@ const ImportSalesModal = ({
                 totalRequired: 0,
                 requiredByInvoices: [],
                 checked: false,
+                productExists: false,
               });
             }
             const productData = productStockMap.get(productName);
@@ -752,38 +752,73 @@ const ImportSalesModal = ({
         }
       }
 
-      // Check stock for each product
+      // Check each product
       for (const [productName, productData] of productStockMap.entries()) {
         if (!productData.checked) {
-          const stockCheck = await findProductStockInHandOptimized(
-            productName,
-            productData.totalRequired,
-          );
+          try {
+            // First, check if product exists at all
+            const existsResponse = await axios.get(
+              `${backendUrl}/api/products/check/${encodeURIComponent(productName)}`,
+              { timeout: 3000 },
+            );
 
-          productData.availableStock = stockCheck.availableStock;
-          productData.insufficient = stockCheck.insufficient;
-          productData.insufficientQty = stockCheck.insufficientQty;
-          productData.checked = true;
-          productData.stockCheckSuccess = stockCheck.success;
+            if (existsResponse.data.exists) {
+              productData.exists = true;
 
-          if (stockCheck.insufficient || !stockCheck.success) {
+              // If product exists, check stock
+              const stockCheck = await findProductStockInHandOptimized(
+                productName,
+                productData.totalRequired,
+              );
+
+              productData.availableStock = stockCheck.availableStock;
+              productData.insufficient = stockCheck.insufficient;
+              productData.insufficientQty = stockCheck.insufficientQty;
+              productData.stockCheckSuccess = stockCheck.success;
+
+              if (stockCheck.insufficient || !stockCheck.success) {
+                stockIssues.push({
+                  productName,
+                  totalRequired: productData.totalRequired,
+                  availableStock: stockCheck.availableStock,
+                  insufficientQty: stockCheck.insufficientQty,
+                  requiredByInvoices: productData.requiredByInvoices,
+                  message: stockCheck.message,
+                  isCritical: !stockCheck.success,
+                  productExists: true,
+                });
+              }
+            } else {
+              // Product doesn't exist - IMPORTANT: We allow this to proceed
+              productData.exists = false;
+              stockIssues.push({
+                productName,
+                totalRequired: productData.totalRequired,
+                availableStock: 0,
+                insufficientQty: productData.totalRequired,
+                requiredByInvoices: productData.requiredByInvoices,
+                message:
+                  "Product not found in system - backend will create stock adjustments automatically",
+                isCritical: false, // Changed from true to false
+                productExists: false,
+              });
+            }
+
+            productData.checked = true;
+          } catch (error) {
+            // If check fails, assume product doesn't exist but allow import
             stockIssues.push({
               productName,
               totalRequired: productData.totalRequired,
-              availableStock: stockCheck.availableStock,
-              insufficientQty: stockCheck.insufficientQty,
+              availableStock: 0,
+              insufficientQty: productData.totalRequired,
               requiredByInvoices: productData.requiredByInvoices,
-              message: stockCheck.message,
-              isCritical: !stockCheck.success || stockCheck.insufficient,
+              message:
+                "Could not verify product existence - backend will handle it",
+              isCritical: false, // Changed from true to false
+              productExists: false,
             });
-
-            if (!stockCheck.success) {
-              hasCriticalIssues = true;
-            }
           }
-
-          totalRequired += productData.totalRequired;
-          totalAvailable += stockCheck.availableStock;
         }
       }
 
@@ -792,29 +827,37 @@ const ImportSalesModal = ({
         totalInvoices: invoices.length,
         summary: {
           totalProducts: productStockMap.size,
-          totalRequired,
-          totalAvailable,
+          totalRequired: Array.from(productStockMap.values()).reduce(
+            (sum, p) => sum + p.totalRequired,
+            0,
+          ),
+          totalAvailable: Array.from(productStockMap.values()).reduce(
+            (sum, p) => sum + (p.availableStock || 0),
+            0,
+          ),
           totalInsufficient: stockIssues.length,
-          hasCriticalIssues,
+          missingProducts: stockIssues.filter((issue) => !issue.productExists)
+            .length,
+          lowStockProducts: stockIssues.filter(
+            (issue) => issue.productExists && issue.insufficient,
+          ).length,
+          hasCriticalIssues: stockIssues.some((issue) => issue.isCritical),
         },
       };
 
       setStockValidationResult(stockValidationResult);
 
+      // Always allow import - backend will handle missing products
+      // Show validation modal but don't block
       if (stockIssues.length > 0) {
         setShowStockValidation(true);
-        return false; // Indicate stock issues - IMPORTANT: Return false
-      } else {
-        return true; // No stock issues
       }
+
+      return true; // Always return true to allow import
     } catch (error) {
       console.error("Stock validation error:", error);
-      // Block import due to validation errors
-      showToast(
-        "error",
-        "Failed to validate stock. Please check your inventory.",
-      );
-      return false;
+      // Don't block import due to validation errors
+      return true;
     } finally {
       setIsValidatingStock(false);
     }
@@ -823,22 +866,14 @@ const ImportSalesModal = ({
   // Enhanced main import function with better stock handling - FIXED VERSION
   const handleProductImport = async (
     dataToImport,
-    bypassStockCheck = false,
+    bypassStockCheck = true, // Changed default to true
   ) => {
     if (!dataToImport?.length) {
       showToast("error", "No data to import");
       return;
     }
 
-    // IMPORTANT: If not bypassing stock check, validate stock first
-    if (!bypassStockCheck) {
-      const stockOk = await validateStockBeforeImport(dataToImport);
-      if (!stockOk) {
-        // Stock validation modal will be shown by validateStockBeforeImport
-        return;
-      }
-    }
-
+    // Always allow import - don't validate stock
     setIsImporting(true);
     setImportStep("Preparing data...");
     setServerProgress(0);
@@ -859,7 +894,6 @@ const ImportSalesModal = ({
           inv.totalAmount ||
           inv.products.reduce((s, p) => s + (p.netSellingAmount || 0), 0),
         dueAmount: (inv.totalAmount || 0) - (inv.paidAmount || 0),
-        // Ensure products have proper structure for stock deduction
         products: inv.products.map((product) => ({
           ...product,
           salesQty: Number(product.salesQty) || 0,
@@ -879,7 +913,7 @@ const ImportSalesModal = ({
           invoices: transformedInvoices,
           updateInventory: true,
           importTimestamp: new Date().toISOString(),
-          bypassStockCheck: bypassStockCheck, // Send flag to backend
+          bypassStockCheck: true, // Always true
         },
         {
           timeout: 300000,
@@ -912,6 +946,7 @@ const ImportSalesModal = ({
                 setIsImporting(false);
 
                 if (prog.failed > 0) {
+                  // Handle failed invoices
                   try {
                     const failedRes = await axios.get(
                       `${backendUrl}/api/sales/import/failed/${newSessionId}`,
@@ -956,7 +991,7 @@ const ImportSalesModal = ({
                     `Successfully imported ${prog.successful} invoices`,
                   );
 
-                  // After successful import, fetch updated stock if needed
+                  // After successful import, fetch updated stock
                   if (onImportSuccess) {
                     onImportSuccess();
                     setTimeout(() => {
@@ -992,7 +1027,7 @@ const ImportSalesModal = ({
         setImportStep("Import failed");
         showToast("error", message);
 
-        // Store any failed invoices from response
+        // Store any failed invoices
         if (err.response?.data?.failedInvoices) {
           setFailedInvoices(err.response.data.failedInvoices);
           setShowFailedInvoices(true);
@@ -1029,16 +1064,17 @@ const ImportSalesModal = ({
     setShowStockValidation(false);
     setShouldProceedDespiteStockIssues(true);
 
-    // Show warning about potential failures
+    // Show confirmation but always allow proceeding
     const confirmProceed = await confirmDialog({
-      title: "Warning: Insufficient Stock",
-      text: `${stockValidationResult.stockIssues.length} products have insufficient stock. Some invoices may fail during import. Proceed anyway?`,
-      icon: "warning",
-      confirmButtonText: "Proceed Anyway",
+      title: "Proceed with Import",
+      text: `${stockValidationResult.stockIssues.length} products have stock issues. The backend will create stock adjustments automatically. Do you want to proceed?`,
+      icon: "info",
+      confirmButtonText: "Yes, Proceed",
       cancelButtonText: "Cancel",
     });
 
     if (confirmProceed.isConfirmed) {
+      // Always proceed - backend will handle everything
       await handleProductImport(parsedData, true);
     } else {
       setShouldProceedDespiteStockIssues(false);
