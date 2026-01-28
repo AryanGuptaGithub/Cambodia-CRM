@@ -387,17 +387,17 @@ const handleProceedAnyway = async () => {
 
   // Separate missing products from low stock products
   const missingProducts = stockValidationResult.stockIssues.filter(
-    issue => !issue.productExists
+    (issue) => !issue.productExists,
   );
   const lowStockProducts = stockValidationResult.stockIssues.filter(
-    issue => issue.productExists
+    (issue) => issue.productExists,
   );
 
   if (missingProducts.length > 0) {
     // Can't proceed with missing products
     showToast(
       "error",
-      `Cannot proceed: ${missingProducts.length} products not found in system. Please add them first.`
+      `Cannot proceed: ${missingProducts.length} products not found in system. Please add them first.`,
     );
     setShouldProceedDespiteStockIssues(false);
     return;
@@ -424,56 +424,6 @@ const handleProceedAnyway = async () => {
   }
 };
 
-const debugProductSearch = async (productName) => {
-  console.log(`=== DEBUG PRODUCT SEARCH: ${productName} ===`);
-  
-  try {
-    // Check Product collection
-    const products = await Product.find({
-      productName: { $regex: productName, $options: 'i' }
-    }).limit(5);
-    
-    console.log('Found in Product collection:', products.map(p => p.productName));
-    
-    // Check ReportInHand
-    const stockItems = await ReportInHand.find({
-      productName: { $regex: productName, $options: 'i' }
-    }).limit(5);
-    
-    console.log('Found in ReportInHand:', stockItems.map(s => ({
-      name: s.productName,
-      stock: s.totalBoxes,
-      batches: s.batches?.length || 0
-    })));
-    
-    // Try exact match
-    const exactProduct = await Product.findOne({
-      productName: productName
-    });
-    
-    console.log('Exact match in Product:', exactProduct?.productName);
-    
-    const exactStock = await ReportInHand.findOne({
-      productName: productName
-    });
-    
-    console.log('Exact match in ReportInHand:', exactStock?.productName);
-    
-    return {
-      products,
-      stockItems,
-      exactProduct,
-      exactStock
-    };
-    
-  } catch (error) {
-    console.error('Debug error:', error);
-    return null;
-  }
-};
-
-// Call this when you encounter the issue
-// debugProductSearch('Ecothrocin 500');
 const checkStockAvailability = async (
   salesData,
   allowNegativeStock = true, // Changed to true by default
@@ -664,27 +614,27 @@ const validateStockBeforeImport = async (invoices) => {
   try {
     setIsValidatingStock(true);
     setImportMessage(`Checking stock for ${invoices.length} invoices...`);
-    
+
     const stockIssues = [];
     const productStockMap = new Map();
-    
+
     // First, just check if products exist (not stock quantity)
     for (const invoice of invoices) {
       for (const product of invoice.products) {
         const requiredQty = product.salesQty + product.bonusQty;
         if (requiredQty > 0) {
           const productName = product.productName;
-          
+
           if (!productStockMap.has(productName)) {
             productStockMap.set(productName, {
               productName,
               totalRequired: 0,
               requiredByInvoices: [],
               checked: false,
-              exists: false
+              exists: false,
             });
           }
-          
+
           const productData = productStockMap.get(productName);
           productData.totalRequired += requiredQty;
           productData.requiredByInvoices.push({
@@ -694,7 +644,7 @@ const validateStockBeforeImport = async (invoices) => {
         }
       }
     }
-    
+
     // Check each product
     for (const [productName, productData] of productStockMap.entries()) {
       if (!productData.checked) {
@@ -702,23 +652,23 @@ const validateStockBeforeImport = async (invoices) => {
           // First, check if product exists at all
           const existsResponse = await axios.get(
             `${backendUrl}/api/products/check/${encodeURIComponent(productName)}`,
-            { timeout: 3000 }
+            { timeout: 3000 },
           );
-          
+
           if (existsResponse.data.exists) {
             productData.exists = true;
-            
+
             // If product exists, check stock
             const stockCheck = await findProductStockInHandOptimized(
               productName,
-              productData.totalRequired
+              productData.totalRequired,
             );
-            
+
             productData.availableStock = stockCheck.availableStock;
             productData.insufficient = stockCheck.insufficient;
             productData.insufficientQty = stockCheck.insufficientQty;
             productData.stockCheckSuccess = stockCheck.success;
-            
+
             if (stockCheck.insufficient || !stockCheck.success) {
               stockIssues.push({
                 productName,
@@ -728,7 +678,7 @@ const validateStockBeforeImport = async (invoices) => {
                 requiredByInvoices: productData.requiredByInvoices,
                 message: stockCheck.message,
                 isCritical: !stockCheck.success,
-                productExists: true
+                productExists: true,
               });
             }
           } else {
@@ -740,14 +690,14 @@ const validateStockBeforeImport = async (invoices) => {
               availableStock: 0,
               insufficientQty: productData.totalRequired,
               requiredByInvoices: productData.requiredByInvoices,
-              message: "Product not found in system - please add to inventory first",
+              message:
+                "Product not found in system - please add to inventory first",
               isCritical: true,
-              productExists: false
+              productExists: false,
             });
           }
-          
+
           productData.checked = true;
-          
         } catch (error) {
           // If check fails, assume product doesn't exist
           stockIssues.push({
@@ -758,37 +708,47 @@ const validateStockBeforeImport = async (invoices) => {
             requiredByInvoices: productData.requiredByInvoices,
             message: "Could not verify product existence",
             isCritical: true,
-            productExists: false
+            productExists: false,
           });
         }
       }
     }
-    
+
     const stockValidationResult = {
       stockIssues,
       totalInvoices: invoices.length,
       summary: {
         totalProducts: productStockMap.size,
-        totalRequired: Array.from(productStockMap.values()).reduce((sum, p) => sum + p.totalRequired, 0),
-        totalAvailable: Array.from(productStockMap.values()).reduce((sum, p) => sum + (p.availableStock || 0), 0),
+        totalRequired: Array.from(productStockMap.values()).reduce(
+          (sum, p) => sum + p.totalRequired,
+          0,
+        ),
+        totalAvailable: Array.from(productStockMap.values()).reduce(
+          (sum, p) => sum + (p.availableStock || 0),
+          0,
+        ),
         totalInsufficient: stockIssues.length,
-        missingProducts: stockIssues.filter(issue => !issue.productExists).length,
-        lowStockProducts: stockIssues.filter(issue => issue.productExists && issue.insufficient).length,
-        hasCriticalIssues: stockIssues.some(issue => issue.isCritical),
+        missingProducts: stockIssues.filter((issue) => !issue.productExists)
+          .length,
+        lowStockProducts: stockIssues.filter(
+          (issue) => issue.productExists && issue.insufficient,
+        ).length,
+        hasCriticalIssues: stockIssues.some((issue) => issue.isCritical),
       },
     };
-    
+
     setStockValidationResult(stockValidationResult);
-    
+
     // Only block import if products don't exist at all
-    const missingProducts = stockIssues.filter(issue => !issue.productExists).length;
+    const missingProducts = stockIssues.filter(
+      (issue) => !issue.productExists,
+    ).length;
     if (missingProducts > 0) {
       setShowStockValidation(true);
       return false;
     }
-    
+
     return true; // Allow import if products exist (even with low stock)
-    
   } catch (error) {
     console.error("Stock validation error:", error);
     // Don't block import due to validation errors
@@ -888,7 +848,9 @@ const processSingleInvoiceWithAutoAdjustment = async (invoiceData, index) => {
     let totalAmount = 0;
     const stockOperations = [];
 
-    // Process each product
+    // First, aggregate all product requirements for this invoice
+    const productRequirements = new Map();
+
     for (const product of invoiceData.products || []) {
       const productName = product.productName?.trim();
       const salesQty = fixPrecision(parseFloat(product.salesQty) || 0);
@@ -908,6 +870,21 @@ const processSingleInvoiceWithAutoAdjustment = async (invoiceData, index) => {
 
       const normalizedName = normalizeProductName(correctedName);
 
+      if (!productRequirements.has(normalizedName)) {
+        productRequirements.set(normalizedName, {
+          originalName: productName,
+          correctedName: correctedName,
+          normalizedName: normalizedName,
+          requiredQty: 0,
+        });
+      }
+
+      const data = productRequirements.get(normalizedName);
+      data.requiredQty = fixPrecision(data.requiredQty + totalQty);
+    }
+
+    // Process each product with its total requirement
+    for (const [normalizedName, requirement] of productRequirements.entries()) {
       // Find product
       const productRecord = await Product.findOne({
         productName: buildProductNameRegex(normalizedName),
@@ -915,7 +892,7 @@ const processSingleInvoiceWithAutoAdjustment = async (invoiceData, index) => {
 
       if (!productRecord) {
         console.warn(
-          `Product "${productName}" not found in catalog, skipping...`,
+          `Product "${requirement.originalName}" not found in catalog, skipping...`,
         );
         continue; // Skip this product but continue with others
       }
@@ -928,10 +905,11 @@ const processSingleInvoiceWithAutoAdjustment = async (invoiceData, index) => {
       let adjustmentCreated = false;
       let adjustmentId = null;
 
-      if (availableStock < totalQty) {
-        const shortage = fixPrecision(totalQty - availableStock);
+      // Check if we have enough stock
+      if (availableStock < requirement.requiredQty) {
+        const shortage = fixPrecision(requirement.requiredQty - availableStock);
 
-        // FIXED: Include all required fields including totalQuantity
+        // Only create an ADD adjustment if we need more stock
         const adjustment = new StockAdjustment({
           productId: productRecord._id,
           productName: productRecord.productName,
@@ -940,7 +918,7 @@ const processSingleInvoiceWithAutoAdjustment = async (invoiceData, index) => {
           quantity: shortage,
           totalQuantity: shortage,
           reason: `Auto-generated adjustment for import invoice ${invoiceData.invoiceNumber}`,
-          remarks: `Created automatically to fulfill import requirements. Invoice: ${invoiceData.invoiceNumber}`,
+          remarks: `Created automatically to fulfill import requirements. Invoice: ${invoiceData.invoiceNumber}, Required: ${requirement.requiredQty}, Available: ${availableStock}`,
           status: "completed",
           createdBy: "system_import",
           createdAt: new Date(),
@@ -952,39 +930,77 @@ const processSingleInvoiceWithAutoAdjustment = async (invoiceData, index) => {
         adjustmentCreated = true;
 
         stockOperations.push({
-          product: productName,
+          product: requirement.originalName,
           action: "adjustment_created",
           adjustmentId: adjustmentId,
           quantity: shortage,
           previousStock: availableStock,
           newStock: availableStock + shortage,
+          reason: "Insufficient stock, added to inventory",
         });
+
+        // Update available stock after adding
+        // availableStock += shortage; // This would be the new stock level
       }
 
-      // Now deduct the stock
+      // Now attempt to deduct the REQUIRED quantity (not the shortage)
       try {
+        // We should deduct the total required quantity, regardless of whether we added stock
         const deductionResult = await deductStockFromReportInHand(
-          productName,
-          salesQty,
-          bonusQty,
+          requirement.originalName,
+          requirement.requiredQty,
+          0, // No bonus in deduction
         );
 
         if (!deductionResult.success) {
           console.warn(
-            `Failed to deduct stock for ${productName}: ${deductionResult.message}`,
+            `Failed to deduct stock for ${requirement.originalName}: ${deductionResult.message}`,
           );
-          // Continue anyway and create adjustment
-          const shortage = fixPrecision(salesQty + bonusQty);
-          // FIXED: Include all required fields
+          // If deduction fails, we need to create a DEDUCT adjustment to account for the sale
+          // But ONLY if we didn't already create an ADD adjustment for this
+          if (!adjustmentCreated) {
+            const adjustment = new StockAdjustment({
+              productId: productRecord._id,
+              productName: productRecord.productName,
+              adjustmentType: "deduct",
+              boxQuantity: requirement.requiredQty,
+              quantity: requirement.requiredQty,
+              totalQuantity: requirement.requiredQty,
+              reason: `Manual deduction for import invoice ${invoiceData.invoiceNumber}`,
+              remarks: `Stock deduction failed, recording sale as adjustment. Invoice: ${invoiceData.invoiceNumber}`,
+              status: "completed",
+              createdBy: "system_import",
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            });
+            await adjustment.save({ session });
+            adjustmentCreated = true;
+            adjustmentId = adjustment._id;
+          }
+        }
+
+        stockOperations.push({
+          product: requirement.originalName,
+          action: "stock_deducted",
+          quantity: requirement.requiredQty,
+          result: deductionResult,
+        });
+      } catch (deductionError) {
+        console.error(
+          `Stock deduction error for ${requirement.originalName}:`,
+          deductionError.message,
+        );
+        // Only create DEDUCT adjustment if we didn't already handle this product
+        if (!adjustmentCreated) {
           const adjustment = new StockAdjustment({
             productId: productRecord._id,
             productName: productRecord.productName,
             adjustmentType: "deduct",
-            boxQuantity: shortage,
-            quantity: shortage,
-            totalQuantity: shortage,
-            reason: `Manual deduction for import invoice ${invoiceData.invoiceNumber} (stock deduction failed)`,
-            remarks: `Created because stock deduction failed for invoice ${invoiceData.invoiceNumber}`,
+            boxQuantity: requirement.requiredQty,
+            quantity: requirement.requiredQty,
+            totalQuantity: requirement.requiredQty,
+            reason: `Deduction for import invoice ${invoiceData.invoiceNumber}`,
+            remarks: `Created to account for sale in invoice ${invoiceData.invoiceNumber}`,
             status: "completed",
             createdBy: "system_import",
             createdAt: new Date(),
@@ -992,68 +1008,49 @@ const processSingleInvoiceWithAutoAdjustment = async (invoiceData, index) => {
           });
           await adjustment.save({ session });
           adjustmentCreated = true;
+          adjustmentId = adjustment._id;
         }
-
-        stockOperations.push({
-          product: productName,
-          action: "stock_deducted",
-          quantity: totalQty,
-          result: deductionResult,
-        });
-      } catch (deductionError) {
-        console.error(
-          `Stock deduction error for ${productName}:`,
-          deductionError.message,
-        );
-        // Create adjustment to account for the sale
-        const shortage = fixPrecision(salesQty + bonusQty);
-        // FIXED: Include all required fields
-        const adjustment = new StockAdjustment({
-          productId: productRecord._id,
-          productName: productRecord.productName,
-          adjustmentType: "deduct",
-          boxQuantity: shortage,
-          quantity: shortage,
-          totalQuantity: shortage,
-          reason: `Deduction for import invoice ${invoiceData.invoiceNumber}`,
-          remarks: `Created to account for sale in invoice ${invoiceData.invoiceNumber}`,
-          status: "completed",
-          createdBy: "system_import",
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        });
-        await adjustment.save({ session });
-        adjustmentCreated = true;
       }
 
-      // Calculate product details
-      const sellingPrice = parseFloat(product.sellingPrice) || 0;
-      const amount = sellingPrice * salesQty;
-      const discount = parseFloat(product.discount) || 0;
-      const netSellingAmount = amount - discount;
+      // Now process individual product entries for the invoice
+      // This is for calculating amounts and creating the sale record
+      for (const product of invoiceData.products || []) {
+        if (normalizeProductName(product.productName) !== normalizedName)
+          continue;
 
-      // Get LC value
-      const productData = productCache.get(normalizedName);
-      const lc = productData?.lc || productRecord.lc || 0;
+        const sellingPrice = parseFloat(product.sellingPrice) || 0;
+        const amount = sellingPrice * parseFloat(product.salesQty || 0);
+        const discount = parseFloat(product.discount) || 0;
+        const netSellingAmount = amount - discount;
 
-      processedProducts.push({
-        productName: productName,
-        salesQty,
-        bonusQty,
-        totalQty,
-        sellingPrice,
-        amount,
-        discount,
-        netSellingAmount,
-        averageUnitPrice: totalQty ? netSellingAmount / totalQty : 0,
-        lc,
-        profitLoss: (sellingPrice - lc) * salesQty,
-        isProductAccept: true,
-        adjustmentCreated,
-        adjustmentId,
-      });
+        // Get LC value
+        const productData = productCache.get(normalizedName);
+        const lc = productData?.lc || productRecord.lc || 0;
 
-      totalAmount += netSellingAmount;
+        processedProducts.push({
+          productName: product.productName,
+          salesQty: parseFloat(product.salesQty || 0),
+          bonusQty: parseFloat(product.bonusQty || 0),
+          totalQty:
+            parseFloat(product.salesQty || 0) +
+            parseFloat(product.bonusQty || 0),
+          sellingPrice,
+          amount,
+          discount,
+          netSellingAmount,
+          averageUnitPrice:
+            parseFloat(product.salesQty || 0) > 0
+              ? netSellingAmount / parseFloat(product.salesQty || 0)
+              : 0,
+          lc,
+          profitLoss: (sellingPrice - lc) * parseFloat(product.salesQty || 0),
+          isProductAccept: true,
+          adjustmentCreated,
+          adjustmentId,
+        });
+
+        totalAmount += netSellingAmount;
+      }
     }
 
     if (processedProducts.length === 0) {
@@ -1064,11 +1061,9 @@ const processSingleInvoiceWithAutoAdjustment = async (invoiceData, index) => {
     const paidAmount = parseFloat(invoiceData.paidAmount) || 0;
     const dueAmount = Math.max(0, totalAmount - paidAmount);
 
-    // FIXED: Use invoiceDate from Excel file, not current date
     const saleRecord = new SaleSummary({
       recordingDate: new Date(invoiceData.recordingDate || Date.now()),
       invoiceNumber: invoiceData.invoiceNumber.trim(),
-      // FIX HERE: Use invoiceDate from the data, fall back to current date if not provided
       invoiceDate: invoiceData.invoiceDate
         ? new Date(invoiceData.invoiceDate)
         : new Date(),
@@ -1692,16 +1687,18 @@ const processSingleInvoice = async (invoiceData, index) => {
   }
 };
 
-// Keep the original deductStockFromReportInHand function (from your code)
 const deductStockFromReportInHand = async (productName, salesQty, bonusQty) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
+  // Declare totalRequiredQty here so it's accessible in catch block
+  let totalRequiredQty = 0;
+
   try {
-    const totalRequiredQty = fixPrecision(salesQty + bonusQty);
+    totalRequiredQty = fixPrecision(salesQty + bonusQty);
     if (totalRequiredQty <= 0) {
       await session.commitTransaction();
-      session.endSession();
+      await session.endSession(); // Add await for consistency
       return { success: true, deducted: 0, remaining: 0 };
     }
 
@@ -1723,7 +1720,7 @@ const deductStockFromReportInHand = async (productName, salesQty, bonusQty) => {
 
     if (!product) {
       await session.abortTransaction();
-      session.endSession();
+      await session.endSession();
       return {
         success: false,
         deducted: 0,
@@ -1742,7 +1739,7 @@ const deductStockFromReportInHand = async (productName, salesQty, bonusQty) => {
     // Check if we have enough stock
     if (totalAvailableStock < totalRequiredQty) {
       await session.abortTransaction();
-      session.endSession();
+      await session.endSession();
       return {
         success: false,
         deducted: 0,
@@ -1793,7 +1790,7 @@ const deductStockFromReportInHand = async (productName, salesQty, bonusQty) => {
 
     if (!stockItem) {
       await session.abortTransaction();
-      session.endSession();
+      await session.endSession();
       return {
         success: false,
         deducted: 0,
@@ -1802,21 +1799,30 @@ const deductStockFromReportInHand = async (productName, salesQty, bonusQty) => {
       };
     }
 
+    // Sort batches by expiry date (FIFO: oldest expiry first)
+    const sortedBatches = (stockItem.batches || []).sort((a, b) => {
+      // Handle missing expiry dates by setting them to a far future date
+      const dateA = a.expiryDate
+        ? new Date(a.expiryDate)
+        : new Date("9999-12-31");
+      const dateB = b.expiryDate
+        ? new Date(b.expiryDate)
+        : new Date("9999-12-31");
+      return dateA - dateB;
+    });
+
     // Deduct from batches (FIFO)
     let remainingQty = totalRequiredQty;
     let totalDeducted = 0;
     const deductionDetails = [];
     const updatedBatches = [];
 
-    // Sort batches by expiry date
-    const sortedBatches = (stockItem.batches || []).sort((a, b) => {
-      const dateA = new Date(a.expiryDate || "9999-12-31");
-      const dateB = new Date(b.expiryDate || "9999-12-31");
-      return dateA - dateB;
-    });
-
     for (const batch of sortedBatches) {
-      if (remainingQty <= 0) break;
+      if (remainingQty <= 0) {
+        // If no more to deduct, keep the rest of the batches as-is
+        updatedBatches.push(batch);
+        continue;
+      }
 
       const availableInBatch = fixPrecision(batch.boxes || batch.quantity || 0);
 
@@ -1825,11 +1831,17 @@ const deductStockFromReportInHand = async (productName, salesQty, bonusQty) => {
           Math.min(availableInBatch, remainingQty),
         );
         const newBatchQty = fixPrecision(availableInBatch - deductQty);
-        batch.boxes = newBatchQty;
-        batch.quantity = newBatchQty;
 
+        // Create a copy of the batch to avoid mutating the original
+        const updatedBatch = {
+          ...(batch.toObject ? batch.toObject() : batch),
+          boxes: newBatchQty,
+          quantity: newBatchQty,
+        };
+
+        // Only keep batches with remaining stock
         if (newBatchQty > 0) {
-          updatedBatches.push(batch);
+          updatedBatches.push(updatedBatch);
         }
 
         deductionDetails.push({
@@ -1842,15 +1854,31 @@ const deductStockFromReportInHand = async (productName, salesQty, bonusQty) => {
 
         totalDeducted = fixPrecision(totalDeducted + deductQty);
         remainingQty = fixPrecision(remainingQty - deductQty);
+      } else {
+        // Remove empty batches
+        continue;
       }
     }
 
-    // Calculate new total
-    const newTotalFromBatches = updatedBatches.reduce(
-      (sum, batch) =>
-        fixPrecision(sum + fixPrecision(batch.boxes || batch.quantity || 0)),
-      0,
-    );
+    // Verify we have enough stock
+    if (remainingQty > 0) {
+      await session.abortTransaction();
+      await session.endSession();
+      return {
+        success: false,
+        deducted: totalDeducted,
+        remaining: remainingQty,
+        message: `Could not deduct full quantity. Only deducted ${totalDeducted} out of ${totalRequiredQty}`,
+        details: deductionDetails,
+      };
+    }
+
+    // Calculate new total from updated batches
+    const newTotalFromBatches = updatedBatches.reduce((sum, batch) => {
+      return fixPrecision(
+        sum + fixPrecision(batch.boxes || batch.quantity || 0),
+      );
+    }, 0);
 
     // Update stock item
     stockItem.batches = updatedBatches;
@@ -1860,10 +1888,12 @@ const deductStockFromReportInHand = async (productName, salesQty, bonusQty) => {
     await stockItem.save({ session });
 
     // Clear cache
-    stockCache.delete(normalizedName);
+    if (stockCache && typeof stockCache.delete === "function") {
+      stockCache.delete(normalizedName);
+    }
 
     await session.commitTransaction();
-    session.endSession();
+    await session.endSession();
 
     return {
       success: true,
@@ -1874,14 +1904,26 @@ const deductStockFromReportInHand = async (productName, salesQty, bonusQty) => {
       newStockLevel: newTotalFromBatches,
     };
   } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
+    // Ensure we always end the session
+    try {
+      if (session.transaction.isActive) {
+        await session.abortTransaction();
+      }
+    } catch (abortError) {
+      console.error("Error aborting transaction:", abortError);
+    }
+
+    try {
+      await session.endSession();
+    } catch (endSessionError) {
+      console.error("Error ending session:", endSessionError);
+    }
 
     console.error("Error deducting stock:", error);
     return {
       success: false,
       deducted: 0,
-      remaining: totalRequiredQty,
+      remaining: totalRequiredQty || salesQty + bonusQty,
       message: `Failed to deduct stock: ${error.message}`,
       error: error.message,
     };
@@ -1900,15 +1942,13 @@ const calculateRealStock = async (productId, productName) => {
     let totalAdjustments = 0;
     let adjustmentHistory = [];
 
-    // 1. Get ALL adjustments for this product
+    // ------------------------------------------------------
+    // 1. FETCH ADJUSTMENTS
+    // ------------------------------------------------------
     debugLogger.debug?.("Fetching adjustments...");
-    if (queryProductId) {
-      debugLogger.debug?.(
-        `Looking for adjustments with productId: ${queryProductId}`,
-      );
 
-      // FIX: Add error handling for adjustments query
-      let adjustments = [];
+    let adjustments = [];
+    if (queryProductId) {
       try {
         adjustments = await StockAdjustment.find({
           productId: queryProductId,
@@ -1916,131 +1956,138 @@ const calculateRealStock = async (productId, productName) => {
         }).lean();
       } catch (adjError) {
         debugLogger.error?.(`Error fetching adjustments: ${adjError.message}`);
-        adjustments = [];
       }
-
-      debugLogger.debug?.(`Found ${adjustments.length} adjustments`);
-
-      adjustments.forEach((adj, index) => {
-        // FIX: Handle undefined adjustment safely
-        if (!adj) return;
-
-        const adjQty = fixPrecision(
-          adj.totalQuantity || adj.boxQuantity || adj.quantity || 0,
-        );
-
-        debugLogger.debug?.(`Adjustment ${index + 1}:`, {
-          type: adj.adjustmentType,
-          quantity: adjQty,
-          reason: adj.reason || adj.remarks || "",
-          fieldsFound: {
-            totalQuantity: adj.totalQuantity,
-            boxQuantity: adj.boxQuantity,
-            quantity: adj.quantity,
-          },
-        });
-
-        if (adj.adjustmentType === "add") {
-          totalAdjustments += adjQty;
-          adjustmentHistory.push({
-            type: "add",
-            quantity: adjQty,
-            reason: adj.reason || adj.remarks || "",
-            date: adj.createdAt,
-          });
-          debugLogger.debug?.(
-            `Added ${adjQty} to totalAdjustments (now: ${totalAdjustments})`,
-          );
-        } else if (
-          adj.adjustmentType === "remove" ||
-          adj.adjustmentType === "deduct"
-        ) {
-          totalAdjustments -= adjQty;
-          adjustmentHistory.push({
-            type: "deduct",
-            quantity: adjQty,
-            reason: adj.reason || adj.remarks || "",
-            date: adj.createdAt,
-          });
-          debugLogger.debug?.(
-            `Subtracted ${adjQty} from totalAdjustments (now: ${totalAdjustments})`,
-          );
-        } else {
-          debugLogger.warn?.(
-            `Unknown adjustment type: ${adj.adjustmentType}, skipping`,
-          );
-        }
-      });
-
-      debugLogger.debug?.(`Total adjustments calculated: ${totalAdjustments}`);
-    } else {
-      debugLogger.debug?.("No valid productId provided, skipping adjustments");
     }
 
-    // FIX: Get stock item with better error handling
+    debugLogger.debug?.(`Found ${adjustments.length} adjustments`);
+
+    // ------------------------------------------------------
+    // PROCESS ADJUSTMENTS
+    // ------------------------------------------------------
+    adjustments.forEach((adj, index) => {
+      if (!adj) return;
+
+      // FIX: determine correct qty (avoid wrong field selection)
+      const adjQty = fixPrecision(
+        Number(adj.totalQuantity) ||
+          Number(adj.boxQuantity) ||
+          Number(adj.quantity) ||
+          0,
+      );
+
+      const type = adj.adjustmentType?.toLowerCase();
+
+      debugLogger.debug?.(`Adjustment ${index + 1}:`, {
+        type,
+        quantity: adjQty,
+        reason: adj.reason || adj.remarks || "",
+        fieldsFound: {
+          totalQuantity: adj.totalQuantity,
+          boxQuantity: adj.boxQuantity,
+          quantity: adj.quantity,
+        },
+      });
+
+      // FIX: ADD LOGIC
+      if (type === "add") {
+        totalAdjustments += adjQty;
+
+        adjustmentHistory.push({
+          type: "add",
+          quantity: adjQty,
+          reason: adj.reason || adj.remarks || "",
+          date: adj.createdAt,
+        });
+
+        debugLogger.debug?.(
+          `Added ${adjQty} → totalAdjustments: ${totalAdjustments}`,
+        );
+      }
+
+      // FIX: DEDUCT LOGIC (deduct/remove must subtract)
+      else if (type === "remove" || type === "deduct") {
+        totalAdjustments -= adjQty;
+
+        adjustmentHistory.push({
+          type: "deduct",
+          quantity: adjQty,
+          reason: adj.reason || adj.remarks || "",
+          date: adj.createdAt,
+        });
+
+        debugLogger.debug?.(
+          `Subtracted ${adjQty} → totalAdjustments: ${totalAdjustments}`,
+        );
+      }
+
+      // Unknown types
+      else {
+        debugLogger.warn?.(`Unknown adjustment type: ${type}, skipping`);
+      }
+    });
+
+    debugLogger.debug?.(`Total adjustments calculated: ${totalAdjustments}`);
+
+    // ------------------------------------------------------
+    // 2. GET BASE STOCK (REPORT IN HAND)
+    // ------------------------------------------------------
     let stockItem = null;
     let baseStockFromBatches = 0;
     let validBatches = [];
-    let calculationMethod = "unknown";
+    let calculationMethod = "none";
 
     try {
-      // Find product in ReportInHand
       const normalizedName = normalizeProductName(productName);
+
       stockItem = await ReportInHand.findOne({
         productName: buildProductNameRegex(normalizedName),
       }).lean();
 
+      if (!stockItem) {
+        stockItem = await findStockItemWithFlexibleMatching(productName);
+      }
+
       if (stockItem) {
-        // Calculate base stock from batches
-        if (stockItem.batches && Array.isArray(stockItem.batches)) {
+        if (Array.isArray(stockItem.batches)) {
           stockItem.batches.forEach((batch) => {
-            const batchQty = fixPrecision(batch.boxes || batch.quantity || 0);
-            if (batchQty > 0) {
-              baseStockFromBatches += batchQty;
+            const qty = fixPrecision(
+              Number(batch.boxes) || Number(batch.quantity) || 0,
+            );
+            if (qty > 0) {
+              baseStockFromBatches += qty;
               validBatches.push(batch);
             }
           });
+
           calculationMethod = "batches";
         } else {
-          baseStockFromBatches = fixPrecision(stockItem.totalBoxes || 0);
-          calculationMethod = "totalBoxes_field";
-        }
-      } else {
-        // Try alternative search
-        stockItem = await findStockItemWithFlexibleMatching(productName);
-        if (stockItem) {
-          if (stockItem.batches && Array.isArray(stockItem.batches)) {
-            stockItem.batches.forEach((batch) => {
-              const batchQty = fixPrecision(batch.boxes || batch.quantity || 0);
-              if (batchQty > 0) {
-                baseStockFromBatches += batchQty;
-                validBatches.push(batch);
-              }
-            });
-            calculationMethod = "batches_flexible";
-          } else {
-            baseStockFromBatches = fixPrecision(stockItem.totalBoxes || 0);
-            calculationMethod = "totalBoxes_flexible";
-          }
+          baseStockFromBatches = fixPrecision(
+            Number(stockItem.totalBoxes) || 0,
+          );
+          calculationMethod = "totalBoxes";
         }
       }
     } catch (stockError) {
       debugLogger.error?.(`Error fetching stock item: ${stockError.message}`);
-      baseStockFromBatches = 0;
     }
 
-    // Calculate available stock (batches + adjustments)
-    const availableStock = Math.max(0, baseStockFromBatches + totalAdjustments);
+    // ------------------------------------------------------
+    // FINAL AVAILABLE STOCK
+    // ------------------------------------------------------
+    const availableStock = Math.max(
+      0,
+      fixPrecision(baseStockFromBatches + totalAdjustments),
+    );
 
     const result = {
       baseStock: baseStockFromBatches,
-      totalAdjustments: totalAdjustments,
-      adjustmentHistory: adjustmentHistory,
-      availableStock: availableStock,
+      totalAdjustments,
+      adjustmentHistory,
+      availableStock,
       batches: validBatches,
-      stockItem: stockItem,
-      usesAdjustments: Math.abs(totalAdjustments) > 0.01,
-      calculationMethod: calculationMethod,
+      stockItem,
+      usesAdjustments: Math.abs(totalAdjustments) > 0.001,
+      calculationMethod,
       breakdown: {
         fromBatches: baseStockFromBatches,
         fromAdjustments: totalAdjustments,
@@ -2049,21 +2096,14 @@ const calculateRealStock = async (productId, productName) => {
       timestamp: Date.now(),
     };
 
-    debugLogger.debug?.(
-      `Completed stock calculation for: ${productName}`,
-      result,
-    );
+    debugLogger.debug?.(`Completed stock calculation`, result);
 
     return result;
   } catch (error) {
-    debugLogger.error?.(
-      `Error in calculateRealStock for ${productName}: ${error.message}`,
-      {
-        stack: error.stack,
-      },
-    );
+    debugLogger.error?.(`Error in calculateRealStock: ${error.message}`, {
+      stack: error.stack,
+    });
 
-    // FIX: Return a proper error object structure
     return {
       baseStock: 0,
       totalAdjustments: 0,
@@ -2071,7 +2111,7 @@ const calculateRealStock = async (productId, productName) => {
       batches: [],
       stockItem: null,
       calculationMethod: "error",
-      error: error.message || "Unknown error occurred",
+      error: error.message,
       timestamp: Date.now(),
     };
   }
