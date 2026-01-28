@@ -30,6 +30,16 @@ const handleDuplicateError = (res, err) => {
 
 const safeStr = (val) => (val == null ? "" : String(val).trim());
 
+// Helper to capitalize first letter of each word
+const toTitleCase = (str) => {
+  if (!str) return "";
+  return str
+    .toLowerCase()
+    .split(" ")
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+};
+
 // Helper function to parse date and handle timezone issues
 const parseCustomerDate = (dateInput) => {
   if (!dateInput) {
@@ -87,6 +97,26 @@ const formatDateForResponse = (date) => {
   return `${year}-${month}-${day}`;
 };
 
+// Helper to format customer response with title case for display
+const formatCustomerResponse = (customer) => {
+  if (!customer) return customer;
+  
+  const customerObj = customer.toObject ? customer.toObject() : customer;
+  
+  return {
+    ...customerObj,
+    name: toTitleCase(customerObj.name),
+    typeOfBusiness: toTitleCase(customerObj.typeOfBusiness),
+    medicalRepName: toTitleCase(customerObj.medicalRepName),
+    address: toTitleCase(customerObj.address),
+    zone: toTitleCase(customerObj.zone),
+    province: toTitleCase(customerObj.province),
+    remark: toTitleCase(customerObj.remark),
+    date: formatDateForResponse(customerObj.date)
+  };
+};
+
+// 1. POST: Import customers
 router.post("/customers/import", async (req, res) => {
   try {
     const customers = req.body;
@@ -106,14 +136,14 @@ router.post("/customers/import", async (req, res) => {
     // Map MR Name → USER ID
     const mrMap = new Map();
     mrList.forEach((mr) => {
-      const medRepName = safeStr(mr.medicalRepName);
-      const staffName = safeStr(mr.staffName);
+      const medRepName = safeStr(mr.medicalRepName).toLowerCase();
+      const staffName = safeStr(mr.staffName).toLowerCase();
 
       if (medRepName) {
-        mrMap.set(medRepName.toLowerCase(), mr.userId?.toString());
+        mrMap.set(medRepName, mr.userId?.toString());
       }
       if (staffName) {
-        mrMap.set(staffName.toLowerCase(), mr.userId?.toString());
+        mrMap.set(staffName, mr.userId?.toString());
       }
     });
 
@@ -136,7 +166,7 @@ router.post("/customers/import", async (req, res) => {
       const item = customers[i];
 
       try {
-        let name = safeStr(item.name);
+        let name = safeStr(item.name).toLowerCase();
         if (!name || name.trim() === "") {
           errors.push(`Row ${i + 1}: Customer name is required`);
           continue;
@@ -147,10 +177,10 @@ router.post("/customers/import", async (req, res) => {
         
         // MR Name → USER ID
         let medicalRepId = null;
-        let mrName = safeStr(item.medicalRepName);
+        let mrName = safeStr(item.medicalRepName).toLowerCase();
 
         if (!mrName || mrName.trim() === "") {
-          mrName = "Not Provided";
+          mrName = "not provided";
         } else {
           const mrKey = mrName.toLowerCase();
           medicalRepId = mrMap.get(mrKey);
@@ -192,13 +222,13 @@ router.post("/customers/import", async (req, res) => {
           date: parsedDate,
           medicalRepName: mrName,
           medicalRepId,
-          name,
-          typeOfBusiness: safeStr(item.typeOfBusiness) || "Not Provided",
+          name: name,
+          typeOfBusiness: safeStr(item.typeOfBusiness).toLowerCase() || "not provided",
           customerNumber: customerNumber || "",
-          address: safeStr(item.customerAddress) || "Not Provided",
-          zone: safeStr(item.zone) || "Not Provided",
-          province: safeStr(item.province) || "Not Provided",
-          remark: safeStr(item.remark) || "Not Provided",
+          address: safeStr(item.customerAddress).toLowerCase() || "not provided",
+          zone: safeStr(item.zone).toLowerCase() || "not provided",
+          province: safeStr(item.province).toLowerCase() || "not provided",
+          remark: safeStr(item.remark).toLowerCase() || "not provided",
           enabled: true,
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -270,6 +300,18 @@ router.post("/customers", async (req, res) => {
   try {
     const { customerNumber, date, ...data } = req.body;
 
+    // Convert string fields to lowercase before saving
+    const cleanData = {
+      ...data,
+      name: data.name ? data.name.toLowerCase() : "",
+      typeOfBusiness: data.typeOfBusiness ? data.typeOfBusiness.toLowerCase() : "",
+      medicalRepName: data.medicalRepName ? data.medicalRepName.toLowerCase() : "",
+      address: data.address ? data.address.toLowerCase() : "",
+      zone: data.zone ? data.zone.toLowerCase() : "",
+      province: data.province ? data.province.toLowerCase() : "",
+      remark: data.remark ? data.remark.toLowerCase() : "",
+    };
+
     const cleanNumber = customerNumber ? safeStr(customerNumber) : "";
     
     // Parse date if provided
@@ -288,21 +330,18 @@ router.post("/customers", async (req, res) => {
     }
 
     const customer = new Customer({ 
-      ...data, 
+      ...cleanData, 
       customerNumber: cleanNumber,
       date: parsedDate 
     });
     const saved = await customer.save();
 
-    // Format date for response
-    const formattedDate = formatDateForResponse(saved.date);
+    // Format response with title case
+    const formattedCustomer = formatCustomerResponse(saved);
 
     res.status(201).json({
-      message: `Customer <b>${saved.name}</b> created with code <b>${saved.customerCode}</b>`,
-      customer: {
-        ...saved.toObject(),
-        date: formattedDate
-      },
+      message: `Customer <b>${toTitleCase(saved.name)}</b> created with code <b>${saved.customerCode}</b>`,
+      customer: formattedCustomer,
       ok: true,
     });
   } catch (err) {
@@ -328,9 +367,19 @@ router.put("/customers/:id", async (req, res) => {
     const { customerNumber, date, ...updateData } = req.body;
     const cleanNumber = customerNumber ? safeStr(customerNumber) : "";
     
+    // Convert string fields to lowercase for update
+    const cleanUpdateData = {};
+    Object.keys(updateData).forEach(key => {
+      if (typeof updateData[key] === 'string' && key !== 'customerNumber') {
+        cleanUpdateData[key] = updateData[key].toLowerCase();
+      } else {
+        cleanUpdateData[key] = updateData[key];
+      }
+    });
+    
     // Parse date if provided
     if (date) {
-      updateData.date = parseCustomerDate(date);
+      cleanUpdateData.date = parseCustomerDate(date);
     }
 
     if (cleanNumber) {
@@ -346,12 +395,12 @@ router.put("/customers/:id", async (req, res) => {
           ok: false,
         });
       }
-      updateData.customerNumber = cleanNumber;
+      cleanUpdateData.customerNumber = cleanNumber;
     }
 
     const updated = await Customer.findByIdAndUpdate(
       req.params.id,
-      updateData,
+      cleanUpdateData,
       { new: true, runValidators: true }
     );
 
@@ -359,11 +408,8 @@ router.put("/customers/:id", async (req, res) => {
       return res.status(404).json({ message: "Customer not found", ok: false });
     }
 
-    // Format date for response
-    const responseCustomer = {
-      ...updated.toObject(),
-      date: formatDateForResponse(updated.date)
-    };
+    // Format response with title case
+    const responseCustomer = formatCustomerResponse(updated);
 
     res.json({ customer: responseCustomer, ok: true });
   } catch (err) {
@@ -383,19 +429,44 @@ router.put("/customers/:id", async (req, res) => {
   }
 });
 
-// 4. GET: All customers + next code
+// 4. GET: All customers with pagination + next code - **FIXED SEARCH**
 router.get("/customers", async (req, res) => {
   try {
-    const customers = await Customer.find().sort({ createdAt: -1 });
-    // Format dates for response
-    const formattedCustomers = customers.map(customer => {
-      const customerObj = customer.toObject();
-      return {
-        ...customerObj,
-        date: formatDateForResponse(customer.date)
-      };
-    });
+    const { page = 1, limit = 10, search = "" } = req.query;
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
 
+    // Build search query - FIXED: Search in lowercase since data is stored in lowercase
+    const searchQuery = {};
+    if (search && search.trim() !== "") {
+      const searchLower = search.trim().toLowerCase();
+      searchQuery.$or = [
+        { name: { $regex: searchLower, $options: "i" } },
+        { typeOfBusiness: { $regex: searchLower, $options: "i" } },
+        { medicalRepName: { $regex: searchLower, $options: "i" } },
+        { address: { $regex: searchLower, $options: "i" } },
+        { zone: { $regex: searchLower, $options: "i" } },
+        { province: { $regex: searchLower, $options: "i" } },
+        { customerCode: { $regex: search.trim(), $options: "i" } }, // Customer code is not lowercase
+        { customerNumber: { $regex: search.trim(), $options: "i" } }, // Customer number is not lowercase
+        { remark: { $regex: searchLower, $options: "i" } }
+      ];
+    }
+
+    // Get total count for pagination
+    const total = await Customer.countDocuments(searchQuery);
+
+    // Get paginated customers
+    const customers = await Customer.find(searchQuery)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum);
+
+    // Format customers with title case for display
+    const formattedCustomers = customers.map(customer => formatCustomerResponse(customer));
+
+    // Get next customer code
     const agg = await Customer.aggregate([
       {
         $project: {
@@ -418,6 +489,9 @@ router.get("/customers", async (req, res) => {
 
     res.json({
       customers: formattedCustomers,
+      total,
+      page: pageNum,
+      totalPages: Math.ceil(total / limitNum),
       nextCustomerCode: nextCode.toString().padStart(4, "0"),
       ok: true,
     });
@@ -444,14 +518,8 @@ router.get("/customers/province/:province", async (req, res) => {
       province: new RegExp(province, "i"),
     });
 
-    // Format dates for response
-    const formattedCustomers = customers.map(customer => {
-      const customerObj = customer.toObject();
-      return {
-        ...customerObj,
-        date: formatDateForResponse(customer.date)
-      };
-    });
+    // Format customers with title case
+    const formattedCustomers = customers.map(customer => formatCustomerResponse(customer));
 
     res.json({
       success: true,
@@ -471,11 +539,8 @@ router.get("/customers/:id", async (req, res) => {
       return res.status(404).json({ message: "Customer not found", ok: false });
     }
     
-    // Format date for response
-    const responseCustomer = {
-      ...customer.toObject(),
-      date: formatDateForResponse(customer.date)
-    };
+    // Format response with title case
+    const responseCustomer = formatCustomerResponse(customer);
     
     res.json({ customer: responseCustomer, ok: true });
   } catch (err) {

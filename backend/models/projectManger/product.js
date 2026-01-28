@@ -5,17 +5,23 @@ const productSchema = new mongoose.Schema(
     productName: { 
       type: String, 
       required: true,
-      trim: true
+      trim: true,
+      lowercase: true, // Automatically convert to lowercase
+      set: (value) => value ? value.trim().toLowerCase() : value
     },
     type: { 
       type: String, 
       required: true,
-      trim: true
+      trim: true,
+      lowercase: true,
+      set: (value) => value ? value.trim().toLowerCase() : value
     },
     packing: { 
       type: String, 
       required: true,
-      trim: true
+      trim: true,
+      lowercase: true,
+      set: (value) => value ? value.trim().toLowerCase() : value
     },
     sellingPrice: { 
       type: Number,
@@ -41,12 +47,16 @@ const productSchema = new mongoose.Schema(
     supplierName: { 
       type: String, 
       default: "",
-      trim: true
+      trim: true,
+      lowercase: true,
+      set: (value) => value ? value.trim().toLowerCase() : value
     },
     drugLicense: { 
       type: String, 
       default: "",
-      trim: true
+      trim: true,
+      lowercase: true,
+      set: (value) => value ? value.trim().toLowerCase() : value
     },
     licenseValidityDate: { 
       type: Date, 
@@ -69,7 +79,9 @@ const productSchema = new mongoose.Schema(
     remarks: { 
       type: String,
       default: "",
-      trim: true
+      trim: true,
+      lowercase: true,
+      set: (value) => value ? value.trim().toLowerCase() : value
     },
   },
   { 

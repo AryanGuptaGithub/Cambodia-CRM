@@ -6,11 +6,13 @@ const supplierSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
+      set: v => v ? v.toLowerCase() : v, // Store in lowercase
     },
  
     address: {
       type: String,
       trim: true,
+      set: v => v ? v.toLowerCase() : v, // Store in lowercase
     },
     siteRegistrationDate: {
       type: Date,
@@ -27,5 +29,9 @@ const supplierSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+// Index for better performance
+supplierSchema.index({ name: 1 });
+supplierSchema.index({ enabled: 1 });
 
 export default mongoose.model("Supplier", supplierSchema);

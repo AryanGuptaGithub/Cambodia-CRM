@@ -1,4 +1,3 @@
-// src/components/Supplier.js
 import { useNavigate } from "react-router-dom";
 import { UserPlus, Upload, Search, Eye, Edit, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
@@ -16,7 +15,26 @@ import LoadingOverlay from "../../components/Loading";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
-const SUPPLIERS_PER_PAGE = 9;
+const SUPPLIERS_PER_PAGE = 10; // Match backend default
+
+// Helper to convert to title case for display
+const toTitleCase = (str) => {
+  if (!str) return "";
+  return str
+    .toLowerCase()
+    .split(" ")
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+};
+
+// Helper to convert to lowercase for storage
+const toLowerCase = (str) => {
+  if (!str) return "";
+  return str.toLowerCase();
+};
+
+// Helper to display value with title case
+const displayValue = (value) => (value ? toTitleCase(value) : "--");
 
 // Subcomponents
 const TopBar = ({ onAddNew, onImport, onDeleteSelected, selectedCount }) => (
@@ -76,26 +94,22 @@ const SearchBar = ({
   setCurrentPage,
   inputRef,
   handleIconClick,
+  handleSearchChange,
 }) => (
-  <div className="flex items-center gap-8">
-    <div className="relative w-full md:w-72">
-      <Search
-        className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-        size={16}
-        onClick={handleIconClick}
-      />
-      <input
-        ref={inputRef}
-        type="text"
-        placeholder="Search..."
-        value={search}
-        onChange={(e) => {
-          setSearch(e.target.value);
-          setCurrentPage(1);
-        }}
-        className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-      />
-    </div>
+  <div className="relative w-full md:w-72">
+    <Search
+      className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+      size={16}
+      onClick={handleIconClick}
+    />
+    <input
+      ref={inputRef}
+      type="text"
+      placeholder="Search by name or address..."
+      value={search}
+      onChange={handleSearchChange}
+      className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+    />
   </div>
 );
 
@@ -134,7 +148,7 @@ const SupplierTable = ({
           <th className="p-3 text-sm font-medium">
             Site Registration Expiry Date
           </th>
-          <th className="p-3 text-sm font-medium">Enabled</th>
+          <th className="p-3 text-sm font-medium">Status</th>
           <th className="p-3 text-sm font-medium">Action</th>
         </tr>
       </thead>
@@ -156,10 +170,10 @@ const SupplierTable = ({
                   checked={selected.some((s) => s.id === supplier._id)}
                   onChange={() => toggleSelect(supplier)}
                 />
-                <span className="capitalize">{supplier.name}</span>
+                <span className="capitalize">{displayValue(supplier.name)}</span>
               </div>
             </td>
-            <td className="p-3">{supplier.address}</td>
+            <td className="p-3">{displayValue(supplier.address)}</td>
             <td className="p-3">
               {formatDateToReadable(supplier.siteRegistrationDate)}
             </td>
@@ -212,37 +226,97 @@ const SupplierTable = ({
   </div>
 );
 
-const Pagination = ({ currentPage, totalPages, setCurrentPage }) => (
-  <div className="mt-4 flex justify-start gap-2 p-5">
-    <button
-      onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-      disabled={currentPage === 1}
-      className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-    >
-      ← Prev
-    </button>
-    {Array.from({ length: totalPages }, (_, index) => index + 1).map((page) => (
+const Pagination = ({ currentPage, totalPages, setCurrentPage }) => {
+  // Generate visible page numbers
+  const getVisiblePages = () => {
+    const pages = [];
+    const maxVisible = 5;
+    
+    if (totalPages <= maxVisible) {
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i);
+      }
+    } else {
+      // Always show first page
+      pages.push(1);
+      
+      // Calculate start and end
+      let start = Math.max(2, currentPage - 1);
+      let end = Math.min(totalPages - 1, currentPage + 1);
+      
+      // Adjust if near the beginning
+      if (currentPage <= 3) {
+        start = 2;
+        end = 4;
+      }
+      
+      // Adjust if near the end
+      if (currentPage >= totalPages - 2) {
+        start = totalPages - 3;
+        end = totalPages - 1;
+      }
+      
+      // Add ellipsis if needed
+      if (start > 2) {
+        pages.push("...");
+      }
+      
+      // Add middle pages
+      for (let i = start; i <= end; i++) {
+        pages.push(i);
+      }
+      
+      // Add ellipsis if needed
+      if (end < totalPages - 1) {
+        pages.push("...");
+      }
+      
+      // Always show last page
+      pages.push(totalPages);
+    }
+    
+    return pages;
+  };
+
+  const visiblePages = getVisiblePages();
+
+  return (
+    <div className="mt-4 p-5 flex gap-2">
       <button
-        key={page}
-        onClick={() => setCurrentPage(page)}
-        className={`px-3 py-1 rounded cursor-pointer ${
-          currentPage === page
-            ? "bg-indigo-600 text-white"
-            : "bg-gray-200 hover:bg-gray-300"
-        }`}
+        onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+        disabled={currentPage === 1}
+        className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
       >
-        {page}
+        ← Prev
       </button>
-    ))}
-    <button
-      onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
-      disabled={currentPage === totalPages}
-      className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-    >
+      
+      {visiblePages.map((page, index) => (
+        <button
+          key={index}
+          onClick={() => typeof page === "number" && setCurrentPage(page)}
+          disabled={page === "..."}
+          className={`px-4 py-2 rounded ${
+            page === "..."
+              ? "bg-gray-200 cursor-not-allowed"
+              : currentPage === page
+              ? "bg-indigo-600 text-white cursor-pointer"
+              : "bg-gray-200 hover:bg-gray-300 cursor-pointer"
+          }`}
+        >
+          {page}
+        </button>
+      ))}
+      
+      <button
+        onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+        disabled={currentPage === totalPages}
+        className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+      >
         Next →
-    </button>
-  </div>
-);
+      </button>
+    </div>
+  );
+};
 
 const ImportModal = ({
   show,
@@ -329,10 +403,10 @@ const ViewModal = ({ show, onClose, form, formatDateToReadable }) =>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-600">
-              Product Name
+              Supplier Name
             </label>
             <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-              {form.name}
+              {displayValue(form.name)}
             </p>
           </div>
           <div>
@@ -340,7 +414,7 @@ const ViewModal = ({ show, onClose, form, formatDateToReadable }) =>
               Address
             </label>
             <p className="border px-3 py-2 rounded-lg bg-gray-100">
-              {form.address}
+              {displayValue(form.address)}
             </p>
           </div>
           <div>
@@ -410,10 +484,10 @@ const EditModal = ({
           className="grid grid-cols-1 md:grid-cols-2 gap-4"
         >
           <div>
-            <label className="block text-sm font-medium">Product Name</label>
+            <label className="block text-sm font-medium">Supplier Name</label>
             <input
               type="text"
-              value={form.name}
+              value={form.name || ""}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               className="w-full border px-3 py-2 rounded-lg border-gray-300"
               required
@@ -423,7 +497,7 @@ const EditModal = ({
             <label className="block text-sm font-medium">Address</label>
             <input
               type="text"
-              value={form.address}
+              value={form.address || ""}
               onChange={(e) => setForm({ ...form, address: e.target.value })}
               className="w-full border px-3 py-2 rounded-lg border-gray-300"
               required
@@ -517,6 +591,8 @@ const Supplier = () => {
   const [error, setError] = useState(null);
   const [selected, setSelected] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalSuppliers, setTotalSuppliers] = useState(0);
   const [activeTab, setActiveTab] = useState("All");
   const [search, setSearch] = useState("");
   const [isOpen, setIsOpen] = useState(false);
@@ -530,59 +606,86 @@ const Supplier = () => {
     enabled: "",
   });
   const [importWarnings, setImportWarnings] = useState([]);
+  const [searchTimeout, setSearchTimeout] = useState(null);
 
-  // Fetch suppliers
+  // Fetch suppliers with pagination
   useEffect(() => {
     const fetchSuppliers = async () => {
       try {
-        const response = await fetch(`${backendUrl}/api/suppliers`);
-        if (!response.ok) throw new Error("Failed to fetch suppliers");
-        const data = await response.json();
-        setSuppliers(data);
+        setLoading(true);
+        const response = await axios.get(`${backendUrl}/api/suppliers`, {
+          params: {
+            page: currentPage,
+            limit: SUPPLIERS_PER_PAGE,
+            search: search
+          }
+        });
+        
+        if (response.data.ok) {
+          setSuppliers(response.data.suppliers || []);
+          setTotalSuppliers(response.data.total || 0);
+          setTotalPages(response.data.totalPages || 1);
+        } else {
+          setError("Failed to fetch suppliers");
+        }
       } catch (err) {
         setError(err.message || "Something went wrong");
+        showToast("error", "Failed to fetch suppliers");
       } finally {
         setLoading(false);
       }
     };
+    
     fetchSuppliers();
-  }, []);
+  }, [currentPage, search]); // Refetch when page or search changes
 
-  // Reset page on filter change
+  // Add debounced search effect
+  useEffect(() => {
+    // Clear previous timeout
+    if (searchTimeout) {
+      clearTimeout(searchTimeout);
+    }
+    
+    // Set new timeout for search
+    const timeout = setTimeout(() => {
+      if (search !== "") {
+        setCurrentPage(1); // Reset to first page when searching
+      }
+    }, 500); // 500ms delay for search
+
+    setSearchTimeout(timeout);
+
+    // Cleanup
+    return () => {
+      if (searchTimeout) {
+        clearTimeout(searchTimeout);
+      }
+    };
+  }, [search]);
+
+  // Reset page when tab changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeTab, search]);
+  }, [activeTab]);
 
-  // Filter suppliers
+  // Filter suppliers based on active tab
   const filteredSuppliers = useMemo(() => {
-    const lowerSearch = search.toLowerCase();
     return suppliers.filter((s) => {
       const matchesTab =
         activeTab === "All" ||
         (activeTab === "Enabled" && s.enabled) ||
         (activeTab === "Disabled" && !s.enabled);
-      const nameMatch = s.name?.toLowerCase().includes(lowerSearch);
-      const addressMatch = s.address?.toLowerCase().includes(lowerSearch);
-      const siteMatch = formatDateToReadable(s.siteRegistrationDate)
-        ?.toLowerCase()
-        .includes(lowerSearch);
-      const expiryMatch = formatDateToReadable(s.siteRegistrationExpiryDate)
-        ?.toLowerCase()
-        .includes(lowerSearch);
-      return (
-        matchesTab && (nameMatch || addressMatch || siteMatch || expiryMatch)
-      );
+      return matchesTab;
     });
-  }, [suppliers, activeTab, search]);
-
-  // Pagination
-  const totalPages = Math.ceil(filteredSuppliers.length / SUPPLIERS_PER_PAGE);
-  const currentSuppliers = filteredSuppliers.slice(
-    (currentPage - 1) * SUPPLIERS_PER_PAGE,
-    currentPage * SUPPLIERS_PER_PAGE
-  );
+  }, [suppliers, activeTab]);
 
   // Handlers
+  const handleSearchChange = (e) => {
+    const value = e.target.value;
+    setSearch(value);
+    // Don't reset page here, let the useEffect handle it with debounce
+  };
+
   const toggleSelect = useCallback((supplier) => {
     setSelected((prev) =>
       prev.some((s) => s.id === supplier._id)
@@ -593,9 +696,9 @@ const Supplier = () => {
 
   const toggleSelectAll = useCallback(
     (checked) => {
-      setSelected(checked ? currentSuppliers.map((s) => ({ id: s._id })) : []);
+      setSelected(checked ? filteredSuppliers.map((s) => ({ id: s._id })) : []);
     },
-    [currentSuppliers]
+    [filteredSuppliers]
   );
 
   const handleView = (supplier) => {
@@ -625,9 +728,20 @@ const Supplier = () => {
 
         if (res.status === 200) {
           showToast("success", "Suppliers deleted successfully");
-          const refreshed = await fetch(`${backendUrl}/api/suppliers`);
-          const updated = await refreshed.json();
-          setSuppliers(updated);
+          // Refresh data
+          const response = await axios.get(`${backendUrl}/api/suppliers`, {
+            params: {
+              page: currentPage,
+              limit: SUPPLIERS_PER_PAGE,
+              search: search
+            }
+          });
+          
+          if (response.data.ok) {
+            setSuppliers(response.data.suppliers || []);
+            setTotalSuppliers(response.data.total || 0);
+            setTotalPages(response.data.totalPages || 1);
+          }
           setSelected([]);
         }
       } catch (err) {
@@ -641,7 +755,7 @@ const Supplier = () => {
 
   const deleteSupplier = async (supplier) => {
     const confirm = await confirmDialog({
-      text: `Are you sure you want to delete <b>${supplier.name}</b>?`,
+      text: `Are you sure you want to delete <b>${displayValue(supplier.name)}</b>?`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
@@ -654,9 +768,20 @@ const Supplier = () => {
         );
         if (res.status === 200) {
           showToast("success", res.data.message);
-          const refreshed = await fetch(`${backendUrl}/api/suppliers`);
-          const updated = await refreshed.json();
-          setSuppliers(updated);
+          // Refresh data
+          const response = await axios.get(`${backendUrl}/api/suppliers`, {
+            params: {
+              page: currentPage,
+              limit: SUPPLIERS_PER_PAGE,
+              search: search
+            }
+          });
+          
+          if (response.data.ok) {
+            setSuppliers(response.data.suppliers || []);
+            setTotalSuppliers(response.data.total || 0);
+            setTotalPages(response.data.totalPages || 1);
+          }
         }
       } catch (err) {
         showToast("error", err.message || "Failed to delete supplier");
@@ -724,8 +849,8 @@ const Supplier = () => {
               }
 
               const dataObj = {
-                supplierName,
-                address,
+                supplierName: supplierName.toLowerCase(), // Convert to lowercase
+                address: address.toLowerCase(), // Convert to lowercase
               };
 
               // Helper function to parse date
@@ -841,8 +966,20 @@ const Supplier = () => {
         );
 
         // Refresh suppliers
-        const updated = await fetch(`${backendUrl}/api/suppliers`);
-        setSuppliers(await updated.json());
+        const response = await axios.get(`${backendUrl}/api/suppliers`, {
+          params: {
+            page: currentPage,
+            limit: SUPPLIERS_PER_PAGE,
+            search: search
+          }
+        });
+        
+        if (response.data.ok) {
+          setSuppliers(response.data.suppliers || []);
+          setTotalSuppliers(response.data.total || 0);
+          setTotalPages(response.data.totalPages || 1);
+        }
+        
         setParsedData([]);
         setIsOpen(null);
       }
@@ -864,11 +1001,13 @@ const Supplier = () => {
         enabled: !selectedSupplier.enabled,
       });
       if (res.status === 200) {
+        // Update local state
         setSuppliers((prev) =>
           prev.map((s) =>
             s._id === id ? { ...s, enabled: res.data.enabled } : s
           )
         );
+        showToast("success", `Supplier ${res.data.enabled ? "enabled" : "disabled"} successfully`);
       }
     } catch (err) {
       showToast("error", "Failed to update supplier status.");
@@ -886,22 +1025,42 @@ const Supplier = () => {
   const handleEditSubmit = async (e) => {
     e.preventDefault();
     try {
+      // Convert name and address to lowercase before sending
+      const updateData = {
+        ...form,
+        name: toLowerCase(form.name),
+        address: toLowerCase(form.address)
+      };
+      
       const res = await axios.put(
         `${backendUrl}/api/suppliers/${form._id}`,
-        form
+        updateData
       );
       if (res.status === 200) {
         showToast("success", "Supplier updated successfully");
         setIsOpen(null);
-        const updated = await fetch(`${backendUrl}/api/suppliers`);
-        setSuppliers(await updated.json());
+        
+        // Refresh data
+        const response = await axios.get(`${backendUrl}/api/suppliers`, {
+          params: {
+            page: currentPage,
+            limit: SUPPLIERS_PER_PAGE,
+            search: search
+          }
+        });
+        
+        if (response.data.ok) {
+          setSuppliers(response.data.suppliers || []);
+          setTotalSuppliers(response.data.total || 0);
+          setTotalPages(response.data.totalPages || 1);
+        }
       }
     } catch (err) {
       showToast("error", "Failed to update supplier.");
     }
   };
 
-  if (loading) return <LoadingOverlay text="Please wait..." />;
+  if (loading && suppliers.length === 0) return <LoadingOverlay text="Please wait..." />;
   if (error) return <p className="text-red-500">{error}</p>;
 
   return (
@@ -912,18 +1071,21 @@ const Supplier = () => {
         onDeleteSelected={handleDeleteSelected}
         selectedCount={selected.length}
       />
+      
       <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
         <Tabs
           activeTab={activeTab}
           setActiveTab={setActiveTab}
-          totalSuppliers={suppliers.length}
+          totalSuppliers={totalSuppliers}
         />
-        {suppliers.length > 0 && (
+        
+        {/* Only show total count and search when there are suppliers */}
+        {totalSuppliers > 0 && (
           <div className="flex items-center gap-8">
             <p className="text-lg font-semibold text-gray-700">
               Total Count:{" "}
               <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-                {filteredSuppliers.length}
+                {totalSuppliers}
               </span>
             </p>
             <SearchBar
@@ -932,12 +1094,41 @@ const Supplier = () => {
               setCurrentPage={setCurrentPage}
               inputRef={inputRef}
               handleIconClick={handleIconClick}
+              handleSearchChange={handleSearchChange}
             />
           </div>
         )}
       </div>
+      
+      {/* Search results info - only show when searching and there are suppliers */}
+      {search && totalSuppliers > 0 && (
+        <div className="mb-4 p-3 bg-blue-50 rounded-lg">
+          <p className="text-sm text-blue-700">
+            Searching for: <span className="font-semibold">"{search}"</span> 
+            <span className="ml-4">Found: <span className="font-bold">{totalSuppliers}</span> supplier(s)</span>
+          </p>
+        </div>
+      )}
+      
+      {/* Search results info - when searching but no suppliers found */}
+      {search && totalSuppliers === 0 && (
+        <div className="mb-4 p-3 bg-yellow-50 rounded-lg">
+          <p className="text-sm text-yellow-700">
+            No suppliers found for: <span className="font-semibold">"{search}"</span>
+            <span className="ml-4">
+              <button 
+                onClick={() => setSearch("")}
+                className="text-blue-600 hover:text-blue-800 underline"
+              >
+                Clear search
+              </button>
+            </span>
+          </p>
+        </div>
+      )}
+      
       <SupplierTable
-        currentSuppliers={currentSuppliers}
+        currentSuppliers={filteredSuppliers}
         selected={selected}
         toggleSelect={toggleSelect}
         toggleSelectAll={toggleSelectAll}
@@ -947,13 +1138,15 @@ const Supplier = () => {
         handlerEnabledSupplier={handlerEnabledSupplier}
         formatDateToReadable={formatDateToReadable}
       />
-      {currentSuppliers.length > 0 && (
+      
+      {filteredSuppliers.length > 0 && totalPages > 1 && (
         <Pagination
           currentPage={currentPage}
           totalPages={totalPages}
           setCurrentPage={setCurrentPage}
         />
       )}
+      
       <ImportModal
         show={isOpen === "import"}
         onClose={() => {
@@ -983,5 +1176,5 @@ const Supplier = () => {
     </div>
   );
 };
-
+ 
 export default Supplier;

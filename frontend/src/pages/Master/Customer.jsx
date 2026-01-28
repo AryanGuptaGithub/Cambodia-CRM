@@ -40,7 +40,7 @@ import {
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
-const customersPerPage = 9;
+const customersPerPage = 10; // Changed to match backend default
 
 /* ────────────────────── Custom hook for form ────────────────────── */
 const useCustomerForm = (initialCustomerCode = "") => {
@@ -59,6 +59,23 @@ const useCustomerForm = (initialCustomerCode = "") => {
     _id: null,
   });
   const [errors, setErrors] = useState({});
+  
+  // Helper to convert to title case for display
+  const toTitleCase = (str) => {
+    if (!str) return "";
+    return str
+      .toLowerCase()
+      .split(" ")
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+  };
+  
+  // Helper to convert to lowercase for saving
+  const toLowerCase = (str) => {
+    if (!str) return "";
+    return str.toLowerCase();
+  };
+
   const handleChange = useCallback(
     (name, value) => {
       setForm((prev) => ({ ...prev, [name]: value }));
@@ -66,6 +83,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
     },
     [errors]
   );
+  
   const handleDropdownChange = useCallback(
     (field, option) => {
       const value = option ? option.value : "";
@@ -73,6 +91,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
     },
     [handleChange]
   );
+  
   const handleNumericInput = useCallback(
     (e, field) => {
       const value = e.target.value;
@@ -82,6 +101,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
     },
     [handleChange]
   );
+  
   const validateForm = useCallback(() => {
     const newErrors = {};
     if (!form.name?.trim()) newErrors.name = "Customer name is required";
@@ -95,6 +115,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   }, [form]);
+  
   const resetForm = useCallback(() => {
     setForm({
       customerCode: initialCustomerCode || "",
@@ -112,6 +133,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
     });
     setErrors({});
   }, [initialCustomerCode]);
+  
   return {
     form,
     errors,
@@ -121,6 +143,8 @@ const useCustomerForm = (initialCustomerCode = "") => {
     validateForm,
     resetForm,
     setForm,
+    toTitleCase,
+    toLowerCase,
   };
 };
 
@@ -132,11 +156,14 @@ const Customer = () => {
   const [selected, setSelected] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCustomers, setTotalCustomers] = useState(0);
   const [showImportModal, setShowImportModal] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [parsedData, setParsedData] = useState([]);
   const [nextCustomerCode, setNextCustomerCode] = useState(null);
   const inputRef = useRef(null);
+  const [searchTimeout, setSearchTimeout] = useState(null);
   // Dropdown data
   const [provinces, setProvinces] = useState([]);
   const [mrList, setMrList] = useState([]);
@@ -147,6 +174,7 @@ const Customer = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [errors, setErrors] = useState({});
+  
   const {
     form,
     handleChange,
@@ -154,10 +182,12 @@ const Customer = () => {
     validateForm,
     resetForm,
     setForm,
+    toTitleCase,
+    toLowerCase,
   } = useCustomerForm();
 
   /* ──────── Helper: Display -- for empty values ──────── */
-  const displayValue = (value) => (value ? value : "--");
+  const displayValue = (value) => (value ? toTitleCase(value) : "--");
 
   /* ──────── Helper function to format date for display ──────── */
   const formatDateForDisplay = (dateString) => {
@@ -211,17 +241,35 @@ const Customer = () => {
     return `${year}-${month}-${day}`;
   };
 
-  /* ──────── Date Parsing Functions ──────── */
-
-  // Convert Excel serial number to YYYY-MM-DD string (NO TIMEZONE ISSUES)
-
-  // Parse any Excel date value to YYYY-MM-DD
-
   /* ──────── Data fetching ──────── */
   useEffect(() => {
     fetchCustomers();
     fetchDropdownData();
-  }, []);
+  }, [currentPage, searchTerm]); // Refetch when page or search changes
+
+  // Add debounced search effect
+  useEffect(() => {
+    // Clear previous timeout
+    if (searchTimeout) {
+      clearTimeout(searchTimeout);
+    }
+    
+    // Set new timeout for search
+    const timeout = setTimeout(() => {
+      if (searchTerm !== "") {
+        setCurrentPage(1); // Reset to first page when searching
+      }
+    }, 500); // 500ms delay for search
+
+    setSearchTimeout(timeout);
+
+    // Cleanup
+    return () => {
+      if (searchTimeout) {
+        clearTimeout(searchTimeout);
+      }
+    };
+  }, [searchTerm]);
 
   const fetchDropdownData = async () => {
     try {
@@ -248,40 +296,35 @@ const Customer = () => {
 
   const fetchCustomers = async () => {
     try {
-      const response = await fetch(`${backendUrl}/api/customers`);
-      if (!response.ok) throw new Error("Failed to fetch customers");
-      const data = await response.json();
-      setCustomers(data.customers || []);
-      setNextCustomerCode(data.nextCustomerCode || null);
+      setLoading(true);
+      const response = await axios.get(`${backendUrl}/api/customers`, {
+        params: {
+          page: currentPage,
+          limit: customersPerPage,
+          search: searchTerm
+        }
+      });
+      
+      if (response.data.ok) {
+        setCustomers(response.data.customers || []);
+        setTotalCustomers(response.data.total || 0);
+        setTotalPages(response.data.totalPages || 1);
+        setNextCustomerCode(response.data.nextCustomerCode || null);
+      }
     } catch (err) {
+      console.error("Error fetching customers:", err);
       showToast("error", err.message || "Something went wrong");
     } finally {
       setLoading(false);
     }
   };
 
-  /* ──────── Filtering & Pagination ──────── */
-  const filteredCustomers = useMemo(() => {
-    const lowerSearch = searchTerm.toLowerCase();
-    return customers.filter((c) => {
-      return (
-        c.name?.toLowerCase().includes(lowerSearch) ||
-        c.typeOfBusiness?.toLowerCase().includes(lowerSearch) ||
-        c.medicalRepName?.toLowerCase().includes(lowerSearch) ||
-        c.address?.toLowerCase().includes(lowerSearch) ||
-        c.zone?.toLowerCase().includes(lowerSearch) ||
-        c.province?.toLowerCase().includes(lowerSearch) ||
-        c.date?.toLowerCase().includes(lowerSearch)
-      );
-    });
-  }, [customers, searchTerm]);
-
-  const totalPages = Math.ceil(filteredCustomers.length / customersPerPage);
-  const visiblePages = getVisiblePages(currentPage, totalPages);
-  const currentCustomers = filteredCustomers.slice(
-    (currentPage - 1) * customersPerPage,
-    currentPage * customersPerPage
-  );
+  /* ──────── Search Handler ──────── */
+  const handleSearchChange = (e) => {
+    const value = e.target.value;
+    setSearchTerm(value);
+    // Don't reset page here, let the useEffect handle it with debounce
+  };
 
   /* ──────── Selection ──────── */
   const toggleSelect = useCallback((customer) => {
@@ -296,11 +339,11 @@ const Customer = () => {
     (checked) => {
       setSelected(
         checked
-          ? currentCustomers.map((c) => ({ id: c._id, name: c.name }))
+          ? customers.map((c) => ({ id: c._id, name: c.name }))
           : []
       );
     },
-    [currentCustomers]
+    [customers]
   );
 
   /* ──────── Delete ──────── */
@@ -479,19 +522,21 @@ const Customer = () => {
       return;
     }
     try {
+      // Convert string fields to lowercase before sending
       const payload = {
         customerCode: form.customerCode,
         date: form.date,
-        medicalRepName: form.medicalRepName,
+        medicalRepName: toLowerCase(form.medicalRepName),
         medicalRepId: form.medicalRepId,
-        name: form.name,
-        typeOfBusiness: form.typeOfBusiness,
+        name: toLowerCase(form.name),
+        typeOfBusiness: toLowerCase(form.typeOfBusiness),
         customerNumber: form.customerNumber,
-        address: form.address,
-        zone: form.zone,
-        province: form.province,
-        remark: form.remark,
+        address: toLowerCase(form.address),
+        zone: toLowerCase(form.zone),
+        province: toLowerCase(form.province),
+        remark: toLowerCase(form.remark),
       };
+      
       const res = await axios.put(
         `${backendUrl}/api/customers/${form._id}`,
         payload
@@ -519,12 +564,7 @@ const Customer = () => {
     setShowImportModal(true);
   };
 
-  /****
-  
-    
-   /* ──────── Date Parsing Functions ──────── */
-
-  // Convert Excel serial number to YYYY-MM-DD string (NO TIMEZONE ISSUES)
+  /* ──────── Date Parsing Functions ──────── */
   const excelSerialToDateString = (serial) => {
     if (!serial && serial !== 0) return "";
 
@@ -555,7 +595,149 @@ const Customer = () => {
     return `${year}-${month}-${day}`;
   };
 
-  // Parse any Excel date value to YYYY-MM-DD
+  const parseExcelDateValue = (dateValue) => {
+    if (!dateValue && dateValue !== 0 && dateValue !== "") {
+      // Return today's date if no date provided
+      const today = new Date();
+      return formatDateToYYYYMMDD(today);
+    }
+
+    // 1. If it's already a Date object (from XLSX with cellDates: true)
+    if (dateValue instanceof Date) {
+      // Get the Excel serial number equivalent
+      const excelEpoch = new Date(1899, 11, 30); // Dec 30, 1899 (Excel's zero date)
+      const diff = dateValue - excelEpoch;
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+
+      // Check if this is the Excel date bug (Feb 29, 1900)
+      const adjustedDays = days >= 60 ? days + 1 : days;
+
+      // Reconstruct the date from the serial number
+      const excelZero = new Date(1899, 11, 31); // Dec 31, 1899 (Excel's day 1)
+      const reconstructedDate = new Date(
+        excelZero.getTime() + (adjustedDays - 1) * 86400000
+      );
+
+      const year = reconstructedDate.getFullYear();
+      const month = String(reconstructedDate.getMonth() + 1).padStart(2, "0");
+      const day = String(reconstructedDate.getDate()).padStart(2, "0");
+
+      return `${year}-${month}-${day}`;
+    }
+
+    // 2. If it's a number (Excel serial date)
+    if (typeof dateValue === "number") {
+      return excelSerialToDateString(dateValue);
+    }
+
+    // 3. If it's a string
+    if (typeof dateValue === "string") {
+      const trimmed = dateValue.trim();
+      if (!trimmed) return "";
+
+      // Check if it's a string number (e.g., "44378" for Jun 1, 2021)
+      const asNumber = parseFloat(trimmed);
+      if (!isNaN(asNumber)) {
+        return excelSerialToDateString(asNumber);
+      }
+
+      // Try to parse common date formats
+      // First try: MM/DD/YY or MM/DD/YYYY (common in US Excel)
+      const usFormatMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+      if (usFormatMatch) {
+        let month = parseInt(usFormatMatch[1], 10);
+        let day = parseInt(usFormatMatch[2], 10);
+        let year = parseInt(usFormatMatch[3], 10);
+
+        if (year < 100) year += 2000;
+
+        return `${year}-${String(month).padStart(2, "0")}-${String(
+          day
+        ).padStart(2, "0")}`;
+      }
+
+      // Try other formats
+      const dateFormats = [
+        // "1-Jun-21", "01-Jun-2021"
+        /^(\d{1,2})[-/\s]([A-Za-z]{3,})[-/\s](\d{2,4})$/i,
+        // "2021-06-01", "2021/06/01"
+        /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/,
+        // "01-06-2021", "1-6-21" (DD-MM-YYYY)
+        /^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/,
+      ];
+
+      for (const format of dateFormats) {
+        const match = trimmed.match(format);
+        if (match) {
+          try {
+            let year, month, day;
+
+            if (format === dateFormats[0]) {
+              // "1-Jun-21" format
+              day = parseInt(match[1], 10);
+              const monthStr = match[2].toLowerCase().substring(0, 3);
+              year = parseInt(match[3], 10);
+
+              if (year < 100) year += 2000;
+
+              const monthMap = {
+                jan: 1,
+                feb: 2,
+                mar: 3,
+                apr: 4,
+                may: 5,
+                jun: 6,
+                jul: 7,
+                aug: 8,
+                sep: 9,
+                oct: 10,
+                nov: 11,
+                dec: 12,
+              };
+
+              month = monthMap[monthStr];
+              if (month === undefined) continue;
+            } else if (format === dateFormats[1]) {
+              // "2021-06-01" format
+              year = parseInt(match[1], 10);
+              month = parseInt(match[2], 10);
+              day = parseInt(match[3], 10);
+            } else {
+              // "01-06-2021" format - assume DD-MM-YYYY (international)
+              day = parseInt(match[1], 10);
+              month = parseInt(match[2], 10);
+              year = parseInt(match[3], 10);
+              if (year < 100) year += 2000;
+            }
+
+            return `${year}-${String(month).padStart(2, "0")}-${String(
+              day
+            ).padStart(2, "0")}`;
+          } catch (e) {
+            console.warn("Failed to parse date string:", trimmed, e);
+          }
+        }
+      }
+
+      // Last resort: try JavaScript Date constructor
+      try {
+        const date = new Date(trimmed);
+        if (!isNaN(date.getTime())) {
+          // For date strings with timezone, extract just the date
+          const year = date.getFullYear();
+          const month = String(date.getMonth() + 1).padStart(2, "0");
+          const day = String(date.getDate()).padStart(2, "0");
+          return `${year}-${month}-${day}`;
+        }
+      } catch (e) {
+        console.warn("JavaScript Date constructor failed for:", trimmed);
+      }
+    }
+
+    // Fallback: return today's date
+    const today = new Date();
+    return formatDateToYYYYMMDD(today);
+  };
 
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
@@ -727,149 +909,6 @@ const Customer = () => {
     reader.readAsArrayBuffer(file);
   };
 
-  const parseExcelDateValue = (dateValue) => {
-    if (!dateValue && dateValue !== 0 && dateValue !== "") {
-      // Return today's date if no date provided
-      const today = new Date();
-      return formatDateToYYYYMMDD(today);
-    }
-
-    // 1. If it's already a Date object (from XLSX with cellDates: true)
-    if (dateValue instanceof Date) {
-      // Get the Excel serial number equivalent
-      const excelEpoch = new Date(1899, 11, 30); // Dec 30, 1899 (Excel's zero date)
-      const diff = dateValue - excelEpoch;
-      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-
-      // Check if this is the Excel date bug (Feb 29, 1900)
-      const adjustedDays = days >= 60 ? days + 1 : days;
-
-      // Reconstruct the date from the serial number
-      const excelZero = new Date(1899, 11, 31); // Dec 31, 1899 (Excel's day 1)
-      const reconstructedDate = new Date(
-        excelZero.getTime() + (adjustedDays - 1) * 86400000
-      );
-
-      const year = reconstructedDate.getFullYear();
-      const month = String(reconstructedDate.getMonth() + 1).padStart(2, "0");
-      const day = String(reconstructedDate.getDate()).padStart(2, "0");
-
-      return `${year}-${month}-${day}`;
-    }
-
-    // 2. If it's a number (Excel serial date)
-    if (typeof dateValue === "number") {
-      return excelSerialToDateString(dateValue);
-    }
-
-    // 3. If it's a string
-    if (typeof dateValue === "string") {
-      const trimmed = dateValue.trim();
-      if (!trimmed) return "";
-
-      // Check if it's a string number (e.g., "44378" for Jun 1, 2021)
-      const asNumber = parseFloat(trimmed);
-      if (!isNaN(asNumber)) {
-        return excelSerialToDateString(asNumber);
-      }
-
-      // Try to parse common date formats
-      // First try: MM/DD/YY or MM/DD/YYYY (common in US Excel)
-      const usFormatMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
-      if (usFormatMatch) {
-        let month = parseInt(usFormatMatch[1], 10);
-        let day = parseInt(usFormatMatch[2], 10);
-        let year = parseInt(usFormatMatch[3], 10);
-
-        if (year < 100) year += 2000;
-
-        return `${year}-${String(month).padStart(2, "0")}-${String(
-          day
-        ).padStart(2, "0")}`;
-      }
-
-      // Try other formats
-      const dateFormats = [
-        // "1-Jun-21", "01-Jun-2021"
-        /^(\d{1,2})[-/\s]([A-Za-z]{3,})[-/\s](\d{2,4})$/i,
-        // "2021-06-01", "2021/06/01"
-        /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/,
-        // "01-06-2021", "1-6-21" (DD-MM-YYYY)
-        /^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/,
-      ];
-
-      for (const format of dateFormats) {
-        const match = trimmed.match(format);
-        if (match) {
-          try {
-            let year, month, day;
-
-            if (format === dateFormats[0]) {
-              // "1-Jun-21" format
-              day = parseInt(match[1], 10);
-              const monthStr = match[2].toLowerCase().substring(0, 3);
-              year = parseInt(match[3], 10);
-
-              if (year < 100) year += 2000;
-
-              const monthMap = {
-                jan: 1,
-                feb: 2,
-                mar: 3,
-                apr: 4,
-                may: 5,
-                jun: 6,
-                jul: 7,
-                aug: 8,
-                sep: 9,
-                oct: 10,
-                nov: 11,
-                dec: 12,
-              };
-
-              month = monthMap[monthStr];
-              if (month === undefined) continue;
-            } else if (format === dateFormats[1]) {
-              // "2021-06-01" format
-              year = parseInt(match[1], 10);
-              month = parseInt(match[2], 10);
-              day = parseInt(match[3], 10);
-            } else {
-              // "01-06-2021" format - assume DD-MM-YYYY (international)
-              day = parseInt(match[1], 10);
-              month = parseInt(match[2], 10);
-              year = parseInt(match[3], 10);
-              if (year < 100) year += 2000;
-            }
-
-            return `${year}-${String(month).padStart(2, "0")}-${String(
-              day
-            ).padStart(2, "0")}`;
-          } catch (e) {
-            console.warn("Failed to parse date string:", trimmed, e);
-          }
-        }
-      }
-
-      // Last resort: try JavaScript Date constructor
-      try {
-        const date = new Date(trimmed);
-        if (!isNaN(date.getTime())) {
-          // For date strings with timezone, extract just the date
-          const year = date.getFullYear();
-          const month = String(date.getMonth() + 1).padStart(2, "0");
-          const day = String(date.getDate()).padStart(2, "0");
-          return `${year}-${month}-${day}`;
-        }
-      } catch (e) {
-        console.warn("JavaScript Date constructor failed for:", trimmed);
-      }
-    }
-
-    // Fallback: return today's date
-    const today = new Date();
-    return formatDateToYYYYMMDD(today);
-  };
   const handleCustomerImport = async () => {
     if (!parsedData.length) {
       showToast("warning", "Upload a valid file first");
@@ -936,43 +975,48 @@ const Customer = () => {
   const provinceOptions = useMemo(
     () =>
       provinces.map((p) => ({
-        value: p.name,
-        label: p.name,
+        value: p.name.toLowerCase(),
+        label: toTitleCase(p.name),
       })),
     [provinces]
   );
+  
   const mrOptions = useMemo(
     () =>
       mrList.map((mr) => {
         const id = mr._id;
         const name = mr.medicalRepName;
-        return { value: id, label: name };
+        return { value: id, label: toTitleCase(name) };
       }),
     [mrList]
   );
+  
   const zoneOptions = useMemo(
     () =>
       zones.map((z, i) => {
         const val = typeof z === "string" ? z : z.name || `Zone ${i + 1}`;
-        return { value: val, label: val };
+        return { value: val.toLowerCase(), label: toTitleCase(val) };
       }),
     [zones]
   );
+  
   const businessTypeOptions = useMemo(
     () =>
       businessTypes.map((t) => {
         const name = typeof t === "string" ? t : t.name || t.label || "Unknown";
-        return { value: name, label: name };
+        return { value: name.toLowerCase(), label: toTitleCase(name) };
       }),
     [businessTypes]
   );
 
-  if (loading) return <LoadingOverlay text="Please wait..." />;
+  const visiblePages = getVisiblePages(currentPage, totalPages);
+
+  if (loading && customers.length === 0) return <LoadingOverlay text="Please wait..." />;
 
   return (
     <div className="p-6">
       <div className="container">
-        {/* Header */}
+        {/* Header - REMOVED CONDITIONAL RENDERING FOR SEARCH SECTION */}
         <div className="flex justify-between items-center mb-4">
           <div className="flex gap-3">
             <button
@@ -1000,35 +1044,47 @@ const Customer = () => {
               </button>
             )}
           </div>
-          {customers.length > 0 && (
-            <div className="flex items-center gap-8">
-              <p className="text-lg font-semibold text-gray-700">
-                Total Count:{" "}
-                <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-                  {filteredCustomers.length}
-                </span>
-              </p>
-              <div className="relative w-full md:w-72">
-                <Search
-                  className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-                  size={16}
-                  onClick={handleIconClick}
-                />
-                <input
-                  ref={inputRef}
-                  type="text"
-                  placeholder="Search..."
-                  value={searchTerm}
-                  onChange={(e) => {
-                    setSearchTerm(e.target.value);
-                    setCurrentPage(1);
-                  }}
-                  className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-                />
-              </div>
+          
+          {/* SEARCH SECTION - ALWAYS VISIBLE NOW */}
+          <div className="flex items-center gap-8">
+            <p className="text-lg font-semibold text-gray-700">
+              Total Count:{" "}
+              <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
+                {totalCustomers}
+              </span>
+            </p>
+            <div className="relative w-full md:w-72">
+              <Search
+                className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
+                size={16}
+                onClick={handleIconClick}
+              />
+              <input
+                ref={inputRef}
+                type="text"
+                placeholder="Search by name, business type, MR, address, zone, province, code, or number..."
+                value={searchTerm}
+                onChange={handleSearchChange}
+                className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
+              />
             </div>
-          )}
+          </div>
         </div>
+
+        {/* Search results info */}
+        {searchTerm && (
+          <div className="mb-4 p-3 bg-blue-50 rounded-lg">
+            <p className="text-sm text-blue-700">
+              Showing results for: <span className="font-semibold">"{searchTerm}"</span> 
+              <span className="ml-4">Found: <span className="font-bold">{totalCustomers}</span> customer(s)</span>
+            </p>
+            {totalCustomers === 0 && (
+              <p className="text-sm text-gray-600 mt-1">
+                No customers found matching your search. Try different keywords.
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Table */}
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
@@ -1037,12 +1093,12 @@ const Customer = () => {
               <tr>
                 <th className="p-3">
                   <div className="flex items-center gap-4">
-                    {currentCustomers.length > 0 && (
+                    {customers.length > 0 && (
                       <input
                         type="checkbox"
                         checked={
-                          selected.length === currentCustomers.length &&
-                          currentCustomers.length > 0
+                          selected.length === customers.length &&
+                          customers.length > 0
                         }
                         onChange={(e) => toggleSelectAll(e.target.checked)}
                       />
@@ -1061,18 +1117,31 @@ const Customer = () => {
               </tr>
             </thead>
             <tbody>
-              {currentCustomers.length === 0 ? (
+              {customers.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="p-4 text-center text-gray-500">
-                    No customers found.
+                    {loading ? "Loading..." : searchTerm ? (
+                      <>
+                        No customers found matching your search. 
+                        <br />
+                        <button
+                          onClick={() => setSearchTerm("")}
+                          className="text-blue-600 hover:text-blue-800 underline mt-2"
+                        >
+                          Clear search to see all customers
+                        </button>
+                      </>
+                    ) : (
+                      "No customers found. Add your first customer using the 'Add New Customer' button above."
+                    )}
                   </td>
                 </tr>
               ) : (
-                currentCustomers.map((customer, idx) => (
+                customers.map((customer, idx) => (
                   <tr
                     key={customer._id}
                     className={`hover:bg-gray-50 ${
-                      idx < currentCustomers.length - 1 ? "border-b" : ""
+                      idx < customers.length - 1 ? "border-b" : ""
                     }`}
                   >
                     <td className="p-3">
@@ -1148,8 +1217,8 @@ const Customer = () => {
             </tbody>
           </table>
 
-          {/* Pagination - FIXED */}
-          {currentCustomers.length > 0 && totalPages > 1 && (
+          {/* Pagination */}
+          {customers.length > 0 && totalPages > 1 && (
             <div className="mt-4 p-5 flex gap-2">
               <button
                 onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
@@ -1183,7 +1252,7 @@ const Customer = () => {
                 disabled={currentPage === totalPages}
                 className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
               >
-                    Next →
+                Next →
               </button>
             </div>
           )}
@@ -1427,7 +1496,7 @@ const Customer = () => {
                         <span className="text-red-500">*</span>
                       </label>
                       <SearchableDropdown
-                        value={form.typeOfBusiness || ""}
+                        value={form.typeOfBusiness ? form.typeOfBusiness.toLowerCase() : ""}
                         onChange={handleBusinessTypeChange}
                         options={businessTypeOptions}
                         placeholder="Select Business Type"
@@ -1460,7 +1529,7 @@ const Customer = () => {
                         Zone <span className="text-red-500">*</span>
                       </label>
                       <SearchableDropdown
-                        value={form.zone || ""}
+                        value={form.zone ? form.zone.toLowerCase() : ""}
                         onChange={handleZoneChange}
                         options={zoneOptions}
                         placeholder="Select Zone"
@@ -1476,7 +1545,7 @@ const Customer = () => {
                         Province <span className="text-red-500">*</span>
                       </label>
                       <SearchableDropdown
-                        value={form.province || ""}
+                        value={form.province ? form.province.toLowerCase() : ""}
                         onChange={handleProvinceChange}
                         options={provinceOptions}
                         placeholder="Select Province"

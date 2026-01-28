@@ -49,10 +49,15 @@ const Product = () => {
   const [suppliers, setSuppliers] = useState([]);
   const [packingOptions, setPackingOptions] = useState([]);
   const [error, setError] = useState(null);
+  const [paginationInfo, setPaginationInfo] = useState({
+    currentPage: 1,
+    totalPages: 1,
+    totalItems: 0,
+    itemsPerPage: 9
+  });
   const inputRef = useRef(null);
 
-  const productsPerPage = 9;
-
+  // Add the missing form state
   const initialFormState = {
     productName: "",
     type: "",
@@ -67,6 +72,16 @@ const Product = () => {
 
   const [form, setForm] = useState(initialFormState);
 
+  // Helper function to format display text
+  const formatDisplayText = (text) => {
+    if (!text) return "";
+    return text
+      .toString()
+      .split(' ')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  };
+
   // Fetch dropdown data
   useEffect(() => {
     const fetchDropdownData = async () => {
@@ -75,50 +90,106 @@ const Product = () => {
           [fetchProductTypes(), fetchSuppliers(), fetchProductPackingType()]
         );
 
+        console.log("Dropdown data fetched:", {
+          typesResult,
+          suppliersResult,
+          packingResult
+        });
+
         if (typesResult.success) {
-          const transformedTypes = typesResult.data.map((item) => ({
-            value: typeof item === "string" ? item : item.name || item.value,
-            label: typeof item === "string" ? item : item.name || item.value,
-          }));
+          const transformedTypes = typesResult.data.map((item) => {
+            const value = typeof item === "string" ? item : item.name || item.value;
+            return {
+              value: value.toLowerCase(),
+              label: formatDisplayText(value)
+            };
+          });
           setProductTypes(transformedTypes);
         }
 
-        if (suppliersResult.success) {
-          const transformedSuppliers = suppliersResult.data.map((item) => ({
-            value: typeof item === "string" ? item : item.name || item.value,
-            label: typeof item === "string" ? item : item.name || item.value,
-          }));
+        if (suppliersResult.success && suppliersResult.data && suppliersResult.data.length > 0) {
+          console.log("Suppliers loaded:", suppliersResult.data.length, "items");
+          const transformedSuppliers = suppliersResult.data.map((item) => {
+            const value = typeof item === "string" ? item : item.name || item.value;
+            return {
+              value: value.toLowerCase(),
+              label: formatDisplayText(value)
+            };
+          });
           setSuppliers(transformedSuppliers);
+        } else {
+          // Handle empty suppliers case
+          setSuppliers([]);
+          console.log("No suppliers found or empty array returned");
+          if (suppliersResult.error) {
+            console.error("Suppliers fetch error:", suppliersResult.error);
+          }
         }
 
         if (packingResult.success) {
-          const transformedPacking = packingResult.data.map((item) => ({
-            value: typeof item === "string" ? item : item.name || item.value,
-            label: typeof item === "string" ? item : item.name || item.value,
-          }));
+          const transformedPacking = packingResult.data.map((item) => {
+            const value = typeof item === "string" ? item : item.name || item.value;
+            return {
+              value: value.toLowerCase(),
+              label: formatDisplayText(value)
+            };
+          });
           setPackingOptions(transformedPacking);
         }
       } catch (error) {
         console.error("Error fetching dropdown data:", error);
+        setSuppliers([]); // Ensure suppliers is empty array on error
       }
     };
 
     fetchDropdownData();
   }, []);
 
-  // Fetch products
-  const fetchProducts = async () => {
+  // Fetch products with pagination
+  const fetchProducts = async (page = 1, search = searchTerm, type = selectedTab) => {
     try {
       setLoading(true);
-      const response = await fetch(`${backendUrl}/api/products`);
+      const response = await fetch(
+        `${backendUrl}/api/products/paginated?` +
+        new URLSearchParams({
+          page: page.toString(),
+          limit: "9",
+          search: search,
+          type: type === "All" ? "" : type
+        })
+      );
+      
       if (!response.ok) throw new Error("Failed to fetch products");
       const data = await response.json();
-      const uniqueTypes = Array.from(
-        new Set(data.map((item) => item.type?.toLowerCase()).filter(Boolean))
-      );
-      setTypes(["All", ...uniqueTypes]);
-      setProducts(data);
-      setSelected([]);
+      
+      if (data.success) {
+        setProducts(data.data);
+        setPaginationInfo(data.pagination);
+        setSelected([]);
+        
+        // Fetch unique types for tabs (only once or when needed)
+        if (page === 1 && search === "" && type === "All") {
+          const typesResponse = await fetch(`${backendUrl}/api/products/types`);
+          if (typesResponse.ok) {
+            const typesData = await typesResponse.json();
+            if (typesData.success) {
+              setTypes(["All", ...typesData.data]);
+            }
+          } else {
+            // Fallback: extract types from current products
+            const uniqueTypes = Array.from(
+              new Set(data.data.map((item) => item.type?.toLowerCase()).filter(Boolean))
+            );
+            const formattedTypes = uniqueTypes.map(type => 
+              type
+                .split(' ')
+                .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                .join(' ')
+            );
+            setTypes(["All", ...formattedTypes.sort()]);
+          }
+        }
+      }
     } catch (err) {
       setError(err.message || "Something went wrong");
       showToast("error", err.message || "Failed to fetch products");
@@ -127,57 +198,25 @@ const Product = () => {
     }
   };
 
+  // Initial fetch and when search or tab changes
   useEffect(() => {
-    fetchProducts();
-  }, []);
+    fetchProducts(1, searchTerm, selectedTab);
+  }, [searchTerm, selectedTab]);
 
-  // Filter products by tab and search term
+  // Handle page change
+  const handlePageChange = (page) => {
+    setCurrentPage(page);
+    fetchProducts(page, searchTerm, selectedTab);
+  };
+
+  // Filter products (now done on server, but keeping for local filtering if needed)
   const filteredProducts = useMemo(() => {
-    const lowerSearch = searchTerm.toLowerCase();
+    return products; // Already filtered by server
+  }, [products]);
 
-    return products.filter((product) => {
-      const matchesType =
-        selectedTab.toLowerCase() === "all" ||
-        product.type?.toLowerCase() === selectedTab.toLowerCase();
-
-      const nameMatch = product.productName
-        ?.toLowerCase()
-        .includes(lowerSearch);
-      const supplierMatch = product.supplierName
-        ?.toLowerCase()
-        .includes(lowerSearch);
-      const licenseMatch = product.drugLicense
-        ?.toLowerCase()
-        .includes(lowerSearch);
-      const typeMatch = product.type?.toLowerCase().includes(lowerSearch);
-
-      const licenseDateFormatted = product.licenseValidityDate
-        ? formatDateToReadable(
-            new Date(product.licenseValidityDate),
-            "dd/MM/yyyy"
-          ).toLowerCase()
-        : "";
-
-      const licenseDateMatch = licenseDateFormatted.includes(lowerSearch);
-
-      return (
-        matchesType &&
-        (nameMatch ||
-          supplierMatch ||
-          licenseMatch ||
-          licenseDateMatch ||
-          typeMatch)
-      );
-    });
-  }, [products, searchTerm, selectedTab]);
-
-  // Pagination logic
-  const totalPages = Math.ceil(filteredProducts.length / productsPerPage);
-  const visiblePages = getVisiblePages(currentPage, totalPages);
-  const currentProducts = filteredProducts.slice(
-    (currentPage - 1) * productsPerPage,
-    currentPage * productsPerPage
-  );
+  // Pagination logic (using server-side pagination info)
+  const visiblePages = getVisiblePages(currentPage, paginationInfo.totalPages);
+  const currentProducts = products; // Already paginated by server
 
   const toggleSelect = useCallback((product) => {
     setSelected((prev) =>
@@ -202,7 +241,8 @@ const Product = () => {
 
   // Import click handler with supplier validation
   const handleImportClick = () => {
-    if (!suppliers.length) {
+    console.log("Suppliers state:", suppliers);
+    if (!suppliers || suppliers.length === 0) {
       showToast(
         "error",
         "No suppliers found. Please add at least one supplier first."
@@ -218,7 +258,7 @@ const Product = () => {
       return;
     }
 
-    if (!suppliers.length) {
+    if (!suppliers || suppliers.length === 0) {
       showToast("error", "No suppliers found – cannot import");
       return;
     }
@@ -240,7 +280,7 @@ const Product = () => {
         showToast("success", message);
         setShowImportModal(false);
         setParsedData([]);
-        fetchProducts();
+        fetchProducts(1); // Refresh first page
       } else if (res.status === 207) {
         // Partial success
         let message = `Imported ${res.data.importedCount} product(s)`;
@@ -269,7 +309,7 @@ const Product = () => {
 
         setShowImportModal(false);
         setParsedData([]);
-        fetchProducts();
+        fetchProducts(1); // Refresh first page
       }
     } catch (err) {
       handleAxiosError(err, showToast);
@@ -416,12 +456,6 @@ const Product = () => {
     reader.readAsArrayBuffer(file);
   };
 
-  function capitalizeFirstLetter(str) {
-    if (!str) return "";
-    str = str.toString();
-    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
-  }
-
   const handleView = (product) => {
     setForm({
       ...product,
@@ -434,6 +468,10 @@ const Product = () => {
     setForm({
       ...product,
       licenseValidityDate: product.licenseValidityDate || "",
+      // Ensure values are in lowercase for dropdowns
+      type: product.type?.toLowerCase() || "",
+      supplierName: product.supplierName?.toLowerCase() || "",
+      packing: product.packing?.toLowerCase() || ""
     });
     setIsEditModalOpen(true);
   };
@@ -468,7 +506,7 @@ const Product = () => {
             "success",
             res.data.message || "Products deleted successfully"
           );
-          fetchProducts();
+          fetchProducts(currentPage); // Refresh current page
         }
       } catch (err) {
         showToast("error", "Failed to delete products.");
@@ -498,7 +536,7 @@ const Product = () => {
             "success",
             res.data.message || "Product deleted successfully"
           );
-          fetchProducts();
+          fetchProducts(currentPage); // Refresh current page
         }
       } catch (error) {
         showToast("error", error.message || "Failed to delete product");
@@ -510,9 +548,20 @@ const Product = () => {
     e.preventDefault();
 
     try {
+      // Send lowercase values to backend
+      const updateData = {
+        ...form,
+        productName: form.productName.toLowerCase(),
+        type: form.type.toLowerCase(),
+        packing: form.packing.toLowerCase(),
+        supplierName: form.supplierName.toLowerCase(),
+        drugLicense: form.drugLicense.toLowerCase(),
+        remarks: form.remarks.toLowerCase()
+      };
+
       const res = await axios.put(
         `${backendUrl}/api/products/${form._id}`,
-        form
+        updateData
       );
 
       if (res.status === 200) {
@@ -521,7 +570,7 @@ const Product = () => {
           `Product <b>${res.data.productName}</b> updated successfully`
         );
         closeEditModal();
-        fetchProducts();
+        fetchProducts(currentPage); // Refresh current page
       }
     } catch (err) {
       console.error("Update error:", err);
@@ -573,18 +622,33 @@ const Product = () => {
 
   // Get selected values for dropdowns
   const getSelectedType = useMemo(() => {
-    return form.type;
+    return form.type || "";
   }, [form.type]);
 
   const getSelectedSupplier = useMemo(() => {
-    return form.supplierName;
+    return form.supplierName || "";
   }, [form.supplierName]);
 
   const getSelectedPacking = useMemo(() => {
-    return form.packing;
+    return form.packing || "";
   }, [form.packing]);
 
-  if (loading) return <LoadingOverlay text="Loading products..." />;
+  // Handle tab change
+  const handleTabChange = (tab) => {
+    setSelectedTab(tab);
+    setCurrentPage(1);
+    fetchProducts(1, searchTerm, tab);
+  };
+
+  // Handle search
+  const handleSearch = (e) => {
+    const value = e.target.value;
+    setSearchTerm(value);
+    setCurrentPage(1);
+    fetchProducts(1, value, selectedTab);
+  };
+
+  if (loading && currentPage === 1) return <LoadingOverlay text="Loading products..." />;
 
   return (
     <div className="p-6">
@@ -617,22 +681,19 @@ const Product = () => {
         </div>
 
         <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
-          {products.length > 0 ? (
+          {types.length > 0 ? (
             <div className="flex gap-4 flex-wrap">
               {types.map((tab) => (
                 <button
                   key={tab}
-                  onClick={() => {
-                    setSelectedTab(tab);
-                    setCurrentPage(1);
-                  }}
+                  onClick={() => handleTabChange(tab)}
                   className={`px-4 py-2 rounded-lg cursor-pointer ${
                     selectedTab === tab
                       ? "bg-indigo-600 text-white"
                       : "bg-gray-200 text-gray-700"
                   }`}
                 >
-                  {capitalizeFirstLetter(tab)}
+                  {formatDisplayText(tab)}
                 </button>
               ))}
             </div>
@@ -645,7 +706,7 @@ const Product = () => {
               <p className="text-lg font-semibold text-gray-700">
                 Total Count:{" "}
                 <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-                  {filteredProducts.length}
+                  {paginationInfo.totalItems}
                 </span>
               </p>
 
@@ -660,10 +721,7 @@ const Product = () => {
                   type="text"
                   placeholder="Search..."
                   value={searchTerm}
-                  onChange={(e) => {
-                    setSearchTerm(e.target.value);
-                    setCurrentPage(1);
-                  }}
+                  onChange={handleSearch}
                   className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
                 />
               </div>
@@ -705,7 +763,7 @@ const Product = () => {
               {currentProducts.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="p-4 text-center text-gray-500">
-                    No products found.
+                    {loading ? "Loading..." : "No products found."}
                   </td>
                 </tr>
               ) : (
@@ -713,7 +771,7 @@ const Product = () => {
                   <tr
                     key={product._id}
                     className={`hover:bg-gray-50 ${
-                      (index + 1) % productsPerPage === 0 ||
+                      (index + 1) % paginationInfo.itemsPerPage === 0 ||
                       index + 1 === currentProducts.length
                         ? ""
                         : "border-b"
@@ -727,7 +785,7 @@ const Product = () => {
                           onChange={() => toggleSelect(product)}
                         />
                         <span>
-                          {capitalizeFirstLetter(product.productName)}
+                          {product.productName} {/* Already formatted by backend */}
                         </span>
                       </div>
                     </td>
@@ -735,7 +793,7 @@ const Product = () => {
                     <td className="p-3">{product.packing}</td>
                     <td className="p-3">{product.qtyPerBoxStrip}</td>
                     <td className="p-3">
-                      {capitalizeFirstLetter(product.supplierName) || "--"}
+                      {product.supplierName || "--"}
                     </td>
                     <td className="p-3">{product.drugLicense || "--"}</td>
                     <td className="p-3">
@@ -772,10 +830,10 @@ const Product = () => {
             </tbody>
           </table>
 
-          {currentProducts.length > 0 && (
+          {paginationInfo.totalPages > 1 && (
             <div className="mt-4 p-5 flex justify-start gap-2">
               <button
-                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                onClick={() => handlePageChange(currentPage - 1)}
                 disabled={currentPage === 1}
                 className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
               >
@@ -785,7 +843,7 @@ const Product = () => {
               {visiblePages.map((page) => (
                 <button
                   key={page}
-                  onClick={() => setCurrentPage(page)}
+                  onClick={() => handlePageChange(page)}
                   className={`px-3 py-1 rounded cursor-pointer ${
                     currentPage === page
                       ? "bg-indigo-600 text-white"
@@ -797,13 +855,11 @@ const Product = () => {
               ))}
 
               <button
-                onClick={() =>
-                  setCurrentPage((prev) => Math.min(prev + 1, totalPages))
-                }
-                disabled={currentPage === totalPages}
+                onClick={() => handlePageChange(currentPage + 1)}
+                disabled={currentPage === paginationInfo.totalPages}
                 className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
               >
-                  Next →
+                Next →
               </button>
             </div>
           )}
@@ -903,8 +959,8 @@ const Product = () => {
                     <label className="block text-sm font-medium text-gray-600">
                       Product Name
                     </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                      {capitalizeFirstLetter(form.productName)}
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                      {form.productName}
                     </p>
                   </div>
 
@@ -912,7 +968,7 @@ const Product = () => {
                     <label className="block text-sm font-medium text-gray-600">
                       Type
                     </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
                       {form.type}
                     </p>
                   </div>
@@ -921,7 +977,7 @@ const Product = () => {
                     <label className="block text-sm font-medium text-gray-600">
                       Packing
                     </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
                       {form.packing}
                     </p>
                   </div>
@@ -939,8 +995,8 @@ const Product = () => {
                     <label className="block text-sm font-medium text-gray-600">
                       Supplier Name
                     </label>
-                    <p className="border px-3 py-2 rounded-lg bg-gray-100 capitalize">
-                      {capitalizeFirstLetter(form.supplierName) || "--"}
+                    <p className="border px-3 py-2 rounded-lg bg-gray-100">
+                      {form.supplierName || "--"}
                     </p>
                   </div>
 

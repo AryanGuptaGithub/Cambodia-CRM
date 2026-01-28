@@ -58,24 +58,44 @@ export const fetchProductTypes = async () => {
 export const fetchSuppliers = async () => {
   try {
     const response = await axios.get(`${backendUrl}/api/suppliers`);
-    const suppliers = response.data?.data || response.data;
+    
+    // CORRECTED: Get suppliers from the correct property
+    // First try suppliers array, then data array, then just the response
+    const suppliers = response.data?.suppliers || response.data?.data || response.data || [];
 
     if (Array.isArray(suppliers)) {
       return {
         success: true,
-        data: suppliers.map((s) => ({
-          value: s.name,
-          label: s.name,
-          id: s._id,
-          name: s.name,
-        })),
+        data: suppliers.map((s) => {
+          // Get the supplier name in correct format
+          const supplierName = s.name || "";
+          return {
+            value: supplierName.toLowerCase(), // Lowercase for matching
+            label: supplierName ? 
+              supplierName
+                .split(' ')
+                .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                .join(' ') : "", // Title case for display
+            id: s._id,
+            name: supplierName,
+          };
+        }),
       };
     } else {
-      return { success: false, error: "Invalid suppliers data format" };
+      console.error("Invalid suppliers data format:", response.data);
+      return { 
+        success: false, 
+        error: "Invalid suppliers data format",
+        data: [] 
+      };
     }
   } catch (error) {
     console.error("❌ Error fetching suppliers:", error);
-    return { success: false, error: "Failed to load suppliers" };
+    return { 
+      success: false, 
+      error: "Failed to load suppliers",
+      data: [] 
+    };
   }
 };
 
@@ -129,6 +149,7 @@ export const fetchProducts = async () => {
     return { success: false, error: "Failed to load products" };
   }
 };
+
 export const fetchProductDropdownPurchase = async () => {
   try {
     const response = await axios.get(`${backendUrl}/api/products`);
@@ -164,6 +185,7 @@ export const fetchProductDropdownPurchase = async () => {
     };
   }
 };
+
 export const fetchProductPackingType = async () => {
   try {
     const response = await axios.get(`${backendUrl}/api/product-packing-types`);

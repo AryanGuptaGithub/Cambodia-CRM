@@ -93,7 +93,7 @@ const parseDateString = (dateStr) => {
   return isNaN(date.getTime()) ? null : date;
 };
 
-// Helper to format supplier response with title case for display
+// Helper to format supplier response with title case
 const formatSupplierResponse = (supplier) => {
   if (!supplier) return supplier;
   
@@ -114,13 +114,13 @@ router.get("/suppliers", async (req, res) => {
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
 
-    // Build search query - FIXED: Use case-insensitive search with proper regex
+    // Build search query
     const searchQuery = {};
     if (search && search.trim() !== "") {
-      const searchLower = search.trim().toLowerCase();
+      const searchRegex = new RegExp(search.trim().toLowerCase(), 'i');
       searchQuery.$or = [
-        { name: { $regex: searchLower, $options: "i" } },
-        { address: { $regex: searchLower, $options: "i" } }
+        { name: searchRegex },
+        { address: searchRegex }
       ];
     }
 

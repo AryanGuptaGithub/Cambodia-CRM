@@ -179,6 +179,11 @@ const parseDate = (dateStr) => {
   return null;
 };
 
+const normalizeString = (str) => {
+  if (!str) return "";
+  return str.toString().trim().toLowerCase();
+};
+
 router.post("/product/import", async (req, res) => {
   try {
     const products = req.body;
@@ -324,22 +329,19 @@ router.post("/product/import", async (req, res) => {
           }
         }
 
-        // Clean up drug license
-        let cleanDrugLicense = drugLicense?.toString().trim() || "";
-        if (cleanDrugLicense.toLowerCase() === "n/a") {
+        // Clean up drug license and other string fields - store as lowercase
+        const cleanProductName = normalizeString(productName);
+        const cleanType = normalizeString(type);
+        const cleanPacking = normalizeString(packing);
+        const cleanSupplierName = normalizeString(supplierName);
+        let cleanDrugLicense = normalizeString(drugLicense);
+        
+        if (cleanDrugLicense === "n/a") {
           cleanDrugLicense = "";
         }
 
         // Check for duplicate in current import batch
-        const productKey = `${productName
-          .toString()
-          .trim()
-          .toLowerCase()}_${type.toString().trim().toLowerCase()}_${packing
-          .toString()
-          .trim()
-          .toLowerCase()}_${(
-          supplierName?.toString().trim() || ""
-        ).toLowerCase()}`;
+        const productKey = `${cleanProductName}_${cleanType}_${cleanPacking}_${cleanSupplierName}`;
 
         if (uniqueProducts.has(productKey)) {
           // This is a duplicate within the import file
@@ -353,14 +355,12 @@ router.post("/product/import", async (req, res) => {
 
         uniqueProducts.add(productKey);
 
-        // Check for existing product in database
+        // Check for existing product in database (case-insensitive search)
         const existingProduct = await Product.findOne({
-          productName: {
-            $regex: new RegExp(`^${productName.toString().trim()}$`, "i"),
-          },
-          type: type.toString().trim(),
-          packing: packing.toString().trim(),
-          supplierName: supplierName?.toString().trim() || "",
+          productName: { $regex: new RegExp(`^${cleanProductName}$`, "i") },
+          type: { $regex: new RegExp(`^${cleanType}$`, "i") },
+          packing: { $regex: new RegExp(`^${cleanPacking}$`, "i") },
+          supplierName: { $regex: new RegExp(`^${cleanSupplierName}$`, "i") },
         });
 
         if (existingProduct) {
@@ -373,20 +373,20 @@ router.post("/product/import", async (req, res) => {
           continue;
         }
 
-        // Create new product
+        // Create new product with lowercase storage
         const product = new Product({
-          productName: productName.toString().trim(),
-          type: type.toString().trim(),
-          packing: packing.toString().trim(),
+          productName: cleanProductName, // Store as lowercase
+          type: cleanType, // Store as lowercase
+          packing: cleanPacking, // Store as lowercase
           sellingPrice: parsedSellingPrice,
           lc: parsedLc,
           fob: parsedFob,
           taxSellingPrice: parsedTaxSellingPrice,
           qtyPerBoxStrip: parsedQtyPerBoxStrip,
-          supplierName: supplierName?.toString().trim() || "",
-          drugLicense: cleanDrugLicense,
+          supplierName: cleanSupplierName, // Store as lowercase
+          drugLicense: cleanDrugLicense, // Store as lowercase
           licenseValidityDate: parsedDate,
-          remarks: remarks?.toString().trim() || "",
+          remarks: normalizeString(remarks),
         });
 
         await product.save();
@@ -429,8 +429,6 @@ router.post("/product/import", async (req, res) => {
 
     const totalProcessed =
       successfulImports.length + duplicateProducts.length + errors.length;
-
-    // Build success message
     let message = `Successfully imported ${successfulImports.length} product(s)`;
     if (duplicateProducts.length > 0) {
       message += `, ${duplicateProducts.length} duplicate record(s) found`;
@@ -496,12 +494,30 @@ router.get("/dropdown-products", async (req, res) => {
       stockMap.set(item.productName.toLowerCase(), item);
     });
 
-    // Merge product + stock
+    // Merge product + stock with formatted display names
     const finalList = products.map((product) => {
       const stock = stockMap.get(product.productName.toLowerCase());
 
       return {
         ...product.toObject(),
+        
+        // Format display names
+        productName: product.productName
+          .split(' ')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' '),
+        type: product.type
+          .split(' ')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' '),
+        supplierName: product.supplierName
+          .split(' ')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' '),
+        drugLicense: product.drugLicense
+          .split(' ')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' '),
 
         // Include batches from stock if available
         batches: stock?.batches || [],
@@ -531,11 +547,32 @@ router.get("/dropdown-products", async (req, res) => {
       .json({ success: false, message: "Failed to fetch products." });
   }
 });
-
 router.get("/products", async (req, res) => {
   try {
-    const products = await Product.find();
-    res.status(200).json(products);
+    const products = await Product.find().sort({ productName: 1 });
+    
+    // Format for display
+    const formattedProducts = products.map(product => ({
+      ...product.toObject(),
+      productName: product.productName
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' '),
+      type: product.type
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' '),
+      supplierName: product.supplierName
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' '),
+      drugLicense: product.drugLicense
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ')
+    }));
+    
+    res.status(200).json(formattedProducts);
   } catch (err) {
     console.error("Error fetching products:", err);
     res.status(500).json({ message: "Failed to fetch products." });
@@ -555,7 +592,7 @@ router.get("/products-with-in-stock", async (req, res) => {
 
     const products = await Product.find();
 
-    // Combine the data
+    // Combine the data with formatted display names
     const productsWithStock = products.map((product) => {
       const stock = stockByProduct.find(
         (s) => s._id.toLowerCase() === product.productName.toLowerCase()
@@ -563,6 +600,18 @@ router.get("/products-with-in-stock", async (req, res) => {
 
       return {
         ...product.toObject(),
+        productName: product.productName
+          .split(' ')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' '),
+        type: product.type
+          .split(' ')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' '),
+        supplierName: product.supplierName
+          .split(' ')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' '),
         inStock: {
           boxes: stock?.totalBoxes || 0,
           status: stock?.totalBoxes > 0 ? "In Stock" : "Out of Stock",
@@ -582,7 +631,27 @@ router.get("/products-with-in-stock", async (req, res) => {
 router.put("/products/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const updatedData = req.body;
+    let updatedData = req.body;
+    
+    // Convert string fields to lowercase before saving
+    if (updatedData.productName) {
+      updatedData.productName = normalizeString(updatedData.productName);
+    }
+    if (updatedData.type) {
+      updatedData.type = normalizeString(updatedData.type);
+    }
+    if (updatedData.packing) {
+      updatedData.packing = normalizeString(updatedData.packing);
+    }
+    if (updatedData.supplierName) {
+      updatedData.supplierName = normalizeString(updatedData.supplierName);
+    }
+    if (updatedData.drugLicense) {
+      updatedData.drugLicense = normalizeString(updatedData.drugLicense);
+    }
+    if (updatedData.remarks) {
+      updatedData.remarks = normalizeString(updatedData.remarks);
+    }
 
     const updatedProduct = await Product.findByIdAndUpdate(id, updatedData, {
       new: true,
@@ -593,7 +662,28 @@ router.put("/products/:id", async (req, res) => {
       return res.status(404).json({ message: "Product not found." });
     }
 
-    return res.status(200).json(updatedProduct);
+    // Format for display
+    const formattedProduct = {
+      ...updatedProduct.toObject(),
+      productName: updatedProduct.productName
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' '),
+      type: updatedProduct.type
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' '),
+      supplierName: updatedProduct.supplierName
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' '),
+      drugLicense: updatedProduct.drugLicense
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ')
+    };
+
+    return res.status(200).json(formattedProduct);
   } catch (error) {
     console.error("Error updating product:", error);
     return res.status(500).json({ message: "Server error." });
@@ -681,15 +771,16 @@ router.post("/product/add", async (req, res) => {
       parsedLicenseDate = parseDate(licenseValidityDate);
     }
 
+    // Store all string fields in lowercase
     const newProduct = new Product({
-      productName: productName.trim(),
-      type: type.trim(),
-      packing: packing.trim(),
+      productName: normalizeString(productName),
+      type: normalizeString(type),
+      packing: normalizeString(packing),
       qtyPerBoxStrip: qtyPerBoxStrip ? Number(qtyPerBoxStrip) : 0,
-      supplierName: supplierName ? supplierName.trim() : "",
-      drugLicense: drugLicense ? drugLicense.trim() : "",
+      supplierName: supplierName ? normalizeString(supplierName) : "",
+      drugLicense: drugLicense ? normalizeString(drugLicense) : "",
       licenseValidityDate: parsedLicenseDate,
-      remarks: remarks ? remarks.trim() : "",
+      remarks: remarks ? normalizeString(remarks) : "",
       sellingPrice: sellingPrice ? Number(sellingPrice) : 0,
       lc: lc ? Number(lc) : 0,
       fob: fob ? Number(fob) : 0,
@@ -697,9 +788,27 @@ router.post("/product/add", async (req, res) => {
     });
 
     const savedProduct = await newProduct.save();
+    
+    // Format for display in response
+    const formattedProduct = {
+      ...savedProduct.toObject(),
+      productName: savedProduct.productName
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' '),
+      type: savedProduct.type
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' '),
+      supplierName: savedProduct.supplierName
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ')
+    };
+
     return res.status(201).json({
-      message: `Product <b>${productName}</b> added successfully`,
-      product: savedProduct,
+      message: `Product <b>${formattedProduct.productName}</b> added successfully`,
+      product: formattedProduct,
     });
   } catch (error) {
     console.error("Error adding product:", error);
@@ -720,6 +829,108 @@ router.post("/product/add", async (req, res) => {
 
     return res.status(500).json({
       message: "Server error while adding product",
+    });
+  }
+});
+
+router.get("/products/paginated", async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 9;
+    const search = req.query.search || "";
+    const type = req.query.type || "";
+    
+    const skip = (page - 1) * limit;
+    
+    // Build query
+    const query = {};
+    
+    if (search) {
+      query.$or = [
+        { productName: { $regex: search, $options: "i" } },
+        { supplierName: { $regex: search, $options: "i" } },
+        { drugLicense: { $regex: search, $options: "i" } },
+        { type: { $regex: search, $options: "i" } }
+      ];
+    }
+    
+    if (type && type.toLowerCase() !== "all") {
+      query.type = { $regex: new RegExp(`^${type}$`, "i") };
+    }
+    
+    // Get total count
+    const total = await Product.countDocuments(query);
+    
+    // Get paginated products
+    const products = await Product.find(query)
+      .sort({ productName: 1 })
+      .skip(skip)
+      .limit(limit);
+    
+    // Format products for display (capitalize first letter of each word)
+    const formattedProducts = products.map(product => ({
+      ...product.toObject(),
+      productName: product.productName
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' '),
+      type: product.type
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' '),
+      supplierName: product.supplierName
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' '),
+      drugLicense: product.drugLicense
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ')
+    }));
+    
+    res.status(200).json({
+      success: true,
+      data: formattedProducts,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(total / limit),
+        totalItems: total,
+        itemsPerPage: limit
+      }
+    });
+  } catch (err) {
+    console.error("Error fetching paginated products:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: "Failed to fetch products." 
+    });
+  }
+});
+
+router.get("/products/types", async (req, res) => {
+  try {
+    const types = await Product.distinct("type");
+    
+    // Format types for display
+    const formattedTypes = types
+      .filter(type => type && type.trim() !== "")
+      .map(type => 
+        type
+          .split(' ')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' ')
+      )
+      .sort();
+    
+    res.status(200).json({ 
+      success: true, 
+      data: formattedTypes 
+    });
+  } catch (err) {
+    console.error("Error fetching product types:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: "Failed to fetch product types." 
     });
   }
 });

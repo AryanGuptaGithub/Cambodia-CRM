@@ -376,6 +376,104 @@ const checkStockWithDetailedReport = async (invoices) => {
   };
 };
 
+const handleProceedAnyway = async () => {
+  if (!stockValidationResult) {
+    showToast("error", "Stock validation data not available");
+    return;
+  }
+
+  setShowStockValidation(false);
+  setShouldProceedDespiteStockIssues(true);
+
+  // Separate missing products from low stock products
+  const missingProducts = stockValidationResult.stockIssues.filter(
+    issue => !issue.productExists
+  );
+  const lowStockProducts = stockValidationResult.stockIssues.filter(
+    issue => issue.productExists
+  );
+
+  if (missingProducts.length > 0) {
+    // Can't proceed with missing products
+    showToast(
+      "error",
+      `Cannot proceed: ${missingProducts.length} products not found in system. Please add them first.`
+    );
+    setShouldProceedDespiteStockIssues(false);
+    return;
+  }
+
+  if (lowStockProducts.length > 0) {
+    // Warn about low stock but allow proceeding
+    const confirmProceed = await confirmDialog({
+      title: "Warning: Insufficient Stock",
+      text: `${lowStockProducts.length} products have insufficient stock. The system will attempt to process these invoices and create stock adjustments. Continue?`,
+      icon: "warning",
+      confirmButtonText: "Proceed Anyway",
+      cancelButtonText: "Cancel",
+    });
+
+    if (confirmProceed.isConfirmed) {
+      await handleProductImport(parsedData, true);
+    } else {
+      setShouldProceedDespiteStockIssues(false);
+    }
+  } else {
+    // No issues, proceed normally
+    await handleProductImport(parsedData, false);
+  }
+};
+
+const debugProductSearch = async (productName) => {
+  console.log(`=== DEBUG PRODUCT SEARCH: ${productName} ===`);
+  
+  try {
+    // Check Product collection
+    const products = await Product.find({
+      productName: { $regex: productName, $options: 'i' }
+    }).limit(5);
+    
+    console.log('Found in Product collection:', products.map(p => p.productName));
+    
+    // Check ReportInHand
+    const stockItems = await ReportInHand.find({
+      productName: { $regex: productName, $options: 'i' }
+    }).limit(5);
+    
+    console.log('Found in ReportInHand:', stockItems.map(s => ({
+      name: s.productName,
+      stock: s.totalBoxes,
+      batches: s.batches?.length || 0
+    })));
+    
+    // Try exact match
+    const exactProduct = await Product.findOne({
+      productName: productName
+    });
+    
+    console.log('Exact match in Product:', exactProduct?.productName);
+    
+    const exactStock = await ReportInHand.findOne({
+      productName: productName
+    });
+    
+    console.log('Exact match in ReportInHand:', exactStock?.productName);
+    
+    return {
+      products,
+      stockItems,
+      exactProduct,
+      exactStock
+    };
+    
+  } catch (error) {
+    console.error('Debug error:', error);
+    return null;
+  }
+};
+
+// Call this when you encounter the issue
+// debugProductSearch('Ecothrocin 500');
 const checkStockAvailability = async (
   salesData,
   allowNegativeStock = true, // Changed to true by default
@@ -564,21 +662,139 @@ const checkStockAvailability = async (
 
 const validateStockBeforeImport = async (invoices) => {
   try {
-    return {
-      success: true,
-      hasStockIssues: false,
-      message: "Stock validation passed - Backend will handle any stock issues",
-      canProceed: true,
+    setIsValidatingStock(true);
+    setImportMessage(`Checking stock for ${invoices.length} invoices...`);
+    
+    const stockIssues = [];
+    const productStockMap = new Map();
+    
+    // First, just check if products exist (not stock quantity)
+    for (const invoice of invoices) {
+      for (const product of invoice.products) {
+        const requiredQty = product.salesQty + product.bonusQty;
+        if (requiredQty > 0) {
+          const productName = product.productName;
+          
+          if (!productStockMap.has(productName)) {
+            productStockMap.set(productName, {
+              productName,
+              totalRequired: 0,
+              requiredByInvoices: [],
+              checked: false,
+              exists: false
+            });
+          }
+          
+          const productData = productStockMap.get(productName);
+          productData.totalRequired += requiredQty;
+          productData.requiredByInvoices.push({
+            invoiceNumber: invoice.invoiceNumber,
+            requiredQty: requiredQty,
+          });
+        }
+      }
+    }
+    
+    // Check each product
+    for (const [productName, productData] of productStockMap.entries()) {
+      if (!productData.checked) {
+        try {
+          // First, check if product exists at all
+          const existsResponse = await axios.get(
+            `${backendUrl}/api/products/check/${encodeURIComponent(productName)}`,
+            { timeout: 3000 }
+          );
+          
+          if (existsResponse.data.exists) {
+            productData.exists = true;
+            
+            // If product exists, check stock
+            const stockCheck = await findProductStockInHandOptimized(
+              productName,
+              productData.totalRequired
+            );
+            
+            productData.availableStock = stockCheck.availableStock;
+            productData.insufficient = stockCheck.insufficient;
+            productData.insufficientQty = stockCheck.insufficientQty;
+            productData.stockCheckSuccess = stockCheck.success;
+            
+            if (stockCheck.insufficient || !stockCheck.success) {
+              stockIssues.push({
+                productName,
+                totalRequired: productData.totalRequired,
+                availableStock: stockCheck.availableStock,
+                insufficientQty: stockCheck.insufficientQty,
+                requiredByInvoices: productData.requiredByInvoices,
+                message: stockCheck.message,
+                isCritical: !stockCheck.success,
+                productExists: true
+              });
+            }
+          } else {
+            // Product doesn't exist
+            productData.exists = false;
+            stockIssues.push({
+              productName,
+              totalRequired: productData.totalRequired,
+              availableStock: 0,
+              insufficientQty: productData.totalRequired,
+              requiredByInvoices: productData.requiredByInvoices,
+              message: "Product not found in system - please add to inventory first",
+              isCritical: true,
+              productExists: false
+            });
+          }
+          
+          productData.checked = true;
+          
+        } catch (error) {
+          // If check fails, assume product doesn't exist
+          stockIssues.push({
+            productName,
+            totalRequired: productData.totalRequired,
+            availableStock: 0,
+            insufficientQty: productData.totalRequired,
+            requiredByInvoices: productData.requiredByInvoices,
+            message: "Could not verify product existence",
+            isCritical: true,
+            productExists: false
+          });
+        }
+      }
+    }
+    
+    const stockValidationResult = {
+      stockIssues,
+      totalInvoices: invoices.length,
+      summary: {
+        totalProducts: productStockMap.size,
+        totalRequired: Array.from(productStockMap.values()).reduce((sum, p) => sum + p.totalRequired, 0),
+        totalAvailable: Array.from(productStockMap.values()).reduce((sum, p) => sum + (p.availableStock || 0), 0),
+        totalInsufficient: stockIssues.length,
+        missingProducts: stockIssues.filter(issue => !issue.productExists).length,
+        lowStockProducts: stockIssues.filter(issue => issue.productExists && issue.insufficient).length,
+        hasCriticalIssues: stockIssues.some(issue => issue.isCritical),
+      },
     };
+    
+    setStockValidationResult(stockValidationResult);
+    
+    // Only block import if products don't exist at all
+    const missingProducts = stockIssues.filter(issue => !issue.productExists).length;
+    if (missingProducts > 0) {
+      setShowStockValidation(true);
+      return false;
+    }
+    
+    return true; // Allow import if products exist (even with low stock)
+    
   } catch (error) {
     console.error("Stock validation error:", error);
-    // Don't fail the import due to validation errors
-    return {
-      success: true,
-      hasStockIssues: false,
-      message: "Stock validation skipped due to error, but import can proceed",
-      canProceed: true,
-    };
+    // Don't block import due to validation errors
+    return true;
+  } finally {
+    setIsValidatingStock(false);
   }
 };
 
@@ -2318,6 +2534,248 @@ const checkInvoiceNumberExists = async (invoiceNumber, excludeId = null) => {
   return await SaleSummary.exists(query);
 };
 
+const calculateStockForProduct = async (productName, requiredQty) => {
+  try {
+    // Enhanced product name normalization
+    const normalizeProductNameEnhanced = (name) => {
+      if (!name) return "";
+
+      let normalized = name
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+        .replace(/[-\/_\\]/g, " ")
+        .replace(/[^\w\s.%]/g, "")
+        .replace(/\s+/g, " ")
+        .replace(/alu\s*alu/gi, "alu alu")
+        .replace(/%/g, " percent")
+        .replace(/\s+percent$/, " percent")
+        .replace(/\.\s+/g, ".")
+        .replace(/\s+\./g, ".")
+        .trim();
+
+      // Handle specific product variations
+      if (normalized.includes("iotekam")) {
+        normalized = normalized.replace(/^iotekam/, "lotekam");
+      }
+
+      if (normalized === "profokam") {
+        normalized = "profokam 1 percent";
+      }
+
+      if (
+        normalized.includes("profokam") &&
+        !normalized.includes("1") &&
+        !normalized.includes("percent")
+      ) {
+        normalized = normalized.replace(/profokam$/, "profokam 1 percent");
+      }
+
+      // Handle Ecozin/Ecozole variations
+      if (
+        normalized.includes("ecozin") &&
+        !normalized.includes("ecozin m") &&
+        !normalized.includes("ecozin 5")
+      ) {
+        normalized = normalized.replace(/ecozin$/, "ecozin m");
+      }
+
+      if (
+        normalized.includes("ecozole") &&
+        !normalized.includes("ecozole 400")
+      ) {
+        normalized = normalized.replace(/ecozole$/, "ecozole 400");
+      }
+
+      return normalized;
+    };
+
+    const normalizedName = normalizeProductNameEnhanced(productName);
+
+    // FIRST: Try to find in ReportInHand (this is where your stock actually is)
+    let stockItem = null;
+    let availableStock = 0;
+    let calculationMethod = "unknown";
+
+    // Try multiple search strategies for ReportInHand
+    const searchStrategies = [
+      { productName: { $regex: new RegExp(`^${normalizedName}$`, "i") } },
+      {
+        productName: {
+          $regex: new RegExp(
+            normalizedName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+            "i",
+          ),
+        },
+      },
+      { $text: { $search: normalizedName } }, // If you have text index
+      {
+        productName: { $regex: new RegExp(normalizedName.split(" ")[0], "i") },
+      }, // Try with first word
+    ];
+
+    for (const strategy of searchStrategies) {
+      stockItem = await ReportInHand.findOne(strategy);
+      if (stockItem) {
+        console.log(
+          `Found stock item for ${productName} using strategy:`,
+          strategy,
+        );
+        break;
+      }
+    }
+
+    if (stockItem) {
+      // Calculate stock from batches
+      if (stockItem.batches && Array.isArray(stockItem.batches)) {
+        availableStock = stockItem.batches.reduce((sum, batch) => {
+          return sum + (batch.boxes || batch.quantity || 0);
+        }, 0);
+        calculationMethod = "batches_in_reportinhand";
+      } else {
+        availableStock = stockItem.totalBoxes || 0;
+        calculationMethod = "totalboxes_in_reportinhand";
+      }
+
+      // Also check adjustments
+      const productInCatalog = await Product.findOne({
+        productName: { $regex: new RegExp(`^${normalizedName}$`, "i") },
+      });
+
+      if (productInCatalog) {
+        const adjustments = await StockAdjustment.find({
+          productId: productInCatalog._id,
+          status: { $ne: "cancelled" },
+        });
+
+        const adjustmentTotal = adjustments.reduce((sum, adj) => {
+          const qty = adj.totalQuantity || adj.boxQuantity || adj.quantity || 0;
+          if (adj.adjustmentType === "add") return sum + qty;
+          if (
+            adj.adjustmentType === "remove" ||
+            adj.adjustmentType === "deduct"
+          )
+            return sum - qty;
+          return sum;
+        }, 0);
+
+        availableStock += adjustmentTotal;
+        if (adjustments.length > 0) {
+          calculationMethod += "_with_adjustments";
+        }
+      }
+
+      const insufficient = Math.max(0, requiredQty - availableStock);
+      const hasEnoughStock = availableStock >= requiredQty;
+
+      return {
+        success: true,
+        productName: stockItem.productName,
+        requestedProductName: productName,
+        normalizedName,
+        availableStock,
+        requiredQty,
+        insufficient: !hasEnoughStock,
+        insufficientQty: hasEnoughStock ? 0 : insufficient,
+        hasEnoughStock,
+        calculationMethod,
+        usesAdjustments: true,
+        breakdown: {
+          baseStock: stockItem.totalBoxes || 0,
+          adjustments: availableStock - (stockItem.totalBoxes || 0),
+          available: availableStock,
+        },
+        productId: productInCatalog?._id,
+        message: hasEnoughStock
+          ? `Sufficient stock available (${availableStock} units)`
+          : `Insufficient stock. Required: ${requiredQty}, Available: ${availableStock}`,
+        rawData: {
+          stockItem: {
+            productName: stockItem.productName,
+            totalBoxes: stockItem.totalBoxes,
+            batches: stockItem.batches?.length || 0,
+          },
+        },
+      };
+    }
+
+    // If not found in ReportInHand, check Product catalog
+    const product = await Product.findOne({
+      productName: { $regex: new RegExp(`^${normalizedName}$`, "i") },
+    });
+
+    if (!product) {
+      return {
+        success: false,
+        productName,
+        correctedName: normalizedName,
+        normalizedName,
+        found: false,
+        availableStock: 0,
+        requiredQty,
+        insufficient: true,
+        insufficientQty: requiredQty,
+        hasEnoughStock: false,
+        message: `Product "${productName}" not found in catalog or stock`,
+      };
+    }
+
+    // Product exists but no stock item - check only adjustments
+    const adjustments = await StockAdjustment.find({
+      productId: product._id,
+      status: { $ne: "cancelled" },
+    });
+
+    const adjustmentTotal = adjustments.reduce((sum, adj) => {
+      const qty = adj.totalQuantity || adj.boxQuantity || adj.quantity || 0;
+      if (adj.adjustmentType === "add") return sum + qty;
+      if (adj.adjustmentType === "remove" || adj.adjustmentType === "deduct")
+        return sum - qty;
+      return sum;
+    }, 0);
+
+    availableStock = Math.max(0, adjustmentTotal);
+    const insufficient = Math.max(0, requiredQty - availableStock);
+    const hasEnoughStock = availableStock >= requiredQty;
+
+    return {
+      success: true,
+      productName: product.productName,
+      requestedProductName: productName,
+      normalizedName,
+      availableStock,
+      requiredQty,
+      insufficient: !hasEnoughStock,
+      insufficientQty: hasEnoughStock ? 0 : insufficient,
+      hasEnoughStock,
+      calculationMethod: "adjustments_only",
+      usesAdjustments: adjustments.length > 0,
+      breakdown: {
+        baseStock: 0,
+        adjustments: adjustmentTotal,
+        available: availableStock,
+      },
+      productId: product._id,
+      message: hasEnoughStock
+        ? `Sufficient stock from adjustments (${availableStock} units)`
+        : `Insufficient stock. Required: ${requiredQty}, Available: ${availableStock}`,
+    };
+  } catch (error) {
+    console.error("Error in calculateStockForProduct:", error);
+    return {
+      success: false,
+      productName,
+      availableStock: 0,
+      requiredQty,
+      insufficient: true,
+      insufficientQty: requiredQty,
+      hasEnoughStock: false,
+      calculationMethod: "error",
+      message: `Error checking stock: ${error.message}`,
+    };
+  }
+};
+
 const findProductStockInHandOptimized = async (
   productName,
   requiredQty,
@@ -3027,69 +3485,6 @@ const getProductAdjustments = async (productId) => {
     return 0;
   }
 };
-
-async function calculateStockForProduct(productName, requiredQty) {
-  let correctedName = productName;
-  if (productName.toLowerCase().includes("iotekam")) {
-    correctedName = productName.toLowerCase().replace(/^i/, "l");
-  }
-  if (productName.toLowerCase() === "profokam") {
-    correctedName = "Profokam 1%";
-  }
-
-  const normalizedName = normalizeProductName(correctedName);
-  stockCache.delete(normalizedName);
-  productCache.delete(normalizedName);
-  const product = await Product.findOne({
-    productName: buildProductNameRegex(normalizedName),
-  }).lean();
-
-  if (!product) {
-    return {
-      success: false,
-      productName,
-      correctedName,
-      normalizedName,
-      found: false,
-      availableStock: 0,
-      requiredQty: requiredQty,
-      insufficient: true,
-      insufficientQty: requiredQty,
-      hasEnoughStock: false,
-      message: `Product "${productName}" not found in catalog`,
-    };
-  }
-
-  const stockData = await calculateRealStock(product._id, product.productName);
-  const availableStock = Math.max(0, stockData.availableStock || 0);
-  const insufficient = Math.max(0, fixPrecision(requiredQty - availableStock));
-  const tolerance = 0.01; // 1% tolerance
-  const hasEnoughStock = availableStock + tolerance >= requiredQty;
-  const result = {
-    success: true,
-    productName: product.productName,
-    requestedProductName: productName,
-    normalizedName,
-    availableStock,
-    requiredQty: requiredQty,
-    insufficient: !hasEnoughStock,
-    insufficientQty: hasEnoughStock ? 0 : insufficient,
-    hasEnoughStock,
-    calculationMethod: stockData.calculationMethod || "unknown",
-    usesAdjustments: stockData.usesAdjustments || false,
-    breakdown: {
-      baseStock: stockData.baseStock || 0,
-      adjustments: stockData.totalAdjustments || 0,
-      available: availableStock,
-    },
-    productId: product._id,
-    message: hasEnoughStock
-      ? `Sufficient stock available (${availableStock} units)`
-      : `Insufficient stock. Required: ${requiredQty}, Available: ${availableStock}, Shortfall: ${insufficient}`,
-  };
-
-  return result;
-}
 
 router.post("/sales/debug-stock-calculation", async (req, res) => {
   try {
@@ -3808,6 +4203,56 @@ router.post("/sales/fix-all-stock-sync", async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+// Add this route to check if product exists (before checking stock)
+router.get("/api/products/check/:productName", async (req, res) => {
+  try {
+    const { productName } = req.params;
+
+    // Try multiple search strategies
+    const searchStrategies = [
+      { productName: { $regex: new RegExp(`^${productName}$`, "i") } },
+      {
+        productName: {
+          $regex: new RegExp(
+            productName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+            "i",
+          ),
+        },
+      },
+      { productName: { $regex: new RegExp(productName.toLowerCase(), "i") } },
+    ];
+
+    let product = null;
+    for (const strategy of searchStrategies) {
+      product = await Product.findOne(strategy);
+      if (product) break;
+    }
+
+    if (!product) {
+      // Try in ReportInHand
+      for (const strategy of searchStrategies) {
+        product = await ReportInHand.findOne(strategy);
+        if (product) break;
+      }
+    }
+
+    res.json({
+      success: true,
+      exists: !!product,
+      product: product
+        ? {
+            name: product.productName,
+            id: product._id,
+          }
+        : null,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
 
 router.get("/sales/test-stock/:productName", async (req, res) => {
   const productName = req.params.productName;
@@ -4401,7 +4846,7 @@ router.post("/sales/import", async (req, res) => {
         message: "No invoices provided",
       });
     }
-  
+
     sessionId = `import_${Date.now()}_${Math.random()
       .toString(36)
       .substr(2, 9)}`;
@@ -6161,6 +6606,291 @@ router.post("/sales/delete-batch", async (req, res) => {
   }
 });
 
+// Add this to your backend routes (sales.js)
+
+router.post("/sales/stock-issues-report", async (req, res) => {
+  try {
+    const { invoices } = req.body;
+    const invoiceData = Array.isArray(invoices) ? invoices : [];
+
+    if (!invoiceData.length) {
+      return res.status(400).json({
+        success: false,
+        message: "No invoices provided",
+      });
+    }
+
+    // Check stock and get detailed issues
+    const stockCheckResult = await checkStockWithDetailedReport(invoiceData);
+
+    if (!stockCheckResult.success) {
+      return res.status(400).json({
+        success: false,
+        message: stockCheckResult.message,
+      });
+    }
+
+    const stockIssues = stockCheckResult.stockIssues || [];
+    const productStockDetails = stockCheckResult.productStockDetails || [];
+
+    // Create Excel workbook
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Stock Issues Report");
+
+    // Add title
+    worksheet.mergeCells("A1:F1");
+    const titleCell = worksheet.getCell("A1");
+    titleCell.value = "STOCK ISSUES REPORT";
+    titleCell.font = { bold: true, size: 16 };
+    titleCell.alignment = { horizontal: "center" };
+
+    // Add timestamp
+    worksheet.mergeCells("A2:F2");
+    const timestampCell = worksheet.getCell("A2");
+    timestampCell.value = `Generated on: ${new Date().toLocaleString()}`;
+    timestampCell.font = { italic: true };
+    timestampCell.alignment = { horizontal: "center" };
+
+    // Add summary
+    worksheet.mergeCells("A3:F3");
+    const summaryCell = worksheet.getCell("A3");
+    summaryCell.value = `Summary: ${stockIssues.length} products with stock issues affecting ${invoiceData.length} invoices`;
+    summaryCell.font = { bold: true };
+
+    // Define columns
+    worksheet.columns = [
+      { header: "S.No", key: "sno", width: 8 },
+      { header: "Product Name", key: "productName", width: 35 },
+      { header: "Required Quantity", key: "requiredQty", width: 18 },
+      { header: "Available Stock", key: "availableStock", width: 18 },
+      { header: "Shortage", key: "shortage", width: 15 },
+      { header: "Status", key: "status", width: 20 },
+      { header: "Issue Type", key: "issueType", width: 40 },
+      { header: "Required By Invoices", key: "invoiceCount", width: 20 },
+      { header: "Affected Invoices", key: "invoices", width: 40 },
+    ];
+
+    // Add headers
+    const headerRow = worksheet.getRow(5);
+    headerRow.values = [
+      "S.No",
+      "Product Name",
+      "Required Quantity",
+      "Available Stock",
+      "Shortage",
+      "Status",
+      "Issue Type",
+      "Required By Invoices",
+      "Affected Invoices",
+    ];
+    headerRow.font = { bold: true };
+    headerRow.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FFE0E0E0" },
+    };
+
+    // Add data rows
+    let rowNumber = 6;
+    let totalRequired = 0;
+    let totalAvailable = 0;
+    let totalShortage = 0;
+
+    stockIssues.forEach((issue, index) => {
+      const row = worksheet.getRow(rowNumber);
+
+      const invoiceList = issue.requiredByInvoices
+        ?.slice(0, 5)
+        .map((inv) => `${inv.invoiceNumber} (${inv.requiredQty})`)
+        .join(", ");
+
+      const moreInvoices =
+        issue.requiredByInvoices?.length > 5
+          ? `... and ${issue.requiredByInvoices.length - 5} more`
+          : "";
+
+      row.values = [
+        index + 1,
+        issue.productName,
+        issue.totalRequired,
+        issue.availableStock,
+        issue.insufficientQty,
+        !issue.stockCheckSuccess ? "Product Not Found" : "Insufficient Stock",
+        issue.message || "Error checking stock",
+        issue.requiredByInvoices?.length || 0,
+        `${invoiceList} ${moreInvoices}`,
+      ];
+
+      // Style based on issue severity
+      if (!issue.stockCheckSuccess) {
+        row.getCell(6).fill = {
+          // Status cell
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFFFCCCC" },
+        };
+      } else if (issue.insufficient) {
+        row.getCell(5).fill = {
+          // Shortage cell
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFFFEECC" },
+        };
+      }
+
+      totalRequired += issue.totalRequired || 0;
+      totalAvailable += issue.availableStock || 0;
+      totalShortage += issue.insufficientQty || 0;
+
+      rowNumber++;
+    });
+
+    // Add summary row
+    rowNumber += 2;
+    const summaryRow = worksheet.getRow(rowNumber);
+    summaryRow.values = [
+      "",
+      "TOTAL SUMMARY",
+      totalRequired,
+      totalAvailable,
+      totalShortage,
+      "",
+      `${stockIssues.length} Products`,
+      "",
+      "",
+    ];
+    summaryRow.font = { bold: true };
+    summaryRow.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FFCCE5FF" },
+    };
+
+    // Add recommendation row
+    rowNumber++;
+    const recommendationRow = worksheet.getRow(rowNumber);
+    worksheet.mergeCells(`A${rowNumber}:I${rowNumber}`);
+    recommendationRow.getCell(1).value =
+      "RECOMMENDATION: Please update inventory for the above products before proceeding with import.";
+    recommendationRow.getCell(1).font = {
+      bold: true,
+      color: { argb: "FF990000" },
+    };
+    recommendationRow.getCell(1).fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FFFFF0F0" },
+    };
+
+    // Set response headers for Excel download
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="stock_issues_report_${Date.now()}.xlsx"`,
+    );
+
+    // Write the workbook to response
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error("Error generating stock issues report:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to generate stock issues report",
+      error: error.message,
+    });
+  }
+});
+
+// Also add a simpler CSV endpoint
+router.post("/sales/stock-issues-csv", async (req, res) => {
+  try {
+    const { invoices } = req.body;
+    const invoiceData = Array.isArray(invoices) ? invoices : [];
+
+    if (!invoiceData.length) {
+      return res.status(400).json({
+        success: false,
+        message: "No invoices provided",
+      });
+    }
+
+    const stockCheckResult = await checkStockWithDetailedReport(invoiceData);
+    const stockIssues = stockCheckResult.stockIssues || [];
+
+    // Create CSV content
+    const headers = [
+      "Product Name",
+      "Required Quantity",
+      "Available Stock",
+      "Shortage",
+      "Status",
+      "Issue Type",
+      "Required By Invoices",
+      "Invoice List",
+    ];
+
+    const csvRows = stockIssues.map((issue) => [
+      `"${issue.productName}"`,
+      issue.totalRequired,
+      issue.availableStock,
+      issue.insufficientQty,
+      `"${!issue.stockCheckSuccess ? "Product Not Found" : "Insufficient Stock"}"`,
+      `"${issue.message || "Error checking stock"}"`,
+      issue.requiredByInvoices?.length || 0,
+      `"${issue.requiredByInvoices?.map((inv) => inv.invoiceNumber).join(", ") || ""}"`,
+    ]);
+
+    // Add summary row
+    const totalRequired = stockIssues.reduce(
+      (sum, issue) => sum + (issue.totalRequired || 0),
+      0,
+    );
+    const totalAvailable = stockIssues.reduce(
+      (sum, issue) => sum + (issue.availableStock || 0),
+      0,
+    );
+    const totalShortage = stockIssues.reduce(
+      (sum, issue) => sum + (issue.insufficientQty || 0),
+      0,
+    );
+
+    csvRows.push(["---", "---", "---", "---", "---", "---", "---", "---"]);
+    csvRows.push([
+      "TOTAL SUMMARY",
+      totalRequired,
+      totalAvailable,
+      totalShortage,
+      `${stockIssues.length} Products`,
+      "",
+      "",
+      "",
+    ]);
+
+    const csvContent = [
+      headers.join(","),
+      ...csvRows.map((row) => row.join(",")),
+    ].join("\n");
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="stock_issues_${Date.now()}.csv"`,
+    );
+    res.send(csvContent);
+  } catch (error) {
+    console.error("Error generating CSV report:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to generate CSV report",
+      error: error.message,
+    });
+  }
+});
+
 // Get stock count
 router.get("/reports/inhand/count", async (req, res) => {
   try {
@@ -7251,7 +7981,6 @@ router.post("/sales/check-stock", async (req, res) => {
 
     let totalRequiredQty = requiredQty;
 
-
     if (totalRequiredQty === undefined || totalRequiredQty === null) {
       totalRequiredQty = fixPrecision((salesQty || 0) + (bonusQty || 0));
     }
@@ -7261,7 +7990,6 @@ router.post("/sales/check-stock", async (req, res) => {
       totalRequiredQty === undefined ||
       totalRequiredQty === null
     ) {
-
       stockLogger.warn?.("Invalid stock check request", {
         productName,
         requiredQty,
