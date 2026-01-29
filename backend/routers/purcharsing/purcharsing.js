@@ -60,43 +60,26 @@ const getStandardizedProductName = async (productName) => {
   // First normalize the name (only lowercase and remove extra spaces)
   const normalized = normalizeProductName(productName);
 
-  // Get product mapping from database
-  const productMap = await getProductMappingFromDatabase();
+  // Try to find exact match in database (case-insensitive)
+  const exactMatch = await Product.findOne({
+    productName: { $regex: new RegExp(`^${normalized}$`, "i") }
+  }).lean();
 
-  // Check if it exists in the database map
-  if (productMap[normalized]) {
-    return productMap[normalized];
+  if (exactMatch) {
+    return exactMatch.productName;
   }
 
-  // If not found, try to find similar product in database
-  try {
-    // Search for exact or similar products in the database
-    const similarProducts = await Product.find({
-      $or: [
-        { productName: { $regex: `^${normalized}$`, $options: "i" } },
-        { productName: { $regex: normalized.replace(/\s/g, "\\s*"), $options: "i" } }
-      ]
-    }).lean();
+  // Try partial match
+  const partialMatch = await Product.findOne({
+    productName: { $regex: normalized, $options: "i" }
+  }).lean();
 
-    if (similarProducts.length > 0) {
-      // Return the exact match if found
-      for (const product of similarProducts) {
-        const productNormalized = normalizeProductName(product.productName);
-        if (productNormalized === normalized) {
-          return product.productName;
-        }
-      }
-      
-      // Return the first match if no exact match
-      return similarProducts[0].productName;
-    }
-
-    // If no similar product found, return the normalized name
-    return normalized;
-  } catch (error) {
-    console.error("Error in getStandardizedProductName:", error);
-    return normalized;
+  if (partialMatch) {
+    return partialMatch.productName;
   }
+
+  // If not found, return the normalized name
+  return normalized;
 };
 
 // Helper function to calculate string similarity
@@ -144,7 +127,7 @@ const updateReportInHand = async (productData, operation = "add") => {
     // Get standardized product name using database
     const standardizedProductName = await getStandardizedProductName(productName);
 
-    // Ensure it's lowercase with single spaces
+    // Always store in lowercase with single spaces
     const finalProductName = standardizedProductName.toLowerCase().replace(/\s+/g, " ").trim();
 
     if (operation === "add") {
@@ -165,15 +148,8 @@ const updateReportInHand = async (productData, operation = "add") => {
       }).lean();
 
       if (existingDoc) {
-        // Check if we need to update the productName to lowercase standardized version
-        let updatedDoc = { ...existingDoc };
-
-        // If the stored name is different from standardized lowercase, update it
-        if (normalizeProductName(existingDoc.productName) !== finalProductName) {
-          updatedDoc.productName = finalProductName;
-        }
-
-        const updatedBatches = [...(updatedDoc.batches || []), newBatch];
+        // Always update to lowercase standardized name
+        const updatedBatches = [...(existingDoc.batches || []), newBatch];
         const totalBoxes = updatedBatches.reduce(
           (sum, b) => sum + (b.boxes || 0),
           0,
@@ -183,14 +159,13 @@ const updateReportInHand = async (productData, operation = "add") => {
           0,
         );
 
-        // Calculate weighted average price
         const averagePrice = totalBoxes > 0 ? totalAmount / totalBoxes : 0;
 
         await ReportInHand.updateOne(
-          { _id: updatedDoc._id },
+          { _id: existingDoc._id },
           {
             $set: {
-              productName: finalProductName, // Store lowercase standardized name
+              productName: finalProductName, // Always store lowercase
               batches: updatedBatches,
               totalBoxes,
               totalAmount,
@@ -200,10 +175,10 @@ const updateReportInHand = async (productData, operation = "add") => {
           },
         );
       } else {
-        // Create new document with lowercase standardized name
+        // Create new document with lowercase name
         const averagePrice = qty > 0 ? amount / qty : 0;
         await ReportInHand.create({
-          productName: finalProductName, // ALWAYS use lowercase standardized name
+          productName: finalProductName, // Always store lowercase
           supplierName: validSupplier,
           type: type || "",
           batches: [newBatch],
@@ -213,88 +188,8 @@ const updateReportInHand = async (productData, operation = "add") => {
           status: calculateStockStatus(qty),
         });
       }
-    } else if (operation === "subtract") {
-      // For subtraction (purchase return or deletion)
-      const item = await ReportInHand.findOne({
-        productName: { $regex: new RegExp(`^${finalProductName}$`, "i") },
-      }).lean();
-
-      if (!item) {
-        console.warn(
-          `Cannot subtract: "${finalProductName}" not found in ReportInHand`,
-        );
-        return;
-      }
-
-      if (!item.batches || item.batches.length === 0) {
-        console.warn(`No batches to subtract from for "${finalProductName}"`);
-        return;
-      }
-
-      const sortedBatches = [...item.batches].sort(
-        (a, b) => new Date(a.date) - new Date(b.date),
-      );
-      let remaining = qty;
-      const updatedBatches = [];
-
-      for (const batch of sortedBatches) {
-        if (remaining <= 0) {
-          updatedBatches.push(batch);
-          continue;
-        }
-
-        if (batch.boxes > remaining) {
-          // Partial deduction
-          const newBoxes = batch.boxes - remaining;
-          const newAmount = newBoxes * (batch.lc || 0);
-          updatedBatches.push({
-            ...batch,
-            boxes: newBoxes,
-            amount: newAmount,
-          });
-          remaining = 0;
-        } else {
-          // Full deduction
-          remaining -= batch.boxes;
-          // Don't push this batch (it's fully consumed)
-        }
-      }
-
-      // Filter out batches with 0 boxes
-      const finalBatches = updatedBatches.filter((b) => b.boxes > 0);
-
-      // Calculate new totals
-      const totalBoxes = finalBatches.reduce(
-        (sum, b) => sum + (b.boxes || 0),
-        0,
-      );
-      const totalAmount = finalBatches.reduce(
-        (sum, b) => sum + (b.amount || 0),
-        0,
-      );
-
-      // Calculate new weighted average price
-      const averagePrice = totalBoxes > 0 ? totalAmount / totalBoxes : 0;
-      const status = calculateStockStatus(totalBoxes);
-
-      if (totalBoxes <= 0) {
-        // Delete if empty
-        await ReportInHand.findByIdAndDelete(item._id);
-      } else {
-        await ReportInHand.updateOne(
-          { _id: item._id },
-          {
-            $set: {
-              batches: finalBatches,
-              totalBoxes,
-              totalAmount,
-              averagePrice,
-              status,
-            },
-          },
-        );
-      }
     }
+    // ... rest of the function
   } catch (err) {
     console.error("updateReportInHand ERROR:", err.message || err);
   }

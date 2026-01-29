@@ -72,8 +72,6 @@ const ImportSalesModal = ({
   const [failedInvoices, setFailedInvoices] = useState([]);
   const [showFailedInvoices, setShowFailedInvoices] = useState(false);
   const [sessionId, setSessionId] = useState(null);
-
-  // Stock validation states
   const [showStockValidation, setShowStockValidation] = useState(false);
   const [stockValidationResult, setStockValidationResult] = useState(null);
   const [isValidatingStock, setIsValidatingStock] = useState(false);
@@ -185,7 +183,7 @@ const ImportSalesModal = ({
         const str = value.trim();
 
         // Remove any time portion
-        const dateStr = str.split(' ')[0].split('T')[0];
+        const dateStr = str.split(" ")[0].split("T")[0];
 
         // Try direct parsing first
         const parsed = new Date(dateStr);
@@ -246,8 +244,18 @@ const ImportSalesModal = ({
               // DD-MMM-YY
               day = parseInt(match[1]);
               const monthNames = {
-                jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
-                jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+                jan: 0,
+                feb: 1,
+                mar: 2,
+                apr: 3,
+                may: 4,
+                jun: 5,
+                jul: 6,
+                aug: 7,
+                sep: 8,
+                oct: 9,
+                nov: 10,
+                dec: 11,
               };
               const monthAbbr = match[2].toLowerCase().substring(0, 3);
               month = monthNames[monthAbbr];
@@ -274,6 +282,385 @@ const ImportSalesModal = ({
     }
   };
 
+  const StockValidationModal = () => {
+    if (!showStockValidation || !stockValidationResult) return null;
+
+    const { stockIssues = [], summary = {} } = stockValidationResult;
+
+    // Download stock issues as Excel
+    const downloadStockIssuesExcel = () => {
+      try {
+        const excelData = stockIssues.map((issue, index) => ({
+          "S.No": index + 1,
+          "Product Name": issue.productName,
+          "Required Quantity": issue.totalRequired,
+          "Available Stock": issue.availableStock,
+          Shortage: issue.insufficientQty,
+          Status: !issue.stockCheckSuccess
+            ? "Product Not Found"
+            : "Insufficient Stock",
+          "Issue Type":
+            issue.message ||
+            "Error checking stock: Request failed with status code 404",
+          "Required By Invoices": issue.requiredByInvoices?.length || 0,
+          "Affected Invoices":
+            issue.requiredByInvoices
+              ?.map((inv) => `${inv.invoiceNumber} (Qty: ${inv.requiredQty})`)
+              .join(", ") || "N/A",
+        }));
+
+        // Add summary
+        excelData.push({});
+        excelData.push({
+          "Product Name": "SUMMARY",
+          "Required Quantity": summary.totalRequired || 0,
+          "Available Stock": summary.totalAvailable || 0,
+          Shortage: stockIssues.reduce(
+            (sum, issue) => sum + issue.insufficientQty,
+            0,
+          ),
+          Status: "Total",
+          "Issue Type": `${stockIssues.length} products with issues`,
+        });
+
+        const ws = XLSX.utils.json_to_sheet(excelData);
+        const range = XLSX.utils.decode_range(ws["!ref"]);
+        const summaryRow = range.e.r;
+
+        // Style summary row
+        for (let C = range.s.c; C <= range.e.c; C++) {
+          const cellAddress = XLSX.utils.encode_cell({ r: summaryRow, c: C });
+          if (ws[cellAddress]) {
+            if (!ws[cellAddress].s) ws[cellAddress].s = {};
+            ws[cellAddress].s.font = { bold: true };
+            if (C === 0) {
+              ws[cellAddress].s.fill = { fgColor: { rgb: "FFCCCC" } };
+            }
+          }
+        }
+
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Stock Issues");
+        const fileName = `stock_issues_${new Date().toISOString().slice(0, 10)}_${Date.now()}.xlsx`;
+        XLSX.writeFile(wb, fileName);
+
+        showToast("success", "Stock issues report downloaded successfully");
+      } catch (error) {
+        console.error("Error downloading stock issues:", error);
+        showToast("error", "Failed to download stock issues report");
+      }
+    };
+
+    // Download CSV
+    const downloadStockIssuesCSV = () => {
+      try {
+        const headers = [
+          "Product Name",
+          "Required Quantity",
+          "Available Stock",
+          "Shortage",
+          "Status",
+          "Issue Type",
+          "Required By Invoices",
+          "Affected Invoices",
+        ];
+
+        const csvRows = stockIssues.map((issue) => [
+          `"${issue.productName}"`,
+          issue.totalRequired,
+          issue.availableStock,
+          issue.insufficientQty,
+          `"${!issue.stockCheckSuccess ? "Product Not Found" : "Insufficient Stock"}"`,
+          `"${issue.message || "Error checking stock: Request failed with status code 404"}"`,
+          issue.requiredByInvoices?.length || 0,
+          `"${issue.requiredByInvoices?.map((inv) => `${inv.invoiceNumber}`).join(", ") || "N/A"}"`,
+        ]);
+
+        // Add summary
+        csvRows.push([]);
+        csvRows.push([
+          '"SUMMARY"',
+          summary.totalRequired || 0,
+          summary.totalAvailable || 0,
+          stockIssues.reduce((sum, issue) => sum + issue.insufficientQty, 0),
+          '"Total"',
+          `"${stockIssues.length} products with issues"`,
+          "",
+          "",
+        ]);
+
+        const csvContent = [
+          headers.join(","),
+          ...csvRows.map((row) => row.join(",")),
+        ].join("\n");
+
+        const blob = new Blob([csvContent], {
+          type: "text/csv;charset=utf-8;",
+        });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `stock_issues_${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+
+        showToast("success", "Stock issues CSV downloaded successfully");
+      } catch (error) {
+        console.error("Error downloading CSV:", error);
+        showToast("error", "Failed to download stock issues CSV");
+      }
+    };
+
+    // Fixed: Handle proceed with import
+    const handleProceedWithImport = async () => {
+      setShowStockValidation(false);
+
+      const confirmProceed = await confirmDialog({
+        title: "Proceed with Import",
+        text: `${stockValidationResult.stockIssues.length} products have stock issues. The backend will create stock adjustments automatically. Do you want to proceed?`,
+        icon: "info",
+        confirmButtonText: "Yes, Proceed",
+        cancelButtonText: "Cancel",
+      });
+
+      if (confirmProceed.isConfirmed) {
+        // IMPORTANT: Call the import function here
+        await handleProductImport(parsedData, true);
+      }
+    };
+
+    // Fixed: Handle cancel stock validation
+    const handleCancelStockValidation = () => {
+      setShowStockValidation(false);
+      setStockValidationResult(null);
+      // Reset any import progress states if needed
+      setIsValidatingStock(false);
+      setImportStep("");
+    };
+
+    return ReactDOM.createPortal(
+      <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-[110]">
+        <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
+          <div className="mb-6 bg-red-50 border border-red-200 rounded-xl p-5">
+            <div className="flex justify-between items-center mb-3">
+              <h2 className="text-xl font-bold text-red-800 flex items-center gap-2">
+                <AlertCircle size={24} />
+                Stock Validation Issues Found
+              </h2>
+              <div className="flex items-center gap-2">
+                <span className="px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
+                  {stockIssues.length} Stock Issues
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    onClick={downloadStockIssuesCSV}
+                    className="px-3 py-1 bg-blue-500 text-white text-sm rounded-lg hover:bg-blue-600 cursor-pointer flex items-center gap-1"
+                    title="Download as CSV"
+                  >
+                    <Download size={14} /> CSV
+                  </button>
+                  <button
+                    onClick={downloadStockIssuesExcel}
+                    className="px-3 py-1 bg-green-500 text-white text-sm rounded-lg hover:bg-green-600 cursor-pointer flex items-center gap-1"
+                    title="Download as Excel"
+                  >
+                    <Download size={14} /> Excel
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+              <div className="text-center p-3 bg-white rounded-lg shadow border">
+                <div className="text-sm text-gray-600">Total Required</div>
+                <div className="text-2xl font-bold text-red-800">
+                  {summary.totalRequired || 0}
+                </div>
+              </div>
+              <div className="text-center p-3 bg-white rounded-lg shadow border">
+                <div className="text-sm text-gray-600">Total Available</div>
+                <div className="text-2xl font-bold text-green-800">
+                  {summary.totalAvailable || 0}
+                </div>
+              </div>
+              <div className="text-center p-3 bg-white rounded-lg shadow border">
+                <div className="text-sm text-gray-600">Total Shortage</div>
+                <div className="text-2xl font-bold text-red-800">
+                  {stockIssues.reduce(
+                    (sum, issue) => sum + issue.insufficientQty,
+                    0,
+                  )}
+                </div>
+              </div>
+              <div className="text-center p-3 bg-white rounded-lg shadow border">
+                <div className="text-sm text-gray-600">
+                  Products with Issues
+                </div>
+                <div className="text-2xl font-bold text-orange-800">
+                  {stockIssues.length}
+                </div>
+              </div>
+            </div>
+
+            <div className="p-3 bg-yellow-100 border border-yellow-300 rounded-lg">
+              <p className="text-sm text-yellow-800 font-medium">
+                ⚠️ <strong>Stock shortages detected.</strong>{" "}
+                {stockIssues.length} products have insufficient stock or are not
+                found in inventory.
+                <br />
+                <br />
+                <strong>You can:</strong>
+                <br />
+                1. Download the stock issues report (Excel/CSV) to see details
+                <br />
+                2. Update your inventory in the system
+                <br />
+                3. Submit to proceed (backend will create adjustments)
+              </p>
+            </div>
+          </div>
+
+          <div className="mb-6">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="font-medium text-gray-700">
+                Stock Issues Details ({stockIssues.length} products)
+              </h3>
+              <div className="text-sm text-gray-500">
+                Click download buttons above to get full report
+              </div>
+            </div>
+
+            <div className="overflow-x-auto border border-gray-200 rounded-lg max-h-[400px] overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 sticky top-0">
+                  <tr>
+                    <th className="p-3 text-left">Product Name</th>
+                    <th className="p-3 text-left">Required Quantity</th>
+                    <th className="p-3 text-left">Available Stock</th>
+                    <th className="p-3 text-left">Shortage</th>
+                    <th className="p-3 text-left">Status</th>
+                    <th className="p-3 text-left">Issue Type</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stockIssues.map((issue, idx) => (
+                    <tr
+                      key={idx}
+                      className={`hover:bg-red-50 border-b ${
+                        !issue.stockCheckSuccess ? "bg-red-50" : ""
+                      }`}
+                    >
+                      <td className="p-3 font-medium">
+                        <div className="text-gray-700">{issue.productName}</div>
+                        <div className="text-xs text-gray-500">
+                          Required by {issue.requiredByInvoices?.length || 0}{" "}
+                          invoices
+                        </div>
+                      </td>
+                      <td className="p-3 font-bold text-red-700">
+                        {issue.totalRequired}
+                      </td>
+                      <td className="p-3 font-medium text-green-700">
+                        {issue.availableStock}
+                      </td>
+                      <td className="p-3 font-bold text-red-800">
+                        {issue.insufficientQty}
+                      </td>
+                      <td className="p-3">
+                        <span
+                          className={`px-2 py-1 text-xs rounded ${
+                            !issue.stockCheckSuccess
+                              ? "bg-red-100 text-red-800"
+                              : issue.insufficient
+                                ? "bg-orange-100 text-orange-800"
+                                : "bg-gray-100 text-gray-800"
+                          }`}
+                        >
+                          {!issue.stockCheckSuccess
+                            ? "Product Not Found"
+                            : issue.insufficient
+                              ? "Insufficient Stock"
+                              : "Warning"}
+                        </span>
+                      </td>
+                      <td className="p-3 text-xs text-gray-600">
+                        {issue.message}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Summary Section */}
+            <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+              <h4 className="font-medium text-gray-700 mb-2">Summary</h4>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="text-center">
+                  <div className="text-sm text-gray-600">Total Products</div>
+                  <div className="text-lg font-bold text-gray-800">
+                    {stockIssues.length}
+                  </div>
+                </div>
+                <div className="text-center">
+                  <div className="text-sm text-gray-600">Total Required</div>
+                  <div className="text-lg font-bold text-red-700">
+                    {summary.totalRequired || 0}
+                  </div>
+                </div>
+                <div className="text-center">
+                  <div className="text-sm text-gray-600">Total Available</div>
+                  <div className="text-lg font-bold text-green-700">
+                    {summary.totalAvailable || 0}
+                  </div>
+                </div>
+                <div className="text-center">
+                  <div className="text-sm text-gray-600">Total Shortage</div>
+                  <div className="text-lg font-bold text-red-800">
+                    {stockIssues.reduce(
+                      (sum, issue) => sum + issue.insufficientQty,
+                      0,
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-between items-center pt-4 border-t border-gray-300">
+            <div className="text-sm text-gray-600">
+              {summary.totalInvoices || 0} invoices affected by stock issues
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={handleCancelStockValidation}
+                className="px-5 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg font-medium cursor-pointer"
+              >
+                Cancel Import
+              </button>
+              <button
+                onClick={handleCancelStockValidation}
+                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium cursor-pointer"
+              >
+                Go Back
+              </button>
+              <button
+                onClick={handleProceedWithImport}
+                className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium flex items-center gap-2 cursor-pointer"
+              >
+                <CheckCircle size={16} />
+                Submit
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>,
+      document.body,
+    );
+  };
+
   // Parse Excel quantity function - IMPROVED
   const parseExcelQuantity = (value) => {
     if (value === null || value === undefined || value === "") return 0;
@@ -287,9 +674,9 @@ const ImportSalesModal = ({
       // Remove non-numeric characters except decimal point and minus sign
       const cleaned = str.replace(/,/g, "").replace(/[^\d.-]/g, "");
       const num = parseFloat(cleaned);
-      
+
       if (isNaN(num) || !isFinite(num)) return 0;
-      
+
       return Math.max(0, num);
     } catch (error) {
       console.error("Error parsing quantity:", value, error);
@@ -310,12 +697,12 @@ const ImportSalesModal = ({
       const response = await axios.post(
         `${backendUrl}/api/sales/check-specific-product`,
         { productName },
-        { timeout: 5000 }
+        { timeout: 5000 },
       );
 
       if (response.data?.success !== false) {
         const stockData = response.data;
-        const availableStock = 
+        const availableStock =
           stockData.availableStock ||
           stockData.totalStockCalculated ||
           stockData.totalStockField ||
@@ -330,9 +717,10 @@ const ImportSalesModal = ({
           insufficient: availableStock < requiredQty,
           insufficientQty: Math.max(0, requiredQty - availableStock),
           calculationMethod: "backend_api",
-          message: availableStock < requiredQty
-            ? `Insufficient stock: Available ${availableStock}, Required ${requiredQty}`
-            : `Stock available: ${availableStock}`,
+          message:
+            availableStock < requiredQty
+              ? `Insufficient stock: Available ${availableStock}, Required ${requiredQty}`
+              : `Stock available: ${availableStock}`,
           rawResponse: stockData,
         };
       }
@@ -418,8 +806,17 @@ const ImportSalesModal = ({
       // Find header row
       let headerIdx = -1;
       const headerKeywords = [
-        "invoice", "customer", "mr", "product", "sales", "qty", "quantity",
-        "amount", "price", "date", "status"
+        "invoice",
+        "customer",
+        "mr",
+        "product",
+        "sales",
+        "qty",
+        "quantity",
+        "amount",
+        "price",
+        "date",
+        "status",
       ];
 
       for (let i = 0; i < Math.min(rows.length, 20); i++) {
@@ -431,7 +828,7 @@ const ImportSalesModal = ({
             .toLowerCase()
             .trim();
 
-          if (headerKeywords.some(keyword => cellValue.includes(keyword))) {
+          if (headerKeywords.some((keyword) => cellValue.includes(keyword))) {
             headerMatchCount++;
           }
         }
@@ -466,46 +863,84 @@ const ImportSalesModal = ({
 
       const columnIndices = {
         invoiceNumber: getColIndex([
-          "Invoice #", "Invoice", "InvoiceNumber", "Invoice No", "INVOICE",
+          "Invoice #",
+          "Invoice",
+          "InvoiceNumber",
+          "Invoice No",
+          "INVOICE",
         ]),
         invoiceDate: getColIndex([
-          "Invoice Date", "Date", "INVOICE DATE", "Inv Date",
+          "Invoice Date",
+          "Date",
+          "INVOICE DATE",
+          "Inv Date",
         ]),
         recordingDate: getColIndex([
-          "Recording Date", "Record Date", "Entry Date",
+          "Recording Date",
+          "Record Date",
+          "Entry Date",
         ]),
         mrName: getColIndex([
-          "MR Name", "MR", "SalesPerson", "Sales Person", "SALESMAN",
+          "MR Name",
+          "MR",
+          "SalesPerson",
+          "Sales Person",
+          "SALESMAN",
         ]),
         customerCode: getColIndex([
-          "Customer Code", "Code", "CUST CODE", "CustomerCode",
+          "Customer Code",
+          "Code",
+          "CUST CODE",
+          "CustomerCode",
         ]),
         customerName: getColIndex([
-          "Customer Name", "Customer", "CUSTOMER NAME", "Party Name",
+          "Customer Name",
+          "Customer",
+          "CUSTOMER NAME",
+          "Party Name",
         ]),
         productName: getColIndex([
-          "Product Name", "Product", "PRODUCT NAME", "Item",
+          "Product Name",
+          "Product",
+          "PRODUCT NAME",
+          "Item",
         ]),
         salesQty: getColIndex([
-          "Sales Qty", "Quantity", "SalesQuantity", "Qty", "QTY",
+          "Sales Qty",
+          "Quantity",
+          "SalesQuantity",
+          "Qty",
+          "QTY",
         ]),
         bonusQty: getColIndex([
-          "Bonus Qty", "Bonus", "BonusQuantity", "Bonus Qty.",
+          "Bonus Qty",
+          "Bonus",
+          "BonusQuantity",
+          "Bonus Qty.",
         ]),
         sellingPrice: getColIndex([
-          "Selling Price", "Price", "Unit Price", "Rate", "PRICE",
+          "Selling Price",
+          "Price",
+          "Unit Price",
+          "Rate",
+          "PRICE",
         ]),
         amount: getColIndex(["Amount", "AMOUNT", "Total Amount"]),
         discount: getColIndex(["Discount", "Disc", "DISCOUNT"]),
         netAmount: getColIndex(["Net Amount", "Net", "NET AMOUNT"]),
         dueDate: getColIndex(["Due Date", "DueDate", "DUE DATE"]),
         deliveryDate: getColIndex([
-          "Delivery Date", "DeliveryDate", "DELIVERY DATE",
+          "Delivery Date",
+          "DeliveryDate",
+          "DELIVERY DATE",
         ]),
         creditDays: getColIndex(["Credit Days", "Credit", "CREDIT DAYS"]),
         paidAmount: getColIndex(["Paid Amount", "Paid", "PAID AMOUNT"]),
         paymentStatus: getColIndex([
-          "Payment Status", "Status", "Payment", "PAYMENT STATUS",
+          "Payment Status",
+          "Status",
+          "Payment",
+          "PAYMENT STATUS",
         ]),
         remark: getColIndex(["Remarks", "Remark", "Note", "REMARKS"]),
       };
@@ -1052,19 +1487,24 @@ const ImportSalesModal = ({
     }
   };
 
-  // Start import with validation
-  const handleImportData = async () => {
-    if (parsedData.length === 0) {
-      showToast("error", "No data to import");
-      return;
-    }
+// Updated handleImportData function
+const handleImportData = async () => {
+  if (parsedData.length === 0) {
+    showToast("error", "No data to import");
+    return;
+  }
 
-    // Validate stock first
-    const canProceed = await validateStockBeforeImport(parsedData);
-    if (canProceed) {
-      await handleProductImport(parsedData, false);
-    }
-  };
+  // Validate stock first
+  const canProceed = await validateStockBeforeImport(parsedData);
+  
+  // If there are stock issues, show the modal and wait for user decision
+  // The import will be triggered from the modal's submit button
+  if (canProceed && stockValidationResult?.stockIssues?.length === 0) {
+    // No stock issues, proceed with import
+    await handleProductImport(parsedData, false);
+  }
+  // If there are stock issues, the modal will handle the import
+};
 
   // Handle proceed despite stock issues
   const handleProceedAnyway = async () => {
@@ -1288,12 +1728,12 @@ const ImportSalesModal = ({
                               inv.type === "validation"
                                 ? "bg-yellow-100 text-yellow-800"
                                 : inv.type === "import_error"
-                                ? "bg-red-100 text-red-800"
-                                : inv.type === "duplicate_error"
-                                ? "bg-orange-100 text-orange-800"
-                                : inv.type === "processing_error"
-                                ? "bg-red-100 text-red-800"
-                                : "bg-gray-100 text-gray-800"
+                                  ? "bg-red-100 text-red-800"
+                                  : inv.type === "duplicate_error"
+                                    ? "bg-orange-100 text-orange-800"
+                                    : inv.type === "processing_error"
+                                      ? "bg-red-100 text-red-800"
+                                      : "bg-gray-100 text-gray-800"
                             }`}
                           >
                             {inv.type || "error"}
@@ -1394,369 +1834,6 @@ const ImportSalesModal = ({
     );
   };
 
-  // Stock Validation Modal Component
-  const StockValidationModal = () => {
-    if (!showStockValidation || !stockValidationResult) return null;
-
-    const { stockIssues = [], summary = {} } = stockValidationResult;
-
-    // Download stock issues as Excel
-    const downloadStockIssuesExcel = () => {
-      try {
-        const excelData = stockIssues.map((issue, index) => ({
-          "S.No": index + 1,
-          "Product Name": issue.productName,
-          "Required Quantity": issue.totalRequired,
-          "Available Stock": issue.availableStock,
-          Shortage: issue.insufficientQty,
-          Status: !issue.stockCheckSuccess
-            ? "Product Not Found"
-            : "Insufficient Stock",
-          "Issue Type":
-            issue.message ||
-            "Error checking stock: Request failed with status code 404",
-          "Required By Invoices": issue.requiredByInvoices?.length || 0,
-          "Affected Invoices":
-            issue.requiredByInvoices
-              ?.map((inv) => `${inv.invoiceNumber} (Qty: ${inv.requiredQty})`)
-              .join(", ") || "N/A",
-        }));
-
-        // Add summary
-        excelData.push({});
-        excelData.push({
-          "Product Name": "SUMMARY",
-          "Required Quantity": summary.totalRequired || 0,
-          "Available Stock": summary.totalAvailable || 0,
-          Shortage: stockIssues.reduce(
-            (sum, issue) => sum + issue.insufficientQty,
-            0,
-          ),
-          Status: "Total",
-          "Issue Type": `${stockIssues.length} products with issues`,
-        });
-
-        const ws = XLSX.utils.json_to_sheet(excelData);
-        const range = XLSX.utils.decode_range(ws["!ref"]);
-        const summaryRow = range.e.r;
-
-        // Style summary row
-        for (let C = range.s.c; C <= range.e.c; C++) {
-          const cellAddress = XLSX.utils.encode_cell({ r: summaryRow, c: C });
-          if (ws[cellAddress]) {
-            if (!ws[cellAddress].s) ws[cellAddress].s = {};
-            ws[cellAddress].s.font = { bold: true };
-            if (C === 0) {
-              ws[cellAddress].s.fill = { fgColor: { rgb: "FFCCCC" } };
-            }
-          }
-        }
-
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Stock Issues");
-        const fileName = `stock_issues_${new Date().toISOString().slice(0, 10)}_${Date.now()}.xlsx`;
-        XLSX.writeFile(wb, fileName);
-
-        showToast("success", "Stock issues report downloaded successfully");
-      } catch (error) {
-        console.error("Error downloading stock issues:", error);
-        showToast("error", "Failed to download stock issues report");
-      }
-    };
-
-    // Download CSV
-    const downloadStockIssuesCSV = () => {
-      try {
-        const headers = [
-          "Product Name",
-          "Required Quantity",
-          "Available Stock",
-          "Shortage",
-          "Status",
-          "Issue Type",
-          "Required By Invoices",
-          "Affected Invoices",
-        ];
-
-        const csvRows = stockIssues.map((issue) => [
-          `"${issue.productName}"`,
-          issue.totalRequired,
-          issue.availableStock,
-          issue.insufficientQty,
-          `"${!issue.stockCheckSuccess ? "Product Not Found" : "Insufficient Stock"}"`,
-          `"${issue.message || "Error checking stock: Request failed with status code 404"}"`,
-          issue.requiredByInvoices?.length || 0,
-          `"${issue.requiredByInvoices?.map((inv) => `${inv.invoiceNumber}`).join(", ") || "N/A"}"`,
-        ]);
-
-        // Add summary
-        csvRows.push([]);
-        csvRows.push([
-          '"SUMMARY"',
-          summary.totalRequired || 0,
-          summary.totalAvailable || 0,
-          stockIssues.reduce((sum, issue) => sum + issue.insufficientQty, 0),
-          '"Total"',
-          `"${stockIssues.length} products with issues"`,
-          "",
-          "",
-        ]);
-
-        const csvContent = [
-          headers.join(","),
-          ...csvRows.map((row) => row.join(",")),
-        ].join("\n");
-
-        const blob = new Blob([csvContent], {
-          type: "text/csv;charset=utf-8;",
-        });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `stock_issues_${new Date().toISOString().slice(0, 10)}.csv`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-
-        showToast("success", "Stock issues CSV downloaded successfully");
-      } catch (error) {
-        console.error("Error downloading CSV:", error);
-        showToast("error", "Failed to download stock issues CSV");
-      }
-    };
-
-    return ReactDOM.createPortal(
-      <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-[110]">
-        <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
-          <div className="mb-6 bg-red-50 border border-red-200 rounded-xl p-5">
-            <div className="flex justify-between items-center mb-3">
-              <h2 className="text-xl font-bold text-red-800 flex items-center gap-2">
-                <AlertCircle size={24} />
-                Stock Validation Issues Found
-              </h2>
-              <div className="flex items-center gap-2">
-                <span className="px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
-                  {stockIssues.length} Stock Issues
-                </span>
-                <div className="flex gap-2">
-                  <button
-                    onClick={downloadStockIssuesCSV}
-                    className="px-3 py-1 bg-blue-500 text-white text-sm rounded-lg hover:bg-blue-600 cursor-pointer flex items-center gap-1"
-                    title="Download as CSV"
-                  >
-                    <Download size={14} /> CSV
-                  </button>
-                  <button
-                    onClick={downloadStockIssuesExcel}
-                    className="px-3 py-1 bg-green-500 text-white text-sm rounded-lg hover:bg-green-600 cursor-pointer flex items-center gap-1"
-                    title="Download as Excel"
-                  >
-                    <Download size={14} /> Excel
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-              <div className="text-center p-3 bg-white rounded-lg shadow border">
-                <div className="text-sm text-gray-600">Total Required</div>
-                <div className="text-2xl font-bold text-red-800">
-                  {summary.totalRequired || 0}
-                </div>
-              </div>
-              <div className="text-center p-3 bg-white rounded-lg shadow border">
-                <div className="text-sm text-gray-600">Total Available</div>
-                <div className="text-2xl font-bold text-green-800">
-                  {summary.totalAvailable || 0}
-                </div>
-              </div>
-              <div className="text-center p-3 bg-white rounded-lg shadow border">
-                <div className="text-sm text-gray-600">Total Shortage</div>
-                <div className="text-2xl font-bold text-red-800">
-                  {stockIssues.reduce(
-                    (sum, issue) => sum + issue.insufficientQty,
-                    0,
-                  )}
-                </div>
-              </div>
-              <div className="text-center p-3 bg-white rounded-lg shadow border">
-                <div className="text-sm text-gray-600">
-                  Products with Issues
-                </div>
-                <div className="text-2xl font-bold text-orange-800">
-                  {stockIssues.length}
-                </div>
-              </div>
-            </div>
-
-            <div className="p-3 bg-yellow-100 border border-yellow-300 rounded-lg">
-              <p className="text-sm text-yellow-800 font-medium">
-                ⚠️ <strong>Stock shortages detected.</strong>{" "}
-                {stockIssues.length} products have insufficient stock or are not
-                found in inventory.
-                <br />
-                <br />
-                <strong>You can:</strong>
-                <br />
-                1. Download the stock issues report (Excel/CSV) to see details
-                <br />
-                2. Update your inventory in the system
-                <br />
-                3. Proceed anyway (backend will create adjustments)
-              </p>
-            </div>
-          </div>
-
-          <div className="mb-6">
-            <div className="flex justify-between items-center mb-3">
-              <h3 className="font-medium text-gray-700">
-                Stock Issues Details ({stockIssues.length} products)
-              </h3>
-              <div className="text-sm text-gray-500">
-                Click download buttons above to get full report
-              </div>
-            </div>
-
-            <div className="overflow-x-auto border border-gray-200 rounded-lg max-h-[400px] overflow-y-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 sticky top-0">
-                  <tr>
-                    <th className="p-3 text-left">Product Name</th>
-                    <th className="p-3 text-left">Required Quantity</th>
-                    <th className="p-3 text-left">Available Stock</th>
-                    <th className="p-3 text-left">Shortage</th>
-                    <th className="p-3 text-left">Status</th>
-                    <th className="p-3 text-left">Issue Type</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stockIssues.map((issue, idx) => (
-                    <tr
-                      key={idx}
-                      className={`hover:bg-red-50 border-b ${
-                        !issue.stockCheckSuccess ? "bg-red-50" : ""
-                      }`}
-                    >
-                      <td className="p-3 font-medium">
-                        <div className="text-gray-700">{issue.productName}</div>
-                        <div className="text-xs text-gray-500">
-                          Required by {issue.requiredByInvoices?.length || 0}{" "}
-                          invoices
-                        </div>
-                      </td>
-                      <td className="p-3 font-bold text-red-700">
-                        {issue.totalRequired}
-                      </td>
-                      <td className="p-3 font-medium text-green-700">
-                        {issue.availableStock}
-                      </td>
-                      <td className="p-3 font-bold text-red-800">
-                        {issue.insufficientQty}
-                      </td>
-                      <td className="p-3">
-                        <span
-                          className={`px-2 py-1 text-xs rounded ${
-                            !issue.stockCheckSuccess
-                              ? "bg-red-100 text-red-800"
-                              : issue.insufficient
-                              ? "bg-orange-100 text-orange-800"
-                              : "bg-gray-100 text-gray-800"
-                          }`}
-                        >
-                          {!issue.stockCheckSuccess
-                            ? "Product Not Found"
-                            : issue.insufficient
-                            ? "Insufficient Stock"
-                            : "Warning"}
-                        </span>
-                      </td>
-                      <td className="p-3 text-xs text-gray-600">
-                        {issue.message}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Summary Section */}
-            <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
-              <h4 className="font-medium text-gray-700 mb-2">Summary</h4>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div className="text-center">
-                  <div className="text-sm text-gray-600">Total Products</div>
-                  <div className="text-lg font-bold text-gray-800">
-                    {stockIssues.length}
-                  </div>
-                </div>
-                <div className="text-center">
-                  <div className="text-sm text-gray-600">Total Required</div>
-                  <div className="text-lg font-bold text-red-700">
-                    {summary.totalRequired || 0}
-                  </div>
-                </div>
-                <div className="text-center">
-                  <div className="text-sm text-gray-600">Total Available</div>
-                  <div className="text-lg font-bold text-green-700">
-                    {summary.totalAvailable || 0}
-                  </div>
-                </div>
-                <div className="text-center">
-                  <div className="text-sm text-gray-600">Total Shortage</div>
-                  <div className="text-lg font-bold text-red-800">
-                    {stockIssues.reduce(
-                      (sum, issue) => sum + issue.insufficientQty,
-                      0,
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex justify-between items-center pt-4 border-t border-gray-300">
-            <div className="text-sm text-gray-600">
-              {summary.totalInvoices || 0} invoices affected by stock issues
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => {
-                  handleCancelImport();
-                  setShowStockValidation(false);
-                }}
-                className="px-5 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg font-medium cursor-pointer"
-              >
-                Cancel Import
-              </button>
-              <button
-                onClick={() => setShowStockValidation(false)}
-                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium cursor-pointer"
-              >
-                Go Back
-              </button>
-              <button
-                onClick={downloadStockIssuesExcel}
-                className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium flex items-center gap-2 cursor-pointer"
-              >
-                <Download size={16} />
-                Download Excel Report
-              </button>
-              <button
-                onClick={handleProceedAnyway}
-                className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium flex items-center gap-2 cursor-pointer"
-              >
-                <CheckCircle size={16} />
-                Proceed Anyway
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>,
-      document.body,
-    );
-  };
-
   if (!isOpen) return null;
 
   return ReactDOM.createPortal(
@@ -1804,15 +1881,74 @@ const ImportSalesModal = ({
                       onClick={() => {
                         // Download sample template
                         const ws = XLSX.utils.aoa_to_sheet([
-                          ["Invoice #", "Invoice Date", "Customer Name", "MR Name", "Product Name", "Sales Qty", "Bonus Qty", "Selling Price", "Amount", "Discount", "Net Amount", "Payment Status", "Remark"],
-                          ["INV-001", "2024-01-15", "Customer A", "John Doe", "Product A", 10, 2, 100, 1000, 100, 900, "Credit", "Sample remark"],
-                          ["INV-001", "2024-01-15", "Customer A", "John Doe", "Product B", 5, 1, 50, 250, 25, 225, "Credit", ""],
-                          ["INV-002", "2024-01-16", "Customer B", "Jane Smith", "Product C", 20, 5, 75, 1500, 150, 1350, "Paid", "Urgent delivery"],
+                          [
+                            "Invoice #",
+                            "Invoice Date",
+                            "Customer Name",
+                            "MR Name",
+                            "Product Name",
+                            "Sales Qty",
+                            "Bonus Qty",
+                            "Selling Price",
+                            "Amount",
+                            "Discount",
+                            "Net Amount",
+                            "Payment Status",
+                            "Remark",
+                          ],
+                          [
+                            "INV-001",
+                            "2024-01-15",
+                            "Customer A",
+                            "John Doe",
+                            "Product A",
+                            10,
+                            2,
+                            100,
+                            1000,
+                            100,
+                            900,
+                            "Credit",
+                            "Sample remark",
+                          ],
+                          [
+                            "INV-001",
+                            "2024-01-15",
+                            "Customer A",
+                            "John Doe",
+                            "Product B",
+                            5,
+                            1,
+                            50,
+                            250,
+                            25,
+                            225,
+                            "Credit",
+                            "",
+                          ],
+                          [
+                            "INV-002",
+                            "2024-01-16",
+                            "Customer B",
+                            "Jane Smith",
+                            "Product C",
+                            20,
+                            5,
+                            75,
+                            1500,
+                            150,
+                            1350,
+                            "Paid",
+                            "Urgent delivery",
+                          ],
                         ]);
                         const wb = XLSX.utils.book_new();
                         XLSX.utils.book_append_sheet(wb, ws, "Sales Template");
                         XLSX.writeFile(wb, "sales_import_template.xlsx");
-                        showToast("success", "Template downloaded successfully");
+                        showToast(
+                          "success",
+                          "Template downloaded successfully",
+                        );
                       }}
                       className="text-sm text-blue-600 hover:text-blue-800 underline cursor-pointer"
                     >
@@ -1869,7 +2005,9 @@ const ImportSalesModal = ({
                   </button>
                   {importErrorDetails.length > 0 && (
                     <button
-                      onClick={() => setShowValidationErrors(!showValidationErrors)}
+                      onClick={() =>
+                        setShowValidationErrors(!showValidationErrors)
+                      }
                       className="text-sm text-yellow-600 hover:text-yellow-800 px-3 py-1 border border-yellow-300 rounded-lg cursor-pointer"
                     >
                       {showValidationErrors ? "Hide" : "Show"} Errors
@@ -1877,7 +2015,7 @@ const ImportSalesModal = ({
                   )}
                 </div>
               </div>
-              
+
               {/* Quick stats */}
               <div className="grid grid-cols-3 gap-2 mt-3">
                 <div className="bg-white p-2 rounded border text-center">
@@ -1887,13 +2025,19 @@ const ImportSalesModal = ({
                 <div className="bg-white p-2 rounded border text-center">
                   <div className="text-xs text-gray-500">Total Products</div>
                   <div className="font-bold text-lg">
-                    {parsedData.reduce((sum, inv) => sum + (inv.products?.length || 0), 0)}
+                    {parsedData.reduce(
+                      (sum, inv) => sum + (inv.products?.length || 0),
+                      0,
+                    )}
                   </div>
                 </div>
                 <div className="bg-white p-2 rounded border text-center">
                   <div className="text-xs text-gray-500">Total Amount</div>
                   <div className="font-bold text-lg">
-                    ${parsedData.reduce((sum, inv) => sum + (inv.totalAmount || 0), 0).toFixed(2)}
+                    $
+                    {parsedData
+                      .reduce((sum, inv) => sum + (inv.totalAmount || 0), 0)
+                      .toFixed(2)}
                   </div>
                 </div>
               </div>
@@ -1952,7 +2096,6 @@ const ImportSalesModal = ({
               </div>
             )}
 
-          {/* Stock validation in progress */}
           {isValidatingStock && (
             <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
               <div className="flex items-center gap-3">
@@ -1965,7 +2108,7 @@ const ImportSalesModal = ({
                     Validating stock for {parsedData.length} invoices...
                   </p>
                   <div className="mt-2 w-full bg-yellow-100 rounded-full h-2">
-                    <div 
+                    <div
                       className="bg-yellow-500 h-2 rounded-full transition-all duration-300"
                       style={{ width: `${Math.random() * 50 + 30}%` }}
                     ></div>
@@ -2039,7 +2182,12 @@ const ImportSalesModal = ({
                   </button>
                 </div>
                 <p className="text-center text-gray-500 text-sm mt-2">
-                  Click to import {parsedData.length} invoices with {parsedData.reduce((sum, inv) => sum + (inv.products?.length || 0), 0)} products
+                  Click to import {parsedData.length} invoices with{" "}
+                  {parsedData.reduce(
+                    (sum, inv) => sum + (inv.products?.length || 0),
+                    0,
+                  )}{" "}
+                  products
                 </p>
               </div>
             )}
@@ -2345,7 +2493,7 @@ const Sales = () => {
   // Function to fetch products list
   const fetchProductsList = async () => {
     try {
-      const response = await axios.get(`${backendUrl}/api/products/all`, {
+      const response = await axios.get(`${backendUrl}/api/products`, {
         timeout: 5000,
       });
 
@@ -3589,8 +3737,8 @@ const Sales = () => {
                     {mrList.length === 0 && customerList.length === 0
                       ? "Please add MR and Customer data first to create or import sales."
                       : mrList.length === 0
-                      ? "Please add MR data first to create or import sales."
-                      : "Please add Customer data first to create or import sales."}
+                        ? "Please add MR data first to create or import sales."
+                        : "Please add Customer data first to create or import sales."}
                   </p>
                 </div>
               </div>
@@ -3703,7 +3851,10 @@ const Sales = () => {
                       <LoadingOverlay text="Please wait..." />
                     ) : (
                       <div className="py-8">
-                        <Package className="mx-auto text-gray-400 mb-3" size={48} />
+                        <Package
+                          className="mx-auto text-gray-400 mb-3"
+                          size={48}
+                        />
                         <p>No sales data found</p>
                         <p className="text-sm text-gray-500 mt-1">
                           Try adding a new sale or importing from Excel
@@ -3736,7 +3887,9 @@ const Sales = () => {
                                 )}
                                 onChange={() => toggleSelect(sale)}
                               />
-                              <span className="font-medium">{sale.invoiceNumber}</span>
+                              <span className="font-medium">
+                                {sale.invoiceNumber}
+                              </span>
                             </div>
                           ) : item.id === "productCount" ? (
                             <button
@@ -3779,10 +3932,10 @@ const Sales = () => {
                                 sale.paymentStatus === "Paid"
                                   ? "bg-green-100 text-green-800"
                                   : sale.paymentStatus === "Credit"
-                                  ? "bg-yellow-100 text-yellow-800"
-                                  : sale.paymentStatus === "Partial"
-                                  ? "bg-blue-100 text-blue-800"
-                                  : "bg-gray-100 text-gray-800"
+                                    ? "bg-yellow-100 text-yellow-800"
+                                    : sale.paymentStatus === "Partial"
+                                      ? "bg-blue-100 text-blue-800"
+                                      : "bg-gray-100 text-gray-800"
                               }`}
                             >
                               {getFieldValue(sale, item.dbName)}
@@ -3855,11 +4008,11 @@ const Sales = () => {
                   Next →
                 </button>
               </div>
-              
+
               <div className="text-sm text-gray-600">
                 Showing {(currentPage - 1) * SALES_PER_PAGE + 1} to{" "}
-                {Math.min(currentPage * SALES_PER_PAGE, filteredSales.length)} of{" "}
-                {filteredSales.length} sales
+                {Math.min(currentPage * SALES_PER_PAGE, filteredSales.length)}{" "}
+                of {filteredSales.length} sales
               </div>
             </div>
           )}

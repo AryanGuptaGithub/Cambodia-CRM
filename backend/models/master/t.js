@@ -1,494 +1,431 @@
-import express from "express";
-import mongoose from "mongoose";
-import Supplier from "../../models/master/supplier.js";
+// Add this function for proper stock deduction
+const deductStockFromReportInHandWithMatching = async (productName, salesQty, bonusQty) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
-const router = express.Router();
-
-const handleServerError = (res, err, message = "Server error", code = 500) => {
-  console.error("❌ [ERROR]:", err);
-  res.status(code).json({ message, error: err.message || err });
-};
-
-const handleDuplicateError = (res, err, entity = "supplier") => {
-  const field = Object.keys(err.keyPattern || {})[0] || "field";
-  const value = err.keyValue?.[field] || "unknown";
-  return res.status(400).json({
-    message: `A ${entity} with this ${field} <b style="color:#EF4444">${value}</b> already exists.`,
-    field,
-    ok: false,
-  });
-};
-
-// Helper to convert to title case for display
-const toTitleCase = (str) => {
-  if (!str) return "";
-  return str
-    .toLowerCase()
-    .split(" ")
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(" ");
-};
-
-// Convert Excel serial date to JS Date
-const excelDateToJSDate = (value) => {
-  if (!value) return null;
-  
-  if (typeof value === "number") {
-    // Excel dates start from 1899-12-30
-    const epoch = new Date(1899, 11, 30);
-    return new Date(epoch.getTime() + value * 86400000);
-  }
-  
-  const parsed = new Date(value);
-  return isNaN(parsed.getTime()) ? null : parsed;
-};
-
-// Parse date string in various formats
-const parseDateString = (dateStr) => {
-  if (!dateStr || typeof dateStr !== 'string') return null;
-  
-  const str = dateStr.trim();
-  if (str === '') return null;
-  
-  // Try DD/MM/YYYY format
-  if (str.includes('/')) {
-    const parts = str.split('/');
-    if (parts.length === 3) {
-      const day = parseInt(parts[0], 10);
-      const month = parseInt(parts[1], 10) - 1;
-      const year = parseInt(parts[2], 10);
-      
-      // Handle 2-digit year
-      const fullYear = year < 100 ? year + 2000 : year;
-      return new Date(fullYear, month, day);
+  try {
+    const totalRequiredQty = fixPrecision(salesQty + bonusQty);
+    
+    if (totalRequiredQty <= 0) {
+      await session.commitTransaction();
+      session.endSession();
+      return { success: true, deducted: 0, remaining: 0 };
     }
-  }
-  
-  // Try MM/DD/YYYY format
-  if (str.includes('-')) {
-    const parts = str.split('-');
-    if (parts.length === 3) {
-      // Check if it's DD-MM-YYYY or MM-DD-YYYY
-      const first = parseInt(parts[0], 10);
-      const second = parseInt(parts[1], 10);
+
+    console.log(`\n📦 Attempting to deduct stock: "${productName}"`);
+    console.log(`   Required: ${totalRequiredQty} (Sales: ${salesQty}, Bonus: ${bonusQty})`);
+
+    // FIRST: Find the product in ReportInHand with exact matching
+    const stockResult = await calculateProductStock(productName, totalRequiredQty);
+    
+    if (!stockResult.success || !stockResult.found) {
+      console.log(`❌ Cannot deduct: ${stockResult.message}`);
+      await session.abortTransaction();
+      session.endSession();
+      return {
+        success: false,
+        deducted: 0,
+        remaining: totalRequiredQty,
+        message: `Product "${productName}" not found in inventory`
+      };
+    }
+
+    if (!stockResult.hasEnoughStock) {
+      console.log(`❌ Insufficient stock: ${stockResult.message}`);
+      await session.abortTransaction();
+      session.endSession();
+      return {
+        success: false,
+        deducted: 0,
+        remaining: stockResult.insufficientQty,
+        message: stockResult.message
+      };
+    }
+
+    const actualProductName = stockResult.productName;
+    console.log(`   ✅ Found: "${actualProductName}" with ${stockResult.availableStock} units available`);
+
+    // Find the stock item in ReportInHand
+    const stockItem = await ReportInHand.findOne({
+      productName: buildProductNameRegex(normalizeProductName(actualProductName))
+    }).session(session);
+
+    if (!stockItem) {
+      console.log(`❌ Stock item not found in ReportInHand: "${actualProductName}"`);
+      await session.abortTransaction();
+      session.endSession();
+      return {
+        success: false,
+        deducted: 0,
+        remaining: totalRequiredQty,
+        message: `Stock record not found for "${actualProductName}"`
+      };
+    }
+
+    // Check if we have batches
+    if (!stockItem.batches || !Array.isArray(stockItem.batches) || stockItem.batches.length === 0) {
+      console.log(`❌ No batches found for product: "${actualProductName}"`);
+      await session.abortTransaction();
+      session.endSession();
+      return {
+        success: false,
+        deducted: 0,
+        remaining: totalRequiredQty,
+        message: `No stock batches found for "${actualProductName}"`
+      };
+    }
+
+    // Sort batches by expiry date (oldest first - FIFO)
+    const sortedBatches = [...stockItem.batches].sort((a, b) => {
+      const dateA = a.expiryDate ? new Date(a.expiryDate) : new Date('9999-12-31');
+      const dateB = b.expiryDate ? new Date(b.expiryDate) : new Date('9999-12-31');
+      return dateA - dateB;
+    });
+
+    let remainingToDeduct = totalRequiredQty;
+    let totalDeducted = 0;
+    const updatedBatches = [];
+    const deductionDetails = [];
+
+    console.log(`   Sorting ${sortedBatches.length} batches by expiry (oldest first)`);
+
+    // Deduct from batches
+    for (const batch of sortedBatches) {
+      if (remainingToDeduct <= 0) break;
+
+      const batchQty = fixPrecision(batch.boxes || batch.quantity || 0);
       
-      if (first > 12) {
-        // DD-MM-YYYY
-        return new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
+      if (batchQty > 0) {
+        const deductFromThisBatch = fixPrecision(Math.min(batchQty, remainingToDeduct));
+        const remainingInBatch = fixPrecision(batchQty - deductFromThisBatch);
+        
+        console.log(`   - Batch ${batch.batchNumber || 'N/A'}: ${batchQty} -> ${remainingInBatch} (deducting ${deductFromThisBatch})`);
+
+        if (remainingInBatch > 0) {
+          // Update batch with remaining quantity
+          updatedBatches.push({
+            ...batch,
+            boxes: remainingInBatch,
+            quantity: remainingInBatch,
+            amount: fixPrecision(remainingInBatch * (batch.lc || 0.71))
+          });
+        } // If batch is completely used up (0 remaining), don't add it back
+
+        totalDeducted = fixPrecision(totalDeducted + deductFromThisBatch);
+        remainingToDeduct = fixPrecision(remainingToDeduct - deductFromThisBatch);
+
+        deductionDetails.push({
+          batchNumber: batch.batchNumber,
+          originalQty: batchQty,
+          deducted: deductFromThisBatch,
+          remainingInBatch: remainingInBatch,
+          expiryDate: batch.expiryDate
+        });
       } else {
-        // MM-DD-YYYY or YYYY-MM-DD
-        if (parts[0].length === 4) {
-          // YYYY-MM-DD
-          return new Date(parts[0], parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
-        } else {
-          // MM-DD-YYYY
-          return new Date(parseInt(parts[2], 10), parseInt(parts[0], 10) - 1, parseInt(parts[1], 10));
-        }
+        // Skip batches with 0 quantity
+        continue;
       }
     }
-  }
-  
-  // Try parsing as ISO date
-  const date = new Date(str);
-  return isNaN(date.getTime()) ? null : date;
-};
 
-// Helper to format supplier response with title case
-const formatSupplierResponse = (supplier) => {
-  if (!supplier) return supplier;
-  
-  const supplierObj = supplier.toObject ? supplier.toObject() : supplier;
-  
-  return {
-    ...supplierObj,
-    name: toTitleCase(supplierObj.name),
-    address: toTitleCase(supplierObj.address),
-  };
-};
-
-/* ------------------------------- GET All with Pagination ------------------------------- */
-router.get("/suppliers", async (req, res) => {
-  try {
-    const { page = 1, limit = 10, search = "" } = req.query;
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
-    const skip = (pageNum - 1) * limitNum;
-
-    // Build search query
-    const searchQuery = {};
-    if (search && search.trim() !== "") {
-      const searchRegex = new RegExp(search.trim().toLowerCase(), 'i');
-      searchQuery.$or = [
-        { name: searchRegex },
-        { address: searchRegex }
-      ];
+    // Add any untouched batches (with positive quantity)
+    for (const batch of sortedBatches) {
+      const batchQty = fixPrecision(batch.boxes || batch.quantity || 0);
+      const alreadyProcessed = deductionDetails.some(d => d.batchNumber === batch.batchNumber);
+      
+      if (!alreadyProcessed && batchQty > 0) {
+        updatedBatches.push(batch);
+      }
     }
 
-    // Get total count for pagination
-    const total = await Supplier.countDocuments(searchQuery);
-
-    // Get paginated suppliers
-    const suppliers = await Supplier.find(searchQuery)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limitNum);
-
-    // Format suppliers with title case for display
-    const formattedSuppliers = suppliers.map(supplier => formatSupplierResponse(supplier));
-
-    res.json({
-      suppliers: formattedSuppliers,
-      total,
-      page: pageNum,
-      totalPages: Math.ceil(total / limitNum),
-      ok: true,
-    });
-  } catch (err) {
-    handleServerError(res, err);
-  }
-});
-
-/* ------------------------------- GET by ID ------------------------------ */
-router.get("/suppliers/:id", async (req, res) => {
-  try {
-    const supplier = await Supplier.findById(req.params.id);
-    if (!supplier) {
-      return res.status(404).json({ message: "Supplier not found" });
-    }
-    
-    // Format response with title case
-    const responseSupplier = formatSupplierResponse(supplier);
-    
-    res.json(responseSupplier);
-  } catch (err) {
-    handleServerError(res, err);
-  }
-});
-
-/* ----------------------------- CREATE Supplier ----------------------------- */
-router.post("/suppliers", async (req, res) => {
-  try {
-    const {
-      name,
-      address,
-      siteRegistrationDate,
-      siteRegistrationExpiryDate,
-      enabled,
-    } = req.body;
-
-    // ✅ Validation
-    if (!name || !address) {
-      return res
-        .status(400)
-        .json({ message: "Name and Address are required fields." });
+    // Verify deduction
+    if (remainingToDeduct > 0.001) {
+      console.log(`❌ Failed to deduct full quantity. Only deducted ${totalDeducted} of ${totalRequiredQty}`);
+      await session.abortTransaction();
+      session.endSession();
+      return {
+        success: false,
+        deducted: totalDeducted,
+        remaining: remainingToDeduct,
+        message: `Could only deduct ${totalDeducted} of ${totalRequiredQty} units`,
+        details: deductionDetails
+      };
     }
 
-    // Convert strings to lowercase for storage
-    const payload = {
-      name: name.toLowerCase().trim(),
-      address: address.toLowerCase().trim(),
-      enabled: enabled === true || enabled === "enabled" || enabled === "true",
+    // Calculate new total from updated batches
+    const newTotalFromBatches = updatedBatches.reduce((sum, batch) => {
+      return fixPrecision(sum + fixPrecision(batch.boxes || batch.quantity || 0));
+    }, 0);
+
+    // Update stock item
+    stockItem.batches = updatedBatches;
+    stockItem.totalBoxes = fixPrecision(newTotalFromBatches);
+    stockItem.updatedAt = new Date();
+
+    await stockItem.save({ session });
+
+    console.log(`✅ Successfully deducted ${totalDeducted} units from "${actualProductName}"`);
+    console.log(`   New total stock: ${newTotalFromBatches} units`);
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return {
+      success: true,
+      deducted: totalDeducted,
+      remaining: 0,
+      newStockLevel: newTotalFromBatches,
+      message: `Successfully deducted ${totalDeducted} units from "${actualProductName}"`,
+      details: deductionDetails
     };
 
-    // Set site registration date (default to current date if not provided)
-    if (siteRegistrationDate) {
-      const regDate = new Date(siteRegistrationDate);
-      payload.siteRegistrationDate = isNaN(regDate.getTime()) ? new Date() : regDate;
-    } else {
-      payload.siteRegistrationDate = new Date();
-    }
-
-    // Set site registration expiry date (default to 1 year from registration date if not provided)
-    if (siteRegistrationExpiryDate) {
-      const expiryDate = new Date(siteRegistrationExpiryDate);
-      if (isNaN(expiryDate.getTime())) {
-        payload.siteRegistrationExpiryDate = new Date(payload.siteRegistrationDate);
-        payload.siteRegistrationExpiryDate.setFullYear(payload.siteRegistrationExpiryDate.getFullYear() + 1);
-      } else {
-        payload.siteRegistrationExpiryDate = expiryDate;
-      }
-    } else {
-      payload.siteRegistrationExpiryDate = new Date(payload.siteRegistrationDate);
-      payload.siteRegistrationExpiryDate.setFullYear(payload.siteRegistrationExpiryDate.getFullYear() + 1);
-    }
-
-    const newSupplier = new Supplier(payload);
-    const savedSupplier = await newSupplier.save();
-
-    // Format response with title case
-    const formattedSupplier = formatSupplierResponse(savedSupplier);
-
-    res.status(201).json({
-      message: `Supplier <b>${toTitleCase(savedSupplier.name)}</b> created successfully.`,
-      supplier: formattedSupplier,
-      ok: true,
-    });
-  } catch (err) {
-    if (err.code === 11000) return handleDuplicateError(res, err);
-    handleServerError(res, err);
-  }
-});
-
-/* ----------------------------- UPDATE Supplier ----------------------------- */
-router.put("/suppliers/:id", async (req, res) => {
-  try {
-    const updateData = { ...req.body };
+  } catch (error) {
+    console.error(`❌ Error in stock deduction for "${productName}":`, error);
     
-    // Convert string fields to lowercase for update
-    if (updateData.name) {
-      updateData.name = updateData.name.toLowerCase().trim();
-    }
-    if (updateData.address) {
-      updateData.address = updateData.address.toLowerCase().trim();
-    }
-
-    const updatedSupplier = await Supplier.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      {
-        new: true,
-        runValidators: true,
+    try {
+      if (session.transaction && session.transaction.isActive) {
+        await session.abortTransaction();
       }
-    );
+    } catch (abortError) {
+      console.error("Error aborting transaction:", abortError);
+    }
+    
+    try {
+      await session.endSession();
+    } catch (endError) {
+      console.error("Error ending session:", endError);
+    }
 
-    if (!updatedSupplier)
-      return res.status(404).json({ message: "Supplier not found" });
-
-    // Format response with title case
-    const formattedSupplier = formatSupplierResponse(updatedSupplier);
-
-    res.json({
-      message: `Supplier <b>${toTitleCase(updatedSupplier.name)}</b> updated successfully.`,
-      supplier: formattedSupplier,
-      ok: true,
-    });
-  } catch (err) {
-    res.status(400).json({ message: "Invalid data", error: err.message });
+    return {
+      success: false,
+      deducted: 0,
+      remaining: salesQty + bonusQty,
+      message: `Stock deduction failed: ${error.message}`,
+      error: error.message
+    };
   }
-});
+};
 
-/* ----------------------------- DELETE Supplier ----------------------------- */
-router.delete("/suppliers/:id", async (req, res) => {
+// Replace the existing processSingleInvoiceWithStockDeduction function with this updated version:
+const processSingleInvoiceWithStockDeduction = async (invoiceData, index) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
-    const deleted = await Supplier.findByIdAndDelete(req.params.id);
-    if (!deleted)
-      return res.status(404).json({ message: "Supplier not found" });
+    console.log(`\n🔄 Processing invoice ${index}: ${invoiceData.invoiceNumber || 'No invoice number'}`);
+    
+    if (!invoiceData.invoiceNumber?.trim()) {
+      throw new Error("Invoice number is required");
+    }
 
-    res.json({
-      message: `Supplier <b>${toTitleCase(deleted.name)}</b> deleted successfully.`,
-      ok: true,
-    });
-  } catch (err) {
-    handleServerError(res, err);
-  }
-});
+    const existingInvoice = await SaleSummary.findOne({
+      invoiceNumber: invoiceData.invoiceNumber.trim(),
+    }).session(session);
 
-/* ----------------------- DELETE Multiple Suppliers ----------------------- */
-router.delete("/suppliers", async (req, res) => {
-  try {
-    let ids = [];
+    if (existingInvoice) {
+      console.warn(`⚠️ Skipping duplicate invoice: ${invoiceData.invoiceNumber}`);
+      await session.abortTransaction();
+      session.endSession();
+      return {
+        success: false,
+        error: {
+          row: index + 2,
+          invoiceNumber: invoiceData.invoiceNumber,
+          message: `Invoice number ${invoiceData.invoiceNumber} already exists`,
+          type: "duplicate_error",
+        },
+      };
+    }
 
-    // Handle both array of strings and array of objects with id property
-    if (Array.isArray(req.body.ids)) {
-      if (req.body.ids.length > 0 && typeof req.body.ids[0] === "object") {
-        // Array of objects with id property
-        ids = req.body.ids.map((item) => item.id).filter(Boolean);
-      } else {
-        // Array of strings
-        ids = req.body.ids;
+    const processedProducts = [];
+    let totalAmount = 0;
+    const stockDeductionResults = [];
+
+    // FIRST: Check if we have enough stock for all products
+    console.log(`📋 Checking stock for ${invoiceData.products?.length || 0} products...`);
+    
+    for (const product of invoiceData.products || []) {
+      const productName = product.productName?.trim();
+      const salesQty = fixPrecision(parseFloat(product.salesQty) || 0);
+      const bonusQty = fixPrecision(parseFloat(product.bonusQty) || 0);
+      const totalQty = fixPrecision(salesQty + bonusQty);
+
+      if (!productName || totalQty <= 0) {
+        console.log(`   ⏭️ Skipping ${productName || 'unnamed product'} (quantity: ${totalQty})`);
+        continue;
       }
+
+      console.log(`   🔍 Checking stock for "${productName}" (Qty: ${totalQty})`);
+      
+      const stockCheck = await calculateProductStock(productName, totalQty);
+      
+      if (!stockCheck.success || !stockCheck.found) {
+        console.log(`   ❌ Product not found: "${productName}"`);
+        throw new Error(`Product "${productName}" not found in inventory`);
+      }
+
+      if (!stockCheck.hasEnoughStock) {
+        console.log(`   ❌ Insufficient stock: ${stockCheck.message}`);
+        throw new Error(stockCheck.message);
+      }
+
+      console.log(`   ✅ Stock available: ${stockCheck.availableStock} units`);
     }
 
-    if (ids.length === 0) {
-      return res
-        .status(400)
-        .json({ message: "No supplier IDs provided.", ok: false });
-    }
+    // SECOND: Process products and deduct stock
+    console.log(`💾 Processing products and deducting stock...`);
+    
+    for (const product of invoiceData.products || []) {
+      const productName = product.productName?.trim();
+      const salesQty = fixPrecision(parseFloat(product.salesQty) || 0);
+      const bonusQty = fixPrecision(parseFloat(product.bonusQty) || 0);
+      const totalQty = fixPrecision(salesQty + bonusQty);
 
-    const validIds = ids.filter((id) => mongoose.Types.ObjectId.isValid(id));
-    if (validIds.length !== ids.length) {
-      return res
-        .status(400)
-        .json({ message: "Invalid supplier ID(s) provided.", ok: false });
-    }
+      if (!productName || totalQty <= 0) continue;
 
-    const result = await Supplier.deleteMany({ _id: { $in: validIds } });
+      // Find product to get LC value
+      const productRecord = await Product.findOne({
+        productName: buildProductNameRegex(normalizeProductName(productName))
+      }).session(session);
 
-    res.json({
-      message: `${result.deletedCount} supplier(s) deleted successfully.`,
-      ok: true,
-    });
-  } catch (err) {
-    handleServerError(res, err);
-  }
-});
+      const lc = productRecord?.lc || 0;
+      const sellingPrice = parseFloat(product.sellingPrice) || 0;
+      const amount = sellingPrice * salesQty;
+      const discount = parseFloat(product.discount) || 0;
+      const netSellingAmount = amount - discount;
 
-/* ----------------------------- EXCEL Import ----------------------------- */
-router.post("/suppliers/import", async (req, res) => {
-  try {
-    const suppliers = req.body;
-
-    if (!Array.isArray(suppliers) || suppliers.length === 0) {
-      return res.status(400).json({
-        message: "Invalid or empty data. Expected an array of suppliers.",
-        ok: false,
+      // Process the sale record
+      processedProducts.push({
+        productName: productName,
+        salesQty,
+        bonusQty,
+        totalQty,
+        sellingPrice,
+        amount,
+        discount,
+        netSellingAmount,
+        averageUnitPrice: totalQty ? netSellingAmount / totalQty : 0,
+        lc,
+        profitLoss: (sellingPrice - lc) * salesQty,
+        isProductAccept: true,
       });
-    }
 
-    const results = [];
-    const importErrors = [];
-    const warnings = [];
+      totalAmount += netSellingAmount;
 
-    for (let [index, supplier] of suppliers.entries()) {
-      try {
-        // Normalize field names and convert to lowercase
-        const name = (
-          supplier.supplierName ||
-          supplier.name ||
-          supplier["Supplier Name"] ||
-          supplier["supplier name"] ||
-          supplier["Supplier"] ||
-          ""
-        )
-          .toString()
-          .toLowerCase()
-          .trim();
+      // Deduct stock from ReportInHand
+      console.log(`   📉 Deducting stock for "${productName}"...`);
+      const deductionResult = await deductStockFromReportInHandWithMatching(
+        productName,
+        salesQty,
+        bonusQty
+      );
 
-        const address = (
-          supplier.address ||
-          supplier.Address ||
-          supplier["Address"] ||
-          ""
-        )
-          .toString()
-          .toLowerCase()
-          .trim();
+      stockDeductionResults.push({
+        product: productName,
+        ...deductionResult
+      });
 
-        // Validate required fields
-        if (!name) {
-          importErrors.push(`Row ${index + 1}: Missing supplier name`);
-          continue;
-        }
-
-        if (!address) {
-          importErrors.push(`Row ${index + 1}: Missing address`);
-          continue;
-        }
-
-        // Parse dates
-        let siteRegistrationDate = null;
-        if (supplier.siteRegistrationDate) {
-          siteRegistrationDate = new Date(supplier.siteRegistrationDate);
-          if (isNaN(siteRegistrationDate.getTime())) {
-            // Try parsing as Excel serial date
-            if (typeof supplier.siteRegistrationDate === 'number') {
-              siteRegistrationDate = excelDateToJSDate(supplier.siteRegistrationDate);
-            } else {
-              siteRegistrationDate = parseDateString(supplier.siteRegistrationDate.toString());
-            }
-            
-            if (!siteRegistrationDate || isNaN(siteRegistrationDate.getTime())) {
-              siteRegistrationDate = new Date(); // Default to current date
-              warnings.push(`Row ${index + 1}: Invalid registration date, using current date`);
-            }
-          }
-        } else {
-          siteRegistrationDate = new Date(); // Default to current date
-          warnings.push(`Row ${index + 1}: Site registration date not provided, using current date`);
-        }
-
-        let siteRegistrationExpiryDate = null;
-        if (supplier.siteRegistrationExpiryDate) {
-          siteRegistrationExpiryDate = new Date(supplier.siteRegistrationExpiryDate);
-          
-          if (isNaN(siteRegistrationExpiryDate.getTime())) {
-            // Try different parsing methods
-            if (typeof supplier.siteRegistrationExpiryDate === 'number') {
-              siteRegistrationExpiryDate = excelDateToJSDate(supplier.siteRegistrationExpiryDate);
-            } else {
-              siteRegistrationExpiryDate = parseDateString(supplier.siteRegistrationExpiryDate.toString());
-            }
-            
-            if (!siteRegistrationExpiryDate || isNaN(siteRegistrationExpiryDate.getTime())) {
-              // Default to 1 year from registration date
-              siteRegistrationExpiryDate = new Date(siteRegistrationDate);
-              siteRegistrationExpiryDate.setFullYear(siteRegistrationExpiryDate.getFullYear() + 1);
-              warnings.push(`Row ${index + 1}: Invalid expiry date, defaulting to 1 year from registration date`);
-            }
-          }
-        } else {
-          // Default to 1 year from registration date
-          siteRegistrationExpiryDate = new Date(siteRegistrationDate);
-          siteRegistrationExpiryDate.setFullYear(siteRegistrationExpiryDate.getFullYear() + 1);
-          warnings.push(`Row ${index + 1}: Expiry date not provided, defaulting to 1 year from registration date`);
-        }
-
-        const mappedSupplier = {
-          name: name.toLowerCase(),
-          address: address.toLowerCase(),
-          siteRegistrationDate,
-          siteRegistrationExpiryDate,
-          enabled: true,
-        };
-
-        // Check if supplier already exists (case-insensitive name match)
-        const exists = await Supplier.findOne({
-          name: { $regex: new RegExp(`^${mappedSupplier.name}$`, "i") },
-        });
-
-        if (exists) {
-          results.push({
-            supplier: toTitleCase(mappedSupplier.name),
-            status: "skipped",
-            message: `Supplier "${toTitleCase(mappedSupplier.name)}" already exists.`,
-          });
-        } else {
-          await Supplier.create(mappedSupplier);
-          results.push({
-            supplier: toTitleCase(mappedSupplier.name),
-            status: "created",
-            message: `Supplier "${toTitleCase(mappedSupplier.name)}" imported successfully.`,
-          });
-        }
-      } catch (err) {
-        importErrors.push(`Row ${index + 1}: ${err.message}`);
-        console.error(`Error importing row ${index + 1}:`, err);
+      if (!deductionResult.success) {
+        console.log(`   ❌ Stock deduction failed: ${deductionResult.message}`);
+        throw new Error(
+          `Stock deduction failed for ${productName}: ${deductionResult.message}`
+        );
       }
+
+      console.log(`   ✅ Stock deducted successfully`);
     }
 
-    const createdCount = results.filter((r) => r.status === "created").length;
-    const skippedCount = results.filter((r) => r.status === "skipped").length;
-
-    let message = `${createdCount} supplier(s) imported successfully.`;
-    if (skippedCount > 0) {
-      message += ` ${skippedCount} supplier(s) skipped (already exist).`;
-    }
-    if (warnings.length > 0) {
-      message += ` ${warnings.length} row(s) had date warnings.`;
-    }
-    if (importErrors.length > 0) {
-      message += ` ${importErrors.length} row(s) had errors.`;
+    if (processedProducts.length === 0) {
+      throw new Error("No valid products found in invoice");
     }
 
-    return res.status(200).json({
-      message,
-      results,
-      warnings: warnings.slice(0, 10), // Limit warnings to first 10
-      errors: importErrors,
-      createdCount,
-      skippedCount,
-      warningCount: warnings.length,
-      errorCount: importErrors.length,
-      ok: true,
+    // Create the sale record
+    const paidAmount = parseFloat(invoiceData.paidAmount) || 0;
+    const dueAmount = Math.max(0, totalAmount - paidAmount);
+
+    const saleRecord = new SaleSummary({
+      recordingDate: new Date(invoiceData.recordingDate || Date.now()),
+      invoiceNumber: invoiceData.invoiceNumber.trim(),
+      invoiceDate: invoiceData.invoiceDate
+        ? new Date(invoiceData.invoiceDate)
+        : new Date(),
+      mrName: invoiceData.mrName?.trim() || "No MR Name Provided",
+      mrId: invoiceData.mrId || null,
+      customerName: invoiceData.customerName?.trim() || "Unknown Customer",
+      customerCode: invoiceData.customerCode || "",
+      customerId: invoiceData.customerId || null,
+      products: processedProducts,
+      creditDays: parseInt(invoiceData.creditDays) || 0,
+      dueDate: invoiceData.dueDate ? new Date(invoiceData.dueDate) : null,
+      deliveryDate: invoiceData.deliveryDate
+        ? new Date(invoiceData.deliveryDate)
+        : null,
+      paidAmount,
+      dueAmount,
+      totalAmount,
+      totalProfitLoss: processedProducts.reduce(
+        (sum, p) => sum + (p.profitLoss || 0),
+        0
+      ),
+      paymentStatus: mapPaymentStatus(invoiceData.paymentStatus),
+      remark: invoiceData.remark || "",
+      stockDeductionResults,
+      importSource: "excel_import_with_stock_deduction",
+      importTimestamp: new Date(),
     });
-  } catch (err) {
-    console.error("❌ Import error:", err);
-    return res.status(500).json({
-      message: "Server error while importing suppliers.",
-      error: err.message,
-      ok: false,
-    });
+
+    await saleRecord.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    console.log(`✅ Invoice processed successfully: ${invoiceData.invoiceNumber}`);
+
+    return {
+      success: true,
+      invoiceNumber: invoiceData.invoiceNumber,
+      stockDeductionResults,
+    };
+  } catch (error) {
+    console.error(`❌ Error processing invoice at index ${index}:`, error.message);
+    
+    try {
+      if (session.transaction && session.transaction.isActive) {
+        await session.abortTransaction();
+      }
+    } catch (abortError) {
+      console.error("Error aborting transaction:", abortError);
+    }
+    
+    try {
+      await session.endSession();
+    } catch (endError) {
+      console.error("Error ending session:", endError);
+    }
+
+    return {
+      success: false,
+      error: {
+        row: index + 2,
+        invoiceNumber: invoiceData.invoiceNumber || "Unknown",
+        message: error.message,
+        type: "processing_error",
+      },
+    };
   }
-});
+};
 
+// Update the main import endpoint to use stock deduction
+
+// Update the processImportWithStockDeduction function
+
+
+// Also update the regular import endpoint to use stock deduction by default
+
+// Add endpoint to check stock before import
+
+
+// Add a function to help debug stock issues
+
+
+// Export router
 export default router;
