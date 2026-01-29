@@ -21,6 +21,9 @@ import {
   Truck,
   Clock,
   PackageCheck,
+  FileSpreadsheet,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import ReactDOM from "react-dom";
 import SampleExcelDownloadSale from "../../excels/SampleExcelDownloadSale";
@@ -45,6 +48,7 @@ import * as XLSX from "xlsx";
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
+// ===================== IMPORT SALES MODAL =====================
 const ImportSalesModal = ({
   isOpen,
   onClose,
@@ -156,7 +160,7 @@ const ImportSalesModal = ({
     showToast("info", "Import cancelled");
   };
 
-  // Parse Excel date function
+  // Parse Excel date function - IMPROVED
   const parseExcelDate = (value) => {
     if (value === null || value === undefined || value === "") {
       return new Date().toISOString().split("T")[0];
@@ -170,8 +174,9 @@ const ImportSalesModal = ({
 
       // If it's an Excel serial date (number)
       if (typeof value === "number") {
-        const excelEpoch = new Date(1899, 11, 30); // Excel's epoch (December 30, 1899)
-        const date = new Date(excelEpoch.getTime() + value * 86400000);
+        // Excel incorrectly treats 1900 as a leap year
+        const excelEpoch = new Date(1899, 11, 30);
+        const date = new Date(excelEpoch.getTime() + (value - 1) * 86400000);
         return date.toISOString().split("T")[0];
       }
 
@@ -179,74 +184,77 @@ const ImportSalesModal = ({
       if (typeof value === "string") {
         const str = value.trim();
 
-        // Try parsing various date formats
-        const dateFormats = [
-          // YYYY-MM-DD
-          /^(\d{4})-(\d{1,2})-(\d{1,2})$/,
+        // Remove any time portion
+        const dateStr = str.split(' ')[0].split('T')[0];
+
+        // Try direct parsing first
+        const parsed = new Date(dateStr);
+        if (!isNaN(parsed.getTime())) {
+          return parsed.toISOString().split("T")[0];
+        }
+
+        // Try common date formats
+        const formats = [
           // DD/MM/YYYY or MM/DD/YYYY
           /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/,
-          // Month name formats
-          /^([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})$/,
+          // YYYY-MM-DD
+          /^(\d{4})-(\d{1,2})-(\d{1,2})$/,
+          // DD-MMM-YY
+          /^(\d{1,2})-([A-Za-z]{3})-(\d{2,4})$/i,
+          // YYYY/MM/DD
+          /^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/,
         ];
 
-        for (const format of dateFormats) {
-          const match = str.match(format);
+        for (const format of formats) {
+          const match = dateStr.match(format);
           if (match) {
             let year, month, day;
 
-            if (format === dateFormats[0]) {
-              // YYYY-MM-DD
-              year = parseInt(match[1]);
-              month = parseInt(match[2]) - 1;
-              day = parseInt(match[3]);
-            } else if (format === dateFormats[1]) {
+            if (format === formats[0]) {
               // DD/MM/YYYY or MM/DD/YYYY
-              // Try to determine format by checking if first part > 12 (likely day)
               const part1 = parseInt(match[1]);
               const part2 = parseInt(match[2]);
-              if (part1 > 12) {
+              year = parseInt(match[3]);
+
+              if (part1 > 31) {
+                // Must be YYYY-MM-DD
+                year = part1;
+                month = part2 - 1;
+                day = parseInt(match[3]);
+              } else if (part2 > 12) {
                 // DD/MM/YYYY
                 day = part1;
                 month = part2 - 1;
               } else {
-                // MM/DD/YYYY
-                month = part1 - 1;
-                day = part2;
+                // Ambiguous, try to guess
+                if (part1 <= 12 && part2 <= 31) {
+                  // Assume MM/DD/YYYY
+                  month = part1 - 1;
+                  day = part2;
+                } else {
+                  // Assume DD/MM/YYYY
+                  day = part1;
+                  month = part2 - 1;
+                }
               }
+            } else if (format === formats[1] || format === formats[3]) {
+              // YYYY-MM-DD or YYYY/MM/DD
+              year = parseInt(match[1]);
+              month = parseInt(match[2]) - 1;
+              day = parseInt(match[3]);
+            } else if (format === formats[2]) {
+              // DD-MMM-YY
+              day = parseInt(match[1]);
+              const monthNames = {
+                jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+                jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+              };
+              const monthAbbr = match[2].toLowerCase().substring(0, 3);
+              month = monthNames[monthAbbr];
               year = parseInt(match[3]);
-            } else if (format === dateFormats[2]) {
-              // Month name format
-              const monthNames = [
-                "january",
-                "february",
-                "march",
-                "april",
-                "may",
-                "june",
-                "july",
-                "august",
-                "september",
-                "october",
-                "november",
-                "december",
-                "jan",
-                "feb",
-                "mar",
-                "apr",
-                "may",
-                "jun",
-                "jul",
-                "aug",
-                "sep",
-                "oct",
-                "nov",
-                "dec",
-              ];
-              const monthName = match[1].toLowerCase();
-              const monthIndex = monthNames.indexOf(monthName) % 12;
-              month = monthIndex;
-              day = parseInt(match[2]);
-              year = parseInt(match[3]);
+              if (year < 100) {
+                year = year < 50 ? 2000 + year : 1900 + year;
+              }
             }
 
             const date = new Date(year, month, day);
@@ -255,15 +263,10 @@ const ImportSalesModal = ({
             }
           }
         }
-
-        // Try native Date parsing
-        const parsed = new Date(str);
-        if (!isNaN(parsed.getTime())) {
-          return parsed.toISOString().split("T")[0];
-        }
       }
 
-      // If all parsing fails, return current date
+      // Final fallback
+      console.warn(`Could not parse date: "${value}", using current date`);
       return new Date().toISOString().split("T")[0];
     } catch (error) {
       console.error("Error parsing date:", value, error);
@@ -271,151 +274,88 @@ const ImportSalesModal = ({
     }
   };
 
-  // Parse Excel quantity function
+  // Parse Excel quantity function - IMPROVED
   const parseExcelQuantity = (value) => {
     if (value === null || value === undefined || value === "") return 0;
 
     try {
+      if (typeof value === "number") {
+        return Math.max(0, value);
+      }
+
       const str = String(value).trim();
-      // Remove commas and any non-numeric characters except decimal point
-      const cleaned = str.replace(/,/g, "").replace(/[^0-9.-]/g, "");
+      // Remove non-numeric characters except decimal point and minus sign
+      const cleaned = str.replace(/,/g, "").replace(/[^\d.-]/g, "");
       const num = parseFloat(cleaned);
-      return isNaN(num) ? 0 : Math.max(0, num);
+      
+      if (isNaN(num) || !isFinite(num)) return 0;
+      
+      return Math.max(0, num);
     } catch (error) {
       console.error("Error parsing quantity:", value, error);
       return 0;
     }
   };
 
-  // Replace the findProductStockInHandOptimized function with this:
+  // Optimized product stock check
   const findProductStockInHandOptimized = async (productName, requiredQty) => {
     try {
-      // First try to normalize the product name
-      const normalizeForApi = (name) => {
-        return name
-          .toLowerCase()
-          .trim()
-          .replace(/\s+/g, " ")
-          .replace(/[^a-z0-9\s]/g, "")
-          .replace(/\s+percent/g, " %")
-          .replace(/alu\s+alu/gi, "alu alu")
-          .replace(/^iotekam/, "lotekam");
-      };
+      const normalizedName = productName
+        .toLowerCase()
+        .trim()
+        .replace(/\s+/g, " ")
+        .replace(/[^\w\s%]/g, "");
 
-      const normalizedName = normalizeForApi(productName);
-
-      // Try multiple API endpoints with different name variations
-      const endpoints = [
-        `${backendUrl}/api/products/stock/${encodeURIComponent(productName)}`,
-        `${backendUrl}/api/products/stock/${encodeURIComponent(normalizedName)}`,
+      // Try API endpoint
+      const response = await axios.post(
         `${backendUrl}/api/sales/check-specific-product`,
-      ];
+        { productName },
+        { timeout: 5000 }
+      );
 
-      let lastError = null;
+      if (response.data?.success !== false) {
+        const stockData = response.data;
+        const availableStock = 
+          stockData.availableStock ||
+          stockData.totalStockCalculated ||
+          stockData.totalStockField ||
+          0;
 
-      for (const endpoint of endpoints) {
-        try {
-          const response = await axios.post(
-            endpoint,
-            endpoint.includes("check-specific-product")
-              ? { productName }
-              : null,
-            {
-              timeout: 5000,
-              headers: endpoint.includes("check-specific-product")
-                ? { "Content-Type": "application/json" }
-                : {},
-            },
-          );
-
-          if (response.data && response.data.success !== false) {
-            // Extract stock data from different response formats
-            const stockData = response.data;
-            const availableStock =
-              stockData.availableStock ||
-              stockData.totalStockCalculated ||
-              stockData.totalStockField ||
-              0;
-
-            const insufficient = availableStock < requiredQty;
-
-            return {
-              success: true,
-              productName: productName,
-              actualProductName: stockData.productName || productName,
-              availableStock: availableStock,
-              requiredQty: requiredQty,
-              insufficient: insufficient,
-              insufficientQty: insufficient ? requiredQty - availableStock : 0,
-              calculationMethod: "backend_api",
-              message: insufficient
-                ? `Insufficient stock: Available ${availableStock}, Required ${requiredQty}`
-                : `Stock available: ${availableStock}`,
-              rawResponse: stockData,
-            };
-          }
-        } catch (apiError) {
-          lastError = apiError;
-          console.log(`Trying next endpoint for ${productName}...`);
-        }
-      }
-
-      // If all API calls fail, check if product exists at all
-      try {
-        const productCheck = await axios.get(
-          `${backendUrl}/api/products/check/${encodeURIComponent(productName)}`,
-          { timeout: 3000 },
-        );
-
-        if (productCheck.data.exists) {
-          // Product exists but stock is 0 or not found
-          return {
-            success: true,
-            productName: productName,
-            actualProductName: productName,
-            availableStock: 0,
-            requiredQty: requiredQty,
-            insufficient: true,
-            insufficientQty: requiredQty,
-            calculationMethod: "product_exists_no_stock",
-            message: "Product exists but has no stock available",
-          };
-        }
-      } catch (checkError) {
-        // Product doesn't exist at all
         return {
-          success: false,
-          productName: productName,
-          actualProductName: productName,
-          availableStock: 0,
-          requiredQty: requiredQty,
-          insufficient: true,
-          insufficientQty: requiredQty,
-          calculationMethod: "product_not_found",
-          message: "Product not found in inventory",
+          success: true,
+          productName,
+          actualProductName: stockData.productName || productName,
+          availableStock,
+          requiredQty,
+          insufficient: availableStock < requiredQty,
+          insufficientQty: Math.max(0, requiredQty - availableStock),
+          calculationMethod: "backend_api",
+          message: availableStock < requiredQty
+            ? `Insufficient stock: Available ${availableStock}, Required ${requiredQty}`
+            : `Stock available: ${availableStock}`,
+          rawResponse: stockData,
         };
       }
 
-      // Final fallback
       return {
         success: false,
-        productName: productName,
+        productName,
         actualProductName: productName,
         availableStock: 0,
-        requiredQty: requiredQty,
+        requiredQty,
         insufficient: true,
         insufficientQty: requiredQty,
-        calculationMethod: "error_fallback",
-        message: `Error checking stock: ${lastError?.message || "All endpoints failed"}`,
+        calculationMethod: "product_not_found",
+        message: "Product not found in inventory",
       };
     } catch (error) {
       console.error(`Error fetching stock for ${productName}:`, error);
       return {
         success: false,
-        productName: productName,
+        productName,
         actualProductName: productName,
         availableStock: 0,
-        requiredQty: requiredQty,
+        requiredQty,
         insufficient: true,
         insufficientQty: requiredQty,
         calculationMethod: "error_fallback",
@@ -445,7 +385,7 @@ const ImportSalesModal = ({
       return;
     }
 
-    resetModal(false); // Partial reset
+    resetModal(false);
     setImportMessage("Reading file...");
     setIsUploading(true);
     setIsProcessingFile(true);
@@ -462,7 +402,10 @@ const ImportSalesModal = ({
       const workbook = XLSX.read(new Uint8Array(data), {
         type: "array",
         cellDates: true,
+        cellNF: false,
+        cellText: false,
       });
+
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(worksheet, {
         header: 1,
@@ -474,13 +417,26 @@ const ImportSalesModal = ({
 
       // Find header row
       let headerIdx = -1;
+      const headerKeywords = [
+        "invoice", "customer", "mr", "product", "sales", "qty", "quantity",
+        "amount", "price", "date", "status"
+      ];
+
       for (let i = 0; i < Math.min(rows.length, 20); i++) {
-        const row = rows[i].map((cell) =>
-          String(cell || "")
-            .trim()
-            .toLowerCase(),
-        );
-        if (row.some((cell) => cell.includes("invoice"))) {
+        const row = rows[i];
+        let headerMatchCount = 0;
+
+        for (let j = 0; j < row.length; j++) {
+          const cellValue = String(row[j] || "")
+            .toLowerCase()
+            .trim();
+
+          if (headerKeywords.some(keyword => cellValue.includes(keyword))) {
+            headerMatchCount++;
+          }
+        }
+
+        if (headerMatchCount >= 3) {
           headerIdx = i;
           break;
         }
@@ -488,57 +444,88 @@ const ImportSalesModal = ({
 
       if (headerIdx === -1) {
         throw new Error(
-          "Header row with 'Invoice' not found in the first 20 rows",
+          "Could not find header row. Please make sure your Excel file has proper column headers.",
         );
       }
 
       const headers = rows[headerIdx].map((h) => String(h || "").trim());
-      const dataRows = rows.slice(headerIdx + 1);
+      console.log("Headers found:", headers);
 
-      // Get column indices
+      // Map column indices
       const getColIndex = (possibleNames) => {
         for (const name of possibleNames) {
-          const index = headers.findIndex((h) =>
-            h.toLowerCase().includes(name.toLowerCase()),
-          );
-          if (index !== -1) return index;
+          const lowerName = name.toLowerCase();
+          for (let i = 0; i < headers.length; i++) {
+            if (headers[i].toLowerCase().includes(lowerName)) {
+              return i;
+            }
+          }
         }
         return -1;
       };
 
-      const invoiceCol = getColIndex(["Invoice #", "Invoice", "InvoiceNumber"]);
-      const invoiceDateCol = getColIndex([
-        "Invoice Date",
-        "Date",
-        "InvoiceDate",
-      ]);
-      const customerCol = getColIndex([
-        "Customer Name",
-        "Customer",
-        "CustomerName",
-      ]);
-      const productCol = getColIndex([
-        "Product Name",
-        "Product",
-        "ProductName",
-      ]);
-      const salesQtyCol = getColIndex([
-        "Sales Qty",
-        "Quantity",
-        "SalesQuantity",
-      ]);
-      const bonusQtyCol = getColIndex(["Bonus Qty", "Bonus", "BonusQuantity"]);
-      const priceCol = getColIndex(["Selling Price", "Price", "Unit Price"]);
-      const dueDateCol = getColIndex(["Due Date", "DueDate"]);
-      const deliveryDateCol = getColIndex(["Delivery Date", "DeliveryDate"]);
+      const columnIndices = {
+        invoiceNumber: getColIndex([
+          "Invoice #", "Invoice", "InvoiceNumber", "Invoice No", "INVOICE",
+        ]),
+        invoiceDate: getColIndex([
+          "Invoice Date", "Date", "INVOICE DATE", "Inv Date",
+        ]),
+        recordingDate: getColIndex([
+          "Recording Date", "Record Date", "Entry Date",
+        ]),
+        mrName: getColIndex([
+          "MR Name", "MR", "SalesPerson", "Sales Person", "SALESMAN",
+        ]),
+        customerCode: getColIndex([
+          "Customer Code", "Code", "CUST CODE", "CustomerCode",
+        ]),
+        customerName: getColIndex([
+          "Customer Name", "Customer", "CUSTOMER NAME", "Party Name",
+        ]),
+        productName: getColIndex([
+          "Product Name", "Product", "PRODUCT NAME", "Item",
+        ]),
+        salesQty: getColIndex([
+          "Sales Qty", "Quantity", "SalesQuantity", "Qty", "QTY",
+        ]),
+        bonusQty: getColIndex([
+          "Bonus Qty", "Bonus", "BonusQuantity", "Bonus Qty.",
+        ]),
+        sellingPrice: getColIndex([
+          "Selling Price", "Price", "Unit Price", "Rate", "PRICE",
+        ]),
+        amount: getColIndex(["Amount", "AMOUNT", "Total Amount"]),
+        discount: getColIndex(["Discount", "Disc", "DISCOUNT"]),
+        netAmount: getColIndex(["Net Amount", "Net", "NET AMOUNT"]),
+        dueDate: getColIndex(["Due Date", "DueDate", "DUE DATE"]),
+        deliveryDate: getColIndex([
+          "Delivery Date", "DeliveryDate", "DELIVERY DATE",
+        ]),
+        creditDays: getColIndex(["Credit Days", "Credit", "CREDIT DAYS"]),
+        paidAmount: getColIndex(["Paid Amount", "Paid", "PAID AMOUNT"]),
+        paymentStatus: getColIndex([
+          "Payment Status", "Status", "Payment", "PAYMENT STATUS",
+        ]),
+        remark: getColIndex(["Remarks", "Remark", "Note", "REMARKS"]),
+      };
 
       // Validate required columns
-      if (invoiceCol === -1) throw new Error("Invoice column not found");
-      if (customerCol === -1) throw new Error("Customer column not found");
-      if (productCol === -1) throw new Error("Product column not found");
-      if (salesQtyCol === -1)
-        throw new Error("Sales Quantity column not found");
+      const requiredColumns = [
+        { name: "Invoice Number", index: columnIndices.invoiceNumber },
+        { name: "Customer Name", index: columnIndices.customerName },
+        { name: "Product Name", index: columnIndices.productName },
+        { name: "Sales Quantity", index: columnIndices.salesQty },
+      ];
 
+      const missingColumns = requiredColumns.filter((col) => col.index === -1);
+      if (missingColumns.length > 0) {
+        throw new Error(
+          `Missing required columns: ${missingColumns.map((col) => col.name).join(", ")}`,
+        );
+      }
+
+      const dataRows = rows.slice(headerIdx + 1);
       const groupedInvoices = {};
       const validationErrors = [];
       let rowCount = headerIdx;
@@ -551,22 +538,70 @@ const ImportSalesModal = ({
           continue;
         }
 
-        const invoiceNumber = String(row[invoiceCol] || "").trim();
-        const invoiceDate = parseExcelDate(row[invoiceDateCol]);
-        const customerName = String(row[customerCol] || "").trim();
-        const productName = String(row[productCol] || "").trim();
-        const salesQty = parseExcelQuantity(row[salesQtyCol]);
-        const bonusQty = parseExcelQuantity(row[bonusQtyCol] || 0);
-        const sellingPrice = parseFloat(row[priceCol]) || 0;
-        const dueDate = row[dueDateCol]
-          ? parseExcelDate(row[dueDateCol])
-          : invoiceDate;
-        const deliveryDate = row[deliveryDateCol]
-          ? parseExcelDate(row[deliveryDateCol])
-          : invoiceDate;
+        // Extract values
+        const getValue = (index) => {
+          if (index === -1 || index >= row.length) return "";
+          const value = row[index];
+          return value !== undefined && value !== null
+            ? String(value).trim()
+            : "";
+        };
 
+        const invoiceNumber = getValue(columnIndices.invoiceNumber);
+        const invoiceDate = parseExcelDate(getValue(columnIndices.invoiceDate));
+        const recordingDate =
+          columnIndices.recordingDate !== -1
+            ? parseExcelDate(getValue(columnIndices.recordingDate))
+            : invoiceDate;
+        const mrName = getValue(columnIndices.mrName) || "Unknown";
+        const customerCode = getValue(columnIndices.customerCode);
+        const customerName = getValue(columnIndices.customerName);
+        const productName = getValue(columnIndices.productName);
+        const salesQty = parseExcelQuantity(getValue(columnIndices.salesQty));
+        const bonusQty =
+          columnIndices.bonusQty !== -1
+            ? parseExcelQuantity(getValue(columnIndices.bonusQty))
+            : 0;
+        const sellingPrice =
+          columnIndices.sellingPrice !== -1
+            ? parseFloat(getValue(columnIndices.sellingPrice)) || 0
+            : 0;
+        const discount =
+          columnIndices.discount !== -1
+            ? parseFloat(getValue(columnIndices.discount)) || 0
+            : 0;
+        const amount =
+          columnIndices.amount !== -1
+            ? parseFloat(getValue(columnIndices.amount)) || 0
+            : sellingPrice * salesQty;
+        const netAmount =
+          columnIndices.netAmount !== -1
+            ? parseFloat(getValue(columnIndices.netAmount)) || 0
+            : Math.max(0, amount - discount);
+        const dueDate =
+          columnIndices.dueDate !== -1
+            ? parseExcelDate(getValue(columnIndices.dueDate))
+            : invoiceDate;
+        const deliveryDate =
+          columnIndices.deliveryDate !== -1
+            ? parseExcelDate(getValue(columnIndices.deliveryDate))
+            : invoiceDate;
+        const creditDays =
+          columnIndices.creditDays !== -1
+            ? parseInt(getValue(columnIndices.creditDays)) || 0
+            : 0;
+        const paidAmount =
+          columnIndices.paidAmount !== -1
+            ? parseFloat(getValue(columnIndices.paidAmount)) || 0
+            : 0;
+        const paymentStatus =
+          columnIndices.paymentStatus !== -1
+            ? getValue(columnIndices.paymentStatus)
+            : "Credit";
+        const remark = getValue(columnIndices.remark);
+
+        // Validate row
         const rowErrors = [];
-
         if (!invoiceNumber) rowErrors.push("Invoice number is required");
         if (!customerName) rowErrors.push("Customer name is required");
         if (!productName) rowErrors.push("Product name is required");
@@ -580,10 +615,7 @@ const ImportSalesModal = ({
             row: rowCount + 1,
             invoiceNumber: invoiceNumber || "N/A",
             customerName: customerName || "N/A",
-            mrName:
-              String(
-                row[getColIndex(["MR Name", "MR", "SalesPerson"])] || "",
-              ).trim() || "Unknown",
+            mrName: mrName || "Unknown",
             productName: productName || "N/A",
             error: rowErrors.join("; "),
             type: "validation",
@@ -591,45 +623,31 @@ const ImportSalesModal = ({
           continue;
         }
 
-        if (!groupedInvoices[invoiceNumber]) {
-          groupedInvoices[invoiceNumber] = {
-            recordingDate: invoiceDate,
+        // Group by invoice number
+        const invoiceKey = invoiceNumber;
+        if (!groupedInvoices[invoiceKey]) {
+          groupedInvoices[invoiceKey] = {
+            recordingDate,
             invoiceNumber,
-            invoiceDate: invoiceDate,
-            mrName:
-              String(
-                row[getColIndex(["MR Name", "MR", "SalesPerson"])] || "",
-              ).trim() || "Unknown",
+            invoiceDate,
+            mrName,
             customerName,
-            customerCode: String(
-              row[getColIndex(["Customer Code", "Code"])] || "",
-            ).trim(),
+            customerCode,
             customerId: "",
-            creditDays: parseInt(
-              row[getColIndex(["Credit Days", "Credit"])] || 0,
-            ),
-            paidAmount: parseFloat(
-              row[getColIndex(["Paid Amount", "Paid"])] || 0,
-            ),
-            paymentStatus: "Credit",
-            remark: String(
-              row[getColIndex(["Remarks", "Remark", "Note"])] || "",
-            ).trim(),
+            creditDays,
+            paidAmount,
+            paymentStatus,
+            remark,
             products: [],
             totalAmount: 0,
             dueAmount: 0,
-            dueDate: dueDate,
-            deliveryDate: deliveryDate,
+            dueDate,
+            deliveryDate,
           };
         }
 
-        const discount = parseFloat(
-          row[getColIndex(["Discount", "Disc"])] || 0,
-        );
-        const amount = sellingPrice * salesQty;
-        const netSellingAmount = Math.max(0, amount - discount);
-
-        groupedInvoices[invoiceNumber].products.push({
+        // Add product to invoice
+        groupedInvoices[invoiceKey].products.push({
           productName,
           salesQty,
           bonusQty,
@@ -637,18 +655,17 @@ const ImportSalesModal = ({
           sellingPrice,
           amount,
           discount,
-          netSellingAmount,
+          netSellingAmount: netAmount,
           averageUnitPrice:
-            salesQty + bonusQty > 0
-              ? netSellingAmount / (salesQty + bonusQty)
-              : 0,
+            salesQty + bonusQty > 0 ? netAmount / (salesQty + bonusQty) : 0,
           lc: 0,
           profitLoss: 0,
           isProductAccept: true,
           remark: "",
         });
 
-        groupedInvoices[invoiceNumber].totalAmount += netSellingAmount;
+        // Update invoice totals
+        groupedInvoices[invoiceKey].totalAmount += netAmount;
       }
 
       // Calculate due amounts
@@ -656,6 +673,7 @@ const ImportSalesModal = ({
         inv.dueAmount = Math.max(0, inv.totalAmount - inv.paidAmount);
       });
 
+      // Filter valid invoices
       const validInvoices = Object.values(groupedInvoices).filter(
         (inv) => inv.products.length > 0,
       );
@@ -663,6 +681,9 @@ const ImportSalesModal = ({
       if (validInvoices.length === 0) {
         throw new Error("No valid invoices found in the file");
       }
+
+      console.log("Parsed invoices:", validInvoices);
+      console.log("Validation errors:", validationErrors);
 
       setParsedData(validInvoices);
       setImportErrorDetails(validationErrors);
@@ -685,7 +706,7 @@ const ImportSalesModal = ({
     }
   };
 
-  // Track failed invoices function
+  // Track failed invoices
   const trackFailedInvoices = (errors, invoices) => {
     const failedMap = new Map();
 
@@ -693,7 +714,6 @@ const ImportSalesModal = ({
       const invoiceNumber = error.invoiceNumber || "Unknown";
 
       if (!failedMap.has(invoiceNumber)) {
-        // Find the original invoice data
         const originalInvoice = invoices.find(
           (inv) => inv.invoiceNumber === invoiceNumber,
         );
@@ -709,6 +729,13 @@ const ImportSalesModal = ({
           type: error.type || "import_error",
           timestamp: new Date().toISOString(),
           originalData: originalInvoice || null,
+          products:
+            originalInvoice?.products?.map((p) => ({
+              name: p.productName,
+              salesQty: p.salesQty,
+              bonusQty: p.bonusQty,
+              totalQty: p.totalQty,
+            })) || [],
         });
       }
     });
@@ -716,8 +743,7 @@ const ImportSalesModal = ({
     return Array.from(failedMap.values());
   };
 
-  // Enhanced stock validation - FIXED VERSION
-  // In the validateStockBeforeImport function - FIXED VERSION
+  // Stock validation
   const validateStockBeforeImport = async (invoices) => {
     try {
       setIsValidatingStock(true);
@@ -725,9 +751,8 @@ const ImportSalesModal = ({
 
       const stockIssues = [];
       const productStockMap = new Map();
-      let hasCriticalIssues = false;
 
-      // Collect all products and their quantities
+      // Collect all products
       for (const invoice of invoices) {
         for (const product of invoice.products) {
           const requiredQty = product.salesQty + product.bonusQty;
@@ -739,14 +764,13 @@ const ImportSalesModal = ({
                 totalRequired: 0,
                 requiredByInvoices: [],
                 checked: false,
-                productExists: false,
               });
             }
             const productData = productStockMap.get(productName);
             productData.totalRequired += requiredQty;
             productData.requiredByInvoices.push({
               invoiceNumber: invoice.invoiceNumber,
-              requiredQty: requiredQty,
+              requiredQty,
             });
           }
         }
@@ -756,16 +780,14 @@ const ImportSalesModal = ({
       for (const [productName, productData] of productStockMap.entries()) {
         if (!productData.checked) {
           try {
-            // First, check if product exists at all
+            // Check if product exists
             const existsResponse = await axios.get(
               `${backendUrl}/api/products/check/${encodeURIComponent(productName)}`,
               { timeout: 3000 },
             );
 
             if (existsResponse.data.exists) {
-              productData.exists = true;
-
-              // If product exists, check stock
+              // Check stock
               const stockCheck = await findProductStockInHandOptimized(
                 productName,
                 productData.totalRequired,
@@ -789,33 +811,29 @@ const ImportSalesModal = ({
                 });
               }
             } else {
-              // Product doesn't exist - IMPORTANT: We allow this to proceed
-              productData.exists = false;
+              // Product doesn't exist - allow import
               stockIssues.push({
                 productName,
                 totalRequired: productData.totalRequired,
                 availableStock: 0,
                 insufficientQty: productData.totalRequired,
                 requiredByInvoices: productData.requiredByInvoices,
-                message:
-                  "Product not found in system - backend will create stock adjustments automatically",
-                isCritical: false, // Changed from true to false
+                message: "Product not found - will create stock adjustments",
+                isCritical: false,
                 productExists: false,
               });
             }
 
             productData.checked = true;
           } catch (error) {
-            // If check fails, assume product doesn't exist but allow import
             stockIssues.push({
               productName,
               totalRequired: productData.totalRequired,
               availableStock: 0,
               insufficientQty: productData.totalRequired,
               requiredByInvoices: productData.requiredByInvoices,
-              message:
-                "Could not verify product existence - backend will handle it",
-              isCritical: false, // Changed from true to false
+              message: "Could not verify product existence",
+              isCritical: false,
               productExists: false,
             });
           }
@@ -847,33 +865,27 @@ const ImportSalesModal = ({
 
       setStockValidationResult(stockValidationResult);
 
-      // Always allow import - backend will handle missing products
-      // Show validation modal but don't block
+      // Always allow import
       if (stockIssues.length > 0) {
         setShowStockValidation(true);
       }
 
-      return true; // Always return true to allow import
+      return true;
     } catch (error) {
       console.error("Stock validation error:", error);
-      // Don't block import due to validation errors
       return true;
     } finally {
       setIsValidatingStock(false);
     }
   };
 
-  // Enhanced main import function with better stock handling - FIXED VERSION
-  const handleProductImport = async (
-    dataToImport,
-    bypassStockCheck = true, // Changed default to true
-  ) => {
+  // Main import function
+  const handleProductImport = async (dataToImport, bypassStockCheck = true) => {
     if (!dataToImport?.length) {
       showToast("error", "No data to import");
       return;
     }
 
-    // Always allow import - don't validate stock
     setIsImporting(true);
     setImportStep("Preparing data...");
     setServerProgress(0);
@@ -913,7 +925,7 @@ const ImportSalesModal = ({
           invoices: transformedInvoices,
           updateInventory: true,
           importTimestamp: new Date().toISOString(),
-          bypassStockCheck: true, // Always true
+          bypassStockCheck: true,
         },
         {
           timeout: 300000,
@@ -926,7 +938,7 @@ const ImportSalesModal = ({
         setSessionId(newSessionId);
         setImportStep("Import started – processing invoices...");
 
-        // Start polling for progress
+        // Start polling
         pollingIntervalRef.current = setInterval(async () => {
           try {
             const progRes = await axios.get(
@@ -946,7 +958,6 @@ const ImportSalesModal = ({
                 setIsImporting(false);
 
                 if (prog.failed > 0) {
-                  // Handle failed invoices
                   try {
                     const failedRes = await axios.get(
                       `${backendUrl}/api/sales/import/failed/${newSessionId}`,
@@ -991,7 +1002,6 @@ const ImportSalesModal = ({
                     `Successfully imported ${prog.successful} invoices`,
                   );
 
-                  // After successful import, fetch updated stock
                   if (onImportSuccess) {
                     onImportSuccess();
                     setTimeout(() => {
@@ -1027,7 +1037,6 @@ const ImportSalesModal = ({
         setImportStep("Import failed");
         showToast("error", message);
 
-        // Store any failed invoices
         if (err.response?.data?.failedInvoices) {
           setFailedInvoices(err.response.data.failedInvoices);
           setShowFailedInvoices(true);
@@ -1043,15 +1052,18 @@ const ImportSalesModal = ({
     }
   };
 
-  // Updated handleImportData function
+  // Start import with validation
   const handleImportData = async () => {
     if (parsedData.length === 0) {
       showToast("error", "No data to import");
       return;
     }
 
-    // Start import with stock validation
-    await handleProductImport(parsedData, false);
+    // Validate stock first
+    const canProceed = await validateStockBeforeImport(parsedData);
+    if (canProceed) {
+      await handleProductImport(parsedData, false);
+    }
   };
 
   // Handle proceed despite stock issues
@@ -1064,7 +1076,6 @@ const ImportSalesModal = ({
     setShowStockValidation(false);
     setShouldProceedDespiteStockIssues(true);
 
-    // Show confirmation but always allow proceeding
     const confirmProceed = await confirmDialog({
       title: "Proceed with Import",
       text: `${stockValidationResult.stockIssues.length} products have stock issues. The backend will create stock adjustments automatically. Do you want to proceed?`,
@@ -1074,7 +1085,6 @@ const ImportSalesModal = ({
     });
 
     if (confirmProceed.isConfirmed) {
-      // Always proceed - backend will handle everything
       await handleProductImport(parsedData, true);
     } else {
       setShouldProceedDespiteStockIssues(false);
@@ -1127,7 +1137,7 @@ const ImportSalesModal = ({
     setShouldProceedDespiteStockIssues(false);
   };
 
-  // FailedInvoicesModal Component
+  // Failed Invoices Modal Component
   const FailedInvoicesModal = ({
     isOpen,
     onClose,
@@ -1135,19 +1145,22 @@ const ImportSalesModal = ({
     sessionId,
   }) => {
     const [isDownloading, setIsDownloading] = useState(false);
+    const [expandedRow, setExpandedRow] = useState(null);
+
+    const toggleRowExpand = (invoiceNumber) => {
+      setExpandedRow(expandedRow === invoiceNumber ? null : invoiceNumber);
+    };
 
     const downloadFailedReport = async () => {
       try {
         setIsDownloading(true);
 
-        // If we have sessionId, try to fetch from backend for complete data
         if (sessionId) {
           try {
             const response = await axios.get(
               `${backendUrl}/api/sales/import/failed/${sessionId}`,
             );
             if (response.data.success && response.data.data.failedInvoices) {
-              // Use the fetched data
               failedInvoices = response.data.data.failedInvoices;
             }
           } catch (fetchError) {
@@ -1168,6 +1181,7 @@ const ImportSalesModal = ({
             "Error Type",
             "Error Message",
             "Timestamp",
+            "Products Details",
           ],
           ...failedInvoices.map((inv) => [
             inv.row || "N/A",
@@ -1178,6 +1192,9 @@ const ImportSalesModal = ({
             inv.type || "unknown",
             inv.error || inv.message || "Unknown error",
             inv.timestamp || new Date().toISOString(),
+            inv.products
+              ?.map((p) => `${p.name}: ${p.salesQty}+${p.bonusQty}`)
+              .join("; ") || "N/A",
           ]),
         ];
 
@@ -1252,45 +1269,97 @@ const ImportSalesModal = ({
                     <th className="p-3 text-left border-b">Invoice #</th>
                     <th className="p-3 text-left border-b">Customer</th>
                     <th className="p-3 text-left border-b">MR Name</th>
-                    <th className="p-3 text-left border-b">Product</th>
                     <th className="p-3 text-left border-b">Error Type</th>
                     <th className="p-3 text-left border-b">Error Message</th>
+                    <th className="p-3 text-left border-b">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {failedInvoices.slice(0, 50).map((inv, idx) => (
-                    <tr key={idx} className="hover:bg-red-50 border-b">
-                      <td className="p-3 font-mono">{inv.row || idx + 1}</td>
-                      <td className="p-3 font-medium">{inv.invoiceNumber}</td>
-                      <td className="p-3">{inv.customerName}</td>
-                      <td className="p-3">{inv.mrName}</td>
-                      <td className="p-3">{inv.productName || "N/A"}</td>
-                      <td className="p-3">
-                        <span
-                          className={`px-2 py-1 rounded text-xs ${
-                            inv.type === "validation"
-                              ? "bg-yellow-100 text-yellow-800"
-                              : inv.type === "import_error"
+                    <React.Fragment key={idx}>
+                      <tr className="hover:bg-red-50 border-b">
+                        <td className="p-3 font-mono">{inv.row || idx + 1}</td>
+                        <td className="p-3 font-medium">{inv.invoiceNumber}</td>
+                        <td className="p-3">{inv.customerName || "N/A"}</td>
+                        <td className="p-3">{inv.mrName || "N/A"}</td>
+                        <td className="p-3">
+                          <span
+                            className={`px-2 py-1 rounded text-xs ${
+                              inv.type === "validation"
+                                ? "bg-yellow-100 text-yellow-800"
+                                : inv.type === "import_error"
                                 ? "bg-red-100 text-red-800"
                                 : inv.type === "duplicate_error"
-                                  ? "bg-orange-100 text-orange-800"
-                                  : inv.type === "insufficient_stock"
-                                    ? "bg-red-100 text-red-800"
-                                    : "bg-gray-100 text-gray-800"
-                          }`}
+                                ? "bg-orange-100 text-orange-800"
+                                : inv.type === "processing_error"
+                                ? "bg-red-100 text-red-800"
+                                : "bg-gray-100 text-gray-800"
+                            }`}
+                          >
+                            {inv.type || "error"}
+                          </span>
+                        </td>
+                        <td
+                          className="p-3 text-red-600 max-w-xs"
+                          title={inv.error || inv.message}
                         >
-                          {inv.type || "error"}
-                        </span>
-                      </td>
-                      <td
-                        className="p-3 text-red-600 max-w-xs"
-                        title={inv.error || inv.message}
-                      >
-                        <div className="truncate">
-                          {inv.error || inv.message || "Unknown error"}
-                        </div>
-                      </td>
-                    </tr>
+                          <div className="truncate">
+                            {inv.error || inv.message || "Unknown error"}
+                          </div>
+                        </td>
+                        <td className="p-3">
+                          <button
+                            onClick={() => toggleRowExpand(inv.invoiceNumber)}
+                            className="text-blue-600 hover:text-blue-800 cursor-pointer"
+                          >
+                            {expandedRow === inv.invoiceNumber
+                              ? "Hide"
+                              : "Show"}{" "}
+                            Details
+                          </button>
+                        </td>
+                      </tr>
+                      {expandedRow === inv.invoiceNumber && (
+                        <tr className="bg-gray-50">
+                          <td colSpan="7" className="p-4">
+                            <div className="mb-2">
+                              <strong>Products in this invoice:</strong>
+                            </div>
+                            {inv.products && inv.products.length > 0 ? (
+                              <div className="grid grid-cols-3 gap-2">
+                                {inv.products.map((product, pIdx) => (
+                                  <div
+                                    key={pIdx}
+                                    className="bg-white p-3 rounded border"
+                                  >
+                                    <div className="font-medium">
+                                      {product.name}
+                                    </div>
+                                    <div className="text-sm text-gray-600">
+                                      Sales: {product.salesQty} | Bonus:{" "}
+                                      {product.bonusQty} | Total:{" "}
+                                      {product.totalQty}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="text-gray-500 italic">
+                                No product details available
+                              </div>
+                            )}
+                            {inv.originalData && (
+                              <div className="mt-3 p-3 bg-blue-50 rounded">
+                                <strong>Original Data:</strong>
+                                <pre className="text-xs overflow-auto mt-2">
+                                  {JSON.stringify(inv.originalData, null, 2)}
+                                </pre>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>
@@ -1325,8 +1394,7 @@ const ImportSalesModal = ({
     );
   };
 
-  // In the StockValidationModal component (inside ImportSalesModal), add download functionality
-
+  // Stock Validation Modal Component
   const StockValidationModal = () => {
     if (!showStockValidation || !stockValidationResult) return null;
 
@@ -1335,7 +1403,6 @@ const ImportSalesModal = ({
     // Download stock issues as Excel
     const downloadStockIssuesExcel = () => {
       try {
-        // Create Excel data
         const excelData = stockIssues.map((issue, index) => ({
           "S.No": index + 1,
           "Product Name": issue.productName,
@@ -1355,7 +1422,7 @@ const ImportSalesModal = ({
               .join(", ") || "N/A",
         }));
 
-        // Add summary row
+        // Add summary
         excelData.push({});
         excelData.push({
           "Product Name": "SUMMARY",
@@ -1369,21 +1436,17 @@ const ImportSalesModal = ({
           "Issue Type": `${stockIssues.length} products with issues`,
         });
 
-        // Create worksheet
         const ws = XLSX.utils.json_to_sheet(excelData);
-
-        // Style the summary row
         const range = XLSX.utils.decode_range(ws["!ref"]);
-        const summaryRow = range.e.r; // Last row is summary
+        const summaryRow = range.e.r;
 
-        // Make summary row bold
+        // Style summary row
         for (let C = range.s.c; C <= range.e.c; C++) {
           const cellAddress = XLSX.utils.encode_cell({ r: summaryRow, c: C });
           if (ws[cellAddress]) {
             if (!ws[cellAddress].s) ws[cellAddress].s = {};
             ws[cellAddress].s.font = { bold: true };
             if (C === 0) {
-              // First column (Product Name)
               ws[cellAddress].s.fill = { fgColor: { rgb: "FFCCCC" } };
             }
           }
@@ -1391,11 +1454,7 @@ const ImportSalesModal = ({
 
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Stock Issues");
-
-        // Generate filename with timestamp
         const fileName = `stock_issues_${new Date().toISOString().slice(0, 10)}_${Date.now()}.xlsx`;
-
-        // Download the file
         XLSX.writeFile(wb, fileName);
 
         showToast("success", "Stock issues report downloaded successfully");
@@ -1405,10 +1464,9 @@ const ImportSalesModal = ({
       }
     };
 
-    // Also create a CSV download option for simpler format
+    // Download CSV
     const downloadStockIssuesCSV = () => {
       try {
-        // Create CSV content
         const headers = [
           "Product Name",
           "Required Quantity",
@@ -1449,7 +1507,6 @@ const ImportSalesModal = ({
           ...csvRows.map((row) => row.join(",")),
         ].join("\n");
 
-        // Create and download file
         const blob = new Blob([csvContent], {
           type: "text/csv;charset=utf-8;",
         });
@@ -1482,7 +1539,6 @@ const ImportSalesModal = ({
                 <span className="px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
                   {stockIssues.length} Stock Issues
                 </span>
-                {/* ADDED DOWNLOAD BUTTONS HERE */}
                 <div className="flex gap-2">
                   <button
                     onClick={downloadStockIssuesCSV}
@@ -1578,7 +1634,9 @@ const ImportSalesModal = ({
                   {stockIssues.map((issue, idx) => (
                     <tr
                       key={idx}
-                      className={`hover:bg-red-50 border-b ${!issue.stockCheckSuccess ? "bg-red-50" : ""}`}
+                      className={`hover:bg-red-50 border-b ${
+                        !issue.stockCheckSuccess ? "bg-red-50" : ""
+                      }`}
                     >
                       <td className="p-3 font-medium">
                         <div className="text-gray-700">{issue.productName}</div>
@@ -1602,15 +1660,15 @@ const ImportSalesModal = ({
                             !issue.stockCheckSuccess
                               ? "bg-red-100 text-red-800"
                               : issue.insufficient
-                                ? "bg-orange-100 text-orange-800"
-                                : "bg-gray-100 text-gray-800"
+                              ? "bg-orange-100 text-orange-800"
+                              : "bg-gray-100 text-gray-800"
                           }`}
                         >
                           {!issue.stockCheckSuccess
                             ? "Product Not Found"
                             : issue.insufficient
-                              ? "Insufficient Stock"
-                              : "Warning"}
+                            ? "Insufficient Stock"
+                            : "Warning"}
                         </span>
                       </td>
                       <td className="p-3 text-xs text-gray-600">
@@ -1677,7 +1735,6 @@ const ImportSalesModal = ({
               >
                 Go Back
               </button>
-              {/* ADD DOWNLOAD BUTTON TO MAIN ACTION AREA */}
               <button
                 onClick={downloadStockIssuesExcel}
                 className="px-5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium flex items-center gap-2 cursor-pointer"
@@ -1742,6 +1799,26 @@ const ImportSalesModal = ({
                     Supported formats: Excel (.xlsx, .xls), CSV (.csv) | Max
                     size: 20MB
                   </p>
+                  <div className="mt-4">
+                    <button
+                      onClick={() => {
+                        // Download sample template
+                        const ws = XLSX.utils.aoa_to_sheet([
+                          ["Invoice #", "Invoice Date", "Customer Name", "MR Name", "Product Name", "Sales Qty", "Bonus Qty", "Selling Price", "Amount", "Discount", "Net Amount", "Payment Status", "Remark"],
+                          ["INV-001", "2024-01-15", "Customer A", "John Doe", "Product A", 10, 2, 100, 1000, 100, 900, "Credit", "Sample remark"],
+                          ["INV-001", "2024-01-15", "Customer A", "John Doe", "Product B", 5, 1, 50, 250, 25, 225, "Credit", ""],
+                          ["INV-002", "2024-01-16", "Customer B", "Jane Smith", "Product C", 20, 5, 75, 1500, 150, 1350, "Paid", "Urgent delivery"],
+                        ]);
+                        const wb = XLSX.utils.book_new();
+                        XLSX.utils.book_append_sheet(wb, ws, "Sales Template");
+                        XLSX.writeFile(wb, "sales_import_template.xlsx");
+                        showToast("success", "Template downloaded successfully");
+                      }}
+                      className="text-sm text-blue-600 hover:text-blue-800 underline cursor-pointer"
+                    >
+                      Download sample template
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -1756,6 +1833,13 @@ const ImportSalesModal = ({
                 </h3>
               </div>
               <p className="text-center text-gray-600">{importMessage}</p>
+              {isProcessingFile && (
+                <div className="mt-4">
+                  <div className="h-2 bg-blue-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-blue-500 rounded-full animate-pulse"></div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1776,12 +1860,42 @@ const ImportSalesModal = ({
                     </p>
                   )}
                 </div>
-                <button
-                  onClick={resetParsedData}
-                  className="text-sm text-gray-600 hover:text-gray-800 px-3 py-1 cursor-pointer"
-                >
-                  Clear
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={resetParsedData}
+                    className="text-sm text-gray-600 hover:text-gray-800 px-3 py-1 border border-gray-300 rounded-lg cursor-pointer"
+                  >
+                    Clear
+                  </button>
+                  {importErrorDetails.length > 0 && (
+                    <button
+                      onClick={() => setShowValidationErrors(!showValidationErrors)}
+                      className="text-sm text-yellow-600 hover:text-yellow-800 px-3 py-1 border border-yellow-300 rounded-lg cursor-pointer"
+                    >
+                      {showValidationErrors ? "Hide" : "Show"} Errors
+                    </button>
+                  )}
+                </div>
+              </div>
+              
+              {/* Quick stats */}
+              <div className="grid grid-cols-3 gap-2 mt-3">
+                <div className="bg-white p-2 rounded border text-center">
+                  <div className="text-xs text-gray-500">Total Invoices</div>
+                  <div className="font-bold text-lg">{parsedData.length}</div>
+                </div>
+                <div className="bg-white p-2 rounded border text-center">
+                  <div className="text-xs text-gray-500">Total Products</div>
+                  <div className="font-bold text-lg">
+                    {parsedData.reduce((sum, inv) => sum + (inv.products?.length || 0), 0)}
+                  </div>
+                </div>
+                <div className="bg-white p-2 rounded border text-center">
+                  <div className="text-xs text-gray-500">Total Amount</div>
+                  <div className="font-bold text-lg">
+                    ${parsedData.reduce((sum, inv) => sum + (inv.totalAmount || 0), 0).toFixed(2)}
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -1789,7 +1903,8 @@ const ImportSalesModal = ({
           {/* Validation errors */}
           {importErrorDetails.length > 0 &&
             showParsedSection &&
-            !isImporting && (
+            !isImporting &&
+            showValidationErrors && (
               <div className="mb-6 border border-yellow-200 rounded-lg overflow-hidden">
                 <div className="bg-yellow-50 p-3 flex justify-between items-center">
                   <div className="flex items-center gap-2">
@@ -1799,43 +1914,41 @@ const ImportSalesModal = ({
                     </h3>
                   </div>
                   <button
-                    onClick={() =>
-                      setShowValidationErrors(!showValidationErrors)
-                    }
-                    className="text-sm text-yellow-600 hover:text-yellow-800 border border-yellow-300 px-3 py-1 rounded cursor-pointer"
+                    onClick={downloadErrorReport}
+                    className="text-sm text-yellow-600 hover:text-yellow-800 border border-yellow-300 px-3 py-1 rounded cursor-pointer flex items-center gap-1"
                   >
-                    {showValidationErrors ? "Hide" : "Show"} Details
+                    <Download size={14} /> Download
                   </button>
                 </div>
-                {showValidationErrors && (
-                  <div className="max-h-60 overflow-y-auto bg-white">
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="p-2 text-left border-b">Row</th>
-                          <th className="p-2 text-left border-b">Invoice #</th>
-                          <th className="p-2 text-left border-b">Error</th>
+                <div className="max-h-60 overflow-y-auto bg-white">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="p-2 text-left border-b">Row</th>
+                        <th className="p-2 text-left border-b">Invoice #</th>
+                        <th className="p-2 text-left border-b">Customer</th>
+                        <th className="p-2 text-left border-b">Error</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importErrorDetails.slice(0, 20).map((err, i) => (
+                        <tr key={i} className="hover:bg-yellow-50 border-b">
+                          <td className="p-2 font-mono">{err.row}</td>
+                          <td className="p-2">{err.invoiceNumber}</td>
+                          <td className="p-2">{err.customerName}</td>
+                          <td className="p-2 text-yellow-600 text-xs">
+                            {err.error}
+                          </td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {importErrorDetails.slice(0, 10).map((err, i) => (
-                          <tr key={i} className="hover:bg-yellow-50 border-b">
-                            <td className="p-2">{err.row}</td>
-                            <td className="p-2">{err.invoiceNumber}</td>
-                            <td className="p-2 text-yellow-600 text-xs">
-                              {err.error}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    {importErrorDetails.length > 10 && (
-                      <div className="p-2 text-center text-gray-500 text-sm">
-                        Showing 10 of {importErrorDetails.length} errors
-                      </div>
-                    )}
-                  </div>
-                )}
+                      ))}
+                    </tbody>
+                  </table>
+                  {importErrorDetails.length > 20 && (
+                    <div className="p-2 text-center text-gray-500 text-sm">
+                      Showing 20 of {importErrorDetails.length} errors
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -1851,6 +1964,12 @@ const ImportSalesModal = ({
                   <p className="text-sm text-yellow-700 mt-1">
                     Validating stock for {parsedData.length} invoices...
                   </p>
+                  <div className="mt-2 w-full bg-yellow-100 rounded-full h-2">
+                    <div 
+                      className="bg-yellow-500 h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${Math.random() * 50 + 30}%` }}
+                    ></div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1900,17 +2019,43 @@ const ImportSalesModal = ({
             parsedData.length > 0 &&
             !isValidatingStock && (
               <div className="mb-6">
-                <button
-                  onClick={handleImportData}
-                  className="w-full bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white py-4 rounded-xl font-bold text-xl shadow-lg transition transform hover:scale-105 cursor-pointer"
-                >
-                  Start Import ({parsedData.length} invoices)
-                </button>
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleImportData}
+                    className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white py-4 rounded-xl font-bold text-xl shadow-lg transition transform hover:scale-105 cursor-pointer"
+                  >
+                    Start Import ({parsedData.length} invoices)
+                  </button>
+                  <button
+                    onClick={() => {
+                      // Preview data
+                      console.log("Preview parsed data:", parsedData);
+                      showToast("info", "Check console for data preview");
+                    }}
+                    className="px-4 py-4 bg-gray-600 hover:bg-gray-700 text-white rounded-xl font-bold shadow-lg transition cursor-pointer"
+                    title="Preview Data"
+                  >
+                    <Eye size={20} />
+                  </button>
+                </div>
+                <p className="text-center text-gray-500 text-sm mt-2">
+                  Click to import {parsedData.length} invoices with {parsedData.reduce((sum, inv) => sum + (inv.products?.length || 0), 0)} products
+                </p>
               </div>
             )}
 
           {/* Footer */}
-          <div className="flex justify-end pt-4 border-t border-gray-200">
+          <div className="flex justify-between pt-4 border-t border-gray-200">
+            <div>
+              {showParsedSection && parsedData.length > 0 && (
+                <button
+                  onClick={resetParsedData}
+                  className="px-4 py-2 text-gray-600 hover:text-gray-800 cursor-pointer"
+                >
+                  Upload Different File
+                </button>
+              )}
+            </div>
             <button
               onClick={handleClose}
               disabled={
@@ -1921,7 +2066,7 @@ const ImportSalesModal = ({
               }
               className="px-6 py-2 bg-gray-300 hover:bg-gray-400 text-gray-700 rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
-              Close
+              {isImporting || isUploading ? "Cancel" : "Close"}
             </button>
           </div>
         </div>
@@ -1943,6 +2088,7 @@ const ImportSalesModal = ({
   );
 };
 
+// ===================== PRODUCT DETAILS MODAL =====================
 const ProductDetailsModal = ({
   isOpen,
   onClose,
@@ -2148,265 +2294,8 @@ const ProductDetailsModal = ({
     document.body,
   );
 };
-// Add these functions to your ImportSalesModal component
 
-const downloadStockIssuesFromBackend = async () => {
-  try {
-    if (!parsedData.length) {
-      showToast("error", "No data available for report");
-      return;
-    }
-
-    setIsValidatingStock(true);
-    setImportMessage("Generating stock issues report...");
-
-    const response = await axios.post(
-      `${backendUrl}/api/sales/stock-issues-report`,
-      { invoices: parsedData },
-      {
-        responseType: "blob", // Important for file download
-        timeout: 30000,
-      },
-    );
-
-    // Create a blob from the response
-    const blob = new Blob([response.data], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    });
-
-    // Create download link
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `stock_issues_report_${new Date().toISOString().slice(0, 10)}.xlsx`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(url);
-
-    showToast("success", "Stock issues report downloaded successfully");
-  } catch (error) {
-    console.error("Error downloading report from backend:", error);
-    showToast(
-      "error",
-      "Failed to download report. Using local export instead.",
-    );
-
-    // Fallback to local generation
-    downloadStockIssuesLocally();
-  } finally {
-    setIsValidatingStock(false);
-  }
-};
-
-const downloadStockIssuesLocally = () => {
-  if (!stockValidationResult?.stockIssues) {
-    showToast("error", "No stock issues data available");
-    return;
-  }
-
-  const { stockIssues, summary } = stockValidationResult;
-
-  try {
-    // Create workbook
-    const wb = XLSX.utils.book_new();
-
-    // Create data for Excel
-    const excelData = [
-      // Header row
-      ["STOCK ISSUES REPORT", "", "", "", "", ""],
-      [`Generated on: ${new Date().toLocaleString()}`, "", "", "", "", ""],
-      ["", "", "", "", "", ""],
-      // Column headers
-      [
-        "Product Name",
-        "Required Quantity",
-        "Available Stock",
-        "Shortage",
-        "Status",
-        "Issue Type",
-        "Required By Invoices",
-        "Affected Invoices",
-      ],
-      // Data rows
-      ...stockIssues.map((issue, index) => [
-        issue.productName,
-        issue.totalRequired,
-        issue.availableStock,
-        issue.insufficientQty,
-        !issue.stockCheckSuccess ? "Product Not Found" : "Insufficient Stock",
-        issue.message || "Error checking stock",
-        issue.requiredByInvoices?.length || 0,
-        issue.requiredByInvoices
-          ?.slice(0, 3)
-          .map((inv) => inv.invoiceNumber)
-          .join(", ") || "N/A",
-      ]),
-      // Empty row
-      [],
-      // Summary row
-      [
-        "TOTAL SUMMARY",
-        summary.totalRequired || 0,
-        summary.totalAvailable || 0,
-        stockIssues.reduce((sum, issue) => sum + issue.insufficientQty, 0),
-        `${stockIssues.length} Products`,
-        "",
-        "",
-        "",
-      ],
-    ];
-
-    // Create worksheet
-    const ws = XLSX.utils.aoa_to_sheet(excelData);
-
-    // Add column widths
-    const wscols = [
-      { wch: 35 }, // Product Name
-      { wch: 18 }, // Required Quantity
-      { wch: 18 }, // Available Stock
-      { wch: 15 }, // Shortage
-      { wch: 20 }, // Status
-      { wch: 40 }, // Issue Type
-      { wch: 20 }, // Required By Invoices
-      { wch: 40 }, // Affected Invoices
-    ];
-    ws["!cols"] = wscols;
-
-    // Merge title cells
-    ws["!merges"] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: 7 } }, // Title row
-      { s: { r: 1, c: 0 }, e: { r: 1, c: 7 } }, // Date row
-    ];
-
-    // Add to workbook
-    XLSX.utils.book_append_sheet(wb, ws, "Stock Issues");
-
-    // Generate filename
-    const fileName = `stock_issues_${new Date().toISOString().slice(0, 10)}.xlsx`;
-
-    // Download
-    XLSX.writeFile(wb, fileName);
-
-    showToast("success", "Stock issues report downloaded");
-  } catch (error) {
-    console.error("Error generating local report:", error);
-    showToast("error", "Failed to generate report");
-  }
-};
-
-// Add this function to create a detailed report matching your requirements
-
-const generateCompleteStockIssuesReport = () => {
-  if (!stockValidationResult?.stockIssues) return;
-
-  const { stockIssues } = stockValidationResult;
-
-  // Create workbook with multiple sheets
-  const wb = XLSX.utils.book_new();
-
-  // Sheet 1: Detailed Issues
-  const detailedData = [
-    [
-      "Product Name",
-      "Required Quantity",
-      "Available Stock",
-      "Shortage",
-      "Status",
-      "Issue Type",
-    ],
-    ...stockIssues.map((issue) => [
-      issue.productName,
-      issue.totalRequired,
-      issue.availableStock || 0,
-      issue.insufficientQty,
-      !issue.stockCheckSuccess ? "Product Not Found" : "Insufficient Stock",
-      issue.message ||
-        "Error checking stock: Request failed with status code 404",
-    ]),
-  ];
-
-  const ws1 = XLSX.utils.aoa_to_sheet(detailedData);
-  XLSX.utils.book_append_sheet(wb, ws1, "Stock Issues");
-
-  // Sheet 2: Invoice-wise Breakdown
-  const invoiceData = [];
-  const header2 = [
-    "Product Name",
-    "Invoice Number",
-    "Required Quantity",
-    "Customer Name",
-    "MR Name",
-  ];
-
-  invoiceData.push(header2);
-
-  stockIssues.forEach((issue) => {
-    issue.requiredByInvoices?.forEach((inv) => {
-      invoiceData.push([
-        issue.productName,
-        inv.invoiceNumber,
-        inv.requiredQty,
-        // You might need to get customer and MR name from the invoice data
-        "Customer Name", // Replace with actual data
-        "MR Name", // Replace with actual data
-      ]);
-    });
-  });
-
-  const ws2 = XLSX.utils.aoa_to_sheet(invoiceData);
-  XLSX.utils.book_append_sheet(wb, ws2, "Invoice Details");
-
-  // Sheet 3: Summary
-  const totalRequired = stockIssues.reduce(
-    (sum, issue) => sum + issue.totalRequired,
-    0,
-  );
-  const totalAvailable = stockIssues.reduce(
-    (sum, issue) => sum + (issue.availableStock || 0),
-    0,
-  );
-  const totalShortage = stockIssues.reduce(
-    (sum, issue) => sum + issue.insufficientQty,
-    0,
-  );
-
-  const summaryData = [
-    ["STOCK ISSUES SUMMARY REPORT"],
-    ["Generated Date", new Date().toLocaleString()],
-    [],
-    ["Metric", "Value"],
-    ["Total Products with Issues", stockIssues.length],
-    ["Total Required Quantity", totalRequired],
-    ["Total Available Stock", totalAvailable],
-    ["Total Shortage", totalShortage],
-    [
-      "Critical Issues (Product Not Found)",
-      stockIssues.filter((issue) => !issue.stockCheckSuccess).length,
-    ],
-    [
-      "Insufficient Stock Issues",
-      stockIssues.filter(
-        (issue) => issue.stockCheckSuccess && issue.insufficient,
-      ).length,
-    ],
-    [],
-    ["RECOMMENDATIONS:"],
-    ["1. Add missing products to inventory"],
-    ["2. Update stock quantities for existing products"],
-    ["3. Create purchase orders for required quantities"],
-    ["4. Contact suppliers for urgent requirements"],
-  ];
-
-  const ws3 = XLSX.utils.aoa_to_sheet(summaryData);
-  XLSX.utils.book_append_sheet(wb, ws3, "Summary");
-
-  // Download the file
-  const fileName = `complete_stock_report_${new Date().toISOString().slice(0, 10)}.xlsx`;
-  XLSX.writeFile(wb, fileName);
-
-  showToast("success", "Complete stock report downloaded");
-};
+// ===================== MAIN SALES COMPONENT =====================
 const Sales = () => {
   const navigate = useNavigate();
   const [sales, setSales] = useState([]);
@@ -2420,14 +2309,14 @@ const Sales = () => {
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [selectedSaleProducts, setSelectedSaleProducts] = useState([]);
-  const [selectedSale, setSelectedSale] = useState(null); // Added missing state
+  const [selectedSale, setSelectedSale] = useState(null);
   const [mrList, setMrList] = useState([]);
   const [customerList, setCustomerList] = useState([]);
   const [hasPurchaseInventories, setHasPurchaseInventories] = useState(false);
   const [checkingPurchaseInventories, setCheckingPurchaseInventories] =
     useState(true);
   const [shouldCheckPurchase, setShouldCheckPurchase] = useState(true);
-  const [productsList, setProductsList] = useState([]); // Add products list state
+  const [productsList, setProductsList] = useState([]);
   const inputRef = useRef(null);
   const { statuses, loading } = useInitialSaleData();
 
@@ -2472,7 +2361,6 @@ const Sales = () => {
       }
     } catch (error) {
       console.warn("Could not fetch products list:", error.message);
-      // Continue without products list
     }
   };
 
@@ -2508,7 +2396,7 @@ const Sales = () => {
   // Also check when component mounts
   useEffect(() => {
     checkPurchaseInventories();
-    fetchProductsList(); // Fetch products list on mount
+    fetchProductsList();
   }, []);
 
   // Listen for custom event when purchase inventory is added
@@ -2533,9 +2421,7 @@ const Sales = () => {
   // Listen for inventory update events
   useEffect(() => {
     const handleInventoryUpdated = () => {
-      // Refresh sales data when inventory is updated
       fetchSaleSummaries();
-      // Also refresh products list
       fetchProductsList();
     };
 
@@ -2610,97 +2496,48 @@ const Sales = () => {
           fetchCustomerList(),
         ]);
 
-        console.log("📊 Raw MR data response:", mrs);
-        console.log("📊 Raw Customer data response:", customers);
-
         // Handle MR list
         if (mrs && mrs.success && Array.isArray(mrs.data)) {
-          console.log("✅ MR data is array with length:", mrs.data.length);
-          console.log("📋 First MR item structure:", mrs.data[0]);
-
           const mrNames = mrs.data
-            .map((mr, index) => {
-              console.log(`🔍 Processing MR ${index}:`, mr);
-
+            .map((mr) => {
               if (typeof mr === "string") {
-                console.log(`   Type: string, Value: "${mr}"`);
                 return mr.trim();
               }
 
               if (mr && typeof mr === "object") {
-                console.log(`   Type: object, Keys: ${Object.keys(mr)}`);
-
-                // Check for medicalRepName field
                 if (mr.medicalRepName) {
-                  console.log(
-                    `   Found medicalRepName: "${mr.medicalRepName}"`,
-                  );
                   return mr.medicalRepName.trim();
                 }
-
-                // Check for name field
                 if (mr.name) {
-                  console.log(`   Found name: "${mr.name}"`);
                   return mr.name.trim();
                 }
-
-                // Check for fullName field
                 if (mr.fullName) {
-                  console.log(`   Found fullName: "${mr.fullName}"`);
                   return mr.fullName.trim();
                 }
-
-                console.log(`   No name field found in MR object`);
                 return null;
               }
 
-              console.log(`   Type: ${typeof mr}, Value: ${mr}`);
               return null;
             })
             .filter(Boolean);
 
-          console.log("📝 Extracted MR names:", mrNames);
           setMrList(mrNames);
         } else {
-          console.warn("❌ MR data not in expected format. Structure:", {
-            hasMrs: !!mrs,
-            hasSuccess: mrs?.success,
-            isArray: Array.isArray(mrs?.data),
-            mrs,
-          });
+          console.warn("❌ MR data not in expected format");
           setMrList([]);
         }
 
         // Handle customer list
         if (customers && customers.success && Array.isArray(customers.data)) {
-          console.log(
-            "✅ Customer data is array with length:",
-            customers.data.length,
-          );
-          console.log("📋 First Customer item:", customers.data[0]);
-          console.log("📋 Customer item keys:", Object.keys(customers.data[0]));
-
-          // Extract just the customer names for debugging
-          const customerNames = customers.data.map((c) => c.name || "Unknown");
-          console.log("📝 Customer names:", customerNames.slice(0, 5)); // Show first 5
-
           setCustomerList(customers.data);
         } else {
-          console.warn("❌ Customer data not in expected format. Structure:", {
-            hasCustomers: !!customers,
-            hasSuccess: customers?.success,
-            isArray: Array.isArray(customers?.data),
-            customers,
-          });
+          console.warn("❌ Customer data not in expected format");
           setCustomerList([]);
         }
 
         console.log("✅ Finished processing dropdown data");
-        console.log("📊 Final MR list length:", mrList.length);
-        console.log("📊 Final Customer list length:", customerList.length);
       } catch (error) {
         console.error("❌ Error fetching dropdown data:", error);
-        console.error("Error stack:", error.stack);
         setMrList([]);
         setCustomerList([]);
       }
@@ -2797,7 +2634,6 @@ const Sales = () => {
   const paymentStatusTabs = useMemo(() => {
     if (!Array.isArray(sales) || sales.length === 0) return ["All"];
 
-    // Extract unique payment statuses from sales data
     const uniqueStatuses = [
       ...new Set(
         sales
@@ -2819,12 +2655,10 @@ const Sales = () => {
     return sales.filter((sale) => {
       const paymentStatus = (sale.paymentStatus || "").toLowerCase();
 
-      // ✅ If tab is NOT "all", then filter by payment status
       if (selectedTabLower !== "all" && selectedTabLower !== paymentStatus) {
         return false;
       }
 
-      // ✅ If no search text, return all matching tab data
       if (!lowerSearch) return true;
 
       const fields = [sale.invoiceNumber, sale.customerName, sale.mrName];
@@ -2906,7 +2740,7 @@ const Sales = () => {
   };
 
   const editSale = (sale) => {
-    setSelectedSale(sale); // Set the selected sale
+    setSelectedSale(sale);
     setForm({
       ...sale,
       products: sale.products || [],
@@ -2985,7 +2819,7 @@ const Sales = () => {
       if (res.status === 200) {
         showToast("success", "Sales record updated successfully");
         setIsEditModalOpen(false);
-        setSelectedSale(null); // Clear selected sale
+        setSelectedSale(null);
         fetchSaleSummaries();
       }
     } catch (err) {
@@ -3009,7 +2843,6 @@ const Sales = () => {
   const handleImportSuccess = () => {
     setTimeout(() => {
       fetchSaleSummaries();
-      // Trigger inventory refresh
       window.dispatchEvent(new CustomEvent("inventory-updated"));
     }, 1000);
   };
@@ -3058,7 +2891,7 @@ const Sales = () => {
         onImportSuccess={handleImportSuccess}
         mrList={mrList}
         customerList={customerList}
-        productsList={productsList} // Pass products list to modal
+        productsList={productsList}
       />
 
       <ProductDetailsModal
@@ -3756,8 +3589,8 @@ const Sales = () => {
                     {mrList.length === 0 && customerList.length === 0
                       ? "Please add MR and Customer data first to create or import sales."
                       : mrList.length === 0
-                        ? "Please add MR data first to create or import sales."
-                        : "Please add Customer data first to create or import sales."}
+                      ? "Please add MR data first to create or import sales."
+                      : "Please add Customer data first to create or import sales."}
                   </p>
                 </div>
               </div>
@@ -3869,7 +3702,13 @@ const Sales = () => {
                     {loadingData ? (
                       <LoadingOverlay text="Please wait..." />
                     ) : (
-                      "No sales data found"
+                      <div className="py-8">
+                        <Package className="mx-auto text-gray-400 mb-3" size={48} />
+                        <p>No sales data found</p>
+                        <p className="text-sm text-gray-500 mt-1">
+                          Try adding a new sale or importing from Excel
+                        </p>
+                      </div>
                     )}
                   </td>
                 </tr>
@@ -3897,7 +3736,7 @@ const Sales = () => {
                                 )}
                                 onChange={() => toggleSelect(sale)}
                               />
-                              <span>{sale.invoiceNumber}</span>
+                              <span className="font-medium">{sale.invoiceNumber}</span>
                             </div>
                           ) : item.id === "productCount" ? (
                             <button
@@ -3915,6 +3754,7 @@ const Sales = () => {
                               <button
                                 className="text-blue-600 hover:text-blue-800 cursor-pointer"
                                 onClick={() => handleView(sale)}
+                                title="View"
                               >
                                 <Eye size={18} />
                               </button>
@@ -3933,6 +3773,20 @@ const Sales = () => {
                                 <Trash2 size={18} />
                               </button>
                             </div>
+                          ) : item.id === "paymentStatus" ? (
+                            <span
+                              className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                sale.paymentStatus === "Paid"
+                                  ? "bg-green-100 text-green-800"
+                                  : sale.paymentStatus === "Credit"
+                                  ? "bg-yellow-100 text-yellow-800"
+                                  : sale.paymentStatus === "Partial"
+                                  ? "bg-blue-100 text-blue-800"
+                                  : "bg-gray-100 text-gray-800"
+                              }`}
+                            >
+                              {getFieldValue(sale, item.dbName)}
+                            </span>
                           ) : (
                             getFieldValue(sale, item.dbName)
                           )}
@@ -4000,6 +3854,12 @@ const Sales = () => {
                 >
                   Next →
                 </button>
+              </div>
+              
+              <div className="text-sm text-gray-600">
+                Showing {(currentPage - 1) * SALES_PER_PAGE + 1} to{" "}
+                {Math.min(currentPage * SALES_PER_PAGE, filteredSales.length)} of{" "}
+                {filteredSales.length} sales
               </div>
             </div>
           )}

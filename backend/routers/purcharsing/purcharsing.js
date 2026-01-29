@@ -7,8 +7,6 @@ import dayjs from "dayjs";
 
 const router = express.Router();
 
-// REMOVED: productNameFixMap hardcoded dictionary
-
 // Helper function to get all product names from database with their normalized versions
 const getProductMappingFromDatabase = async () => {
   try {
@@ -20,12 +18,6 @@ const getProductMappingFromDatabase = async () => {
         const normalized = normalizeProductName(product.productName);
         // Store the original product name with its normalized version as key
         productMap[normalized] = product.productName;
-
-        // Also add common spelling variations
-        const variations = getCommonSpellingVariations(normalized);
-        variations.forEach((variation) => {
-          productMap[variation] = product.productName;
-        });
       }
     });
 
@@ -38,95 +30,25 @@ const getProductMappingFromDatabase = async () => {
 
 const normalizeProductName = (name) => {
   if (!name || typeof name !== "string") return "";
+  
+  // Only remove extra spaces and convert to lowercase
   let normalized = name.toLowerCase().trim();
-  normalized = normalized.replace(/\s+/g, " ");
-  normalized = normalized.replace(/[^a-z0-9\s.-]/g, "");
-  normalized = normalized.replace(/alu\s*alu/gi, "alu alu");
-  normalized = normalized.replace(
-    /n-lycopene\s*\+\s*wheatgerm\s*oil/gi,
-    "n-lycopene + wheatgerm oil",
-  );
-  normalized = normalized.replace(
-    /n\s*lycopene\s*\+\s*wheatgerm\s*oil/gi,
-    "n-lycopene + wheatgerm oil",
-  );
-  normalized = normalized.replace(/\s+/g, " ").trim();
-  normalized = normalized.replace(/(\d+)\.(\d+)/g, "$1.$2");
-  // Handle specific patterns without adding decimals to 1000
-  if (normalized.includes("sirmox cl 2285")) {
-    normalized = normalized.replace("sirmox cl 2285", "sirmox cl 228.5");
-  }
+  normalized = normalized.replace(/\s+/g, " "); // Replace multiple spaces with single space
+  normalized = normalized.replace(/\s{2,}/g, " "); // Remove any remaining double spaces
   return normalized;
 };
 
 const getCommonSpellingVariations = (normalizedName) => {
   const variations = [];
-
-  // Common spelling mistakes patterns
-  if (normalizedName.includes("carboxykam")) {
-    variations.push("caboxykam");
+  
+  // Keep only essential variations based on exact matches
+  if (normalizedName === "caboxykam") {
+    variations.push("carboxykam");
   }
-  if (normalizedName.includes("carespas")) {
-    variations.push("carepas");
+  if (normalizedName === "carepas") {
+    variations.push("carespas");
   }
-  if (normalizedName.includes("plantokam")) {
-    variations.push("platokam");
-  }
-  if (normalizedName.includes("atrokam")) {
-    variations.push("atropin 0.6");
-  }
-  if (normalizedName.includes("diclokam")) {
-    variations.push("disclokam");
-    variations.push("dicolokam");
-  }
-  if (normalizedName.includes("dorzakam")) {
-    variations.push("dorkam");
-  }
-  if (normalizedName.includes("tadakam")) {
-    variations.push("tadokam 20");
-  }
-  if (normalizedName.includes("lidokam plus")) {
-    variations.push("lidokampius");
-  }
-  if (normalizedName.includes("acekam p forte")) {
-    variations.push("acekam-p-forte");
-  }
-  if (normalizedName.includes("sirmox 250")) {
-    variations.push("sirmox cl 250cap");
-    variations.push("sirmox cl 250 cap");
-  }
-  if (normalizedName.includes("sirmox 500")) {
-    variations.push("sirmox cl 500cap");
-    variations.push("sirmox cl 500 cap");
-  }
-  if (normalizedName.includes("glycikam sr 1000")) {
-    variations.push("glycikam gr 1000");
-  }
-  if (normalizedName.includes("ecofloxacin")) {
-    variations.push("ecofloxcin");
-  }
-  if (normalizedName.includes("profokam 1")) {
-    variations.push("profokam 1%");
-    variations.push("profokam 1% 1%");
-  }
-  if (normalizedName.includes("sirmox cl 228.5 syp")) {
-    variations.push("sirmox cl 2285 syp");
-    variations.push("sirmox cl 2285");
-  }
-  if (normalizedName.includes("ecovastin")) {
-    const strengthMatch = normalizedName.match(/ecovastin\s*(\d+)/);
-    const strength = strengthMatch ? strengthMatch[1] : "20";
-    variations.push(`ecovastin${strength}`);
-    variations.push(`ecovastin-${strength}`);
-    variations.push(`ecovastin ${strength}`);
-  }
-  if (normalizedName.includes("alu alu ecocid 20")) {
-    variations.push("ecocid 20 alu alu");
-    variations.push("alualu ecocid 20");
-    variations.push("ecocid alu alu 20");
-    variations.push("ecocid 20");
-  }
-
+  
   return variations;
 };
 
@@ -135,7 +57,7 @@ const getStandardizedProductName = async (productName) => {
     return "";
   }
 
-  // First normalize the name
+  // First normalize the name (only lowercase and remove extra spaces)
   const normalized = normalizeProductName(productName);
 
   // Get product mapping from database
@@ -148,66 +70,33 @@ const getStandardizedProductName = async (productName) => {
 
   // If not found, try to find similar product in database
   try {
-    // Search for similar products in the database
+    // Search for exact or similar products in the database
     const similarProducts = await Product.find({
       $or: [
-        { productName: { $regex: normalized, $options: "i" } },
-        {
-          productName: {
-            $regex: normalized.replace(/\s+/g, ".*"),
-            $options: "i",
-          },
-        },
-      ],
+        { productName: { $regex: `^${normalized}$`, $options: "i" } },
+        { productName: { $regex: normalized.replace(/\s/g, "\\s*"), $options: "i" } }
+      ]
     }).lean();
 
     if (similarProducts.length > 0) {
-      // Return the most similar product name using string similarity
-      let bestMatch = similarProducts[0].productName;
-      let bestSimilarity = 0;
-
+      // Return the exact match if found
       for (const product of similarProducts) {
         const productNormalized = normalizeProductName(product.productName);
-        const similarity = calculateStringSimilarity(
-          normalized,
-          productNormalized,
-        );
-        if (similarity > bestSimilarity) {
-          bestSimilarity = similarity;
-          bestMatch = product.productName;
+        if (productNormalized === normalized) {
+          return product.productName;
         }
       }
-
-      // If similarity is high enough, use this product
-      if (bestSimilarity > 0.7) {
-        return bestMatch.toLowerCase();
-      }
+      
+      // Return the first match if no exact match
+      return similarProducts[0].productName;
     }
 
-    // If no similar product found, try to match with common patterns
-    if (normalized.includes("ecovastin")) {
-      const strengthMatch = normalized.match(/ecovastin\s*(\d+)/);
-      const strength = strengthMatch ? strengthMatch[1] : "20";
-      return `ecovastin ${strength}`.toLowerCase();
-    }
-
-    if (normalized.includes("sirmox cl 2285")) {
-      return "sirmox cl 228.5 syp".toLowerCase();
-    }
-
-    if (normalized.includes("ecocid")) {
-      return "alu alu ecocid 20".toLowerCase();
-    }
+    // If no similar product found, return the normalized name
+    return normalized;
   } catch (error) {
     console.error("Error in getStandardizedProductName:", error);
+    return normalized;
   }
-
-  // Default: convert to lowercase and clean
-  return normalized
-    .replace(/\s+/g, " ")
-    .replace(/\s{2,}/g, " ")
-    .trim()
-    .toLowerCase();
 };
 
 // Helper function to calculate string similarity
@@ -252,12 +141,11 @@ const updateReportInHand = async (productData, operation = "add") => {
     const qty = Number(quantityPerBoxStrip || 0);
     const validSupplier = supplierName?.trim() || "Unknown Supplier";
 
-    // **Get standardized product name using database**
-    const standardizedProductName =
-      await getStandardizedProductName(productName);
+    // Get standardized product name using database
+    const standardizedProductName = await getStandardizedProductName(productName);
 
-    // Ensure it's lowercase
-    const finalProductName = standardizedProductName.toLowerCase();
+    // Ensure it's lowercase with single spaces
+    const finalProductName = standardizedProductName.toLowerCase().replace(/\s+/g, " ").trim();
 
     if (operation === "add") {
       const amount = qty * (lc || 0);
@@ -271,7 +159,7 @@ const updateReportInHand = async (productData, operation = "add") => {
         date: new Date(),
       };
 
-      // **Use case-insensitive regex search**
+      // Use case-insensitive regex search
       const existingDoc = await ReportInHand.findOne({
         productName: { $regex: new RegExp(`^${finalProductName}$`, "i") },
       }).lean();
@@ -281,7 +169,7 @@ const updateReportInHand = async (productData, operation = "add") => {
         let updatedDoc = { ...existingDoc };
 
         // If the stored name is different from standardized lowercase, update it
-        if (existingDoc.productName.toLowerCase() !== finalProductName) {
+        if (normalizeProductName(existingDoc.productName) !== finalProductName) {
           updatedDoc.productName = finalProductName;
         }
 
@@ -315,7 +203,7 @@ const updateReportInHand = async (productData, operation = "add") => {
         // Create new document with lowercase standardized name
         const averagePrice = qty > 0 ? amount / qty : 0;
         await ReportInHand.create({
-          productName: finalProductName, // **ALWAYS use lowercase standardized name**
+          productName: finalProductName, // ALWAYS use lowercase standardized name
           supplierName: validSupplier,
           type: type || "",
           batches: [newBatch],
@@ -416,7 +304,7 @@ const getStrictNormalizedProductName = (name) => {
   if (!name) return "";
   return name
     .toLowerCase()
-    .replace(/[^a-z0-9]/g, "") // Remove all non-alphanumeric
+    .replace(/\s+/g, " ")
     .trim();
 };
 
@@ -442,41 +330,6 @@ const findProductInReportInHand = async (productName) => {
 
     if (item) {
       return item;
-    }
-
-    // 3. Try strict normalized match (remove all special chars)
-    const strictNormalizedInput = getStrictNormalizedProductName(productName);
-    const allItems = await ReportInHand.find({}).lean();
-
-    for (const doc of allItems) {
-      const strictNormalizedDoc = getStrictNormalizedProductName(
-        doc.productName,
-      );
-
-      // Exact match on strict normalized
-      if (strictNormalizedDoc === strictNormalizedInput) {
-        return doc;
-      }
-
-      // Check if contains
-      if (
-        strictNormalizedDoc.includes(strictNormalizedInput) ||
-        strictNormalizedInput.includes(strictNormalizedDoc)
-      ) {
-        return doc;
-      }
-    }
-
-    // 4. Try fuzzy matching for ECOVASTIN
-    if (productName.toLowerCase().includes("ecovastin")) {
-      const ecoItems = await ReportInHand.find({
-        productName: { $regex: "ECOVASTIN", $options: "i" },
-      }).lean();
-
-      if (ecoItems.length > 0) {
-        // Return the first ECOVASTIN match
-        return ecoItems[0];
-      }
     }
 
     return null;
@@ -638,36 +491,38 @@ router.put("/purchase/:id", async (req, res) => {
       }
     });
 
-    const processedProducts = newProducts.map((p) => {
-      const qty = Number(p.quantityPerBoxStrip || 0);
-      const productBatch = productBatchMap.get(p.productId);
+    const processedProducts = await Promise.all(
+      newProducts.map(async (p) => {
+        const qty = Number(p.quantityPerBoxStrip || 0);
+        const productBatch = productBatchMap.get(p.productId);
 
-      const lc = Number(p.lc) || productBatch?.lc || 0;
-      const fob = Number(p.fob) || productBatch?.fob || 0;
-      const cif = Number(p.cif) || productBatch?.cif || 0;
-      const amount = qty * lc;
+        const lc = Number(p.lc) || productBatch?.lc || 0;
+        const fob = Number(p.fob) || productBatch?.fob || 0;
+        const cif = Number(p.cif) || productBatch?.cif || 0;
+        const amount = qty * lc;
 
-      totalAmount += amount;
+        totalAmount += amount;
 
-      let productNameToUse = p.productName;
-      if (p.productId && productNameMap.has(p.productId.toString())) {
-        productNameToUse = productNameMap.get(p.productId.toString());
-      } else {
-        // Use database-based standardization
-        productNameToUse = p.productName;
-      }
+        let productNameToUse = p.productName;
+        if (p.productId && productNameMap.has(p.productId.toString())) {
+          productNameToUse = productNameMap.get(p.productId.toString());
+        }
 
-      return {
-        productName: productNameToUse,
-        type: p.type || productTypeMap.get(p.productId) || "",
-        expiryDate: p.expiryDate ? new Date(p.expiryDate) : null,
-        quantityPerBoxStrip: qty,
-        lc,
-        fob,
-        cif,
-        amount,
-      };
-    });
+        // Standardize the product name
+        productNameToUse = await getStandardizedProductName(productNameToUse);
+
+        return {
+          productName: productNameToUse, // Store standardized name
+          type: p.type || productTypeMap.get(p.productId) || "",
+          expiryDate: p.expiryDate ? new Date(p.expiryDate) : null,
+          quantityPerBoxStrip: qty,
+          lc,
+          fob,
+          cif,
+          amount,
+        };
+      })
+    );
 
     // Now update the purchase inventory
     const updated = await purchaseInventory.findByIdAndUpdate(
@@ -845,50 +700,49 @@ router.post("/purchase", async (req, res) => {
       }
     });
 
-    const products = data.products.map(async (p) => {
-      const qty = Number(p.quantityPerBoxStrip || 0);
-      const productBatch = productBatchMap.get(p.productId);
+    const products = await Promise.all(
+      data.products.map(async (p) => {
+        const qty = Number(p.quantityPerBoxStrip || 0);
+        const productBatch = productBatchMap.get(p.productId);
 
-      const lc = Number(p.lc) || productBatch?.lc || 0;
-      const fob = Number(p.fob) || productBatch?.fob || 0;
-      const cif = Number(p.cif) || productBatch?.cif || 0;
-      const amount = qty * lc;
+        const lc = Number(p.lc) || productBatch?.lc || 0;
+        const fob = Number(p.fob) || productBatch?.fob || 0;
+        const cif = Number(p.cif) || productBatch?.cif || 0;
+        const amount = qty * lc;
 
-      totalAmount += amount;
+        totalAmount += amount;
 
-      // **Get standardized product name using database**
-      let productNameToUse = p.productName;
-      if (p.productId && productNameMap.has(p.productId.toString())) {
-        productNameToUse = productNameMap.get(p.productId.toString());
-      }
+        // Get standardized product name using database
+        let productNameToUse = p.productName;
+        if (p.productId && productNameMap.has(p.productId.toString())) {
+          productNameToUse = productNameMap.get(p.productId.toString());
+        }
 
-      // Always standardize the product name
-      productNameToUse = await getStandardizedProductName(productNameToUse);
+        // Always standardize the product name
+        productNameToUse = await getStandardizedProductName(productNameToUse);
 
-      return {
-        productName: productNameToUse, // Store standardized name
-        type: p.type || productTypeMap.get(p.productId) || "",
-        expiryDate: p.expiryDate ? new Date(p.expiryDate) : null,
-        quantityPerBoxStrip: qty,
-        lc,
-        fob,
-        cif,
-        amount,
-      };
-    });
-
-    // Wait for all product standardization to complete
-    const processedProducts = await Promise.all(products);
+        return {
+          productName: productNameToUse, // Store standardized name
+          type: p.type || productTypeMap.get(p.productId) || "",
+          expiryDate: p.expiryDate ? new Date(p.expiryDate) : null,
+          quantityPerBoxStrip: qty,
+          lc,
+          fob,
+          cif,
+          amount,
+        };
+      })
+    );
 
     const invoice = await purchaseInventory.create({
       ...data,
       supplierName: data.supplierName.trim(),
-      products: processedProducts,
+      products: products,
       totalAmount,
     });
 
-    // **Update ReportInHand with standardized names**
-    for (const p of processedProducts) {
+    // Update ReportInHand with standardized names
+    for (const p of products) {
       await updateReportInHand(
         {
           productName: p.productName,
@@ -997,8 +851,8 @@ router.post("/purchase/import", async (req, res) => {
         const deliveryNumber = invoiceData.deliveryNumber || invoiceNumber;
 
         // Process each product with database-based standardization
-        const processedProductsPromises = invoiceData.products.map(
-          async (product, idx) => {
+        const processedProducts = await Promise.all(
+          invoiceData.products.map(async (product, idx) => {
             const quantityPerBoxStrip =
               parseFloat(product.quantityPerBoxStrip) || 0;
             let lc =
@@ -1006,7 +860,7 @@ router.post("/purchase/import", async (req, res) => {
             let fob = parseFloat(product.fob) || 0;
             let cif = parseFloat(product.cif) || 0;
 
-            // **STANDARDIZE PRODUCT NAME USING DATABASE**
+            // STANDARDIZE PRODUCT NAME USING DATABASE
             const standardizedName = await getStandardizedProductName(
               product.productName,
             );
@@ -1057,11 +911,8 @@ router.post("/purchase/import", async (req, res) => {
               cif,
               amount,
             };
-          },
+          })
         );
-
-        // Wait for all product standardization to complete
-        const processedProducts = await Promise.all(processedProductsPromises);
 
         // Calculate total amount
         const totalAmount = processedProducts.reduce(
@@ -1081,7 +932,7 @@ router.post("/purchase/import", async (req, res) => {
           totalAmount: totalAmount,
         });
 
-        // **Update ReportInHand with standardized names**
+        // Update ReportInHand with standardized names
         for (const product of processedProducts) {
           await updateReportInHand(
             {
@@ -1262,13 +1113,17 @@ router.get("/debug/product-name-standardization", async (req, res) => {
       .limit(20)
       .lean();
 
-    res.json({
-      testResults: results,
-      sampleReportInHandEntries: reportInHandEntries.map(async (r) => ({
+    const standardizedReports = await Promise.all(
+      reportInHandEntries.map(async (r) => ({
         productName: r.productName,
         standardized: await getStandardizedProductName(r.productName),
         totalBoxes: r.totalBoxes,
-      })),
+      }))
+    );
+
+    res.json({
+      testResults: results,
+      sampleReportInHandEntries: standardizedReports,
     });
   } catch (error) {
     console.error("Debug error:", error);
