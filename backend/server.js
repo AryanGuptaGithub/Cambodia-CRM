@@ -102,7 +102,7 @@ app.use("/api", product);
 app.use("/api", authRoutes);
 app.use("/api", staff);
 app.use("/api", priceList);
-app.use("/api", sales);
+app.use("/api/sales", sales);
 app.use("/api", payments);
 app.use("/api", dailySample);
 app.use("/api", purcharse);

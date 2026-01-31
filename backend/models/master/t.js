@@ -1,230 +1,181 @@
-// Add this function for proper stock deduction
-const deductStockFromReportInHandWithMatching = async (productName, salesQty, bonusQty) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
+router.post("/import-with-stock-deduction", async (req, res) => {
+  let sessionId = null;
   try {
-    const totalRequiredQty = fixPrecision(salesQty + bonusQty);
-    
-    if (totalRequiredQty <= 0) {
-      await session.commitTransaction();
-      session.endSession();
-      return { success: true, deducted: 0, remaining: 0 };
-    }
-
-    console.log(`\n📦 Attempting to deduct stock: "${productName}"`);
-    console.log(`   Required: ${totalRequiredQty} (Sales: ${salesQty}, Bonus: ${bonusQty})`);
-
-    // FIRST: Find the product in ReportInHand with exact matching
-    const stockResult = await calculateProductStock(productName, totalRequiredQty);
-    
-    if (!stockResult.success || !stockResult.found) {
-      console.log(`❌ Cannot deduct: ${stockResult.message}`);
-      await session.abortTransaction();
-      session.endSession();
-      return {
+    const { invoices, skipDuplicates = true } = req.body;
+    const invoiceData = Array.isArray(invoices) ? invoices : [];
+    if (!invoiceData.length) {
+      return res.status(400).json({
         success: false,
-        deducted: 0,
-        remaining: totalRequiredQty,
-        message: `Product "${productName}" not found in inventory`
-      };
+        message: "No invoices provided",
+      });
     }
-
-    if (!stockResult.hasEnoughStock) {
-      console.log(`❌ Insufficient stock: ${stockResult.message}`);
-      await session.abortTransaction();
-      session.endSession();
-      return {
+    // Check if another import is already in progress
+    if (isImportInProgress) {
+      return res.status(429).json({
         success: false,
-        deducted: 0,
-        remaining: stockResult.insufficientQty,
-        message: stockResult.message
-      };
+        message: "Another import is already in progress. Please wait.",
+        retryAfter: 30,
+      });
     }
-
-    const actualProductName = stockResult.productName;
-    console.log(`   ✅ Found: "${actualProductName}" with ${stockResult.availableStock} units available`);
-
-    // Find the stock item in ReportInHand
-    const stockItem = await ReportInHand.findOne({
-      productName: buildProductNameRegex(normalizeProductName(actualProductName))
-    }).session(session);
-
-    if (!stockItem) {
-      console.log(`❌ Stock item not found in ReportInHand: "${actualProductName}"`);
-      await session.abortTransaction();
-      session.endSession();
-      return {
-        success: false,
-        deducted: 0,
-        remaining: totalRequiredQty,
-        message: `Stock record not found for "${actualProductName}"`
-      };
-    }
-
-    // Check if we have batches
-    if (!stockItem.batches || !Array.isArray(stockItem.batches) || stockItem.batches.length === 0) {
-      console.log(`❌ No batches found for product: "${actualProductName}"`);
-      await session.abortTransaction();
-      session.endSession();
-      return {
-        success: false,
-        deducted: 0,
-        remaining: totalRequiredQty,
-        message: `No stock batches found for "${actualProductName}"`
-      };
-    }
-
-    // Sort batches by expiry date (oldest first - FIFO)
-    const sortedBatches = [...stockItem.batches].sort((a, b) => {
-      const dateA = a.expiryDate ? new Date(a.expiryDate) : new Date('9999-12-31');
-      const dateB = b.expiryDate ? new Date(b.expiryDate) : new Date('9999-12-31');
-      return dateA - dateB;
+    isImportInProgress = true;
+    // Create session for import progress
+    sessionId = `import_stock_deduction_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    importProgressMap.set(sessionId, {
+      sessionId,
+      totalInvoices: invoiceData.length,
+      processedInvoices: 0,
+      successful: 0,
+      failed: 0,
+      skippedDuplicates: 0,
+      progressPercentage: 0,
+      startTime: Date.now(),
+      lastUpdated: Date.now(),
+      completed: false,
+      errors: [],
+      status: "initializing",
+      importType: "stock_deduction",
     });
-
-    let remainingToDeduct = totalRequiredQty;
-    let totalDeducted = 0;
-    const updatedBatches = [];
-    const deductionDetails = [];
-
-    console.log(`   Sorting ${sortedBatches.length} batches by expiry (oldest first)`);
-
-    // Deduct from batches
-    for (const batch of sortedBatches) {
-      if (remainingToDeduct <= 0) break;
-
-      const batchQty = fixPrecision(batch.boxes || batch.quantity || 0);
-      
-      if (batchQty > 0) {
-        const deductFromThisBatch = fixPrecision(Math.min(batchQty, remainingToDeduct));
-        const remainingInBatch = fixPrecision(batchQty - deductFromThisBatch);
-        
-        console.log(`   - Batch ${batch.batchNumber || 'N/A'}: ${batchQty} -> ${remainingInBatch} (deducting ${deductFromThisBatch})`);
-
-        if (remainingInBatch > 0) {
-          // Update batch with remaining quantity
-          updatedBatches.push({
-            ...batch,
-            boxes: remainingInBatch,
-            quantity: remainingInBatch,
-            amount: fixPrecision(remainingInBatch * (batch.lc || 0.71))
+    // Start import immediately
+    processImportWithStockDeduction(sessionId, invoiceData, skipDuplicates)
+      .catch(error => {
+        const progress = importProgressMap.get(sessionId);
+        if (progress) {
+          progress.status = "failed";
+          progress.errors.push({
+            message: "Import process failed unexpectedly",
+            error: error.message,
+            timestamp: new Date().toISOString()
           });
-        } // If batch is completely used up (0 remaining), don't add it back
-
-        totalDeducted = fixPrecision(totalDeducted + deductFromThisBatch);
-        remainingToDeduct = fixPrecision(remainingToDeduct - deductFromThisBatch);
-
-        deductionDetails.push({
-          batchNumber: batch.batchNumber,
-          originalQty: batchQty,
-          deducted: deductFromThisBatch,
-          remainingInBatch: remainingInBatch,
-          expiryDate: batch.expiryDate
-        });
-      } else {
-        // Skip batches with 0 quantity
-        continue;
-      }
-    }
-
-    // Add any untouched batches (with positive quantity)
-    for (const batch of sortedBatches) {
-      const batchQty = fixPrecision(batch.boxes || batch.quantity || 0);
-      const alreadyProcessed = deductionDetails.some(d => d.batchNumber === batch.batchNumber);
-      
-      if (!alreadyProcessed && batchQty > 0) {
-        updatedBatches.push(batch);
-      }
-    }
-
-    // Verify deduction
-    if (remainingToDeduct > 0.001) {
-      console.log(`❌ Failed to deduct full quantity. Only deducted ${totalDeducted} of ${totalRequiredQty}`);
-      await session.abortTransaction();
-      session.endSession();
-      return {
-        success: false,
-        deducted: totalDeducted,
-        remaining: remainingToDeduct,
-        message: `Could only deduct ${totalDeducted} of ${totalRequiredQty} units`,
-        details: deductionDetails
-      };
-    }
-
-    // Calculate new total from updated batches
-    const newTotalFromBatches = updatedBatches.reduce((sum, batch) => {
-      return fixPrecision(sum + fixPrecision(batch.boxes || batch.quantity || 0));
-    }, 0);
-
-    // Update stock item
-    stockItem.batches = updatedBatches;
-    stockItem.totalBoxes = fixPrecision(newTotalFromBatches);
-    stockItem.updatedAt = new Date();
-
-    await stockItem.save({ session });
-
-    console.log(`✅ Successfully deducted ${totalDeducted} units from "${actualProductName}"`);
-    console.log(`   New total stock: ${newTotalFromBatches} units`);
-
-    await session.commitTransaction();
-    session.endSession();
-
-    return {
+          progress.lastUpdated = Date.now();
+        }
+      })
+      .finally(() => {
+        isImportInProgress = false;
+      });
+    res.json({
       success: true,
-      deducted: totalDeducted,
-      remaining: 0,
-      newStockLevel: newTotalFromBatches,
-      message: `Successfully deducted ${totalDeducted} units from "${actualProductName}"`,
-      details: deductionDetails
-    };
-
+      message: "Import with stock deduction started",
+      sessionId,
+      totalInvoices: invoiceData.length,
+      note: "Stock will be deducted from ReportInHand for each sale",
+      progressUrl: `/api/sales/import/progress/${sessionId}`,
+      startTime: new Date().toISOString(),
+    });
   } catch (error) {
-    console.error(`❌ Error in stock deduction for "${productName}":`, error);
-    
-    try {
-      if (session.transaction && session.transaction.isActive) {
-        await session.abortTransaction();
-      }
-    } catch (abortError) {
-      console.error("Error aborting transaction:", abortError);
-    }
-    
-    try {
-      await session.endSession();
-    } catch (endError) {
-      console.error("Error ending session:", endError);
-    }
-
-    return {
+    if (sessionId) importProgressMap.delete(sessionId);
+    isImportInProgress = false;
+    res.status(500).json({
       success: false,
-      deducted: 0,
-      remaining: salesQty + bonusQty,
-      message: `Stock deduction failed: ${error.message}`,
-      error: error.message
-    };
+      message: "Import failed to start",
+      error: error.message,
+    });
+  }
+});
+
+const processImportWithStockDeduction = async (
+  sessionId,
+  invoices,
+  skipDuplicates = true
+) => {
+  const progress = importProgressMap.get(sessionId);
+  if (!progress) {
+    return;
+  }
+  const errors = [];
+  let successful = 0;
+  let failed = 0;
+  let skippedDuplicates = 0;
+  progress.status = "processing";
+  progress.startTime = Date.now();
+  progress.lastUpdated = Date.now();
+  try {
+    // Process invoices ONE AT A TIME sequentially to avoid stock conflicts
+    for (let i = 0; i < invoices.length; i++) {
+      const invoice = invoices[i];
+      try {
+        // Validate invoice before processing
+        if (!invoice.invoiceNumber?.trim()) {
+          throw new Error("Invoice number is required");
+        }
+        // Skip duplicate check if enabled
+        if (skipDuplicates) {
+          const existingInvoice = await SaleSummary.findOne({
+            invoiceNumber: invoice.invoiceNumber.trim(),
+          });
+          if (existingInvoice) {
+            skippedDuplicates++;
+            // Update progress for skipped invoice
+            progress.processedInvoices = i + 1;
+            progress.skippedDuplicates = skippedDuplicates;
+            progress.progressPercentage = Math.round(
+              ((i + 1) / progress.totalInvoices) * 100
+            );
+            progress.lastUpdated = Date.now();
+            continue;
+          }
+        }
+        // Process invoice with stock deduction - WAIT for completion before next invoice
+        const result = await processSingleInvoiceWithStockDeduction(invoice, i);
+        if (result.success) {
+          successful++;
+        } else {
+          failed++;
+          if (result.error) {
+            errors.push(result.error);
+          }
+        }
+      } catch (error) {
+        failed++;
+        errors.push({
+          row: i + 2,
+          invoiceNumber: invoice.invoiceNumber || "Unknown",
+          message: error.message,
+          type: "unexpected_error",
+          timestamp: new Date().toISOString()
+        });
+      }
+      // Update progress after EACH invoice completes
+      progress.processedInvoices = i + 1;
+      progress.successful = successful;
+      progress.failed = failed;
+      progress.skippedDuplicates = skippedDuplicates;
+      progress.progressPercentage = Math.round(
+        ((i + 1) / progress.totalInvoices) * 100
+      );
+      progress.lastUpdated = Date.now();
+    }
+    // Mark import as completed
+    progress.completed = true;
+    progress.endTime = Date.now();
+    progress.totalTime = progress.endTime - progress.startTime;
+    progress.errors = errors;
+    progress.status = "completed";
+  } catch (error) {
+    // Update progress with critical error
+    progress.status = "failed";
+    progress.errors.push({
+      message: "Critical error in import process",
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+    progress.lastUpdated = Date.now();
   }
 };
 
-// Replace the existing processSingleInvoiceWithStockDeduction function with this updated version:
 const processSingleInvoiceWithStockDeduction = async (invoiceData, index) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-
   try {
-    console.log(`\n🔄 Processing invoice ${index}: ${invoiceData.invoiceNumber || 'No invoice number'}`);
-    
     if (!invoiceData.invoiceNumber?.trim()) {
       throw new Error("Invoice number is required");
     }
-
+    // Check for duplicate invoice
     const existingInvoice = await SaleSummary.findOne({
       invoiceNumber: invoiceData.invoiceNumber.trim(),
     }).session(session);
-
     if (existingInvoice) {
-      console.warn(`⚠️ Skipping duplicate invoice: ${invoiceData.invoiceNumber}`);
       await session.abortTransaction();
-      session.endSession();
+      await session.endSession();
       return {
         success: false,
         error: {
@@ -235,65 +186,78 @@ const processSingleInvoiceWithStockDeduction = async (invoiceData, index) => {
         },
       };
     }
-
+    // CRITICAL: Check stock within the SAME session to get current/locked data
+    for (const product of invoiceData.products || []) {
+      const productName = product.productName?.trim();
+      const salesQty = fixPrecision(parseFloat(product.salesQty) || 0);
+      const bonusQty = fixPrecision(parseFloat(product.bonusQty) || 0);
+      const totalQty = fixPrecision(salesQty + bonusQty);
+      if (totalQty <= 0) continue;
+      // Find stock item WITHIN THE SESSION to ensure we get current locked data
+      const stockItem = await ReportInHand.findOne({
+        productName: { $regex: new RegExp(`^${normalizeProductName(productName)}$`, "i") },
+      }).session(session);
+      if (!stockItem) {
+        throw new Error(`Product "${productName}" not found in inventory`);
+      }
+      // Calculate available stock - PREFER sum from batches for accuracy
+      let availableStock = 0;
+      // Always sum from batches if they exist (source of truth)
+      if (stockItem.batches && Array.isArray(stockItem.batches)) {
+        stockItem.batches.forEach((batch) => {
+          const batchQty = fixPrecision(Number(batch.boxes || batch.quantity || 0));
+          if (batchQty > 0) {
+            availableStock = fixPrecision(availableStock + batchQty);
+          }
+        });
+      }
+      // If batches sum is 0 or no batches, fall back to totalBoxesFromBatches
+      if (availableStock <= 0 && stockItem.totalBoxesFromBatches && stockItem.totalBoxesFromBatches > 0) {
+        availableStock = fixPrecision(Number(stockItem.totalBoxesFromBatches));
+      }
+      // If still 0, fall back to totalBoxes
+      if (availableStock <= 0 && stockItem.totalBoxes && stockItem.totalBoxes > 0) {
+        availableStock = fixPrecision(Number(stockItem.totalBoxes));
+      }
+      // Apply adjustments
+      let totalAdjustments = 0;
+      if (stockItem.addStockAdjustment) {
+        totalAdjustments = fixPrecision(totalAdjustments + fixPrecision(Number(stockItem.addStockAdjustment)));
+      }
+      if (stockItem.removeStockAdjustment) {
+        totalAdjustments = fixPrecision(totalAdjustments - fixPrecision(Number(stockItem.removeStockAdjustment)));
+      }
+      const finalStock = fixPrecision(Math.max(0, availableStock + totalAdjustments));
+      if (finalStock < totalQty) {
+        const shortage = fixPrecision(totalQty - finalStock);
+        console.log(
+          `❌ INSUFFICIENT STOCK - Invoice: ${invoiceData.invoiceNumber} | Product: "${productName}" | Required: ${totalQty} | Available: ${finalStock} | Short by: ${shortage}`,
+        );
+        throw new Error(
+          `Insufficient stock for ${productName}. Required: ${totalQty}, Available: ${finalStock}, Short by: ${shortage}`
+        );
+      }
+    }
     const processedProducts = [];
     let totalAmount = 0;
     const stockDeductionResults = [];
-
-    // FIRST: Check if we have enough stock for all products
-    console.log(`📋 Checking stock for ${invoiceData.products?.length || 0} products...`);
-    
-    for (const product of invoiceData.products || []) {
-      const productName = product.productName?.trim();
-      const salesQty = fixPrecision(parseFloat(product.salesQty) || 0);
-      const bonusQty = fixPrecision(parseFloat(product.bonusQty) || 0);
-      const totalQty = fixPrecision(salesQty + bonusQty);
-
-      if (!productName || totalQty <= 0) {
-        console.log(`   ⏭️ Skipping ${productName || 'unnamed product'} (quantity: ${totalQty})`);
-        continue;
-      }
-
-      console.log(`   🔍 Checking stock for "${productName}" (Qty: ${totalQty})`);
-      
-      const stockCheck = await calculateProductStock(productName, totalQty);
-      
-      if (!stockCheck.success || !stockCheck.found) {
-        console.log(`   ❌ Product not found: "${productName}"`);
-        throw new Error(`Product "${productName}" not found in inventory`);
-      }
-
-      if (!stockCheck.hasEnoughStock) {
-        console.log(`   ❌ Insufficient stock: ${stockCheck.message}`);
-        throw new Error(stockCheck.message);
-      }
-
-      console.log(`   ✅ Stock available: ${stockCheck.availableStock} units`);
-    }
-
     // SECOND: Process products and deduct stock
-    console.log(`💾 Processing products and deducting stock...`);
-    
     for (const product of invoiceData.products || []) {
       const productName = product.productName?.trim();
       const salesQty = fixPrecision(parseFloat(product.salesQty) || 0);
       const bonusQty = fixPrecision(parseFloat(product.bonusQty) || 0);
       const totalQty = fixPrecision(salesQty + bonusQty);
-
-      if (!productName || totalQty <= 0) continue;
-
+      if (totalQty <= 0) continue;
       // Find product to get LC value
       const productRecord = await Product.findOne({
-        productName: buildProductNameRegex(normalizeProductName(productName))
+        productName: { $regex: new RegExp(`^${normalizeProductName(productName)}$`, "i") },
       }).session(session);
-
       const lc = productRecord?.lc || 0;
       const sellingPrice = parseFloat(product.sellingPrice) || 0;
       const amount = sellingPrice * salesQty;
       const discount = parseFloat(product.discount) || 0;
       const netSellingAmount = amount - discount;
-
-      // Process the sale record
+      // Add to processed products
       processedProducts.push({
         productName: productName,
         salesQty,
@@ -308,46 +272,32 @@ const processSingleInvoiceWithStockDeduction = async (invoiceData, index) => {
         profitLoss: (sellingPrice - lc) * salesQty,
         isProductAccept: true,
       });
-
       totalAmount += netSellingAmount;
-
-      // Deduct stock from ReportInHand
-      console.log(`   📉 Deducting stock for "${productName}"...`);
-      const deductionResult = await deductStockFromReportInHandWithMatching(
+      // Deduct stock - pass the session so it uses the SAME transaction
+      const deductionResult = await deductStockFromReportInHand(
         productName,
         salesQty,
-        bonusQty
+        bonusQty,
+        invoiceData.invoiceNumber,
+        session // Pass existing session instead of creating new one
       );
-
-      stockDeductionResults.push({
-        product: productName,
-        ...deductionResult
-      });
-
+      stockDeductionResults.push({ product: productName, ...deductionResult });
       if (!deductionResult.success) {
-        console.log(`   ❌ Stock deduction failed: ${deductionResult.message}`);
         throw new Error(
           `Stock deduction failed for ${productName}: ${deductionResult.message}`
         );
       }
-
-      console.log(`   ✅ Stock deducted successfully`);
     }
-
     if (processedProducts.length === 0) {
       throw new Error("No valid products found in invoice");
     }
-
     // Create the sale record
     const paidAmount = parseFloat(invoiceData.paidAmount) || 0;
     const dueAmount = Math.max(0, totalAmount - paidAmount);
-
     const saleRecord = new SaleSummary({
       recordingDate: new Date(invoiceData.recordingDate || Date.now()),
       invoiceNumber: invoiceData.invoiceNumber.trim(),
-      invoiceDate: invoiceData.invoiceDate
-        ? new Date(invoiceData.invoiceDate)
-        : new Date(),
+      invoiceDate: invoiceData.invoiceDate ? new Date(invoiceData.invoiceDate) : new Date(),
       mrName: invoiceData.mrName?.trim() || "No MR Name Provided",
       mrId: invoiceData.mrId || null,
       customerName: invoiceData.customerName?.trim() || "Unknown Customer",
@@ -356,15 +306,13 @@ const processSingleInvoiceWithStockDeduction = async (invoiceData, index) => {
       products: processedProducts,
       creditDays: parseInt(invoiceData.creditDays) || 0,
       dueDate: invoiceData.dueDate ? new Date(invoiceData.dueDate) : null,
-      deliveryDate: invoiceData.deliveryDate
-        ? new Date(invoiceData.deliveryDate)
-        : null,
+      deliveryDate: invoiceData.deliveryDate ? new Date(invoiceData.deliveryDate) : null,
       paidAmount,
       dueAmount,
       totalAmount,
       totalProfitLoss: processedProducts.reduce(
         (sum, p) => sum + (p.profitLoss || 0),
-        0
+        0,
       ),
       paymentStatus: mapPaymentStatus(invoiceData.paymentStatus),
       remark: invoiceData.remark || "",
@@ -372,36 +320,27 @@ const processSingleInvoiceWithStockDeduction = async (invoiceData, index) => {
       importSource: "excel_import_with_stock_deduction",
       importTimestamp: new Date(),
     });
-
     await saleRecord.save({ session });
-
     await session.commitTransaction();
     session.endSession();
-
-    console.log(`✅ Invoice processed successfully: ${invoiceData.invoiceNumber}`);
-
     return {
       success: true,
       invoiceNumber: invoiceData.invoiceNumber,
       stockDeductionResults,
     };
   } catch (error) {
-    console.error(`❌ Error processing invoice at index ${index}:`, error.message);
-    
     try {
-      if (session.transaction && session.transaction.isActive) {
+      if (session.transaction?.isActive) {
         await session.abortTransaction();
       }
     } catch (abortError) {
-      console.error("Error aborting transaction:", abortError);
+      // Silent fail
     }
-    
     try {
       await session.endSession();
     } catch (endError) {
-      console.error("Error ending session:", endError);
+      // Silent fail
     }
-
     return {
       success: false,
       error: {
@@ -413,19 +352,3 @@ const processSingleInvoiceWithStockDeduction = async (invoiceData, index) => {
     };
   }
 };
-
-// Update the main import endpoint to use stock deduction
-
-// Update the processImportWithStockDeduction function
-
-
-// Also update the regular import endpoint to use stock deduction by default
-
-// Add endpoint to check stock before import
-
-
-// Add a function to help debug stock issues
-
-
-// Export router
-export default router;

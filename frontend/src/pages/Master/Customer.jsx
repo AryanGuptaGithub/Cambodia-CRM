@@ -1103,9 +1103,10 @@ const Customer = () => {
                         onChange={(e) => toggleSelectAll(e.target.checked)}
                       />
                     )}
-                    <span className="text-sm font-medium">Name</span>
+                    <span className="text-sm font-medium">Customer Code</span>
                   </div>
                 </th>
+                <th className="p-3 text-sm font-medium">Name</th>
                 <th className="p-3 text-sm font-medium">Business Type</th>
                 <th className="p-3 text-sm font-medium">MR Name</th>
                 <th className="p-3 text-sm font-medium">Address</th>
@@ -1152,9 +1153,11 @@ const Customer = () => {
                           onChange={() => toggleSelect(customer)}
                         />
                         <span className="capitalize">
-                          {displayValue(customer.name)}
+                          {displayValue(customer.customerCode)}
                         </span>
                       </div>
+                    </td> <td className="p-3 capitalize">
+                      {displayValue(customer.name)}
                     </td>
                     <td className="p-3 capitalize">
                       {displayValue(customer.typeOfBusiness)}
@@ -1582,7 +1585,7 @@ const Customer = () => {
                       )}
                     </div>
 
-                    {/* ADDRESS as textarea (editable) – placed BEFORE Remarks */}
+                
                     <div className="md:col-span-2">
                       <label className="block text-sm font-medium text-gray-600">
                         Address

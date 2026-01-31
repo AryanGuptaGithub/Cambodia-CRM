@@ -274,10 +274,8 @@ const ImportSalesModal = ({
       }
 
       // Final fallback
-      console.warn(`Could not parse date: "${value}", using current date`);
       return new Date().toISOString().split("T")[0];
     } catch (error) {
-      console.error("Error parsing date:", value, error);
       return new Date().toISOString().split("T")[0];
     }
   };
@@ -346,7 +344,6 @@ const ImportSalesModal = ({
 
         showToast("success", "Stock issues report downloaded successfully");
       } catch (error) {
-        console.error("Error downloading stock issues:", error);
         showToast("error", "Failed to download stock issues report");
       }
     };
@@ -408,36 +405,49 @@ const ImportSalesModal = ({
 
         showToast("success", "Stock issues CSV downloaded successfully");
       } catch (error) {
-        console.error("Error downloading CSV:", error);
         showToast("error", "Failed to download stock issues CSV");
       }
     };
 
-    // Fixed: Handle proceed with import
+    // Fixed: Handle proceed with import in StockValidationModal
     const handleProceedWithImport = async () => {
-      setShowStockValidation(false);
-
       const confirmProceed = await confirmDialog({
         title: "Proceed with Import",
-        text: `${stockValidationResult.stockIssues.length} products have stock issues. The backend will create stock adjustments automatically. Do you want to proceed?`,
+        text: `${stockValidationResult.stockIssues.length} products have stock issues. Do you want to proceed?`,
         icon: "info",
         confirmButtonText: "Yes, Proceed",
         cancelButtonText: "Cancel",
       });
 
       if (confirmProceed.isConfirmed) {
-        // IMPORTANT: Call the import function here
+        // Close the modal
+        setShowStockValidation(false);
+
+        // Start the import
+        setIsImporting(true);
+        setImportStep("Starting import with stock issues...");
+
+        // Call the import function
         await handleProductImport(parsedData, true);
+
+        // Reset modal state
+        setStockValidationResult(null);
       }
     };
 
     // Fixed: Handle cancel stock validation
     const handleCancelStockValidation = () => {
-      setShowStockValidation(false);
-      setStockValidationResult(null);
-      // Reset any import progress states if needed
-      setIsValidatingStock(false);
-      setImportStep("");
+      const confirmCancel = window.confirm(
+        "Are you sure you want to cancel the import?",
+      );
+
+      if (confirmCancel) {
+        setShowStockValidation(false);
+        setStockValidationResult(null);
+        setIsValidatingStock(false);
+        setImportStep("");
+        showToast("info", "Import cancelled");
+      }
     };
 
     return ReactDOM.createPortal(
@@ -679,7 +689,6 @@ const ImportSalesModal = ({
 
       return Math.max(0, num);
     } catch (error) {
-      console.error("Error parsing quantity:", value, error);
       return 0;
     }
   };
@@ -687,16 +696,14 @@ const ImportSalesModal = ({
   // Optimized product stock check
   const findProductStockInHandOptimized = async (productName, requiredQty) => {
     try {
-      const normalizedName = productName
-        .toLowerCase()
-        .trim()
-        .replace(/\s+/g, " ")
-        .replace(/[^\w\s%]/g, "");
+      console.log("🔍 Checking stock for:", productName);
 
-      // Try API endpoint
       const response = await axios.post(
-        `${backendUrl}/api/sales/check-specific-product`,
-        { productName },
+        `${backendUrl}/api/sales/check-stock`,
+        {
+          productName,
+          requiredQty,
+        },
         { timeout: 5000 },
       );
 
@@ -737,7 +744,7 @@ const ImportSalesModal = ({
         message: "Product not found in inventory",
       };
     } catch (error) {
-      console.error(`Error fetching stock for ${productName}:`, error);
+      console.error("Stock check error:", error);
       return {
         success: false,
         productName,
@@ -846,7 +853,6 @@ const ImportSalesModal = ({
       }
 
       const headers = rows[headerIdx].map((h) => String(h || "").trim());
-      console.log("Headers found:", headers);
 
       // Map column indices
       const getColIndex = (possibleNames) => {
@@ -1117,9 +1123,6 @@ const ImportSalesModal = ({
         throw new Error("No valid invoices found in the file");
       }
 
-      console.log("Parsed invoices:", validInvoices);
-      console.log("Validation errors:", validationErrors);
-
       setParsedData(validInvoices);
       setImportErrorDetails(validationErrors);
 
@@ -1132,7 +1135,6 @@ const ImportSalesModal = ({
 
       setShowParsedSection(true);
     } catch (error) {
-      console.error("File processing error:", error);
       showToast("error", `Failed to process file: ${error.message}`);
       resetModal(false);
     } finally {
@@ -1178,7 +1180,7 @@ const ImportSalesModal = ({
     return Array.from(failedMap.values());
   };
 
-  // Stock validation
+  // Updated validateStockBeforeImport to always return result
   const validateStockBeforeImport = async (invoices) => {
     try {
       setIsValidatingStock(true);
@@ -1217,7 +1219,7 @@ const ImportSalesModal = ({
           try {
             // Check if product exists
             const existsResponse = await axios.get(
-              `${backendUrl}/api/products/check/${encodeURIComponent(productName)}`,
+              `${backendUrl}/api/sales/products/check/${encodeURIComponent(productName)}`,
               { timeout: 3000 },
             );
 
@@ -1246,7 +1248,7 @@ const ImportSalesModal = ({
                 });
               }
             } else {
-              // Product doesn't exist - allow import
+              // Product doesn't exist - consider as stock issue
               stockIssues.push({
                 productName,
                 totalRequired: productData.totalRequired,
@@ -1298,17 +1300,23 @@ const ImportSalesModal = ({
         },
       };
 
-      setStockValidationResult(stockValidationResult);
-
-      // Always allow import
-      if (stockIssues.length > 0) {
-        setShowStockValidation(true);
-      }
-
-      return true;
+      // Always return the result
+      return stockValidationResult;
     } catch (error) {
-      console.error("Stock validation error:", error);
-      return true;
+      // Return empty result on error
+      return {
+        stockIssues: [],
+        totalInvoices: invoices.length,
+        summary: {
+          totalProducts: 0,
+          totalRequired: 0,
+          totalAvailable: 0,
+          totalInsufficient: 0,
+          missingProducts: 0,
+          lowStockProducts: 0,
+          hasCriticalIssues: false,
+        },
+      };
     } finally {
       setIsValidatingStock(false);
     }
@@ -1352,7 +1360,7 @@ const ImportSalesModal = ({
 
       setImportStep("Sending to server...");
 
-      const endpoint = `${backendUrl}/api/sales/import`;
+      const endpoint = `${backendUrl}/api/sales/import-with-stock-deduction`;
 
       const res = await axios.post(
         endpoint,
@@ -1397,7 +1405,6 @@ const ImportSalesModal = ({
                     const failedRes = await axios.get(
                       `${backendUrl}/api/sales/import/failed/${newSessionId}`,
                     );
-
                     if (failedRes.data.success) {
                       let failedInvoicesData = [];
 
@@ -1409,14 +1416,12 @@ const ImportSalesModal = ({
                           dataToImport,
                         );
                       }
-
                       if (failedInvoicesData.length > 0) {
                         setFailedInvoices(failedInvoicesData);
                         setShowFailedInvoices(true);
                       }
                     }
                   } catch (e) {
-                    console.warn("Could not fetch failed invoices:", e.message);
                     if (prog.errors?.length > 0) {
                       const tracked = trackFailedInvoices(
                         prog.errors,
@@ -1452,7 +1457,6 @@ const ImportSalesModal = ({
             }
           } catch (err) {
             if (err.code === "ERR_CANCELED") return;
-            console.error("Polling error:", err);
           }
         }, 1000);
       } else {
@@ -1466,7 +1470,6 @@ const ImportSalesModal = ({
         setImportStep("Import cancelled");
         showToast("info", "Import cancelled");
       } else {
-        console.error("Import error:", err);
         const message =
           err.response?.data?.message || err.message || "Import failed";
         setImportStep("Import failed");
@@ -1487,49 +1490,54 @@ const ImportSalesModal = ({
     }
   };
 
-// Updated handleImportData function
-const handleImportData = async () => {
-  if (parsedData.length === 0) {
-    showToast("error", "No data to import");
-    return;
-  }
-
-  // Validate stock first
-  const canProceed = await validateStockBeforeImport(parsedData);
-  
-  // If there are stock issues, show the modal and wait for user decision
-  // The import will be triggered from the modal's submit button
-  if (canProceed && stockValidationResult?.stockIssues?.length === 0) {
-    // No stock issues, proceed with import
-    await handleProductImport(parsedData, false);
-  }
-  // If there are stock issues, the modal will handle the import
-};
-
-  // Handle proceed despite stock issues
-  const handleProceedAnyway = async () => {
-    if (!stockValidationResult) {
-      showToast("error", "Stock validation data not available");
+  // Updated handleImportData function
+  const handleImportData = async () => {
+    if (parsedData.length === 0) {
+      showToast("error", "No data to import");
       return;
     }
 
-    setShowStockValidation(false);
-    setShouldProceedDespiteStockIssues(true);
+    // Always check stock first
+    const stockValidationResult = await validateStockBeforeImport(parsedData);
 
-    const confirmProceed = await confirmDialog({
-      title: "Proceed with Import",
-      text: `${stockValidationResult.stockIssues.length} products have stock issues. The backend will create stock adjustments automatically. Do you want to proceed?`,
-      icon: "info",
-      confirmButtonText: "Yes, Proceed",
-      cancelButtonText: "Cancel",
-    });
+    // Check if we have stock issues
+    const hasStockIssues = stockValidationResult?.stockIssues?.length > 0;
 
-    if (confirmProceed.isConfirmed) {
-      await handleProductImport(parsedData, true);
+    if (hasStockIssues) {
+      // Show modal for user decision
+      setStockValidationResult(stockValidationResult);
+      setShowStockValidation(true);
+      // IMPORTANT: Don't proceed here - wait for user decision in the modal
     } else {
-      setShouldProceedDespiteStockIssues(false);
+      // No stock issues, proceed directly with import
+      console.log("No stock issues, proceeding with import...");
+      await handleProductImport(parsedData, false);
     }
   };
+  // Handle proceed despite stock issues
+  // const handleProceedAnyway = async () => {
+  //   if (!stockValidationResult) {
+  //     showToast("error", "Stock validation data not available");
+  //     return;
+  //   }
+
+  //   setShowStockValidation(false);
+  //   setShouldProceedDespiteStockIssues(true);
+
+  //   const confirmProceed = await confirmDialog({
+  //     title: "Proceed with Import",
+  //     text: `${stockValidationResult.stockIssues.length} products have stock issues. The backend will create stock adjustments automatically. Do you want to proceed?`,
+  //     icon: "info",
+  //     confirmButtonText: "Yes, Proceed",
+  //     cancelButtonText: "Cancel",
+  //   });
+
+  //   if (confirmProceed.isConfirmed) {
+  //     await handleProductImport(parsedData, true);
+  //   } else {
+  //     setShouldProceedDespiteStockIssues(false);
+  //   }
+  // };
 
   // Download error report
   const downloadErrorReport = () => {
@@ -1559,7 +1567,6 @@ const handleImportData = async () => {
       XLSX.writeFile(wb, fileName);
       showToast("success", "Report downloaded successfully");
     } catch (error) {
-      console.error("Error downloading report:", error);
       showToast("error", "Failed to download report");
     }
   };
@@ -1577,7 +1584,7 @@ const handleImportData = async () => {
     setShouldProceedDespiteStockIssues(false);
   };
 
-  // Failed Invoices Modal Component
+  // Updated FailedInvoicesModal component with proper column mapping
   const FailedInvoicesModal = ({
     isOpen,
     onClose,
@@ -1603,12 +1610,7 @@ const handleImportData = async () => {
             if (response.data.success && response.data.data.failedInvoices) {
               failedInvoices = response.data.data.failedInvoices;
             }
-          } catch (fetchError) {
-            console.warn(
-              "Could not fetch failed invoices from backend:",
-              fetchError.message,
-            );
-          }
+          } catch (fetchError) {}
         }
 
         const csvRows = [
@@ -1623,18 +1625,30 @@ const handleImportData = async () => {
             "Timestamp",
             "Products Details",
           ],
-          ...failedInvoices.map((inv) => [
-            inv.row || "N/A",
-            inv.invoiceNumber,
-            inv.customerName,
-            inv.mrName,
-            inv.productName || "N/A",
-            inv.type || "unknown",
+          ...failedInvoices.map((inv, index) => [
+            inv.row || index + 1,
+            inv.invoiceNumber || "N/A",
+
+            // CORRECTED: Get customer name from the right place
+            inv.customerName ||
+              inv.originalData?.customerName ||
+              inv.data?.customerName ||
+              "N/A",
+
+            // CORRECTED: Get MR name from the right place
+            inv.mrName || inv.originalData?.mrName || inv.data?.mrName || "N/A",
+
+            // CORRECTED: Get product name from the right place
+            inv.productName || inv.data?.productName || "N/A",
+
+            inv.type || "processing_error",
             inv.error || inv.message || "Unknown error",
             inv.timestamp || new Date().toISOString(),
             inv.products
-              ?.map((p) => `${p.name}: ${p.salesQty}+${p.bonusQty}`)
-              .join("; ") || "N/A",
+              ? JSON.stringify(inv.products)
+              : inv.data?.products
+                ? JSON.stringify(inv.data.products)
+                : "N/A",
           ]),
         ];
 
@@ -1662,7 +1676,6 @@ const handleImportData = async () => {
 
         showToast("success", "Failed invoices report downloaded");
       } catch (error) {
-        console.error("Error downloading report:", error);
         showToast("error", "Failed to download report");
       } finally {
         setIsDownloading(false);
@@ -1709,6 +1722,8 @@ const handleImportData = async () => {
                     <th className="p-3 text-left border-b">Invoice #</th>
                     <th className="p-3 text-left border-b">Customer</th>
                     <th className="p-3 text-left border-b">MR Name</th>
+                    <th className="p-3 text-left border-b">Product</th>{" "}
+                    {/* Added Product column */}
                     <th className="p-3 text-left border-b">Error Type</th>
                     <th className="p-3 text-left border-b">Error Message</th>
                     <th className="p-3 text-left border-b">Actions</th>
@@ -1720,23 +1735,39 @@ const handleImportData = async () => {
                       <tr className="hover:bg-red-50 border-b">
                         <td className="p-3 font-mono">{inv.row || idx + 1}</td>
                         <td className="p-3 font-medium">{inv.invoiceNumber}</td>
-                        <td className="p-3">{inv.customerName || "N/A"}</td>
-                        <td className="p-3">{inv.mrName || "N/A"}</td>
+                        <td className="p-3">
+                          {/* CORRECTED: Handle both CSV format and JS object format */}
+                          {inv["Customer Name"] || inv.customerName || "N/A"}
+                        </td>
+                        <td className="p-3">
+                          {/* CORRECTED: Handle both CSV format and JS object format */}
+                          {inv["MR Name"] || inv.mrName || "N/A"}
+                        </td>
+                        <td className="p-3">
+                          {/* CORRECTED: Handle both CSV format and JS object format */}
+                          {inv.Product || inv.productName || "N/A"}
+                        </td>
                         <td className="p-3">
                           <span
                             className={`px-2 py-1 rounded text-xs ${
+                              inv["Error Type"] === "validation" ||
                               inv.type === "validation"
                                 ? "bg-yellow-100 text-yellow-800"
-                                : inv.type === "import_error"
+                                : inv["Error Type"] === "import_error" ||
+                                    inv.type === "import_error"
                                   ? "bg-red-100 text-red-800"
-                                  : inv.type === "duplicate_error"
+                                  : inv["Error Type"] === "duplicate_error" ||
+                                      inv.type === "duplicate_error"
                                     ? "bg-orange-100 text-orange-800"
-                                    : inv.type === "processing_error"
+                                    : inv["Error Type"] ===
+                                          "processing_error" ||
+                                        inv.type === "processing_error"
                                       ? "bg-red-100 text-red-800"
                                       : "bg-gray-100 text-gray-800"
                             }`}
                           >
-                            {inv.type || "error"}
+                            {/* CORRECTED: Handle both CSV format and JS object format */}
+                            {inv["Error Type"] || inv.type || "error"}
                           </span>
                         </td>
                         <td
@@ -1761,41 +1792,22 @@ const handleImportData = async () => {
                       </tr>
                       {expandedRow === inv.invoiceNumber && (
                         <tr className="bg-gray-50">
-                          <td colSpan="7" className="p-4">
+                          <td colSpan="8" className="p-4">
+                            {" "}
+                            {/* Changed colSpan from 7 to 8 */}
                             <div className="mb-2">
-                              <strong>Products in this invoice:</strong>
+                              <strong>Additional Details:</strong>
                             </div>
-                            {inv.products && inv.products.length > 0 ? (
-                              <div className="grid grid-cols-3 gap-2">
-                                {inv.products.map((product, pIdx) => (
-                                  <div
-                                    key={pIdx}
-                                    className="bg-white p-3 rounded border"
-                                  >
-                                    <div className="font-medium">
-                                      {product.name}
-                                    </div>
-                                    <div className="text-sm text-gray-600">
-                                      Sales: {product.salesQty} | Bonus:{" "}
-                                      {product.bonusQty} | Total:{" "}
-                                      {product.totalQty}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <div className="text-gray-500 italic">
-                                No product details available
-                              </div>
-                            )}
-                            {inv.originalData && (
-                              <div className="mt-3 p-3 bg-blue-50 rounded">
-                                <strong>Original Data:</strong>
-                                <pre className="text-xs overflow-auto mt-2">
-                                  {JSON.stringify(inv.originalData, null, 2)}
-                                </pre>
-                              </div>
-                            )}
+                            <div className="text-sm">
+                              <p>
+                                <strong>Timestamp:</strong>{" "}
+                                {inv.timestamp || "N/A"}
+                              </p>
+                              <p>
+                                <strong>Products Details:</strong>{" "}
+                                {inv["Products Details"] || "N/A"}
+                              </p>
+                            </div>
                           </td>
                         </tr>
                       )}
@@ -2172,7 +2184,6 @@ const handleImportData = async () => {
                   <button
                     onClick={() => {
                       // Preview data
-                      console.log("Preview parsed data:", parsedData);
                       showToast("info", "Check console for data preview");
                     }}
                     className="px-4 py-4 bg-gray-600 hover:bg-gray-700 text-white rounded-xl font-bold shadow-lg transition cursor-pointer"
@@ -2507,9 +2518,7 @@ const Sales = () => {
       } else if (response.data.data && Array.isArray(response.data.data)) {
         setProductsList(response.data.data);
       }
-    } catch (error) {
-      console.warn("Could not fetch products list:", error.message);
-    }
+    } catch (error) {}
   };
 
   // Function to check if purchase inventories exist
@@ -2521,7 +2530,6 @@ const Sales = () => {
         response.data.exists || response.data.count > 0,
       );
     } catch (error) {
-      console.error("Error checking purchase inventories:", error);
       setHasPurchaseInventories(false);
     } finally {
       setCheckingPurchaseInventories(false);
@@ -2584,7 +2592,6 @@ const Sales = () => {
     const salesData = data.summaries || data.data || data;
 
     if (!Array.isArray(salesData)) {
-      console.error("Sales data is not an array:", salesData);
       setSales([]);
       return;
     }
@@ -2622,7 +2629,6 @@ const Sales = () => {
         }
       }
     } catch (error) {
-      console.error("Fetch error:", error);
       showToast("error", error.message || "Error fetching sale summaries");
       setSales([]);
     } finally {
@@ -2637,8 +2643,6 @@ const Sales = () => {
   useEffect(() => {
     const fetchDropdownData = async () => {
       try {
-        console.log("🔄 Starting to fetch dropdown data...");
-
         const [mrs, customers] = await Promise.all([
           fetchMRList(),
           fetchCustomerList(),
@@ -2671,7 +2675,6 @@ const Sales = () => {
 
           setMrList(mrNames);
         } else {
-          console.warn("❌ MR data not in expected format");
           setMrList([]);
         }
 
@@ -2679,13 +2682,9 @@ const Sales = () => {
         if (customers && customers.success && Array.isArray(customers.data)) {
           setCustomerList(customers.data);
         } else {
-          console.warn("❌ Customer data not in expected format");
           setCustomerList([]);
         }
-
-        console.log("✅ Finished processing dropdown data");
       } catch (error) {
-        console.error("❌ Error fetching dropdown data:", error);
         setMrList([]);
         setCustomerList([]);
       }
@@ -2716,7 +2715,6 @@ const Sales = () => {
           setSelected([]);
         }
       } catch (error) {
-        console.error("Delete batch error:", error);
         showToast("error", "Failed to delete selected sales");
       }
     }
