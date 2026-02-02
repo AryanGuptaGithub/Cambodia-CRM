@@ -1864,7 +1864,6 @@ const ImportSalesModal = ({
             Import Sales Data
           </h2>
 
-          {/* File upload section */}
           {!showParsedSection &&
             !isUploading &&
             !isProcessingFile &&
@@ -1873,100 +1872,32 @@ const ImportSalesModal = ({
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Upload Excel/CSV File
                 </label>
+
                 <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
                   <Upload className="mx-auto text-gray-400 mb-3" size={48} />
+
                   <p className="text-gray-600 mb-2">
                     Drag & drop your file here or click to browse
                   </p>
+
                   <input
                     type="file"
                     accept=".xlsx,.xls,.csv"
                     onChange={handleFileUpload}
-                    className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
+                    className="block w-full text-sm text-gray-500
+            file:mr-4 file:py-2 file:px-4
+            file:rounded-lg file:border-0
+            file:text-sm file:font-semibold
+            file:bg-blue-50 file:text-blue-700
+            hover:file:bg-blue-100 cursor-pointer"
                   />
+
                   <p className="text-xs text-gray-500 mt-3">
                     Supported formats: Excel (.xlsx, .xls), CSV (.csv) | Max
                     size: 20MB
                   </p>
-                  <div className="mt-4">
-                    <button
-                      onClick={() => {
-                        // Download sample template
-                        const ws = XLSX.utils.aoa_to_sheet([
-                          [
-                            "Invoice #",
-                            "Invoice Date",
-                            "Customer Name",
-                            "MR Name",
-                            "Product Name",
-                            "Sales Qty",
-                            "Bonus Qty",
-                            "Selling Price",
-                            "Amount",
-                            "Discount",
-                            "Net Amount",
-                            "Payment Status",
-                            "Remark",
-                          ],
-                          [
-                            "INV-001",
-                            "2024-01-15",
-                            "Customer A",
-                            "John Doe",
-                            "Product A",
-                            10,
-                            2,
-                            100,
-                            1000,
-                            100,
-                            900,
-                            "Credit",
-                            "Sample remark",
-                          ],
-                          [
-                            "INV-001",
-                            "2024-01-15",
-                            "Customer A",
-                            "John Doe",
-                            "Product B",
-                            5,
-                            1,
-                            50,
-                            250,
-                            25,
-                            225,
-                            "Credit",
-                            "",
-                          ],
-                          [
-                            "INV-002",
-                            "2024-01-16",
-                            "Customer B",
-                            "Jane Smith",
-                            "Product C",
-                            20,
-                            5,
-                            75,
-                            1500,
-                            150,
-                            1350,
-                            "Paid",
-                            "Urgent delivery",
-                          ],
-                        ]);
-                        const wb = XLSX.utils.book_new();
-                        XLSX.utils.book_append_sheet(wb, ws, "Sales Template");
-                        XLSX.writeFile(wb, "sales_import_template.xlsx");
-                        showToast(
-                          "success",
-                          "Template downloaded successfully",
-                        );
-                      }}
-                      className="text-sm text-blue-600 hover:text-blue-800 underline cursor-pointer"
-                    >
-                      Download sample template
-                    </button>
-                  </div>
+
+                  <SampleExcelDownloadSale />
                 </div>
               </div>
             )}

@@ -1016,7 +1016,7 @@ const Customer = () => {
   return (
     <div className="p-6">
       <div className="container">
-        {/* Header - REMOVED CONDITIONAL RENDERING FOR SEARCH SECTION */}
+        {/* Header */}
         <div className="flex justify-between items-center mb-4">
           <div className="flex gap-3">
             <button
@@ -1045,7 +1045,7 @@ const Customer = () => {
             )}
           </div>
           
-          {/* SEARCH SECTION - ALWAYS VISIBLE NOW */}
+          {/* SEARCH SECTION */}
           <div className="flex items-center gap-8">
             <p className="text-lg font-semibold text-gray-700">
               Total Count:{" "}
@@ -1120,7 +1120,7 @@ const Customer = () => {
             <tbody>
               {customers.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="p-4 text-center text-gray-500">
+                  <td colSpan={10} className="p-4 text-center text-gray-500">
                     {loading ? "Loading..." : searchTerm ? (
                       <>
                         No customers found matching your search. 
@@ -1156,7 +1156,8 @@ const Customer = () => {
                           {displayValue(customer.customerCode)}
                         </span>
                       </div>
-                    </td> <td className="p-3 capitalize">
+                    </td>
+                    <td className="p-3 capitalize">
                       {displayValue(customer.name)}
                     </td>
                     <td className="p-3 capitalize">

@@ -64,6 +64,7 @@ import operationCostSalesRatio from "./routers/reports/operationCostSalesRatio.j
 import tourExpenseSales from "./routers/reports/tourExpenseSales.js";
 import SaleSummaryReport from "./routers/reports/SaleSummary.js";
 import mrBasicPayrollRoutes from "./routers/hrm/mrBasicPayrollRoutes.js"; 
+import outstanding from "./routers/sale/outstanding.js";
 dotenv.config();
 
 const app = express();
@@ -156,6 +157,7 @@ app.use("/api", operationCostSalesRatio);
 app.use("/api", tourExpenseSales);
 app.use("/api/sales-summary", SaleSummaryReport);
 app.use("/api/mr-basic-payrolls", mrBasicPayrollRoutes);  
+app.use("/api", outstanding);
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
