@@ -2181,16 +2181,6 @@ const ImportSalesModal = ({
                   >
                     Start Import ({parsedData.length} invoices)
                   </button>
-                  <button
-                    onClick={() => {
-                      // Preview data
-                      showToast("info", "Check console for data preview");
-                    }}
-                    className="px-4 py-4 bg-gray-600 hover:bg-gray-700 text-white rounded-xl font-bold shadow-lg transition cursor-pointer"
-                    title="Preview Data"
-                  >
-                    <Eye size={20} />
-                  </button>
                 </div>
                 <p className="text-center text-gray-500 text-sm mt-2">
                   Click to import {parsedData.length} invoices with{" "}

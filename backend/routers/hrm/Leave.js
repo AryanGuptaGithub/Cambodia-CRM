@@ -353,9 +353,6 @@ router.post("/leaves", async (req, res) => {
 
     await leave.save();
     await leave.populate("userId", "medicalRepName MRId");
-
-    console.log("✅ Leave applied successfully");
-
     res.status(201).json({
       success: true,
       message: "Leave applied successfully",
@@ -373,27 +370,20 @@ router.post("/leaves", async (req, res) => {
 // Record attendance (existing code remains the same)
 router.post("/attendance/record", async (req, res) => {
   try {
-    console.log("🔵 ===== START: Record Attendance API ===== 🔵");
-    console.log("📥 Request Body:", req.body);
+   
 
     const { userId, loginTime, logoutTime, workingHoursPerDay } = req.body;
 
-    console.log("📋 Input Data:");
-    console.log("  - userId:", userId);
-    console.log("  - loginTime:", loginTime);
-    console.log("  - logoutTime:", logoutTime);
-    console.log("  - workingHoursPerDay:", workingHoursPerDay);
+
 
     if (!userId || !loginTime || !logoutTime) {
-      console.log("❌ Missing required fields");
       return res.status(400).json({
         success: false,
         message: "User ID, login time, and logout time are required",
       });
     }
 
-    // Parse dates - Extract date and time parts without timezone conversion
-    console.log("\n📅 Parsing Dates:");
+
 
     // Parse the ISO string to extract date and time
     const parseDateTime = (datetimeStr) => {
