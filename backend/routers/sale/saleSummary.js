@@ -1542,7 +1542,7 @@ router.post("/create", async (req, res) => {
       if (totalQty > 0) {
         // FIXED: Find stock item with proper regex
         const stockItem = await ReportInHand.findOne({
-          productName: buildProductNameRegex(p.productName),
+          productName: buildProductNameRegex(normalizeProductName(p.productName)),
         }).session(session);
 
         if (!stockItem) {

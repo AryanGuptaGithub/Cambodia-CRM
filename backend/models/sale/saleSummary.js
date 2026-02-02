@@ -60,7 +60,7 @@ const saleSummarySchema = new Schema(
     totalAmount: { type: Number, required: true, set: roundToTwo },
     paymentStatus: {
       type: String,
-      enum: ["Cash", "Credit", "Partial Paid", "Paid", "Return"],
+      enum: ["Cash", "Credit", "Partial Paid", "Paid", "Return", "Unpaid"],
       default: "Credit",
     },
     remark: { type: String, default: "", trim: true },

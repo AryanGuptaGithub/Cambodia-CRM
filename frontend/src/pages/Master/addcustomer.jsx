@@ -26,6 +26,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
   const [form, setForm] = useState({
     ...initialFormState,
     customerCode: initialCustomerCode || "",
+    customerNumber: "", // Add customerNumber field
   });
   const [errors, setErrors] = useState({});
   const [provinces, setProvinces] = useState([]);
@@ -61,9 +62,8 @@ const useCustomerForm = (initialCustomerCode = "") => {
     if (!form.province) newErrors.province = "Province is required";
 
     // Customer Number validation - only numbers allowed
-    if (form.customerPhoneNumber && !/^\d+$/.test(form.customerPhoneNumber)) {
-      newErrors.customerPhoneNumber =
-        "Customer Number must contain only numbers";
+    if (form.customerNumber && !/^\d+$/.test(form.customerNumber)) {
+      newErrors.customerNumber = "Customer Number must contain only numbers";
     }
 
     setErrors(newErrors);
@@ -91,7 +91,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
     }
 
     // Handle Customer Number - only allow numbers
-    if (name === "customerPhoneNumber") {
+    if (name === "customerNumber") {
       const numericValue = value.replace(/[^\d]/g, "");
       setForm((prevForm) => ({
         ...prevForm,
@@ -599,14 +599,15 @@ const AddCustomer = () => {
       if (form.province && form.province.trim() !== "") {
         await loadZones(form.province);
       } else {
-        setZones([]);
+        // Reset zones when province is cleared
+        // Note: zones state is managed in useCustomerForm hook
       }
     };
 
     if (form.province) {
       loadZonesForProvince();
     }
-  }, [form.province]);
+  }, [form.province, loadZones]);
 
   // Check if form is valid for submission
   const isFormValid = useMemo(() => {
@@ -621,7 +622,7 @@ const AddCustomer = () => {
         form.typeOfBusiness.trim() &&
         form.zone &&
         form.province &&
-        (!form.customerPhoneNumber || /^\d+$/.test(form.customerPhoneNumber)) &&
+        (!form.customerNumber || /^\d+$/.test(form.customerNumber)) &&
         !errors.date
       );
     } catch (error) {
@@ -712,13 +713,14 @@ const AddCustomer = () => {
               max={getTodayDate()}
               disabled={isFormDisabled}
             />
+            
             <InputField
               label="Customer Number"
-              name="customerPhoneNumber"
-              value={form.customerPhoneNumber}
+              name="customerNumber" // Changed from customerPhoneNumber
+              value={form.customerNumber} // Changed from form.customerPhoneNumber
               onChange={handleChange}
               placeholder="Enter numbers only"
-              error={errors.customerPhoneNumber}
+              error={errors.customerNumber} // Changed from errors.customerPhoneNumber
               disabled={isFormDisabled}
               type="tel"
               inputMode="numeric"

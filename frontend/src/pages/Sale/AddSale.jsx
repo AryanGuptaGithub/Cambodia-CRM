@@ -66,11 +66,10 @@ const INITIAL_FORM_STATE = {
   ],
 };
 
-// Helper function to calculate available stock from batches - MODIFIED
+// Helper function to calculate available stock from batches
 const calculateAvailableStock = (productData) => {
   if (!productData) return 0;
 
-  // If product has totalBoxes field and it's greater than 0, use that
   if (
     productData.totalBoxes !== undefined &&
     productData.totalBoxes !== null &&
@@ -79,7 +78,6 @@ const calculateAvailableStock = (productData) => {
     return productData.totalBoxes;
   }
 
-  // If product has batches array, sum the boxes from batches that have boxes > 0
   if (productData.batches && Array.isArray(productData.batches)) {
     return productData.batches.reduce(
       (sum, batch) => sum + (batch.boxes || 0),
@@ -87,7 +85,6 @@ const calculateAvailableStock = (productData) => {
     );
   }
 
-  // Fallback to inStock.boxes if available
   if (productData.inStock?.boxes !== undefined) {
     return productData.inStock.boxes;
   }
@@ -95,7 +92,7 @@ const calculateAvailableStock = (productData) => {
   return 0;
 };
 
-// NEW: Helper function to get the nearest expiry date from batches
+// Helper function to get the nearest expiry date from batches
 const getNearestExpiryDate = (productData) => {
   if (!productData?.batches || !Array.isArray(productData.batches)) return null;
 
@@ -105,7 +102,6 @@ const getNearestExpiryDate = (productData) => {
 
   if (validBatches.length === 0) return null;
 
-  // Sort batches by expiry date (ascending - soonest first)
   const sortedBatches = [...validBatches].sort(
     (a, b) => new Date(a.expiryDate) - new Date(b.expiryDate)
   );
@@ -113,7 +109,6 @@ const getNearestExpiryDate = (productData) => {
   return sortedBatches[0].expiryDate;
 };
 
-// NEW: Helper function to check if a product has any stock
 const hasStock = (productData) => {
   return calculateAvailableStock(productData) > 0;
 };
@@ -372,10 +367,10 @@ const useSaleForm = (initialCustomerCode = "") => {
   const [expandedProductIndex, setExpandedProductIndex] = useState(0);
   const [mrList, setMrList] = useState([]);
   const [customerList, setCustomerList] = useState([]);
-  const [productsList, setProductsList] = useState([]); // NEW: State for products
+  const [productsList, setProductsList] = useState([]);
   const [mrListLoading, setMrListLoading] = useState(true);
   const [customerListLoading, setCustomerListLoading] = useState(true);
-  const [productsListLoading, setProductsListLoading] = useState(true); // NEW: Loading state for products
+  const [productsListLoading, setProductsListLoading] = useState(true);
 
   const parseNumber = useCallback((val) => {
     if (val === "" || val === null || val === undefined) return 0;
@@ -383,7 +378,6 @@ const useSaleForm = (initialCustomerCode = "") => {
     return isNaN(num) ? 0 : num;
   }, []);
 
-  // Calculate total amount from all products
   const calculateTotalAmount = useCallback((products) => {
     const total = products.reduce((sum, product) => {
       return sum + parseFloat(product.netSellingAmount || 0);
@@ -391,7 +385,6 @@ const useSaleForm = (initialCustomerCode = "") => {
     return total.toFixed(2);
   }, []);
 
-  // Calculate total net amount from all products
   const calculateTotalNetAmount = useCallback((products) => {
     const total = products.reduce((sum, product) => {
       return sum + parseFloat(product.netSellingAmount || 0);
@@ -399,20 +392,18 @@ const useSaleForm = (initialCustomerCode = "") => {
     return total.toFixed(2);
   }, []);
 
-  // NEW: Check if total amount equals paid amount
   const isPaidInFull = useCallback(() => {
     const totalAmount = parseFloat(form.totalAmount) || 0;
     const paidAmount = parseFloat(form.paidAmount) || 0;
     return totalAmount > 0 && totalAmount === paidAmount;
   }, [form.totalAmount, form.paidAmount]);
 
-  // Auto-set payment status based on paid amount and total amount
   const autoSetPaymentStatus = useCallback((currentForm) => {
     const totalAmount = parseFloat(currentForm.totalAmount) || 0;
     const paidAmount = parseFloat(currentForm.paidAmount) || 0;
     const dueAmount = parseFloat(currentForm.dueAmount) || 0;
 
-    let paymentStatus = "Credit"; // Default to Credit
+    let paymentStatus = "Credit";
 
     if (totalAmount > 0) {
       if (paidAmount === totalAmount) {
@@ -433,14 +424,12 @@ const useSaleForm = (initialCustomerCode = "") => {
 
       if (name === "invoiceDate") {
         updatedForm.deliveryDate = value;
-        // Remove due date calculation from invoice date
       }
 
       if (name === "creditDays") {
         const creditDays = parseInt(value, 10);
         if (!isNaN(creditDays) && creditDays > 0) {
           try {
-            // Use current date instead of invoice date for due date calculation
             const currentDate = new Date();
             const due = new Date(currentDate);
             due.setDate(due.getDate() + creditDays);
@@ -467,7 +456,6 @@ const useSaleForm = (initialCustomerCode = "") => {
 
         updatedForm.dueAmount = newDueAmount;
 
-        // Auto-set payment status when paid amount changes
         updatedForm.paymentStatus = autoSetPaymentStatus({
           ...updatedForm,
           paidAmount: value,
@@ -475,7 +463,6 @@ const useSaleForm = (initialCustomerCode = "") => {
           totalAmount: totalNetAmount,
         });
 
-        // NEW: Clear credit days and due date when paid in full
         const isFullPayment = parseFloat(totalNetAmount) === parseFloat(value);
         if (isFullPayment) {
           updatedForm.creditDays = "";
@@ -483,7 +470,6 @@ const useSaleForm = (initialCustomerCode = "") => {
         }
       }
 
-      // Auto-set payment status when total amount changes (from product updates)
       if (name === "totalAmount") {
         const totalAmount = parseFloat(value) || 0;
         const paidAmount = parseFloat(currentForm.paidAmount) || 0;
@@ -496,7 +482,6 @@ const useSaleForm = (initialCustomerCode = "") => {
           dueAmount: dueAmount.toFixed(2),
         });
 
-        // NEW: Clear credit days and due date when paid in full
         const isFullPayment = totalAmount === paidAmount;
         if (isFullPayment) {
           updatedForm.creditDays = "";
@@ -509,7 +494,6 @@ const useSaleForm = (initialCustomerCode = "") => {
     [parseNumber, calculateTotalNetAmount, autoSetPaymentStatus]
   );
 
-  // Handle form field changes
   const handleChange = useCallback(
     (e) => {
       const { name, value } = e.target;
@@ -520,7 +504,6 @@ const useSaleForm = (initialCustomerCode = "") => {
     [calculateDerivedFields]
   );
 
-  // Fetch MR list using imported function
   const fetchMRListData = useCallback(async () => {
     try {
       setMrListLoading(true);
@@ -539,7 +522,6 @@ const useSaleForm = (initialCustomerCode = "") => {
     }
   }, []);
 
-  // Fetch Customer list using imported function
   const fetchCustomerListData = useCallback(async () => {
     try {
       setCustomerListLoading(true);
@@ -558,7 +540,6 @@ const useSaleForm = (initialCustomerCode = "") => {
     }
   }, []);
 
-  // NEW: Fetch Products list using imported function
   const fetchProductsListData = useCallback(async () => {
     try {
       setProductsListLoading(true);
@@ -582,7 +563,6 @@ const useSaleForm = (initialCustomerCode = "") => {
     setForm((prev) => ({ ...prev, [name]: value }));
   }, []);
 
-  // Handle MR selection
   const handleMRChange = useCallback(
     (mrId) => {
       const selectedMR = mrList.find((mr) => mr._id === mrId);
@@ -598,7 +578,6 @@ const useSaleForm = (initialCustomerCode = "") => {
     [mrList]
   );
 
-  // Handle Customer selection - UPDATED to include customerName
   const handleCustomerChange = useCallback(
     (customerId) => {
       const selectedCustomer = customerList.find(
@@ -609,7 +588,7 @@ const useSaleForm = (initialCustomerCode = "") => {
           ...prevForm,
           customerId: customerId,
           customerCode: selectedCustomer.customerCode,
-          customerName: selectedCustomer.name, // Added customerName
+          customerName: selectedCustomer.name,
         }));
       }
       setErrors((prev) => ({ ...prev, customerCode: "" }));
@@ -617,12 +596,10 @@ const useSaleForm = (initialCustomerCode = "") => {
     [customerList]
   );
 
-  // Toggle product view
   const toggleView = useCallback((index) => {
     setExpandedProductIndex((prevIndex) => (prevIndex === index ? -1 : index));
   }, []);
 
-  // Check if a product is expanded
   const isProductExpanded = useCallback(
     (index) => {
       return expandedProductIndex === index;
@@ -634,7 +611,6 @@ const useSaleForm = (initialCustomerCode = "") => {
     return product.productName.trim() !== "";
   }, []);
 
-  // Check if all required common fields are filled
   const areCommonFieldsFilled = useCallback((currentForm) => {
     const requiredFields = [
       "recordingDate",
@@ -651,7 +627,6 @@ const useSaleForm = (initialCustomerCode = "") => {
     );
   }, []);
 
-  // Check if at least one product is filled
   const hasAtLeastOneProduct = useCallback((products) => {
     return products.some((product) => product.productName.trim() !== "");
   }, []);
@@ -676,7 +651,6 @@ const useSaleForm = (initialCustomerCode = "") => {
         parseFloat(totalNetAmount) - parseFloat(prev.paidAmount || 0)
       ).toFixed(2);
 
-      // Recalculate payment status
       const paymentStatus = autoSetPaymentStatus({
         ...prev,
         totalAmount,
@@ -701,7 +675,6 @@ const useSaleForm = (initialCustomerCode = "") => {
     autoSetPaymentStatus,
   ]);
 
-  // Remove product
   const removeProduct = useCallback(
     (index) => {
       if (form.products.length > 1) {
@@ -713,7 +686,6 @@ const useSaleForm = (initialCustomerCode = "") => {
             parseFloat(totalNetAmount) - parseFloat(prev.paidAmount || 0)
           ).toFixed(2);
 
-          // Recalculate payment status
           const paymentStatus = autoSetPaymentStatus({
             ...prev,
             totalAmount,
@@ -748,7 +720,6 @@ const useSaleForm = (initialCustomerCode = "") => {
     ]
   );
 
-  // Calculate derived fields for a single product
   const calculateProductFields = useCallback((product) => {
     const salesQty = parseInt(product.salesQty) || 0;
     const bonusQty = parseInt(product.bonusQty) || 0;
@@ -777,7 +748,6 @@ const useSaleForm = (initialCustomerCode = "") => {
     };
   }, []);
 
-  // Update product field
   const updateProduct = useCallback(
     (index, field, value) => {
       setForm((prev) => {
@@ -794,7 +764,6 @@ const useSaleForm = (initialCustomerCode = "") => {
           parseFloat(totalNetAmount) - parseFloat(prev.paidAmount || 0)
         ).toFixed(2);
 
-        // Recalculate payment status
         const paymentStatus = autoSetPaymentStatus({
           ...prev,
           totalAmount,
@@ -819,7 +788,6 @@ const useSaleForm = (initialCustomerCode = "") => {
     ]
   );
 
-  // Validate total quantity (sales + bonus) against available stock
   const validateTotalQuantity = useCallback((product, index, productsData) => {
     if (!product.productName) return null;
 
@@ -840,7 +808,6 @@ const useSaleForm = (initialCustomerCode = "") => {
     return null;
   }, []);
 
-  // Check if product has stock issues
   const hasStockIssue = useCallback((product, productsData) => {
     if (!product.productName) return false;
 
@@ -857,7 +824,6 @@ const useSaleForm = (initialCustomerCode = "") => {
     return totalQty > availableStock;
   }, []);
 
-  // Calculate remaining stock for a product
   const calculateRemainingStock = useCallback((product, productsData) => {
     if (!product.productName) return null;
 
@@ -874,13 +840,11 @@ const useSaleForm = (initialCustomerCode = "") => {
     return availableStock - totalQty;
   }, []);
 
-  // Real-time validation for individual product fields
   const validateProductField = useCallback(
     (index, field, value, productsData) => {
       const product = { ...form.products[index], [field]: value };
       const newErrors = { ...errors };
 
-      // Clear previous errors for this field
       delete newErrors[`${field}_${index}`];
 
       if (field === "productName" && !value.trim()) {
@@ -902,7 +866,6 @@ const useSaleForm = (initialCustomerCode = "") => {
               index + 1
             } must be greater than 0`;
           } else {
-            // Stock validation only if product name exists
             if (form.products[index].productName) {
               const stockError = validateTotalQuantity(
                 { ...form.products[index], salesQty: value },
@@ -942,7 +905,6 @@ const useSaleForm = (initialCustomerCode = "") => {
     (productsData = []) => {
       const newErrors = {};
 
-      // Validate common fields
       if (!form.recordingDate?.trim()) {
         newErrors.recordingDate = "Recording Date is required";
       }
@@ -962,17 +924,14 @@ const useSaleForm = (initialCustomerCode = "") => {
         newErrors.paymentStatus = "Payment Status is required";
       }
 
-      // Validate products
       form.products.forEach((product, index) => {
         if (product.productName.trim()) {
-          // Product Name validation
           if (!product.productName.trim()) {
             newErrors[`productName_${index}`] = `Product Name for item ${
               index + 1
             } is required`;
           }
 
-          // Sales Quantity validation
           const salesQtyStr = product.salesQty?.toString().trim();
           if (!salesQtyStr || salesQtyStr === "") {
             newErrors[`salesQty_${index}`] = `Sales Quantity for item ${
@@ -987,7 +946,6 @@ const useSaleForm = (initialCustomerCode = "") => {
             }
           }
 
-          // Selling Price validation
           const sellingPriceStr = product.sellingPrice?.toString().trim();
           if (!sellingPriceStr || sellingPriceStr === "") {
             newErrors[`sellingPrice_${index}`] = `Selling Price for item ${
@@ -1002,7 +960,6 @@ const useSaleForm = (initialCustomerCode = "") => {
             }
           }
 
-          // Stock validation
           const stockError = validateTotalQuantity(
             product,
             index,
@@ -1014,7 +971,6 @@ const useSaleForm = (initialCustomerCode = "") => {
         }
       });
 
-      // Check if at least one product is filled
       const hasProducts = form.products.some(
         (product) => product.productName.trim() !== ""
       );
@@ -1028,16 +984,12 @@ const useSaleForm = (initialCustomerCode = "") => {
     [form, validateTotalQuantity]
   );
 
-  // NEW: State for products and productNames
   const [products, setProducts] = useState([]);
   const [productNames, setProductNames] = useState([]);
 
-  // NEW: Effect to update products and productNames when productsList changes - MODIFIED
-  // NEW: Effect to update products and productNames when productsList changes - CORRECTED
   useEffect(() => {
     if (productsList?.length > 0) {
       try {
-        // Filter products that have stock and sort by nearest expiry
         const availableProducts = productsList
           .filter((product) => {
             try {
@@ -1056,11 +1008,9 @@ const useSaleForm = (initialCustomerCode = "") => {
               const aExpiry = getNearestExpiryDate(a);
               const bExpiry = getNearestExpiryDate(b);
 
-              // Handle cases where dates might be invalid
               const aDate = aExpiry ? new Date(aExpiry) : null;
               const bDate = bExpiry ? new Date(bExpiry) : null;
 
-              // Both have valid dates - sort by nearest expiry first
               if (
                 aDate instanceof Date &&
                 !isNaN(aDate) &&
@@ -1070,7 +1020,6 @@ const useSaleForm = (initialCustomerCode = "") => {
                 return aDate.getTime() - bDate.getTime();
               }
 
-              // Products with valid expiry dates come first
               if (
                 aDate instanceof Date &&
                 !isNaN(aDate) &&
@@ -1084,7 +1033,6 @@ const useSaleForm = (initialCustomerCode = "") => {
               )
                 return 1;
 
-              // Otherwise maintain original order
               return 0;
             } catch (error) {
               console.error("Error sorting products by expiry:", error);
@@ -1112,10 +1060,10 @@ const useSaleForm = (initialCustomerCode = "") => {
     errors,
     mrList,
     customerList,
-    productsList, // NEW: Return products list
+    productsList,
     mrListLoading,
     customerListLoading,
-    productsListLoading, // NEW: Return products loading state
+    productsListLoading,
     handleChange,
     validate,
     validateProductField,
@@ -1126,7 +1074,7 @@ const useSaleForm = (initialCustomerCode = "") => {
     handleCustomerChange,
     fetchMRList: fetchMRListData,
     fetchCustomerList: fetchCustomerListData,
-    fetchProductsList: fetchProductsListData, // NEW: Return fetch products function
+    fetchProductsList: fetchProductsListData,
     addProduct,
     removeProduct,
     updateProduct,
@@ -1136,9 +1084,9 @@ const useSaleForm = (initialCustomerCode = "") => {
     areCommonFieldsFilled,
     hasAtLeastOneProduct,
     setErrors,
-    products, // NEW: Return filtered products
-    productNames, // NEW: Return filtered product names
-    isPaidInFull, // NEW: Return isPaidInFull function
+    products,
+    productNames,
+    isPaidInFull,
   };
 };
 
@@ -1175,7 +1123,6 @@ const DatePickerField = React.memo(
       [name, onChange, disabled]
     );
 
-    // Safely parse the date value
     const selectedDate = useMemo(() => {
       if (!value) return null;
       try {
@@ -1318,10 +1265,10 @@ const AddSale = () => {
     errors,
     mrList,
     customerList,
-    productsList, // NEW: Get productsList from useSaleForm
+    productsList,
     mrListLoading,
     customerListLoading,
-    productsListLoading, // NEW: Get productsListLoading from useSaleForm
+    productsListLoading,
     handleChange,
     validate,
     validateProductField,
@@ -1332,7 +1279,7 @@ const AddSale = () => {
     handleCustomerChange,
     fetchMRList,
     fetchCustomerList,
-    fetchProductsList, // NEW: Get fetchProductsList from useSaleForm
+    fetchProductsList,
     addProduct,
     removeProduct,
     updateProduct,
@@ -1340,34 +1287,29 @@ const AddSale = () => {
     isProductExpanded,
     areCommonFieldsFilled,
     hasAtLeastOneProduct,
-    products, // NEW: Get filtered products from useSaleForm
-    productNames, // NEW: Get filtered product names from useSaleForm
-    isPaidInFull, // NEW: Get isPaidInFull function
+    products,
+    productNames,
+    isPaidInFull,
   } = useSaleForm(customerCode);
 
-  // REMOVED: useInitialSaleData hook and replaced with local state
   const { statuses, loading: initialLoading } = useInitialSaleData();
 
-  // State for showing upload message
   const [showUploadMessage, setShowUploadMessage] = useState(false);
   const [uploadMessage, setUploadMessage] = useState("");
   const [isFormDisabled, setIsFormDisabled] = useState(false);
 
-  // Fetch MR, Customer and Products lists on component mount
   useEffect(() => {
     fetchMRList();
     fetchCustomerList();
-    fetchProductsList(); // NEW: Fetch products list
+    fetchProductsList();
   }, [fetchMRList, fetchCustomerList, fetchProductsList]);
 
-  // Calculate combined loading state
   const loading =
     initialLoading ||
     mrListLoading ||
     customerListLoading ||
     productsListLoading;
 
-  // Memoized MR options for dropdown
   const mrOptions = useMemo(() => {
     if (mrList.length === 0 && !mrListLoading) {
       return [
@@ -1388,7 +1330,6 @@ const AddSale = () => {
     ];
   }, [mrList, mrListLoading]);
 
-  // Memoized Customer options for dropdown
   const customerOptions = useMemo(() => {
     if (customerList.length === 0 && !customerListLoading) {
       return [
@@ -1409,17 +1350,14 @@ const AddSale = () => {
     ];
   }, [customerList, customerListLoading]);
 
-  // Payment Status Suggestions
   const paymentStatusSuggestions = useSuggestions(
     statuses,
     "type",
     form.paymentStatus
   );
 
-  // Product Suggestions using custom hook for product rows
   const productSuggestions = useProductSuggestions(form.products, productNames);
 
-  // NEW: Function to get expiry information for a product
   const getProductExpiryInfo = (productName) => {
     const productData = products.find((p) => p.productName === productName);
     if (!productData?.batches) return null;
@@ -1440,16 +1378,14 @@ const AddSale = () => {
     return {
       nearestExpiry: nearestBatch.expiryDate,
       daysUntilExpiry,
-      isNearExpiry: daysUntilExpiry <= 30, // Within 30 days is considered near expiry
+      isNearExpiry: daysUntilExpiry <= 30,
       batchCount: validBatches.length,
     };
   };
 
-  // FIXED: Function to check if required data is available and set form disabled state
   const checkRequiredData = useCallback(() => {
     const missingFields = [];
 
-    // Check if productsList is loaded and has items (regardless of stock)
     if (productsList.length === 0 && !productsListLoading) {
       missingFields.push("products");
     }
@@ -1467,7 +1403,6 @@ const AddSale = () => {
       return false;
     }
 
-    // Additional check: if there are products but none have stock, show a different message
     if (productNames.length === 0 && productsList.length > 0) {
       setUploadMessage("All products are currently out of stock. Please add stock to products first.");
       setShowUploadMessage(true);
@@ -1488,24 +1423,21 @@ const AddSale = () => {
     customerListLoading,
   ]);
 
-  // Check required data when dependencies change
   useEffect(() => {
     checkRequiredData();
   }, [checkRequiredData]);
 
-  // CORRECTED: Enhanced getProductDetails function to handle batches properly
   const getProductDetails = (productName) => {
     const product = products.find((p) => p.productName === productName);
     if (!product) {
       return { lc: "", fob: "", cif: "", sellingPrice: "" };
     }
 
-    // Check if product has batches and use batch values if available
     let lc = product.lc || 0;
     let fob = product.fob || 0;
     let cif = product.cif || 0;
+    let sellingPrice = product.sellingPrice || "";
 
-    // If product has batches, use the first batch values (prioritize batch over direct product values)
     if (product.batches && product.batches.length > 0) {
       const firstBatch = product.batches[0];
       lc = firstBatch.lc || lc;
@@ -1517,18 +1449,16 @@ const AddSale = () => {
       lc: lc.toString(),
       fob: fob.toString(),
       cif: cif.toString(),
-      sellingPrice: product.sellingPrice || "",
+      sellingPrice: sellingPrice.toString(),
     };
   };
 
-  // Enhanced handleChange for payment status
   const enhancedHandleChange = useCallback(
     (e) => {
       if (isFormDisabled) return;
 
       const { name, value } = e.target;
 
-      // Handle payment status input separately to allow manual selection
       if (name === "paymentStatus") {
         updateFormField("paymentStatus", value);
         paymentStatusSuggestions.setIsOpen(true);
@@ -1538,7 +1468,6 @@ const AddSale = () => {
       }
 
       if (name === "paidAmount") {
-        // Force payment status update when paid amount changes
         setTimeout(() => {
           const totalAmount = parseFloat(form.totalAmount) || 0;
           const paidAmount = parseFloat(value) || 0;
@@ -1571,33 +1500,30 @@ const AddSale = () => {
     ]
   );
 
-  // CORRECTED: Enhanced product change with real-time validation
   const enhancedProductChange = useCallback(
     (index, field, value) => {
       if (isFormDisabled) return;
 
-      // First update the product field
       updateProduct(index, field, value);
 
       if (field === "productName") {
         const productDetails = getProductDetails(value);
 
-        // Update all fields including LC, FOB, CIF
         updateProduct(index, "lc", productDetails.lc);
         updateProduct(index, "fob", productDetails.fob);
         updateProduct(index, "cif", productDetails.cif);
-        updateProduct(index, "sellingPrice", productDetails.sellingPrice);
+        if (productDetails.sellingPrice) {
+          updateProduct(index, "sellingPrice", productDetails.sellingPrice);
+        }
 
         productSuggestions.setIsOpen(index, true);
         productSuggestions.setDropdownTop(index);
         productSuggestions.setHighlightedIndex(index, 0);
       }
 
-      // Real-time validation for critical fields
       if (
         ["salesQty", "bonusQty", "sellingPrice", "productName"].includes(field)
       ) {
-        // Use setTimeout to ensure state is updated before validation
         setTimeout(() => {
           validateProductField(index, field, value, products);
         }, 10);
@@ -1612,7 +1538,6 @@ const AddSale = () => {
     ]
   );
 
-  // Handle payment status keyboard events
   const handlePaymentStatusKeyDown = useCallback(
     (e) => {
       if (isFormDisabled) return;
@@ -1623,7 +1548,6 @@ const AddSale = () => {
     [paymentStatusSuggestions, updateFormField, isFormDisabled]
   );
 
-  // Handle product name keyboard events for specific index
   const handleProductNameKeyDown = useCallback(
     (index, e) => {
       if (isFormDisabled) return;
@@ -1634,14 +1558,12 @@ const AddSale = () => {
     [productSuggestions, enhancedProductChange, isFormDisabled]
   );
 
-  // Handle payment status focus
   const handlePaymentStatusFocus = useCallback(() => {
     if (isFormDisabled) return;
     paymentStatusSuggestions.setIsOpen(true);
     paymentStatusSuggestions.setHighlightedIndex(0);
   }, [paymentStatusSuggestions, isFormDisabled]);
 
-  // Handle product name focus
   const handleProductNameFocus = useCallback(
     (index) => {
       if (isFormDisabled) return;
@@ -1660,7 +1582,6 @@ const AddSale = () => {
     [productSuggestions, isFormDisabled]
   );
 
-  // Check if "Add Sale" button should be enabled
   const isAddSaleEnabled = useMemo(() => {
     return (
       areCommonFieldsFilled(form) &&
@@ -1669,7 +1590,6 @@ const AddSale = () => {
     );
   }, [form, areCommonFieldsFilled, hasAtLeastOneProduct, isFormDisabled]);
 
-  // Check if "Add Product" button should be enabled - UPDATED with stock validation
   const isCurrentProductValid = useCallback(() => {
     if (isFormDisabled) return false;
 
@@ -1677,7 +1597,6 @@ const AddSale = () => {
     const salesQty = currentProduct.salesQty?.toString().trim();
     const sellingPrice = currentProduct.sellingPrice?.toString().trim();
 
-    // Check basic validation
     const basicValidation =
       currentProduct.productName.trim() !== "" &&
       salesQty &&
@@ -1693,7 +1612,6 @@ const AddSale = () => {
       return false;
     }
 
-    // Check stock validation - disable button if stock is exceeded
     const hasStockProblem = hasStockIssue(currentProduct, products);
     if (hasStockProblem) {
       return false;
@@ -1705,19 +1623,16 @@ const AddSale = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Check if required data (MR, Customer, etc.) is available
     if (!checkRequiredData()) {
       return;
     }
 
-    // Validate products (e.g., required fields, positive quantities)
     if (!validate(products)) {
       showToast("error", "Please fix the validation errors before submitting");
       return;
     }
 
     try {
-      // Filter out completely empty product rows
       const validProducts = form.products.filter(
         (product) =>
           product.productName &&
@@ -1730,7 +1645,6 @@ const AddSale = () => {
         return;
       }
 
-      // Optional: Client-side stock check (remove if you don't want it)
       const stockErrors = [];
       validProducts.forEach((product) => {
         const productData = products.find(
@@ -1753,14 +1667,12 @@ const AddSale = () => {
         return;
       }
 
-      // Safe date formatting
       const safeFormatDate = (dateString) => {
         if (!dateString) return "";
         const date = new Date(dateString);
         return isNaN(date.getTime()) ? "" : date.toISOString().split("T")[0];
       };
 
-      // Prepare sale data – exactly matches backend expectations
       const saleData = {
         recordingDate: safeFormatDate(form.recordingDate),
         invoiceNumber: form.invoiceNumber?.trim() || "",
@@ -1769,10 +1681,10 @@ const AddSale = () => {
         mrId: form.mrId || null,
         customerCode: form.customerCode || "",
         customerId: form.customerId || null,
-        customerName: form.customerName || "", // Important for reports
+        customerName: form.customerName || "",
 
         products: validProducts.map((product) => ({
-          productName: product.productName.trim(), // ← CRITICAL: This must be present and valid
+          productName: product.productName.trim(),
           salesQty: Number(product.salesQty) || 0,
           bonusQty: Number(product.bonusQty) || 0,
           totalQty: Number(product.totalQty) || 0,
@@ -1799,7 +1711,8 @@ const AddSale = () => {
         remark: form.remark || "",
       };
 
-      const response = await fetch(`${backendUrl}/api/sales`, {
+      // FIXED: Changed endpoint from /api/sales to /api/sales/create
+      const response = await fetch(`${backendUrl}/api/sales/create`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1807,22 +1720,29 @@ const AddSale = () => {
         body: JSON.stringify(saleData),
       });
 
-      const respData = await response.json();
-
+      const contentType = response.headers.get("content-type");
       if (!response.ok) {
-        throw new Error(
-          respData.error || respData.message || "Failed to create sale"
-        );
+        let errorMessage;
+        if (contentType && contentType.includes("application/json")) {
+          const respData = await response.json();
+          errorMessage = respData.error || respData.message || `HTTP error! status: ${response.status}`;
+        } else {
+          const text = await response.text();
+          errorMessage = `Server returned ${response.status}: ${text.substring(0, 100)}...`;
+        }
+        throw new Error(errorMessage);
       }
 
+      const respData = await response.json();
+
       showToast("success", respData.message || "Sale created successfully!");
-      navigate("/salelayout/sale"); // Redirect to sales list
+      navigate("/salelayout/sale");
     } catch (err) {
       console.error("Error submitting sale:", err);
       showToast("error", err.message || "Failed to submit sale");
     }
   };
-  // Handle numeric input change
+
   const handleNumericInputChange = useCallback(
     (e, updateFunc) => {
       if (isFormDisabled) return;
@@ -1834,7 +1754,6 @@ const AddSale = () => {
     [isFormDisabled]
   );
 
-  // Handle alphanumeric input for Invoice Number
   const handleAlphanumericInputChange = useCallback(
     (e, updateFunc) => {
       if (isFormDisabled) return;
@@ -1846,7 +1765,6 @@ const AddSale = () => {
     [isFormDisabled]
   );
 
-  // NEW: Check if paid in full
   const paidInFull = isPaidInFull();
 
   if (loading) {
@@ -1861,7 +1779,6 @@ const AddSale = () => {
 
   return (
     <div className="max-w-5xl mx-auto p-6 bg-white rounded-2xl shadow">
-      {/* Upload Message Banner - CHANGED TO SHOW DIFFERENT COLORS BASED ON ISSUE */}
       {showUploadMessage && (
         <div className={`mb-6 p-4 rounded-lg ${
           uploadMessage.includes("out of stock") 
@@ -1939,7 +1856,6 @@ const AddSale = () => {
           const remainingStock = calculateRemainingStock(product, products);
           const hasStockProblem = totalQty > availableStock;
 
-          // NEW: Get expiry information
           const expiryInfo = getProductExpiryInfo(product.productName);
 
           return (
@@ -1967,7 +1883,6 @@ const AddSale = () => {
                         Available: {availableStock} boxes
                       </span>
 
-                      {/* NEW: Expiry information display */}
                       {expiryInfo && (
                         <span
                           className={`text-sm px-2 py-1 rounded border ${
@@ -1988,7 +1903,6 @@ const AddSale = () => {
                         </span>
                       )}
 
-                      {/* Stock validation warning */}
                       {hasStockProblem && (
                         <span className="text-red-600 text-sm font-medium">
                           ⚠️ Total quantity exceeds available stock
@@ -2035,7 +1949,6 @@ const AddSale = () => {
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {/* Product Name Input */}
                     <div className="relative flex flex-col">
                       <label className="text-sm font-medium text-gray-700 mb-1">
                         Product Name
@@ -2146,7 +2059,6 @@ const AddSale = () => {
                       disabled={isFormDisabled}
                     />
 
-                    {/* Bonus Quantity - ReadOnly and Disabled */}
                     <InputField
                       label="Bonus Quantity"
                       name={`bonusQty_${index}`}
@@ -2180,12 +2092,11 @@ const AddSale = () => {
                         );
                       }}
                       readOnly
-                      disabled={true} // Always disabled as per requirement
+                      disabled={true}
                       error={errors[`sellingPrice_${index}`]}
                       required
                     />
 
-                    {/* Discount - ReadOnly and Disabled */}
                     <InputField
                       label="Discount"
                       name={`discount_${index}`}
@@ -2209,10 +2120,9 @@ const AddSale = () => {
                       name={`lc_${index}`}
                       value={product.lc}
                       readOnly
-                      disabled={true} // Always disabled as per requirement
+                      disabled={true}
                     />
 
-                    {/* FOB Field - Added */}
                     <InputField
                       label="FOB (USD)"
                       name={`fob_${index}`}
@@ -2221,7 +2131,6 @@ const AddSale = () => {
                       disabled={true}
                     />
 
-                    {/* CIF Field - Added */}
                     <InputField
                       label="CIF (USD)"
                       name={`cif_${index}`}
@@ -2230,41 +2139,40 @@ const AddSale = () => {
                       disabled={true}
                     />
 
-                    {/* Calculated Fields */}
                     <InputField
                       label="Total Quantity"
                       name={`totalQty_${index}`}
                       value={product.totalQty}
                       readOnly
-                      disabled={true} // Always disabled as per requirement
+                      disabled={true}
                     />
                     <InputField
                       label="Amount"
                       name={`amount_${index}`}
                       value={product.amount}
                       readOnly
-                      disabled={true} // Always disabled as per requirement
+                      disabled={true}
                     />
                     <InputField
                       label="Net Selling Amount"
                       name={`netSellingAmount_${index}`}
                       value={product.netSellingAmount}
                       readOnly
-                      disabled={true} // Always disabled as per requirement
+                      disabled={true}
                     />
                     <InputField
                       label="Average Unit Price"
                       name={`averageUnitPrice_${index}`}
                       value={product.averageUnitPrice}
                       readOnly
-                      disabled={true} // Always disabled as per requirement
+                      disabled={true}
                     />
                     <InputField
                       label="Profit / Loss"
                       name={`profitLoss_${index}`}
                       value={product.profitLoss}
                       readOnly
-                      disabled={true} // Always disabled as per requirement
+                      disabled={true}
                     />
                   </div>
                 </div>
@@ -2274,9 +2182,7 @@ const AddSale = () => {
         })}
       </div>
 
-      {/* Rest of the form */}
       <form onSubmit={handleSubmit}>
-        {/* Common Fields */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
           <DatePickerField
             label="Recording Date"
@@ -2313,7 +2219,6 @@ const AddSale = () => {
             disabled={isFormDisabled}
           />
 
-          {/* Medical Representative Dropdown */}
           <SearchableDropdown
             value={form.mrId}
             onChange={handleMRChange}
@@ -2326,7 +2231,6 @@ const AddSale = () => {
             disabled={isFormDisabled}
           />
 
-          {/* Customer Dropdown */}
           <SearchableDropdown
             value={form.customerId}
             onChange={handleCustomerChange}
@@ -2351,7 +2255,6 @@ const AddSale = () => {
           />
         </div>
 
-        {/* Additional Common Fields - MODIFIED: Conditional grid columns */}
         <div
           className={`grid grid-cols-1 ${
             paidInFull ? "sm:grid-cols-2" : "sm:grid-cols-3"
@@ -2364,7 +2267,7 @@ const AddSale = () => {
             onChange={enhancedHandleChange}
             error={errors.totalAmount}
             readOnly
-            disabled={true} // Always disabled as per requirement
+            disabled={true}
           />
           <InputField
             label="Paid Amount"
@@ -2376,7 +2279,6 @@ const AddSale = () => {
             disabled={isFormDisabled}
           />
 
-          {/* Show Credit Days and Due Date only when NOT paid in full */}
           {!paidInFull && (
             <>
               <InputField
@@ -2404,7 +2306,6 @@ const AddSale = () => {
             </>
           )}
 
-          {/* Due Amount - ReadOnly and Disabled */}
           <InputField
             label="Due Amount"
             name="dueAmount"
@@ -2412,7 +2313,7 @@ const AddSale = () => {
             onChange={enhancedHandleChange}
             error={errors.dueAmount}
             readOnly
-            disabled={true} // Always disabled as per requirement
+            disabled={true}
           />
 
           <SuggestionInput
@@ -2441,7 +2342,6 @@ const AddSale = () => {
             disabled={isFormDisabled}
           />
 
-          {/* Remarks as Textarea with 2 rows - MODIFIED: Conditional column span */}
           <div className={`${paidInFull ? "sm:col-span-2" : "sm:col-span-3"}`}>
             <label className="text-sm font-medium text-gray-700 mb-1">
               Remark

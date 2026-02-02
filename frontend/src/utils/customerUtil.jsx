@@ -3,17 +3,19 @@ import axios from "axios";
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
 // Initial form state
+// In customerUtil.js, update the initialFormState:
 export const initialFormState = {
   date: "",
-  medicalRepName: "",
   medicalRepId: "",
+  medicalRepName: "",
   name: "",
   typeOfBusiness: "",
-  customerPhoneNumber: "",
+  customerNumber: "", // Changed from customerPhoneNumber
   address: "",
   zone: "",
   province: "",
   remark: "",
+  customerCode: "",
 };
 
 
