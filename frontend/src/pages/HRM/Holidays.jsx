@@ -349,6 +349,7 @@ const Holidays = () => {
     }
   };
 
+  // CORRECTED FILE UPLOAD FUNCTION
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -362,49 +363,94 @@ const Holidays = () => {
         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
-        const expectedHeaders = ["Date", "Holiday Name", "Description"];
+        // Updated expected headers based on your Excel file
+        const expectedHeaders = ["Holiday Name", "Start Date", "End Date", "Description"];
         let headerIdx = -1;
 
+        // Find the header row
         for (let i = 0; i < rows.length; i++) {
-          const row = rows[i].map((c) => c?.toString().trim());
+          if (!rows[i] || !Array.isArray(rows[i])) continue;
+          
+          const row = rows[i].map((c) => c?.toString().trim() || "");
           const normalized = row.map((c) => c.toLowerCase());
-          const matchCount = expectedHeaders.filter((h) =>
-            normalized.includes(h.toLowerCase())
-          ).length;
-          if (matchCount >= 2) {
+          
+          // Check if this row contains most of our expected headers
+          let matchCount = 0;
+          expectedHeaders.forEach(h => {
+            if (normalized.includes(h.toLowerCase())) {
+              matchCount++;
+            }
+          });
+          
+          if (matchCount >= 2) { // Require at least 2 header matches
             headerIdx = i;
             break;
           }
         }
 
         if (headerIdx === -1) {
-          showToast("error", "Header row not found in the Excel file");
+          showToast("error", "Could not find holiday data in the Excel file. Please check the format.");
           return;
         }
 
-        const headers = rows[headerIdx].map((h) => h?.toString().trim());
+        const headers = rows[headerIdx].map((h) => h?.toString().trim() || "");
         const dataRows = rows.slice(headerIdx + 1);
 
+        // Convert to JSON using the headers
         const json = dataRows.map((row) => {
           const obj = {};
-          headers.forEach((h, i) => (obj[h] = row[i] ?? ""));
+          headers.forEach((h, i) => {
+            // Use empty string if cell is undefined
+            obj[h] = row && row[i] !== undefined ? row[i] : "";
+          });
           return obj;
         });
 
+        // Process the data - map Excel columns to your application's field names
         const finalData = json
-          .filter((item) => item.Date && item["Holiday Name"])
-          .map((item) => ({
-            startDate: item.Date,
-            endDate: item.Date,
-            name: item["Holiday Name"],
-            description: item.Description || "",
-          }));
+          .filter((item) => {
+            // Check if we have required data
+            const holidayName = item["Holiday Name"] || item["HolidayName"] || item["Holiday name"];
+            const startDate = item["Start Date"] || item["StartDate"] || item["Start date"];
+            return holidayName && startDate;
+          })
+          .map((item) => {
+            // Map Excel columns to your application's field names
+            const holidayName = item["Holiday Name"] || item["HolidayName"] || item["Holiday name"] || "";
+            const startDate = item["Start Date"] || item["StartDate"] || item["Start date"] || "";
+            const endDate = item["End Date"] || item["EndDate"] || item["End date"] || startDate; // Use start date if end date not provided
+            const description = item["Description"] || item["Description"] || "";
+
+            // Parse and format dates
+            let formattedStartDate = startDate;
+            let formattedEndDate = endDate;
+
+            // If date contains timestamp (like "2026-01-01 00:00:00"), extract just the date part
+            if (startDate && startDate.includes && startDate.includes(" ")) {
+              formattedStartDate = startDate.split(" ")[0];
+            }
+            
+            if (endDate && endDate.includes && endDate.includes(" ")) {
+              formattedEndDate = endDate.split(" ")[0];
+            }
+
+            return {
+              startDate: formattedStartDate,
+              endDate: formattedEndDate,
+              name: holidayName,
+              description: description,
+            };
+          });
+
+        if (finalData.length === 0) {
+          showToast("warning", "No valid holiday data found in the file. Please check the format.");
+          return;
+        }
 
         setParsedData(finalData);
-        showToast("success", `Found ${finalData.length} holidays to import`);
       } catch (error) {
         console.error("Error reading file:", error);
-        showToast("error", "Failed to process Excel file");
+        showToast("error", "Failed to process Excel file. Please check the format.");
       }
     };
 
