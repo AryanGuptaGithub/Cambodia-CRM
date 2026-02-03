@@ -276,25 +276,46 @@ const PurchaseReturn = () => {
     }
   };
 
-  const fetchSuppliers = async () => {
-    setLoadingSuppliers(true);
-    try {
-      const response = await axios.get(`${backendUrl}/api/suppliers`);
-      const transformedSuppliers = response.data.map((supplier) => ({
-        value: supplier._id,
-        label: supplier.supplierName || supplier.name,
-      }));
-      setSupplierOptions(transformedSuppliers);
-      setFilteredSupplierOptions(transformedSuppliers);
-    } catch (err) {
-      console.error("Error fetching suppliers:", err);
-      showToast("error", "Failed to fetch suppliers");
-      setSupplierOptions([]);
-      setFilteredSupplierOptions([]);
-    } finally {
-      setLoadingSuppliers(false);
+const fetchSuppliers = async () => {
+  setLoadingSuppliers(true);
+  try {
+    // Updated to use the correct endpoint that returns array or handle paginated response
+    const response = await axios.get(`${backendUrl}/api/suppliers/all`); // Or modify existing endpoint
+    console.log('values of response', response);
+    
+    // Check if response.data is an array or has suppliers property
+    let suppliersData = [];
+    
+    if (Array.isArray(response.data)) {
+      // If backend returns direct array
+      suppliersData = response.data;
+    } else if (response.data.suppliers && Array.isArray(response.data.suppliers)) {
+      // If backend returns paginated response with suppliers array
+      suppliersData = response.data.suppliers;
+    } else if (Array.isArray(response.data.data)) {
+      // If backend returns { data: [] } format
+      suppliersData = response.data.data;
+    } else {
+      console.warn('Unexpected response format:', response.data);
+      suppliersData = [];
     }
-  };
+    
+    const transformedSuppliers = suppliersData.map((supplier) => ({
+      value: supplier._id,
+      label: supplier.supplierName || supplier.name || 'Unnamed Supplier',
+    }));
+    
+    setSupplierOptions(transformedSuppliers);
+    setFilteredSupplierOptions(transformedSuppliers);
+  } catch (err) {
+    console.error("Error fetching suppliers:", err);
+    showToast("error", "Failed to fetch suppliers");
+    setSupplierOptions([]);
+    setFilteredSupplierOptions([]);
+  } finally {
+    setLoadingSuppliers(false);
+  }
+};
 
   const fetchPurchases = async () => {
     setLoadingPurchases(true);

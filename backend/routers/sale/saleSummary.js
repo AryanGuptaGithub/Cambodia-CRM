@@ -21,7 +21,7 @@ const importLock = new Map();
 // Fixed precision helper
 const fixPrecision = (num) => {
   if (typeof num !== "number") return num;
-  return Math.round(num * 1e10) / 1e10;
+  return Math.round(num * 100) / 100; // Changed to 2 decimal places for currency
 };
 
 const normalizeProductName = (name) => {
@@ -79,12 +79,19 @@ const mapPaymentStatus = (status) => {
 };
 
 // ==========================================
-// MR CASH UPDATE FUNCTION
+// MR CASH UPDATE FUNCTION (FIXED)
 // ==========================================
 
 const updateMRCashes = async (mrName, amount, invoiceNumber, date, session, isRefund = false) => {
   try {
-    console.log(`🔄 MR Cash Update - MR Name: ${mrName}, Amount: ${amount}, Invoice: ${invoiceNumber}`);
+    // ✅ CRITICAL FIX: Return early if amount is 0 or invalid
+    const cleanAmount = fixPrecision(Number(amount) || 0);
+    if (cleanAmount === 0 || !cleanAmount) {
+      console.log(`⏭️ Skipping MR Cash Update - Amount is 0 for invoice: ${invoiceNumber}`);
+      return { success: true, skipped: true, reason: "Amount is zero" };
+    }
+    
+    console.log(`🔄 MR Cash Update - MR Name: ${mrName}, Amount: ${cleanAmount}, Invoice: ${invoiceNumber}`);
     
     if (!mrName || mrName.trim() === "") {
       throw new Error("medicalRepName is required to update MR Cash");
@@ -104,7 +111,7 @@ const updateMRCashes = async (mrName, amount, invoiceNumber, date, session, isRe
     
     if (!mrCash) {
       console.log(`📝 Creating new MRCash record for MR: ${mr.medicalRepName}`);
-      const initialCash = isRefund || amount < 0 ? 0 : Math.abs(amount);
+      const initialCash = isRefund ? 0 : cleanAmount;
       mrCash = new MRCash({
         mrId: mr._id,
         mrName: mr.medicalRepName,
@@ -116,30 +123,31 @@ const updateMRCashes = async (mrName, amount, invoiceNumber, date, session, isRe
       });
       await mrCash.save({ session });
       console.log(`✅ Created new MRCash with initial cash: ${initialCash}`);
-      
-      if (!isRefund && amount > 0) {
-        return { success: true, mrCash, action: "created_new" };
-      }
+      return { success: true, mrCash, action: "created_new" };
     }
     
-    if (!amount || amount === 0) {
-      return { success: true, mrCash };
-    }
+    // Calculate new cash amount
+    let newCashAmount = mrCash.currentCash || 0;
     
-    const absoluteAmount = Math.abs(amount);
-    
-    if (isRefund || amount < 0) {
-      mrCash.currentCash = fixPrecision((mrCash.currentCash || 0) - absoluteAmount);
-      if (mrCash.currentCash < 0) {
-        console.warn(`⚠️ Warning: MR ${mr.medicalRepName} cash balance went negative: ${mrCash.currentCash}`);
-      }
+    if (isRefund) {
+      // Refund - subtract from current cash
+      newCashAmount = fixPrecision(newCashAmount - cleanAmount);
+      console.log(`💰 Refund: ${mrCash.currentCash} - ${cleanAmount} = ${newCashAmount}`);
     } else {
-      mrCash.currentCash = fixPrecision((mrCash.currentCash || 0) + absoluteAmount);
+      // Add to current cash
+      newCashAmount = fixPrecision(newCashAmount + cleanAmount);
+      console.log(`💰 Adding: ${mrCash.currentCash} + ${cleanAmount} = ${newCashAmount}`);
+    }
+    
+    mrCash.currentCash = newCashAmount;
+    
+    if (mrCash.currentCash < 0) {
+      console.warn(`⚠️ Warning: MR ${mr.medicalRepName} cash balance went negative: ${mrCash.currentCash}`);
     }
     
     const transactionNote = isRefund
-      ? `Refund for invoice ${invoiceNumber}: -${absoluteAmount}`
-      : `Sale invoice ${invoiceNumber}: +${absoluteAmount}`;
+      ? `Refund for invoice ${invoiceNumber}: -${cleanAmount}`
+      : `Sale invoice ${invoiceNumber}: +${cleanAmount}`;
     mrCash.notes = mrCash.notes
       ? `${mrCash.notes}\n${transactionNote}`
       : transactionNote;
@@ -148,13 +156,15 @@ const updateMRCashes = async (mrName, amount, invoiceNumber, date, session, isRe
     await mrCash.save({ session });
     
     console.log(
-      `✅ MR Cash Updated | ${mr.medicalRepName} | Current Cash: ${mrCash.currentCash} | Change: ${amount}`
+      `✅ MR Cash Updated | ${mr.medicalRepName} | Current Cash: ${mrCash.currentCash} | Change: ${isRefund ? '-' : '+'}${cleanAmount}`
     );
     
     return {
       success: true,
       mrCash,
-      action: mrCash.isNew ? "created_new" : "updated_existing",
+      action: "updated_existing",
+      previousAmount: mrCash.currentCash - (isRefund ? -cleanAmount : cleanAmount),
+      newAmount: mrCash.currentCash,
     };
   } catch (error) {
     console.error("❌ Error updating MR Cash:", error.message);
@@ -762,10 +772,10 @@ const processSingleInvoiceWithStockDeduction = async (invoiceData, index) => {
       }).session(session);
       
       const lc = productRecord?.lc || 0;
-      const sellingPrice = parseFloat(product.sellingPrice) || 0;
-      const amount = sellingPrice * salesQty;
-      const discount = parseFloat(product.discount) || 0;
-      const netSellingAmount = amount - discount;
+      const sellingPrice = fixPrecision(parseFloat(product.sellingPrice) || 0);
+      const amount = fixPrecision(sellingPrice * salesQty);
+      const discount = fixPrecision(parseFloat(product.discount) || 0);
+      const netSellingAmount = fixPrecision(amount - discount);
       
       processedProducts.push({
         productName: productName,
@@ -776,13 +786,13 @@ const processSingleInvoiceWithStockDeduction = async (invoiceData, index) => {
         amount,
         discount,
         netSellingAmount,
-        averageUnitPrice: totalQty ? netSellingAmount / totalQty : 0,
+        averageUnitPrice: totalQty ? fixPrecision(netSellingAmount / totalQty) : 0,
         lc,
-        profitLoss: (sellingPrice - lc) * salesQty,
+        profitLoss: fixPrecision((sellingPrice - lc) * salesQty),
         isProductAccept: true,
       });
       
-      totalAmount += netSellingAmount;
+      totalAmount = fixPrecision(totalAmount + netSellingAmount);
       
       // Deduct stock
       const deductionResult = await deductStockFromReportInHand(
@@ -809,8 +819,8 @@ const processSingleInvoiceWithStockDeduction = async (invoiceData, index) => {
       throw new Error("No valid products found in invoice");
     }
     
-    const paidAmount = parseFloat(invoiceData.paidAmount) || 0;
-    const dueAmount = Math.max(0, totalAmount - paidAmount);
+    const paidAmount = fixPrecision(parseFloat(invoiceData.paidAmount) || 0);
+    const dueAmount = fixPrecision(Math.max(0, totalAmount - paidAmount));
     
     const saleRecord = new SaleSummary({
       recordingDate: invoiceData.recordingDate
@@ -834,9 +844,8 @@ const processSingleInvoiceWithStockDeduction = async (invoiceData, index) => {
       paidAmount,
       dueAmount,
       totalAmount,
-      totalProfitLoss: processedProducts.reduce(
-        (sum, p) => sum + (p.profitLoss || 0),
-        0
+      totalProfitLoss: fixPrecision(
+        processedProducts.reduce((sum, p) => sum + (p.profitLoss || 0), 0)
       ),
       paymentStatus: mapPaymentStatus(invoiceData.paymentStatus),
       remark: invoiceData.remark || "",
@@ -847,7 +856,7 @@ const processSingleInvoiceWithStockDeduction = async (invoiceData, index) => {
     
     await saleRecord.save({ session });
     
-    // Update MR Cash if payment was made
+    // ✅ CRITICAL FIX: Only update MR Cash if paidAmount > 0
     if (paidAmount > 0 && invoiceData.mrName) {
       const mrCashUpdate = await updateMRCashes(
         invoiceData.mrName,
@@ -856,7 +865,7 @@ const processSingleInvoiceWithStockDeduction = async (invoiceData, index) => {
         invoiceData.invoiceDate || new Date(),
         session
       );
-      if (!mrCashUpdate.success) {
+      if (!mrCashUpdate.success && !mrCashUpdate.skipped) {
         console.warn(`Failed to update MR Cash: ${mrCashUpdate.error}`);
       }
     }
@@ -865,7 +874,7 @@ const processSingleInvoiceWithStockDeduction = async (invoiceData, index) => {
     await session.endSession();
     
     console.log(
-      `✅ SUCCESS - Invoice: ${invoiceData.invoiceNumber} processed successfully`
+      `✅ SUCCESS - Invoice: ${invoiceData.invoiceNumber} processed successfully (Paid: ${paidAmount})`
     );
     
     return {
@@ -1355,17 +1364,17 @@ router.delete("/:id", async (req, res) => {
       throw new Error("Sales record not found.");
     }
     
-    // Update MR Cash if payment was made
+    // ✅ CRITICAL FIX: Only update MR Cash if paidAmount > 0
     if (saleToDelete.paidAmount > 0 && saleToDelete.mrName) {
       const mrCashUpdate = await updateMRCashes(
         saleToDelete.mrName,
-        -saleToDelete.paidAmount,
+        saleToDelete.paidAmount,
         saleToDelete.invoiceNumber,
         new Date(),
         session,
-        true
+        true // isRefund = true
       );
-      if (!mrCashUpdate.success) {
+      if (!mrCashUpdate.success && !mrCashUpdate.skipped) {
         console.warn(
           `Failed to update MR Cash on deletion: ${mrCashUpdate.error}`
         );
@@ -1527,10 +1536,10 @@ router.put("/:id", async (req, res) => {
         }
       }
       
-      const sellingPrice = Number(p.sellingPrice) || 0;
-      const amount = sellingPrice * newSalesQty;
-      const discount = Number(p.discount) || 0;
-      const netSellingAmount = amount - discount;
+      const sellingPrice = fixPrecision(Number(p.sellingPrice) || 0);
+      const amount = fixPrecision(sellingPrice * newSalesQty);
+      const discount = fixPrecision(Number(p.discount) || 0);
+      const netSellingAmount = fixPrecision(amount - discount);
       
       let lcValue = parseFloat(p.lc) || 0;
       if (lcValue <= 0) {
@@ -1540,7 +1549,7 @@ router.put("/:id", async (req, res) => {
         lcValue = productRecord?.lc || 0;
       }
       
-      const profitLoss = (sellingPrice - lcValue) * newSalesQty;
+      const profitLoss = fixPrecision((sellingPrice - lcValue) * newSalesQty);
       
       updatedProducts.push({
         productName: p.productName.trim(),
@@ -1551,26 +1560,26 @@ router.put("/:id", async (req, res) => {
         amount,
         discount,
         netSellingAmount,
-        averageUnitPrice: newTotalQty > 0 ? netSellingAmount / newTotalQty : 0,
+        averageUnitPrice: newTotalQty > 0 ? fixPrecision(netSellingAmount / newTotalQty) : 0,
         lc: lcValue,
         profitLoss,
         isProductAccept: true,
       });
       
-      totalAmount += netSellingAmount;
-      totalProfitLoss += profitLoss;
+      totalAmount = fixPrecision(totalAmount + netSellingAmount);
+      totalProfitLoss = fixPrecision(totalProfitLoss + profitLoss);
     }
     
     if (updatedProducts.length === 0) {
       throw new Error("At least one valid product is required");
     }
     
-    const paidAmount = Number(saleData.paidAmount) || 0;
-    const dueAmount = Math.max(0, totalAmount - paidAmount);
+    const paidAmount = fixPrecision(Number(saleData.paidAmount) || 0);
+    const dueAmount = fixPrecision(Math.max(0, totalAmount - paidAmount));
     
-    // Update MR Cash if payment amount changed
-    const paidAmountDifference = paidAmount - originalSale.paidAmount;
-    if (Math.abs(paidAmountDifference) > 0.001) {
+    // ✅ CRITICAL FIX: Update MR Cash only if payment amount changed AND is > 0
+    const paidAmountDifference = fixPrecision(paidAmount - originalSale.paidAmount);
+    if (Math.abs(paidAmountDifference) > 0.01) {
       const mrName = saleData.mrName || originalSale.mrName;
       if (mrName) {
         const mrCashUpdate = await updateMRCashes(
@@ -1581,7 +1590,7 @@ router.put("/:id", async (req, res) => {
           session,
           paidAmountDifference < 0
         );
-        if (!mrCashUpdate.success) {
+        if (!mrCashUpdate.success && !mrCashUpdate.skipped) {
           console.warn(`Failed to update MR Cash: ${mrCashUpdate.error}`);
         }
       }
@@ -1722,17 +1731,17 @@ router.post("/create", async (req, res) => {
       
       if (totalQty === 0) continue;
       
-      const sellingPrice = Number(p.sellingPrice) || 0;
-      const amount = sellingPrice * salesQty;
-      const discount = Number(p.discount) || 0;
-      const netSellingAmount = amount - discount;
+      const sellingPrice = fixPrecision(Number(p.sellingPrice) || 0);
+      const amount = fixPrecision(sellingPrice * salesQty);
+      const discount = fixPrecision(Number(p.discount) || 0);
+      const netSellingAmount = fixPrecision(amount - discount);
       
       const productRecord = await Product.findOne({
         productName: buildProductNameRegex(p.productName),
       }).session(session);
       
       const lc = productRecord?.lc || Number(p.lc) || 0;
-      const profitLoss = (sellingPrice - lc) * salesQty;
+      const profitLoss = fixPrecision((sellingPrice - lc) * salesQty);
       
       processedProducts.push({
         productName: p.productName.trim(),
@@ -1743,14 +1752,14 @@ router.post("/create", async (req, res) => {
         amount,
         discount,
         netSellingAmount,
-        averageUnitPrice: totalQty ? netSellingAmount / totalQty : 0,
+        averageUnitPrice: totalQty ? fixPrecision(netSellingAmount / totalQty) : 0,
         lc,
         profitLoss,
         isProductAccept: true,
       });
       
-      totalAmount += netSellingAmount;
-      totalProfitLoss += profitLoss;
+      totalAmount = fixPrecision(totalAmount + netSellingAmount);
+      totalProfitLoss = fixPrecision(totalProfitLoss + profitLoss);
       
       // Deduct stock
       const deductionResult = await deductStockFromReportInHand(
@@ -1778,8 +1787,8 @@ router.post("/create", async (req, res) => {
     }
     
     // Payment processing
-    const paidAmount = Number(data.paidAmount) || 0;
-    const dueAmount = Math.max(0, totalAmount - paidAmount);
+    const paidAmount = fixPrecision(Number(data.paidAmount) || 0);
+    const dueAmount = fixPrecision(Math.max(0, totalAmount - paidAmount));
     const paymentStatus = mapPaymentStatus(data.paymentStatus);
     
     // Create sale
@@ -1807,7 +1816,7 @@ router.post("/create", async (req, res) => {
     
     const sale = await SaleSummary.create([saleData], { session });
     
-    // Update MR Cash if payment was made
+    // ✅ CRITICAL FIX: Only update MR Cash if paidAmount > 0
     if (paidAmount > 0 && data.mrName) {
       const mrCashUpdate = await updateMRCashes(
         data.mrName,
@@ -1816,7 +1825,7 @@ router.post("/create", async (req, res) => {
         data.invoiceDate || new Date(),
         session
       );
-      if (!mrCashUpdate.success) {
+      if (!mrCashUpdate.success && !mrCashUpdate.skipped) {
         console.warn(`Failed to update MR Cash: ${mrCashUpdate.error}`);
       }
     }
@@ -1860,7 +1869,7 @@ router.delete("/delete-batch", async (req, res) => {
       session
     );
     
-    // Update MR Cash for all deleted sales
+    // ✅ CRITICAL FIX: Update MR Cash for all deleted sales (only if paidAmount > 0)
     const mrPayments = {};
     for (const sale of salesToDelete) {
       if (sale.paidAmount > 0 && sale.mrName) {
@@ -1872,7 +1881,9 @@ router.delete("/delete-batch", async (req, res) => {
             invoiceNumbers: [],
           };
         }
-        mrPayments[mrKey].totalAmount += sale.paidAmount;
+        mrPayments[mrKey].totalAmount = fixPrecision(
+          mrPayments[mrKey].totalAmount + sale.paidAmount
+        );
         mrPayments[mrKey].invoiceNumbers.push(sale.invoiceNumber);
       }
     }
@@ -1881,13 +1892,13 @@ router.delete("/delete-batch", async (req, res) => {
       const mrPayment = mrPayments[mrKey];
       const mrCashUpdate = await updateMRCashes(
         mrPayment.mrName,
-        -mrPayment.totalAmount,
+        mrPayment.totalAmount,
         mrPayment.invoiceNumbers.join(", "),
         new Date(),
         session,
-        true
+        true // isRefund = true
       );
-      if (!mrCashUpdate.success) {
+      if (!mrCashUpdate.success && !mrCashUpdate.skipped) {
         console.warn(
           `Failed to update MR Cash for MR ${mrPayment.mrName}: ${mrCashUpdate.error}`
         );

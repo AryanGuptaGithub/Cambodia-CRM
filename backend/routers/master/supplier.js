@@ -19,6 +19,8 @@ const handleDuplicateError = (res, err, entity = "supplier") => {
   });
 };
 
+
+  
 // Helper to convert to title case for display
 const toTitleCase = (str) => {
   if (!str) return "";
@@ -106,6 +108,42 @@ const formatSupplierResponse = (supplier) => {
   };
 };
 
+router.get("/suppliers/all", async (req, res) => {
+  try {
+    const { search = "" } = req.query;
+    
+    // Build search query
+    const searchQuery = {};
+    if (search && search.trim() !== "") {
+      const searchLower = search.trim().toLowerCase();
+      searchQuery.$or = [
+        { name: { $regex: searchLower, $options: "i" } },
+        { supplierName: { $regex: searchLower, $options: "i" } },
+        { address: { $regex: searchLower, $options: "i" } }
+      ];
+    }
+
+    // Get all suppliers without pagination (for dropdowns)
+    const suppliers = await Supplier.find(searchQuery)
+      .select("_id name supplierName address contact email")
+      .sort({ name: 1 });
+
+    // Format suppliers
+    const formattedSuppliers = suppliers.map(supplier => ({
+      _id: supplier._id,
+      name: supplier.name || "",
+      supplierName: supplier.supplierName || supplier.name || "",
+      address: supplier.address || "",
+      contact: supplier.contact || "",
+      email: supplier.email || ""
+    }));
+
+    res.json(formattedSuppliers); // Returns array directly
+  } catch (err) {
+    handleServerError(res, err);
+  }
+});
+
 /* ------------------------------- GET All with Pagination ------------------------------- */
 router.get("/suppliers", async (req, res) => {
   try {
@@ -114,12 +152,13 @@ router.get("/suppliers", async (req, res) => {
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
 
-    // Build search query - FIXED: Use case-insensitive search with proper regex
+    // Build search query
     const searchQuery = {};
     if (search && search.trim() !== "") {
       const searchLower = search.trim().toLowerCase();
       searchQuery.$or = [
         { name: { $regex: searchLower, $options: "i" } },
+        { supplierName: { $regex: searchLower, $options: "i" } },
         { address: { $regex: searchLower, $options: "i" } }
       ];
     }
@@ -133,15 +172,16 @@ router.get("/suppliers", async (req, res) => {
       .skip(skip)
       .limit(limitNum);
 
-    // Format suppliers with title case for display
+    // Format suppliers
     const formattedSuppliers = suppliers.map(supplier => formatSupplierResponse(supplier));
 
     res.json({
+      success: true,
       suppliers: formattedSuppliers,
       total,
       page: pageNum,
+      limit: limitNum,
       totalPages: Math.ceil(total / limitNum),
-      ok: true,
     });
   } catch (err) {
     handleServerError(res, err);
@@ -152,14 +192,18 @@ router.get("/suppliers", async (req, res) => {
 router.get("/suppliers/:id", async (req, res) => {
   try {
     const supplier = await Supplier.findById(req.params.id);
+    
     if (!supplier) {
-      return res.status(404).json({ message: "Supplier not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Supplier not found",
+      });
     }
-    
-    // Format response with title case
-    const responseSupplier = formatSupplierResponse(supplier);
-    
-    res.json(responseSupplier);
+
+    res.json({
+      success: true,
+      supplier: formatSupplierResponse(supplier),
+    });
   } catch (err) {
     handleServerError(res, err);
   }
@@ -168,63 +212,43 @@ router.get("/suppliers/:id", async (req, res) => {
 /* ----------------------------- CREATE Supplier ----------------------------- */
 router.post("/suppliers", async (req, res) => {
   try {
-    const {
-      name,
-      address,
-      siteRegistrationDate,
-      siteRegistrationExpiryDate,
-      enabled,
-    } = req.body;
+    const { name, supplierName, address, contact, email, gstNumber, panNumber } = req.body;
 
-    // ✅ Validation
-    if (!name || !address) {
-      return res
-        .status(400)
-        .json({ message: "Name and Address are required fields." });
+    // Check for duplicates
+    const existingSupplier = await Supplier.findOne({
+      $or: [
+        { name: name?.trim() },
+        { supplierName: supplierName?.trim() },
+        { email: email?.trim() },
+        { contact: contact?.trim() }
+      ]
+    });
+
+    if (existingSupplier) {
+      return res.status(400).json({
+        success: false,
+        message: "Supplier with similar details already exists",
+      });
     }
 
-    // Convert strings to lowercase for storage
-    const payload = {
-      name: name.toLowerCase().trim(),
-      address: address.toLowerCase().trim(),
-      enabled: enabled === true || enabled === "enabled" || enabled === "true",
-    };
+    const newSupplier = new Supplier({
+      name: name?.trim(),
+      supplierName: supplierName?.trim(),
+      address: address?.trim(),
+      contact: contact?.trim(),
+      email: email?.trim().toLowerCase(),
+      gstNumber: gstNumber?.trim(),
+      panNumber: panNumber?.trim(),
+    });
 
-    // Set site registration date (default to current date if not provided)
-    if (siteRegistrationDate) {
-      const regDate = new Date(siteRegistrationDate);
-      payload.siteRegistrationDate = isNaN(regDate.getTime()) ? new Date() : regDate;
-    } else {
-      payload.siteRegistrationDate = new Date();
-    }
-
-    // Set site registration expiry date (default to 1 year from registration date if not provided)
-    if (siteRegistrationExpiryDate) {
-      const expiryDate = new Date(siteRegistrationExpiryDate);
-      if (isNaN(expiryDate.getTime())) {
-        payload.siteRegistrationExpiryDate = new Date(payload.siteRegistrationDate);
-        payload.siteRegistrationExpiryDate.setFullYear(payload.siteRegistrationExpiryDate.getFullYear() + 1);
-      } else {
-        payload.siteRegistrationExpiryDate = expiryDate;
-      }
-    } else {
-      payload.siteRegistrationExpiryDate = new Date(payload.siteRegistrationDate);
-      payload.siteRegistrationExpiryDate.setFullYear(payload.siteRegistrationExpiryDate.getFullYear() + 1);
-    }
-
-    const newSupplier = new Supplier(payload);
-    const savedSupplier = await newSupplier.save();
-
-    // Format response with title case
-    const formattedSupplier = formatSupplierResponse(savedSupplier);
+    await newSupplier.save();
 
     res.status(201).json({
-      message: `Supplier <b>${toTitleCase(savedSupplier.name)}</b> created successfully.`,
-      supplier: formattedSupplier,
-      ok: true,
+      success: true,
+      message: "Supplier created successfully",
+      supplier: formatSupplierResponse(newSupplier),
     });
   } catch (err) {
-    if (err.code === 11000) return handleDuplicateError(res, err);
     handleServerError(res, err);
   }
 });
@@ -232,91 +256,81 @@ router.post("/suppliers", async (req, res) => {
 /* ----------------------------- UPDATE Supplier ----------------------------- */
 router.put("/suppliers/:id", async (req, res) => {
   try {
-    const updateData = { ...req.body };
-    
-    // Convert string fields to lowercase for update
-    if (updateData.name) {
-      updateData.name = updateData.name.toLowerCase().trim();
-    }
-    if (updateData.address) {
-      updateData.address = updateData.address.toLowerCase().trim();
+    const { name, supplierName, address, contact, email, gstNumber, panNumber } = req.body;
+
+    // Check if supplier exists
+    const supplier = await Supplier.findById(req.params.id);
+    if (!supplier) {
+      return res.status(404).json({
+        success: false,
+        message: "Supplier not found",
+      });
     }
 
+    // Update supplier
     const updatedSupplier = await Supplier.findByIdAndUpdate(
       req.params.id,
-      updateData,
       {
-        new: true,
-        runValidators: true,
-      }
+        name: name?.trim(),
+        supplierName: supplierName?.trim(),
+        address: address?.trim(),
+        contact: contact?.trim(),
+        email: email?.trim().toLowerCase(),
+        gstNumber: gstNumber?.trim(),
+        panNumber: panNumber?.trim(),
+      },
+      { new: true, runValidators: true }
     );
 
-    if (!updatedSupplier)
-      return res.status(404).json({ message: "Supplier not found" });
-
-    // Format response with title case
-    const formattedSupplier = formatSupplierResponse(updatedSupplier);
-
     res.json({
-      message: `Supplier <b>${toTitleCase(updatedSupplier.name)}</b> updated successfully.`,
-      supplier: formattedSupplier,
-      ok: true,
-    });
-  } catch (err) {
-    res.status(400).json({ message: "Invalid data", error: err.message });
-  }
-});
-
-/* ----------------------------- DELETE Supplier ----------------------------- */
-router.delete("/suppliers/:id", async (req, res) => {
-  try {
-    const deleted = await Supplier.findByIdAndDelete(req.params.id);
-    if (!deleted)
-      return res.status(404).json({ message: "Supplier not found" });
-
-    res.json({
-      message: `Supplier <b>${toTitleCase(deleted.name)}</b> deleted successfully.`,
-      ok: true,
+      success: true,
+      message: "Supplier updated successfully",
+      supplier: formatSupplierResponse(updatedSupplier),
     });
   } catch (err) {
     handleServerError(res, err);
   }
 });
 
-/* ----------------------- DELETE Multiple Suppliers ----------------------- */
-router.delete("/suppliers", async (req, res) => {
+/* ----------------------------- DELETE Supplier ----------------------------- */
+router.delete("/suppliers/:id", async (req, res) => {
   try {
-    let ids = [];
-
-    // Handle both array of strings and array of objects with id property
-    if (Array.isArray(req.body.ids)) {
-      if (req.body.ids.length > 0 && typeof req.body.ids[0] === "object") {
-        // Array of objects with id property
-        ids = req.body.ids.map((item) => item.id).filter(Boolean);
-      } else {
-        // Array of strings
-        ids = req.body.ids;
-      }
+    const supplier = await Supplier.findById(req.params.id);
+    
+    if (!supplier) {
+      return res.status(404).json({
+        success: false,
+        message: "Supplier not found",
+      });
     }
 
-    if (ids.length === 0) {
-      return res
-        .status(400)
-        .json({ message: "No supplier IDs provided.", ok: false });
-    }
-
-    const validIds = ids.filter((id) => mongoose.Types.ObjectId.isValid(id));
-    if (validIds.length !== ids.length) {
-      return res
-        .status(400)
-        .json({ message: "Invalid supplier ID(s) provided.", ok: false });
-    }
-
-    const result = await Supplier.deleteMany({ _id: { $in: validIds } });
+    await Supplier.findByIdAndDelete(req.params.id);
 
     res.json({
-      message: `${result.deletedCount} supplier(s) deleted successfully.`,
-      ok: true,
+      success: true,
+      message: "Supplier deleted successfully",
+    });
+  } catch (err) {
+    handleServerError(res, err);
+  }
+});
+
+router.delete("/suppliers", async (req, res) => {
+  try {
+    const { ids } = req.body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide supplier IDs to delete",
+      });
+    }
+
+    const result = await Supplier.deleteMany({ _id: { $in: ids } });
+
+    res.json({
+      success: true,
+      message: `${result.deletedCount} supplier(s) deleted successfully`,
     });
   } catch (err) {
     handleServerError(res, err);
