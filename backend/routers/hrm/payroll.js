@@ -633,15 +633,10 @@ router.get("/payrolls/:id", async (req, res) => {
 
 router.get("/mrs/from-basic-payroll", async (req, res) => {
   try {
-    console.log("🔍 Starting to fetch MRs from basic payroll...");
-    
     // Fetch all basic payroll records with employee details
     const mrBasicPayrolls = await MrBasicPayroll.find({})
       .populate("employeeId", "medicalRepName")
       .lean();
-
-    console.log(`✅ Found ${mrBasicPayrolls.length} basic payroll records`);
-
     // Transform the data to get only id and name
     const mrList = mrBasicPayrolls.map((p) => {
       let employeeId, employeeName;
@@ -668,9 +663,6 @@ router.get("/mrs/from-basic-payroll", async (req, res) => {
 
     // Filter out any null employeeIds
     const validMrList = mrList.filter(mr => mr._id !== null);
-    
-    console.log(`✅ Valid records: ${validMrList.length}`);
-
     return res.status(200).json({
       success: true,
       count: validMrList.length,

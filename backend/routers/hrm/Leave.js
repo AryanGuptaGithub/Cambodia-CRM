@@ -40,8 +40,8 @@ const isHolidayOrSunday = async (date) => {
   const holiday = await Holiday.findOne({
     $or: [
       { date: { $gte: startOfDay, $lte: endOfDay } },
-      { startDate: { $gte: startOfDay, $lte: endOfDay } }
-    ]
+      { startDate: { $gte: startOfDay, $lte: endOfDay } },
+    ],
   });
 
   if (holiday) {
@@ -236,11 +236,11 @@ router.get("/leaves", async (req, res) => {
   try {
     const { leaveType, status } = req.query;
     let filter = {};
-    
+
     // Add filters based on query parameters
     if (leaveType) filter.leaveType = leaveType;
     if (status) filter.status = status;
-    
+
     const leaves = await Leave.find(filter)
       .populate("userId", "medicalRepName MRId email contactNo")
       .sort({ leaveDate: -1 });
@@ -370,11 +370,7 @@ router.post("/leaves", async (req, res) => {
 // Record attendance (existing code remains the same)
 router.post("/attendance/record", async (req, res) => {
   try {
-   
-
     const { userId, loginTime, logoutTime, workingHoursPerDay } = req.body;
-
-
 
     if (!userId || !loginTime || !logoutTime) {
       return res.status(400).json({
@@ -382,8 +378,6 @@ router.post("/attendance/record", async (req, res) => {
         message: "User ID, login time, and logout time are required",
       });
     }
-
-
 
     // Parse the ISO string to extract date and time
     const parseDateTime = (datetimeStr) => {
@@ -409,68 +403,23 @@ router.post("/attendance/record", async (req, res) => {
     const loginDateTime = parseDateTime(loginTime);
     const logoutDateTime = parseDateTime(logoutTime);
 
-    console.log("  - Original loginTime string:", loginTime);
-    console.log("  - Parsed loginDateTime:", loginDateTime);
-    console.log(
-      "  - loginDateTime.toISOString():",
-      loginDateTime.toISOString(),
-    );
-    console.log(
-      "  - loginDateTime.getUTCHours():",
-      loginDateTime.getUTCHours(),
-    );
-    console.log(
-      "  - loginDateTime.getUTCMinutes():",
-      loginDateTime.getUTCMinutes(),
-    );
-
-    console.log("  - Original logoutTime string:", logoutTime);
-    console.log("  - Parsed logoutDateTime:", logoutDateTime);
-    console.log(
-      "  - logoutDateTime.toISOString():",
-      logoutDateTime.toISOString(),
-    );
-    console.log(
-      "  - logoutDateTime.getUTCHours():",
-      logoutDateTime.getUTCHours(),
-    );
-    console.log(
-      "  - logoutDateTime.getUTCMinutes():",
-      logoutDateTime.getUTCMinutes(),
-    );
-
-    // Validate that logout time is after login time
-    console.log("\n✅ Validating Time Order:");
-    console.log("  - loginDateTime:", loginDateTime);
-    console.log("  - logoutDateTime:", logoutDateTime);
-    console.log("  - Is logout after login?", logoutDateTime > loginDateTime);
-
     if (logoutDateTime <= loginDateTime) {
-      console.log("❌ Logout time is not after login time");
       return res.status(400).json({
         success: false,
         message: "Logout time must be after login time",
       });
     }
 
-    // Check if the date is Sunday or holiday (use local date)
-    console.log("\n📅 Checking for Holidays/Sundays:");
-
     // Create a date for checking holidays (using local time)
     const checkDate = new Date(loginDateTime);
     const holidayCheck = await isHolidayOrSunday(checkDate);
-    console.log("  - Holiday check result:", holidayCheck);
 
     if (holidayCheck.isHoliday) {
-      console.log("❌ Cannot record on holiday/Sunday:", holidayCheck.reason);
       return res.status(400).json({
         success: false,
         message: `Cannot record attendance on ${holidayCheck.reason}`,
       });
     }
-
-    // Check if attendance already exists for this user on the same day
-    console.log("\n🔍 Checking for Existing Attendance:");
 
     // Create start and end of day for the login date in UTC
     const loginDateOnly = new Date(loginDateTime);
@@ -478,10 +427,6 @@ router.post("/attendance/record", async (req, res) => {
 
     const nextDay = new Date(loginDateOnly);
     nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-
-    console.log("  - Checking for date:", loginDateOnly.toISOString());
-    console.log("  - Date range: from", loginDateOnly, "to", nextDay);
-
     const existingAttendance = await Attendance.findOne({
       userId,
       loginTime: {
@@ -490,12 +435,8 @@ router.post("/attendance/record", async (req, res) => {
       },
     });
 
-    console.log(
-      "  - Existing attendance found:",
-      existingAttendance ? "YES" : "NO",
-    );
+
     if (existingAttendance) {
-      console.log("❌ Attendance already exists for this date");
       return res.status(400).json({
         success: false,
         message:
@@ -503,19 +444,7 @@ router.post("/attendance/record", async (req, res) => {
       });
     }
 
-    // Calculate time difference
-    console.log("\n⏱️ Calculating Time Difference:");
     const diffMs = logoutDateTime - loginDateTime;
-    console.log("  - Time difference in ms:", diffMs);
-    console.log(
-      "  - Time difference in minutes:",
-      Math.floor(diffMs / (1000 * 60)),
-    );
-    console.log(
-      "  - Time difference in hours:",
-      Math.floor(diffMs / (1000 * 60 * 60)),
-    );
-
     // Calculate total time in HH:MM:SS format
     const hours = Math.floor(diffMs / (1000 * 60 * 60));
     const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
@@ -523,22 +452,9 @@ router.post("/attendance/record", async (req, res) => {
     const totalTime = `${hours.toString().padStart(2, "0")}:${minutes
       .toString()
       .padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
-
-    console.log("  - Total time calculated:", totalTime);
-    console.log("  - Hours:", hours);
-    console.log("  - Minutes:", minutes);
-    console.log("  - Seconds:", seconds);
-
-    // Calculate extra hours - Fixed for 8 hour workday
-    console.log("\n📊 Calculating Extra Hours:");
     const workingHours = workingHoursPerDay || 8;
-    console.log("  - Working hours per day:", workingHours);
-
     const totalMinutesWorked = Math.floor(diffMs / (1000 * 60));
     const expectedMinutes = workingHours * 60;
-    console.log("  - Total minutes worked:", totalMinutesWorked);
-    console.log("  - Expected minutes (8 hours):", expectedMinutes);
-
     let extraHours = "00:00:00";
     let extraHoursInMinutes = 0;
 
@@ -546,14 +462,8 @@ router.post("/attendance/record", async (req, res) => {
       const extraMinutes = totalMinutesWorked - expectedMinutes;
       extraHoursInMinutes = extraMinutes;
       extraHours = formatMinutesToTimeString(extraMinutes);
-      console.log("  - Extra minutes detected:", extraMinutes);
-      console.log("  - Extra hours:", extraHours);
-    } else {
-      console.log("  - No extra hours (worked within 8 hours)");
-    }
+    } 
 
-    // Create attendance record with the exact times provided
-    console.log("\n💾 Creating Attendance Record:");
     const attendanceData = {
       userId,
       loginTime: loginDateTime,
@@ -564,46 +474,9 @@ router.post("/attendance/record", async (req, res) => {
       extraHoursInMinutes,
     };
 
-    console.log("  - Attendance data to save:", {
-      ...attendanceData,
-      loginTime: attendanceData.loginTime.toISOString(),
-      logoutTime: attendanceData.logoutTime.toISOString(),
-      loginTimeUTCHours: attendanceData.loginTime.getUTCHours(),
-      logoutTimeUTCHours: attendanceData.logoutTime.getUTCHours(),
-    });
-
     const attendance = new Attendance(attendanceData);
-    console.log("  - Mongoose document created");
-
     await attendance.save();
-    console.log("  - Document saved to database");
-    console.log("  - Saved loginTime (from DB):", attendance.loginTime);
-    console.log(
-      "  - Saved loginTime (ISO):",
-      attendance.loginTime.toISOString(),
-    );
-    console.log(
-      "  - Saved loginTime (UTCHours):",
-      attendance.loginTime.getUTCHours(),
-    );
-    console.log("  - Saved logoutTime (from DB):", attendance.logoutTime);
-    console.log(
-      "  - Saved logoutTime (ISO):",
-      attendance.logoutTime.toISOString(),
-    );
-    console.log(
-      "  - Saved logoutTime (UTCHours):",
-      attendance.logoutTime.getUTCHours(),
-    );
-    console.log("  - Saved _id:", attendance._id);
-
-    // Populate user details
-    console.log("\n👤 Populating User Details:");
     await attendance.populate("userId", "medicalRepName MRId");
-    console.log("  - Populated userId:", attendance.userId);
-
-    console.log("\n✅ ===== END: Record Attendance Successful ===== ✅");
-
     res.status(201).json({
       success: true,
       message: "Attendance recorded successfully",
@@ -633,7 +506,7 @@ router.post("/attendance/convert-to-leave", async (req, res) => {
   try {
     await session.startTransaction();
     const { userId, date, leaveDays = 1, useMonthlyOnly = false } = req.body;
-    
+
     if (!userId || !date) {
       await session.abortTransaction();
       transactionInProgress = false;
@@ -652,7 +525,7 @@ router.post("/attendance/convert-to-leave", async (req, res) => {
 
     // Create date at 9:00 AM in local time
     const leaveDate = new Date(year, month, day, 9, 0, 0, 0);
-    
+
     // Convert to UTC for database storage
     const leaveDateUTC = new Date(Date.UTC(year, month, day, 9, 0, 0, 0));
 
@@ -747,7 +620,7 @@ router.post("/attendance/convert-to-leave", async (req, res) => {
 
     // Create or update leave attendance record
     let leaveAttendance;
-    
+
     if (existingAttendance && existingAttendance.isLeaveDay) {
       // Update existing leave day
       existingAttendance.remarks = `Leave converted from ${minutesNeeded / 60} extra working hours (${leaveDays} day${leaveDays > 1 ? "s" : ""})`;
@@ -797,7 +670,7 @@ router.post("/attendance/convert-to-leave", async (req, res) => {
 
       const deduction = Math.min(originalMinutes, minutesRemaining);
       const newExtraMinutes = originalMinutes - deduction;
-      
+
       // Update the attendance record
       attendance.extraHoursInMinutes = newExtraMinutes;
       attendance.extraHours = formatMinutesToTimeString(newExtraMinutes);
@@ -902,7 +775,7 @@ router.post("/attendance/convert-to-leave", async (req, res) => {
     });
   } catch (error) {
     console.error("❌ UNEXPECTED ERROR:", error);
-    
+
     try {
       if (transactionInProgress) {
         await session.abortTransaction();

@@ -425,39 +425,25 @@ const handleProceedAnyway = async () => {
 };
 
 const debugProductSearch = async (productName) => {
-  console.log(`=== DEBUG PRODUCT SEARCH: ${productName} ===`);
-  
   try {
     // Check Product collection
     const products = await Product.find({
       productName: { $regex: productName, $options: 'i' }
     }).limit(5);
     
-    console.log('Found in Product collection:', products.map(p => p.productName));
-    
     // Check ReportInHand
     const stockItems = await ReportInHand.find({
       productName: { $regex: productName, $options: 'i' }
     }).limit(5);
-    
-    console.log('Found in ReportInHand:', stockItems.map(s => ({
-      name: s.productName,
-      stock: s.totalBoxes,
-      batches: s.batches?.length || 0
-    })));
-    
+        
     // Try exact match
     const exactProduct = await Product.findOne({
       productName: productName
     });
     
-    console.log('Exact match in Product:', exactProduct?.productName);
-    
     const exactStock = await ReportInHand.findOne({
       productName: productName
     });
-    
-    console.log('Exact match in ReportInHand:', exactStock?.productName);
     
     return {
       products,
