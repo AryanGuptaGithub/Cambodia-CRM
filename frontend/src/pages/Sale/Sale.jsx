@@ -1722,14 +1722,12 @@ const ImportSalesModal = ({
                     <th className="p-3 text-left border-b">Invoice #</th>
                     <th className="p-3 text-left border-b">Customer</th>
                     <th className="p-3 text-left border-b">MR Name</th>
-                    <th className="p-3 text-left border-b">Product</th>{" "}
-                    {/* Added Product column */}
-                    <th className="p-3 text-left border-b">Error Type</th>
+                    <th className="p-3 text-left border-b">Product</th>
                     <th className="p-3 text-left border-b">Error Message</th>
-                    <th className="p-3 text-left border-b">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
+                  {console.log("failedInvoices", failedInvoices)}
                   {failedInvoices.slice(0, 50).map((inv, idx) => (
                     <React.Fragment key={idx}>
                       <tr className="hover:bg-red-50 border-b">
@@ -1747,29 +1745,7 @@ const ImportSalesModal = ({
                           {/* CORRECTED: Handle both CSV format and JS object format */}
                           {inv.Product || inv.productName || "N/A"}
                         </td>
-                        <td className="p-3">
-                          <span
-                            className={`px-2 py-1 rounded text-xs ${
-                              inv["Error Type"] === "validation" ||
-                              inv.type === "validation"
-                                ? "bg-yellow-100 text-yellow-800"
-                                : inv["Error Type"] === "import_error" ||
-                                    inv.type === "import_error"
-                                  ? "bg-red-100 text-red-800"
-                                  : inv["Error Type"] === "duplicate_error" ||
-                                      inv.type === "duplicate_error"
-                                    ? "bg-orange-100 text-orange-800"
-                                    : inv["Error Type"] ===
-                                          "processing_error" ||
-                                        inv.type === "processing_error"
-                                      ? "bg-red-100 text-red-800"
-                                      : "bg-gray-100 text-gray-800"
-                            }`}
-                          >
-                            {/* CORRECTED: Handle both CSV format and JS object format */}
-                            {inv["Error Type"] || inv.type || "error"}
-                          </span>
-                        </td>
+
                         <td
                           className="p-3 text-red-600 max-w-xs"
                           title={inv.error || inv.message}
@@ -1777,17 +1753,6 @@ const ImportSalesModal = ({
                           <div className="truncate">
                             {inv.error || inv.message || "Unknown error"}
                           </div>
-                        </td>
-                        <td className="p-3">
-                          <button
-                            onClick={() => toggleRowExpand(inv.invoiceNumber)}
-                            className="text-blue-600 hover:text-blue-800 cursor-pointer"
-                          >
-                            {expandedRow === inv.invoiceNumber
-                              ? "Hide"
-                              : "Show"}{" "}
-                            Details
-                          </button>
                         </td>
                       </tr>
                       {expandedRow === inv.invoiceNumber && (
