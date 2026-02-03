@@ -6,9 +6,14 @@ import mongoose from "mongoose";
 
 const router = express.Router();
 
-// -----------------------------------------------------------
+// Helper function to normalize strings (remove extra spaces)
+const normalizeString = (str) => {
+  if (!str || typeof str !== 'string') return '';
+  // Replace multiple spaces with single space and trim
+  return str.replace(/\s+/g, ' ').trim();
+};
+
 // COMMON ERROR HANDLER
-// -----------------------------------------------------------
 const sendError = (res, error, code = 400) => {
   console.error("❌ ERROR:", error);
   res.status(code).json({
@@ -17,16 +22,13 @@ const sendError = (res, error, code = 400) => {
   });
 };
 
-// -----------------------------------------------------------
 // GET ALL STAFF
-// -----------------------------------------------------------
 router.get("/staffs", async (_, res) => {
   try {
     const staff = await staffSchema
       .find()
       .populate("userId", "name email role isActive")
       .sort({ updatedAt: -1 });
-
     res.json(staff);
   } catch (error) {
     sendError(res, error, 500);
@@ -36,77 +38,61 @@ router.get("/staffs", async (_, res) => {
 router.get("/staff/teams", async (_, res) => {
   try {
     const staff = await staffSchema.find({}, "teamName");
-    const teams = [
-      ...new Set(staff.map((i) => i.teamName?.trim()).filter(Boolean)),
-    ];
-
+    const teams = [...new Set(staff.map((i) => normalizeString(i.teamName)).filter(Boolean))];
     res.json(teams);
   } catch (error) {
     sendError(res, error, 500);
   }
 });
 
-// -----------------------------------------------------------
 // GET SINGLE STAFF
-// -----------------------------------------------------------
 router.get("/staffs/:id", async (req, res) => {
   try {
     const staff = await staffSchema
       .findById(req.params.id)
       .populate("userId", "name email role isActive");
-
     if (!staff) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Staff not found" });
+      return res.status(404).json({ success: false, message: "Staff not found" });
     }
-
     res.json(staff);
   } catch (error) {
     sendError(res, error, 500);
   }
 });
 
-// -----------------------------------------------------------
 // CREATE NEW STAFF
-// -----------------------------------------------------------
 router.post("/staffs", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-
   try {
-    const {
-      medicalRepName,
-      teamName,
-      contactNo,
-      email,
-      password,
-      date,
-      enabled,
-    } = req.body;
+    const { medicalRepName, teamName, contactNo, email, password, date, enabled } = req.body;
 
-    const name = medicalRepName.trim();
-    const emailLower = email?.trim().toLowerCase() || "";
-    const contact = contactNo?.toString().trim() || "";
+    // Normalize all string inputs
+    const name = normalizeString(medicalRepName);
+    const team = normalizeString(teamName);
+    const emailLower = email ? normalizeString(email).toLowerCase() : "";
+    const contact = contactNo ? normalizeString(contactNo.toString()) : "";
+
+    if (!name) {
+      throw new Error("Staff name is required");
+    }
 
     // Duplicate Checks
-    if (await staffSchema.findOne({ medicalRepName: name }).session(session))
-      throw new Error(`Staff name "${name}" already exists.`);
+    const existingByName = await staffSchema.findOne({ medicalRepName: name }).session(session);
+    if (existingByName) throw new Error(`Staff name "${name}" already exists.`);
 
-    if (
-      emailLower &&
-      (await User.findOne({ email: emailLower }).session(session))
-    )
-      throw new Error(`Email "${emailLower}" already exists.`);
+    if (emailLower) {
+      const existingByEmail = await User.findOne({ email: emailLower }).session(session);
+      if (existingByEmail) throw new Error(`Email "${emailLower}" already exists.`);
+    }
 
-    if (
-      contact &&
-      (await staffSchema.findOne({ contactNo: contact }).session(session))
-    )
-      throw new Error(`Contact "${contact}" already exists.`);
+    if (contact) {
+      const existingByContact = await staffSchema.findOne({ contactNo: contact }).session(session);
+      if (existingByContact) throw new Error(`Contact "${contact}" already exists.`);
+    }
 
     // Password hashing
-    const finalPassword = password?.trim() || "password123";
+    const finalPassword = password ? normalizeString(password) : "password123";
     const hashedPassword = await bcrypt.hash(finalPassword, 10);
 
     // Email fallback
@@ -115,16 +101,13 @@ router.post("/staffs", async (req, res) => {
       const base = name.toLowerCase().replace(/\s+/g, ".");
       let candidate = `${base}@company.com`;
       let i = 1;
-
       while (await User.findOne({ email: candidate }).session(session)) {
         candidate = `${base}${i++}@company.com`;
       }
-
       finalEmail = candidate;
     }
 
-    const isActive =
-      enabled === true || enabled === "true" || enabled === "enabled";
+    const isActive = enabled === true || enabled === "true" || enabled === "enabled";
 
     // CREATE USER
     const newUser = await new User({
@@ -138,7 +121,7 @@ router.post("/staffs", async (req, res) => {
     // CREATE STAFF
     const newStaff = await new staffSchema({
       medicalRepName: name,
-      teamName: teamName?.trim(),
+      teamName: team,
       contactNo: contact,
       email: finalEmail,
       date: date ? new Date(date) : new Date(),
@@ -147,7 +130,6 @@ router.post("/staffs", async (req, res) => {
 
     newUser.staffId = newStaff._id;
     await newUser.save({ session });
-
     await session.commitTransaction();
 
     res.status(201).json({
@@ -167,39 +149,47 @@ router.post("/staffs", async (req, res) => {
   }
 });
 
-// -----------------------------------------------------------
 // UPDATE STAFF
-// -----------------------------------------------------------
 router.put("/staff/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { medicalRepName, teamName, contactNo, email, date, isActive } = req.body;
 
+    // Normalize inputs
+    const normalizedName = normalizeString(medicalRepName);
+    const normalizedTeam = normalizeString(teamName);
+    const normalizedContact = contactNo ? normalizeString(contactNo.toString()) : "";
+    const normalizedEmail = email ? normalizeString(email).toLowerCase() : "";
+
     // Update staff
     const updatedStaff = await staffSchema.findByIdAndUpdate(
       id,
       {
-        medicalRepName,
-        teamName,
-        contactNo,
-        email,
+        medicalRepName: normalizedName,
+        teamName: normalizedTeam,
+        contactNo: normalizedContact,
+        email: normalizedEmail,
         date,
       },
       { new: true }
     ).populate("userId", "name email isActive");
 
-    // Update user's isActive status if changed
-    if (updatedStaff.userId && isActive !== undefined) {
-      await User.findByIdAndUpdate(
-        updatedStaff.userId._id,
-        { isActive },
-        { new: true }
-      );
+    // Update user's name and isActive status if changed
+    if (updatedStaff.userId) {
+      const updateData = {};
+      if (normalizedName) updateData.name = normalizedName;
+      if (isActive !== undefined) updateData.isActive = isActive;
+      if (Object.keys(updateData).length > 0) {
+        await User.findByIdAndUpdate(
+          updatedStaff.userId._id,
+          updateData,
+          { new: true }
+        );
+      }
     }
 
     // Re-populate to get updated user data
     const finalStaff = await staffSchema.findById(id).populate("userId");
-
     res.json({
       success: true,
       message: "Staff updated successfully",
@@ -214,26 +204,17 @@ router.put("/staff/:id", async (req, res) => {
   }
 });
 
-// -----------------------------------------------------------
 // DELETE MULTIPLE STAFF
-// -----------------------------------------------------------
 router.delete("/staffs", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-
   try {
     const ids = req.body;
-
-    const staffList = await staffSchema
-      .find({ _id: { $in: ids } })
-      .session(session);
+    const staffList = await staffSchema.find({ _id: { $in: ids } }).session(session);
     const linkedUsers = staffList.map((s) => s.userId);
-
     await staffSchema.deleteMany({ _id: { $in: ids } }).session(session);
     await User.deleteMany({ _id: { $in: linkedUsers } }).session(session);
-
     await session.commitTransaction();
-
     res.json({
       success: true,
       message: `${ids.length} staff deleted.`,
@@ -246,23 +227,16 @@ router.delete("/staffs", async (req, res) => {
   }
 });
 
-// -----------------------------------------------------------
 // DELETE SINGLE STAFF
-// -----------------------------------------------------------
 router.delete("/staff/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-
   try {
     const staff = await staffSchema.findById(req.params.id).session(session);
     if (!staff) throw new Error("Staff not found");
-
     await staffSchema.findByIdAndDelete(req.params.id).session(session);
-    if (staff.userId)
-      await User.findByIdAndDelete(staff.userId).session(session);
-
+    if (staff.userId) await User.findByIdAndDelete(staff.userId).session(session);
     await session.commitTransaction();
-
     res.json({
       success: true,
       message: `Staff "${staff.medicalRepName}" deleted.`,
@@ -275,16 +249,12 @@ router.delete("/staff/:id", async (req, res) => {
   }
 });
 
-// -----------------------------------------------------------
-// IMPORT STAFF - CORRECTED VERSION
-// -----------------------------------------------------------
+// IMPORT STAFF
 router.post("/staffs/import", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
-
   try {
     let list = req.body;
-
     if (req.body && req.body.data && Array.isArray(req.body.data)) {
       list = req.body.data;
     } else if (Array.isArray(req.body)) {
@@ -292,7 +262,6 @@ router.post("/staffs/import", async (req, res) => {
     } else if (req.body && Array.isArray(req.body.list)) {
       list = req.body.list;
     }
-
     if (!Array.isArray(list) || list.length === 0) {
       throw new Error("Invalid import format: Expected non-empty array");
     }
@@ -301,139 +270,80 @@ router.post("/staffs/import", async (req, res) => {
     const duplicateNames = [];
     const duplicateContacts = [];
 
+    // First pass: Check for duplicates
     for (let i = 0; i < list.length; i++) {
       const row = list[i];
-
-      const medicalRepName =
-        row.medicalRepName || row.name || row["MR Name"] || row["mr name"];
+      const medicalRepName = row.medicalRepName || row.name || row["MR Name"] || row["mr name"];
       const email = row.email || row.Email || "";
-      const contactNo =
-        row.contactNo ||
-        row.phone ||
-        row["Contact No"] ||
-        row["contact no"] ||
-        row["Contact"] ||
-        row["contact"];
+      const contactNo = row.contactNo || row.phone || row["Contact No"] || row["contact no"] || row["Contact"] || row["contact"];
 
-      const name = medicalRepName?.trim();
-      const emailLower = email?.trim().toLowerCase() || null;
-      const contact = contactNo?.toString().trim() || null;
+      const name = normalizeString(medicalRepName);
+      const emailLower = email ? normalizeString(email).toLowerCase() : null;
+      const contact = contactNo ? normalizeString(contactNo.toString()) : null;
 
       if (!name) {
         throw new Error(`medicalRepName is required in row ${i + 1}`);
       }
 
-      const existingStaffByName = await staffSchema
-        .findOne({ medicalRepName: name })
-        .session(session);
-      if (existingStaffByName) {
-        duplicateNames.push(name);
-      }
+      const existingStaffByName = await staffSchema.findOne({ medicalRepName: name }).session(session);
+      if (existingStaffByName) duplicateNames.push(name);
 
       if (emailLower) {
-        const existingUser = await User.findOne({ email: emailLower }).session(
-          session
-        );
-        if (existingUser) {
-          duplicateEmails.push(emailLower);
-        }
+        const existingUser = await User.findOne({ email: emailLower }).session(session);
+        if (existingUser) duplicateEmails.push(emailLower);
       }
 
-      // Check duplicate contact
       if (contact) {
-        const existingStaffByContact = await staffSchema
-          .findOne({ contactNo: contact })
-          .session(session);
-        if (existingStaffByContact) {
-          duplicateContacts.push(contact);
-        }
+        const existingStaffByContact = await staffSchema.findOne({ contactNo: contact }).session(session);
+        if (existingStaffByContact) duplicateContacts.push(contact);
       }
     }
 
-    // If any duplicates found → abort
-    if (
-      duplicateNames.length ||
-      duplicateEmails.length ||
-      duplicateContacts.length
-    ) {
+    if (duplicateNames.length || duplicateEmails.length || duplicateContacts.length) {
       return res.status(400).json({
         success: false,
         message: "Duplicate entries found",
-        duplicates: {
-          names: duplicateNames,
-          emails: duplicateEmails,
-          contacts: duplicateContacts,
-        },
+        duplicates: { names: duplicateNames, emails: duplicateEmails, contacts: duplicateContacts },
       });
     }
 
     const importedStaff = [];
     const failedImports = [];
 
-    // Second Pass: Create Users + Staff
+    // Second pass: Create records
     for (let i = 0; i < list.length; i++) {
       const row = list[i];
-
       try {
-        // Extract data with fallback for different property names
-        const medicalRepName =
-          row.medicalRepName || row.name || row["MR Name"] || row["mr name"];
-        const teamName =
-          row.teamName || row["Team Name"] || row["team name"] || row.team;
+        const medicalRepName = row.medicalRepName || row.name || row["MR Name"] || row["mr name"];
+        const teamName = row.teamName || row["Team Name"] || row["team name"] || row.team;
         const email = row.email || row.Email || "";
-        const contactNo =
-          row.contactNo ||
-          row.phone ||
-          row["Contact No"] ||
-          row["contact no"] ||
-          row["Contact"] ||
-          row["contact"];
+        const contactNo = row.contactNo || row.phone || row["Contact No"] || row["contact no"] || row["Contact"] || row["contact"];
         const password = row.password || row.Password || "123456";
-        const date =
-          row.date ||
-          row.Date ||
-          row["Joining Date"] ||
-          row["joining date"] ||
-          row["Instance of Joining Date"] ||
-          new Date();
+        const date = row.date || row.Date || row["Joining Date"] || row["joining date"] || row["Instance of Joining Date"] || new Date();
         const enabled = row.enabled !== undefined ? row.enabled : true;
 
-        const name = medicalRepName.trim();
-        const team = teamName?.trim();
-
+        const name = normalizeString(medicalRepName);
+        const team = normalizeString(teamName);
         if (!team) {
-          failedImports.push({
-            row: i + 1,
-            name,
-            error: "Team name is required",
-          });
+          failedImports.push({ row: i + 1, name, error: "Team name is required" });
           continue;
         }
 
         const plaintextPassword = password;
-
         const hashedPassword = await bcrypt.hash(plaintextPassword, 10);
+        const emailLower = email ? normalizeString(email).toLowerCase() : "";
+        const finalEmail = emailLower || `${name.toLowerCase().replace(/\s+/g, ".")}@company.com`;
+        const contact = contactNo ? normalizeString(contactNo.toString()) : "";
 
-        const emailLower = email?.trim().toLowerCase() || "";
-        const finalEmail =
-          emailLower ||
-          `${name.toLowerCase().replace(/\s+/g, ".")}@company.com`;
-
-        const contact = contactNo?.toString().trim() || "";
-
-        // Parse date
         let joinDate;
         try {
           if (date instanceof Date) {
             joinDate = date;
           } else if (typeof date === "string") {
-            // Try parsing the date string
             const parsed = new Date(date);
             if (isNaN(parsed.getTime())) {
-              // Try Excel serial number
               const excelNum = parseFloat(date);
               if (!isNaN(excelNum) && excelNum > 0) {
-                // Excel date (days since 1900-01-01)
                 const excelDate = new Date((excelNum - 25569) * 86400 * 1000);
                 if (!isNaN(excelDate.getTime())) {
                   joinDate = excelDate;
@@ -451,7 +361,6 @@ router.post("/staffs/import", async (req, res) => {
           joinDate = new Date();
         }
 
-        // Create User
         const newUser = new User({
           name,
           email: finalEmail,
@@ -460,9 +369,7 @@ router.post("/staffs/import", async (req, res) => {
           isActive: enabled,
         });
         await newUser.save({ session });
-        
 
-        // Create Staff
         const staff = new staffSchema({
           medicalRepName: name,
           teamName: team,
@@ -472,37 +379,21 @@ router.post("/staffs/import", async (req, res) => {
           userId: newUser._id,
         });
         await staff.save({ session });
-        
 
-        // Link back
         newUser.staffId = staff._id;
         await newUser.save({ session });
-        
 
-        importedStaff.push({
-          name,
-          email: finalEmail,
-          team,
-          userId: newUser._id,
-          staffId: staff._id,
-        });
+        importedStaff.push({ name, email: finalEmail, team, userId: newUser._id, staffId: staff._id });
       } catch (rowError) {
         console.error(`Error processing row ${i + 1}:`, rowError);
-        failedImports.push({
-          row: i + 1,
-          name: row.medicalRepName || row.name || `Row ${i + 1}`,
-          error: rowError.message,
-        });
+        failedImports.push({ row: i + 1, name: row.medicalRepName || row.name || `Row ${i + 1}`, error: rowError.message });
       }
     }
 
     await session.commitTransaction();
-
     res.json({
       success: true,
-      message: `Successfully imported ${importedStaff.length} staff members.${
-        failedImports.length > 0 ? ` ${failedImports.length} failed.` : ""
-      }`,
+      message: `Successfully imported ${importedStaff.length} staff members.${failedImports.length > 0 ? ` ${failedImports.length} failed.` : ""}`,
       count: importedStaff.length,
       imported: importedStaff,
       failed: failedImports.length > 0 ? failedImports : undefined,
@@ -515,31 +406,18 @@ router.post("/staffs/import", async (req, res) => {
   }
 });
 
-
-// Add this route in your backend
+// UPDATE STAFF STATUS
 router.put("/staff/status/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { isActive } = req.body;
-
-    // Find staff
     const staff = await staffSchema.findById(id);
     if (!staff) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Staff not found" 
-      });
+      return res.status(404).json({ success: false, message: "Staff not found" });
     }
-
-    // Update user's isActive status
     if (staff.userId) {
-      await User.findByIdAndUpdate(
-        staff.userId, 
-        { isActive },
-        { new: true }
-      );
+      await User.findByIdAndUpdate(staff.userId, { isActive }, { new: true });
     }
-
     res.json({
       success: true,
       message: `Staff status updated to ${isActive ? "active" : "inactive"}`,
@@ -547,10 +425,8 @@ router.put("/staff/status/:id", async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating staff status:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: "Internal server error" 
-    });
+    res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
+
 export default router;

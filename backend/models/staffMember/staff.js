@@ -1,5 +1,11 @@
 import mongoose from "mongoose";
 
+// Helper function to normalize strings
+const normalizeString = (str) => {
+  if (!str || typeof str !== 'string') return '';
+  return str.replace(/\s+/g, ' ').trim();
+};
+
 // Counter for auto-increment
 const counterSchema = new mongoose.Schema({
   _id: { type: String, required: true },
@@ -12,23 +18,30 @@ const Counter = mongoose.model("Counter", counterSchema);
 const staffSchema = new mongoose.Schema(
   {
     MRId: { type: Number, unique: true },
-    medicalRepName: { type: String, required: true },
-    teamName: { type: String, required: true },
+    medicalRepName: { 
+      type: String, 
+      required: true,
+      set: normalizeString // Auto-normalize on set
+    },
+    teamName: { 
+      type: String, 
+      required: true,
+      set: normalizeString // Auto-normalize on set
+    },
     contactNo: { 
       type: String, 
       unique: true,
-      sparse: true
+      sparse: true,
+      set: (val) => val ? normalizeString(val.toString()) : val
     },
     email: { 
       type: String, 
       unique: true,
-      sparse: true
+      sparse: true,
+      set: (val) => val ? normalizeString(val).toLowerCase() : val
     },
     date: { type: Date, required: true },
-    userId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User"
-    },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   },
   { timestamps: true }
 );
@@ -38,7 +51,7 @@ staffSchema.pre("save", async function (next) {
   if (this.isNew) {
     try {
       const counter = await Counter.findByIdAndUpdate(
-        "staffMRId",         // use string ID directly
+        "staffMRId",
         { $inc: { seq: 1 } },
         { new: true, upsert: true }
       );
@@ -52,6 +65,5 @@ staffSchema.pre("save", async function (next) {
   }
 });
 
-// Important: Export model as "MR" to match StockReturn ref
 const Staff = mongoose.model("Staff", staffSchema);
 export default Staff;
