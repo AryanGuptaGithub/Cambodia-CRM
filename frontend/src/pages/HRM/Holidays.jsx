@@ -43,7 +43,6 @@ const Holidays = () => {
   const [isUploading, setIsUploading] = useState(false);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
-  const [isOpen, setIsOpen] = useState(false);
 
   const [form, setForm] = useState({
     startDate: "",
@@ -63,21 +62,43 @@ const Holidays = () => {
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
 
-  // Upcoming holidays pagination
-  const [upcomingHolidaysPage, setUpcomingHolidaysPage] = useState(1);
-
   useEffect(() => {
     fetchHolidays();
   }, []);
 
   const fetchHolidays = async () => {
+    console.log("📡 fetchHolidays called");
+    setLoading(true);
+    setError(null);
+
     try {
-      const response = await fetch(`${backendUrl}/api/holidays`);
-      if (!response.ok) throw new Error("Failed to fetch holidays");
-      const data = await response.json();
-      setHolidays(data.holidays || []);
+      const response = await axios.get(`${backendUrl}/api/holidays`);
+      console.log("📥 API response:", response);
+
+      if (response.data && response.data.success !== false) {
+        const holidaysData =
+          response.data.holidays || response.data.data || response.data;
+        console.log("✅ Parsed holidays data:", holidaysData);
+
+        if (Array.isArray(holidaysData)) {
+          setHolidays(holidaysData);
+          console.log(
+            "📦 Holidays set in state:",
+            holidaysData.length,
+            "holidays",
+          );
+        } else {
+          console.warn("⚠️ Holidays data is not an array:", holidaysData);
+          setHolidays([]);
+        }
+      } else {
+        console.error("❌ API returned error:", response.data);
+        setHolidays([]);
+      }
     } catch (err) {
-      setError(err.message || "Something went wrong");
+      console.error("❌ fetchHolidays error:", err);
+      setError(err.message || "Failed to fetch holidays");
+      setHolidays([]);
     } finally {
       setLoading(false);
     }
@@ -105,7 +126,7 @@ const Holidays = () => {
       (holiday) =>
         holiday.yearCode &&
         Array.isArray(holiday.yearCode) &&
-        holiday.yearCode.includes(currentYearString)
+        holiday.yearCode.includes(currentYearString),
     );
   }, [holidays, currentYearString]);
 
@@ -119,7 +140,7 @@ const Holidays = () => {
       r.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       r.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (r.startDate &&
-        r.startDate.toLowerCase().includes(searchTerm.toLowerCase()))
+        r.startDate.toLowerCase().includes(searchTerm.toLowerCase())),
   );
 
   // Get holidays for the entire current year - FOR CALENDAR (FIXED)
@@ -131,16 +152,14 @@ const Holidays = () => {
     return allHolidaysForCalendar
       .filter((holiday) => {
         if (!holiday.startDate) return false;
-        
+
         const holidayStart = new Date(holiday.startDate);
         const holidayEnd = new Date(holiday.endDate || holiday.startDate);
-        
+
         holidayStart.setHours(0, 0, 0, 0);
         holidayEnd.setHours(0, 0, 0, 0);
 
-        return (
-          (holidayStart <= endOfYear && holidayEnd >= startOfYear)
-        );
+        return holidayStart <= endOfYear && holidayEnd >= startOfYear;
       })
       .sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
   }, [allHolidaysForCalendar, currentYear]);
@@ -245,7 +264,6 @@ const Holidays = () => {
     }
   };
 
-  // Missing functions - ADD THESE
   const handleAddButtonClick = () => {
     setIsAddModalOpen(true);
     setForm({
@@ -330,7 +348,9 @@ const Holidays = () => {
 
     if (confirm.isConfirmed) {
       try {
-        const res = await axios.delete(`${backendUrl}/api/holidays/${holiday._id}`);
+        const res = await axios.delete(
+          `${backendUrl}/api/holidays/${holiday._id}`,
+        );
         if (res.status === 200) {
           showToast("success", `${holiday.name} deleted successfully`);
           fetchHolidays();
@@ -349,7 +369,7 @@ const Holidays = () => {
     }
   };
 
-  // CORRECTED FILE UPLOAD FUNCTION
+  // CORRECTED FILE UPLOAD FUNCTION - FIX DATE PARSING
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -364,32 +384,41 @@ const Holidays = () => {
         const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
         // Updated expected headers based on your Excel file
-        const expectedHeaders = ["Holiday Name", "Start Date", "End Date", "Description"];
+        const expectedHeaders = [
+          "Holiday Name",
+          "Start Date",
+          "End Date",
+          "Description",
+        ];
         let headerIdx = -1;
 
         // Find the header row
         for (let i = 0; i < rows.length; i++) {
           if (!rows[i] || !Array.isArray(rows[i])) continue;
-          
+
           const row = rows[i].map((c) => c?.toString().trim() || "");
           const normalized = row.map((c) => c.toLowerCase());
-          
+
           // Check if this row contains most of our expected headers
           let matchCount = 0;
-          expectedHeaders.forEach(h => {
+          expectedHeaders.forEach((h) => {
             if (normalized.includes(h.toLowerCase())) {
               matchCount++;
             }
           });
-          
-          if (matchCount >= 2) { // Require at least 2 header matches
+
+          if (matchCount >= 2) {
+            // Require at least 2 header matches
             headerIdx = i;
             break;
           }
         }
 
         if (headerIdx === -1) {
-          showToast("error", "Could not find holiday data in the Excel file. Please check the format.");
+          showToast(
+            "error",
+            "Could not find holiday data in the Excel file. Please check the format.",
+          );
           return;
         }
 
@@ -410,29 +439,74 @@ const Holidays = () => {
         const finalData = json
           .filter((item) => {
             // Check if we have required data
-            const holidayName = item["Holiday Name"] || item["HolidayName"] || item["Holiday name"];
-            const startDate = item["Start Date"] || item["StartDate"] || item["Start date"];
+            const holidayName =
+              item["Holiday Name"] ||
+              item["HolidayName"] ||
+              item["Holiday name"];
+            const startDate =
+              item["Start Date"] || item["StartDate"] || item["Start date"];
             return holidayName && startDate;
           })
           .map((item) => {
             // Map Excel columns to your application's field names
-            const holidayName = item["Holiday Name"] || item["HolidayName"] || item["Holiday name"] || "";
-            const startDate = item["Start Date"] || item["StartDate"] || item["Start date"] || "";
-            const endDate = item["End Date"] || item["EndDate"] || item["End date"] || startDate; // Use start date if end date not provided
-            const description = item["Description"] || item["Description"] || "";
+            const holidayName =
+              item["Holiday Name"] ||
+              item["HolidayName"] ||
+              item["Holiday name"] ||
+              "";
+            let startDate =
+              item["Start Date"] ||
+              item["StartDate"] ||
+              item["Start date"] ||
+              "";
+            let endDate =
+              item["End Date"] ||
+              item["EndDate"] ||
+              item["End date"] ||
+              startDate;
+            const description =
+              item["Description"] || item["Description"] || "";
 
-            // Parse and format dates
-            let formattedStartDate = startDate;
-            let formattedEndDate = endDate;
+            // FIXED: Handle Excel date formats properly
+            const parseExcelDate = (dateValue) => {
+              if (!dateValue) return null;
 
-            // If date contains timestamp (like "2026-01-01 00:00:00"), extract just the date part
-            if (startDate && startDate.includes && startDate.includes(" ")) {
-              formattedStartDate = startDate.split(" ")[0];
-            }
-            
-            if (endDate && endDate.includes && endDate.includes(" ")) {
-              formattedEndDate = endDate.split(" ")[0];
-            }
+              // If it's already a date string
+              if (typeof dateValue === "string") {
+                // Handle format like "2026-01-01 00:00:00"
+                if (dateValue.includes && dateValue.includes(" ")) {
+                  return dateValue.split(" ")[0];
+                }
+                // Handle format like "2026-01-01"
+                return dateValue;
+              }
+
+              // If it's a number (Excel serial date)
+              if (typeof dateValue === "number") {
+                // Excel serial date: days since Jan 0, 1900 (with Excel's 1900 leap year bug)
+                // Convert to JavaScript Date
+                const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+                const millisecondsPerDay = 24 * 60 * 60 * 1000;
+                const jsDate = new Date(
+                  excelEpoch.getTime() + dateValue * millisecondsPerDay,
+                );
+
+                // Format as YYYY-MM-DD
+                const year = jsDate.getUTCFullYear();
+                const month = String(jsDate.getUTCMonth() + 1).padStart(2, "0");
+                const day = String(jsDate.getUTCDate()).padStart(2, "0");
+                return `${year}-${month}-${day}`;
+              }
+
+              return null;
+            };
+
+            // Parse dates
+            const formattedStartDate = parseExcelDate(startDate);
+            const formattedEndDate =
+              endDate === startDate
+                ? formattedStartDate
+                : parseExcelDate(endDate);
 
             return {
               startDate: formattedStartDate,
@@ -440,17 +514,25 @@ const Holidays = () => {
               name: holidayName,
               description: description,
             };
-          });
+          })
+          .filter((item) => item.startDate && item.endDate); // Only include items with valid dates
 
         if (finalData.length === 0) {
-          showToast("warning", "No valid holiday data found in the file. Please check the format.");
+          showToast(
+            "warning",
+            "No valid holiday data found in the file. Please check the format.",
+          );
           return;
         }
 
+        console.log("Parsed holidays data:", finalData);
         setParsedData(finalData);
       } catch (error) {
         console.error("Error reading file:", error);
-        showToast("error", "Failed to process Excel file. Please check the format.");
+        showToast(
+          "error",
+          "Failed to process Excel file. Please check the format.",
+        );
       }
     };
 
@@ -465,15 +547,22 @@ const Holidays = () => {
 
     setIsUploading(true);
     try {
-      const res = await axios.post(`${backendUrl}/api/holidays/import`, parsedData);
-      if (res.status === 200) {
+      const res = await axios.post(
+        `${backendUrl}/api/holidays/import`,
+        parsedData,
+      );
+      if (res.status === 200 || res.status === 201) {
         showToast("success", "Holidays imported successfully");
         setShowImportModal(false);
         setParsedData([]);
         fetchHolidays();
       }
     } catch (err) {
-      showToast("error", "Failed to import holidays");
+      console.error("Import error:", err);
+      showToast(
+        "error",
+        err.response?.data?.message || "Failed to import holidays",
+      );
     } finally {
       setIsUploading(false);
     }
@@ -509,14 +598,24 @@ const Holidays = () => {
       };
 
       const res = await axios.post(`${backendUrl}/api/holidays`, payload);
-      if (res.status === 201) {
+      if (res.status === 201 || res.status === 200) {
         showToast("success", "Holiday added successfully");
         setIsAddModalOpen(false);
-        setForm({ startDate: "", endDate: "", name: "", description: "", _id: null });
+        setForm({
+          startDate: "",
+          endDate: "",
+          name: "",
+          description: "",
+          _id: null,
+        });
         fetchHolidays();
       }
     } catch (err) {
-      showToast("error", "Failed to add holiday");
+      console.error("Add holiday error:", err);
+      showToast(
+        "error",
+        err.response?.data?.message || "Failed to add holiday",
+      );
     }
   };
 
@@ -535,15 +634,28 @@ const Holidays = () => {
         description: form.description,
       };
 
-      const res = await axios.put(`${backendUrl}/api/holidays/${form._id}`, payload);
+      const res = await axios.put(
+        `${backendUrl}/api/holidays/${form._id}`,
+        payload,
+      );
       if (res.status === 200) {
         showToast("success", "Holiday updated successfully");
         setIsEditModalOpen(false);
-        setForm({ startDate: "", endDate: "", name: "", description: "", _id: null });
+        setForm({
+          startDate: "",
+          endDate: "",
+          name: "",
+          description: "",
+          _id: null,
+        });
         fetchHolidays();
       }
     } catch (err) {
-      showToast("error", "Failed to update holiday");
+      console.error("Update holiday error:", err);
+      showToast(
+        "error",
+        err.response?.data?.message || "Failed to update holiday",
+      );
     }
   };
 
@@ -551,19 +663,16 @@ const Holidays = () => {
   const getHolidaysForMonth = (monthIndex) => {
     return currentYearFilteredHolidays.filter((holiday) => {
       if (!holiday.startDate) return false;
-      
+
       const holidayStart = new Date(holiday.startDate);
       const holidayEnd = new Date(holiday.endDate || holiday.startDate);
-      
+
       // Check if holiday overlaps with the specified month
       const startOfMonth = new Date(currentYear, monthIndex, 1);
       const endOfMonth = new Date(currentYear, monthIndex + 1, 0);
       endOfMonth.setHours(23, 59, 59, 999);
 
-      return (
-        holidayStart <= endOfMonth && 
-        holidayEnd >= startOfMonth
-      );
+      return holidayStart <= endOfMonth && holidayEnd >= startOfMonth;
     });
   };
 
@@ -571,8 +680,18 @@ const Holidays = () => {
   const renderMonthlyCalendar = () => {
     const days = getDaysInMonth();
     const monthNames = [
-      "January", "February", "March", "April", "May", "June",
-      "July", "August", "September", "October", "November", "December"
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December",
     ];
     const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const today = new Date();
@@ -600,7 +719,10 @@ const Holidays = () => {
 
         <div className="grid grid-cols-7 gap-1 mb-2">
           {dayNames.map((day) => (
-            <div key={day} className="p-2 text-center font-medium text-gray-600 text-sm">
+            <div
+              key={day}
+              className="p-2 text-center font-medium text-gray-600 text-sm"
+            >
               {day}
             </div>
           ))}
@@ -648,7 +770,9 @@ const Holidays = () => {
                 }`}
               >
                 <div className="flex justify-between items-start">
-                  <span className={`text-sm font-medium ${isSundayDate || isHolidayDate ? "text-white" : "text-gray-900"}`}>
+                  <span
+                    className={`text-sm font-medium ${isSundayDate || isHolidayDate ? "text-white" : "text-gray-900"}`}
+                  >
                     {date.getDate()}
                   </span>
                 </div>
@@ -670,8 +794,18 @@ const Holidays = () => {
   // UPDATED: Annual calendar with grid layout similar to Attendance component
   const renderAnnualCalendar = () => {
     const monthNames = [
-      "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
     ];
 
     const today = new Date();
@@ -699,7 +833,9 @@ const Holidays = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {monthNames.map((monthName, monthIndex) => {
             const monthDays = getDaysInMonth(currentYear, monthIndex);
-            const isCurrentMonth = monthIndex === currentMonthToday && currentYear === currentYearToday;
+            const isCurrentMonth =
+              monthIndex === currentMonthToday &&
+              currentYear === currentYearToday;
             const monthHolidays = getHolidaysForMonth(monthIndex);
 
             return (
@@ -750,12 +886,14 @@ const Holidays = () => {
 
                     const isSundayDay = isSunday(date);
                     const isHolidayDate = isHoliday(date);
-                    const isToday = date.toDateString() === today.toDateString();
+                    const isToday =
+                      date.toDateString() === today.toDateString();
                     const dateString = date.toISOString().split("T")[0];
                     const holidayName = getHolidayName(dateString);
 
                     // Determine cell style based on conditions
-                    let cellStyle = "h-6 flex items-center justify-center rounded text-xs cursor-pointer ";
+                    let cellStyle =
+                      "h-6 flex items-center justify-center rounded text-xs cursor-pointer ";
 
                     if (isToday) {
                       cellStyle += "bg-blue-500 text-white ";
@@ -776,8 +914,8 @@ const Holidays = () => {
                           isHolidayDate
                             ? `Holiday: ${holidayName}`
                             : isSundayDay
-                            ? "Sunday"
-                            : "Normal day"
+                              ? "Sunday"
+                              : "Normal day"
                         }
                       >
                         {date.getDate()}
@@ -842,31 +980,45 @@ const Holidays = () => {
   const totalPages = Math.ceil(filteredHolidays.length / holidaysPerPage);
   const currentHolidays = filteredHolidays.slice(
     (currentPage - 1) * holidaysPerPage,
-    currentPage * holidaysPerPage
+    currentPage * holidaysPerPage,
   );
 
   const getVisiblePages = (currentPage, totalPages) => {
     const visiblePages = [];
     const showPages = 5;
-    
+
     let startPage = Math.max(1, currentPage - Math.floor(showPages / 2));
     let endPage = Math.min(totalPages, startPage + showPages - 1);
-    
+
     if (endPage - startPage + 1 < showPages) {
       startPage = Math.max(1, endPage - showPages + 1);
     }
-    
+
     for (let i = startPage; i <= endPage; i++) {
       visiblePages.push(i);
     }
-    
+
     return visiblePages;
   };
 
   const visiblePages = getVisiblePages(currentPage, totalPages);
 
-  if (loading) return <div className="p-6 text-center">Loading...</div>;
-  if (error) return <div className="p-6 text-red-500 text-center">{error}</div>;
+  // Debug: Log the current state
+  useEffect(() => {
+    console.log("📊 Current state:", {
+      loading,
+      error,
+      holidaysCount: holidays.length,
+      currentYearHolidaysCount: currentYearHolidays.length,
+      filteredHolidaysCount: filteredHolidays.length,
+      currentYear: currentYearString,
+    });
+  }, [holidays, currentYearHolidays, filteredHolidays, loading, error]);
+
+  if (loading)
+    return <div className="p-6 text-center">Loading holidays...</div>;
+  if (error)
+    return <div className="p-6 text-red-500 text-center">Error: {error}</div>;
 
   return (
     <div className="p-6">
@@ -904,7 +1056,7 @@ const Holidays = () => {
           )}
         </div>
 
-        {!showCalendarView &&  holidays.length > 0 && (
+        {!showCalendarView && holidays.length > 0 && (
           <div className="flex items-center gap-8">
             <p className="text-lg font-semibold text-gray-700">
               Total Count:{" "}
@@ -989,179 +1141,189 @@ const Holidays = () => {
       ) : (
         /* Table View - Shows ONLY current year (2025) holidays */
         <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-          <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
-            {/* Table Header with Checkbox */}
-            <thead className="bg-gray-100 text-gray-700 border-b text-sm">
-              <tr>
-                <th className="p-3">
-                  <div className="flex items-center gap-3">
-                    {currentHolidays.length > 0 && (
-                      <input
-                        type="checkbox"
-                        checked={
-                          selected.length === currentHolidays.length &&
-                          currentHolidays.length > 0
-                        }
-                        onChange={(e) => toggleSelectAll(e.target.checked)}
-                        className="cursor-pointer"
-                      />
-                    )}
-                    <span>Sr No</span>
-                  </div>
-                </th>
-                <th className="p-3">Holiday Name</th>
-                <th className="p-3">Start Date</th>
-                <th className="p-3">End Date</th>
-                <th className="p-3">Description</th>
-                <th className="p-3">Actions</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {currentHolidays.length > 0 ? (
-                currentHolidays.map((holiday, index) => {
-                  const formattedStartDate = formatDateToReadable(
-                    holiday.startDate
-                  );
-                  const formattedEndDate = formatDateToReadable(
-                    holiday.endDate || holiday.startDate
-                  );
-
-                  // Check if holiday is selected
-                  const isSelected = selected.some((s) => s.id === holiday._id);
-
-                  return (
-                    <tr
-                      key={holiday._id}
-                      className={`hover:bg-gray-50 ${
-                        (index + 1) % holidaysPerPage === 0 ||
-                        index + 1 === currentHolidays.length
-                          ? ""
-                          : "border-b"
-                      } ${isSelected ? "bg-blue-50" : ""}`}
-                    >
-                      {/* Checkbox Cell */}
-                      <td className="p-3">
-                        <div className="flex items-center gap-3">
+          {holidays.length === 0 ? (
+            <div className="bg-white rounded-2xl p-12 text-center">
+              <p className="text-gray-500 text-lg mb-4">
+                No holidays found in the system
+              </p>
+              <p className="text-gray-400 mb-6">
+                Add your first holiday or import from a file
+              </p>
+        
+            </div>
+          ) : filteredHolidays.length === 0 ? (
+            <div className="bg-white rounded-2xl p-12 text-center">
+              <p className="text-gray-500 text-lg">
+                No holidays found for {currentYearString}
+              </p>
+              <p className="text-gray-400 mt-2">
+                Try switching to calendar view to see all years
+              </p>
+            </div>
+          ) : (
+            <>
+              <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
+                {/* Table Header with Checkbox */}
+                <thead className="bg-gray-100 text-gray-700 border-b text-sm">
+                  <tr>
+                    <th className="p-3">
+                      <div className="flex items-center gap-3">
+                        {currentHolidays.length > 0 && (
                           <input
                             type="checkbox"
-                            checked={isSelected}
-                            onChange={() => toggleSelect(holiday)}
+                            checked={
+                              selected.length === currentHolidays.length &&
+                              currentHolidays.length > 0
+                            }
+                            onChange={(e) => toggleSelectAll(e.target.checked)}
                             className="cursor-pointer"
                           />
-                          <span>
-                            {(currentPage - 1) * holidaysPerPage + index + 1}
-                          </span>
-                        </div>
-                      </td>
+                        )}
+                        <span>Sr No</span>
+                      </div>
+                    </th>
+                    <th className="p-3">Holiday Name</th>
+                    <th className="p-3">Start Date</th>
+                    <th className="p-3">End Date</th>
+                    <th className="p-3">Description</th>
+                    <th className="p-3">Actions</th>
+                  </tr>
+                </thead>
 
-                      <td className="p-3">
-                        <div className="flex flex-col">
-                          <span className="capitalize font-medium text-gray-800">
-                            {holiday.name}
-                          </span>
-                          <span className="text-sm text-gray-500">
-                            ({formattedStartDate})
-                          </span>
-                        </div>
-                      </td>
+                <tbody>
+                  {currentHolidays.map((holiday, index) => {
+                    const formattedStartDate = formatDateToReadable(
+                      holiday.startDate,
+                    );
+                    const formattedEndDate = formatDateToReadable(
+                      holiday.endDate || holiday.startDate,
+                    );
 
-                      <td className="p-3">{formattedStartDate}</td>
-                      <td className="p-3">{formattedEndDate}</td>
+                    // Check if holiday is selected
+                    const isSelected = selected.some(
+                      (s) => s.id === holiday._id,
+                    );
 
-                      <td className="p-3 capitalize">
-                        {holiday.description || "No description"}
-                      </td>
+                    return (
+                      <tr
+                        key={holiday._id}
+                        className={`hover:bg-gray-50 ${
+                          (index + 1) % holidaysPerPage === 0 ||
+                          index + 1 === currentHolidays.length
+                            ? ""
+                            : "border-b"
+                        } ${isSelected ? "bg-blue-50" : ""}`}
+                      >
+                        {/* Checkbox Cell */}
+                        <td className="p-3">
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleSelect(holiday)}
+                              className="cursor-pointer"
+                            />
+                            <span>
+                              {(currentPage - 1) * holidaysPerPage + index + 1}
+                            </span>
+                          </div>
+                        </td>
 
-                      <td className="p-3 flex items-center justify-center gap-3">
-                        <button
-                          onClick={() => handleView(holiday)}
-                          className="text-blue-600 hover:text-blue-800 cursor-pointer"
-                          title="View"
-                        >
-                          <Eye size={18} />
-                        </button>
-                        <button
-                          onClick={() => editHoliday(holiday)}
-                          className="text-green-600 hover:text-green-800 cursor-pointer"
-                          title="Edit"
-                        >
-                          <Edit size={18} />
-                        </button>
-                        <button
-                          onClick={() => deleteHoliday(holiday)}
-                          className="text-red-600 hover:text-red-800 cursor-pointer"
-                          title="Delete"
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
-              ) : (
-                <tr>
-                  <td colSpan={6} className="p-3 text-center text-gray-500">
-                    No holiday records found for {currentYearString}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                        <td className="p-3">
+                          <div className="flex flex-col">
+                            <span className="capitalize font-medium text-gray-800">
+                              {holiday.name}
+                            </span>
+                            <span className="text-sm text-gray-500">
+                              ({formattedStartDate})
+                            </span>
+                          </div>
+                        </td>
 
-          {currentHolidays.length > 0 && (
-            <div className="mt-4 p-5 flex justify-start gap-2">
-              <button
-                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-                disabled={currentPage === 1}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-              >
-                Prev
-              </button>
-              {visiblePages.map((page, idx) =>
-                page === "..." ? (
-                  <span
-                    key={`ellipsis-${idx}`}
-                    className="px-3 py-1 text-gray-500 select-none cursor-pointer"
-                  >
-                    ...
-                  </span>
-                ) : (
+                        <td className="p-3">{formattedStartDate}</td>
+                        <td className="p-3">{formattedEndDate}</td>
+
+                        <td className="p-3 capitalize">
+                          {holiday.description || "No description"}
+                        </td>
+
+                        <td className="p-3 flex items-center justify-center gap-3">
+                          <button
+                            onClick={() => handleView(holiday)}
+                            className="text-blue-600 hover:text-blue-800 cursor-pointer"
+                            title="View"
+                          >
+                            <Eye size={18} />
+                          </button>
+                          <button
+                            onClick={() => editHoliday(holiday)}
+                            className="text-green-600 hover:text-green-800 cursor-pointer"
+                            title="Edit"
+                          >
+                            <Edit size={18} />
+                          </button>
+                          <button
+                            onClick={() => deleteHoliday(holiday)}
+                            className="text-red-600 hover:text-red-800 cursor-pointer"
+                            title="Delete"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+
+              {totalPages > 1 && (
+                <div className="mt-4 p-5 flex justify-start gap-2">
                   <button
-                    key={page}
-                    onClick={() => setCurrentPage(page)}
-                    className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
-                      currentPage === page
-                        ? "bg-indigo-600 text-white"
-                        : "bg-gray-200 hover:bg-gray-300"
-                    }`}
+                    onClick={() =>
+                      setCurrentPage((prev) => Math.max(prev - 1, 1))
+                    }
+                    disabled={currentPage === 1}
+                    className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
                   >
-                    {page}
+                    Prev
                   </button>
-                )
+                  {visiblePages.map((page) => (
+                    <button
+                      key={page}
+                      onClick={() => setCurrentPage(page)}
+                      className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
+                        currentPage === page
+                          ? "bg-indigo-600 text-white"
+                          : "bg-gray-200 hover:bg-gray-300"
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => {
+                      setCurrentPage((prev) => Math.min(prev + 1, totalPages));
+                      window.scrollTo({ top: 0, behavior: "smooth" });
+                    }}
+                    disabled={currentPage === totalPages}
+                    className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
+                  >
+                    Next
+                  </button>
+                </div>
               )}
-              <button
-                onClick={() => {
-                  setCurrentPage((prev) => Math.min(prev + 1, totalPages));
-                  window.scrollTo({ top: 0, behavior: "smooth" });
-                }}
-                disabled={currentPage === totalPages}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-              >
-                Next
-              </button>
-            </div>
+            </>
           )}
         </div>
       )}
 
-      {/* Rest of the modals (Import, Add, Edit, View) remain the same */}
+      {/* Import Modal */}
       {showImportModal &&
         ReactDOM.createPortal(
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsOpen(false)}
+              onClick={handleCloseImportModal}
             />
             <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
               <button
@@ -1226,7 +1388,7 @@ const Holidays = () => {
               </div>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
 
       {/* Add Holiday Modal */}
@@ -1235,7 +1397,7 @@ const Holidays = () => {
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsOpen(false)}
+              onClick={() => setIsAddModalOpen(false)}
             />
             <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
               <button
@@ -1322,7 +1484,7 @@ const Holidays = () => {
               </div>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
 
       {/* Edit Holiday Modal */}
@@ -1331,7 +1493,7 @@ const Holidays = () => {
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsOpen(false)}
+              onClick={() => setIsEditModalOpen(false)}
             />
             <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
               <button
@@ -1416,7 +1578,7 @@ const Holidays = () => {
               </div>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
 
       {/* View Holiday Modal */}
@@ -1425,7 +1587,7 @@ const Holidays = () => {
           <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setIsOpen(false)}
+              onClick={() => setIsViewModalOpen(false)}
             />
             <div className="bg-white w-full max-w-2xl p-6 rounded-xl shadow-lg relative overflow-y-auto max-h-screen">
               <button
@@ -1483,7 +1645,7 @@ const Holidays = () => {
               </div>
             </div>
           </div>,
-          document.body
+          document.body,
         )}
     </div>
   );

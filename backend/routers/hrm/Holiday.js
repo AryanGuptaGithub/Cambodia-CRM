@@ -184,15 +184,14 @@ router.delete("/holidays", async (req, res) => {
   }
 });
 
-
+// CORRECTED BACKEND IMPORT ROUTE
 router.post("/holidays/import", async (req, res) => {
   try {
     const holidaysData = req.body;
-    
     if (!Array.isArray(holidaysData) || holidaysData.length === 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "No holiday data provided" 
+      return res.status(400).json({
+        success: false,
+        message: "No holiday data provided"
       });
     }
 
@@ -203,42 +202,51 @@ router.post("/holidays/import", async (req, res) => {
       importedHolidays: []
     };
 
-    // Process each holiday
     for (const [index, holidayData] of holidaysData.entries()) {
       try {
         const { name, startDate, endDate, description } = holidayData;
-
+        
         // Validate required fields
         if (!name || !startDate) {
           results.failed++;
-          results.errors.push(`Row ${index + 1}: Missing required fields - name and start date are required`);
+          results.errors.push(
+            `Row ${index + 1}: Missing required fields - name and start date are required`
+          );
           continue;
         }
 
-        // Validate date formats
+        // Parse dates - ensure they're valid
         const start = new Date(startDate);
         const end = new Date(endDate || startDate);
 
         if (isNaN(start.getTime())) {
           results.failed++;
-          results.errors.push(`Row ${index + 1}: Invalid start date format - ${startDate}`);
+          results.errors.push(
+            `Row ${index + 1}: Invalid start date format - ${startDate}`
+          );
           continue;
         }
 
         if (isNaN(end.getTime())) {
           results.failed++;
-          results.errors.push(`Row ${index + 1}: Invalid end date format - ${endDate}`);
+          results.errors.push(
+            `Row ${index + 1}: Invalid end date format - ${endDate}`
+          );
           continue;
         }
 
-        // Validate end date is not before start date
         if (end < start) {
           results.failed++;
-          results.errors.push(`Row ${index + 1}: End date cannot be before start date`);
+          results.errors.push(
+            `Row ${index + 1}: End date cannot be before start date`
+          );
           continue;
         }
 
-        // Check if holiday already exists (by name and start date)
+        // Extract year from start date for yearCode
+        const year = start.getFullYear();
+        
+        // Check for duplicate holidays
         const existing = await Holiday.findOne({
           name: name.trim(),
           startDate: start
@@ -246,17 +254,19 @@ router.post("/holidays/import", async (req, res) => {
 
         if (existing) {
           results.failed++;
-          results.errors.push(`Row ${index + 1}: Holiday "${name.trim()}" on ${start.toDateString()} already exists`);
+          results.errors.push(
+            `Row ${index + 1}: Holiday "${name.trim()}" on ${start.toDateString()} already exists`
+          );
           continue;
         }
 
-        // Create holiday according to your model schema
         const holiday = new Holiday({
           name: name.trim(),
           startDate: start,
           endDate: end,
           description: description ? description.trim() : "",
-          enabled: true // Default from model, but explicitly setting
+          yearCode: [year.toString()], // Add yearCode for filtering
+          enabled: true
         });
 
         const savedHoliday = await holiday.save();
@@ -265,16 +275,17 @@ router.post("/holidays/import", async (req, res) => {
           name: savedHoliday.name,
           startDate: savedHoliday.startDate,
           endDate: savedHoliday.endDate,
-          description: savedHoliday.description
+          description: savedHoliday.description,
+          yearCode: savedHoliday.yearCode
         });
 
       } catch (error) {
+        console.error(`🔥 Error at row ${index + 1}:`, error);
         results.failed++;
         results.errors.push(`Row ${index + 1}: ${error.message}`);
       }
     }
 
-    // Prepare response message
     let message;
     if (results.success === holidaysData.length) {
       message = `All ${results.success} holidays imported successfully`;
@@ -286,7 +297,7 @@ router.post("/holidays/import", async (req, res) => {
 
     res.json({
       success: results.success > 0,
-      message: message,
+      message,
       importedCount: results.success,
       failedCount: results.failed,
       errors: results.errors,
@@ -294,13 +305,14 @@ router.post("/holidays/import", async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Error importing holidays:", error);
-    res.status(500).json({ 
-      success: false, 
+    console.error("🚨 Fatal error importing holidays:", error);
+    res.status(500).json({
+      success: false,
       message: "Server error while importing holidays",
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      error: process.env.NODE_ENV === "development" ? error.message : undefined
     });
   }
 });
+
 
 export default router;

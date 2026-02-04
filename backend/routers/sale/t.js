@@ -1,3 +1,4 @@
+import express from "express";
 import mongoose from "mongoose";
 import SaleSummary from "../../models/sale/saleSummary.js";
 import Customer from "../../models/master/customer.js";
@@ -1543,6 +1544,8 @@ const processSingleInvoiceWithStockDeduction = async (invoiceData, index, skipDu
   }
 };
 
+// ✅ CORRECTED FUNCTION - Replace your existing processImportWithStockDeduction with this:
+
 const processImportWithStockDeduction = async (
   sessionId,
   invoices,
@@ -1568,27 +1571,68 @@ const processImportWithStockDeduction = async (
   console.log(`🔧 Duplicate handling: ${skipDuplicates ? 'Skip exact duplicates, merge same invoice' : 'Allow all'}`);
   
   try {
-    // Process invoices ONE AT A TIME sequentially
+    // ✅ STEP 1: Group invoices by invoice number to combine products from multiple rows
+    // This is the KEY FIX - prevents duplicate MR Cash updates
+    const groupedInvoices = new Map();
+    
     for (let i = 0; i < invoices.length; i++) {
       const invoice = invoices[i];
+      const invoiceNumber = invoice.invoiceNumber?.trim();
       
-      try {
-        if (!invoice.invoiceNumber?.trim()) {
-          throw new Error("Invoice number is required");
+      if (!invoiceNumber) {
+        errors.push({
+          row: i + 2,
+          invoiceNumber: "Unknown",
+          message: "Invoice number is required",
+          type: "validation_error",
+        });
+        failed++;
+        continue;
+      }
+      
+      if (!groupedInvoices.has(invoiceNumber)) {
+        // First occurrence of this invoice number - create new entry
+        groupedInvoices.set(invoiceNumber, {
+          ...invoice,
+          products: invoice.products || [],
+          _rowIndex: i, // Track original row for error reporting
+        });
+      } else {
+        // Invoice number already exists - merge products into it
+        const existing = groupedInvoices.get(invoiceNumber);
+        if (invoice.products && invoice.products.length > 0) {
+          // Add products from this row to the existing invoice
+          existing.products.push(...invoice.products);
         }
-        
+      }
+    }
+    
+    console.log(`📦 Grouped ${invoices.length} rows into ${groupedInvoices.size} unique invoices`);
+    
+    // ✅ STEP 2: Update progress total to reflect unique invoices (not total rows)
+    progress.totalInvoices = groupedInvoices.size;
+    
+    // ✅ STEP 3: Process each unique invoice (MR Cash updated ONCE per invoice)
+    let processedCount = 0;
+    
+    for (const [invoiceNumber, groupedInvoice] of groupedInvoices) {
+      try {
         // Process the invoice with duplicate checking and merging
-        const result = await processSingleInvoiceWithStockDeduction(invoice, i, skipDuplicates);
+        const result = await processSingleInvoiceWithStockDeduction(
+          groupedInvoice, 
+          groupedInvoice._rowIndex, 
+          skipDuplicates
+        );
         
         if (result.skipped) {
           // This is an exact duplicate that was skipped
           skippedDuplicates++;
-          console.log(`⏭️ Skipped exact duplicate invoice: ${invoice.invoiceNumber} (${i + 1}/${invoices.length})`);
+          console.log(`⏭️ Skipped exact duplicate invoice: ${invoiceNumber} (${processedCount + 1}/${groupedInvoices.size})`);
         } else if (result.success) {
           if (result.action === "merged") {
             // This invoice was merged with an existing one
             mergedInvoices++;
-            console.log(`🔄 Merged invoice: ${invoice.invoiceNumber} (${i + 1}/${invoices.length}) | Added ${result.addedProducts} products`);
+            console.log(`🔄 Merged invoice: ${invoiceNumber} (${processedCount + 1}/${groupedInvoices.size}) | Added ${result.addedProducts} products`);
             
             // Track MR cash added from merge
             if (result.paidAmount > 0) {
@@ -1597,7 +1641,7 @@ const processImportWithStockDeduction = async (
           } else {
             // This is a new invoice that was created
             successful++;
-            console.log(`✅ Created invoice: ${invoice.invoiceNumber} (${i + 1}/${invoices.length})`);
+            console.log(`✅ Created invoice: ${invoiceNumber} (${processedCount + 1}/${groupedInvoices.size})`);
             
             // Track MR cash added
             if (result.paidAmount > 0) {
@@ -1609,28 +1653,30 @@ const processImportWithStockDeduction = async (
           if (result.error) {
             errors.push(result.error);
           }
-          console.log(`❌ Invoice ${invoice.invoiceNumber} failed (${i + 1}/${invoices.length})`);
+          console.log(`❌ Invoice ${invoiceNumber} failed (${processedCount + 1}/${groupedInvoices.size})`);
         }
       } catch (error) {
         failed++;
         errors.push({
-          row: i + 2,
-          invoiceNumber: invoice.invoiceNumber || "Unknown",
+          row: groupedInvoice._rowIndex + 2,
+          invoiceNumber: invoiceNumber || "Unknown",
           message: error.message,
           type: "unexpected_error",
           timestamp: new Date().toISOString(),
         });
-        console.log(`❌ Unexpected error for invoice ${invoice.invoiceNumber}: ${error.message}`);
+        console.log(`❌ Unexpected error for invoice ${invoiceNumber}: ${error.message}`);
       }
       
-      // Update progress after EACH invoice
-      progress.processedInvoices = i + 1;
+      processedCount++;
+      
+      // Update progress after EACH unique invoice
+      progress.processedInvoices = processedCount;
       progress.successful = successful;
       progress.failed = failed;
       progress.skippedDuplicates = skippedDuplicates;
       progress.mergedInvoices = mergedInvoices;
       progress.progressPercentage = Math.round(
-        ((i + 1) / progress.totalInvoices) * 100
+        (processedCount / groupedInvoices.size) * 100
       );
       progress.lastUpdated = Date.now();
     }
