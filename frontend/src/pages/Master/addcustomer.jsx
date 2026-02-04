@@ -1,4 +1,3 @@
-// AddCustomer.jsx
 import React, {
   useState,
   useEffect,
@@ -26,7 +25,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
   const [form, setForm] = useState({
     ...initialFormState,
     customerCode: initialCustomerCode || "",
-    customerNumber: "", // Add customerNumber field
+    customerNumber: "",
   });
   const [errors, setErrors] = useState({});
   const [provinces, setProvinces] = useState([]);
@@ -334,27 +333,66 @@ const useCustomerForm = (initialCustomerCode = "") => {
 
     try {
       setLoading(true);
+      
+      // Prepare the data for submission
+      const formData = {
+        date: form.date,
+        medicalRepId: form.medicalRepId,
+        medicalRepName: form.medicalRepName,
+        name: form.name,
+        typeOfBusiness: form.typeOfBusiness,
+        customerNumber: form.customerNumber,
+        address: form.address,
+        zone: form.zone,
+        province: form.province,
+        remark: form.remark
+      };
+
       const response = await fetch(`${backendUrl}/api/customers`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify(formData),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        showToast("error", data.message || "Something went wrong");
+        if (data.duplicateCode) {
+          // If customer code duplicate, fetch new code and retry
+          await fetchNewCustomerCode();
+          showToast("error", data.message || "Customer code conflict. Please try again.");
+        } else {
+          showToast("error", data.message || "Something went wrong");
+        }
         return;
       }
 
       showToast("success", data.message || "Customer added successfully");
       navigate("/masterlayout/customer");
     } catch (error) {
+      console.error("Error adding customer:", error);
       showToast("error", error.message || "Network error");
     } finally {
       setLoading(false);
     }
   };
+
+  // Function to fetch new customer code
+  const fetchNewCustomerCode = useCallback(async () => {
+    try {
+      const response = await fetch(`${backendUrl}/api/customers?limit=1`);
+      const data = await response.json();
+      
+      if (data.ok && data.nextCustomerCode) {
+        setForm(prev => ({
+          ...prev,
+          customerCode: data.nextCustomerCode
+        }));
+      }
+    } catch (error) {
+      console.error("Error fetching new customer code:", error);
+    }
+  }, []);
 
   const updateFormField = useCallback((field, value) => {
     setForm((prevForm) => ({
@@ -362,6 +400,22 @@ const useCustomerForm = (initialCustomerCode = "") => {
       [field]: value,
     }));
   }, []);
+
+  // Function to fetch next customer code on mount
+  const fetchNextCustomerCode = useCallback(async () => {
+    try {
+      const response = await fetch(`${backendUrl}/api/customers?limit=1`);
+      const data = await response.json();
+      
+      if (data.ok && data.nextCustomerCode) {
+        // If initialCustomerCode is provided, use it, otherwise use the fetched code
+        const codeToUse = initialCustomerCode || data.nextCustomerCode;
+        updateFormField("customerCode", codeToUse);
+      }
+    } catch (error) {
+      console.error("Error fetching customer code:", error);
+    }
+  }, [initialCustomerCode, updateFormField]);
 
   return {
     form,
@@ -390,6 +444,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
     setForm,
     updateFormField,
     getTodayDate,
+    fetchNextCustomerCode,
   };
 };
 
@@ -423,6 +478,7 @@ const AddCustomer = () => {
     loadBusinessTypes,
     updateFormField,
     getTodayDate,
+    fetchNextCustomerCode,
   } = useCustomerForm(customerCode);
 
   // Memoized province options for dropdown - with safety checks
@@ -555,9 +611,8 @@ const AddCustomer = () => {
 
   // Set initial customer code and fetch data
   useEffect(() => {
-    if (customerCode) {
-      updateFormField("customerCode", customerCode);
-    }
+    // Fetch next customer code on mount
+    fetchNextCustomerCode();
 
     // Load data with error handling
     const loadData = async () => {
@@ -567,7 +622,6 @@ const AddCustomer = () => {
           loadMRList(),
           loadBusinessTypes(),
         ]);
-        // Note: We don't load zones initially, only when province is selected
       } catch (error) {
         console.error("Error loading data:", error);
         showToast("error", "Failed to load required data");
@@ -576,11 +630,10 @@ const AddCustomer = () => {
 
     loadData();
   }, [
-    customerCode,
     loadProvinces,
     loadMRList,
     loadBusinessTypes,
-    updateFormField,
+    fetchNextCustomerCode,
   ]);
 
   // Set today's date as default when component mounts
@@ -699,7 +752,8 @@ const AddCustomer = () => {
               value={form.customerCode}
               onChange={handleChange}
               disabled={true}
-              className="bg-gray-100 text-gray-700 border rounded px-3 py-2 border-gray-300"
+              className="bg-gray-100 text-gray-700 border rounded px-3 py-2 border-gray-300 font-mono text-lg"
+              placeholder="Auto-generated (e.g., 00001)"
             />
 
             <InputField
@@ -716,11 +770,11 @@ const AddCustomer = () => {
             
             <InputField
               label="Customer Number"
-              name="customerNumber" // Changed from customerPhoneNumber
-              value={form.customerNumber} // Changed from form.customerPhoneNumber
+              name="customerNumber"
+              value={form.customerNumber}
               onChange={handleChange}
               placeholder="Enter numbers only"
-              error={errors.customerNumber} // Changed from errors.customerPhoneNumber
+              error={errors.customerNumber}
               disabled={isFormDisabled}
               type="tel"
               inputMode="numeric"
@@ -738,6 +792,7 @@ const AddCustomer = () => {
               error={errors.name}
               required
               disabled={isFormDisabled}
+              placeholder="Enter customer name"
             />
 
             <SearchableDropdown
@@ -858,7 +913,17 @@ const AddCustomer = () => {
                 : "bg-green-600 hover:bg-green-700 text-white cursor-pointer transform hover:scale-105 transition-transform focus:ring-green-500"
             }`}
           >
-            {loading ? "Adding..." : "Add Customer"}
+            {loading ? (
+              <span className="flex items-center gap-2">
+                <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Adding...
+              </span>
+            ) : (
+              `Add Customer (${form.customerCode})`
+            )}
           </button>
           <button
             type="button"

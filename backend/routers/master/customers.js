@@ -116,6 +116,36 @@ const formatCustomerResponse = (customer) => {
   };
 };
 
+// Function to generate next customer code with 5 digits
+const generateNextCustomerCode = async () => {
+  try {
+    // Find the highest customer code that matches the 5-digit pattern
+    const lastCustomer = await Customer.findOne({})
+      .sort({ createdAt: -1 })
+      .select("customerCode");
+
+    let nextCode = 1;
+    
+    if (lastCustomer?.customerCode) {
+      // Extract numeric part from customer code (handles "00001", "CUST00001", etc.)
+      const codeMatch = lastCustomer.customerCode.match(/\d+/);
+      if (codeMatch) {
+        const parsed = parseInt(codeMatch[0], 10);
+        if (!isNaN(parsed)) {
+          nextCode = parsed + 1;
+        }
+      }
+    }
+
+    // Format with 5 digits
+    return nextCode.toString().padStart(5, "0");
+  } catch (error) {
+    console.error("Error generating customer code:", error);
+    // Return default if error
+    return "00001";
+  }
+};
+
 // 1. POST: Import customers
 router.post("/customers/import", async (req, res) => {
   try {
@@ -147,15 +177,18 @@ router.post("/customers/import", async (req, res) => {
       }
     });
 
-    // Get last customer code
+    // Get starting code for this import batch
     const lastCustomer = await Customer.findOne({})
       .sort({ createdAt: -1 })
       .select("customerCode");
 
     let nextCode = 1;
     if (lastCustomer?.customerCode) {
-      const parsed = parseInt(lastCustomer.customerCode, 10);
-      if (!isNaN(parsed)) nextCode = parsed + 1;
+      const codeMatch = lastCustomer.customerCode.match(/\d+/);
+      if (codeMatch) {
+        const parsed = parseInt(codeMatch[0], 10);
+        if (!isNaN(parsed)) nextCode = parsed + 1;
+      }
     }
 
     const newCustomers = [];
@@ -215,10 +248,13 @@ router.post("/customers/import", async (req, res) => {
           continue;
         }
 
+        // Generate 5-digit customer code
+        const customerCode = (nextCode + newCustomers.length)
+          .toString()
+          .padStart(5, "0");
+
         newCustomers.push({
-          customerCode: (nextCode + newCustomers.length)
-            .toString()
-            .padStart(4, "0"),
+          customerCode: customerCode,
           date: parsedDate,
           medicalRepName: mrName,
           medicalRepId,
@@ -300,9 +336,13 @@ router.post("/customers", async (req, res) => {
   try {
     const { customerNumber, date, ...data } = req.body;
 
+    // Generate next 5-digit customer code
+    const customerCode = await generateNextCustomerCode();
+
     // Convert string fields to lowercase before saving
     const cleanData = {
       ...data,
+      customerCode: customerCode, // Add the generated code
       name: data.name ? data.name.toLowerCase() : "",
       typeOfBusiness: data.typeOfBusiness ? data.typeOfBusiness.toLowerCase() : "",
       medicalRepName: data.medicalRepName ? data.medicalRepName.toLowerCase() : "",
@@ -342,10 +382,18 @@ router.post("/customers", async (req, res) => {
     res.status(201).json({
       message: `Customer <b>${toTitleCase(saved.name)}</b> created with code <b>${saved.customerCode}</b>`,
       customer: formattedCustomer,
+      customerCode: saved.customerCode,
       ok: true,
     });
   } catch (err) {
     if (err.code === 11000) {
+      if (err.keyPattern?.customerCode) {
+        return res.status(400).json({
+          message: `Customer with code <b style="color:#EF4444">${err.keyValue.customerCode}</b> already exists. Please try again.`,
+          duplicateCode: err.keyValue.customerCode,
+          ok: false,
+        });
+      }
       if (err.keyPattern?.customerNumber) {
         return res.status(400).json({
           message: `Customer with mobile number <b style="color:#EF4444">${err.keyValue.customerNumber}</b> already exists.`,
@@ -364,8 +412,16 @@ router.post("/customers", async (req, res) => {
 // 3. PUT: Update customer
 router.put("/customers/:id", async (req, res) => {
   try {
-    const { customerNumber, date, ...updateData } = req.body;
+    const { customerNumber, date, customerCode, ...updateData } = req.body;
     const cleanNumber = customerNumber ? safeStr(customerNumber) : "";
+    
+    // Prevent customer code updates
+    if (customerCode) {
+      return res.status(400).json({
+        message: "Customer code cannot be updated.",
+        ok: false
+      });
+    }
     
     // Convert string fields to lowercase for update
     const cleanUpdateData = {};
@@ -429,7 +485,7 @@ router.put("/customers/:id", async (req, res) => {
   }
 });
 
-// 4. GET: All customers with pagination + next code - **FIXED SEARCH**
+// 4. GET: All customers with pagination + next code
 router.get("/customers", async (req, res) => {
   try {
     const { page = 1, limit = 10, search = "" } = req.query;
@@ -437,7 +493,7 @@ router.get("/customers", async (req, res) => {
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
 
-    // Build search query - FIXED: Search in lowercase since data is stored in lowercase
+    // Build search query
     const searchQuery = {};
     if (search && search.trim() !== "") {
       const searchLower = search.trim().toLowerCase();
@@ -448,8 +504,8 @@ router.get("/customers", async (req, res) => {
         { address: { $regex: searchLower, $options: "i" } },
         { zone: { $regex: searchLower, $options: "i" } },
         { province: { $regex: searchLower, $options: "i" } },
-        { customerCode: { $regex: search.trim(), $options: "i" } }, // Customer code is not lowercase
-        { customerNumber: { $regex: search.trim(), $options: "i" } }, // Customer number is not lowercase
+        { customerCode: { $regex: search.trim(), $options: "i" } },
+        { customerNumber: { $regex: search.trim(), $options: "i" } },
         { remark: { $regex: searchLower, $options: "i" } }
       ];
     }
@@ -466,33 +522,15 @@ router.get("/customers", async (req, res) => {
     // Format customers with title case for display
     const formattedCustomers = customers.map(customer => formatCustomerResponse(customer));
 
-    // Get next customer code
-    const agg = await Customer.aggregate([
-      {
-        $project: {
-          codeNum: {
-            $convert: {
-              input: { $trim: { input: "$customerCode" } },
-              to: "int",
-              onError: 0,
-              onNull: 0,
-            },
-          },
-        },
-      },
-      { $sort: { codeNum: -1 } },
-      { $limit: 1 },
-    ]);
-
-    let nextCode = 1;
-    if (agg[0]?.codeNum) nextCode = agg[0].codeNum + 1;
+    // Generate next customer code
+    const nextCustomerCode = await generateNextCustomerCode();
 
     res.json({
       customers: formattedCustomers,
       total,
       page: pageNum,
       totalPages: Math.ceil(total / limitNum),
-      nextCustomerCode: nextCode.toString().padStart(4, "0"),
+      nextCustomerCode: nextCustomerCode,
       ok: true,
     });
   } catch (err) {

@@ -2133,7 +2133,6 @@ const CashAndBank = () => {
         )}
 
         <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
-          <marquee>For Demo Only Cash Balance :10000$ , Personal Account : 10000$, Company Account: 10000$</marquee>
           <div className="flex gap-3 items-center">
             <button
               onClick={() => setIsModalOpen(true)}

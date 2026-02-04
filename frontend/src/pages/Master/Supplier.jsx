@@ -36,7 +36,7 @@ const toLowerCase = (str) => {
 // Helper to display value with title case
 const displayValue = (value) => (value ? toTitleCase(value) : "--");
 
-// Subcomponents
+// Subcomponents (same as before)
 const TopBar = ({ onAddNew, onImport, onDeleteSelected, selectedCount }) => (
   <div className="flex justify-between items-center mb-4">
     <div className="flex gap-3">
@@ -608,36 +608,95 @@ const Supplier = () => {
   const [importWarnings, setImportWarnings] = useState([]);
   const [searchTimeout, setSearchTimeout] = useState(null);
 
-  // Fetch suppliers with pagination
+  // Fetch suppliers with pagination - FIXED VERSION
   useEffect(() => {
     const fetchSuppliers = async () => {
       try {
         setLoading(true);
+        
+        // Build query parameters
+        const params = {
+          page: currentPage,
+          limit: SUPPLIERS_PER_PAGE,
+        };
+        
+        // Add search parameter if provided
+        if (search && search.trim() !== "") {
+          params.search = search.trim();
+        }
+        
+        console.log('Fetching suppliers with params:', params);
+        
         const response = await axios.get(`${backendUrl}/api/suppliers`, {
-          params: {
-            page: currentPage,
-            limit: SUPPLIERS_PER_PAGE,
-            search: search
-          }
+          params: params,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          timeout: 10000, // 10 second timeout
         });
         
-        if (response.data.ok) {
-          setSuppliers(response.data.suppliers || []);
-          setTotalSuppliers(response.data.total || 0);
-          setTotalPages(response.data.totalPages || 1);
+        console.log('API Response:', response.data);
+        
+        // Handle different response structures
+        if (response.data) {
+          // Check for success flag or direct data
+          if (response.data.success || response.data.ok) {
+            const data = response.data.data || response.data.suppliers || [];
+            const total = response.data.total || response.data.count || 0;
+            const totalPages = response.data.totalPages || Math.ceil(total / SUPPLIERS_PER_PAGE) || 1;
+            
+            setSuppliers(data);
+            setTotalSuppliers(total);
+            setTotalPages(totalPages);
+            setError(null);
+          } else if (Array.isArray(response.data)) {
+            // If response is directly an array
+            setSuppliers(response.data);
+            setTotalSuppliers(response.data.length);
+            setTotalPages(Math.ceil(response.data.length / SUPPLIERS_PER_PAGE));
+            setError(null);
+          } else {
+            // If no success flag but has data
+            setSuppliers(response.data.suppliers || []);
+            setTotalSuppliers(response.data.total || 0);
+            setTotalPages(response.data.totalPages || 1);
+            setError(null);
+          }
         } else {
-          setError("Failed to fetch suppliers");
+          setError("No data received from server");
         }
       } catch (err) {
-        setError(err.message || "Something went wrong");
-        showToast("error", "Failed to fetch suppliers");
+        console.error('Error fetching suppliers:', err);
+        
+        // Detailed error handling
+        if (err.response) {
+          // Server responded with error status
+          console.error('Response error:', err.response.status, err.response.data);
+          setError(`Server error: ${err.response.status} - ${err.response.data?.message || 'Unknown error'}`);
+          showToast("error", `Failed to fetch suppliers: ${err.response.status}`);
+        } else if (err.request) {
+          // Request was made but no response
+          console.error('No response received:', err.request);
+          setError("No response from server. Check backend connection.");
+          showToast("error", "Cannot connect to server. Please try again.");
+        } else {
+          // Something else happened
+          console.error('Request setup error:', err.message);
+          setError(`Request error: ${err.message}`);
+          showToast("error", `Failed to fetch suppliers: ${err.message}`);
+        }
+        
+        // Set empty data on error
+        setSuppliers([]);
+        setTotalSuppliers(0);
+        setTotalPages(1);
       } finally {
         setLoading(false);
       }
     };
     
     fetchSuppliers();
-  }, [currentPage, search]); // Refetch when page or search changes
+  }, [currentPage, search, activeTab]); // Added activeTab to dependencies
 
   // Add debounced search effect
   useEffect(() => {
@@ -683,7 +742,6 @@ const Supplier = () => {
   const handleSearchChange = (e) => {
     const value = e.target.value;
     setSearch(value);
-    // Don't reset page here, let the useEffect handle it with debounce
   };
 
   const toggleSelect = useCallback((supplier) => {
@@ -712,6 +770,8 @@ const Supplier = () => {
   };
 
   const handleDeleteSelected = async () => {
+    if (selected.length === 0) return;
+    
     const confirm = await confirmDialog({
       text: `Are you sure you want to delete <b>${selected.length}</b> suppliers?`,
       icon: "warning",
@@ -726,30 +786,17 @@ const Supplier = () => {
           data: { ids: idsToDelete },
         });
 
-        if (res.status === 200) {
+        if (res.status === 200 || res.status === 204) {
           showToast("success", "Suppliers deleted successfully");
           // Refresh data
-          const response = await axios.get(`${backendUrl}/api/suppliers`, {
-            params: {
-              page: currentPage,
-              limit: SUPPLIERS_PER_PAGE,
-              search: search
-            }
-          });
-          
-          if (response.data.ok) {
-            setSuppliers(response.data.suppliers || []);
-            setTotalSuppliers(response.data.total || 0);
-            setTotalPages(response.data.totalPages || 1);
-          }
+          setSuppliers(prev => prev.filter(s => !idsToDelete.includes(s._id)));
+          setTotalSuppliers(prev => prev - selected.length);
           setSelected([]);
         }
       } catch (err) {
         console.error("Delete error:", err.response?.data || err.message);
         showToast("error", "Failed to delete suppliers.");
       }
-    } else {
-      setSelected([]);
     }
   };
 
@@ -766,22 +813,11 @@ const Supplier = () => {
         const res = await axios.delete(
           `${backendUrl}/api/suppliers/${supplier._id}`
         );
-        if (res.status === 200) {
-          showToast("success", res.data.message);
-          // Refresh data
-          const response = await axios.get(`${backendUrl}/api/suppliers`, {
-            params: {
-              page: currentPage,
-              limit: SUPPLIERS_PER_PAGE,
-              search: search
-            }
-          });
-          
-          if (response.data.ok) {
-            setSuppliers(response.data.suppliers || []);
-            setTotalSuppliers(response.data.total || 0);
-            setTotalPages(response.data.totalPages || 1);
-          }
+        if (res.status === 200 || res.status === 204) {
+          showToast("success", res.data?.message || "Supplier deleted successfully");
+          // Update local state
+          setSuppliers(prev => prev.filter(s => s._id !== supplier._id));
+          setTotalSuppliers(prev => prev - 1);
         }
       } catch (err) {
         showToast("error", err.message || "Failed to delete supplier");
@@ -789,6 +825,7 @@ const Supplier = () => {
     }
   };
 
+  // Rest of the handlers remain the same...
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -801,14 +838,12 @@ const Supplier = () => {
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
 
-        // Convert entire sheet to array of arrays
         const rawData = XLSX.utils.sheet_to_json(worksheet, {
           header: 1,
           defval: "",
           raw: false,
         });
 
-        // Find the header row (the row with "Supplier Name" in first column)
         let headerRowIndex = -1;
         for (let i = 0; i < rawData.length; i++) {
           const firstCell =
@@ -824,14 +859,11 @@ const Supplier = () => {
           return;
         }
 
-        // Get data rows starting from the row after the header
         const dataRows = rawData.slice(headerRowIndex + 1);
 
-        // Parse data rows
         const parsedData = dataRows
           .map((row, index) => {
             try {
-              // Skip empty rows
               if (!row || !Array.isArray(row) || row.length === 0) {
                 return null;
               }
@@ -843,23 +875,20 @@ const Supplier = () => {
                 .toString()
                 .trim();
 
-              // Skip rows without supplier name
               if (!supplierName || supplierName.trim() === "") {
                 return null;
               }
 
               const dataObj = {
-                supplierName: supplierName.toLowerCase(), // Convert to lowercase
-                address: address.toLowerCase(), // Convert to lowercase
+                supplierName: supplierName.toLowerCase(),
+                address: address.toLowerCase(),
               };
 
-              // Helper function to parse date
               const parseDateValue = (dateStr) => {
                 if (!dateStr || dateStr.trim() === "") {
                   return null;
                 }
 
-                // Try parsing as Excel serial number
                 if (!isNaN(dateStr)) {
                   const serialDate = parseFloat(dateStr);
                   const date = parseExcelDate(serialDate);
@@ -868,14 +897,12 @@ const Supplier = () => {
                   }
                 }
 
-                // Try parsing as DD/MM/YYYY format
                 if (dateStr.includes("/")) {
                   const parts = dateStr.split("/");
                   if (parts.length === 3) {
                     const day = parseInt(parts[0], 10);
                     const month = parseInt(parts[1], 10) - 1;
                     const year = parseInt(parts[2], 10);
-                    // Handle 2-digit years
                     const fullYear = year < 100 ? 2000 + year : year;
                     const date = new Date(fullYear, month, day);
                     if (!isNaN(date.getTime())) {
@@ -884,7 +911,6 @@ const Supplier = () => {
                   }
                 }
 
-                // Try standard Date parsing
                 const date = new Date(dateStr);
                 if (!isNaN(date.getTime())) {
                   return date.toISOString();
@@ -893,25 +919,15 @@ const Supplier = () => {
                 return null;
               };
 
-              // Parse site registration date
-              if (
-                siteRegistrationDateStr &&
-                siteRegistrationDateStr.trim() !== ""
-              ) {
+              if (siteRegistrationDateStr && siteRegistrationDateStr.trim() !== "") {
                 const parsedDate = parseDateValue(siteRegistrationDateStr);
                 if (parsedDate) {
                   dataObj.siteRegistrationDate = parsedDate;
                 }
               }
 
-              // Parse site registration expiry date
-              if (
-                siteRegistrationExpiryDateStr &&
-                siteRegistrationExpiryDateStr.trim() !== ""
-              ) {
-                const parsedDate = parseDateValue(
-                  siteRegistrationExpiryDateStr
-                );
+              if (siteRegistrationExpiryDateStr && siteRegistrationExpiryDateStr.trim() !== "") {
+                const parsedDate = parseDateValue(siteRegistrationExpiryDateStr);
                 if (parsedDate) {
                   dataObj.siteRegistrationExpiryDate = parsedDate;
                 }
@@ -923,9 +939,8 @@ const Supplier = () => {
               return null;
             }
           })
-          .filter((item) => item !== null); // Remove null items
+          .filter((item) => item !== null);
 
-        // Filter out rows without supplier name (just in case)
         const validData = parsedData.filter(
           (item) => item.supplierName && item.supplierName.trim() !== ""
         );
@@ -959,26 +974,15 @@ const Supplier = () => {
         `${backendUrl}/api/suppliers/import`,
         parsedData
       );
-      if (res.status === 200) {
+      if (res.status === 200 || res.status === 201) {
         showToast(
           "success",
           res.data.message || "Suppliers imported successfully!"
         );
 
         // Refresh suppliers
-        const response = await axios.get(`${backendUrl}/api/suppliers`, {
-          params: {
-            page: currentPage,
-            limit: SUPPLIERS_PER_PAGE,
-            search: search
-          }
-        });
-        
-        if (response.data.ok) {
-          setSuppliers(response.data.suppliers || []);
-          setTotalSuppliers(response.data.total || 0);
-          setTotalPages(response.data.totalPages || 1);
-        }
+        setCurrentPage(1); // Go to first page to see new data
+        setSearch(""); // Clear search
         
         setParsedData([]);
         setIsOpen(null);
@@ -1025,7 +1029,6 @@ const Supplier = () => {
   const handleEditSubmit = async (e) => {
     e.preventDefault();
     try {
-      // Convert name and address to lowercase before sending
       const updateData = {
         ...form,
         name: toLowerCase(form.name),
@@ -1040,20 +1043,10 @@ const Supplier = () => {
         showToast("success", "Supplier updated successfully");
         setIsOpen(null);
         
-        // Refresh data
-        const response = await axios.get(`${backendUrl}/api/suppliers`, {
-          params: {
-            page: currentPage,
-            limit: SUPPLIERS_PER_PAGE,
-            search: search
-          }
-        });
-        
-        if (response.data.ok) {
-          setSuppliers(response.data.suppliers || []);
-          setTotalSuppliers(response.data.total || 0);
-          setTotalPages(response.data.totalPages || 1);
-        }
+        // Update local state
+        setSuppliers(prev => 
+          prev.map(s => s._id === form._id ? { ...s, ...updateData } : s)
+        );
       }
     } catch (err) {
       showToast("error", "Failed to update supplier.");
@@ -1061,7 +1054,24 @@ const Supplier = () => {
   };
 
   if (loading && suppliers.length === 0) return <LoadingOverlay text="Please wait..." />;
-  if (error) return <p className="text-red-500">{error}</p>;
+  if (error && suppliers.length === 0) return (
+    <div className="p-6">
+      <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+        <p className="text-red-700 font-medium">Error: {error}</p>
+        <button 
+          onClick={() => {
+            setError(null);
+            setLoading(true);
+            // Trigger refetch
+            setCurrentPage(1);
+          }}
+          className="mt-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+        >
+          Retry
+        </button>
+      </div>
+    </div>
+  );
 
   return (
     <div className="p-6">
@@ -1079,7 +1089,6 @@ const Supplier = () => {
           totalSuppliers={totalSuppliers}
         />
         
-        {/* Only show total count and search when there are suppliers */}
         {totalSuppliers > 0 && (
           <div className="flex items-center gap-8">
             <p className="text-lg font-semibold text-gray-700">
@@ -1100,7 +1109,6 @@ const Supplier = () => {
         )}
       </div>
       
-      {/* Search results info - only show when searching and there are suppliers */}
       {search && totalSuppliers > 0 && (
         <div className="mb-4 p-3 bg-blue-50 rounded-lg">
           <p className="text-sm text-blue-700">
@@ -1110,8 +1118,7 @@ const Supplier = () => {
         </div>
       )}
       
-      {/* Search results info - when searching but no suppliers found */}
-      {search && totalSuppliers === 0 && (
+      {search && totalSuppliers === 0 && suppliers.length === 0 && (
         <div className="mb-4 p-3 bg-yellow-50 rounded-lg">
           <p className="text-sm text-yellow-700">
             No suppliers found for: <span className="font-semibold">"{search}"</span>
@@ -1176,5 +1183,5 @@ const Supplier = () => {
     </div>
   );
 };
- 
+
 export default Supplier;

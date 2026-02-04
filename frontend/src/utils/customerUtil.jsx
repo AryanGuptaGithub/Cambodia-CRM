@@ -3,21 +3,19 @@ import axios from "axios";
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
 // Initial form state
-// In customerUtil.js, update the initialFormState:
 export const initialFormState = {
   date: "",
   medicalRepId: "",
   medicalRepName: "",
   name: "",
   typeOfBusiness: "",
-  customerNumber: "", // Changed from customerPhoneNumber
+  customerNumber: "",
   address: "",
   zone: "",
   province: "",
   remark: "",
   customerCode: "",
 };
-
 
 // Validation function
 export const validateCustomerForm = (form) => {
@@ -43,8 +41,8 @@ export const validateCustomerForm = (form) => {
   if (!form.province) newErrors.province = "Province is required";
 
   // Customer Number validation - only numbers allowed
-  if (form.customerPhoneNumber && !/^\d+$/.test(form.customerPhoneNumber)) {
-    newErrors.customerPhoneNumber = "Customer Number must contain only numbers";
+  if (form.customerNumber && !/^\d+$/.test(form.customerNumber)) {
+    newErrors.customerNumber = "Customer Number must contain only numbers";
   }
 
   return newErrors;
@@ -124,18 +122,11 @@ export const fetchProvinces = async () => {
 
     let provinces = [];
 
-    // Case 1: already array
     if (Array.isArray(json)) {
       provinces = json;
-    }
-
-    // Case 2: { success, data: [...] }
-    else if (json?.success && Array.isArray(json.data)) {
+    } else if (json?.success && Array.isArray(json.data)) {
       provinces = json.data;
-    }
-
-    // Case 3: object → convert to array
-    else if (typeof json === "object") {
+    } else if (typeof json === "object") {
       provinces = Object.entries(json).map(([province, zones]) => ({
         province,
         zones: Array.isArray(zones) ? zones : [],
@@ -152,7 +143,6 @@ export const fetchProvinces = async () => {
   }
 };
 
-// In your customerUtil.js file
 export const fetchZonesByProvince = async (provinceName) => {
   try {
     if (!provinceName || provinceName.trim() === "") {
@@ -175,7 +165,6 @@ export const fetchZonesByProvince = async (provinceName) => {
     }
     
     const json = await res.json();
-    // Ensure zones is always array - handle different response formats
     let zones = [];
     
     if (Array.isArray(json)) {
@@ -214,7 +203,7 @@ export const EXCEL_CONFIG = {
     { key: "medicalRep", width: 40, header: "Medical Representative Name" },
     { key: "customerName", width: 55, header: "Customer Name in English" },
     { key: "businessType", width: 25, header: "Types of Business" },
-    { key: "customerPhoneNumber", width: 55, header: "Customer Phone Number" },
+    { key: "customerNumber", width: 20, header: "Customer Number" },
     { key: "customerAddress", width: 55, header: "Customer Address" },
     { key: "zone", width: 25, header: "Zone" },
     { key: "province", width: 25, header: "Province" },

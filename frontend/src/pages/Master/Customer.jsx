@@ -40,7 +40,7 @@ import {
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
-const customersPerPage = 10; // Changed to match backend default
+const customersPerPage = 10;
 
 /* ────────────────────── Custom hook for form ────────────────────── */
 const useCustomerForm = (initialCustomerCode = "") => {
@@ -60,7 +60,6 @@ const useCustomerForm = (initialCustomerCode = "") => {
   });
   const [errors, setErrors] = useState({});
   
-  // Helper to convert to title case for display
   const toTitleCase = (str) => {
     if (!str) return "";
     return str
@@ -70,7 +69,6 @@ const useCustomerForm = (initialCustomerCode = "") => {
       .join(" ");
   };
   
-  // Helper to convert to lowercase for saving
   const toLowerCase = (str) => {
     if (!str) return "";
     return str.toLowerCase();
@@ -82,14 +80,6 @@ const useCustomerForm = (initialCustomerCode = "") => {
       if (errors[name]) setErrors((prev) => ({ ...prev, [name]: "" }));
     },
     [errors]
-  );
-  
-  const handleDropdownChange = useCallback(
-    (field, option) => {
-      const value = option ? option.value : "";
-      handleChange(field, value);
-    },
-    [handleChange]
   );
   
   const handleNumericInput = useCallback(
@@ -138,7 +128,6 @@ const useCustomerForm = (initialCustomerCode = "") => {
     form,
     errors,
     handleChange,
-    handleDropdownChange,
     handleNumericInput,
     validateForm,
     resetForm,
@@ -148,7 +137,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
   };
 };
 
-/* ────────────────────── Main Component ────────────────────── */
+/* ──────── Main Component ──────── */
 const Customer = () => {
   const navigate = useNavigate();
   const [customers, setCustomers] = useState([]);
@@ -194,29 +183,15 @@ const Customer = () => {
     if (!dateString) return "--";
 
     try {
-      // If it's already in YYYY-MM-DD format
-      if (
-        typeof dateString === "string" &&
-        /^\d{4}-\d{2}-\d{2}$/.test(dateString)
-      ) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
         const parts = dateString.split("-");
         const year = parseInt(parts[0], 10);
         const month = parseInt(parts[1], 10) - 1;
         const day = parseInt(parts[2], 10);
 
         const monthNames = [
-          "Jan",
-          "Feb",
-          "Mar",
-          "Apr",
-          "May",
-          "Jun",
-          "Jul",
-          "Aug",
-          "Sep",
-          "Oct",
-          "Nov",
-          "Dec",
+          "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
         ];
         return `${day} ${monthNames[month]} ${year}`;
       }
@@ -245,25 +220,21 @@ const Customer = () => {
   useEffect(() => {
     fetchCustomers();
     fetchDropdownData();
-  }, [currentPage, searchTerm]); // Refetch when page or search changes
+  }, [currentPage, searchTerm]);
 
-  // Add debounced search effect
   useEffect(() => {
-    // Clear previous timeout
     if (searchTimeout) {
       clearTimeout(searchTimeout);
     }
     
-    // Set new timeout for search
     const timeout = setTimeout(() => {
       if (searchTerm !== "") {
-        setCurrentPage(1); // Reset to first page when searching
+        setCurrentPage(1);
       }
-    }, 500); // 500ms delay for search
+    }, 500);
 
     setSearchTimeout(timeout);
 
-    // Cleanup
     return () => {
       if (searchTimeout) {
         clearTimeout(searchTimeout);
@@ -323,7 +294,6 @@ const Customer = () => {
   const handleSearchChange = (e) => {
     const value = e.target.value;
     setSearchTerm(value);
-    // Don't reset page here, let the useEffect handle it with debounce
   };
 
   /* ──────── Selection ──────── */
@@ -372,7 +342,7 @@ const Customer = () => {
 
   const deleteCustomer = async (customer) => {
     const confirm = await confirmDialog({
-      text: `Are you sure you want to delete <b>${customer.name}</b>?`,
+      text: `Are you sure you want to delete <b>${customer.name}</b> (Code: ${customer.customerCode})?`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
@@ -433,11 +403,7 @@ const Customer = () => {
 
   const handleStatusToggle = async (id) => {
     try {
-      // Store original customers for rollback
-      const originalCustomers = [...customers];
-
-      // Find the customer to toggle
-      const customerToToggle = originalCustomers.find((c) => c._id === id);
+      const customerToToggle = customers.find((c) => c._id === id);
 
       if (!customerToToggle) {
         showToast("error", "Customer not found");
@@ -464,7 +430,6 @@ const Customer = () => {
         } successfully`
       );
     } catch (err) {
-      // Revert on error
       fetchCustomers();
       showToast("error", "Failed to update status");
     }
@@ -522,9 +487,7 @@ const Customer = () => {
       return;
     }
     try {
-      // Convert string fields to lowercase before sending
       const payload = {
-        customerCode: form.customerCode,
         date: form.date,
         medicalRepName: toLowerCase(form.medicalRepName),
         medicalRepId: form.medicalRepId,
@@ -568,26 +531,13 @@ const Customer = () => {
   const excelSerialToDateString = (serial) => {
     if (!serial && serial !== 0) return "";
 
-    // Handle both number and string numbers
     const num = typeof serial === "string" ? parseFloat(serial) : serial;
     if (isNaN(num)) return "";
 
-    // Excel date system: 1 = Jan 1, 1900 (with bug for Feb 29, 1900)
-    // Important: Excel incorrectly treats 1900 as a leap year
-    // So we need to adjust for the phantom day (Feb 29, 1900)
-
-    // If it's 60 or above, it's on or after the phantom Feb 29, 1900
-    // So we need to subtract 1 to skip that phantom day
     const adjustedNum = num >= 60 ? num - 1 : num;
-
-    // JavaScript Date: Jan 1, 1900 is serial 2 (because Jan 0, 1900 = serial 1)
-    // So we use Jan 0, 1900 as our base
-    const excelEpoch = new Date(1900, 0, 0); // Jan 0, 1900 (same as Dec 31, 1899)
-
-    // Calculate the date by adding days
+    const excelEpoch = new Date(1900, 0, 0);
     const date = new Date(excelEpoch.getTime() + (adjustedNum - 1) * 86400000);
 
-    // Format as YYYY-MM-DD
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, "0");
     const day = String(date.getDate()).padStart(2, "0");
@@ -597,23 +547,16 @@ const Customer = () => {
 
   const parseExcelDateValue = (dateValue) => {
     if (!dateValue && dateValue !== 0 && dateValue !== "") {
-      // Return today's date if no date provided
       const today = new Date();
       return formatDateToYYYYMMDD(today);
     }
 
-    // 1. If it's already a Date object (from XLSX with cellDates: true)
     if (dateValue instanceof Date) {
-      // Get the Excel serial number equivalent
-      const excelEpoch = new Date(1899, 11, 30); // Dec 30, 1899 (Excel's zero date)
+      const excelEpoch = new Date(1899, 11, 30);
       const diff = dateValue - excelEpoch;
       const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-
-      // Check if this is the Excel date bug (Feb 29, 1900)
       const adjustedDays = days >= 60 ? days + 1 : days;
-
-      // Reconstruct the date from the serial number
-      const excelZero = new Date(1899, 11, 31); // Dec 31, 1899 (Excel's day 1)
+      const excelZero = new Date(1899, 11, 31);
       const reconstructedDate = new Date(
         excelZero.getTime() + (adjustedDays - 1) * 86400000
       );
@@ -625,24 +568,20 @@ const Customer = () => {
       return `${year}-${month}-${day}`;
     }
 
-    // 2. If it's a number (Excel serial date)
     if (typeof dateValue === "number") {
       return excelSerialToDateString(dateValue);
     }
 
-    // 3. If it's a string
     if (typeof dateValue === "string") {
       const trimmed = dateValue.trim();
       if (!trimmed) return "";
 
-      // Check if it's a string number (e.g., "44378" for Jun 1, 2021)
       const asNumber = parseFloat(trimmed);
       if (!isNaN(asNumber)) {
         return excelSerialToDateString(asNumber);
       }
 
-      // Try to parse common date formats
-      // First try: MM/DD/YY or MM/DD/YYYY (common in US Excel)
+      // Try MM/DD/YY or MM/DD/YYYY
       const usFormatMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
       if (usFormatMatch) {
         let month = parseInt(usFormatMatch[1], 10);
@@ -658,11 +597,8 @@ const Customer = () => {
 
       // Try other formats
       const dateFormats = [
-        // "1-Jun-21", "01-Jun-2021"
         /^(\d{1,2})[-/\s]([A-Za-z]{3,})[-/\s](\d{2,4})$/i,
-        // "2021-06-01", "2021/06/01"
         /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/,
-        // "01-06-2021", "1-6-21" (DD-MM-YYYY)
         /^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/,
       ];
 
@@ -673,7 +609,6 @@ const Customer = () => {
             let year, month, day;
 
             if (format === dateFormats[0]) {
-              // "1-Jun-21" format
               day = parseInt(match[1], 10);
               const monthStr = match[2].toLowerCase().substring(0, 3);
               year = parseInt(match[3], 10);
@@ -681,29 +616,17 @@ const Customer = () => {
               if (year < 100) year += 2000;
 
               const monthMap = {
-                jan: 1,
-                feb: 2,
-                mar: 3,
-                apr: 4,
-                may: 5,
-                jun: 6,
-                jul: 7,
-                aug: 8,
-                sep: 9,
-                oct: 10,
-                nov: 11,
-                dec: 12,
+                jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+                jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
               };
 
               month = monthMap[monthStr];
               if (month === undefined) continue;
             } else if (format === dateFormats[1]) {
-              // "2021-06-01" format
               year = parseInt(match[1], 10);
               month = parseInt(match[2], 10);
               day = parseInt(match[3], 10);
             } else {
-              // "01-06-2021" format - assume DD-MM-YYYY (international)
               day = parseInt(match[1], 10);
               month = parseInt(match[2], 10);
               year = parseInt(match[3], 10);
@@ -719,11 +642,9 @@ const Customer = () => {
         }
       }
 
-      // Last resort: try JavaScript Date constructor
       try {
         const date = new Date(trimmed);
         if (!isNaN(date.getTime())) {
-          // For date strings with timezone, extract just the date
           const year = date.getFullYear();
           const month = String(date.getMonth() + 1).padStart(2, "0");
           const day = String(date.getDate()).padStart(2, "0");
@@ -734,7 +655,6 @@ const Customer = () => {
       }
     }
 
-    // Fallback: return today's date
     const today = new Date();
     return formatDateToYYYYMMDD(today);
   };
@@ -750,19 +670,17 @@ const Customer = () => {
         const data = new Uint8Array(evt.target.result);
         const workbook = XLSX.read(data, {
           type: "array",
-          cellDates: true, // Let XLSX try to parse dates
+          cellDates: true,
           cellNF: false,
           cellText: false,
         });
 
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
-
-        // Get ALL rows as they appear in Excel
         const rows = XLSX.utils.sheet_to_json(sheet, {
           header: 1,
           defval: "",
           blankrows: true,
-          raw: true, // Get raw values (numbers, dates)
+          raw: true,
         });
 
         if (!rows.length) {
@@ -770,16 +688,13 @@ const Customer = () => {
           return;
         }
 
-        // Find header row - check multiple columns for date header
         let headerIdx = -1;
         for (let i = 0; i < Math.min(rows.length, 10); i++) {
-          // Check the first column for "date"
           const firstCell = rows[i]?.[0]?.toString().trim().toLowerCase();
           if (firstCell === "date" || firstCell === "joining date") {
             headerIdx = i;
             break;
           }
-          // Also check other columns for date header
           for (let j = 0; j < rows[i]?.length; j++) {
             const cell = rows[i]?.[j]?.toString().trim().toLowerCase();
             if (cell === "date" || cell === "joining date") {
@@ -798,7 +713,6 @@ const Customer = () => {
         const headers = rows[headerIdx].map((h) => h.toString().trim());
         const dataRows = rows.slice(headerIdx + 1);
 
-        // Convert to objects
         const json = dataRows
           .map((row) => {
             const obj = {};
@@ -924,7 +838,7 @@ const Customer = () => {
           headers: {
             "Content-Type": "application/json",
           },
-          timeout: 300000, // 5 minutes timeout
+          timeout: 300000,
         }
       );
 
@@ -1152,8 +1066,8 @@ const Customer = () => {
                           checked={selected.some((s) => s.id === customer._id)}
                           onChange={() => toggleSelect(customer)}
                         />
-                        <span className="capitalize">
-                          {displayValue(customer.customerCode)}
+                        <span className="font-mono font-semibold text-blue-600">
+                          {customer.customerCode}
                         </span>
                       </div>
                     </td>
@@ -1330,7 +1244,7 @@ const Customer = () => {
             document.body
           )}
 
-        {/* ────────────────────── VIEW MODAL ────────────────────── */}
+        {/* VIEW MODAL */}
         {isViewModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
@@ -1345,8 +1259,8 @@ const Customer = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <p className="text-gray-700 font-medium">Customer Code</p>
-                    <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
-                      {displayValue(form.customerCode)}
+                    <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300 font-mono font-semibold text-blue-600">
+                      {form.customerCode}
                     </p>
                   </div>
                   <div>
@@ -1377,7 +1291,6 @@ const Customer = () => {
                       {displayValue(form.medicalRepName)}
                     </p>
                   </div>
-
                   <div>
                     <p className="text-gray-700 font-medium">Zone</p>
                     <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
@@ -1405,7 +1318,6 @@ const Customer = () => {
                       disabled
                     />
                   </div>
-                  {/* REMARKS (still after address) */}
                   <div className="md:col-span-2">
                     <p className="text-gray-700 font-medium">Remarks</p>
                     <textarea
@@ -1429,7 +1341,7 @@ const Customer = () => {
             document.body
           )}
 
-        {/* ────────────────────── EDIT MODAL ────────────────────── */}
+        {/* EDIT MODAL */}
         {isEditModalOpen &&
           ReactDOM.createPortal(
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
@@ -1446,15 +1358,17 @@ const Customer = () => {
                 <h2 className="text-xl font-semibold mb-4">Edit Customer</h2>
                 <form onSubmit={handleCustomerUpdate}>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* Customer Code */}
+                    {/* Customer Code (Read-only) */}
                     <div>
-                      <InputField
-                        label="Customer Code"
-                        name="customerCode"
-                        value={displayValue(form.customerCode)}
-                        disabled
-                        className="bg-gray-100 text-gray-700 border rounded px-3 py-2 border-gray-300"
-                      />
+                      <label className="block text-sm font-medium text-gray-600">
+                        Customer Code
+                      </label>
+                      <div className="bg-gray-100 text-gray-700 border rounded px-3 py-2 border-gray-300 font-mono font-semibold">
+                        {form.customerCode}
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Customer code cannot be changed
+                      </p>
                     </div>
 
                     {/* Name */}
@@ -1586,7 +1500,7 @@ const Customer = () => {
                       )}
                     </div>
 
-                
+                    {/* Address */}
                     <div className="md:col-span-2">
                       <label className="block text-sm font-medium text-gray-600">
                         Address
@@ -1602,7 +1516,7 @@ const Customer = () => {
                       />
                     </div>
 
-                    {/* REMARKS – after Address */}
+                    {/* Remarks */}
                     <div className="md:col-span-2">
                       <label className="block text-sm font-medium text-gray-600">
                         Remarks

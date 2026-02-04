@@ -326,8 +326,26 @@ const getCustomerByCode = async (customerCode, session = null) => {
       };
     }
 
+    // Clean the input
+    const cleanedCode = customerCode.trim();
+    
+    // Always convert to 5-digit format for lookup
+    // Extract digits from input
+    const digitsMatch = cleanedCode.match(/\d+/);
+    if (!digitsMatch) {
+      return {
+        success: false,
+        message: `Invalid customer code format: "${cleanedCode}"`,
+      };
+    }
+    
+    const digits = digitsMatch[0];
+    const normalizedCode = digits.padStart(5, '0');
+    
+    console.log(`Looking up customer: ${cleanedCode} -> ${normalizedCode}`);
+
     const query = Customer.findOne({
-      customerCode: customerCode.trim(),
+      customerCode: normalizedCode,
       enabled: true,
     });
 
@@ -340,7 +358,7 @@ const getCustomerByCode = async (customerCode, session = null) => {
     if (!customer) {
       return {
         success: false,
-        message: `Customer with code "${customerCode}" not found`,
+        message: `Customer with code "${cleanedCode}" (normalized to "${normalizedCode}") not found`,
       };
     }
 
@@ -353,6 +371,7 @@ const getCustomerByCode = async (customerCode, session = null) => {
       },
     };
   } catch (error) {
+    console.error(`Error fetching customer with code "${customerCode}":`, error);
     return {
       success: false,
       message: `Error fetching customer: ${error.message}`,
@@ -694,11 +713,11 @@ const restoreStockToReportInHand = async (productName, quantity) => {
 // ROUTES
 // ==========================================
 
-// ✅ MR CASH SYNC ENDPOINT - Recalculate from ALL sales
 router.post("/mrcash/sync-from-sales", async (req, res) => {
   try {
     console.log("🔄 Starting MR Cash synchronization from all sales...");
 
+    // ✅ Aggregate ALL paid amounts by MR
     const salesByMR = await SaleSummary.aggregate([
       {
         $match: {
@@ -711,6 +730,7 @@ router.post("/mrcash/sync-from-sales", async (req, res) => {
           _id: "$mrName",
           totalPaidAmount: { $sum: "$paidAmount" },
           invoiceCount: { $sum: 1 },
+          invoices: { $push: { invoiceNumber: "$invoiceNumber", paidAmount: "$paidAmount" } }
         },
       },
     ]);
@@ -727,12 +747,21 @@ router.post("/mrcash/sync-from-sales", async (req, res) => {
         const mrName = mrData._id;
         const totalCash = fixPrecision(mrData.totalPaidAmount);
 
+        console.log(`\n📋 Processing MR: ${mrName}`);
+        console.log(`   Total from ${mrData.invoiceCount} invoices: ${totalCash}`);
+        
+        // Debug: Print first 5 invoices
+        console.log(`   Sample invoices:`);
+        mrData.invoices.slice(0, 5).forEach((inv, idx) => {
+          console.log(`   ${idx + 1}. ${inv.invoiceNumber}: ₹${inv.paidAmount}`);
+        });
+
         const mr = await Staff.findOne({
           medicalRepName: { $regex: `^${mrName.trim()}$`, $options: "i" },
         }).session(session);
 
         if (!mr) {
-          console.warn(`⚠️ MR not found: ${mrName}`);
+          console.warn(`⚠️ MR not found in Staff: ${mrName}`);
           await session.abortTransaction();
           session.endSession();
           results.push({
@@ -746,6 +775,7 @@ router.post("/mrcash/sync-from-sales", async (req, res) => {
         let mrCash = await MRCash.findOne({ mrId: mr._id }).session(session);
 
         if (!mrCash) {
+          // Create new MR Cash record
           mrCash = new MRCash({
             mrId: mr._id,
             mrName: mr.medicalRepName,
@@ -756,8 +786,10 @@ router.post("/mrcash/sync-from-sales", async (req, res) => {
             isActive: true,
           });
         } else {
+          // Update existing MR Cash record
+          const previousCash = mrCash.currentCash;
           mrCash.currentCash = totalCash;
-          mrCash.notes = `Synced from ${mrData.invoiceCount} sales. Total: ${totalCash}`;
+          mrCash.notes = `Synced from ${mrData.invoiceCount} sales. Total: ${totalCash} (Previous: ${previousCash})`;
           mrCash.updatedAt = new Date();
         }
 
@@ -775,7 +807,7 @@ router.post("/mrcash/sync-from-sales", async (req, res) => {
         });
 
         console.log(
-          `✅ Synced: ${mr.medicalRepName} = $${totalCash} (${mrData.invoiceCount} invoices)`,
+          `✅ Synced: ${mr.medicalRepName} = ₹${totalCash} (${mrData.invoiceCount} invoices)`
         );
       } catch (error) {
         await session.abortTransaction();
@@ -795,7 +827,7 @@ router.post("/mrcash/sync-from-sales", async (req, res) => {
     const failCount = results.filter((r) => !r.success).length;
 
     console.log(
-      `✅ Sync complete: ${successCount} succeeded, ${failCount} failed`,
+      `\n✅ Sync complete: ${successCount} succeeded, ${failCount} failed`
     );
 
     return res.json({
@@ -983,8 +1015,9 @@ router.get("/import/progress/:sessionId", (req, res) => {
         total: progress.totalInvoices || 0,
         successful: progress.successful || 0,
         failed: progress.failed || 0,
-        merged: progress.mergedInvoices || 0,  // Add this
+        merged: progress.mergedInvoices || 0,
         skipped: progress.skippedDuplicates || 0,
+        duplicateProductsSkipped: progress.duplicateProductsSkipped || 0,  // ✅ NEW
         completed: progress.completed || false,
         startTime: progress.startTime,
         lastUpdated: progress.lastUpdated,
@@ -1023,24 +1056,26 @@ router.post("/import-with-stock-deduction", async (req, res) => {
     isImportInProgress = true;
     
     sessionId = `import_stock_deduction_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-   // In the router.post("/import-with-stock-deduction") route, update the progress object:
-importProgressMap.set(sessionId, {
-  sessionId,
-  totalInvoices: invoiceData.length,
-  processedInvoices: 0,
-  successful: 0,
-  failed: 0,
-  skippedDuplicates: 0,
-  mergedInvoices: 0,  // Add this
-  progressPercentage: 0,
-  startTime: Date.now(),
-  lastUpdated: Date.now(),
-  completed: false,
-  errors: [],
-  status: "initializing",
-  importType: "stock_deduction",
-  totalMRCashAdded: 0,
-});
+    
+    // Initialize progress tracking with duplicate product tracking
+    importProgressMap.set(sessionId, {
+      sessionId,
+      totalInvoices: invoiceData.length,
+      processedInvoices: 0,
+      successful: 0,
+      failed: 0,
+      skippedDuplicates: 0,
+      mergedInvoices: 0,
+      duplicateProductsSkipped: 0,  // ✅ NEW: Track duplicate products skipped
+      progressPercentage: 0,
+      startTime: Date.now(),
+      lastUpdated: Date.now(),
+      completed: false,
+      errors: [],
+      status: "initializing",
+      importType: "stock_deduction",
+      totalMRCashAdded: 0,
+    });
     
     console.log(`🚀 Starting import session: ${sessionId} with ${invoiceData.length} invoices`);
     
@@ -1068,7 +1103,7 @@ importProgressMap.set(sessionId, {
       message: "Import with stock deduction started",
       sessionId,
       totalInvoices: invoiceData.length,
-      note: "Stock will be deducted from ReportInHand and MR Cash will be updated for each paid sale",
+      note: "Stock will be deducted from ReportInHand and MR Cash will be updated for each paid sale. Duplicate products within the same invoice will be automatically skipped.",
       progressUrl: `/api/sales/import/progress/${sessionId}`,
       startTime: new Date().toISOString(),
     });
@@ -1084,128 +1119,8 @@ importProgressMap.set(sessionId, {
   }
 });
 
-const updateMRCashes = async (
-  mrName,
-  amount,
-  invoiceNumber,
-  date,
-  session,
-  isRefund = false
-) => {
-  try {
-    const cleanAmount = fixPrecision(Number(amount) || 0);
-    
-    console.log(`🔄 MR Cash Update - MR: ${mrName}, Amount: ${cleanAmount}, Invoice: ${invoiceNumber}, IsRefund: ${isRefund}`);
-    
-    if (cleanAmount === 0) {
-      console.log(`⏭️ Skipping MR Cash Update - Amount is 0 for invoice: ${invoiceNumber}`);
-      return { success: true, skipped: true, reason: "Amount is zero" };
-    }
-    
-    if (!mrName || mrName.trim() === "") {
-      throw new Error("medicalRepName is required to update MR Cash");
-    }
-    
-    // ✅ CORRECTED: Escape regex properly
-    const escapeForRegex = (text = "") => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    
-    const mr = await Staff.findOne({
-      medicalRepName: { 
-        $regex: `^${escapeForRegex(mrName.trim())}$`, 
-        $options: "i" 
-      },
-    }).session(session);
-    
-    if (!mr) {
-      throw new Error(`MR not found with name "${mrName}"`);
-    }
-    
-    console.log(`✅ MR Found: ${mr.medicalRepName} (ID: ${mr._id})`);
-    
-    let mrCash = await MRCash.findOne({ mrId: mr._id }).session(session);
-    
-    // ✅ CRITICAL FIX: For new records, start with the appropriate amount
-    if (!mrCash) {
-      console.log(`📝 Creating NEW MRCash record for MR: ${mr.medicalRepName}`);
-      
-      // CORRECTED LOGIC: Start with amount if sale, or 0 if refund (but we should track refunds separately)
-      const initialCash = isRefund ? 0 : cleanAmount;
-      // Note: If it's a refund and no record exists, it means MR hasn't collected any cash yet,
-      // so we shouldn't create a negative balance. Instead, we should create with 0.
-      
-      mrCash = new MRCash({
-        mrId: mr._id,
-        mrName: mr.medicalRepName,
-        currentCash: initialCash,
-        cashTransferredToAdmin: 0,
-        lastTransferDate: null,
-        notes: `Initial creation with invoice: ${invoiceNumber} (${isRefund ? 'Refund' : 'Sale'}: ${cleanAmount})`,
-        isActive: true,
-      });
-      
-      await mrCash.save({ session });
-      
-      console.log(`✅ Created NEW MRCash | Initial Cash: ${initialCash} (${isRefund ? 'Refund' : 'Sale'})`);
-      
-      return { 
-        success: true, 
-        mrCash, 
-        action: "created_new",
-        previousAmount: 0,
-        newAmount: initialCash
-      };
-    }
-    
-    // ✅ CORRECTED: Update existing MR Cash properly
-    const previousAmount = fixPrecision(mrCash.currentCash || 0);
-    let newCashAmount = previousAmount;
-    
-    if (isRefund) {
-      newCashAmount = fixPrecision(previousAmount - cleanAmount);
-      console.log(`💰 REFUND: ${previousAmount} - ${cleanAmount} = ${newCashAmount}`);
-    } else {
-      newCashAmount = fixPrecision(previousAmount + cleanAmount);
-      console.log(`💰 ADDING: ${previousAmount} + ${cleanAmount} = ${newCashAmount}`);
-    }
-    
-    mrCash.currentCash = newCashAmount;
-    
-    if (mrCash.currentCash < 0) {
-      console.warn(
-        `⚠️ Warning: MR ${mr.medicalRepName} cash balance went negative: ${mrCash.currentCash}`
-      );
-    }
-    
-    // Update notes
-    const transactionNote = isRefund
-      ? `Refund for invoice ${invoiceNumber}: -${cleanAmount}`
-      : `Sale invoice ${invoiceNumber}: +${cleanAmount}`;
-      
-    mrCash.notes = mrCash.notes
-      ? `${mrCash.notes}\n${transactionNote}`
-      : transactionNote;
-      
-    mrCash.updatedAt = new Date();
-    
-    await mrCash.save({ session });
-    
-    console.log(
-      `✅ MR Cash UPDATED | ${mr.medicalRepName} | Previous: ${previousAmount} | New: ${newCashAmount} | Change: ${isRefund ? '-' : '+'}${cleanAmount}`
-    );
-    
-    return {
-      success: true,
-      mrCash,
-      action: "updated_existing",
-      previousAmount: previousAmount,
-      newAmount: newCashAmount,
-      changeAmount: cleanAmount,
-    };
-  } catch (error) {
-    console.error("❌ Error updating MR Cash:", error.message);
-    return { success: false, error: error.message };
-  }
-};
+
+
 
 // Helper function to check if two invoices are exact duplicates
 const areInvoicesExactlySame = (invoice1, invoice2) => {
@@ -1543,7 +1458,6 @@ const processSingleInvoiceWithStockDeduction = async (invoiceData, index, skipDu
     };
   }
 };
-
 const processImportWithStockDeduction = async (
   sessionId,
   invoices,
@@ -1569,40 +1483,156 @@ const processImportWithStockDeduction = async (
   console.log(`🔧 Duplicate handling: ${skipDuplicates ? 'Skip exact duplicates, merge same invoice' : 'Allow all'}`);
   
   try {
-    // Process invoices ONE AT A TIME sequentially
+    // ✅ STEP 1: Group invoices by invoice number AND DEDUPLICATE products within same invoice
+    // ✅ CRITICAL FIX: Also track MR names per invoice for proper cash distribution
+    const groupedInvoices = new Map();
+    
     for (let i = 0; i < invoices.length; i++) {
       const invoice = invoices[i];
+      const invoiceNumber = invoice.invoiceNumber?.trim();
       
+      if (!invoiceNumber) {
+        errors.push({
+          row: i + 2,
+          invoiceNumber: "Unknown",
+          message: "Invoice number is required",
+          type: "validation_error",
+        });
+        failed++;
+        continue;
+      }
+      
+      if (!groupedInvoices.has(invoiceNumber)) {
+        // First occurrence of this invoice number - create new entry
+        groupedInvoices.set(invoiceNumber, {
+          ...invoice,
+          products: invoice.products || [],
+          _rowIndex: i,
+          // ✅ NEW: Track MR distribution for this invoice
+          _mrDistribution: new Map(), // Map<mrName, { products: [], totalAmount: 0 }>
+        });
+        
+        // ✅ Initialize MR distribution
+        const mrName = invoice.mrName?.trim() || "No MR Name Provided";
+        if (invoice.products && invoice.products.length > 0) {
+          groupedInvoices.get(invoiceNumber)._mrDistribution.set(mrName, {
+            products: [...invoice.products],
+            mrName: mrName,
+          });
+        }
+      } else {
+        // Invoice number already exists - merge products with deduplication
+        const existing = groupedInvoices.get(invoiceNumber);
+        const newMrName = invoice.mrName?.trim() || "No MR Name Provided";
+        
+        if (invoice.products && invoice.products.length > 0) {
+          // ✅ FIX: Check each new product for duplicates before adding
+          for (const newProduct of invoice.products) {
+            const productName = newProduct.productName?.trim();
+            const salesQty = fixPrecision(parseFloat(newProduct.salesQty) || 0);
+            const bonusQty = fixPrecision(parseFloat(newProduct.bonusQty) || 0);
+            const sellingPrice = fixPrecision(parseFloat(newProduct.sellingPrice) || 0);
+            const discount = fixPrecision(parseFloat(newProduct.discount) || 0);
+            
+            // Check if this exact product already exists in the grouped invoice
+            const isDuplicate = existing.products.some(existingProduct => {
+              const existingProductName = existingProduct.productName?.trim();
+              const existingSalesQty = fixPrecision(parseFloat(existingProduct.salesQty) || 0);
+              const existingBonusQty = fixPrecision(parseFloat(existingProduct.bonusQty) || 0);
+              const existingSellingPrice = fixPrecision(parseFloat(existingProduct.sellingPrice) || 0);
+              const existingDiscount = fixPrecision(parseFloat(existingProduct.discount) || 0);
+              
+              return (
+                existingProductName === productName &&
+                existingSalesQty === salesQty &&
+                existingBonusQty === bonusQty &&
+                existingSellingPrice === sellingPrice &&
+                existingDiscount === discount
+              );
+            });
+            
+            if (!isDuplicate) {
+              // This is a new product - add it
+              existing.products.push(newProduct);
+              
+              // ✅ NEW: Track which MR this product belongs to
+              if (!existing._mrDistribution.has(newMrName)) {
+                existing._mrDistribution.set(newMrName, {
+                  products: [],
+                  mrName: newMrName,
+                });
+              }
+              existing._mrDistribution.get(newMrName).products.push(newProduct);
+            } else {
+              // This is a duplicate - skip it and log
+              console.warn(
+                `⚠️ Row ${i + 2}: Skipping duplicate product in invoice ${invoiceNumber}: ` +
+                `${productName} (Qty: ${salesQty}, Price: ${sellingPrice})`
+              );
+              
+              if (!progress.duplicateProductsSkipped) {
+                progress.duplicateProductsSkipped = 0;
+              }
+              progress.duplicateProductsSkipped++;
+            }
+          }
+        }
+      }
+    }
+    
+    console.log(`📦 Grouped ${invoices.length} rows into ${groupedInvoices.size} unique invoices`);
+    if (progress.duplicateProductsSkipped > 0) {
+      console.log(`🗑️ Skipped ${progress.duplicateProductsSkipped} duplicate product entries`);
+    }
+    
+    // ✅ STEP 2: Update progress total to reflect unique invoices (not total rows)
+    progress.totalInvoices = groupedInvoices.size;
+    
+    // ✅ STEP 3: Process each unique invoice (MR Cash updated PER MR, not per invoice)
+    let processedCount = 0;
+    
+    for (const [invoiceNumber, groupedInvoice] of groupedInvoices) {
       try {
-        if (!invoice.invoiceNumber?.trim()) {
-          throw new Error("Invoice number is required");
+        // ✅ CRITICAL: Check if this invoice has multiple MRs
+        const mrCount = groupedInvoice._mrDistribution.size;
+        
+        if (mrCount > 1) {
+          console.warn(
+            `⚠️ Invoice ${invoiceNumber} has ${mrCount} different MRs! ` +
+            `MRs: ${Array.from(groupedInvoice._mrDistribution.keys()).join(', ')}`
+          );
         }
         
-        // Process the invoice with duplicate checking and merging
-        const result = await processSingleInvoiceWithStockDeduction(invoice, i, skipDuplicates);
+        // Process the invoice with MR-wise distribution
+        const result = await processSingleInvoiceWithMRDistribution(
+          groupedInvoice, 
+          groupedInvoice._rowIndex, 
+          skipDuplicates
+        );
         
         if (result.skipped) {
-          // This is an exact duplicate that was skipped
           skippedDuplicates++;
-          console.log(`⏭️ Skipped exact duplicate invoice: ${invoice.invoiceNumber} (${i + 1}/${invoices.length})`);
+          console.log(`⏭️ Skipped exact duplicate invoice: ${invoiceNumber} (${processedCount + 1}/${groupedInvoices.size})`);
         } else if (result.success) {
           if (result.action === "merged") {
-            // This invoice was merged with an existing one
             mergedInvoices++;
-            console.log(`🔄 Merged invoice: ${invoice.invoiceNumber} (${i + 1}/${invoices.length}) | Added ${result.addedProducts} products`);
+            console.log(`🔄 Merged invoice: ${invoiceNumber} (${processedCount + 1}/${groupedInvoices.size}) | Added ${result.addedProducts} products`);
             
-            // Track MR cash added from merge
-            if (result.paidAmount > 0) {
-              totalMRCashAdded = fixPrecision(totalMRCashAdded + result.paidAmount);
+            if (result.mrCashUpdates) {
+              for (const [mrName, amount] of Object.entries(result.mrCashUpdates)) {
+                totalMRCashAdded = fixPrecision(totalMRCashAdded + amount);
+                console.log(`  💰 MR Cash updated for ${mrName}: +${amount}`);
+              }
             }
           } else {
-            // This is a new invoice that was created
             successful++;
-            console.log(`✅ Created invoice: ${invoice.invoiceNumber} (${i + 1}/${invoices.length})`);
+            console.log(`✅ Created invoice: ${invoiceNumber} (${processedCount + 1}/${groupedInvoices.size})`);
             
-            // Track MR cash added
-            if (result.paidAmount > 0) {
-              totalMRCashAdded = fixPrecision(totalMRCashAdded + result.paidAmount);
+            if (result.mrCashUpdates) {
+              for (const [mrName, amount] of Object.entries(result.mrCashUpdates)) {
+                totalMRCashAdded = fixPrecision(totalMRCashAdded + amount);
+                console.log(`  💰 MR Cash updated for ${mrName}: +${amount}`);
+              }
             }
           }
         } else {
@@ -1610,28 +1640,30 @@ const processImportWithStockDeduction = async (
           if (result.error) {
             errors.push(result.error);
           }
-          console.log(`❌ Invoice ${invoice.invoiceNumber} failed (${i + 1}/${invoices.length})`);
+          console.log(`❌ Invoice ${invoiceNumber} failed (${processedCount + 1}/${groupedInvoices.size})`);
         }
       } catch (error) {
         failed++;
         errors.push({
-          row: i + 2,
-          invoiceNumber: invoice.invoiceNumber || "Unknown",
+          row: groupedInvoice._rowIndex + 2,
+          invoiceNumber: invoiceNumber || "Unknown",
           message: error.message,
           type: "unexpected_error",
           timestamp: new Date().toISOString(),
         });
-        console.log(`❌ Unexpected error for invoice ${invoice.invoiceNumber}: ${error.message}`);
+        console.log(`❌ Unexpected error for invoice ${invoiceNumber}: ${error.message}`);
       }
       
-      // Update progress after EACH invoice
-      progress.processedInvoices = i + 1;
+      processedCount++;
+      
+      // Update progress after EACH unique invoice
+      progress.processedInvoices = processedCount;
       progress.successful = successful;
       progress.failed = failed;
       progress.skippedDuplicates = skippedDuplicates;
       progress.mergedInvoices = mergedInvoices;
       progress.progressPercentage = Math.round(
-        ((i + 1) / progress.totalInvoices) * 100
+        (processedCount / groupedInvoices.size) * 100
       );
       progress.lastUpdated = Date.now();
     }
@@ -1645,6 +1677,9 @@ const processImportWithStockDeduction = async (
     
     console.log(`🎉 Import completed - Created: ${successful}, Merged: ${mergedInvoices}, Failed: ${failed}, Skipped (exact duplicates): ${skippedDuplicates}`);
     console.log(`💰 Total MR Cash Added: ${totalMRCashAdded}`);
+    if (progress.duplicateProductsSkipped > 0) {
+      console.log(`🗑️ Total duplicate products skipped during grouping: ${progress.duplicateProductsSkipped}`);
+    }
     
   } catch (error) {
     progress.status = "failed";
@@ -1658,6 +1693,488 @@ const processImportWithStockDeduction = async (
   }
 };
 
+// ✅ NEW FUNCTION: Process invoice with MR-wise distribution
+const processSingleInvoiceWithMRDistribution = async (invoiceData, index, skipDuplicates = true) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  
+  try {
+    if (!invoiceData.invoiceNumber?.trim()) {
+      throw new Error("Invoice number is required");
+    }
+    
+    // Check for existing invoice
+    const existingInvoice = await SaleSummary.findOne({
+      invoiceNumber: invoiceData.invoiceNumber.trim(),
+    }).session(session);
+    
+    if (existingInvoice) {
+      const mergeCheck = shouldMergeInvoices(existingInvoice, invoiceData);
+      
+      if (mergeCheck.isExactDuplicate && skipDuplicates) {
+        await session.abortTransaction();
+        await session.endSession();
+        return {
+          success: false,
+          skipped: true,
+          isExactDuplicate: true,
+          error: {
+            row: index + 2,
+            invoiceNumber: invoiceData.invoiceNumber,
+            message: `Exact duplicate invoice ${invoiceData.invoiceNumber} skipped`,
+            type: "duplicate_skipped",
+          },
+        };
+      } else if (mergeCheck.shouldMerge) {
+        console.log(`🔄 Merging products into existing invoice: ${invoiceData.invoiceNumber}`);
+        
+        const mergeResult = await mergeInvoiceProducts(existingInvoice, invoiceData, session);
+        
+        if (mergeResult.success) {
+          await session.commitTransaction();
+          await session.endSession();
+          
+          return {
+            success: true,
+            invoiceNumber: invoiceData.invoiceNumber,
+            action: "merged",
+            addedProducts: mergeResult.addedProducts,
+            paidAmount: mergeResult.addedPaidAmount,
+            mrCashUpdates: { [existingInvoice.mrName]: mergeResult.addedPaidAmount },
+          };
+        } else {
+          throw new Error(`Failed to merge invoice: ${mergeResult.error}`);
+        }
+      } else {
+        throw new Error(
+          `Invoice number ${invoiceData.invoiceNumber} already exists but cannot be merged: ${mergeCheck.reason || "Incompatible data"}`
+        );
+      }
+    }
+    
+    // ✅ NEW: Process invoice with MR-wise cash distribution
+    let customerName = invoiceData.customerName || "";
+    let customerId = invoiceData.customerId || null;
+    
+    if (invoiceData.customerCode && invoiceData.customerCode.trim() !== "") {
+      const customerResult = await getCustomerByCode(invoiceData.customerCode, session);
+      if (!customerResult.success) {
+        throw new Error(customerResult.message);
+      }
+      customerName = customerResult.customer.customerName;
+      customerId = customerResult.customer.customerId;
+    } else if (!customerName) {
+      throw new Error("Customer code or customer name is required");
+    }
+    
+    const processedProducts = [];
+    let totalAmount = 0;
+    const stockDeductionResults = [];
+    const mrCashDistribution = new Map(); // Track cash per MR
+    
+    // ✅ Process each product and track which MR it belongs to
+    for (const product of invoiceData.products || []) {
+      const productName = product.productName?.trim();
+      const salesQty = fixPrecision(parseFloat(product.salesQty) || 0);
+      const bonusQty = fixPrecision(parseFloat(product.bonusQty) || 0);
+      const totalQty = fixPrecision(salesQty + bonusQty);
+      
+      if (totalQty <= 0) continue;
+      
+      // Stock check and deduction
+      const stockItem = await ReportInHand.findOne({
+        productName: buildProductNameRegex(productName),
+      }).session(session);
+      
+      if (!stockItem) {
+        throw new Error(`Product "${productName}" not found in inventory`);
+      }
+      
+      const currentAvailableStock = fixPrecision(Number(stockItem.totalBoxes || 0));
+      
+      if (currentAvailableStock < totalQty) {
+        const shortage = fixPrecision(totalQty - currentAvailableStock);
+        throw new Error(
+          `Insufficient stock for ${productName}. Required: ${totalQty}, Available: ${currentAvailableStock}, Short by: ${shortage}`
+        );
+      }
+      
+      const productRecord = await Product.findOne({
+        productName: buildProductNameRegex(productName),
+      }).session(session);
+      
+      const lc = productRecord?.lc || 0;
+      const sellingPrice = fixPrecision(parseFloat(product.sellingPrice) || 0);
+      const amount = fixPrecision(sellingPrice * salesQty);
+      const discount = fixPrecision(parseFloat(product.discount) || 0);
+      const netSellingAmount = fixPrecision(amount - discount);
+      
+      processedProducts.push({
+        productName: productName,
+        salesQty,
+        bonusQty,
+        totalQty,
+        sellingPrice,
+        amount,
+        discount,
+        netSellingAmount,
+        averageUnitPrice: totalQty ? fixPrecision(netSellingAmount / totalQty) : 0,
+        lc,
+        profitLoss: fixPrecision((sellingPrice - lc) * salesQty),
+        isProductAccept: true,
+      });
+      
+      totalAmount = fixPrecision(totalAmount + netSellingAmount);
+      
+      // ✅ Track which MR this product belongs to
+      // Find the MR for this product from the distribution map
+      let productMR = invoiceData.mrName?.trim() || "No MR Name Provided";
+      
+      if (invoiceData._mrDistribution) {
+        for (const [mrName, mrData] of invoiceData._mrDistribution) {
+          const hasProduct = mrData.products.some(p => 
+            p.productName?.trim() === productName &&
+            fixPrecision(parseFloat(p.salesQty) || 0) === salesQty
+          );
+          if (hasProduct) {
+            productMR = mrName;
+            break;
+          }
+        }
+      }
+      
+      // Add to MR's cash distribution
+      if (!mrCashDistribution.has(productMR)) {
+        mrCashDistribution.set(productMR, 0);
+      }
+      mrCashDistribution.set(
+        productMR, 
+        fixPrecision(mrCashDistribution.get(productMR) + netSellingAmount)
+      );
+      
+      // Deduct stock
+      const deductionResult = await deductStockFromReportInHand(
+        productName, salesQty, bonusQty, invoiceData.invoiceNumber, session
+      );
+      
+      stockDeductionResults.push({ product: productName, ...deductionResult });
+      
+      if (!deductionResult.success) {
+        throw new Error(`Stock deduction failed for ${productName}: ${deductionResult.message}`);
+      }
+    }
+    
+    if (processedProducts.length === 0) {
+      throw new Error("No valid products found in invoice");
+    }
+    
+    const paymentStatus = mapPaymentStatus(invoiceData.paymentStatus);
+    let paidAmount = 0;
+    
+    // Calculate paid amount
+    if (paymentStatus === "Cash") {
+      paidAmount = totalAmount;
+    } else if (paymentStatus === "Partial Paid") {
+      paidAmount = fixPrecision(parseFloat(invoiceData.paidAmount) || 0);
+    } else {
+      paidAmount = 0;
+    }
+    
+    const dueAmount = fixPrecision(Math.max(0, totalAmount - paidAmount));
+    
+    // ✅ For the sale record, use the FIRST MR (or primary MR)
+    const primaryMR = invoiceData.mrName?.trim() || 
+                      (invoiceData._mrDistribution ? Array.from(invoiceData._mrDistribution.keys())[0] : "No MR Name Provided");
+    
+    const saleRecord = new SaleSummary({
+      recordingDate: invoiceData.recordingDate ? new Date(invoiceData.recordingDate) : new Date(),
+      invoiceNumber: invoiceData.invoiceNumber.trim(),
+      invoiceDate: invoiceData.invoiceDate ? new Date(invoiceData.invoiceDate) : new Date(),
+      mrName: primaryMR,
+      mrId: invoiceData.mrId || null,
+      customerName: customerName,
+      customerCode: invoiceData.customerCode || "",
+      customerId: customerId,
+      products: processedProducts,
+      creditDays: parseInt(invoiceData.creditDays) || 0,
+      dueDate: invoiceData.dueDate ? new Date(invoiceData.dueDate) : null,
+      deliveryDate: invoiceData.deliveryDate ? new Date(invoiceData.deliveryDate) : null,
+      paidAmount,
+      dueAmount,
+      totalAmount,
+      totalProfitLoss: fixPrecision(processedProducts.reduce((sum, p) => sum + (p.profitLoss || 0), 0)),
+      paymentStatus: paymentStatus,
+      remark: invoiceData.remark || "",
+      stockDeductionResults,
+      importSource: "excel_import_with_stock_deduction",
+      importTimestamp: new Date(),
+    });
+    
+    await saleRecord.save({ session });
+    
+    // ✅ CRITICAL: Update MR Cash for EACH MR proportionally
+    const mrCashUpdates = {};
+    
+    if (paidAmount > 0 && paymentStatus === "Cash") {
+      for (const [mrName, mrAmount] of mrCashDistribution) {
+        if (mrName && mrName.trim() && mrAmount > 0) {
+          console.log(`💵 Updating MR Cash for ${mrName}: ${mrAmount} (Invoice: ${invoiceData.invoiceNumber})`);
+          
+          const mrCashUpdate = await updateMRCashes(
+            mrName.trim(),
+            mrAmount,
+            invoiceData.invoiceNumber,
+            invoiceData.invoiceDate || new Date(),
+            session,
+            false
+          );
+          
+          if (mrCashUpdate.success) {
+            mrCashUpdates[mrName] = mrAmount;
+            console.log(`✅ MR Cash updated for ${mrName}: +${mrAmount}`);
+          } else if (!mrCashUpdate.skipped) {
+            console.error(`⚠️ Failed to update MR Cash for ${mrName}: ${mrCashUpdate.error}`);
+          }
+        }
+      }
+    }
+    
+    await session.commitTransaction();
+    await session.endSession();
+    
+    console.log(`✅ CREATED - Invoice: ${invoiceData.invoiceNumber} | Total: ${totalAmount} | Paid: ${paidAmount}`);
+    if (Object.keys(mrCashUpdates).length > 1) {
+      console.log(`  📊 MR Cash distributed to ${Object.keys(mrCashUpdates).length} MRs`);
+    }
+    
+    return {
+      success: true,
+      invoiceNumber: invoiceData.invoiceNumber,
+      stockDeductionResults,
+      paidAmount: paidAmount,
+      action: "created",
+      mrCashUpdates: mrCashUpdates,
+    };
+  } catch (error) {
+    console.error(`❌ ERROR - Invoice ${invoiceData.invoiceNumber}:`, error.message);
+    
+    try {
+      if (session.transaction?.isActive) {
+        await session.abortTransaction();
+      }
+    } catch (abortError) {
+      console.error("Error aborting transaction:", abortError);
+    }
+    
+    try {
+      await session.endSession();
+    } catch (endError) {
+      console.error("Error ending session:", endError);
+    }
+    
+    return {
+      success: false,
+      error: {
+        row: index + 2,
+        invoiceNumber: invoiceData.invoiceNumber || "Unknown",
+        message: error.message,
+        type: "processing_error",
+      },
+    };
+  }
+};
+
+
+const updateMRCashes = async (
+  mrName,
+  amount,
+  invoiceNumber,
+  date,
+  session,
+  isRefund = false
+) => {
+  try {
+    const cleanAmount = fixPrecision(Number(amount) || 0);
+    
+    console.log(`🔄 MR Cash Update - MR: ${mrName}, Amount: ${cleanAmount}, Invoice: ${invoiceNumber}, IsRefund: ${isRefund}`);
+    
+    if (cleanAmount === 0) {
+      console.log(`⏭️ Skipping MR Cash Update - Amount is 0 for invoice: ${invoiceNumber}`);
+      return { success: true, skipped: true, reason: "Amount is zero" };
+    }
+    
+    if (!mrName || mrName.trim() === "") {
+      throw new Error("medicalRepName is required to update MR Cash");
+    }
+    
+    // ✅ Escape regex properly
+    const escapeForRegex = (text = "") => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    
+    const mr = await Staff.findOne({
+      medicalRepName: { 
+        $regex: `^${escapeForRegex(mrName.trim())}$`, 
+        $options: "i" 
+      },
+    }).session(session);
+    
+    if (!mr) {
+      throw new Error(`MR not found with name "${mrName}"`);
+    }
+    
+    console.log(`✅ MR Found: ${mr.medicalRepName} (ID: ${mr._id})`);
+    
+    let mrCash = await MRCash.findOne({ mrId: mr._id }).session(session);
+    
+    // ✅ CRITICAL FIX: For new records, properly handle the first transaction
+    if (!mrCash) {
+      console.log(`📝 Creating NEW MRCash record for MR: ${mr.medicalRepName}`);
+      
+      // ✅ KEY FIX: Start with the correct initial amount
+      // For the first sale, set currentCash to the amount
+      // For the first refund (shouldn't happen but handle it), set to 0
+      let initialCash = 0;
+      if (!isRefund) {
+        initialCash = cleanAmount;
+      }
+      
+      mrCash = new MRCash({
+        mrId: mr._id,
+        mrName: mr.medicalRepName,
+        currentCash: initialCash,
+        cashTransferredToAdmin: 0,
+        lastTransferDate: null,
+        notes: `Initial creation with invoice: ${invoiceNumber} (${isRefund ? 'Refund' : 'Sale'}: ${cleanAmount})`,
+        isActive: true,
+      });
+      
+      await mrCash.save({ session });
+      
+      console.log(`✅ Created NEW MRCash | Initial Cash: ${initialCash}`);
+      
+      return { 
+        success: true, 
+        mrCash, 
+        action: "created_new",
+        previousAmount: 0,
+        newAmount: initialCash
+      };
+    }
+    
+    // ✅ For existing MR Cash records, add or subtract the amount
+    const previousAmount = fixPrecision(mrCash.currentCash || 0);
+    let newCashAmount = previousAmount;
+    
+    if (isRefund) {
+      newCashAmount = fixPrecision(previousAmount - cleanAmount);
+      console.log(`💰 REFUND: ${previousAmount} - ${cleanAmount} = ${newCashAmount}`);
+    } else {
+      newCashAmount = fixPrecision(previousAmount + cleanAmount);
+      console.log(`💰 ADDING: ${previousAmount} + ${cleanAmount} = ${newCashAmount}`);
+    }
+    
+    mrCash.currentCash = newCashAmount;
+    
+    if (mrCash.currentCash < 0) {
+      console.warn(
+        `⚠️ Warning: MR ${mr.medicalRepName} cash balance went negative: ${mrCash.currentCash}`
+      );
+    }
+    
+    // Update notes
+    const transactionNote = isRefund
+      ? `Refund for invoice ${invoiceNumber}: -${cleanAmount}`
+      : `Sale invoice ${invoiceNumber}: +${cleanAmount}`;
+      
+    mrCash.notes = mrCash.notes
+      ? `${mrCash.notes}\n${transactionNote}`
+      : transactionNote;
+      
+    mrCash.updatedAt = new Date();
+    
+    await mrCash.save({ session });
+    
+    console.log(
+      `✅ MR Cash UPDATED | ${mr.medicalRepName} | Previous: ${previousAmount} | New: ${newCashAmount} | Change: ${isRefund ? '-' : '+'}${cleanAmount}`
+    );
+    
+    return {
+      success: true,
+      mrCash,
+      action: "updated_existing",
+      previousAmount: previousAmount,
+      newAmount: newCashAmount,
+      changeAmount: cleanAmount,
+    };
+  } catch (error) {
+    console.error("❌ Error updating MR Cash:", error.message);
+    return { success: false, error: error.message };
+  }
+};
+
+
+
+router.post("/mrcash/fix-duplicates", async (req, res) => {
+  try {
+    console.log("🔧 Starting one-time MR Cash duplicate fix...");
+    
+    // The affected invoices and their excess amounts
+    const duplicateAdjustments = [
+      { invoice: '995120', excess: 160.00 },  // Sirmox cl 625 counted 2x
+      { invoice: '995279', excess: 95.00 },   // Sirmox cl 1000 counted 2x
+      { invoice: '995692', excess: 20.00 },   // Digekam counted 2x
+      { invoice: '995898', excess: 105.00 },  // Ecocid 20 + Lidokam counted 2x
+      { invoice: '996102', excess: 59.00 },   // Multiple products counted 2x
+      { invoice: '996104', excess: 60.00 },   // Multiple products counted 2x
+      { invoice: '996127', excess: 118.80 },  // Lotekam 0.5 counted 2x
+      { invoice: '996659', excess: 50.00 },   // Ecofloxcin 200 counted 2x
+    ];
+    
+    const totalExcess = duplicateAdjustments.reduce((sum, item) => sum + item.excess, 0);
+    
+    console.log(`Total excess to be removed: ₹${totalExcess.toFixed(2)}`);
+    
+    // Find and update Yav Phanda's MR Cash
+    const mrCash = await MRCash.findOne({ mrName: /Yav Phanda/i });
+    
+    if (!mrCash) {
+      return res.status(404).json({
+        success: false,
+        message: "MR Cash record for Yav Phanda not found",
+      });
+    }
+    
+    const oldCash = mrCash.currentCash;
+    const newCash = fixPrecision(oldCash - totalExcess);
+    
+    mrCash.currentCash = newCash;
+    mrCash.notes = mrCash.notes 
+      ? `${mrCash.notes}\n\nOne-time fix: Removed ₹${totalExcess.toFixed(2)} excess from duplicate products (${new Date().toISOString()})`
+      : `One-time fix: Removed ₹${totalExcess.toFixed(2)} excess from duplicate products (${new Date().toISOString()})`;
+    
+    await mrCash.save();
+    
+    console.log(`✅ Fixed MR Cash for Yav Phanda: ${oldCash} → ${newCash}`);
+    
+    res.json({
+      success: true,
+      message: "MR Cash duplicates fixed successfully",
+      details: {
+        mrName: mrCash.mrName,
+        oldCash: oldCash,
+        newCash: newCash,
+        excessRemoved: totalExcess,
+        affectedInvoices: duplicateAdjustments,
+      },
+    });
+  } catch (error) {
+    console.error("❌ Error fixing MR Cash duplicates:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fix MR Cash duplicates",
+      error: error.message,
+    });
+  }
+});
 //
 router.get("/import/failed/:sessionId", (req, res) => {
   try {
