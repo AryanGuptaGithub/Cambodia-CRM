@@ -17,7 +17,8 @@ const transactionSchema = new mongoose.Schema(
       ref: "Destination",
       required: function() {
         // Required for: deposit, withdraw, remittance, payment outward
-        return ['deposit', 'withdraw', 'remittance', 'payment outward'].includes(this.transactionType);
+        const categoryName = this.transactionType?.toLowerCase() || '';
+        return ['deposit', 'withdraw', 'remittance', 'payment outward'].includes(categoryName);
       },
       default: null,
     },
@@ -25,8 +26,9 @@ const transactionSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Destination",
       required: function() {
-        // Required for: deposit, withdraw, payment inward, sales
-        return ['deposit', 'withdraw', 'payment inward', 'sale'].includes(this.transactionType);
+        // Required for: deposit, withdraw, payment inward, cash sale, credit collection
+        const categoryName = this.transactionType?.toLowerCase() || '';
+        return ['deposit', 'withdraw', 'payment inward', 'cash sale', 'credit collection'].includes(categoryName);
       },
       default: null,
     },
@@ -35,7 +37,8 @@ const transactionSchema = new mongoose.Schema(
       ref: "Supplier",
       required: function() {
         // Required for: payment inward, remittance, payment outward
-        return ['payment inward', 'remittance', 'payment outward'].includes(this.transactionType);
+        const categoryName = this.transactionType?.toLowerCase() || '';
+        return ['payment inward', 'remittance', 'payment outward'].includes(categoryName);
       },
       default: null,
     },
@@ -49,7 +52,11 @@ const transactionSchema = new mongoose.Schema(
     },
     customerName: {
       type: String,
-      required: false,
+      required: function() {
+        // Required for: cash sale, credit collection
+        const categoryName = this.transactionType?.toLowerCase() || '';
+        return ['cash sale', 'credit collection'].includes(categoryName);
+      },
       trim: true,
     },
     customerAddress: {
@@ -66,11 +73,26 @@ const transactionSchema = new mongoose.Schema(
       type: Number,
       default: 0,
       min: 0,
+      validate: {
+        validator: function(value) {
+          // Exchange loss cannot be greater than amount
+          return value <= this.amount;
+        },
+        message: 'Exchange loss cannot be greater than amount'
+      }
     },
     finalAmount: {
       type: Number,
       required: true,
       min: 0,
+      validate: {
+        validator: function(value) {
+          // finalAmount should equal amount - exchangeLoss
+          const expected = this.amount - (this.exchangeLoss || 0);
+          return Math.abs(value - expected) < 0.01; // Allow small floating point differences
+        },
+        message: 'Final amount must equal amount minus exchange loss'
+      }
     },
     accountType: {
       type: String,
@@ -95,7 +117,6 @@ const transactionSchema = new mongoose.Schema(
         'remittance', 
         'payment inward', 
         'payment outward',
-        'sale',
         'cash sale',
         'credit collection'
       ],
@@ -105,11 +126,32 @@ const transactionSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     },
+    importBatchId: {
+      type: String,
+      required: false,
+    },
+    importStatus: {
+      type: String,
+      enum: ['pending', 'imported', 'error'],
+      default: 'imported'
+    },
+    importErrors: {
+      type: [String],
+      default: []
+    }
   },
   {
     timestamps: true,
   }
 );
+
+// Middleware to calculate finalAmount before saving
+transactionSchema.pre('save', function(next) {
+  if (this.isModified('amount') || this.isModified('exchangeLoss')) {
+    this.finalAmount = this.amount - (this.exchangeLoss || 0);
+  }
+  next();
+});
 
 // Virtual to get category name
 transactionSchema.virtual('categoryName').get(function() {
@@ -124,6 +166,7 @@ transactionSchema.index({ transactionType: 1 });
 transactionSchema.index({ source: 1 });
 transactionSchema.index({ destination: 1 });
 transactionSchema.index({ supplier: 1 });
+transactionSchema.index({ importBatchId: 1 });
 
 // Ensure virtual fields are serialized
 transactionSchema.set('toJSON', { virtuals: true });

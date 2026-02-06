@@ -8,6 +8,8 @@ import {
   Edit,
   Eye,
   Settings,
+  Upload,
+  FileSpreadsheet,
 } from "lucide-react";
 import ReactDOM from "react-dom";
 import axios from "axios";
@@ -16,7 +18,9 @@ import { showToast } from "../../utils/toast";
 import { confirmDialog } from "../../utils/confirmationDialog";
 import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
 import { formatDateToReadable } from "../../utils/dateUtil.js";
-import SearchableDropdown from "../../components/common/SearchableDropdown"; // Add this import
+import SearchableDropdown from "../../components/common/SearchableDropdown";
+import TransactionExcelDownload from "../../excels/TransactionExcelDownload.jsx";
+import * as XLSX from "xlsx";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const ITEMS_PER_PAGE = 7;
@@ -72,7 +76,7 @@ const parseDateFromInput = (dateString) => {
         "Dec",
       ];
       const monthIndex = monthNames.findIndex(
-        (m) => m.toLowerCase() === month.toLowerCase()
+        (m) => m.toLowerCase() === month.toLowerCase(),
       );
 
       if (monthIndex !== -1) {
@@ -137,7 +141,7 @@ const useDropdownOptions = () => {
 
       // Fetch category options
       const categoryResponse = await axios.get(
-        `${backendUrl}/api/accounts/category-type`
+        `${backendUrl}/api/accounts/category-type`,
       );
 
       const categories = categoryResponse.data.map((cat) => ({
@@ -148,7 +152,7 @@ const useDropdownOptions = () => {
 
       // Fetch destination options
       const destinationResponse = await axios.get(
-        `${backendUrl}/api/accounts/destinations`
+        `${backendUrl}/api/accounts/destinations`,
       );
 
       const destinations = destinationResponse.data.map((dest) => ({
@@ -249,8 +253,8 @@ const CustomDropdown = ({
         {selectedOption
           ? selectedOption.label
           : options.length === 0
-          ? "Loading..."
-          : placeholder || "Select an option"}
+            ? "Loading..."
+            : placeholder || "Select an option"}
       </button>
 
       {isOpen && !disabled && (
@@ -310,7 +314,7 @@ const useInvoiceOptions = (categoryName = "") => {
     if (loading) {
       return [{ value: "", label: "Loading invoices...", disabled: true }];
     }
-    
+
     if (error || sales.length === 0) {
       return [{ value: "", label: "No invoices available", disabled: true }];
     }
@@ -320,26 +324,32 @@ const useInvoiceOptions = (categoryName = "") => {
 
     // Get the category name to understand the context
     const categoryNameLower = categoryName?.toLowerCase() || "";
-    
+
     if (categoryNameLower.includes("cash sale")) {
       // Filter for Cash Sale: invoices with payment status "cash" or "paid"
-      filteredSales = sales.filter(sale => {
+      filteredSales = sales.filter((sale) => {
         const paymentStatus = sale.paymentStatus?.toLowerCase() || "";
         return paymentStatus === "cash" || paymentStatus === "paid";
       });
     } else if (categoryNameLower.includes("credit collection")) {
       // Filter for Credit Collection: invoices with payment status "credit" or "pending"
-      filteredSales = sales.filter(sale => {
+      filteredSales = sales.filter((sale) => {
         const paymentStatus = sale.paymentStatus?.toLowerCase() || "";
-        return paymentStatus === "credit" || paymentStatus === "pending" || 
-               paymentStatus === "unpaid" || paymentStatus === "due";
+        return (
+          paymentStatus === "credit" ||
+          paymentStatus === "pending" ||
+          paymentStatus === "unpaid" ||
+          paymentStatus === "due"
+        );
       });
     }
     // If no category specified or doesn't require filtering, show all
 
     // Remove duplicates and format options
     const uniqueInvoices = [
-      ...new Set(filteredSales.map((sale) => sale.invoiceNumber).filter(Boolean)),
+      ...new Set(
+        filteredSales.map((sale) => sale.invoiceNumber).filter(Boolean),
+      ),
     ];
 
     const options = [
@@ -358,20 +368,24 @@ const useInvoiceOptions = (categoryName = "") => {
     if (!categoryName) return sales;
 
     const categoryNameLower = categoryName.toLowerCase();
-    
+
     if (categoryNameLower.includes("cash sale")) {
-      return sales.filter(sale => {
+      return sales.filter((sale) => {
         const paymentStatus = sale.paymentStatus?.toLowerCase() || "";
         return paymentStatus === "cash" || paymentStatus === "paid";
       });
     } else if (categoryNameLower.includes("credit collection")) {
-      return sales.filter(sale => {
+      return sales.filter((sale) => {
         const paymentStatus = sale.paymentStatus?.toLowerCase() || "";
-        return paymentStatus === "credit" || paymentStatus === "pending" || 
-               paymentStatus === "unpaid" || paymentStatus === "due";
+        return (
+          paymentStatus === "credit" ||
+          paymentStatus === "pending" ||
+          paymentStatus === "unpaid" ||
+          paymentStatus === "due"
+        );
       });
     }
-    
+
     return sales;
   }, [sales, categoryName]);
 
@@ -408,7 +422,9 @@ const AddTransactionModal = ({
   // Get category name for filtering
   const getCategoryName = useMemo(() => {
     if (!form.categoryType) return "";
-    const category = categoryOptions.find((cat) => cat.value === form.categoryType);
+    const category = categoryOptions.find(
+      (cat) => cat.value === form.categoryType,
+    );
     return category?.label || "";
   }, [form.categoryType, categoryOptions]);
 
@@ -424,7 +440,10 @@ const AddTransactionModal = ({
   // Memoized helper functions
   const requiresSupplier = useMemo(() => {
     const categoryName = getCategoryName.toLowerCase();
-    return categoryName.includes("payment inward") || categoryName.includes("remittance");
+    return (
+      categoryName.includes("payment inward") ||
+      categoryName.includes("remittance")
+    );
   }, [getCategoryName]);
 
   const isRemittance = useMemo(() => {
@@ -444,7 +463,9 @@ const AddTransactionModal = ({
 
   const isDepositOrWithdraw = useMemo(() => {
     const categoryName = getCategoryName.toLowerCase();
-    return categoryName.includes("withdraw") || categoryName.includes("deposit");
+    return (
+      categoryName.includes("withdraw") || categoryName.includes("deposit")
+    );
   }, [getCategoryName]);
 
   const isDeposit = useMemo(() => {
@@ -460,22 +481,31 @@ const AddTransactionModal = ({
   // Check if category requires invoice dropdown
   const requiresInvoiceDropdown = useMemo(() => {
     const categoryName = getCategoryName.toLowerCase();
-    return categoryName.includes("cash sale") || categoryName.includes("credit collection");
+    return (
+      categoryName.includes("cash sale") ||
+      categoryName.includes("credit collection")
+    );
   }, [getCategoryName]);
 
   // Check if category requires invoice fields (text input)
   const requiresInvoiceFields = useMemo(() => {
     if (!form.categoryType) return false;
     const categoryName = getCategoryName.toLowerCase();
-    
+
     // Invoice fields for sales-related categories (except those with dropdown)
     return (
-      !isDepositOrWithdraw && 
-      !requiresSupplier && 
+      !isDepositOrWithdraw &&
+      !requiresSupplier &&
       !isPaymentOutward &&
       !requiresInvoiceDropdown
     );
-  }, [getCategoryName, isDepositOrWithdraw, requiresSupplier, isPaymentOutward, requiresInvoiceDropdown]);
+  }, [
+    getCategoryName,
+    isDepositOrWithdraw,
+    requiresSupplier,
+    isPaymentOutward,
+    requiresInvoiceDropdown,
+  ]);
 
   // Get filtered source options (exclude destination account for deposit/withdraw)
   const getFilteredSourceOptions = useMemo(() => {
@@ -485,7 +515,7 @@ const AddTransactionModal = ({
 
     // For deposit/withdraw, exclude the selected destination account from source options
     return sourceOptions.filter(
-      (source) => !form.destination || source.value !== form.destination
+      (source) => !form.destination || source.value !== form.destination,
     );
   }, [sourceOptions, form.destination, isDepositOrWithdraw]);
 
@@ -497,7 +527,7 @@ const AddTransactionModal = ({
 
     // For deposit/withdraw, exclude the selected source account from destination options
     return destinationOptions.filter(
-      (destination) => !form.source || destination.value !== form.source
+      (destination) => !form.source || destination.value !== form.source,
     );
   }, [destinationOptions, form.source, isDepositOrWithdraw]);
 
@@ -554,9 +584,7 @@ const AddTransactionModal = ({
           options: sourceOptions,
           layout: "half",
         });
-      }
-      
-      else if (isPaymentInward) {
+      } else if (isPaymentInward) {
         baseFields.splice(2, 0, {
           key: "destination",
           label: "Destination Account",
@@ -647,13 +675,7 @@ const AddTransactionModal = ({
       if (requiresInvoiceDropdown) {
         const categoryName = getCategoryName.toLowerCase();
         let paymentStatusNote = "";
-        
-        // if (categoryName.includes("cash sale")) {
-        //   paymentStatusNote = "(Only invoices with 'Cash' or 'Paid' status)";
-        // } else if (categoryName.includes("credit collection")) {
-        //   paymentStatusNote = "(Only invoices with 'Credit' or 'Pending' status)";
-        // }
-        
+
         baseFields.splice(1, 0, {
           key: "invoiceNumber",
           label: `Invoice Number ${paymentStatusNote}`,
@@ -662,7 +684,7 @@ const AddTransactionModal = ({
           options: invoiceOptions,
           layout: "half",
         });
-      } 
+      }
       // For other sales categories: use text input
       else if (requiresInvoiceFields) {
         baseFields.splice(1, 0, {
@@ -673,7 +695,7 @@ const AddTransactionModal = ({
           layout: "half",
         });
       }
-      
+
       // Add destination account for invoice-based categories
       if (requiresInvoiceDropdown || requiresInvoiceFields) {
         baseFields.splice(2, 0, {
@@ -712,7 +734,7 @@ const AddTransactionModal = ({
             required: false,
             layout: "half",
             disabled: true,
-          }
+          },
         );
       }
     }
@@ -787,7 +809,7 @@ const AddTransactionModal = ({
         setOriginalAmount(0);
       }
       setErrors({});
-      
+
       // Refetch sales when modal opens
       refetchSales();
     }
@@ -811,7 +833,7 @@ const AddTransactionModal = ({
   useEffect(() => {
     if (form.source) {
       const selectedSource = sourceOptions.find(
-        (option) => option.value === form.source
+        (option) => option.value === form.source,
       );
       if (selectedSource) {
         setSourceAccountBalance(selectedSource.totalAmount || 0);
@@ -833,7 +855,11 @@ const AddTransactionModal = ({
         }
 
         // Reset invoice fields when category changes to non-invoice categories
-        if (!requiresInvoiceFields && !requiresInvoiceDropdown && newForm.invoiceNumber) {
+        if (
+          !requiresInvoiceFields &&
+          !requiresInvoiceDropdown &&
+          newForm.invoiceNumber
+        ) {
           newForm.invoiceNumber = "";
           newForm.invoiceDate = "";
           newForm.customerName = "";
@@ -861,13 +887,15 @@ const AddTransactionModal = ({
   // Find sale data by invoice number
   const findSaleByInvoice = (invoiceNumber) => {
     // First check filtered sales (already filtered by payment status)
-    let sale = filteredSales.find((sale) => sale.invoiceNumber === invoiceNumber);
-    
+    let sale = filteredSales.find(
+      (sale) => sale.invoiceNumber === invoiceNumber,
+    );
+
     // If not found in filtered sales, check all sales (for edit mode)
     if (!sale) {
       sale = sales.find((sale) => sale.invoiceNumber === invoiceNumber);
     }
-    
+
     return sale;
   };
 
@@ -887,19 +915,20 @@ const AddTransactionModal = ({
 
     try {
       setIsFetchingSales(true);
-      
+
       // For Cash Sale and Credit Collection: get data from filtered sales
       if (requiresInvoiceDropdown) {
         const saleRecord = findSaleByInvoice(invoiceNumber);
-        
+
         if (saleRecord) {
           // Check if invoice already exists in current data
-          const existingTransaction = checkInvoiceExistsInCurrentData(invoiceNumber);
-          
+          const existingTransaction =
+            checkInvoiceExistsInCurrentData(invoiceNumber);
+
           if (existingTransaction) {
             showToast(
               "error",
-              `Invoice number ${invoiceNumber} already has a transaction`
+              `Invoice number ${invoiceNumber} already has a transaction`,
             );
             setForm((prev) => ({
               ...prev,
@@ -926,22 +955,36 @@ const AddTransactionModal = ({
           setInvoiceDataFetched(true);
         } else {
           // Check if invoice exists but doesn't match payment status filter
-          const allSaleRecord = sales.find((s) => s.invoiceNumber === invoiceNumber);
+          const allSaleRecord = sales.find(
+            (s) => s.invoiceNumber === invoiceNumber,
+          );
           if (allSaleRecord) {
             const paymentStatus = allSaleRecord.paymentStatus || "Unknown";
             const categoryName = getCategoryName.toLowerCase();
-            
+
             if (categoryName.includes("cash sale")) {
-              showToast("error", `Invoice ${invoiceNumber} has payment status "${paymentStatus}". Cash Sale requires invoices with "Cash" or "Paid" status.`);
+              showToast(
+                "error",
+                `Invoice ${invoiceNumber} has payment status "${paymentStatus}". Cash Sale requires invoices with "Cash" or "Paid" status.`,
+              );
             } else if (categoryName.includes("credit collection")) {
-              showToast("error", `Invoice ${invoiceNumber} has payment status "${paymentStatus}". Credit Collection requires invoices with "Credit" or "Pending" status.`);
+              showToast(
+                "error",
+                `Invoice ${invoiceNumber} has payment status "${paymentStatus}". Credit Collection requires invoices with "Credit" or "Pending" status.`,
+              );
             } else {
-              showToast("error", `Invoice ${invoiceNumber} not available for ${getCategoryName}`);
+              showToast(
+                "error",
+                `Invoice ${invoiceNumber} not available for ${getCategoryName}`,
+              );
             }
           } else {
-            showToast("error", `Invoice ${invoiceNumber} not found in sales records`);
+            showToast(
+              "error",
+              `Invoice ${invoiceNumber} not found in sales records`,
+            );
           }
-          
+
           setForm((prev) => ({
             ...prev,
             invoiceDate: "",
@@ -951,23 +994,23 @@ const AddTransactionModal = ({
           }));
           setInvoiceDataFetched(false);
         }
-      } 
+      }
       // For other invoice-based categories: use API call
       else if (requiresInvoiceFields) {
         const salesResponse = await axios.get(
-          `${backendUrl}/api/accounts/alternative?invoiceNumber=${invoiceNumber}`
+          `${backendUrl}/api/accounts/alternative?invoiceNumber=${invoiceNumber}`,
         );
         const salesData = salesResponse.data;
 
         if (salesData.data && salesData.data.length > 0) {
           const existingTransaction = currentData.find(
-            (item) => item.invoiceNumber === invoiceNumber
+            (item) => item.invoiceNumber === invoiceNumber,
           );
 
           if (existingTransaction) {
             showToast(
               "error",
-              `Invoice number ${invoiceNumber} already has a transaction with amount $${existingTransaction.amount}`
+              `Invoice number ${invoiceNumber} already has a transaction with amount $${existingTransaction.amount}`,
             );
             setForm((prev) => ({
               ...prev,
@@ -1068,7 +1111,7 @@ const AddTransactionModal = ({
     // When source changes, update source account balance
     if (field === "source" && value) {
       const selectedSource = sourceOptions.find(
-        (option) => option.value === value
+        (option) => option.value === value,
       );
       if (selectedSource) {
         setSourceAccountBalance(selectedSource.totalAmount || 0);
@@ -1094,7 +1137,7 @@ const AddTransactionModal = ({
         setErrors((prev) => ({
           ...prev,
           amount: `Amount cannot exceed available balance of $${availableBalance.toFixed(
-            2
+            2,
           )}`,
         }));
       } else if (errors.amount) {
@@ -1140,9 +1183,8 @@ const AddTransactionModal = ({
       if (field.key === "amount" && form[field.key]) {
         const amountValue = parseFloat(form[field.key]);
         if (isNaN(amountValue) || amountValue <= 0) {
-          newErrors[
-            field.key
-          ] = `${field.label} must be a valid positive number`;
+          newErrors[field.key] =
+            `${field.label} must be a valid positive number`;
         }
 
         // For deposit/withdraw transactions, validate against available balance
@@ -1150,11 +1192,10 @@ const AddTransactionModal = ({
           const availableBalance = getAvailableBalanceForUpdate();
 
           if (amountValue > availableBalance) {
-            newErrors[
-              field.key
-            ] = `Amount cannot exceed available balance of $${availableBalance.toFixed(
-              2
-            )}`;
+            newErrors[field.key] =
+              `Amount cannot exceed available balance of $${availableBalance.toFixed(
+                2,
+              )}`;
           }
         }
       }
@@ -1165,9 +1206,8 @@ const AddTransactionModal = ({
         const amountValue = parseFloat(form.amount) || 0;
 
         if (isNaN(exchangeLossValue) || exchangeLossValue < 0) {
-          newErrors[
-            field.key
-          ] = `${field.label} must be a valid positive number`;
+          newErrors[field.key] =
+            `${field.label} must be a valid positive number`;
         }
 
         if (exchangeLossValue > amountValue) {
@@ -1239,12 +1279,12 @@ const AddTransactionModal = ({
       if (isEdit && editData) {
         response = await axios.put(
           `${backendUrl}/api/transaction/${editData._id}`,
-          transactionData
+          transactionData,
         );
       } else {
         response = await axios.post(
           `${backendUrl}/api/transaction`,
-          transactionData
+          transactionData,
         );
       }
 
@@ -1256,7 +1296,7 @@ const AddTransactionModal = ({
       console.error("Transaction submission error:", err);
       alert(
         "Failed to submit transaction: " +
-          (err.response?.data?.message || err.message)
+          (err.response?.data?.message || err.message),
       );
     }
   };
@@ -1281,7 +1321,7 @@ const AddTransactionModal = ({
           setErrors((prev) => ({
             ...prev,
             amount: `Amount cannot exceed available balance of $${availableBalance.toFixed(
-              2
+              2,
             )}`,
           }));
           return; // Don't update the value if it exceeds the balance
@@ -1348,7 +1388,9 @@ const AddTransactionModal = ({
               loading={salesLoading}
             />
             {isFetchingSales && (
-              <div className="mt-1 text-xs text-gray-500">Fetching invoice details...</div>
+              <div className="mt-1 text-xs text-gray-500">
+                Fetching invoice details...
+              </div>
             )}
           </div>
         );
@@ -1514,7 +1556,355 @@ const AddTransactionModal = ({
         </form>
       </div>
     </div>,
-    document.body
+    document.body,
+  );
+};
+
+// ImportExcelModal Component - Update the template download section
+const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
+  const [uploading, setUploading] = useState(false);
+  const [importSummary, setImportSummary] = useState(null);
+  const [step, setStep] = useState(1); // 1: Upload, 2: Preview, 3: Summary
+  const [importFile, setImportFile] = useState(null);
+  const [importPreview, setImportPreview] = useState([]);
+  const fileInputRef = useRef(null);
+
+  // Function to download template from backend
+  const downloadTemplate = () => {
+    // Construct the URL with query parameters
+    const templateUrl = `${backendUrl}/api/transaction/import-template?accountType=${encodeURIComponent(activeTab)}`;
+
+    // Create a temporary anchor element
+    const link = document.createElement("a");
+    link.href = templateUrl;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.download = `transaction-import-template-${activeTab.toLowerCase().replace(/\s+/g, "-")}.xlsx`;
+
+    // Append to body, click, and remove
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    // Show success message
+    showToast("success", "Template download started");
+  };
+
+  // Handle file upload
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Check file type
+    if (!file.name.match(/\.(xlsx|xls|csv)$/i)) {
+      showToast("error", "Please upload Excel or CSV files only");
+      return;
+    }
+
+    setImportFile(file);
+
+    // Read and preview the file
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const data = new Uint8Array(event.target.result);
+      const workbook = XLSX.read(data, { type: "array" });
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const jsonData = XLSX.utils.sheet_to_json(firstSheet);
+
+      // Preview first 5 rows
+      setImportPreview(jsonData.slice(0, 5));
+      setStep(2);
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  // Handle import
+  const handleImport = async () => {
+    if (!importFile) {
+      showToast("error", "Please select a file first");
+      return;
+    }
+
+    setUploading(true);
+    const formData = new FormData();
+    formData.append("file", importFile);
+    formData.append("accountType", activeTab);
+
+    try {
+      const response = await axios.post(
+        `${backendUrl}/api/transaction/import`,
+        formData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        },
+      );
+
+      if (response.data.success) {
+        setImportSummary(response.data.summary);
+        setStep(3);
+        showToast("success", "Import completed successfully");
+      }
+    } catch (error) {
+      console.error("Import error:", error);
+      showToast(
+        "error",
+        error.response?.data?.message || "Failed to import transactions",
+      );
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleClose = () => {
+    setStep(1);
+    setImportFile(null);
+    setImportPreview([]);
+    setImportSummary(null);
+    onClose();
+    if (onImportComplete) {
+      onImportComplete();
+    }
+  };
+
+  const resetImport = () => {
+    setStep(1);
+    setImportFile(null);
+    setImportPreview([]);
+    setImportSummary(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return ReactDOM.createPortal(
+    <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+      <div
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={handleClose}
+      />
+      <div className="bg-white rounded-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto relative z-10">
+        <div className="flex items-center justify-between p-6 border-b">
+          <h2 className="text-xl font-semibold text-gray-800">
+            Import Transactions - {activeTab}
+          </h2>
+          <button
+            onClick={handleClose}
+            className="p-2 hover:bg-gray-200 rounded-lg transition-colors cursor-pointer"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="p-6">
+          {/* Step 1: Upload */}
+          {step === 1 && (
+            <div className="text-center">
+              <div className="mb-6">
+                <FileSpreadsheet className="mx-auto text-gray-400" size={48} />
+                <h3 className="text-lg font-semibold mt-4 mb-2">
+                  Upload Excel File
+                </h3>
+                <p className="text-gray-600 mb-4">
+                  Upload an Excel file with transaction data. Download the
+                  template for reference.
+                </p>
+
+                {/* Download Template Button - UPDATED */}
+                <div className="mb-6">
+                  <button
+                    onClick={downloadTemplate}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer"
+                  >
+                    <Download size={16} />
+                    Download Template
+                  </button>
+                  <p className="text-xs text-gray-500 mt-2">
+                    Template includes all required fields and category-specific
+                    formatting
+                  </p>
+                </div>
+              </div>
+
+              <div
+                className="border-2 border-dashed border-gray-300 rounded-lg p-8 hover:border-indigo-400 transition-colors cursor-pointer"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Upload className="mx-auto text-gray-400 mb-4" size={32} />
+                <p className="text-gray-700 mb-2">
+                  Click to upload or drag and drop
+                </p>
+                <p className="text-gray-500 text-sm">
+                  Excel (.xlsx, .xls) or CSV files only
+                </p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
+              </div>
+
+              {importFile && (
+                <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                  <p className="text-green-700">
+                    Selected: {importFile.name} (
+                    {(importFile.size / 1024).toFixed(2)} KB)
+                  </p>
+                </div>
+              )}
+
+              <div className="mt-8 text-left">
+                <h4 className="font-semibold mb-2">Expected Columns:</h4>
+                <div className="text-sm text-gray-600 grid grid-cols-2 gap-2">
+                  <div>• Invoice Number* (Required)</div>
+                  <div>• Category Type* (Required)</div>
+                  <div>• Date* (YYYY-MM-DD) (Required)</div>
+                  <div>• Amount* (Required)</div>
+                  <div>• Source Account (Conditional)</div>
+                  <div>• Destination Account (Conditional)</div>
+                  <div>• Supplier Name (Conditional)</div>
+                  <div>• Remarks (Optional)</div>
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  * = Required field. Conditional fields depend on category
+                  type.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Step 2: Preview */}
+          {step === 2 && (
+            <div>
+              <h3 className="text-lg font-semibold mb-4">Preview Data</h3>
+              <p className="text-gray-600 mb-4">
+                Preview of first 5 rows from your file:
+              </p>
+
+              <div className="overflow-x-auto mb-6">
+                <table className="w-full border-collapse bg-white rounded-lg overflow-hidden shadow-sm">
+                  <thead className="bg-gray-100">
+                    <tr>
+                      {importPreview.length > 0 &&
+                        Object.keys(importPreview[0]).map((key) => (
+                          <th
+                            key={key}
+                            className="p-3 text-left text-sm font-medium"
+                          >
+                            {key}
+                          </th>
+                        ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {importPreview.map((row, index) => (
+                      <tr key={index} className="border-b hover:bg-gray-50">
+                        {Object.values(row).map((value, idx) => (
+                          <td key={idx} className="p-3 text-sm">
+                            {String(value)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex justify-between">
+                <button
+                  onClick={resetImport}
+                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
+                >
+                  Back
+                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={resetImport}
+                    className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleImport}
+                    disabled={uploading}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    {uploading ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                        Importing...
+                      </>
+                    ) : (
+                      "Confirm Import"
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Step 3: Summary */}
+          {step === 3 && importSummary && (
+            <div>
+              <h3 className="text-lg font-semibold mb-4 text-green-600">
+                Import Successful!
+              </h3>
+
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="text-center p-3 bg-white rounded-lg">
+                    <div className="text-2xl font-bold text-green-600">
+                      {importSummary.successCount || 0}
+                    </div>
+                    <div className="text-sm text-gray-600">Successful</div>
+                  </div>
+                  <div className="text-center p-3 bg-white rounded-lg">
+                    <div className="text-2xl font-bold text-red-600">
+                      {importSummary.errorCount || 0}
+                    </div>
+                    <div className="text-sm text-gray-600">Failed</div>
+                  </div>
+                </div>
+
+                {importSummary.errors && importSummary.errors.length > 0 && (
+                  <div className="mt-4">
+                    <h4 className="font-semibold text-red-600 mb-2">Errors:</h4>
+                    <div className="max-h-40 overflow-y-auto">
+                      {importSummary.errors.map((error, idx) => (
+                        <div key={idx} className="text-sm text-red-500 mb-1">
+                          • Row {error.row}: {error.message}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={resetImport}
+                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
+                >
+                  Import Another File
+                </button>
+                <button
+                  onClick={handleClose}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 cursor-pointer"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 };
 
@@ -1523,8 +1913,10 @@ const CashAndBank = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [exportLoading, setExportLoading] = useState(false);
+  const [importLoading, setImportLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [data, setData] = useState([]);
   const [selected, setSelected] = useState([]);
   const [editingTransaction, setEditingTransaction] = useState(null);
@@ -1638,7 +2030,7 @@ const CashAndBank = () => {
         dbName: "actions",
       },
     ],
-    []
+    [],
   );
 
   // Required columns that cannot be removed
@@ -1653,7 +2045,7 @@ const CashAndBank = () => {
   const removableColumns = useMemo(() => {
     return allFields.filter(
       (item) =>
-        tableColumns.includes(item.id) && !requiredColumns.includes(item.id)
+        tableColumns.includes(item.id) && !requiredColumns.includes(item.id),
     );
   }, [allFields, tableColumns]);
 
@@ -1701,7 +2093,7 @@ const CashAndBank = () => {
     } else {
       // Remove selected columns from table (except required ones)
       const newColumns = tableColumns.filter(
-        (id) => !selectedItems.includes(id) || requiredColumns.includes(id)
+        (id) => !selectedItems.includes(id) || requiredColumns.includes(id),
       );
       setTableColumns(newColumns);
     }
@@ -1780,7 +2172,7 @@ const CashAndBank = () => {
 
         // ✅ Find totalAmount from destinations array
         const matchingDestination = destinations.find(
-          (dest) => dest.name.toLowerCase() === activeTab.toLowerCase()
+          (dest) => dest.name.toLowerCase() === activeTab.toLowerCase(),
         );
 
         const totalAmount = matchingDestination?.totalAmount || 0;
@@ -1822,7 +2214,7 @@ const CashAndBank = () => {
       if (isEdit && editingTransaction) {
         const response = await axios.put(
           `${backendUrl}/api/transaction/${editingTransaction._id}`,
-          transactionData
+          transactionData,
         );
 
         if (response.data.success) {
@@ -1863,7 +2255,7 @@ const CashAndBank = () => {
 
     try {
       const response = await axios.delete(
-        `${backendUrl}/api/transaction/${transaction._id}`
+        `${backendUrl}/api/transaction/${transaction._id}`,
       );
 
       if (response.data.success) {
@@ -1900,7 +2292,7 @@ const CashAndBank = () => {
 
       showToast(
         "success",
-        `${selected.length} transaction(s) deleted successfully`
+        `${selected.length} transaction(s) deleted successfully`,
       );
       setSelected([]);
       fetchTransactions();
@@ -1916,7 +2308,7 @@ const CashAndBank = () => {
     setSelected((prev) =>
       prev.some((s) => s === item._id)
         ? prev.filter((s) => s !== item._id)
-        : [...prev, item._id]
+        : [...prev, item._id],
     );
   };
 
@@ -1993,19 +2385,19 @@ const CashAndBank = () => {
             isNegativeDisplay
               ? "text-red-600" // Red color for money going out
               : isPositiveDisplay
-              ? "text-green-700" // Green color for money coming in
-              : value >= 0
-              ? "text-green-700"
-              : "text-red-600"
+                ? "text-green-700" // Green color for money coming in
+                : value >= 0
+                  ? "text-green-700"
+                  : "text-red-600"
           }`}
         >
           {isNegativeDisplay
             ? "-"
             : isPositiveDisplay
-            ? "+"
-            : value >= 0
-            ? "+"
-            : ""}
+              ? "+"
+              : value >= 0
+                ? "+"
+                : ""}
           {Math.abs(value || 0).toFixed(2)}
         </span>
       );
@@ -2061,7 +2453,7 @@ const CashAndBank = () => {
         "download",
         `transactions_${activeTab}_${
           new Date().toISOString().split("T")[0]
-        }.csv`
+        }.csv`,
       );
       document.body.appendChild(link);
       link.click();
@@ -2146,6 +2538,14 @@ const CashAndBank = () => {
               <Plus size={18} /> Add New Transaction
             </button>
 
+            <button
+              onClick={() => setIsImportModalOpen(true)}
+              disabled={importLoading}
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50"
+            >
+              <Upload size={18} /> Import Excel
+            </button>
+
             {selected.length > 0 && (
               <button
                 onClick={handleDeleteSelected}
@@ -2167,7 +2567,7 @@ const CashAndBank = () => {
             <button
               onClick={handleExport}
               disabled={exportLoading || currentData.length === 0}
-              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50"
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50"
             >
               <Download size={18} />
               {exportLoading ? "Exporting..." : "Export"}
@@ -2286,8 +2686,8 @@ const CashAndBank = () => {
                     {loading
                       ? "Loading transactions..."
                       : searchTerm
-                      ? "No transactions match your search."
-                      : "No transactions found."}
+                        ? "No transactions match your search."
+                        : "No transactions found."}
                   </td>
                 </tr>
               ) : (
@@ -2356,7 +2756,7 @@ const CashAndBank = () => {
                   >
                     {page}
                   </button>
-                )
+                ),
               )}
               <button
                 onClick={() =>
@@ -2467,7 +2867,7 @@ const CashAndBank = () => {
                           <div className="grid grid-cols-2 gap-3 text-gray-400 text-sm">
                             {allFields
                               .filter((field) =>
-                                requiredColumns.includes(field.id)
+                                requiredColumns.includes(field.id),
                               )
                               .map((field) => (
                                 <div
@@ -2521,7 +2921,7 @@ const CashAndBank = () => {
                 </div>
               </div>
             </div>,
-            document.body
+            document.body,
           )}
 
         <AddTransactionModal
@@ -2553,6 +2953,16 @@ const CashAndBank = () => {
           destinationOptions={destinationOptions}
           supplierOptions={supplierOptions}
           currentData={currentData}
+        />
+
+        <ImportExcelModal
+          isOpen={isImportModalOpen}
+          onClose={() => setIsImportModalOpen(false)}
+          activeTab={activeTab}
+          onImportComplete={() => {
+            fetchTransactions(); // Refresh data after import
+            refetchDropdownOptions(); // Refresh dropdown options
+          }}
         />
       </div>
     </div>

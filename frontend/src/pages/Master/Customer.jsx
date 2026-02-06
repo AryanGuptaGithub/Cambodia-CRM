@@ -42,6 +42,13 @@ const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 const customersPerPage = 10;
 
+/* ──────── Helper Functions ──────── */
+function capitalizeFirstLetter(str) {
+  if (!str) return "";
+  str = str.toString();
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+}
+
 /* ────────────────────── Custom hook for form ────────────────────── */
 const useCustomerForm = (initialCustomerCode = "") => {
   const [form, setForm] = useState({
@@ -76,6 +83,10 @@ const useCustomerForm = (initialCustomerCode = "") => {
 
   const handleChange = useCallback(
     (name, value) => {
+      // Special handling for name field to capitalize first letter
+      if (name === "name") {
+        value = capitalizeFirstLetter(value);
+      }
       setForm((prev) => ({ ...prev, [name]: value }));
       if (errors[name]) setErrors((prev) => ({ ...prev, [name]: "" }));
     },
@@ -387,7 +398,7 @@ const Customer = () => {
         date: customer.date || "",
         medicalRepName: customer.medicalRepName || "",
         medicalRepId: actualMrId,
-        name: customer.name || "",
+        name: capitalizeFirstLetter(customer.name || ""), // Apply capitalizeFirstLetter here
         typeOfBusiness: customer.typeOfBusiness || "",
         customerNumber: customer.customerNumber || "",
         address: customer.address || "",
@@ -491,7 +502,7 @@ const Customer = () => {
         date: form.date,
         medicalRepName: toLowerCase(form.medicalRepName),
         medicalRepId: form.medicalRepId,
-        name: toLowerCase(form.name),
+        name: form.name, // Already capitalized by handleChange
         typeOfBusiness: toLowerCase(form.typeOfBusiness),
         customerNumber: form.customerNumber,
         address: toLowerCase(form.address),
@@ -813,7 +824,13 @@ const Customer = () => {
           return;
         }
 
-        setParsedData(validData);
+        // Apply capitalizeFirstLetter to imported customer names
+        const formattedData = validData.map(item => ({
+          ...item,
+          name: capitalizeFirstLetter(item.name)
+        }));
+
+        setParsedData(formattedData);
       } catch (err) {
         console.error("Error parsing file:", err);
         showToast("error", "Failed to parse file: " + err.message);
@@ -1071,8 +1088,8 @@ const Customer = () => {
                         </span>
                       </div>
                     </td>
-                    <td className="p-3 capitalize">
-                      {displayValue(customer.name)}
+                    <td className="p-3">
+                      {capitalizeFirstLetter(customer.name)} {/* Use capitalizeFirstLetter here */}
                     </td>
                     <td className="p-3 capitalize">
                       {displayValue(customer.typeOfBusiness)}
@@ -1265,8 +1282,8 @@ const Customer = () => {
                   </div>
                   <div>
                     <p className="text-gray-700 font-medium">Name</p>
-                    <p className="capitalize bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
-                      {displayValue(form.name)}
+                    <p className="bg-gray-100 rounded-lg px-3 py-2 border border-gray-300">
+                      {capitalizeFirstLetter(form.name)} {/* Use capitalizeFirstLetter here */}
                     </p>
                   </div>
                   <div>
@@ -1381,7 +1398,7 @@ const Customer = () => {
                         value={form.name || ""}
                         onChange={(e) => handleChange("name", e.target.value)}
                         error={errors.name}
-                        className="capitalize px-3 py-2 border-gray-300 border rounded-lg w-full"
+                        className="px-3 py-2 border-gray-300 border rounded-lg w-full"
                         placeholder="Enter customer name"
                       />
                       {errors.name && (
@@ -1389,6 +1406,9 @@ const Customer = () => {
                           {errors.name}
                         </p>
                       )}
+                      <p className="text-xs text-gray-500 mt-1">
+                        First letter will be automatically capitalized
+                      </p>
                     </div>
 
                     {/* Customer Number */}

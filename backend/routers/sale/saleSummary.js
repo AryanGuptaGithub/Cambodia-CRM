@@ -9,6 +9,7 @@ import PaymentStatus from "../../models/paymentStatus.js";
 import Product from "../../models/projectManger/product.js";
 import StockAdjustment from "../../models/stock/stockAdjustment.js";
 
+
 const router = express.Router();
 const importProgressMap = new Map();
 let isImportInProgress = false;
@@ -1001,10 +1002,7 @@ router.get("/import/progress/:sessionId", (req, res) => {
   try {
     const progress = importProgressMap.get(req.params.sessionId);
     if (!progress) {
-      return res.status(404).json({
-        success: false,
-        message: "Session not found",
-      });
+      return res.status(404).json({ success: false, message: "Session not found" });
     }
 
     res.json({
@@ -1015,19 +1013,54 @@ router.get("/import/progress/:sessionId", (req, res) => {
         total: progress.totalInvoices || 0,
         successful: progress.successful || 0,
         failed: progress.failed || 0,
-        merged: progress.mergedInvoices || 0,
-        skipped: progress.skippedDuplicates || 0,
-        duplicateProductsSkipped: progress.duplicateProductsSkipped || 0,  // ✅ NEW
+        duplicateProductsSkipped: progress.duplicateProductsSkipped || 0,
         completed: progress.completed || false,
-        startTime: progress.startTime,
-        lastUpdated: progress.lastUpdated,
+        status: progress.status,
         errors: progress.errors || [],
       },
     });
   } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to fetch progress" });
+  }
+});
+
+router.post("/validate-mr", async (req, res) => {
+  try {
+    const { mrNames } = req.body;
+    
+    if (!mrNames || !Array.isArray(mrNames)) {
+      return res.status(400).json({
+        success: false,
+        message: "MR names array required"
+      });
+    }
+
+    const results = await Promise.all(
+      mrNames.map(async (mrName) => {
+        const validation = await validateMR(mrName);
+        return {
+          mrName,
+          valid: validation.success,
+          message: validation.message
+        };
+      })
+    );
+
+    const invalidMRs = results.filter(r => !r.valid);
+
+    res.json({
+      success: invalidMRs.length === 0,
+      results,
+      invalidMRs,
+      message: invalidMRs.length > 0 
+        ? `${invalidMRs.length} invalid MR(s) found`
+        : 'All MRs valid'
+    });
+  } catch (error) {
     res.status(500).json({
       success: false,
-      message: "Failed to fetch progress",
+      message: "Validation failed",
+      error: error.message
     });
   }
 });
@@ -1035,92 +1068,70 @@ router.get("/import/progress/:sessionId", (req, res) => {
 router.post("/import-with-stock-deduction", async (req, res) => {
   let sessionId = null;
   try {
-    const { invoices, skipDuplicates = true } = req.body;
+    const { invoices } = req.body;
     const invoiceData = Array.isArray(invoices) ? invoices : [];
     
     if (!invoiceData.length) {
-      return res.status(400).json({
-        success: false,
-        message: "No invoices provided",
-      });
+      return res.status(400).json({ success: false, message: "No invoices provided" });
     }
     
     if (isImportInProgress) {
       return res.status(429).json({
         success: false,
-        message: "Another import is already in progress. Please wait.",
+        message: "Another import in progress",
         retryAfter: 30,
       });
     }
     
     isImportInProgress = true;
     
-    sessionId = `import_stock_deduction_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    sessionId = `import_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
-    // Initialize progress tracking with duplicate product tracking
     importProgressMap.set(sessionId, {
       sessionId,
       totalInvoices: invoiceData.length,
       processedInvoices: 0,
       successful: 0,
       failed: 0,
-      skippedDuplicates: 0,
-      mergedInvoices: 0,
-      duplicateProductsSkipped: 0,  // ✅ NEW: Track duplicate products skipped
+      duplicateProductsSkipped: 0,
       progressPercentage: 0,
       startTime: Date.now(),
       lastUpdated: Date.now(),
       completed: false,
       errors: [],
       status: "initializing",
-      importType: "stock_deduction",
       totalMRCashAdded: 0,
     });
     
-    console.log(`🚀 Starting import session: ${sessionId} with ${invoiceData.length} invoices`);
-    
-    processImportWithStockDeduction(sessionId, invoiceData, skipDuplicates)
+    processImport(sessionId, invoiceData)
       .catch((error) => {
         const progress = importProgressMap.get(sessionId);
         if (progress) {
           progress.status = "failed";
           progress.errors.push({
-            message: "Import process failed unexpectedly",
+            message: "Import failed",
             error: error.message,
             timestamp: new Date().toISOString(),
           });
-          progress.lastUpdated = Date.now();
         }
-        console.error(`💥 Import process failed unexpectedly: ${error.message}`);
       })
       .finally(() => {
         isImportInProgress = false;
-        console.log(`🏁 Import session ${sessionId} finalized`);
       });
     
     res.json({
       success: true,
-      message: "Import with stock deduction started",
+      message: "Import started",
       sessionId,
       totalInvoices: invoiceData.length,
-      note: "Stock will be deducted from ReportInHand and MR Cash will be updated for each paid sale. Duplicate products within the same invoice will be automatically skipped.",
       progressUrl: `/api/sales/import/progress/${sessionId}`,
-      startTime: new Date().toISOString(),
     });
   } catch (error) {
     if (sessionId) importProgressMap.delete(sessionId);
     isImportInProgress = false;
-    console.error(`❌ Failed to start import: ${error.message}`);
-    res.status(500).json({
-      success: false,
-      message: "Import failed to start",
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: "Import failed", error: error.message });
   }
 });
-
-
-
 
 // Helper function to check if two invoices are exact duplicates
 const areInvoicesExactlySame = (invoice1, invoice2) => {
@@ -1458,242 +1469,8 @@ const processSingleInvoiceWithStockDeduction = async (invoiceData, index, skipDu
     };
   }
 };
-const processImportWithStockDeduction = async (
-  sessionId,
-  invoices,
-  skipDuplicates = true
-) => {
-  const progress = importProgressMap.get(sessionId);
-  if (!progress) {
-    return;
-  }
-  
-  const errors = [];
-  let successful = 0;
-  let failed = 0;
-  let skippedDuplicates = 0;
-  let mergedInvoices = 0;
-  let totalMRCashAdded = 0;
-  
-  progress.status = "processing";
-  progress.startTime = Date.now();
-  progress.lastUpdated = Date.now();
-  
-  console.log(`🚀 Starting import process - Total Invoices: ${invoices.length}`);
-  console.log(`🔧 Duplicate handling: ${skipDuplicates ? 'Skip exact duplicates, merge same invoice' : 'Allow all'}`);
-  
-  try {
-    // ✅ STEP 1: Group invoices by invoice number AND DEDUPLICATE products within same invoice
-    // ✅ CRITICAL FIX: Also track MR names per invoice for proper cash distribution
-    const groupedInvoices = new Map();
-    
-    for (let i = 0; i < invoices.length; i++) {
-      const invoice = invoices[i];
-      const invoiceNumber = invoice.invoiceNumber?.trim();
-      
-      if (!invoiceNumber) {
-        errors.push({
-          row: i + 2,
-          invoiceNumber: "Unknown",
-          message: "Invoice number is required",
-          type: "validation_error",
-        });
-        failed++;
-        continue;
-      }
-      
-      if (!groupedInvoices.has(invoiceNumber)) {
-        // First occurrence of this invoice number - create new entry
-        groupedInvoices.set(invoiceNumber, {
-          ...invoice,
-          products: invoice.products || [],
-          _rowIndex: i,
-          // ✅ NEW: Track MR distribution for this invoice
-          _mrDistribution: new Map(), // Map<mrName, { products: [], totalAmount: 0 }>
-        });
-        
-        // ✅ Initialize MR distribution
-        const mrName = invoice.mrName?.trim() || "No MR Name Provided";
-        if (invoice.products && invoice.products.length > 0) {
-          groupedInvoices.get(invoiceNumber)._mrDistribution.set(mrName, {
-            products: [...invoice.products],
-            mrName: mrName,
-          });
-        }
-      } else {
-        // Invoice number already exists - merge products with deduplication
-        const existing = groupedInvoices.get(invoiceNumber);
-        const newMrName = invoice.mrName?.trim() || "No MR Name Provided";
-        
-        if (invoice.products && invoice.products.length > 0) {
-          // ✅ FIX: Check each new product for duplicates before adding
-          for (const newProduct of invoice.products) {
-            const productName = newProduct.productName?.trim();
-            const salesQty = fixPrecision(parseFloat(newProduct.salesQty) || 0);
-            const bonusQty = fixPrecision(parseFloat(newProduct.bonusQty) || 0);
-            const sellingPrice = fixPrecision(parseFloat(newProduct.sellingPrice) || 0);
-            const discount = fixPrecision(parseFloat(newProduct.discount) || 0);
-            
-            // Check if this exact product already exists in the grouped invoice
-            const isDuplicate = existing.products.some(existingProduct => {
-              const existingProductName = existingProduct.productName?.trim();
-              const existingSalesQty = fixPrecision(parseFloat(existingProduct.salesQty) || 0);
-              const existingBonusQty = fixPrecision(parseFloat(existingProduct.bonusQty) || 0);
-              const existingSellingPrice = fixPrecision(parseFloat(existingProduct.sellingPrice) || 0);
-              const existingDiscount = fixPrecision(parseFloat(existingProduct.discount) || 0);
-              
-              return (
-                existingProductName === productName &&
-                existingSalesQty === salesQty &&
-                existingBonusQty === bonusQty &&
-                existingSellingPrice === sellingPrice &&
-                existingDiscount === discount
-              );
-            });
-            
-            if (!isDuplicate) {
-              // This is a new product - add it
-              existing.products.push(newProduct);
-              
-              // ✅ NEW: Track which MR this product belongs to
-              if (!existing._mrDistribution.has(newMrName)) {
-                existing._mrDistribution.set(newMrName, {
-                  products: [],
-                  mrName: newMrName,
-                });
-              }
-              existing._mrDistribution.get(newMrName).products.push(newProduct);
-            } else {
-              // This is a duplicate - skip it and log
-              console.warn(
-                `⚠️ Row ${i + 2}: Skipping duplicate product in invoice ${invoiceNumber}: ` +
-                `${productName} (Qty: ${salesQty}, Price: ${sellingPrice})`
-              );
-              
-              if (!progress.duplicateProductsSkipped) {
-                progress.duplicateProductsSkipped = 0;
-              }
-              progress.duplicateProductsSkipped++;
-            }
-          }
-        }
-      }
-    }
-    
-    console.log(`📦 Grouped ${invoices.length} rows into ${groupedInvoices.size} unique invoices`);
-    if (progress.duplicateProductsSkipped > 0) {
-      console.log(`🗑️ Skipped ${progress.duplicateProductsSkipped} duplicate product entries`);
-    }
-    
-    // ✅ STEP 2: Update progress total to reflect unique invoices (not total rows)
-    progress.totalInvoices = groupedInvoices.size;
-    
-    // ✅ STEP 3: Process each unique invoice (MR Cash updated PER MR, not per invoice)
-    let processedCount = 0;
-    
-    for (const [invoiceNumber, groupedInvoice] of groupedInvoices) {
-      try {
-        // ✅ CRITICAL: Check if this invoice has multiple MRs
-        const mrCount = groupedInvoice._mrDistribution.size;
-        
-        if (mrCount > 1) {
-          console.warn(
-            `⚠️ Invoice ${invoiceNumber} has ${mrCount} different MRs! ` +
-            `MRs: ${Array.from(groupedInvoice._mrDistribution.keys()).join(', ')}`
-          );
-        }
-        
-        // Process the invoice with MR-wise distribution
-        const result = await processSingleInvoiceWithMRDistribution(
-          groupedInvoice, 
-          groupedInvoice._rowIndex, 
-          skipDuplicates
-        );
-        
-        if (result.skipped) {
-          skippedDuplicates++;
-          console.log(`⏭️ Skipped exact duplicate invoice: ${invoiceNumber} (${processedCount + 1}/${groupedInvoices.size})`);
-        } else if (result.success) {
-          if (result.action === "merged") {
-            mergedInvoices++;
-            console.log(`🔄 Merged invoice: ${invoiceNumber} (${processedCount + 1}/${groupedInvoices.size}) | Added ${result.addedProducts} products`);
-            
-            if (result.mrCashUpdates) {
-              for (const [mrName, amount] of Object.entries(result.mrCashUpdates)) {
-                totalMRCashAdded = fixPrecision(totalMRCashAdded + amount);
-                console.log(`  💰 MR Cash updated for ${mrName}: +${amount}`);
-              }
-            }
-          } else {
-            successful++;
-            console.log(`✅ Created invoice: ${invoiceNumber} (${processedCount + 1}/${groupedInvoices.size})`);
-            
-            if (result.mrCashUpdates) {
-              for (const [mrName, amount] of Object.entries(result.mrCashUpdates)) {
-                totalMRCashAdded = fixPrecision(totalMRCashAdded + amount);
-                console.log(`  💰 MR Cash updated for ${mrName}: +${amount}`);
-              }
-            }
-          }
-        } else {
-          failed++;
-          if (result.error) {
-            errors.push(result.error);
-          }
-          console.log(`❌ Invoice ${invoiceNumber} failed (${processedCount + 1}/${groupedInvoices.size})`);
-        }
-      } catch (error) {
-        failed++;
-        errors.push({
-          row: groupedInvoice._rowIndex + 2,
-          invoiceNumber: invoiceNumber || "Unknown",
-          message: error.message,
-          type: "unexpected_error",
-          timestamp: new Date().toISOString(),
-        });
-        console.log(`❌ Unexpected error for invoice ${invoiceNumber}: ${error.message}`);
-      }
-      
-      processedCount++;
-      
-      // Update progress after EACH unique invoice
-      progress.processedInvoices = processedCount;
-      progress.successful = successful;
-      progress.failed = failed;
-      progress.skippedDuplicates = skippedDuplicates;
-      progress.mergedInvoices = mergedInvoices;
-      progress.progressPercentage = Math.round(
-        (processedCount / groupedInvoices.size) * 100
-      );
-      progress.lastUpdated = Date.now();
-    }
-    
-    progress.completed = true;
-    progress.endTime = Date.now();
-    progress.totalTime = progress.endTime - progress.startTime;
-    progress.errors = errors;
-    progress.status = "completed";
-    progress.totalMRCashAdded = totalMRCashAdded;
-    
-    console.log(`🎉 Import completed - Created: ${successful}, Merged: ${mergedInvoices}, Failed: ${failed}, Skipped (exact duplicates): ${skippedDuplicates}`);
-    console.log(`💰 Total MR Cash Added: ${totalMRCashAdded}`);
-    if (progress.duplicateProductsSkipped > 0) {
-      console.log(`🗑️ Total duplicate products skipped during grouping: ${progress.duplicateProductsSkipped}`);
-    }
-    
-  } catch (error) {
-    progress.status = "failed";
-    progress.errors.push({
-      message: "Critical error in import process",
-      error: error.message,
-      timestamp: new Date().toISOString(),
-    });
-    progress.lastUpdated = Date.now();
-    console.error(`💥 Critical error in import process: ${error.message}`);
-  }
-};
 
-// ✅ NEW FUNCTION: Process invoice with MR-wise distribution
+
 const processSingleInvoiceWithMRDistribution = async (invoiceData, index, skipDuplicates = true) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -1770,7 +1547,7 @@ const processSingleInvoiceWithMRDistribution = async (invoiceData, index, skipDu
     const processedProducts = [];
     let totalAmount = 0;
     const stockDeductionResults = [];
-    const mrCashDistribution = new Map(); // Track cash per MR
+    const mrCashDistribution = new Map(); // ✅ Track cash per MR
     
     // ✅ Process each product and track which MR it belongs to
     for (const product of invoiceData.products || []) {
@@ -1826,7 +1603,7 @@ const processSingleInvoiceWithMRDistribution = async (invoiceData, index, skipDu
       
       totalAmount = fixPrecision(totalAmount + netSellingAmount);
       
-      // ✅ Track which MR this product belongs to
+      // ✅ CRITICAL: Track which MR this product belongs to
       // Find the MR for this product from the distribution map
       let productMR = invoiceData.mrName?.trim() || "No MR Name Provided";
       
@@ -1984,6 +1761,239 @@ const processSingleInvoiceWithMRDistribution = async (invoiceData, index, skipDu
   }
 };
 
+const processImportWithStockDeduction = async (
+  sessionId,
+  invoices,
+  skipDuplicates = true
+) => {
+  const progress = importProgressMap.get(sessionId);
+  if (!progress) {
+    return;
+  }
+  
+  const errors = [];
+  let successful = 0;
+  let failed = 0;
+  let skippedDuplicates = 0;
+  let mergedInvoices = 0;
+  let totalMRCashAdded = 0;
+  
+  progress.status = "processing";
+  progress.startTime = Date.now();
+  progress.lastUpdated = Date.now();
+  
+  console.log(`🚀 Starting import process - Total Invoices: ${invoices.length}`);
+  console.log(`🔧 Duplicate handling: ${skipDuplicates ? 'Skip exact duplicates, merge same invoice' : 'Allow all'}`);
+  
+  try {
+    // ✅ STEP 1: Group invoices by invoice number AND track MR distribution
+    const groupedInvoices = new Map();
+    
+    for (let i = 0; i < invoices.length; i++) {
+      const invoice = invoices[i];
+      const invoiceNumber = invoice.invoiceNumber?.trim();
+      
+      if (!invoiceNumber) {
+        errors.push({
+          row: i + 2,
+          invoiceNumber: "Unknown",
+          message: "Invoice number is required",
+          type: "validation_error",
+        });
+        failed++;
+        continue;
+      }
+      
+      if (!groupedInvoices.has(invoiceNumber)) {
+        // First occurrence of this invoice number - create new entry
+        groupedInvoices.set(invoiceNumber, {
+          ...invoice,
+          products: invoice.products || [],
+          _rowIndex: i,
+          // ✅ Track MR distribution for this invoice
+          _mrDistribution: new Map(), // Map<mrName, { products: [], mrName: }>
+        });
+        
+        // ✅ Initialize MR distribution
+        const mrName = invoice.mrName?.trim() || "No MR Name Provided";
+        if (invoice.products && invoice.products.length > 0) {
+          groupedInvoices.get(invoiceNumber)._mrDistribution.set(mrName, {
+            products: [...invoice.products],
+            mrName: mrName,
+          });
+        }
+      } else {
+        // Invoice number already exists - merge products with deduplication
+        const existing = groupedInvoices.get(invoiceNumber);
+        const newMrName = invoice.mrName?.trim() || "No MR Name Provided";
+        
+        if (invoice.products && invoice.products.length > 0) {
+          // ✅ Check each new product for duplicates before adding
+          for (const newProduct of invoice.products) {
+            const productName = newProduct.productName?.trim();
+            const salesQty = fixPrecision(parseFloat(newProduct.salesQty) || 0);
+            const bonusQty = fixPrecision(parseFloat(newProduct.bonusQty) || 0);
+            const sellingPrice = fixPrecision(parseFloat(newProduct.sellingPrice) || 0);
+            const discount = fixPrecision(parseFloat(newProduct.discount) || 0);
+            
+            // Check if this exact product already exists in the grouped invoice
+            const isDuplicate = existing.products.some(existingProduct => {
+              const existingProductName = existingProduct.productName?.trim();
+              const existingSalesQty = fixPrecision(parseFloat(existingProduct.salesQty) || 0);
+              const existingBonusQty = fixPrecision(parseFloat(existingProduct.bonusQty) || 0);
+              const existingSellingPrice = fixPrecision(parseFloat(existingProduct.sellingPrice) || 0);
+              const existingDiscount = fixPrecision(parseFloat(existingProduct.discount) || 0);
+              
+              return (
+                existingProductName === productName &&
+                existingSalesQty === salesQty &&
+                existingBonusQty === bonusQty &&
+                existingSellingPrice === sellingPrice &&
+                existingDiscount === discount
+              );
+            });
+            
+            if (!isDuplicate) {
+              // This is a new product - add it
+              existing.products.push(newProduct);
+              
+              // ✅ Track which MR this product belongs to
+              if (!existing._mrDistribution.has(newMrName)) {
+                existing._mrDistribution.set(newMrName, {
+                  products: [],
+                  mrName: newMrName,
+                });
+              }
+              existing._mrDistribution.get(newMrName).products.push(newProduct);
+            } else {
+              // This is a duplicate - skip it and log
+              console.warn(
+                `⚠️ Row ${i + 2}: Skipping duplicate product in invoice ${invoiceNumber}: ` +
+                `${productName} (Qty: ${salesQty}, Price: ${sellingPrice})`
+              );
+              
+              if (!progress.duplicateProductsSkipped) {
+                progress.duplicateProductsSkipped = 0;
+              }
+              progress.duplicateProductsSkipped++;
+            }
+          }
+        }
+      }
+    }
+    
+    console.log(`📦 Grouped ${invoices.length} rows into ${groupedInvoices.size} unique invoices`);
+    if (progress.duplicateProductsSkipped > 0) {
+      console.log(`🗑️ Skipped ${progress.duplicateProductsSkipped} duplicate product entries`);
+    }
+    
+    // ✅ STEP 2: Update progress total to reflect unique invoices
+    progress.totalInvoices = groupedInvoices.size;
+    
+    // ✅ STEP 3: Process each unique invoice (MR Cash updated PER MR, not per invoice)
+    let processedCount = 0;
+    
+    for (const [invoiceNumber, groupedInvoice] of groupedInvoices) {
+      try {
+        // ✅ Check if this invoice has multiple MRs
+        const mrCount = groupedInvoice._mrDistribution.size;
+        
+        if (mrCount > 1) {
+          console.warn(
+            `⚠️ Invoice ${invoiceNumber} has ${mrCount} different MRs! ` +
+            `MRs: ${Array.from(groupedInvoice._mrDistribution.keys()).join(', ')}`
+          );
+        }
+        
+        // Process the invoice with MR-wise distribution
+        const result = await processSingleInvoiceWithMRDistribution(
+          groupedInvoice, 
+          groupedInvoice._rowIndex, 
+          skipDuplicates
+        );
+        
+        if (result.skipped) {
+          skippedDuplicates++;
+          console.log(`⏭️ Skipped exact duplicate invoice: ${invoiceNumber} (${processedCount + 1}/${groupedInvoices.size})`);
+        } else if (result.success) {
+          if (result.action === "merged") {
+            mergedInvoices++;
+            console.log(`🔄 Merged invoice: ${invoiceNumber} (${processedCount + 1}/${groupedInvoices.size}) | Added ${result.addedProducts} products`);
+            
+            if (result.mrCashUpdates) {
+              for (const [mrName, amount] of Object.entries(result.mrCashUpdates)) {
+                totalMRCashAdded = fixPrecision(totalMRCashAdded + amount);
+                console.log(`  💰 MR Cash updated for ${mrName}: +${amount}`);
+              }
+            }
+          } else {
+            successful++;
+            console.log(`✅ Created invoice: ${invoiceNumber} (${processedCount + 1}/${groupedInvoices.size})`);
+            
+            if (result.mrCashUpdates) {
+              for (const [mrName, amount] of Object.entries(result.mrCashUpdates)) {
+                totalMRCashAdded = fixPrecision(totalMRCashAdded + amount);
+                console.log(`  💰 MR Cash updated for ${mrName}: +${amount}`);
+              }
+            }
+          }
+        } else {
+          failed++;
+          if (result.error) {
+            errors.push(result.error);
+          }
+          console.log(`❌ Invoice ${invoiceNumber} failed (${processedCount + 1}/${groupedInvoices.size})`);
+        }
+      } catch (error) {
+        failed++;
+        errors.push({
+          row: groupedInvoice._rowIndex + 2,
+          invoiceNumber: invoiceNumber || "Unknown",
+          message: error.message,
+          type: "unexpected_error",
+          timestamp: new Date().toISOString(),
+        });
+        console.log(`❌ Unexpected error for invoice ${invoiceNumber}: ${error.message}`);
+      }
+      
+      processedCount++;
+      
+      // Update progress after EACH unique invoice
+      progress.processedInvoices = processedCount;
+      progress.successful = successful;
+      progress.failed = failed;
+      progress.skippedDuplicates = skippedDuplicates;
+      progress.mergedInvoices = mergedInvoices;
+      progress.progressPercentage = Math.round(
+        (processedCount / groupedInvoices.size) * 100
+      );
+      progress.lastUpdated = Date.now();
+    }
+    
+    progress.completed = true;
+    progress.endTime = Date.now();
+    progress.totalTime = progress.endTime - progress.startTime;
+    progress.errors = errors;
+    progress.status = "completed";
+    progress.totalMRCashAdded = totalMRCashAdded;
+    
+    console.log(`🎉 Import completed - Created: ${successful}, Merged: ${mergedInvoices}, Failed: ${failed}, Skipped (exact duplicates): ${skippedDuplicates}`);
+    console.log(`💰 Total MR Cash Added: ${totalMRCashAdded}`);
+    if (progress.duplicateProductsSkipped > 0) {
+      console.log(`🗑️ Total duplicate products skipped during grouping: ${progress.duplicateProductsSkipped}`);
+    }
+    
+  } catch (error) {
+    progress.status = "failed";
+    progress.errors.push({
+      message: "Critical error in import process",
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+    progress.lastUpdated = Date.now();
+    console.error(`💥 Critical error in import process: ${error.message}`);
+  }
+};
 
 const updateMRCashes = async (
   mrName,
@@ -2247,7 +2257,6 @@ router.get("/products/check/:productName", async (req, res) => {
     });
   }
 });
-
 router.get("/", async (req, res) => {
   try {
     const { page = 1, limit = 9, search = "", tab = "All" } = req.query;
@@ -2258,7 +2267,7 @@ router.get("/", async (req, res) => {
 
     const matchConditions = {};
 
-    if (search && search.trim() !== "") {
+    if (search && search.trim()) {
       const searchRegex = new RegExp(escapeRegex(search.trim()), "i");
       matchConditions.$or = [
         { invoiceNumber: searchRegex },
@@ -2283,23 +2292,15 @@ router.get("/", async (req, res) => {
         invoiceNumber: 1,
         invoiceDate: 1,
         mrName: 1,
-        mrId: 1,
-        customerCode: 1,
-        customerId: 1,
         customerName: 1,
+        customerCode: 1,
         paymentStatus: 1,
-        remark: 1,
-        creditDays: 1,
-        dueDate: 1,
-        deliveryDate: 1,
+        totalAmount: 1,
         paidAmount: 1,
         dueAmount: 1,
-        totalAmount: 1,
-        totalProfitLoss: 1,
         products: 1,
-        createdAt: 1,
-        updatedAt: 1,
-      });
+      })
+      .lean();
 
     res.status(200).json({
       summaries,
@@ -2312,7 +2313,7 @@ router.get("/", async (req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({ message: "Failed to fetch sale summaries." });
+    res.status(500).json({ message: "Failed to fetch sales" });
   }
 });
 
