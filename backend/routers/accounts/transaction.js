@@ -2,9 +2,45 @@ import express from "express";
 import Transaction from "../../models/accounts/Transaction.js";
 import Destination from "../../models/accounts/Destination.js";
 import CategoryType from "../../models/accounts/CategoryType.js";
+import Supplier from "../../models/master/supplier.js";
+import Customer from "../../models/master/customer.js";
 import mongoose from "mongoose";
 import ExcelJS from "exceljs";
+import multer from "multer";
+
 const router = express.Router();
+
+// Configure multer for file upload
+const storage = multer.memoryStorage();
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedMimeTypes = [
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml',
+      'application/x-excel',
+      'application/x-msexcel',
+      'text/csv',
+      'text/plain',
+      'application/csv',
+      'text/comma-separated-values',
+      'application/octet-stream'
+    ];
+    
+    const allowedExtensions = ['.xlsx', '.xls', '.csv'];
+    const fileExtension = file.originalname.toLowerCase().slice(file.originalname.lastIndexOf('.'));
+    
+    if (allowedMimeTypes.includes(file.mimetype) || allowedExtensions.includes(fileExtension)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`Invalid file type. Please upload Excel (.xlsx, .xls) or CSV files only.`));
+    }
+  },
+});
 
 // Helper function to determine transaction type from category
 async function getTransactionType(categoryTypeId) {
@@ -24,9 +60,8 @@ async function getTransactionType(categoryTypeId) {
       return "payment inward";
     case "payment outward":
       return "payment outward";
-    case "sale":
     case "cash sale":
-      return "sale";
+      return "cash sale";
     case "credit collection":
       return "credit collection";
     default:
@@ -34,7 +69,51 @@ async function getTransactionType(categoryTypeId) {
   }
 }
 
-// Enhanced balance adjustment function - CORRECTED FOR DEPOSIT
+// Helper function to map category name to transaction type
+function mapCategoryToTransactionType(categoryName) {
+  const name = categoryName.toLowerCase();
+
+  switch (name) {
+    case "deposit":
+      return "deposit";
+    case "withdraw":
+      return "withdraw";
+    case "remittance":
+      return "remittance";
+    case "payment inward":
+      return "payment inward";
+    case "payment outward":
+      return "payment outward";
+    case "cash sale":
+      return "cash sale";
+    case "credit collection":
+      return "credit collection";
+    default:
+      return "sale";
+  }
+}
+
+// Helper function to find or create category
+async function findOrCreateCategory(categoryName, userId) {
+  if (!categoryName || categoryName === '--') return null;
+  
+  let category = await CategoryType.findOne({ 
+    name: { $regex: new RegExp(`^${categoryName.trim()}$`, 'i') }
+  });
+  
+  if (!category) {
+    category = new CategoryType({
+      name: categoryName.trim(),
+      createdBy: userId,
+      isActive: true
+    });
+    await category.save();
+  }
+  
+  return category;
+}
+
+// Enhanced balance adjustment function with consistent logic
 async function adjustBalances(transaction, session, isDelete = false) {
   const {
     transactionType,
@@ -69,21 +148,18 @@ async function adjustBalances(transaction, session, isDelete = false) {
         throw new Error("Source or destination account missing for deposit");
 
       if (isDelete) {
+        // Revert: Add amount back to source, remove from destination
         sourceAcc.totalAmount = (sourceAcc.totalAmount || 0) + amount;
-        const destinationAdjustment =
-          finalAmount !== undefined ? finalAmount : amount;
-        destAcc.totalAmount =
-          (destAcc.totalAmount || 0) - destinationAdjustment;
+        const destinationAdjustment = finalAmount || amount;
+        destAcc.totalAmount = (destAcc.totalAmount || 0) - destinationAdjustment;
       } else {
+        // Deduct from source, add to destination
         sourceAcc.totalAmount = (sourceAcc.totalAmount || 0) - amount;
-
-        const destinationAdjustment =
-          finalAmount !== undefined ? finalAmount : amount;
-        destAcc.totalAmount =
-          (destAcc.totalAmount || 0) + destinationAdjustment;
+        const destinationAdjustment = finalAmount || amount;
+        destAcc.totalAmount = (destAcc.totalAmount || 0) + destinationAdjustment;
 
         if (sourceAcc.totalAmount < 0) {
-          throw new Error("Insufficient balance in source account");
+          throw new Error(`Insufficient balance in source account. Available: $${sourceAcc.totalAmount + amount}, Required: $${amount}`);
         }
       }
 
@@ -103,7 +179,7 @@ async function adjustBalances(transaction, session, isDelete = false) {
         destAcc.totalAmount = (destAcc.totalAmount || 0) + amount;
 
         if (sourceAcc.totalAmount < 0) {
-          throw new Error("Insufficient balance in source account");
+          throw new Error(`Insufficient balance in source account. Available: $${sourceAcc.totalAmount + amount}, Required: $${amount}`);
         }
       }
 
@@ -149,6 +225,20 @@ async function adjustBalances(transaction, session, isDelete = false) {
       await sourceAcc.save({ session });
       break;
 
+    case "cash sale":
+    case "credit collection":
+      if (!destAcc)
+        throw new Error("Destination account missing for sale transaction");
+
+      if (isDelete) {
+        destAcc.totalAmount = (destAcc.totalAmount || 0) - amount;
+      } else {
+        destAcc.totalAmount = (destAcc.totalAmount || 0) + amount;
+      }
+
+      await destAcc.save({ session });
+      break;
+
     default:
       if (destAcc) {
         if (isDelete) {
@@ -164,7 +254,7 @@ async function adjustBalances(transaction, session, isDelete = false) {
 }
 
 // Helper function to find or create Destination
-const findOrCreateDestination = async (destinationName, accountType, userId) => {
+const findOrCreateDestination = async (destinationName, userId) => {
   if (!destinationName || destinationName === '--') return null;
   
   let destination = await Destination.findOne({ 
@@ -174,9 +264,10 @@ const findOrCreateDestination = async (destinationName, accountType, userId) => 
   if (!destination) {
     destination = new Destination({
       name: destinationName.trim(),
-      accountType: accountType || 'Cash Balance',
+      accountType: 'Cash Balance',
       createdBy: userId,
-      isActive: true
+      isActive: true,
+      totalAmount: 0
     });
     await destination.save();
   }
@@ -204,6 +295,26 @@ const findOrCreateSupplier = async (supplierName, userId) => {
   return supplier;
 };
 
+// Helper function to find or create Customer
+const findOrCreateCustomer = async (customerName, userId) => {
+  if (!customerName || customerName === '--') return null;
+  
+  let customer = await Customer.findOne({ 
+    name: { $regex: new RegExp(`^${customerName.trim()}$`, 'i') }
+  });
+  
+  if (!customer) {
+    customer = new Customer({
+      name: customerName.trim(),
+      createdBy: userId,
+      isActive: true
+    });
+    await customer.save();
+  }
+  
+  return customer;
+};
+
 // Helper function to parse date
 const parseDate = (dateValue) => {
   if (!dateValue) return null;
@@ -218,6 +329,32 @@ const parseDate = (dateValue) => {
     if (!isNaN(date.getTime())) {
       return date;
     }
+    
+    // Try parsing with Excel date format (YYYY-MM-DD)
+    const parts = dateValue.split('-');
+    if (parts.length === 3) {
+      const year = parseInt(parts[0]);
+      const month = parseInt(parts[1]) - 1;
+      const day = parseInt(parts[2]);
+      const date = new Date(year, month, day);
+      if (!isNaN(date.getTime())) {
+        return date;
+      }
+    }
+    
+    // Try DD-MM-YYYY
+    if (dateValue.includes('/')) {
+      const parts = dateValue.split('/');
+      if (parts.length === 3) {
+        const day = parseInt(parts[0]);
+        const month = parseInt(parts[1]) - 1;
+        const year = parseInt(parts[2]);
+        const date = new Date(year, month, day);
+        if (!isNaN(date.getTime())) {
+          return date;
+        }
+      }
+    }
   }
   
   // If Excel serial number
@@ -231,7 +368,168 @@ const parseDate = (dateValue) => {
   return null;
 };
 
-// Create transaction - UPDATED TO ENSURE FINAL AMOUNT IS CALCULATED
+// Improved getCellValue function to handle Excel formulas properly
+const getCellValue = (cell) => {
+  if (!cell) return null;
+  
+  // Check if cell is actually empty (ExcelJS specific)
+  if (cell.type === 6) { // 6 = empty cell type in ExcelJS
+    return null;
+  }
+  
+  // Handle formula cells
+  if (cell.type === 2 || cell.formula) { // 2 = formula cell type
+    // Return result if available
+    if (cell.result !== undefined && cell.result !== null) {
+      return cell.result;
+    }
+    
+    // For template formulas that haven't been calculated
+    if (cell.value && typeof cell.value === 'string' && cell.value.startsWith('=')) {
+      // Check if it's an IF formula from your template
+      if (cell.value.startsWith('=IF(D') || cell.value.includes('=IF(')) {
+        return null; // Treat template formulas as empty
+      }
+    }
+    
+    return '';
+  }
+  
+  // Handle raw values
+  const value = cell.value;
+  
+  if (value === undefined || value === null) {
+    return null;
+  }
+  
+  // If it's an object but not a Date
+  if (typeof value === 'object' && !(value instanceof Date)) {
+    // Check if it's a shared formula or other object
+    if (value.formula || value.sharedFormula) {
+      return cell.result || '';
+    }
+    return String(value);
+  }
+  
+  return value;
+};
+
+// Validation function for each category type
+const validateTransactionByCategory = (categoryName, rowData) => {
+  const errors = [];
+  const categoryLower = categoryName.toLowerCase();
+
+  // Required fields for all categories
+  if (!rowData['Date']) {
+    errors.push('Date is required');
+  }
+  
+  const amount = parseFloat(rowData['Amount']);
+  if (!amount || amount <= 0 || isNaN(amount)) {
+    errors.push('Valid Amount is required');
+  }
+
+  // Category-specific validations based on frontend logic
+  switch (categoryLower) {
+    case 'cash sale':
+      if (!rowData['Destination Account']) {
+        errors.push('Destination Account is required for Cash Sale');
+      }
+      if (!rowData['Customer Name']) {
+        errors.push('Customer Name is required for Cash Sale');
+      }
+      if (!rowData['Invoice Number']) {
+        errors.push('Invoice Number is required for Cash Sale');
+      }
+      break;
+
+    case 'credit collection':
+      if (!rowData['Destination Account']) {
+        errors.push('Destination Account is required for Credit Collection');
+      }
+      if (!rowData['Customer Name']) {
+        errors.push('Customer Name is required for Credit Collection');
+      }
+      if (!rowData['Invoice Number']) {
+        errors.push('Invoice Number is required for Credit Collection');
+      }
+      break;
+
+    case 'deposit':
+      if (!rowData['Source Account']) {
+        errors.push('Source Account is required for Deposit');
+      }
+      if (!rowData['Destination Account']) {
+        errors.push('Destination Account is required for Deposit');
+      }
+      // Validate exchange loss
+      if (rowData['Exchange Loss'] && (isNaN(parseFloat(rowData['Exchange Loss'])) || parseFloat(rowData['Exchange Loss']) < 0)) {
+        errors.push('Exchange Loss must be a valid non-negative number');
+      }
+      if (rowData['Exchange Loss'] && parseFloat(rowData['Exchange Loss']) > amount) {
+        errors.push('Exchange Loss cannot exceed Amount');
+      }
+      break;
+
+    case 'withdraw':
+      if (!rowData['Source Account']) {
+        errors.push('Source Account is required for Withdraw');
+      }
+      if (!rowData['Destination Account']) {
+        errors.push('Destination Account is required for Withdraw');
+      }
+      break;
+
+    case 'payment inward':
+      if (!rowData['Supplier Name']) {
+        errors.push('Supplier Name is required for Payment Inward');
+      }
+      if (!rowData['Destination Account']) {
+        errors.push('Destination Account is required for Payment Inward');
+      }
+      break;
+
+    case 'remittance':
+      if (!rowData['Supplier Name']) {
+        errors.push('Supplier Name is required for Remittance');
+      }
+      if (!rowData['Source Account']) {
+        errors.push('Source Account is required for Remittance');
+      }
+      break;
+
+    default:
+      errors.push(`Unknown category type: ${categoryName}`);
+      break;
+  }
+
+  return errors;
+};
+
+// Check if source account has sufficient balance
+const checkSourceAccountBalance = async (sourceAccountId, amount, transactionType) => {
+  if (!sourceAccountId) return true;
+  
+  const sourceAccount = await Destination.findById(sourceAccountId);
+  if (!sourceAccount) {
+    throw new Error(`Source account not found: ${sourceAccountId}`);
+  }
+  
+  const currentBalance = sourceAccount.totalAmount || 0;
+  
+  // For deposit/withdraw/remittance/payment outward, check balance
+  const requiresBalanceCheck = ['deposit', 'withdraw', 'remittance', 'payment outward'].includes(transactionType);
+  
+  if (requiresBalanceCheck) {
+    if (currentBalance < amount) {
+      throw new Error(`Insufficient balance in source account "${sourceAccount.name}". Available: $${currentBalance.toFixed(2)}, Required: $${amount.toFixed(2)}`);
+    }
+  }
+  
+  return true;
+};
+
+// Create transaction
 router.post("/transaction", async (req, res) => {
   const session = await mongoose.startSession();
 
@@ -277,6 +575,11 @@ router.post("/transaction", async (req, res) => {
       calculatedFinalAmount = parseFloat(amount) - exchangeLossValue;
     }
 
+    // Check source account balance
+    if (source) {
+      await checkSourceAccountBalance(source, parseFloat(amount), transactionType);
+    }
+
     const transactionData = {
       categoryType,
       source,
@@ -318,6 +621,7 @@ router.post("/transaction", async (req, res) => {
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
+    console.error("Transaction creation error:", error);
     res.status(400).json({
       success: false,
       message: error.message,
@@ -325,38 +629,74 @@ router.post("/transaction", async (req, res) => {
   }
 });
 
-router.post('/transaction/import', async (req, res) => {
+// Helper function to check if a row is a template/formula row
+const isTemplateRow = (rowData) => {
+  const requiredFields = ['Category Type', 'Amount', 'Date', 'Invoice Number'];
+  
+  // If ALL required fields are empty or only contain formula-like content
+  for (const field of requiredFields) {
+    const value = rowData[field];
+    if (value && typeof value === 'string') {
+      const trimmed = value.trim();
+      if (trimmed && 
+          trimmed !== '--' && 
+          !trimmed.startsWith('=IF(') &&
+          !trimmed.startsWith('Select')) {
+        return false; // This has actual data
+      }
+    } else if (value && typeof value === 'number') {
+      if (value !== 0) {
+        return false; // This has actual data
+      }
+    }
+  }
+  
+  return true; // This is a template row
+};
+
+// Enhanced Import Route with better formula handling
+router.post('/transaction/import', upload.single('file'), async (req, res) => {
+  const session = await mongoose.startSession();
+
   try {
-    const { accountType } = req.body;
-    const userId = req.user.id;
+    await session.startTransaction();
+
+    // For testing, use a default user ID if not available
+    const userId = req.user?.id || new mongoose.Types.ObjectId();
+
     const file = req.file;
-    
+
     if (!file) {
       return res.status(400).json({
         success: false,
         message: 'No file uploaded'
       });
     }
-    
-    if (!accountType) {
-      return res.status(400).json({
-        success: false,
-        message: 'Account type is required'
-      });
-    }
-    
-    // Validate account type
-    const validAccountTypes = ['Cash Balance', 'Personal Account', 'Company Account'];
-    if (!validAccountTypes.includes(accountType)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid account type'
-      });
-    }
-    
+
+    console.log(`Processing file: ${file.originalname}, Size: ${file.size} bytes, MIME type: ${file.mimetype}`);
+
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(file.buffer);
     
+    // Handle different file types
+    try {
+      if (file.originalname.toLowerCase().endsWith('.csv')) {
+        await workbook.csv.read(file.buffer);
+      } else {
+        // Load without formula calculation to avoid issues
+        await workbook.xlsx.load(file.buffer, {
+          ignoreNodes: ['calcChain'],
+          ignoreStyles: true
+        });
+      }
+    } catch (excelError) {
+      console.error('Error reading Excel file:', excelError);
+      return res.status(400).json({
+        success: false,
+        message: 'Error reading Excel file. Please ensure the file is not corrupted and is in correct format.',
+        error: excelError.message
+      });
+    }
+
     const worksheet = workbook.worksheets[0];
     if (!worksheet) {
       return res.status(400).json({
@@ -364,552 +704,347 @@ router.post('/transaction/import', async (req, res) => {
         message: 'No worksheet found in the file'
       });
     }
-    
-    // Get headers
-    const headerRow = worksheet.getRow(4);
+
+    // Read headers from row 3 (based on your template)
+    const headerRow = worksheet.getRow(3);
     const headers = [];
     headerRow.eachCell((cell, colNumber) => {
-      headers[colNumber - 1] = cell.value?.toString()?.split('*')[0]?.trim() || '';
+      const headerValue = getCellValue(cell)?.toString()?.trim() || `Column ${colNumber}`;
+      headers[colNumber - 1] = headerValue;
     });
-    
-    // Map Excel headers to model fields
+
+    console.log('Detected headers:', headers);
+
+    // Flexible header mapping to handle different column names
     const headerMapping = {
-      'Invoice Number': 'invoiceNumber',
-      'Category Type': 'categoryType',
-      'Date (YYYY-MM-DD)': 'date',
-      'Amount': 'amount',
-      'Source Account': 'source',
-      'Destination Account': 'destination',
-      'Supplier Name': 'supplier',
-      'Exchange Loss': 'exchangeLoss',
-      'Final Amount': 'finalAmount',
-      'Invoice Date': 'invoiceDate',
-      'Customer Name': 'customerName',
-      'Customer Address': 'customerAddress',
-      'Remarks': 'remarks'
+      'Invoice No': 'Invoice Number',
+      'Invoice Number': 'Invoice Number',
+      'Invoice #': 'Invoice Number',
+      'Category Type*': 'Category Type',
+      'Category Type': 'Category Type',
+      'Category': 'Category Type',
+      'Source Account': 'Source Account',
+      'Source': 'Source Account',
+      'Destination Account': 'Destination Account',
+      'Destination': 'Destination Account',
+      'Amount*': 'Amount',
+      'Amount': 'Amount',
+      'Exchange Loss': 'Exchange Loss',
+      'Final Amount (Auto)': 'Final Amount',
+      'Final Amount': 'Final Amount',
+      'Date* (YYYY-MM-DD)': 'Date',
+      'Date': 'Date',
+      'Transaction Date': 'Date',
+      'Invoice Date (YYYY-MM-DD)': 'Invoice Date',
+      'Invoice Date': 'Invoice Date',
+      'Customer Name': 'Customer Name',
+      'Customer': 'Customer Name',
+      'Customer Address': 'Customer Address',
+      'Remarks': 'Remarks',
+      'Notes': 'Remarks',
+      'Supplier Name': 'Supplier Name',
+      'Supplier': 'Supplier Name',
+      'Payment To': 'Supplier Name'
     };
-    
-    // Process rows starting from row 5
+
     const importedTransactions = [];
     const errors = [];
-    const batchId = `BATCH_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const batchId = `BATCH_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
+    // Start from row 4 (after headers in your template)
+    let rowNumber = 4;
+    let processedRows = 0;
+    let skippedRows = 0;
+    let dataRowsProcessed = 0;
     
-    for (let rowNumber = 5; rowNumber <= worksheet.rowCount; rowNumber++) {
+    // Process only first 1000 rows to avoid infinite loops
+    const maxRowsToProcess = Math.min(worksheet.rowCount, 1000);
+    
+    console.log(`Processing up to ${maxRowsToProcess} rows`);
+    
+    while (rowNumber <= maxRowsToProcess) {
       const row = worksheet.getRow(rowNumber);
       
-      // Skip empty rows
-      const firstCellValue = row.getCell(1).value;
-      if (!firstCellValue || firstCellValue.toString().trim() === '') {
-        continue;
-      }
-      
+      // Get row data using improved getCellValue
       const rowData = {};
-      const rowErrors = [];
+      let hasAnyData = false;
       
-      // Extract data from each column
       headers.forEach((header, index) => {
         const cell = row.getCell(index + 1);
-        let value = cell.value;
-        
-        if (value !== undefined && value !== null) {
-          // Clean up the value
+        let value = getCellValue(cell);
+
+        if (value !== null && value !== undefined && value !== '') {
           if (typeof value === 'string') {
             value = value.trim();
-            if (value === '--') value = '';
+            // Skip placeholder values
+            if (value === '--' || value === 'Select' || value.startsWith('Select ') || 
+                value.startsWith('=IF(') || value === '0' || value === '0.00') {
+              value = '';
+            } else if (value) {
+              hasAnyData = true;
+            }
+          } else if (typeof value === 'number') {
+            if (value !== 0) {
+              hasAnyData = true;
+            }
+          } else if (value instanceof Date) {
+            hasAnyData = true;
           }
-          rowData[header] = value;
+        } else {
+          value = '';
+        }
+
+        const mappedHeader = headerMapping[header] || header;
+        if (!rowData[mappedHeader]) {
+          rowData[mappedHeader] = value;
         }
       });
+
+      // Skip if row has no data or is a template row
+      if (!hasAnyData || isTemplateRow(rowData)) {
+        rowNumber++;
+        skippedRows++;
+        continue;
+      }
+
+      // This row has data, process it
+      processedRows++;
+      dataRowsProcessed++;
       
+      const rowErrors = [];
+
       try {
-        // Validate required fields
-        if (!rowData['Invoice Number']) {
-          rowErrors.push('Invoice Number is required');
-        }
-        
-        if (!rowData['Category Type']) {
+        // Required validations
+        if (!rowData['Category Type'] || rowData['Category Type'].trim() === '') {
           rowErrors.push('Category Type is required');
         }
-        
-        if (!rowData['Date (YYYY-MM-DD)']) {
-          rowErrors.push('Date is required');
+
+        const date = parseDate(rowData['Date']);
+        if (!date) {
+          rowErrors.push('Invalid Date format. Please use YYYY-MM-DD format');
         }
-        
-        if (!rowData['Amount'] || isNaN(parseFloat(rowData['Amount']))) {
-          rowErrors.push('Valid Amount is required');
+
+        const amount = parseFloat(rowData['Amount']);
+        if (isNaN(amount) || amount <= 0) {
+          rowErrors.push('Valid Amount is required and must be greater than 0');
         }
-        
+
         if (rowErrors.length > 0) {
-          errors.push({
-            row: rowNumber,
-            invoice: rowData['Invoice Number'] || 'N/A',
-            errors: rowErrors
+          errors.push({ 
+            row: rowNumber, 
+            errors: rowErrors,
+            data: rowData
           });
+          rowNumber++;
           continue;
         }
+
+        const categoryName = rowData['Category Type'].trim();
+        const category = await findOrCreateCategory(categoryName, userId);
         
-        // Parse category type
-        const category = await findOrCreateCategory(rowData['Category Type'], userId);
         if (!category) {
           errors.push({
             row: rowNumber,
-            invoice: rowData['Invoice Number'],
-            errors: [`Invalid category type: ${rowData['Category Type']}`]
+            errors: [`Invalid category type: ${categoryName}`],
+            data: rowData
           });
+          rowNumber++;
           continue;
         }
-        
-        // Parse source account
-        let source = null;
-        if (rowData['Source Account'] && rowData['Source Account'] !== '') {
-          source = await findOrCreateDestination(rowData['Source Account'], accountType, userId);
-        }
-        
-        // Parse destination account
-        let destination = null;
-        if (rowData['Destination Account'] && rowData['Destination Account'] !== '') {
-          destination = await findOrCreateDestination(rowData['Destination Account'], accountType, userId);
-        }
-        
-        // Parse supplier
-        let supplier = null;
-        if (rowData['Supplier Name'] && rowData['Supplier Name'] !== '') {
-          supplier = await findOrCreateSupplier(rowData['Supplier Name'], userId);
-        }
-        
-        // Parse dates
-        const date = parseDate(rowData['Date (YYYY-MM-DD)']);
-        const invoiceDate = rowData['Invoice Date'] ? parseDate(rowData['Invoice Date']) : null;
-        
-        if (!date) {
-          errors.push({
-            row: rowNumber,
-            invoice: rowData['Invoice Number'],
-            errors: ['Invalid date format']
+
+        const categoryErrors = validateTransactionByCategory(category.name, rowData);
+        if (categoryErrors.length > 0) {
+          errors.push({ 
+            row: rowNumber, 
+            errors: categoryErrors,
+            data: rowData
           });
+          rowNumber++;
           continue;
         }
-        
-        // Parse amounts
-        const amount = parseFloat(rowData['Amount']);
-        const exchangeLoss = rowData['Exchange Loss'] ? parseFloat(rowData['Exchange Loss']) : 0;
-        const finalAmount = rowData['Final Amount'] ? parseFloat(rowData['Final Amount']) : (amount - exchangeLoss);
-        
-        // Validate final amount calculation
-        const calculatedFinalAmount = amount - exchangeLoss;
-        if (Math.abs(finalAmount - calculatedFinalAmount) > 0.01) {
-          rowErrors.push(`Final amount mismatch. Expected ${calculatedFinalAmount}, got ${finalAmount}`);
+
+        // Find or create related entities
+        const source = rowData['Source Account'] && rowData['Source Account'].trim() !== ''
+          ? await findOrCreateDestination(rowData['Source Account'].trim(), userId)
+          : null;
+
+        const destination = rowData['Destination Account'] && rowData['Destination Account'].trim() !== ''
+          ? await findOrCreateDestination(rowData['Destination Account'].trim(), userId)
+          : null;
+
+        const supplier = rowData['Supplier Name'] && rowData['Supplier Name'].trim() !== ''
+          ? await findOrCreateSupplier(rowData['Supplier Name'].trim(), userId)
+          : null;
+
+        const customer = rowData['Customer Name'] && rowData['Customer Name'].trim() !== ''
+          ? await findOrCreateCustomer(rowData['Customer Name'].trim(), userId)
+          : null;
+
+        const invoiceDate = rowData['Invoice Date'] && rowData['Invoice Date'].trim() !== ''
+          ? parseDate(rowData['Invoice Date'])
+          : date;
+
+        const exchangeLoss = parseFloat(rowData['Exchange Loss']) || 0;
+
+        let finalAmount = amount;
+        if (category.name.toLowerCase() === 'deposit') {
+          finalAmount = amount - exchangeLoss;
+          if (finalAmount < 0) {
+            errors.push({
+              row: rowNumber,
+              errors: ['Final Amount cannot be negative'],
+              data: rowData
+            });
+            rowNumber++;
+            continue;
+          }
         }
-        
-        // Check for duplicate invoice number
-        const existingTransaction = await Transaction.findOne({
-          invoiceNumber: rowData['Invoice Number'].trim()
-        });
-        
-        if (existingTransaction) {
-          errors.push({
-            row: rowNumber,
-            invoice: rowData['Invoice Number'],
-            errors: ['Invoice number already exists']
-          });
-          continue;
-        }
-        
-        // Get transaction type from category
+
         const transactionType = mapCategoryToTransactionType(category.name);
-        
-        // Create transaction object
-        const transactionData = {
-          invoiceNumber: rowData['Invoice Number'].trim(),
+
+        // Check for duplicate invoice numbers for cash sale and credit collection
+        if (['cash sale', 'credit collection'].includes(transactionType)) {
+          if (!rowData['Invoice Number'] || rowData['Invoice Number'].trim() === '') {
+            errors.push({
+              row: rowNumber,
+              errors: ['Invoice Number is required'],
+              data: rowData
+            });
+            rowNumber++;
+            continue;
+          }
+
+          const invoiceNum = rowData['Invoice Number'].trim();
+          if (invoiceNum) {
+            const exists = await Transaction.findOne({
+              invoiceNumber: invoiceNum
+            });
+
+            if (exists) {
+              errors.push({
+                row: rowNumber,
+                errors: [`Invoice number "${invoiceNum}" already exists`],
+                data: rowData
+              });
+              rowNumber++;
+              continue;
+            }
+          }
+        }
+
+        // Check source account balance
+        if (source && ['deposit', 'withdraw', 'remittance', 'payment outward'].includes(transactionType)) {
+          try {
+            await checkSourceAccountBalance(source._id, amount, transactionType);
+          } catch (balanceError) {
+            errors.push({
+              row: rowNumber,
+              errors: [balanceError.message],
+              data: rowData
+            });
+            rowNumber++;
+            continue;
+          }
+        }
+
+        // Create transaction
+        const transaction = new Transaction({
+          invoiceNumber: rowData['Invoice Number']?.trim() || '',
           categoryType: category._id,
           source: source?._id || null,
           destination: destination?._id || null,
           supplier: supplier?._id || null,
-          date: date,
-          invoiceDate: invoiceDate,
-          customerName: rowData['Customer Name'] || '',
-          customerAddress: rowData['Customer Address'] || '',
-          amount: amount,
-          exchangeLoss: exchangeLoss,
-          finalAmount: finalAmount,
-          accountType: accountType,
-          remarks: rowData['Remarks'] || '',
-          transactionType: transactionType,
+          date,
+          invoiceDate,
+          customerName: customer?.name || rowData['Customer Name']?.trim() || '',
+          customerAddress: rowData['Customer Address']?.trim() || '',
+          amount,
+          exchangeLoss,
+          finalAmount,
+          remarks: rowData['Remarks']?.trim() || '',
+          transactionType,
+          accountType: 'Cash Balance',
           createdBy: userId,
           importBatchId: batchId,
           importStatus: 'imported'
-        };
-        
-        // Validate transaction based on transaction type
-        const validationErrors = [];
-        
-        // Check required fields based on transaction type
-        switch (transactionType) {
-          case 'cash sale':
-          case 'credit collection':
-            if (!rowData['Customer Name']) {
-              validationErrors.push('Customer Name is required for this category');
-            }
-            if (!destination) {
-              validationErrors.push('Destination Account is required for this category');
-            }
-            break;
-            
-          case 'payment inward':
-            if (!supplier) {
-              validationErrors.push('Supplier Name is required for this category');
-            }
-            if (!destination) {
-              validationErrors.push('Destination Account is required for this category');
-            }
-            break;
-            
-          case 'payment outward':
-          case 'remittance':
-            if (!supplier) {
-              validationErrors.push('Supplier Name is required for this category');
-            }
-            if (!source) {
-              validationErrors.push('Source Account is required for this category');
-            }
-            break;
-            
-          case 'deposit':
-          case 'withdraw':
-            if (!source) {
-              validationErrors.push('Source Account is required for this category');
-            }
-            if (!destination) {
-              validationErrors.push('Destination Account is required for this category');
-            }
-            break;
-        }
-        
-        if (validationErrors.length > 0) {
-          errors.push({
-            row: rowNumber,
-            invoice: rowData['Invoice Number'],
-            errors: validationErrors
-          });
-          continue;
-        }
-        
-        // Create transaction
-        const transaction = new Transaction(transactionData);
-        await transaction.save();
-        
-        importedTransactions.push({
-          invoiceNumber: transaction.invoiceNumber,
-          id: transaction._id,
-          date: transaction.date
         });
-        
-      } catch (error) {
+
+        await transaction.save({ session });
+        await adjustBalances(transaction, session, false);
+
+        importedTransactions.push({
+          id: transaction._id,
+          invoiceNumber: transaction.invoiceNumber,
+          amount,
+          category: category.name
+        });
+
+        console.log(`Successfully imported row ${rowNumber}: ${category.name} - $${amount}`);
+
+      } catch (err) {
+        console.error(`Error processing row ${rowNumber}:`, err);
         errors.push({
           row: rowNumber,
-          invoice: rowData['Invoice Number'] || 'N/A',
-          errors: [error.message]
+          errors: [err.message || 'Unknown error processing this row'],
+          data: rowData
         });
       }
+      
+      rowNumber++;
     }
-    
-    // Return import summary
-    const summary = {
-      totalProcessed: importedTransactions.length + errors.length,
-      successCount: importedTransactions.length,
-      errorCount: errors.length,
-      batchId: batchId,
-      importedTransactions: importedTransactions.slice(0, 10), // Return first 10 for preview
-      errors: errors.slice(0, 20) // Return first 20 errors
-    };
-    
+
+    console.log(`Import summary: Processed ${dataRowsProcessed} data rows, skipped ${skippedRows} empty/template rows`);
+
+    if (errors.length > 0) {
+      await session.abortTransaction();
+      session.endSession();
+
+      console.log(`Import completed with ${errors.length} errors`);
+      console.log('Errors:', errors);
+
+      return res.status(400).json({
+        success: false,
+        message: 'Import failed with errors',
+        summary: {
+          totalDataRows: dataRowsProcessed,
+          successCount: importedTransactions.length,
+          errorCount: errors.length,
+          skippedRows: skippedRows,
+          errors: errors.slice(0, 20) // Limit errors in response
+        }
+      });
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    console.log(`Import successful: ${importedTransactions.length} transactions imported`);
+
     res.json({
       success: true,
-      message: `Imported ${importedTransactions.length} transactions successfully`,
-      summary: summary
+      message: `Successfully imported ${importedTransactions.length} transaction(s)`,
+      batchId,
+      importedTransactions,
+      summary: {
+        totalDataRows: dataRowsProcessed,
+        totalImported: importedTransactions.length,
+        skippedRows: skippedRows
+      }
     });
-    
+
   } catch (error) {
-    console.error('Import error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to import transactions',
-      error: error.message
-    });
-  }
-});
-
-// Get import template (no sample data)
-router.get('/transaction/import-template', async (req, res) => {
-  try {
-    const { accountType = 'Cash Balance' } = req.query;
+    console.error('Import route error:', error);
     
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Transaction Template');
-
-    // ===== Company Header =====
-    worksheet.mergeCells('A1:M1');
-    const titleCell = worksheet.getCell('A1');
-    titleCell.value = 'HEALTHCARE SOUTH EAST ASIA';
-    titleCell.font = { bold: true, size: 16, color: { argb: '000000' } };
-    titleCell.alignment = { 
-      vertical: 'middle', 
-      horizontal: 'center' 
-    };
-    titleCell.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'E6F3FF' }
-    };
-
-    // ===== Worksheet Title =====
-    worksheet.mergeCells('A2:M2');
-    const subtitleCell = worksheet.getCell('A2');
-    subtitleCell.value = `Transaction Import Template - ${accountType}`;
-    subtitleCell.font = { bold: true, size: 14, color: { argb: '000000' } };
-    subtitleCell.alignment = { 
-      vertical: 'middle', 
-      horizontal: 'center' 
-    };
-    subtitleCell.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'F0F8FF' }
-    };
-
-    // ===== Instructions =====
-    worksheet.mergeCells('A3:M3');
-    const instructionCell = worksheet.getCell('A3');
-    instructionCell.value = 'Instructions: Fill in the required fields below. Fields marked with * are required. For conditional fields, refer to the notes.';
-    instructionCell.font = { italic: true, size: 10, color: { argb: 'FF0000' } };
-    instructionCell.alignment = { 
-      vertical: 'middle', 
-      horizontal: 'left',
-      wrapText: true 
-    };
-    instructionCell.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FFF0F0' }
-    };
-
-    // ===== Column Headers =====
-    const headers = [
-      { header: 'Invoice Number*', key: 'invoiceNumber', width: 20 },
-      { header: 'Category Type*', key: 'categoryType', width: 20 },
-      { header: 'Date* (YYYY-MM-DD)', key: 'date', width: 15 },
-      { header: 'Amount*', key: 'amount', width: 15 },
-      { header: 'Source Account', key: 'source', width: 20 },
-      { header: 'Destination Account', key: 'destination', width: 20 },
-      { header: 'Supplier Name', key: 'supplier', width: 25 },
-      { header: 'Exchange Loss', key: 'exchangeLoss', width: 15 },
-      { header: 'Final Amount (Auto)', key: 'finalAmount', width: 15 },
-      { header: 'Invoice Date', key: 'invoiceDate', width: 15 },
-      { header: 'Customer Name', key: 'customerName', width: 25 },
-      { header: 'Customer Address', key: 'customerAddress', width: 30 },
-      { header: 'Remarks', key: 'remarks', width: 30 }
-    ];
-
-    // Add headers at row 4
-    const headerRow = worksheet.getRow(4);
-    headers.forEach((header, index) => {
-      const cell = headerRow.getCell(index + 1);
-      cell.value = header.header;
-      cell.font = { bold: true, color: { argb: 'FFFFFF' } };
-      cell.alignment = { 
-        vertical: 'middle', 
-        horizontal: 'center',
-        wrapText: true 
-      };
-      cell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: '4472C4' }
-      };
-      cell.border = {
-        top: { style: 'thin', color: { argb: '000000' } },
-        left: { style: 'thin', color: { argb: '000000' } },
-        bottom: { style: 'thin', color: { argb: '000000' } },
-        right: { style: 'thin', color: { argb: '000000' } }
-      };
-    });
-
-    // Set column widths
-    worksheet.columns = headers;
-
-    // ===== Add Data Validation =====
-    // Validate amount column (positive numbers)
-    for (let i = 5; i <= 100; i++) {
-      const amountCell = worksheet.getCell(`D${i}`);
-      amountCell.dataValidation = {
-        type: 'decimal',
-        operator: 'greaterThan',
-        formula1: '0',
-        allowBlank: false,
-        showErrorMessage: true,
-        errorTitle: 'Invalid Amount',
-        error: 'Amount must be a positive number'
-      };
-
-      // Validate exchange loss (non-negative)
-      const exchangeCell = worksheet.getCell(`H${i}`);
-      exchangeCell.dataValidation = {
-        type: 'decimal',
-        operator: 'greaterThanOrEqual',
-        formula1: '0',
-        allowBlank: true,
-        showErrorMessage: true,
-        errorTitle: 'Invalid Exchange Loss',
-        error: 'Exchange loss cannot be negative'
-      };
-      
-      // Add date validation
-      const dateCell = worksheet.getCell(`C${i}`);
-      dateCell.dataValidation = {
-        type: 'date',
-        operator: 'greaterThan',
-        formula1: 'DATE(2000,1,1)',
-        allowBlank: false,
-        showErrorMessage: true,
-        errorTitle: 'Invalid Date',
-        error: 'Please enter a valid date (YYYY-MM-DD)'
-      };
+    if (session.inTransaction()) {
+      await session.abortTransaction();
     }
+    session.endSession();
 
-    // ===== Add Auto-calculation for Final Amount =====
-    for (let i = 5; i <= 100; i++) {
-      const finalAmountCell = worksheet.getCell(`I${i}`);
-      finalAmountCell.value = {
-        formula: `IF(AND(ISNUMBER(D${i}), ISNUMBER(H${i})), D${i}-H${i}, IF(ISNUMBER(D${i}), D${i}, 0))`
-      };
-      finalAmountCell.numFmt = '#,##0.00';
-      finalAmountCell.font = { bold: true, color: { argb: '008000' } };
-      finalAmountCell.protection = { locked: true };
-    }
-
-    // ===== Add Category Rules Section =====
-    const notesStartRow = 8;
-    
-    worksheet.mergeCells(`A${notesStartRow}:M${notesStartRow}`);
-    const rulesTitle = worksheet.getCell(`A${notesStartRow}`);
-    rulesTitle.value = 'CATEGORY-SPECIFIC REQUIREMENTS:';
-    rulesTitle.font = { bold: true, size: 12, color: { argb: '0000FF' } };
-    rulesTitle.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'E6F3FF' }
-    };
-
-    const categoryRules = [
-      { category: 'Cash Sale', rules: 'Requires: Invoice Number, Destination Account, Customer Name' },
-      { category: 'Credit Collection', rules: 'Requires: Invoice Number, Destination Account, Customer Name' },
-      { category: 'Payment Inward', rules: 'Requires: Supplier Name, Destination Account' },
-      { category: 'Payment Outward', rules: 'Requires: Supplier Name, Source Account' },
-      { category: 'Deposit', rules: 'Requires: Source Account, Destination Account. Exchange Loss is optional.' },
-      { category: 'Withdraw', rules: 'Requires: Source Account, Destination Account' },
-      { category: 'Remittance', rules: 'Requires: Supplier Name, Source Account' }
-    ];
-
-    categoryRules.forEach((rule, index) => {
-      const ruleRow = notesStartRow + 1 + index;
-      
-      // Category column
-      const catCell = worksheet.getCell(`A${ruleRow}`);
-      catCell.value = `• ${rule.category}:`;
-      catCell.font = { bold: true };
-      
-      // Rules column
-      worksheet.mergeCells(`B${ruleRow}:M${ruleRow}`);
-      const rulesCell = worksheet.getCell(`B${ruleRow}`);
-      rulesCell.value = rule.rules;
-      rulesCell.font = { italic: true };
-    });
-
-    // ===== Add General Instructions =====
-    const instructionsStartRow = notesStartRow + categoryRules.length + 3;
-    
-    worksheet.mergeCells(`A${instructionsStartRow}:M${instructionsStartRow}`);
-    const instructionsTitle = worksheet.getCell(`A${instructionsStartRow}`);
-    instructionsTitle.value = 'GENERAL INSTRUCTIONS:';
-    instructionsTitle.font = { bold: true, size: 12, color: { argb: '008000' } };
-    instructionsTitle.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'F0FFF0' }
-    };
-
-    const instructions = [
-      '1. Fields marked with * are mandatory for all transactions',
-      '2. Date must be in YYYY-MM-DD format',
-      '3. Amount must be a positive number',
-      '4. Exchange Loss is deducted from Amount to calculate Final Amount',
-      '5. For invoice-based categories, Invoice Date, Customer Name are auto-filled',
-      '6. Duplicate invoice numbers will be rejected during import',
-      '7. Source/Destination accounts must exist in the system or will be created',
-      '8. For Deposit/Withdraw: Both Source and Destination accounts required',
-      '9. For Payment Inward/Remittance: Supplier Name is required',
-      '10. Remarks are optional but recommended for tracking',
-      '11. Fields marked "--" are not applicable for the category type'
-    ];
-
-    instructions.forEach((instruction, index) => {
-      const instrRow = instructionsStartRow + 1 + index;
-      worksheet.mergeCells(`A${instrRow}:M${instrRow}`);
-      const instrCell = worksheet.getCell(`A${instrRow}`);
-      instrCell.value = instruction;
-      instrCell.font = { size: 10 };
-    });
-
-    // ===== Prepare Excel Buffer for Response =====
-    const buffer = await workbook.xlsx.writeBuffer();
-
-    // Set response headers
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename=transaction-import-template-${accountType.toLowerCase().replace(/\s+/g, '-')}.xlsx`);
-    res.setHeader('Content-Length', buffer.length);
-
-    // Send the buffer
-    res.send(buffer);
-
-  } catch (error) {
-    console.error('Error generating import template:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to generate import template'
-    });
-  }
-});
-
-// Get import summary
-router.get('/transaction/import-summary/:batchId' , async (req, res) => {
-  try {
-    const { batchId } = req.params;
-    
-    const transactions = await Transaction.find({ importBatchId: batchId })
-      .populate('categoryType', 'name')
-      .populate('source', 'name')
-      .populate('destination', 'name')
-      .populate('supplier', 'name')
-      .sort({ date: -1 });
-    
-    const summary = {
-      total: transactions.length,
-      imported: transactions.filter(t => t.importStatus === 'imported').length,
-      pending: transactions.filter(t => t.importStatus === 'pending').length,
-      errors: transactions.filter(t => t.importStatus === 'error').length,
-      transactions: transactions
-    };
-    
-    res.json({
-      success: true,
-      summary
-    });
-    
-  } catch (error) {
-    console.error('Error getting import summary:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to get import summary'
+      message: 'Import failed due to server error',
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
@@ -917,25 +1052,61 @@ router.get('/transaction/import-summary/:batchId' , async (req, res) => {
 // Get all transactions with pagination and filtering
 router.get("/transaction", async (req, res) => {
   try {
-    const transactions = await Transaction.find({})
+    const { 
+      startDate, 
+      endDate, 
+      categoryType, 
+      accountType,
+      page = 1, 
+      limit = 50 
+    } = req.query;
+    
+    let query = {};
+    
+    // Date filter
+    if (startDate || endDate) {
+      query.date = {};
+      if (startDate) query.date.$gte = new Date(startDate);
+      if (endDate) query.date.$lte = new Date(endDate);
+    }
+    
+    // Category filter
+    if (categoryType) {
+      query.categoryType = categoryType;
+    }
+    
+    // Account type filter
+    if (accountType) {
+      query.accountType = accountType;
+    }
+    
+    const skip = (page - 1) * limit;
+    
+    const transactions = await Transaction.find(query)
       .populate("categoryType", "name")
       .populate("source", "name totalAmount")
       .populate("destination", "name totalAmount")
       .populate("supplier", "name")
-      .sort({ date: -1, createdAt: -1 });
+      .sort({ date: -1, createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
 
+    const total = await Transaction.countDocuments(query);
     const destinations = await Destination.find();
-    const total = transactions.length;
 
     res.json({
       success: true,
       data: transactions,
       destinations,
-      totalPages: 1,
-      currentPage: 1,
-      total,
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(total / limit)
+      }
     });
   } catch (error) {
+    console.error('Get transactions error:', error);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -964,6 +1135,7 @@ router.get("/transaction/:id", async (req, res) => {
       data: transaction,
     });
   } catch (error) {
+    console.error('Get single transaction error:', error);
     res.status(500).json({
       success: false,
       message: error.message,
@@ -971,7 +1143,7 @@ router.get("/transaction/:id", async (req, res) => {
   }
 });
 
-// Update transaction - CORRECTED FOR FINAL AMOUNT HANDLING
+// Update transaction
 router.put("/transaction/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -1008,70 +1180,36 @@ router.put("/transaction/:id", async (req, res) => {
       newTransactionType = await getTransactionType(req.body.categoryType);
     }
 
+    // Reverse old balances
     await adjustBalances(existingTransaction, session, true);
 
     let calculatedFinalAmount =
       parseFloat(req.body.finalAmount) ||
       parseFloat(req.body.amount) ||
       existingTransaction.finalAmount;
+    
     if (newTransactionType === "deposit") {
-      const amountValue =
-        parseFloat(req.body.amount) || existingTransaction.amount;
-      const exchangeLossValue =
-        parseFloat(req.body.exchangeLoss) ||
-        existingTransaction.exchangeLoss ||
-        0;
+      const amountValue = parseFloat(req.body.amount) || existingTransaction.amount;
+      const exchangeLossValue = parseFloat(req.body.exchangeLoss) || existingTransaction.exchangeLoss || 0;
       calculatedFinalAmount = amountValue - exchangeLossValue;
+    }
+
+    // Check source account balance for new transaction
+    if (req.body.source && req.body.amount) {
+      await checkSourceAccountBalance(
+        req.body.source, 
+        parseFloat(req.body.amount), 
+        newTransactionType
+      );
     }
 
     const updateData = {
       ...req.body,
       transactionType: newTransactionType,
       amount: parseFloat(req.body.amount || existingTransaction.amount),
-      exchangeLoss: parseFloat(
-        req.body.exchangeLoss || existingTransaction.exchangeLoss
-      ),
+      exchangeLoss: parseFloat(req.body.exchangeLoss || existingTransaction.exchangeLoss),
       finalAmount: calculatedFinalAmount,
     };
-
-    // For category changes, ensure proper source/destination handling
-    if (categoryTypeChanged) {
-      const newCategory = await CategoryType.findById(req.body.categoryType);
-      const newCategoryName = newCategory ? newCategory.name.toLowerCase() : "";
-
-      // Clear inappropriate fields based on new category
-      if (
-        newCategoryName === "cash sale" ||
-        newCategoryName === "sale" ||
-        newCategoryName === "credit collection"
-      ) {
-        // Sales categories only need destination
-        updateData.source = undefined;
-        if (!updateData.destination) {
-          throw new Error(
-            "Destination account is required for sales transactions"
-          );
-        }
-      } else if (
-        newCategoryName === "remittance" ||
-        newCategoryName === "payment outward"
-      ) {
-        // These categories need source only
-        updateData.destination = undefined;
-        if (!updateData.source) {
-          throw new Error(
-            "Source account is required for this transaction type"
-          );
-        }
-      } else if (newCategoryName === "payment inward") {
-        // Payment inward needs destination only
-        updateData.source = undefined;
-        if (!updateData.destination) {
-          throw new Error("Destination account is required for payment inward");
-        }
-      }
-      // For deposit/withdraw, both source and destination should be provided
-    }
 
     const newTransactionData = {
       ...updateData,
@@ -1079,6 +1217,7 @@ router.put("/transaction/:id", async (req, res) => {
       transactionType: newTransactionType,
     };
 
+    // Apply new balances
     await adjustBalances(newTransactionData, session, false);
 
     const transaction = await Transaction.findByIdAndUpdate(id, updateData, {
@@ -1152,6 +1291,7 @@ router.delete("/transaction/:id", async (req, res) => {
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
+    console.error("Delete transaction error:", error);
     res.status(500).json({
       success: false,
       message: "Failed to delete transaction",
@@ -1184,9 +1324,7 @@ router.delete("/transactions", async (req, res) => {
       });
     }
 
-    const transactions = await Transaction.find({ _id: { $in: ids } }).session(
-      session
-    );
+    const transactions = await Transaction.find({ _id: { $in: ids } }).session(session);
     if (transactions.length === 0) {
       await session.abortTransaction();
       session.endSession();
@@ -1200,9 +1338,7 @@ router.delete("/transactions", async (req, res) => {
       await adjustBalances(tx, session, true);
     }
 
-    const result = await Transaction.deleteMany({ _id: { $in: ids } }).session(
-      session
-    );
+    const result = await Transaction.deleteMany({ _id: { $in: ids } }).session(session);
 
     await session.commitTransaction();
     session.endSession();
@@ -1214,10 +1350,49 @@ router.delete("/transactions", async (req, res) => {
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
+    console.error("Bulk delete error:", error);
     res.status(500).json({
       success: false,
       message: "Failed to delete transactions",
       error: error.message,
+    });
+  }
+});
+
+// Test import endpoint for debugging
+router.post('/transaction/import/test', upload.single('file'), async (req, res) => {
+  try {
+    const file = req.file;
+    
+    if (!file) {
+      return res.status(400).json({
+        success: false,
+        message: 'No file uploaded'
+      });
+    }
+
+    console.log('Test upload received:', {
+      fileName: file.originalname,
+      fileSize: file.size,
+      fileType: file.mimetype,
+      bufferLength: file.buffer.length
+    });
+
+    res.json({
+      success: true,
+      message: 'File received successfully',
+      fileInfo: {
+        name: file.originalname,
+        size: file.size,
+        type: file.mimetype
+      }
+    });
+  } catch (error) {
+    console.error('Test endpoint error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Test failed',
+      error: error.message
     });
   }
 });

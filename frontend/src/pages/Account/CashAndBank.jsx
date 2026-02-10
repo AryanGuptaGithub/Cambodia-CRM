@@ -1,4 +1,3 @@
-// Fetch transactions when component mounts or filters change
 import {
   Search,
   Download,
@@ -16,110 +15,60 @@ import axios from "axios";
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { showToast } from "../../utils/toast";
 import { confirmDialog } from "../../utils/confirmationDialog";
-import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
 import { formatDateToReadable } from "../../utils/dateUtil.js";
 import SearchableDropdown from "../../components/common/SearchableDropdown";
 import TransactionExcelDownload from "../../excels/TransactionExcelDownload.jsx";
-import * as XLSX from "xlsx";
+import * as XLSX from "xlsx"; // Added missing import
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
-const ITEMS_PER_PAGE = 7;
 
-// Helper function to convert date from "YYYY-MM-DD" to "DD MMM YYYY" format
-const formatDateForInput = (dateString) => {
-  if (!dateString) return "";
-
-  try {
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return dateString;
-
-    const day = date.getDate().toString().padStart(2, "0");
-    const month = date.toLocaleString("en", { month: "short" });
-    const year = date.getFullYear();
-
-    return `${day} ${month} ${year}`;
-  } catch (error) {
-    console.error("Error formatting date:", error);
-    return dateString;
-  }
-};
-
-// Helper function to convert date from "DD MMM YYYY" back to "YYYY-MM-DD" for form submission
-const parseDateFromInput = (dateString) => {
-  if (!dateString) return "";
-
-  try {
-    // If it's already in YYYY-MM-DD format, return as is
-    if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
-      return dateString;
-    }
-
-    // Parse from "DD MMM YYYY" format
-    const parts = dateString.split(" ");
-    if (parts.length === 3) {
-      const day = parts[0];
-      const month = parts[1];
-      const year = parts[2];
-
-      const monthNames = [
-        "Jan",
-        "Feb",
-        "Mar",
-        "Apr",
-        "May",
-        "Jun",
-        "Jul",
-        "Aug",
-        "Sep",
-        "Oct",
-        "Nov",
-        "Dec",
-      ];
-      const monthIndex = monthNames.findIndex(
-        (m) => m.toLowerCase() === month.toLowerCase(),
-      );
-
-      if (monthIndex !== -1) {
-        const date = new Date(year, monthIndex, day);
-        return date.toISOString().split("T")[0];
-      }
-    }
-
-    return dateString;
-  } catch (error) {
-    console.error("Error parsing date:", error);
-    return dateString;
-  }
-};
-
+// Helper function to get display value
 const getDisplayValue = (value, options) => {
   try {
-    if (!value && value !== 0) return "--";
+    if (value === undefined || value === null || value === "") return "--";
 
     // If value is an object (populated data from backend)
     if (typeof value === "object" && value !== null) {
-      // Try different possible property names
       return (
-        value.name || value.label || value.title || value.toString() || "--"
+        value.name ||
+        value.label ||
+        value.title ||
+        (typeof value === "string" ? value : "--")
       );
     }
 
-    // If value is a string (could be ID), find the label from options
-    if (typeof value === "string" && options && Array.isArray(options)) {
+    // If value is a string or number (could be ID)
+    if (
+      (typeof value === "string" || typeof value === "number") &&
+      options &&
+      Array.isArray(options)
+    ) {
       const option = options.find((opt) => {
-        // Handle both string and ObjectId comparisons
-        return opt.value === value || opt.value?.toString() === value;
-      });
-      return option ? option.label : value;
-    }
+        if (!opt) return false;
 
-    // If value is a number, return it as string
-    if (typeof value === "number") {
+        if (opt.value === value || opt.value?.toString() === value.toString()) {
+          return true;
+        }
+
+        if (typeof opt === "string" && opt === value) {
+          return true;
+        }
+
+        if (opt._id && opt._id.toString() === value.toString()) {
+          return true;
+        }
+
+        return false;
+      });
+
+      if (option) {
+        return option.label || option.name || option.toString();
+      }
+
       return value.toString();
     }
 
-    // Return the value as string for other cases
-    return value ? value.toString() : "--";
+    return value !== undefined && value !== null ? value.toString() : "--";
   } catch (error) {
     console.error("Error in getDisplayValue:", error);
     return "--";
@@ -132,11 +81,13 @@ const useDropdownOptions = () => {
   const [sourceOptions, setSourceOptions] = useState([]);
   const [destinationOptions, setDestinationOptions] = useState([]);
   const [supplierOptions, setSupplierOptions] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [customerOptions, setCustomerOptions] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   const fetchDropdownOptions = async () => {
     try {
+      setLoading(true);
       setError(null);
 
       // Fetch category options
@@ -144,53 +95,68 @@ const useDropdownOptions = () => {
         `${backendUrl}/api/accounts/category-type`,
       );
 
-      const categories = categoryResponse.data.map((cat) => ({
-        value: cat._id,
-        label: cat.name,
+      const categories = (categoryResponse.data || []).map((cat) => ({
+        value: cat._id || cat.id,
+        label: cat.name || "Unnamed Category",
       }));
       setCategoryOptions(categories);
 
-      // Fetch destination options
+      // Fetch destination options (which also serve as source options)
       const destinationResponse = await axios.get(
         `${backendUrl}/api/accounts/destinations`,
       );
-
-      const destinations = destinationResponse.data.map((dest) => ({
-        value: dest._id,
-        label: dest.name,
+      const destinations = (destinationResponse.data || []).map((dest) => ({
+        value: dest._id || dest.id,
+        label: dest.name || "Unnamed Destination",
         totalAmount: dest.totalAmount || 0,
       }));
       setDestinationOptions(destinations);
       setSourceOptions(destinations);
 
-      // Fetch supplier options - FIXED: Handle different response structures
-      const supplierResponse = await axios.get(`${backendUrl}/api/suppliers`);
+      // Fetch supplier options
+      const supplierResponse = await axios.get(
+        `${backendUrl}/api/suppliers/all`,
+      );
 
-      // Handle different possible response structures
       let suppliers = [];
       if (supplierResponse.data && Array.isArray(supplierResponse.data)) {
-        // If response is directly an array
         suppliers = supplierResponse.data;
-      } else if (
-        supplierResponse.data &&
-        supplierResponse.data.data &&
-        Array.isArray(supplierResponse.data.data)
-      ) {
-        // If response has { data: [] } structure
-        suppliers = supplierResponse.data.data;
-      } else if (
-        supplierResponse.data &&
-        Array.isArray(supplierResponse.data.suppliers)
-      ) {
-        // If response has { suppliers: [] } structure
-        suppliers = supplierResponse.data.suppliers;
       }
 
       const supplierOptions = suppliers.map((supplier) => ({
-        value: supplier._id,
-        label: supplier.name,
+        value: supplier._id || supplier.id,
+        label: supplier.name || supplier.supplierName || "Unnamed Supplier",
+        supplierName: supplier.supplierName || "",
+        address: supplier.address || "",
+        contact: supplier.contact || "",
+        email: supplier.email || "",
       }));
       setSupplierOptions(supplierOptions);
+
+      // Fetch customer options
+      const customerResponse = await axios.get(`${backendUrl}/api/customers`);
+
+      let customers = [];
+      if (
+        customerResponse.data &&
+        Array.isArray(customerResponse.data.customers)
+      ) {
+        customers = customerResponse.data.customers;
+      } else if (
+        customerResponse.data &&
+        Array.isArray(customerResponse.data)
+      ) {
+        customers = customerResponse.data;
+      }
+
+      const customerOptions = customers.map((customer) => ({
+        value: customer._id || customer.id,
+        label: customer.name || customer.customerName || "Unnamed Customer",
+        customerCode: customer.customerCode || "",
+        address: customer.address || "",
+        typeOfBusiness: customer.typeOfBusiness || "",
+      }));
+      setCustomerOptions(customerOptions);
     } catch (err) {
       console.error("Error fetching dropdown options:", err);
       setError(err.message);
@@ -198,6 +164,7 @@ const useDropdownOptions = () => {
       setSourceOptions([]);
       setDestinationOptions([]);
       setSupplierOptions([]);
+      setCustomerOptions([]);
     } finally {
       setLoading(false);
     }
@@ -212,72 +179,11 @@ const useDropdownOptions = () => {
     sourceOptions,
     destinationOptions,
     supplierOptions,
+    customerOptions,
     loading,
     error,
     refetch: fetchDropdownOptions,
   };
-};
-
-// Custom dropdown component with limited visible items and scroll
-const CustomDropdown = ({
-  value,
-  onChange,
-  options,
-  error,
-  disabled,
-  placeholder,
-}) => {
-  const [isOpen, setIsOpen] = useState(false);
-
-  const handleSelect = (optionValue) => {
-    onChange({ target: { value: optionValue } });
-    setIsOpen(false);
-  };
-
-  const selectedOption = options.find((opt) => opt.value === value);
-
-  return (
-    <div className="relative w-full">
-      <button
-        type="button"
-        onClick={() => !disabled && setIsOpen(!isOpen)}
-        className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 text-left ${
-          error ? "border-red-500" : "border-gray-300"
-        } ${
-          disabled
-            ? "bg-gray-200 cursor-not-allowed"
-            : "bg-white cursor-pointer"
-        }`}
-        disabled={disabled || options.length === 0}
-      >
-        {selectedOption
-          ? selectedOption.label
-          : options.length === 0
-            ? "Loading..."
-            : placeholder || "Select an option"}
-      </button>
-
-      {isOpen && !disabled && (
-        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto">
-          {options.length === 0 ? (
-            <div className="p-2 text-gray-500 text-sm">Loading options...</div>
-          ) : (
-            options.map((option) => (
-              <div
-                key={option.value}
-                onClick={() => handleSelect(option.value)}
-                className={`p-2 cursor-pointer hover:bg-indigo-50 ${
-                  value === option.value ? "bg-indigo-100 text-indigo-700" : ""
-                }`}
-              >
-                {option.label}
-              </div>
-            ))
-          )}
-        </div>
-      )}
-    </div>
-  );
 };
 
 // New hook to fetch sales invoices with payment status filtering
@@ -399,6 +305,262 @@ const useInvoiceOptions = (categoryName = "") => {
   };
 };
 
+// Import Excel Modal Component
+const ImportExcelModal = ({
+  isOpen,
+  onClose,
+  activeTab,
+  data = [],
+  categoryOptions = [],
+  sourceOptions = [],
+  destinationOptions = [],
+  supplierOptions = [],
+  customerOptions = [],
+}) => {
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const handleFileSelect = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const validTypes = [
+      "application/vnd.ms-excel",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "text/csv",
+    ];
+
+    if (!validTypes.includes(file.type)) {
+      showToast("error", "Please select a valid Excel or CSV file");
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      showToast("error", "File size should be less than 10MB");
+      return;
+    }
+
+    setSelectedFile(file);
+  };
+
+  const handleUpload = async () => {
+    if (!selectedFile) {
+      showToast("error", "Please select a file first");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", selectedFile);
+
+    try {
+      setUploading(true);
+
+      const response = await axios.post(
+        `${backendUrl}/api/transaction/import`,
+        formData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        },
+      );
+
+      if (response.data.success) {
+        showToast(
+          "success",
+          response.data.message || "File imported successfully",
+        );
+        setSelectedFile(null);
+        onClose();
+        window.location.reload();
+      } else {
+        showToast("error", response.data.message || "Import failed");
+      }
+    } catch (error) {
+      console.error("Error importing file:", error);
+
+      showToast(
+        "error",
+        error.response?.data?.message ||
+          "Import failed. Please check Excel format and data.",
+      );
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDownloadTemplate = () => {
+    // Create template data structure
+    const templateData = [
+      {
+        "Invoice No": "INV-001",
+        "Category Type": "Cash Sale",
+        "Source Account": "Cash Balance",
+        "Destination Account": "Company Account",
+        Amount: "1000.00",
+        "Exchange Loss": "0.00",
+        "Final Amount": "1000.00",
+        Date: "2024-01-15",
+        Remarks: "Sample transaction",
+      },
+      {
+        "Invoice No": "INV-002",
+        "Category Type": "Deposit",
+        "Source Account": "Personal Account",
+        "Destination Account": "Cash Balance",
+        Amount: "500.00",
+        "Exchange Loss": "5.00",
+        "Final Amount": "495.00",
+        Date: "2024-01-16",
+        Remarks: "Deposit example",
+      },
+    ];
+
+    // Create worksheet
+    const ws = XLSX.utils.json_to_sheet(templateData);
+
+    // Create workbook
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Transactions Template");
+
+    // Generate Excel file
+    XLSX.writeFile(
+      wb,
+      `transactions_template_${activeTab.replace(/\s+/g, "_")}.xlsx`,
+    );
+
+    showToast("success", "Template downloaded successfully");
+  };
+
+  if (!isOpen) return null;
+
+  return ReactDOM.createPortal(
+    <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
+      <div
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      <div className="bg-white rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto relative z-10">
+        <div className="flex items-center justify-between p-6 border-b">
+          <h2 className="text-xl font-semibold text-gray-800">
+            Import Excel - {activeTab}
+          </h2>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-200 rounded-lg transition-colors cursor-pointer"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="p-6">
+          {/* Download Template Section */}
+          <div className="mb-8 p-4 bg-blue-50 rounded-lg border border-blue-200">
+            <h3 className="text-lg font-semibold text-gray-800 mb-3">
+              Download Excel Template
+            </h3>
+            <p className="text-gray-600 mb-4">
+              Download a template file with the correct format for importing
+              transactions.
+            </p>
+            <TransactionExcelDownload
+              data={data}
+              categoryOptions={categoryOptions}
+              sourceOptions={sourceOptions}
+              destinationOptions={destinationOptions}
+              supplierOptions={supplierOptions}
+              customerOptions={customerOptions}
+              activeTab={activeTab}
+            />
+          </div>
+
+          {/* Import Section */}
+          <div className="mb-6">
+            <h3 className="text-lg font-semibold text-gray-800 mb-3">
+              Upload Excel File
+            </h3>
+            <div className="space-y-4">
+              <div
+                className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer hover:border-indigo-400 transition-colors"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Upload className="mx-auto text-gray-400 mb-3" size={48} />
+                <p className="text-gray-600 mb-2">
+                  {selectedFile
+                    ? selectedFile.name
+                    : "Click to select Excel file"}
+                </p>
+                <p className="text-sm text-gray-500">
+                  Supported formats: .xlsx, .xls, .csv (Max 10MB)
+                </p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
+              </div>
+
+              {selectedFile && (
+                <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium text-green-800">
+                        Selected file: {selectedFile.name}
+                      </p>
+                      <p className="text-sm text-green-600">
+                        Size: {(selectedFile.size / 1024).toFixed(2)} KB
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setSelectedFile(null)}
+                      className="text-red-600 hover:text-red-800 cursor-pointer"
+                    >
+                      <X size={20} />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <button
+                onClick={handleUpload}
+                disabled={!selectedFile || uploading}
+                className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-3 rounded-lg shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {uploading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                    Uploading...
+                  </>
+                ) : (
+                  <>
+                    <Upload size={18} /> Upload File
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Instructions */}
+          <div className="mt-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+            <h4 className="font-medium text-gray-800 mb-2">Instructions:</h4>
+            <ul className="text-sm text-gray-600 space-y-1">
+              <li>• Download the template for the correct format</li>
+              <li>• Fill in the transaction data</li>
+              <li>• Save the file and upload it here</li>
+              <li>• Make sure dates are in YYYY-MM-DD format</li>
+              <li>• Amounts should be in numeric format (e.g., 1000.00)</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+};
+
 const AddTransactionModal = ({
   isOpen,
   onClose,
@@ -410,6 +572,7 @@ const AddTransactionModal = ({
   sourceOptions = [],
   destinationOptions = [],
   supplierOptions = [],
+  customerOptions = [],
   currentData = [],
 }) => {
   const [form, setForm] = useState({});
@@ -722,8 +885,9 @@ const AddTransactionModal = ({
           {
             key: "customerName",
             label: "Customer Name",
-            type: "text",
+            type: "customerDropdown",
             required: true,
+            options: customerOptions,
             layout: "half",
             disabled: true,
           },
@@ -754,6 +918,7 @@ const AddTransactionModal = ({
     sourceOptions,
     destinationOptions,
     supplierOptions,
+    customerOptions,
     getCategoryName,
     getFilteredSourceOptions,
     getFilteredDestinationOptions,
@@ -770,10 +935,10 @@ const AddTransactionModal = ({
   ]);
 
   // Initialize form data
-  const initializeFormData = () => {
+  const initializeFormData = useCallback(() => {
     const initialData = {};
     formFields.forEach((field) => {
-      if (field.type === "date") {
+      if (field.type === "date" && field.key === "date") {
         initialData[field.key] = new Date().toISOString().split("T")[0];
       } else if (field.key === "finalAmount") {
         initialData[field.key] = "0.00";
@@ -782,18 +947,27 @@ const AddTransactionModal = ({
       }
     });
     return initialData;
-  };
+  }, [formFields]);
 
   useEffect(() => {
     if (isOpen) {
       if (isEdit && editData) {
         const processedEditData = {
           ...editData,
-          categoryType: editData.categoryType?._id || editData.categoryType,
-          source: editData.source?._id || editData.source,
-          destination: editData.destination?._id || editData.destination,
-          supplier: editData.supplier?._id || editData.supplier,
+          categoryType:
+            editData.categoryType?._id || editData.categoryType || "",
+          source: editData.source?._id || editData.source || "",
+          destination: editData.destination?._id || editData.destination || "",
+          supplier: editData.supplier?._id || editData.supplier || "",
           remarks: editData.remarks || "",
+          customerName: editData.customerName || "",
+          customerAddress: editData.customerAddress || "",
+          invoiceDate: editData.invoiceDate || "",
+          invoiceNumber: editData.invoiceNumber || "",
+          exchangeLoss: editData.exchangeLoss || "",
+          finalAmount: editData.finalAmount || "0.00",
+          amount: editData.amount || "",
+          date: editData.date || new Date().toISOString().split("T")[0],
         };
         setForm(processedEditData);
         setInvoiceDataFetched(true);
@@ -813,7 +987,7 @@ const AddTransactionModal = ({
       // Refetch sales when modal opens
       refetchSales();
     }
-  }, [isOpen, isEdit, editData, activeTab]);
+  }, [isOpen, isEdit, editData, activeTab, initializeFormData]);
 
   // Calculate final amount for deposit transactions
   useEffect(() => {
@@ -885,7 +1059,7 @@ const AddTransactionModal = ({
   }, [form.categoryType]);
 
   // Find sale data by invoice number
-  const findSaleByInvoice = (invoiceNumber) => {
+  const findSaleByInvoice = useCallback((invoiceNumber) => {
     // First check filtered sales (already filtered by payment status)
     let sale = filteredSales.find(
       (sale) => sale.invoiceNumber === invoiceNumber,
@@ -897,14 +1071,17 @@ const AddTransactionModal = ({
     }
 
     return sale;
-  };
+  }, [filteredSales, sales]);
 
-  // Check if invoice already has a transaction
-  const checkInvoiceExistsInCurrentData = (invoiceNumber) => {
+  // Check if invoice already has a transaction (excluding current edit)
+  const checkInvoiceExistsInCurrentData = useCallback((invoiceNumber) => {
+    if (isEdit && editData && editData.invoiceNumber === invoiceNumber) {
+      return false; // Allow same invoice when editing
+    }
     return currentData.some((item) => item.invoiceNumber === invoiceNumber);
-  };
+  }, [currentData, isEdit, editData]);
 
-  const fetchSalesData = async (invoiceNumber) => {
+  const fetchSalesData = useCallback(async (invoiceNumber) => {
     if (
       !invoiceNumber ||
       invoiceNumber.trim() === "" ||
@@ -942,6 +1119,11 @@ const AddTransactionModal = ({
             return;
           }
 
+          // Find the customer in customerOptions
+          const customer = customerOptions.find(
+            (c) => c.label === saleRecord.customerName,
+          );
+
           setForm((prev) => ({
             ...prev,
             invoiceNumber: saleRecord.invoiceNumber,
@@ -949,7 +1131,8 @@ const AddTransactionModal = ({
               saleRecord.invoiceDate?.split("T")[0] ||
               new Date().toISOString().split("T")[0],
             customerName: saleRecord.customerName || "",
-            customerAddress: saleRecord.customerAddress || "",
+            customerAddress:
+              customer?.address || saleRecord.customerAddress || "",
             amount: saleRecord.totalAmount || "",
           }));
           setInvoiceDataFetched(true);
@@ -1003,14 +1186,15 @@ const AddTransactionModal = ({
         const salesData = salesResponse.data;
 
         if (salesData.data && salesData.data.length > 0) {
-          const existingTransaction = currentData.find(
-            (item) => item.invoiceNumber === invoiceNumber,
-          );
+          const existingTransaction = checkInvoiceExistsInCurrentData(invoiceNumber);
 
           if (existingTransaction) {
+            const existingTx = currentData.find(
+              (item) => item.invoiceNumber === invoiceNumber,
+            );
             showToast(
               "error",
-              `Invoice number ${invoiceNumber} already has a transaction with amount $${existingTransaction.amount}`,
+              `Invoice number ${invoiceNumber} already has a transaction with amount $${existingTx.amount}`,
             );
             setForm((prev) => ({
               ...prev,
@@ -1024,13 +1208,20 @@ const AddTransactionModal = ({
           }
 
           const saleRecord = salesData.data[0];
+
+          // Find the customer in customerOptions
+          const customer = customerOptions.find(
+            (c) => c.label === saleRecord.customerName,
+          );
+
           setForm((prev) => ({
             ...prev,
             invoiceDate:
               saleRecord.invoiceDate?.split("T")[0] ||
               new Date().toISOString().split("T")[0],
             customerName: saleRecord.customerName || "",
-            customerAddress: saleRecord.customerAddress || "",
+            customerAddress:
+              customer?.address || saleRecord.customerAddress || "",
             amount: saleRecord.amount || "",
           }));
           setInvoiceDataFetched(true);
@@ -1054,9 +1245,18 @@ const AddTransactionModal = ({
     } finally {
       setIsFetchingSales(false);
     }
-  };
+  }, [
+    requiresInvoiceFields,
+    requiresInvoiceDropdown,
+    findSaleByInvoice,
+    checkInvoiceExistsInCurrentData,
+    customerOptions,
+    sales,
+    getCategoryName,
+    currentData,
+  ]);
 
-  // FIXED: Calculate available balance for updates
+  // Calculate available balance for updates
   const getAvailableBalanceForUpdate = useCallback(() => {
     if (!form.source) return sourceAccountBalance;
 
@@ -1074,19 +1274,17 @@ const AddTransactionModal = ({
   ]);
 
   // Handle input change
-  const handleInputChange = (field, value) => {
+  const handleInputChange = useCallback((field, value) => {
     setForm((prev) => ({
       ...prev,
       [field]: value,
     }));
 
     // Clear error when user starts typing
-    if (errors[field]) {
-      setErrors((prev) => ({
-        ...prev,
-        [field]: "",
-      }));
-    }
+    setErrors((prev) => ({
+      ...prev,
+      [field]: "",
+    }));
 
     // When category type changes, reset related fields
     if (field === "categoryType") {
@@ -1164,9 +1362,18 @@ const AddTransactionModal = ({
         }));
       }
     }
-  };
+  }, [
+    sourceOptions,
+    fetchSalesData,
+    form.source,
+    form.amount,
+    isDeposit,
+    isWithdraw,
+    getAvailableBalanceForUpdate,
+    errors,
+  ]);
 
-  const validateForm = () => {
+  const validateForm = useCallback(() => {
     const newErrors = {};
 
     formFields.forEach((field) => {
@@ -1218,7 +1425,7 @@ const AddTransactionModal = ({
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
-  };
+  }, [form, formFields, isDeposit, isWithdraw, getAvailableBalanceForUpdate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -1241,7 +1448,6 @@ const AddTransactionModal = ({
       exchangeLoss,
       finalAmount,
       accountType: activeTab,
-      description: form.description,
       remarks: form.remarks || "",
     };
 
@@ -1291,10 +1497,15 @@ const AddTransactionModal = ({
       if (response.data.success) {
         onAddTransaction(response.data.data, isEdit);
         onClose();
+        showToast(
+          "success",
+          `Transaction ${isEdit ? "updated" : "added"} successfully`,
+        );
       }
     } catch (err) {
       console.error("Transaction submission error:", err);
-      alert(
+      showToast(
+        "error",
         "Failed to submit transaction: " +
           (err.response?.data?.message || err.message),
       );
@@ -1302,61 +1513,121 @@ const AddTransactionModal = ({
   };
 
   // Handle numeric input for text fields with validation
-  const handleNumericInputChange = (e, field) => {
+  const handleNumericInputChange = useCallback((e, field) => {
     const value = e.target.value;
 
     // Allow only numbers and decimal point
     if (value === "" || /^\d*\.?\d*$/.test(value)) {
-      // Additional validation for amount field
-      if (
-        field === "amount" &&
-        value &&
-        form.source &&
-        (isDeposit || isWithdraw)
-      ) {
-        const numericValue = parseFloat(value);
-        const availableBalance = getAvailableBalanceForUpdate();
-
-        if (!isNaN(numericValue) && numericValue > availableBalance) {
-          setErrors((prev) => ({
-            ...prev,
-            amount: `Amount cannot exceed available balance of $${availableBalance.toFixed(
-              2,
-            )}`,
-          }));
-          return; // Don't update the value if it exceeds the balance
-        }
-
-        // Clear amount error if validation passes
-        if (errors.amount) {
-          setErrors((prev) => ({
-            ...prev,
-            amount: "",
-          }));
-        }
-      }
-
       handleInputChange(field, value);
     }
-  };
+  }, [handleInputChange]);
 
-  // Handle date input change - convert from display format to storage format
-  const handleDateInputChange = (e, field) => {
-    const displayValue = e.target.value;
+  // Custom dropdown component
+  const CustomDropdown = ({
+    value,
+    onChange,
+    options = [],
+    error,
+    disabled,
+    placeholder,
+  }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const dropdownRef = useRef(null);
 
-    // Convert display format (DD MMM YYYY) to storage format (YYYY-MM-DD)
-    const storageValue = parseDateFromInput(displayValue);
+    useEffect(() => {
+      const handleClickOutside = (event) => {
+        if (
+          dropdownRef.current &&
+          !dropdownRef.current.contains(event.target)
+        ) {
+          setIsOpen(false);
+        }
+      };
+      document.addEventListener("mousedown", handleClickOutside);
+      return () =>
+        document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
 
-    handleInputChange(field, storageValue);
-  };
+    const handleSelect = (optionValue) => {
+      onChange({ target: { value: optionValue } });
+      setIsOpen(false);
+    };
 
-  // Handle dropdown change
-  const handleDropdownChange = (e, field) => {
-    handleInputChange(field, e.target.value);
+    const selectedOption = useMemo(() => {
+      if (!value && value !== 0) return null;
+      return options.find((opt) => {
+        if (!opt) return false;
+        return (
+          opt.value === value || opt.value?.toString() === value.toString()
+        );
+      });
+    }, [value, options]);
+
+    const displayText = useMemo(() => {
+      if (selectedOption) {
+        return selectedOption.label || selectedOption.value || "Selected";
+      }
+      if (options.length === 0) {
+        return "Loading options...";
+      }
+      return placeholder;
+    }, [selectedOption, options, placeholder]);
+
+    return (
+      <div className="relative w-full" ref={dropdownRef}>
+        <button
+          type="button"
+          onClick={() => !disabled && options.length > 0 && setIsOpen(!isOpen)}
+          className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 text-left flex justify-between items-center ${
+            error ? "border-red-500" : "border-gray-300"
+          } ${
+            disabled
+              ? "bg-gray-100 cursor-not-allowed"
+              : "bg-white cursor-pointer hover:border-indigo-300"
+          }`}
+          disabled={disabled || options.length === 0}
+        >
+          <span className="truncate">{displayText}</span>
+          <svg
+            className={`w-4 h-4 text-gray-400 transition-transform ${
+              isOpen ? "rotate-180" : ""
+            }`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M19 9l-7 7-7-7"
+            />
+          </svg>
+        </button>
+
+        {isOpen && !disabled && options.length > 0 && (
+          <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto">
+            {options.map((option, index) => (
+              <div
+                key={option.value || index}
+                onClick={() => handleSelect(option.value)}
+                className={`p-3 cursor-pointer hover:bg-indigo-50 transition-colors ${
+                  value === option.value
+                    ? "bg-indigo-50 text-indigo-700 font-medium"
+                    : "text-gray-700"
+                }`}
+              >
+                {option.label || option.value || "Unnamed option"}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
   };
 
   // Render form field based on type
-  const renderFormField = (field) => {
+  const renderFormField = useCallback((field) => {
     const value = form[field.key] || "";
     const fieldError = errors[field.key];
 
@@ -1395,28 +1666,30 @@ const AddTransactionModal = ({
           </div>
         );
 
+      case "customerDropdown":
+        return (
+          <div>
+            <SearchableDropdown
+              value={value}
+              onChange={(val) => handleInputChange(field.key, val)}
+              options={field.options || []}
+              placeholder={field.placeholder || `Select ${field.label}`}
+              error={fieldError}
+              disabled={field.disabled}
+            />
+          </div>
+        );
+
       case "date":
-        return field.key === "date" ? (
+        return (
           <input
             type="date"
             value={value}
-            onChange={(e) => handleDateInputChange(e, field.key)}
+            onChange={(e) => handleInputChange(field.key, e.target.value)}
             className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
               fieldError ? "border-red-500" : "border-gray-300"
             } ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
             disabled={field.disabled || false}
-            placeholder="DD MMM YYYY"
-          />
-        ) : (
-          <input
-            type="text"
-            value={formatDateForInput(value)}
-            onChange={(e) => handleDateInputChange(e, field.key)}
-            className={`w-full p-2 border rounded-lg focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 ${
-              fieldError ? "border-red-500" : "border-gray-300"
-            } ${field.disabled ? "bg-gray-200 cursor-not-allowed" : ""}`}
-            disabled={field.disabled || false}
-            placeholder="DD MMM YYYY"
           />
         );
 
@@ -1438,19 +1711,8 @@ const AddTransactionModal = ({
               form.source &&
               (isDeposit || isWithdraw) && (
                 <div className="mt-1 text-xs text-gray-500">
-                  {isEdit ? (
-                    <>
-                      Available Balance: $
-                      {getAvailableBalanceForUpdate().toFixed(2)}
-                    </>
-                  ) : (
-                    <>
-                      Available Balance: ${sourceAccountBalance.toFixed(2)}
-                      <span className="block text-red-500">
-                        Maximum amount: ${sourceAccountBalance.toFixed(2)}
-                      </span>
-                    </>
-                  )}
+                  Available Balance: $
+                  {getAvailableBalanceForUpdate().toFixed(2)}
                 </div>
               )}
           </div>
@@ -1485,7 +1747,7 @@ const AddTransactionModal = ({
           />
         );
     }
-  };
+  }, [form, errors, handleInputChange, handleNumericInputChange, salesLoading, isFetchingSales, isDeposit, isWithdraw, getAvailableBalanceForUpdate]);
 
   if (!isOpen) return null;
 
@@ -1546,8 +1808,7 @@ const AddTransactionModal = ({
               disabled={
                 categoryOptions.length === 0 || destinationOptions.length === 0
               }
-              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center
-               gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Plus size={16} />
               {isEdit ? "Update" : "Add"} Transaction
@@ -1560,123 +1821,71 @@ const AddTransactionModal = ({
   );
 };
 
-// ImportExcelModal Component - Update the template download section
-const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
-  const [uploading, setUploading] = useState(false);
-  const [importSummary, setImportSummary] = useState(null);
-  const [step, setStep] = useState(1); // 1: Upload, 2: Preview, 3: Summary
-  const [importFile, setImportFile] = useState(null);
-  const [importPreview, setImportPreview] = useState([]);
-  const fileInputRef = useRef(null);
+// Column Management Modal
+const ColumnManagementModal = ({ isOpen, onClose }) => {
+  const [visibleColumns, setVisibleColumns] = useState([
+    { key: "invoiceNumber", label: "Invoice No", visible: true },
+    { key: "categoryType", label: "Category Type", visible: true },
+    { key: "source", label: "Source Account", visible: true },
+    { key: "destination", label: "Destination Account", visible: true },
+    { key: "amount", label: "Amount", visible: true },
+    { key: "exchangeLoss", label: "Exchange Loss", visible: true },
+    { key: "finalAmount", label: "Final Amount", visible: true },
+    { key: "date", label: "Date", visible: true },
+    { key: "remarks", label: "Remarks", visible: true },
+    { key: "actions", label: "Actions", visible: true },
+  ]);
 
-  // Function to download template from backend
-  const downloadTemplate = () => {
-    // Construct the URL with query parameters
-    const templateUrl = `${backendUrl}/api/transaction/import-template?accountType=${encodeURIComponent(activeTab)}`;
-
-    // Create a temporary anchor element
-    const link = document.createElement("a");
-    link.href = templateUrl;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    link.download = `transaction-import-template-${activeTab.toLowerCase().replace(/\s+/g, "-")}.xlsx`;
-
-    // Append to body, click, and remove
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
-    // Show success message
-    showToast("success", "Template download started");
+  const toggleColumn = (key) => {
+    setVisibleColumns((prev) =>
+      prev.map((col) =>
+        col.key === key ? { ...col, visible: !col.visible } : col
+      )
+    );
   };
 
-  // Handle file upload
-  const handleFileUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    // Check file type
-    if (!file.name.match(/\.(xlsx|xls|csv)$/i)) {
-      showToast("error", "Please upload Excel or CSV files only");
-      return;
-    }
-
-    setImportFile(file);
-
-    // Read and preview the file
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const data = new Uint8Array(event.target.result);
-      const workbook = XLSX.read(data, { type: "array" });
-      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-      const jsonData = XLSX.utils.sheet_to_json(firstSheet);
-
-      // Preview first 5 rows
-      setImportPreview(jsonData.slice(0, 5));
-      setStep(2);
-    };
-    reader.readAsArrayBuffer(file);
+  const moveColumn = (fromIndex, toIndex) => {
+    const newColumns = [...visibleColumns];
+    const [removed] = newColumns.splice(fromIndex, 1);
+    newColumns.splice(toIndex, 0, removed);
+    setVisibleColumns(newColumns);
   };
 
-  // Handle import
-  const handleImport = async () => {
-    if (!importFile) {
-      showToast("error", "Please select a file first");
-      return;
-    }
-
-    setUploading(true);
-    const formData = new FormData();
-    formData.append("file", importFile);
-    formData.append("accountType", activeTab);
-
-    try {
-      const response = await axios.post(
-        `${backendUrl}/api/transaction/import`,
-        formData,
-        {
-          headers: {
-            "Content-Type": "multipart/form-data",
-          },
-        },
-      );
-
-      if (response.data.success) {
-        setImportSummary(response.data.summary);
-        setStep(3);
-        showToast("success", "Import completed successfully");
-      }
-    } catch (error) {
-      console.error("Import error:", error);
-      showToast(
-        "error",
-        error.response?.data?.message || "Failed to import transactions",
-      );
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const handleClose = () => {
-    setStep(1);
-    setImportFile(null);
-    setImportPreview([]);
-    setImportSummary(null);
+  const saveColumns = () => {
+    localStorage.setItem("cashbank_columns", JSON.stringify(visibleColumns));
+    showToast("success", "Column settings saved successfully");
     onClose();
-    if (onImportComplete) {
-      onImportComplete();
-    }
+    window.location.reload();
   };
 
-  const resetImport = () => {
-    setStep(1);
-    setImportFile(null);
-    setImportPreview([]);
-    setImportSummary(null);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
+  const resetColumns = () => {
+    setVisibleColumns([
+      { key: "invoiceNumber", label: "Invoice No", visible: true },
+      { key: "categoryType", label: "Category Type", visible: true },
+      { key: "source", label: "Source Account", visible: true },
+      { key: "destination", label: "Destination Account", visible: true },
+      { key: "amount", label: "Amount", visible: true },
+      { key: "exchangeLoss", label: "Exchange Loss", visible: true },
+      { key: "finalAmount", label: "Final Amount", visible: true },
+      { key: "date", label: "Date", visible: true },
+      { key: "remarks", label: "Remarks", visible: true },
+      { key: "actions", label: "Actions", visible: true },
+    ]);
+    localStorage.removeItem("cashbank_columns");
   };
+
+  useEffect(() => {
+    if (isOpen) {
+      const saved = localStorage.getItem("cashbank_columns");
+      if (saved) {
+        try {
+          setVisibleColumns(JSON.parse(saved));
+        } catch (e) {
+          console.error("Error loading saved columns:", e);
+        }
+      }
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -1684,15 +1893,15 @@ const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
     <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
       <div
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={handleClose}
+        onClick={onClose}
       />
-      <div className="bg-white rounded-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto relative z-10">
+      <div className="bg-white rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto relative z-10">
         <div className="flex items-center justify-between p-6 border-b">
           <h2 className="text-xl font-semibold text-gray-800">
-            Import Transactions - {activeTab}
+            Column Management
           </h2>
           <button
-            onClick={handleClose}
+            onClick={onClose}
             className="p-2 hover:bg-gray-200 rounded-lg transition-colors cursor-pointer"
           >
             <X size={20} />
@@ -1700,207 +1909,91 @@ const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
         </div>
 
         <div className="p-6">
-          {/* Step 1: Upload */}
-          {step === 1 && (
-            <div className="text-center">
-              <div className="mb-6">
-                <FileSpreadsheet className="mx-auto text-gray-400" size={48} />
-                <h3 className="text-lg font-semibold mt-4 mb-2">
-                  Upload Excel File
-                </h3>
-                <p className="text-gray-600 mb-4">
-                  Upload an Excel file with transaction data. Download the
-                  template for reference.
-                </p>
+          <div className="mb-6">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4">
+              Manage Table Columns
+            </h3>
+            <p className="text-gray-600 mb-4">
+              Select which columns to show and drag to reorder them.
+            </p>
+          </div>
 
-                {/* Download Template Button - UPDATED */}
-                <div className="mb-6">
-                  <button
-                    onClick={downloadTemplate}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer"
-                  >
-                    <Download size={16} />
-                    Download Template
-                  </button>
-                  <p className="text-xs text-gray-500 mt-2">
-                    Template includes all required fields and category-specific
-                    formatting
-                  </p>
-                </div>
-              </div>
-
+          <div className="space-y-4">
+            {visibleColumns.map((column, index) => (
               <div
-                className="border-2 border-dashed border-gray-300 rounded-lg p-8 hover:border-indigo-400 transition-colors cursor-pointer"
-                onClick={() => fileInputRef.current?.click()}
+                key={column.key}
+                className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200"
               >
-                <Upload className="mx-auto text-gray-400 mb-4" size={32} />
-                <p className="text-gray-700 mb-2">
-                  Click to upload or drag and drop
-                </p>
-                <p className="text-gray-500 text-sm">
-                  Excel (.xlsx, .xls) or CSV files only
-                </p>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".xlsx,.xls,.csv"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                />
-              </div>
-
-              {importFile && (
-                <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-                  <p className="text-green-700">
-                    Selected: {importFile.name} (
-                    {(importFile.size / 1024).toFixed(2)} KB)
-                  </p>
-                </div>
-              )}
-
-              <div className="mt-8 text-left">
-                <h4 className="font-semibold mb-2">Expected Columns:</h4>
-                <div className="text-sm text-gray-600 grid grid-cols-2 gap-2">
-                  <div>• Invoice Number* (Required)</div>
-                  <div>• Category Type* (Required)</div>
-                  <div>• Date* (YYYY-MM-DD) (Required)</div>
-                  <div>• Amount* (Required)</div>
-                  <div>• Source Account (Conditional)</div>
-                  <div>• Destination Account (Conditional)</div>
-                  <div>• Supplier Name (Conditional)</div>
-                  <div>• Remarks (Optional)</div>
-                </div>
-                <p className="text-xs text-gray-500 mt-2">
-                  * = Required field. Conditional fields depend on category
-                  type.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* Step 2: Preview */}
-          {step === 2 && (
-            <div>
-              <h3 className="text-lg font-semibold mb-4">Preview Data</h3>
-              <p className="text-gray-600 mb-4">
-                Preview of first 5 rows from your file:
-              </p>
-
-              <div className="overflow-x-auto mb-6">
-                <table className="w-full border-collapse bg-white rounded-lg overflow-hidden shadow-sm">
-                  <thead className="bg-gray-100">
-                    <tr>
-                      {importPreview.length > 0 &&
-                        Object.keys(importPreview[0]).map((key) => (
-                          <th
-                            key={key}
-                            className="p-3 text-left text-sm font-medium"
-                          >
-                            {key}
-                          </th>
-                        ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {importPreview.map((row, index) => (
-                      <tr key={index} className="border-b hover:bg-gray-50">
-                        {Object.values(row).map((value, idx) => (
-                          <td key={idx} className="p-3 text-sm">
-                            {String(value)}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="flex justify-between">
-                <button
-                  onClick={resetImport}
-                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
-                >
-                  Back
-                </button>
-                <div className="flex gap-2">
+                <div className="flex items-center gap-3">
                   <button
-                    onClick={resetImport}
-                    className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
+                    onClick={() => toggleColumn(column.key)}
+                    className={`w-6 h-6 rounded border flex items-center justify-center ${
+                      column.visible
+                        ? "bg-indigo-600 border-indigo-600"
+                        : "bg-white border-gray-300"
+                    }`}
                   >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleImport}
-                    disabled={uploading}
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                  >
-                    {uploading ? (
-                      <>
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                        Importing...
-                      </>
-                    ) : (
-                      "Confirm Import"
+                    {column.visible && (
+                      <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                      </svg>
                     )}
                   </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Step 3: Summary */}
-          {step === 3 && importSummary && (
-            <div>
-              <h3 className="text-lg font-semibold mb-4 text-green-600">
-                Import Successful!
-              </h3>
-
-              <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="text-center p-3 bg-white rounded-lg">
-                    <div className="text-2xl font-bold text-green-600">
-                      {importSummary.successCount || 0}
-                    </div>
-                    <div className="text-sm text-gray-600">Successful</div>
-                  </div>
-                  <div className="text-center p-3 bg-white rounded-lg">
-                    <div className="text-2xl font-bold text-red-600">
-                      {importSummary.errorCount || 0}
-                    </div>
-                    <div className="text-sm text-gray-600">Failed</div>
-                  </div>
+                  <span className="font-medium text-gray-800">
+                    {column.label}
+                  </span>
                 </div>
 
-                {importSummary.errors && importSummary.errors.length > 0 && (
-                  <div className="mt-4">
-                    <h4 className="font-semibold text-red-600 mb-2">Errors:</h4>
-                    <div className="max-h-40 overflow-y-auto">
-                      {importSummary.errors.map((error, idx) => (
-                        <div key={idx} className="text-sm text-red-500 mb-1">
-                          • Row {error.row}: {error.message}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <div className="flex items-center gap-2">
+                  {index > 0 && (
+                    <button
+                      onClick={() => moveColumn(index, index - 1)}
+                      className="p-2 text-gray-600 hover:text-indigo-600 cursor-pointer"
+                      title="Move up"
+                    >
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                      </svg>
+                    </button>
+                  )}
+                  {index < visibleColumns.length - 1 && (
+                    <button
+                      onClick={() => moveColumn(index, index + 1)}
+                      className="p-2 text-gray-600 hover:text-indigo-600 cursor-pointer"
+                      title="Move down"
+                    >
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
               </div>
+            ))}
+          </div>
 
-              <div className="flex justify-end gap-2">
-                <button
-                  onClick={resetImport}
-                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 cursor-pointer"
-                >
-                  Import Another File
-                </button>
-                <button
-                  onClick={handleClose}
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 cursor-pointer"
-                >
-                  Done
-                </button>
-              </div>
+          <div className="flex justify-between gap-3 mt-8 pt-6 border-t">
+            <button
+              onClick={resetColumns}
+              className="px-4 py-2 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 transition-colors cursor-pointer"
+            >
+              Reset to Default
+            </button>
+            <div className="flex gap-3">
+              <button
+                onClick={onClose}
+                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveColumns}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors cursor-pointer"
+              >
+                Save Changes
+              </button>
             </div>
-          )}
+          </div>
         </div>
       </div>
     </div>,
@@ -1910,257 +2003,50 @@ const ImportExcelModal = ({ isOpen, onClose, activeTab, onImportComplete }) => {
 
 const CashAndBank = () => {
   const [activeTab, setActiveTab] = useState("Cash Balance");
-  const [searchTerm, setSearchTerm] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
-  const [exportLoading, setExportLoading] = useState(false);
-  const [importLoading, setImportLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [data, setData] = useState([]);
-  const [selected, setSelected] = useState([]);
   const [editingTransaction, setEditingTransaction] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [totalPages, setTotalPages] = useState(0);
-  const [totalCount, setTotalCount] = useState(0);
-  const inputRef = useRef(null);
-
-  const [isColumnModalOpen, setIsColumnModalOpen] = useState(false);
-  const [selectedItems, setSelectedItems] = useState([]);
-  const [allSelected, setAllSelected] = useState(false);
-  const [activeColumnTab, setActiveColumnTab] = useState("add");
   const [totalAmountTab, setTotalAmountTab] = useState(0);
-  const [tableColumns, setTableColumns] = useState([
-    "invoiceNumber",
-    "categoryType",
-    "source",
-    "destination",
-    "amount",
-    "exchangeLoss",
-    "finalAmount",
-    "date",
-    "remarks",
-    "actions",
-  ]);
+  const [isColumnModalOpen, setIsColumnModalOpen] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState([]);
 
-  // Fetch dropdown options from backend
+  // Fetch dropdown options
   const {
     categoryOptions,
     sourceOptions,
     destinationOptions,
     supplierOptions,
+    customerOptions,
     loading: optionsLoading,
     error: optionsError,
     refetch: refetchDropdownOptions,
   } = useDropdownOptions();
 
-  // Use the custom hook for visible pages
-  const visiblePages = useVisiblePages(currentPage, totalPages);
-
-  const allFields = useMemo(
-    () => [
-      {
-        id: "invoiceNumber",
-        name: "Invoice No",
-        dbName: "invoiceNumber",
-      },
-      {
-        id: "categoryType",
-        name: "Category Type",
-        dbName: "categoryType",
-      },
-      {
-        id: "source",
-        name: "Source Account",
-        dbName: "source",
-      },
-      {
-        id: "destination",
-        name: "Destination Account",
-        dbName: "destination",
-      },
-      {
-        id: "invoiceDate",
-        name: "Invoice Date",
-        dbName: "invoiceDate",
-      },
-      {
-        id: "customerName",
-        name: "Customer Name",
-        dbName: "customerName",
-      },
-      {
-        id: "customerAddress",
-        name: "Customer Address",
-        dbName: "customerAddress",
-      },
-      {
-        id: "amount",
-        name: "Amount",
-        dbName: "amount",
-      },
-      {
-        id: "exchangeLoss",
-        name: "Exchange Loss",
-        dbName: "exchangeLoss",
-      },
-      {
-        id: "finalAmount",
-        name: "Final Amount",
-        dbName: "finalAmount",
-      },
-      {
-        id: "date",
-        name: "Date",
-        dbName: "date",
-      },
-      {
-        id: "description",
-        name: "Description",
-        dbName: "description",
-      },
-      {
-        id: "remarks",
-        name: "Remarks",
-        dbName: "remarks",
-      },
-      {
-        id: "actions",
-        name: "Actions",
-        dbName: "actions",
-      },
-    ],
-    [],
-  );
-
-  // Required columns that cannot be removed
-  const requiredColumns = ["invoiceNumber", "actions"];
-
-  // Get available columns for Add tab (columns not currently in table)
-  const availableColumns = useMemo(() => {
-    return allFields.filter((item) => !tableColumns.includes(item.id));
-  }, [allFields, tableColumns]);
-
-  // Get removable columns for Remove tab (columns in table except required ones)
-  const removableColumns = useMemo(() => {
-    return allFields.filter(
-      (item) =>
-        tableColumns.includes(item.id) && !requiredColumns.includes(item.id),
-    );
-  }, [allFields, tableColumns]);
-
-  // Chunk items for display in modal
-  const chunkedItems = useMemo(() => {
-    const items =
-      activeColumnTab === "add" ? availableColumns : removableColumns;
-    const chunks = [];
-    for (let i = 0; i < items.length; i += 2) {
-      chunks.push(items.slice(i, i + 2));
-    }
-    return chunks;
-  }, [activeColumnTab, availableColumns, removableColumns]);
-
-  // Toggle item selection in column modal
-  const toggleItem = (id) => {
-    if (id === "all") {
-      if (allSelected) {
-        setSelectedItems([]);
-        setAllSelected(false);
-      } else {
-        const allIds = chunkedItems.flat().map((item) => item.id);
-        setSelectedItems(allIds);
-        setAllSelected(true);
-      }
-    } else {
-      let updatedItems;
-      if (selectedItems.includes(id)) {
-        updatedItems = selectedItems.filter((itemId) => itemId !== id);
-      } else {
-        updatedItems = [...selectedItems, id];
-      }
-
-      setSelectedItems(updatedItems);
-      setAllSelected(updatedItems.length === chunkedItems.flat().length);
-    }
-  };
-
-  // Handle save for column configuration
-  const handleColumnSave = () => {
-    if (activeColumnTab === "add") {
-      // Add selected columns to table
-      const newColumns = [...tableColumns, ...selectedItems];
-      setTableColumns(newColumns);
-    } else {
-      // Remove selected columns from table (except required ones)
-      const newColumns = tableColumns.filter(
-        (id) => !selectedItems.includes(id) || requiredColumns.includes(id),
-      );
-      setTableColumns(newColumns);
-    }
-    setSelectedItems([]);
-    setAllSelected(false);
-    setIsColumnModalOpen(false);
-  };
-
-  const handleColumnReset = () => {
-    setSelectedItems([]);
-    setAllSelected(false);
-    // Reset to default columns
-    setTableColumns([
-      "invoiceNumber",
-      "categoryType",
-      "source",
-      "destination",
-      "amount",
-      "exchangeLoss",
-      "finalAmount",
-      "date",
-      "remarks",
-      "actions",
-    ]);
-  };
-
-  const handleColumnCancel = () => {
-    setSelectedItems([]);
-    setAllSelected(false);
-    setIsColumnModalOpen(false);
-  };
-
-  // Update allSelected state when individual selections change
-  useEffect(() => {
-    const currentItems = chunkedItems.flat();
-    if (
-      currentItems.length > 0 &&
-      selectedItems.length === currentItems.length
-    ) {
-      setAllSelected(true);
-    } else {
-      setAllSelected(false);
-    }
-  }, [selectedItems, chunkedItems]);
-
   const fetchTransactions = async () => {
     try {
-      // Remove all parameters including searchTerm
+      setLoading(true);
       const response = await axios.get(`${backendUrl}/api/transaction`);
       if (response.data.success) {
         const { data: transactions, destinations } = response.data;
 
-        // ✅ Filter transactions based on active tab - show both source AND destination entries
+        // Filter transactions based on active tab
         const filteredData = transactions.filter((tx) => {
           const txCategoryName = tx.categoryType?.name?.toLowerCase() || "";
           const sourceName = tx.source?.name?.toLowerCase() || "";
           const destinationName = tx.destination?.name?.toLowerCase() || "";
           const activeTabLower = activeTab.toLowerCase();
 
-          // For deposit/withdraw transactions, show entries for both source and destination
+          // For deposit/withdraw transactions
           if (txCategoryName === "deposit" || txCategoryName === "withdraw") {
             return (
               sourceName === activeTabLower ||
               destinationName === activeTabLower
             );
           }
-          // For remittance, match source instead of destination
+          // For remittance, match source
           else if (txCategoryName === "remittance") {
             return sourceName === activeTabLower;
           }
@@ -2170,34 +2056,19 @@ const CashAndBank = () => {
           }
         });
 
-        // ✅ Find totalAmount from destinations array
+        // Find totalAmount from destinations array
         const matchingDestination = destinations.find(
           (dest) => dest.name.toLowerCase() === activeTab.toLowerCase(),
         );
-
         const totalAmount = matchingDestination?.totalAmount || 0;
         setTotalAmountTab(totalAmount);
 
-        // Calculate pagination
-        const totalCount = filteredData.length;
-        const totalPages = Math.ceil(totalCount / ITEMS_PER_PAGE);
-
-        setTotalPages(totalPages);
-        setTotalCount(totalCount);
-
-        // Get current page data (only 7 records)
-        const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-        const endIndex = startIndex + ITEMS_PER_PAGE;
-        const currentPageData = filteredData.slice(startIndex, endIndex);
-
-        setData(currentPageData);
+        setData(filteredData);
       }
     } catch (error) {
-      console.error("❌ Error fetching transactions:", error);
+      console.error("Error fetching transactions:", error);
       showToast("error", "Failed to fetch transactions");
       setData([]);
-      setTotalPages(0);
-      setTotalCount(0);
     } finally {
       setLoading(false);
     }
@@ -2205,31 +2076,51 @@ const CashAndBank = () => {
 
   useEffect(() => {
     fetchTransactions();
-  }, [activeTab, currentPage]);
+  }, [activeTab]);
 
-  const currentData = data || [];
+  useEffect(() => {
+    // Load saved column settings
+    const saved = localStorage.getItem("cashbank_columns");
+    if (saved) {
+      try {
+        setVisibleColumns(JSON.parse(saved));
+      } catch (e) {
+        console.error("Error loading saved columns:", e);
+        setVisibleColumns([
+          { key: "invoiceNumber", label: "Invoice No", visible: true },
+          { key: "categoryType", label: "Category Type", visible: true },
+          { key: "source", label: "Source Account", visible: true },
+          { key: "destination", label: "Destination Account", visible: true },
+          { key: "amount", label: "Amount", visible: true },
+          { key: "exchangeLoss", label: "Exchange Loss", visible: true },
+          { key: "finalAmount", label: "Final Amount", visible: true },
+          { key: "date", label: "Date", visible: true },
+          { key: "remarks", label: "Remarks", visible: true },
+          { key: "actions", label: "Actions", visible: true },
+        ]);
+      }
+    } else {
+      setVisibleColumns([
+        { key: "invoiceNumber", label: "Invoice No", visible: true },
+        { key: "categoryType", label: "Category Type", visible: true },
+        { key: "source", label: "Source Account", visible: true },
+        { key: "destination", label: "Destination Account", visible: true },
+        { key: "amount", label: "Amount", visible: true },
+        { key: "exchangeLoss", label: "Exchange Loss", visible: true },
+        { key: "finalAmount", label: "Final Amount", visible: true },
+        { key: "date", label: "Date", visible: true },
+        { key: "remarks", label: "Remarks", visible: true },
+        { key: "actions", label: "Actions", visible: true },
+      ]);
+    }
+  }, []);
 
   const handleAddTransaction = async (transactionData, isEdit = false) => {
     try {
-      if (isEdit && editingTransaction) {
-        const response = await axios.put(
-          `${backendUrl}/api/transaction/${editingTransaction._id}`,
-          transactionData,
-        );
-
-        if (response.data.success) {
-          showToast("success", "Transaction updated successfully");
-          fetchTransactions();
-          refetchDropdownOptions();
-        }
-      } else {
-        showToast("success", "Transaction added successfully");
-        fetchTransactions();
-        refetchDropdownOptions();
-      }
+      fetchTransactions();
+      refetchDropdownOptions();
     } catch (error) {
       console.error("Error saving transaction:", error);
-      showToast("error", "Failed to save transaction");
     }
   };
 
@@ -2239,13 +2130,11 @@ const CashAndBank = () => {
     setIsEditModalOpen(true);
   };
 
-  // Handle delete transaction (single)
+  // Handle delete transaction
   const handleDelete = async (transaction) => {
     const confirm = await confirmDialog({
       title: "Delete Transaction",
-      text: `Are you sure you want to delete <b>${
-        transaction.title || "This transaction"
-      }</b>?`,
+      text: `Are you sure you want to delete this transaction?`,
       icon: "warning",
       confirmButtonText: "Yes, delete",
       cancelButtonText: "Cancel",
@@ -2261,7 +2150,7 @@ const CashAndBank = () => {
       if (response.data.success) {
         showToast("success", "Transaction deleted successfully");
         fetchTransactions();
-        refetchDropdownOptions(); // Refresh dropdown options after delete
+        refetchDropdownOptions();
       } else {
         showToast("error", "Failed to delete transaction");
       }
@@ -2271,700 +2160,289 @@ const CashAndBank = () => {
     }
   };
 
-  // Handle delete selected transactions (bulk)
-  const handleDeleteSelected = async () => {
-    if (selected.length === 0) return;
-
-    const confirm = await confirmDialog({
-      title: "Delete Selected Transactions",
-      text: `Are you sure you want to delete <b>${selected.length}</b> selected transaction(s)?`,
-      icon: "warning",
-      confirmButtonText: "Yes, delete",
-      cancelButtonText: "Cancel",
-    });
-
-    if (!confirm.isConfirmed) return;
-
-    try {
-      await axios.delete(`${backendUrl}/api/transactions`, {
-        data: { ids: selected },
-      });
-
-      showToast(
-        "success",
-        `${selected.length} transaction(s) deleted successfully`,
-      );
-      setSelected([]);
-      fetchTransactions();
-      refetchDropdownOptions(); // Refresh dropdown options after bulk delete
-    } catch (error) {
-      console.error("Error deleting transactions:", error);
-      showToast("error", "Failed to delete some transactions");
-    }
-  };
-
-  // Handle selection
-  const toggleSelect = (item) => {
-    setSelected((prev) =>
-      prev.some((s) => s === item._id)
-        ? prev.filter((s) => s !== item._id)
-        : [...prev, item._id],
-    );
-  };
-
-  const toggleSelectAll = (checked) => {
-    if (checked) {
-      setSelected(currentData.map((r) => r._id));
-    } else {
-      setSelected([]);
-    }
-  };
-
-  const renderCellContent = (item, field) => {
-    const value = item[field.dbName];
-
-    if (field.id === "actions") {
-      return (
-        <div className="flex items-center justify-center gap-3 min-w-[150px]">
-          <button
-            className="text-green-600 hover:text-green-800 cursor-pointer"
-            title="Edit"
-            onClick={() => handleEdit(item)}
-          >
-            <Edit size={18} />
-          </button>
-          <button
-            className="text-red-600 hover:text-red-800 cursor-pointer"
-            title="Delete"
-            onClick={() => handleDelete(item)}
-          >
-            <Trash2 size={18} />
-          </button>
-        </div>
-      );
-    }
-
-    if (field.dbName === "categoryType") {
-      const displayValue = getDisplayValue(value, categoryOptions);
-      return (
-        <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
-          {displayValue}
-        </span>
-      );
-    }
-
-    if (field.dbName === "amount") {
-      // Amount field - black color, no +- symbols
-      return (
-        <span className="font-medium text-black">
-          {(value || 0).toFixed(2)}
-        </span>
-      );
-    }
-
-    if (field.dbName === "finalAmount") {
-      // Final Amount field - with +- symbols and color coding
-      const categoryName = item.categoryType?.name?.toLowerCase() || "";
-
-      const isNegativeDisplay =
-        categoryName === "remittance" ||
-        (categoryName === "withdraw" &&
-          item.source?.name?.toLowerCase() === activeTab.toLowerCase()) ||
-        (categoryName === "deposit" &&
-          item.source?.name?.toLowerCase() === activeTab.toLowerCase());
-
-      const isPositiveDisplay =
-        (categoryName === "withdraw" &&
-          item.destination?.name?.toLowerCase() === activeTab.toLowerCase()) ||
-        (categoryName === "deposit" &&
-          item.destination?.name?.toLowerCase() === activeTab.toLowerCase());
-
-      return (
-        <span
-          className={`font-medium ${
-            isNegativeDisplay
-              ? "text-red-600" // Red color for money going out
-              : isPositiveDisplay
-                ? "text-green-700" // Green color for money coming in
-                : value >= 0
-                  ? "text-green-700"
-                  : "text-red-600"
-          }`}
-        >
-          {isNegativeDisplay
-            ? "-"
-            : isPositiveDisplay
-              ? "+"
-              : value >= 0
-                ? "+"
-                : ""}
-          {Math.abs(value || 0).toFixed(2)}
-        </span>
-      );
-    }
-
-    if (field.dbName === "source" || field.dbName === "destination") {
-      const displayValue = getDisplayValue(value, sourceOptions);
-      const colorClass =
-        field.dbName === "source"
-          ? "bg-green-50 text-green-700"
-          : "bg-purple-50 text-purple-700";
-      return (
-        <span
-          className={`px-2 py-1 rounded-full text-xs font-medium ${colorClass}`}
-        >
-          {displayValue}
-        </span>
-      );
-    }
-
-    if (field.dbName === "date" || field.dbName === "invoiceDate") {
-      return value ? formatDateToReadable(value) : "--";
-    }
-
-    if (field.dbName === "remarks") {
-      return value ? (
-        <div className="max-w-xs truncate" title={value}>
-          {value}
-        </div>
-      ) : (
-        "--"
-      );
-    }
-
-    return value ? value.toString() : "--";
-  };
-
-  const handleExport = async () => {
-    setExportLoading(true);
-    try {
-      const response = await axios.get(`${backendUrl}/api/transaction/export`, {
-        params: {
-          accountType: activeTab,
-          ...(searchTerm && { search: searchTerm }),
-        },
-        responseType: "blob",
-      });
-
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement("a");
-      link.href = url;
-      link.setAttribute(
-        "download",
-        `transactions_${activeTab}_${
-          new Date().toISOString().split("T")[0]
-        }.csv`,
-      );
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-
-      showToast("success", "Export completed successfully");
-    } catch (error) {
-      console.error("Error exporting transactions:", error);
-      showToast("error", "Failed to export transactions");
-    } finally {
-      setExportLoading(false);
-    }
-  };
-
-  const handleSearchChange = (e) => {
-    const searchValue = e.target.value;
-    setSearchTerm(searchValue);
-    setSelected([]);
-    setCurrentPage(1);
-  };
-
-  const getSearchPlaceholder = () => {
-    return activeTab === "Personal Account"
-      ? "Search by Description or Category"
-      : "Search by Invoice Number or Customer";
-  };
-
-  // Handle tab change
-  const handleTabChange = (tab) => {
-    setActiveTab(tab);
-    setCurrentPage(1);
-    setSearchTerm("");
-    setSelected([]);
-    refetchDropdownOptions();
-  };
-
   const accountTypes = ["Cash Balance", "Personal Account", "Company Account"];
+
+  // Get visible column headers
+  const visibleColumnHeaders = visibleColumns
+    .filter(col => col.visible)
+    .map(col => ({
+      key: col.key,
+      label: col.label
+    }));
 
   return (
     <div className="p-6">
-      <div className="container">
-        <div className="mb-4 text-gray-600 text-sm">
-          Dashboard <span className="mx-2">{">"}</span> Cash & Bank
-        </div>
-
-        {(optionsLoading || loading) && (
-          <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-            <div className="flex items-center gap-3">
-              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
-              <span className="text-blue-700">
-                {loading
-                  ? "Loading transactions..."
-                  : "Loading dropdown options..."}
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* Show error state */}
-        {optionsError && (
-          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-            <div className="flex items-center gap-3">
-              <span className="text-red-700">
-                Error loading dropdown options: {optionsError}
-              </span>
-            </div>
-          </div>
-        )}
-
-        <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
-          <div className="flex gap-3 items-center">
-            <button
-              onClick={() => setIsModalOpen(true)}
-              disabled={
-                optionsLoading ||
-                categoryOptions.length === 0 ||
-                sourceOptions.length === 0
-              }
-              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Plus size={18} /> Add New Transaction
-            </button>
-
-            <button
-              onClick={() => setIsImportModalOpen(true)}
-              disabled={importLoading}
-              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50"
-            >
-              <Upload size={18} /> Import Excel
-            </button>
-
-            {selected.length > 0 && (
-              <button
-                onClick={handleDeleteSelected}
-                className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-              >
-                <Trash2 size={18} /> Delete Selected ({selected.length})
-              </button>
-            )}
-          </div>
-
-          <div className="flex gap-3 items-center">
-            <button
-              className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer"
-              onClick={() => setIsColumnModalOpen(true)}
-            >
-              <Settings size={18} /> Add / Remove Column
-            </button>
-
-            <button
-              onClick={handleExport}
-              disabled={exportLoading || currentData.length === 0}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl shadow-md cursor-pointer disabled:opacity-50"
-            >
-              <Download size={18} />
-              {exportLoading ? "Exporting..." : "Export"}
-            </button>
-          </div>
-        </div>
-
-        {/* Tabs - CORRECTED LAYOUT */}
-        <div className="flex justify-between items-center mb-6">
-          {/* Left side - Tabs */}
-          <div className="flex gap-2 flex-1">
-            {accountTypes.map((tab) => (
-              <button
-                key={`tab-${tab}`}
-                onClick={() => handleTabChange(tab)}
-                className={`px-4 py-2 rounded-lg capitalize transition-colors ${
-                  activeTab === tab
-                    ? "bg-indigo-600 text-white shadow-md"
-                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                }`}
-              >
-                {tab}
-              </button>
-            ))}
-          </div>
-
-          {currentData.length > 0 && (
-            <div className="flex items-center gap-4 ml-4">
-              <p className="text-lg font-semibold text-gray-700 whitespace-nowrap">
-                Total Count:{" "}
-                <span className="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium shadow-sm">
-                  {totalCount}
-                </span>
-              </p>
-              <div className="relative w-72">
-                <Search
-                  className="absolute top-1/2 left-3 -translate-y-1/2 text-gray-400 cursor-pointer"
-                  size={16}
-                  onClick={() => inputRef.current?.focus()}
-                />
-                <input
-                  ref={inputRef}
-                  type="text"
-                  placeholder={getSearchPlaceholder()}
-                  value={searchTerm}
-                  onChange={handleSearchChange}
-                  className="pl-10 pr-4 py-2 w-full border rounded-lg shadow-sm focus:ring focus:ring-indigo-200"
-                />
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Account Summary */}
-        <div className="mb-6 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-lg font-semibold text-gray-800 mb-1">
-                {activeTab} Summary
-              </h3>
-              <div className="flex items-center gap-4">
-                <div className="text-2xl font-bold text-indigo-700">
-                  ${totalAmountTab.toFixed(2)}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
-          <table className="w-full min-w-max border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
-            <thead className="bg-gray-100 text-gray-700 border-b">
-              <tr>
-                {allFields
-                  .filter((item) => tableColumns.includes(item.id))
-                  .map((field) => (
-                    <th
-                      key={`header-${field.id}`}
-                      className="p-3 whitespace-nowrap min-w-[120px]"
-                    >
-                      {field.id === "invoiceNumber" ? (
-                        <div className="flex items-center gap-4">
-                          {currentData.length > 0 && (
-                            <input
-                              type="checkbox"
-                              aria-label="Select all transactions"
-                              checked={
-                                selected.length === currentData.length &&
-                                currentData.length > 0
-                              }
-                              onChange={(e) =>
-                                toggleSelectAll(e.target.checked)
-                              }
-                            />
-                          )}
-                          <span className="text-sm font-medium">
-                            {field.name}
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="text-sm font-medium">
-                          {field.name}
-                        </span>
-                      )}
-                    </th>
-                  ))}
-              </tr>
-            </thead>
-            <tbody>
-              {currentData.length === 0 ? (
-                <tr key="empty-row">
-                  <td
-                    colSpan={tableColumns.length}
-                    className="p-4 text-center text-gray-500"
-                  >
-                    {loading
-                      ? "Loading transactions..."
-                      : searchTerm
-                        ? "No transactions match your search."
-                        : "No transactions found."}
-                  </td>
-                </tr>
-              ) : (
-                currentData.map((item, index) => (
-                  <tr
-                    key={`row-${item._id || index}`}
-                    className={`hover:bg-gray-50 ${
-                      index < currentData.length - 1 ? "border-b" : ""
-                    }`}
-                  >
-                    {allFields
-                      .filter((item) => tableColumns.includes(item.id))
-                      .map((field) => (
-                        <td
-                          key={`cell-${item._id}-${field.id}`}
-                          className="p-3 whitespace-nowrap min-w-[120px]"
-                        >
-                          {field.id === "invoiceNumber" ? (
-                            <div className="flex items-center gap-4">
-                              <input
-                                type="checkbox"
-                                checked={selected.includes(item._id)}
-                                onChange={() => toggleSelect(item)}
-                              />
-                              <span className="capitalize">
-                                {item.invoiceNumber || "NA"}
-                              </span>
-                            </div>
-                          ) : (
-                            renderCellContent(item, field)
-                          )}
-                        </td>
-                      ))}
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-
-          {currentData.length > 1 && (
-            <div className="mt-4 p-5 flex justify-start gap-2">
-              <button
-                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-                disabled={currentPage === 1}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-              >
-                Prev
-              </button>
-              {visiblePages.map((page, idx) =>
-                page === "..." ? (
-                  <span
-                    key={`ellipsis-${idx}`}
-                    className="px-3 py-1 text-gray-500 select-none"
-                  >
-                    ...
-                  </span>
-                ) : (
-                  <button
-                    key={page}
-                    onClick={() => setCurrentPage(page)}
-                    className={`px-3 py-1 rounded w-10 text-center transition cursor-pointer ${
-                      currentPage === page
-                        ? "bg-indigo-600 text-white"
-                        : "bg-gray-200 hover:bg-gray-300"
-                    }`}
-                  >
-                    {page}
-                  </button>
-                ),
-              )}
-              <button
-                onClick={() =>
-                  setCurrentPage((prev) => Math.min(prev + 1, totalPages))
-                }
-                disabled={currentPage === totalPages}
-                className="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 disabled:opacity-50 cursor-pointer"
-              >
-                Next
-              </button>
-            </div>
-          )}
-        </div>
-
-        {isColumnModalOpen &&
-          ReactDOM.createPortal(
-            <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-              <div
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={handleColumnCancel}
-              />
-              <div
-                className="relative bg-white p-6 rounded shadow-lg max-w-4xl w-full z-10"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <h2 className="text-xl font-semibold mb-4">
-                  {activeColumnTab === "add" ? "Add Columns" : "Remove Columns"}
-                </h2>
-
-                <div className="flex w-full gap-2 mb-4">
-                  <div className="w-1/2">
-                    <button
-                      onClick={() => {
-                        setActiveColumnTab("add");
-                        setSelectedItems([]);
-                        setAllSelected(false);
-                      }}
-                      className={`w-full px-4 py-2 font-medium text-center rounded-lg ${
-                        activeColumnTab === "add"
-                          ? "bg-green-600 text-white"
-                          : "bg-gray-200 text-gray-700"
-                      }`}
-                    >
-                      Add Columns ({availableColumns.length})
-                    </button>
-                  </div>
-                  <div className="w-1/2">
-                    <button
-                      onClick={() => {
-                        setActiveColumnTab("remove");
-                        setSelectedItems([]);
-                        setAllSelected(false);
-                      }}
-                      className={`w-full px-4 py-2 font-medium text-center rounded-lg ${
-                        activeColumnTab === "remove"
-                          ? "bg-red-600 text-white"
-                          : "bg-gray-200 text-gray-700"
-                      }`}
-                    >
-                      Remove Columns ({removableColumns.length})
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex-1 overflow-y-auto">
-                  {chunkedItems.length > 0 ? (
-                    <div className="grid grid-cols-1 gap-3">
-                      {/* Select All option */}
-                      {chunkedItems.flat().length > 0 && (
-                        <div className="flex gap-4 border-b pb-2 mb-2 sticky top-0 bg-white">
-                          <label className="flex items-center gap-2 flex-1 cursor-pointer select-none font-semibold">
-                            <input
-                              type="checkbox"
-                              checked={allSelected}
-                              onChange={() => toggleItem("all")}
-                            />
-                            Select All
-                          </label>
-                          <div className="flex-1"></div>
-                        </div>
-                      )}
-
-                      {chunkedItems.map((pair, index) => (
-                        <div key={index} className="flex gap-4">
-                          {pair.map(({ id, name }) => (
-                            <label
-                              key={id}
-                              className="flex items-center gap-1 flex-1 cursor-pointer select-none hover:bg-gray-50 rounded"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={selectedItems.includes(id)}
-                                onChange={() => toggleItem(id)}
-                              />
-                              <span className="flex-1">{name}</span>
-                            </label>
-                          ))}
-                          {pair.length === 1 && <div className="flex-1"></div>}
-                        </div>
-                      ))}
-
-                      {/* REQUIRED COLUMNS shown on Remove tab */}
-                      {activeColumnTab === "remove" && (
-                        <div className="mt-6 border-t pt-4">
-                          <h3 className="text-sm font-semibold text-gray-600 mb-2">
-                            Compulsory Fields
-                          </h3>
-                          <div className="grid grid-cols-2 gap-3 text-gray-400 text-sm">
-                            {allFields
-                              .filter((field) =>
-                                requiredColumns.includes(field.id),
-                              )
-                              .map((field) => (
-                                <div
-                                  key={field.id}
-                                  className="flex items-center gap-2 bg-gray-200 rounded px-2 py-1 cursor-not-allowed"
-                                >
-                                  <input type="checkbox" checked disabled />
-                                  <div className="flex flex-col">
-                                    <span>{field.name}</span>
-                                    <span className="text-xs text-red-500">
-                                      This field is compulsory
-                                    </span>
-                                  </div>
-                                </div>
-                              ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-gray-500">
-                      {activeColumnTab === "add"
-                        ? "All available columns are already in the table."
-                        : "No columns available to remove."}
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-4 pt-4 border-t flex justify-between items-center">
-                  <button
-                    onClick={handleColumnReset}
-                    className="px-4 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200 cursor-pointer"
-                  >
-                    Reset to Default
-                  </button>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleColumnCancel}
-                      className="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 cursor-pointer"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleColumnSave}
-                      disabled={selectedItems.length === 0}
-                      className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 cursor-pointer disabled:bg-gray-400 disabled:cursor-not-allowed"
-                    >
-                      Save Changes
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>,
-            document.body,
-          )}
-
-        <AddTransactionModal
-          key="add-modal"
-          isOpen={isModalOpen}
-          onClose={() => setIsModalOpen(false)}
-          activeTab={activeTab}
-          onAddTransaction={handleAddTransaction}
-          categoryOptions={categoryOptions}
-          sourceOptions={sourceOptions}
-          destinationOptions={destinationOptions}
-          supplierOptions={supplierOptions}
-          currentData={currentData}
-        />
-
-        <AddTransactionModal
-          key="edit-modal"
-          isOpen={isEditModalOpen}
-          onClose={() => {
-            setIsEditModalOpen(false);
-            setEditingTransaction(null);
-          }}
-          activeTab={activeTab}
-          onAddTransaction={handleAddTransaction}
-          editData={editingTransaction}
-          isEdit={true}
-          categoryOptions={categoryOptions}
-          sourceOptions={sourceOptions}
-          destinationOptions={destinationOptions}
-          supplierOptions={supplierOptions}
-          currentData={currentData}
-        />
-
-        <ImportExcelModal
-          isOpen={isImportModalOpen}
-          onClose={() => setIsImportModalOpen(false)}
-          activeTab={activeTab}
-          onImportComplete={() => {
-            fetchTransactions(); // Refresh data after import
-            refetchDropdownOptions(); // Refresh dropdown options
-          }}
-        />
+      {/* Breadcrumb */}
+      <div className="mb-4 text-gray-600 text-sm">
+        Dashboard <span className="mx-2">{">"}</span> Cash & Bank
       </div>
+
+      {/* Loading/Error States */}
+      {(optionsLoading || loading) && (
+        <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="flex items-center gap-3">
+            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+            <span className="text-blue-700">
+              {loading
+                ? "Loading transactions..."
+                : "Loading dropdown options..."}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {optionsError && (
+        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <div className="flex items-center gap-3">
+            <span className="text-red-700">
+              Error loading dropdown options: {optionsError}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Top Buttons */}
+      <div className="flex justify-between items-center mb-6">
+        <div className="flex gap-2">
+          <button
+            onClick={() => setIsModalOpen(true)}
+            disabled={optionsLoading}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Plus size={18} /> Add New Transaction
+          </button>
+
+          <button
+            onClick={() => setIsImportModalOpen(true)}
+            className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg shadow-md cursor-pointer"
+          >
+            <Upload size={18} /> Import Excel
+          </button>
+        </div>
+
+        <button
+          className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg shadow-md cursor-pointer"
+          onClick={() => setIsColumnModalOpen(true)}
+        >
+          <Settings size={18} /> Add / Remove Column
+        </button>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-2 mb-6">
+        {accountTypes.map((tab) => (
+          <button
+            key={`tab-${tab}`}
+            onClick={() => setActiveTab(tab)}
+            className={`px-4 py-2 rounded-lg capitalize transition-colors ${
+              activeTab === tab
+                ? "bg-indigo-600 text-white shadow-md"
+                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+            }`}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      {/* Account Summary */}
+      <div className="mb-6 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-800 mb-1">
+              {activeTab} Summary
+            </h3>
+            <div className="text-2xl font-bold text-indigo-700">
+              ${totalAmountTab.toFixed(2)}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="overflow-x-auto shadow rounded-lg border border-gray-200">
+        <table className="w-full min-w-max border-collapse bg-white rounded-lg overflow-hidden text-center shadow-sm">
+          <thead className="bg-gray-100 text-gray-700 border-b">
+            <tr>
+              {visibleColumnHeaders.map((col) => (
+                <th key={col.key} className="p-3 whitespace-nowrap min-w-[120px]">
+                  <span className="text-sm font-medium">{col.label}</span>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {data.length === 0 ? (
+              <tr>
+                <td colSpan={visibleColumnHeaders.length} className="p-8 text-center text-gray-500">
+                  No transactions found.
+                </td>
+              </tr>
+            ) : (
+              data.map((item, index) => (
+                <tr
+                  key={`row-${item._id || index}`}
+                  className={`hover:bg-gray-50 ${
+                    index < data.length - 1 ? "border-b" : ""
+                  }`}
+                >
+                  {visibleColumnHeaders.map((col) => {
+                    if (col.key === "invoiceNumber") {
+                      return (
+                        <td key={col.key} className="p-3 whitespace-nowrap min-w-[120px]">
+                          {item.invoiceNumber || "--"}
+                        </td>
+                      );
+                    }
+                    if (col.key === "categoryType") {
+                      return (
+                        <td key={col.key} className="p-3 whitespace-nowrap min-w-[120px]">
+                          <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
+                            {getDisplayValue(item.categoryType, categoryOptions)}
+                          </span>
+                        </td>
+                      );
+                    }
+                    if (col.key === "source") {
+                      return (
+                        <td key={col.key} className="p-3 whitespace-nowrap min-w-[120px]">
+                          <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-50 text-green-700">
+                            {getDisplayValue(item.source, sourceOptions)}
+                          </span>
+                        </td>
+                      );
+                    }
+                    if (col.key === "destination") {
+                      return (
+                        <td key={col.key} className="p-3 whitespace-nowrap min-w-[120px]">
+                          <span className="px-2 py-1 rounded-full text-xs font-medium bg-purple-50 text-purple-700">
+                            {getDisplayValue(item.destination, destinationOptions)}
+                          </span>
+                        </td>
+                      );
+                    }
+                    if (col.key === "amount") {
+                      return (
+                        <td key={col.key} className="p-3 whitespace-nowrap min-w-[120px]">
+                          <span className="font-medium text-black">
+                            {parseFloat(item.amount || 0).toFixed(2)}
+                          </span>
+                        </td>
+                      );
+                    }
+                    if (col.key === "exchangeLoss") {
+                      return (
+                        <td key={col.key} className="p-3 whitespace-nowrap min-w-[120px]">
+                          {parseFloat(item.exchangeLoss || 0).toFixed(2)}
+                        </td>
+                      );
+                    }
+                    if (col.key === "finalAmount") {
+                      return (
+                        <td key={col.key} className="p-3 whitespace-nowrap min-w-[120px]">
+                          <span className="font-medium text-green-700">
+                            +{parseFloat(item.finalAmount || 0).toFixed(2)}
+                          </span>
+                        </td>
+                      );
+                    }
+                    if (col.key === "date") {
+                      return (
+                        <td key={col.key} className="p-3 whitespace-nowrap min-w-[120px]">
+                          {item.date ? formatDateToReadable(item.date) : "--"}
+                        </td>
+                      );
+                    }
+                    if (col.key === "remarks") {
+                      return (
+                        <td key={col.key} className="p-3 whitespace-nowrap min-w-[120px]">
+                          <div className="max-w-xs truncate" title={item.remarks}>
+                            {item.remarks || "--"}
+                          </div>
+                        </td>
+                      );
+                    }
+                    if (col.key === "actions") {
+                      return (
+                        <td key={col.key} className="p-3 whitespace-nowrap min-w-[120px]">
+                          <div className="flex items-center justify-center gap-3">
+                            <button
+                              className="text-green-600 hover:text-green-800 cursor-pointer"
+                              title="Edit"
+                              onClick={() => handleEdit(item)}
+                            >
+                              <Edit size={18} />
+                            </button>
+                            <button
+                              className="text-red-600 hover:text-red-800 cursor-pointer"
+                              title="Delete"
+                              onClick={() => handleDelete(item)}
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          </div>
+                        </td>
+                      );
+                    }
+                    return null;
+                  })}
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Modals */}
+      <AddTransactionModal
+        key="add-modal"
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        activeTab={activeTab}
+        onAddTransaction={handleAddTransaction}
+        categoryOptions={categoryOptions}
+        sourceOptions={sourceOptions}
+        destinationOptions={destinationOptions}
+        supplierOptions={supplierOptions}
+        customerOptions={customerOptions}
+        currentData={data}
+      />
+
+      <AddTransactionModal
+        key="edit-modal"
+        isOpen={isEditModalOpen}
+        onClose={() => {
+          setIsEditModalOpen(false);
+          setEditingTransaction(null);
+        }}
+        activeTab={activeTab}
+        onAddTransaction={handleAddTransaction}
+        editData={editingTransaction}
+        isEdit={true}
+        categoryOptions={categoryOptions}
+        sourceOptions={sourceOptions}
+        destinationOptions={destinationOptions}
+        supplierOptions={supplierOptions}
+        customerOptions={customerOptions}
+        currentData={data}
+      />
+
+      <ImportExcelModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        activeTab={activeTab}
+        data={data}
+        categoryOptions={categoryOptions}
+        sourceOptions={sourceOptions}
+        destinationOptions={destinationOptions}
+        supplierOptions={supplierOptions}
+        customerOptions={customerOptions}
+      />
+
+      <ColumnManagementModal
+        isOpen={isColumnModalOpen}
+        onClose={() => setIsColumnModalOpen(false)}
+      />
     </div>
   );
 };
