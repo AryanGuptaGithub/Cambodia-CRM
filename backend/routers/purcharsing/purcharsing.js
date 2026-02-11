@@ -166,9 +166,6 @@ const updateReportInHand = async (productData, operation = "add") => {
         const batches = existingDoc.batches || [];
 
         if (batchExists(batches, newBatch)) {
-          console.log(
-            `Duplicate batch found for ${finalProductName}, skipping addition`,
-          );
           return;
         }
 
@@ -1685,38 +1682,39 @@ router.put("/reports-in-hand/:id/standardize-name", async (req, res) => {
 
 // Get reports in hand
 router.get("/reports-in-hand", async (req, res) => {
-  try {
-    const reports = await ReportInHand.find().sort({ createdAt: -1 }).lean();
+ try {
+    const { search } = req.query;
 
-    // Calculate correct totals for each report
-    const enhancedReports = reports.map((report) => {
-      const batches = report.batches || [];
-      const { totalBoxesFromBatches, totalAmount, averagePrice } =
-        calculateTotalsFromBatches(batches);
+    // Build query based on search parameter
+    let query = {};
+    if (search) {
+      query.productName = { $regex: search, $options: "i" };
+    }
 
-      const totalBoxes =
-        totalBoxesFromBatches +
-        (report.addStockAdjustment || 0) -
-        (report.removeStockAdjustment || 0);
+    // Get ALL reports matching the query
+    const allReports = await ReportInHand.find(query).sort({ createdAt: -1 });
+    const filteredReports = filterReportsWithBatches(allReports);
 
-      return {
-        ...report,
-        totalBoxesFromBatches,
-        totalBoxes,
-        totalAmount,
-        averagePrice,
-        status: calculateStockStatus(totalBoxes),
-      };
-    });
-
-    // Filter out reports with no batches
-    const filteredReports = enhancedReports.filter(
-      (report) => Array.isArray(report.batches) && report.batches.length > 0,
-    );
+    // Calculate summary statistics
+    const inStockCount = filteredReports.filter(r => r.status === "In Stock").length;
+    const lowStockCount = filteredReports.filter(r => r.status === "Low Stock").length;
+    const criticalCount = filteredReports.filter(r => r.status === "Critical").length;
+    const outOfStockCount = filteredReports.filter(r => r.status === "Out of Stock").length;
+    
+    // ✅ Calculate total boxes across all products
+    const totalBoxesSum = filteredReports.reduce((sum, report) => {
+      return sum + (report.totalBoxes || 0);
+    }, 0);
 
     res.status(200).json({
       success: true,
       count: filteredReports.length,
+      total: filteredReports.length,
+      totalBoxes: totalBoxesSum,
+      inStockCount: inStockCount,
+      lowStockCount: lowStockCount,
+      criticalCount: criticalCount,
+      outOfStockCount: outOfStockCount,
       reports: filteredReports,
     });
   } catch (error) {

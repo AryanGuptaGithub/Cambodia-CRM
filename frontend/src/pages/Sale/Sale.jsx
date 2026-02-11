@@ -54,6 +54,7 @@ import * as XLSX from "xlsx";
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
+
 const StockValidationModal = ({
   isOpen,
   onClose,
@@ -71,12 +72,72 @@ const StockValidationModal = ({
   const isBlocked = importBlocked || (summary.hasInsufficientStock && summary.totalInsufficient > 0);
   
   const downloadStockIssuesExcel = useCallback(() => {
-    // ... (keep existing download logic)
-  }, [stockIssues, summary]);
+    try {
+      const excelData = stockIssues.map((issue, index) => ({
+        "S.No": index + 1,
+        "Product Name": issue.productName,
+        "Required Quantity": issue.totalRequired,
+        "Available Stock": issue.availableStock,
+        "Shortage": issue.insufficientQty || 0,
+        "Status": issue.productExists 
+          ? (issue.insufficient ? "Insufficient Stock" : "Available")
+          : "Product Not Found",
+        "Issue Type": issue.message,
+        "Affected Invoices": issue.requiredByInvoices?.length || 0,
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(excelData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Stock Issues");
+      
+      const fileName = `stock_issues_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+
+      showToast("success", "Stock issues report downloaded");
+    } catch (error) {
+      console.error("Download error:", error);
+      showToast("error", "Failed to download report");
+    }
+  }, [stockIssues]);
 
   const downloadStockIssuesCSV = useCallback(() => {
-    // ... (keep existing download logic)
-  }, [stockIssues, summary]);
+    try {
+      const csvRows = [
+        ["S.No", "Product Name", "Required Quantity", "Available Stock", "Shortage", "Status", "Issue Type", "Affected Invoices"],
+        ...stockIssues.map((issue, index) => [
+          index + 1,
+          issue.productName,
+          issue.totalRequired,
+          issue.availableStock,
+          issue.insufficientQty || 0,
+          issue.productExists 
+            ? (issue.insufficient ? "Insufficient Stock" : "Available")
+            : "Product Not Found",
+          issue.message,
+          issue.requiredByInvoices?.length || 0,
+        ])
+      ];
+
+      const csvContent = csvRows
+        .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(","))
+        .join("\n");
+
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `stock_issues_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      showToast("success", "Stock issues CSV downloaded");
+    } catch (error) {
+      console.error("Download error:", error);
+      showToast("error", "Failed to download CSV");
+    }
+  }, [stockIssues]);
 
   return ReactDOM.createPortal(
     <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-[110]">
@@ -260,7 +321,6 @@ const StockValidationModal = ({
             </table>
           </div>
 
-          {/* Summary Section */}
           <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
             <h4 className="font-medium text-gray-700 mb-2">Summary</h4>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -337,7 +397,6 @@ const StockValidationModal = ({
   );
 };
 
-// ===================== MR VALIDATION MODAL (Updated with warning only) =====================
 const MRValidationModal = ({
   isOpen,
   onClose,
@@ -381,7 +440,7 @@ const MRValidationModal = ({
     <div className="fixed inset-0 bg-black/70 flex justify-center items-center z-[110]">
       <div className="bg-white w-full max-w-6xl p-6 rounded-xl shadow-lg relative max-h-[90vh] overflow-y-auto">
         
-        {/* Header - Changed from red to yellow for warning */}
+        {/* ✅ CHANGED: Header shows WARNING (yellow) instead of ERROR (red) */}
         <div className="mb-6 bg-yellow-50 border-2 border-yellow-300 rounded-xl p-5">
           <div className="flex justify-between items-center mb-3">
             <h2 className="text-xl font-bold text-yellow-800 flex items-center gap-2">
@@ -422,7 +481,7 @@ const MRValidationModal = ({
             </div>
           </div>
 
-          {/* Warning Message - Changed to warning instead of error */}
+          {/* ✅ CHANGED: Warning message instead of error - allows proceeding */}
           <div className="p-4 bg-yellow-50 border-2 border-yellow-300 rounded-lg">
             <p className="text-sm text-yellow-900 font-medium">
               ⚠️ <strong>Warning:</strong> The following MRs are not registered in the Staff system.
@@ -496,7 +555,7 @@ const MRValidationModal = ({
           </div>
         </div>
 
-        {/* Footer - Added Proceed Anyway button */}
+        {/* ✅ CHANGED: Footer now shows "Proceed Anyway" button instead of blocking */}
         <div className="flex justify-between items-center pt-4 border-t-2 border-gray-300">
           <div className="text-sm text-gray-600">
             <strong className="text-yellow-600">Warning:</strong> MRs not found in Staff module
@@ -822,8 +881,6 @@ const ImportSalesModal = ({
         };
       }
 
-      console.log(`🔍 Validating ${mrNames.size} unique MRs...`);
-
       // Validate MRs via API
       const response = await axios.post(`${backendUrl}/api/sales/validate-mr`, {
         mrNames: Array.from(mrNames),
@@ -858,9 +915,6 @@ const ImportSalesModal = ({
       });
 
       mrIssues.push(...Array.from(invalidMRMap.values()));
-
-      console.log(`⚠️ Found ${mrIssues.length} invalid MRs affecting ${invoices.length} invoices`);
-
       setIsValidatingMR(false);
 
       return {
@@ -1118,8 +1172,6 @@ const ImportSalesModal = ({
   const findProductStockInHandOptimized = useCallback(
     async (productName, requiredQty) => {
       try {
-        console.log("🔍 Checking stock for:", productName);
-
         const response = await axios.post(
           `${backendUrl}/api/sales/check-stock`,
           {
@@ -2003,19 +2055,14 @@ const ImportSalesModal = ({
 
     if (confirmProceed.isConfirmed) {
       setShowStockValidation(false);
-      
-      // After stock issues are accepted, check MRs (warning only)
-      console.log("🔍 Step 2: Checking MRs (warning only)...");
       const mrValidationResult = await validateMRsBeforeImport(parsedData);
       
       if (mrValidationResult.mrIssues && mrValidationResult.mrIssues.length > 0) {
-        console.log(`⚠️ Found ${mrValidationResult.mrIssues.length} invalid MRs - showing warning`);
         setMrValidationResult(mrValidationResult);
         setShowMRValidation(true);
         return; // Wait for user decision on MR warning
       }
       
-      console.log("✅ All validations passed - Proceeding with import");
       await handleProductImport(parsedData, true);
     }
   }, [stockValidationResult, parsedData, validateMRsBeforeImport, handleProductImport]);
@@ -2042,19 +2089,12 @@ const ImportSalesModal = ({
       return;
     }
 
-    console.log(`📋 Starting validation for ${parsedData.length} invoices...`);
-
-    // ✅ STEP 1: Validate Stock FIRST (blocking issues)
-    console.log("🔍 Step 1: Validating Stock...");
     const stockValidationResult = await validateStockBeforeImport(parsedData);
 
     // Check if there are ANY stock issues
     const hasStockIssues = stockValidationResult?.stockIssues?.length > 0;
     
     if (hasStockIssues) {
-      console.log(`❌ Found ${stockValidationResult.stockIssues.length} stock issues`);
-      
-      // Check if any issues are INSUFFICIENT STOCK (should block)
       const insufficientStockIssues = stockValidationResult.stockIssues.filter(
         issue => issue.productExists && issue.insufficient
       );
@@ -2062,16 +2102,8 @@ const ImportSalesModal = ({
       const missingProductIssues = stockValidationResult.stockIssues.filter(
         issue => !issue.productExists
       );
-      
-      console.log(`📊 Stock issues breakdown:`);
-      console.log(`   - Insufficient stock: ${insufficientStockIssues.length} products`);
-      console.log(`   - Missing products: ${missingProductIssues.length} products`);
-      
-      // 🔥 If there are INSUFFICIENT stock issues, BLOCK the import
+           
       if (insufficientStockIssues.length > 0) {
-        console.log(`🚫 BLOCKING IMPORT - ${insufficientStockIssues.length} products have insufficient stock`);
-        
-        // Create a filtered validation result showing only insufficient stock issues
         const blockingStockValidationResult = {
           ...stockValidationResult,
           stockIssues: insufficientStockIssues,
@@ -2092,8 +2124,6 @@ const ImportSalesModal = ({
       
       // 🔥 If only missing products (product not found), allow import with warning
       if (missingProductIssues.length > 0 && insufficientStockIssues.length === 0) {
-        console.log(`⚠️ Only missing products found - showing warning`);
-        
         const warningStockValidationResult = {
           ...stockValidationResult,
           stockIssues: missingProductIssues,
@@ -2112,21 +2142,15 @@ const ImportSalesModal = ({
         // Wait for user decision in the modal
         return;
       }
-    } else {
-      console.log("✅ No stock issues found.");
-      
-      // ✅ STEP 2: Check MRs (warning only, not blocking)
-      console.log("🔍 Step 2: Checking MRs (warning only)...");
+    } else {    
       const mrValidationResult = await validateMRsBeforeImport(parsedData);
       
       if (mrValidationResult.mrIssues && mrValidationResult.mrIssues.length > 0) {
-        console.log(`⚠️ Found ${mrValidationResult.mrIssues.length} invalid MRs - showing warning`);
         setMrValidationResult(mrValidationResult);
         setShowMRValidation(true);
         return; // Wait for user decision on MR warning
       }
       
-      console.log("✅ All validations passed - Proceeding with import");
       await handleProductImport(parsedData, false);
     }
   }, [parsedData, validateStockBeforeImport, validateMRsBeforeImport, handleProductImport]);

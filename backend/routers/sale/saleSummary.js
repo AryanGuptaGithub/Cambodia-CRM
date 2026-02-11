@@ -409,9 +409,6 @@ const getCustomerByCode = async (customerCode, session = null) => {
     
     const digits = digitsMatch[0];
     const normalizedCode = digits.padStart(5, '0');
-    
-    console.log(`Looking up customer: ${cleanedCode} -> ${normalizedCode}`);
-
     const query = Customer.findOne({
       customerCode: normalizedCode,
       enabled: true,
@@ -450,7 +447,7 @@ const getCustomerByCode = async (customerCode, session = null) => {
 // IMPROVED: Stock calculation with better product matching
 const calculateProductStock = async (productName, requiredQty = 0) => {
   try {
-    // First try to find the product using flexible search
+    // Use flexible search to find the product
     const stockItem = await findStockItemFlexible(productName);
     
     if (!stockItem) {
@@ -461,10 +458,10 @@ const calculateProductStock = async (productName, requiredQty = 0) => {
         success: false,
         found: false,
         productName,
-        requiredQty,
+        requiredQty: fixPrecision(requiredQty),
         availableStock: 0,
         insufficient: true,
-        insufficientQty: requiredQty,
+        insufficientQty: fixPrecision(requiredQty),
         message: `Product "${productName}" not found in inventory`,
         status: "Product Not Found",
         issueType: "Could not verify product existence",
@@ -472,12 +469,14 @@ const calculateProductStock = async (productName, requiredQty = 0) => {
       };
     }
 
+    // Calculate available stock
     let availableStock = 0;
     let batchDetails = [];
 
     if (stockItem.totalBoxes !== undefined && stockItem.totalBoxes !== null) {
       availableStock = fixPrecision(Number(stockItem.totalBoxes));
     } else {
+      // Fallback: calculate from batches
       if (stockItem.batches && Array.isArray(stockItem.batches)) {
         const batchEntries = stockItem.batches.filter(
           (batch) => !batch.adjustmentType || batch.adjustmentType === "batch",
@@ -497,30 +496,35 @@ const calculateProductStock = async (productName, requiredQty = 0) => {
           }
         });
 
+        // Apply adjustments
         let totalAdjustments = 0;
         if (stockItem.addStockAdjustment) {
           totalAdjustments = fixPrecision(
-            totalAdjustments +
-              fixPrecision(Number(stockItem.addStockAdjustment)),
+            totalAdjustments + fixPrecision(Number(stockItem.addStockAdjustment))
           );
         }
         if (stockItem.removeStockAdjustment) {
           totalAdjustments = fixPrecision(
-            totalAdjustments -
-              fixPrecision(Number(stockItem.removeStockAdjustment)),
+            totalAdjustments - fixPrecision(Number(stockItem.removeStockAdjustment))
           );
         }
 
-        availableStock = fixPrecision(
-          Math.max(0, batchesSum + totalAdjustments),
-        );
+        availableStock = fixPrecision(Math.max(0, batchesSum + totalAdjustments));
       }
     }
 
-    const insufficientQty = fixPrecision(
-      Math.max(0, requiredQty - availableStock),
-    );
-    const hasEnoughStock = availableStock >= requiredQty;
+    // Calculate shortage
+    const fixedRequiredQty = fixPrecision(requiredQty);
+    const insufficientQty = fixPrecision(Math.max(0, fixedRequiredQty - availableStock));
+    const hasEnoughStock = availableStock >= fixedRequiredQty;
+
+    console.log(`
+📦 Stock Check for "${productName}":
+   - Required: ${fixedRequiredQty}
+   - Available: ${availableStock}
+   - Sufficient: ${hasEnoughStock ? 'YES' : 'NO'}
+   - Short by: ${insufficientQty}
+    `);
 
     return {
       success: true,
@@ -528,16 +532,16 @@ const calculateProductStock = async (productName, requiredQty = 0) => {
       productName: stockItem.productName,
       requestedProductName: productName,
       availableStock: availableStock,
-      requiredQty,
+      requiredQty: fixedRequiredQty,
       insufficient: !hasEnoughStock,
-      insufficientQty,
-      hasEnoughStock,
+      insufficientQty: insufficientQty,
+      hasEnoughStock: hasEnoughStock,
       batchDetails,
       calculationMethod: "reportinhand_with_adjustments",
       productExists: true,
       message: hasEnoughStock
         ? `✅ Stock available: ${availableStock} units`
-        : `❌ Insufficient stock. Required: ${requiredQty}, Available: ${availableStock}, Short by: ${insufficientQty}`,
+        : `❌ Insufficient stock: Required ${fixedRequiredQty}, Available ${availableStock}, Short by ${insufficientQty}`,
     };
   } catch (error) {
     console.error(`❌ STOCK CALCULATION ERROR for ${productName}:`, error);
@@ -546,9 +550,9 @@ const calculateProductStock = async (productName, requiredQty = 0) => {
       found: false,
       productName,
       availableStock: 0,
-      requiredQty,
+      requiredQty: fixPrecision(requiredQty),
       insufficient: true,
-      insufficientQty: requiredQty,
+      insufficientQty: fixPrecision(requiredQty),
       message: `Error checking stock: ${error.message}`,
       status: "Error",
       issueType: "Stock check failed",
@@ -754,7 +758,6 @@ const restoreStockToReportInHand = async (productName, quantity) => {
 // ==========================================
 // MR VALIDATION
 // ==========================================
-
 const validateMR = async (mrName, session = null) => {
   try {
     if (!mrName || mrName.trim() === "") {
@@ -767,13 +770,23 @@ const validateMR = async (mrName, session = null) => {
 
     const cleanedMrName = mrName.trim();
     
-    const escapeForRegex = (text = "") => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
+    // ✅ CHANGE: Allow "Unknown" MR name without validation
+    if (cleanedMrName.toLowerCase() === "unknown") {
+      return {
+        success: true,
+        message: `MR "Unknown" is allowed`,
+        exists: true,
+        isUnknown: true,
+        mrData: {
+          mrName: cleanedMrName,
+          mrId: null,
+        },
+      };
+    }
+    
+    // Case-insensitive search using the lowercase field
     const query = Staff.findOne({
-      medicalRepName: { 
-        $regex: `^${escapeForRegex(cleanedMrName)}$`, 
-        $options: "i" 
-      },
+      medicalRepNameLower: cleanedMrName.toLowerCase()
     });
 
     if (session) {
@@ -818,12 +831,15 @@ const validateStockForImport = async (invoices) => {
     const stockIssues = [];
     const productStockMap = new Map();
 
-    // Collect all products
+    // Step 1: Collect all products and sum their requirements
     for (const invoice of invoices) {
       for (const product of invoice.products) {
-        const requiredQty = (product.salesQty || 0) + (product.bonusQty || 0);
-        if (requiredQty > 0) {
-          const productName = product.productName;
+        const productName = product.productName?.trim();
+        const salesQty = fixPrecision(parseFloat(product.salesQty) || 0);
+        const bonusQty = fixPrecision(parseFloat(product.bonusQty) || 0);
+        const requiredQty = fixPrecision(salesQty + bonusQty);
+        
+        if (requiredQty > 0 && productName) {
           if (!productStockMap.has(productName)) {
             productStockMap.set(productName, {
               productName,
@@ -835,17 +851,21 @@ const validateStockForImport = async (invoices) => {
             });
           }
           const productData = productStockMap.get(productName);
-          productData.totalRequired += requiredQty;
+          productData.totalRequired = fixPrecision(productData.totalRequired + requiredQty);
           productData.requiredByInvoices.push({
             invoiceNumber: invoice.invoiceNumber,
-            requiredQty,
+            requiredQty: requiredQty, // Individual invoice requirement
+            salesQty: salesQty,
+            bonusQty: bonusQty,
             customerName: invoice.customerName,
           });
         }
       }
     }
 
-    // Check each product
+    console.log(`📊 Validating stock for ${productStockMap.size} unique products`);
+
+    // Step 2: Check stock availability for each unique product
     for (const [productName, productData] of productStockMap.entries()) {
       if (!productData.checked) {
         try {
@@ -857,6 +877,13 @@ const validateStockForImport = async (invoices) => {
           productData.productExists = stockCheck.found;
           productData.stockCheckSuccess = stockCheck.success;
 
+          console.log(
+            `✓ ${productName}: Required ${productData.totalRequired}, ` +
+            `Available ${stockCheck.availableStock}, ` +
+            `Short by ${stockCheck.insufficientQty || 0}`
+          );
+
+          // Only add to issues if there's actually a problem
           if (stockCheck.insufficient || !stockCheck.found) {
             stockIssues.push({
               productName,
@@ -864,6 +891,7 @@ const validateStockForImport = async (invoices) => {
               availableStock: stockCheck.availableStock,
               insufficientQty: stockCheck.insufficientQty || 0,
               requiredByInvoices: productData.requiredByInvoices,
+              invoiceCount: productData.requiredByInvoices.length,
               message: stockCheck.message,
               productExists: stockCheck.found,
               insufficient: stockCheck.insufficient,
@@ -873,22 +901,25 @@ const validateStockForImport = async (invoices) => {
 
           productData.checked = true;
         } catch (error) {
+          console.error(`❌ Error checking stock for ${productName}:`, error);
           stockIssues.push({
             productName,
             totalRequired: productData.totalRequired,
             availableStock: 0,
             insufficientQty: productData.totalRequired,
             requiredByInvoices: productData.requiredByInvoices,
-            message: "Could not verify product existence",
+            invoiceCount: productData.requiredByInvoices.length,
+            message: `Could not verify stock: ${error.message}`,
             productExists: false,
             insufficient: false,
             type: "verification_error"
           });
+          productData.checked = true;
         }
       }
     }
 
-    // Calculate summary with better categorization
+    // Step 3: Calculate accurate summary
     const insufficientCount = stockIssues.filter(issue => 
       issue.productExists && issue.insufficient
     ).length;
@@ -897,35 +928,52 @@ const validateStockForImport = async (invoices) => {
       !issue.productExists
     ).length;
 
+    // Calculate total stock metrics
+    const totalRequired = Array.from(productStockMap.values()).reduce(
+      (sum, p) => fixPrecision(sum + (p.totalRequired || 0)),
+      0
+    );
+    
+    const totalAvailable = Array.from(productStockMap.values()).reduce(
+      (sum, p) => fixPrecision(sum + (p.availableStock || 0)),
+      0
+    );
+
+    const summary = {
+      totalProducts: productStockMap.size,
+      totalRequired: totalRequired,
+      totalAvailable: totalAvailable,
+      totalInsufficient: insufficientCount,
+      missingProducts: missingCount,
+      lowStockProducts: insufficientCount,
+      hasCriticalIssues: stockIssues.some(issue => issue.type === "verification_error"),
+      hasInsufficientStock: insufficientCount > 0,
+      importBlocked: insufficientCount > 0,
+    };
+
+    console.log(`
+📋 Stock Validation Summary:
+   - Total Unique Products: ${summary.totalProducts}
+   - Total Required: ${summary.totalRequired}
+   - Total Available: ${summary.totalAvailable}
+   - Insufficient Stock Issues: ${insufficientCount}
+   - Missing Products: ${missingCount}
+   - Import Blocked: ${summary.importBlocked ? 'YES' : 'NO'}
+    `);
+
     return {
       stockIssues,
       totalInvoices: invoices.length,
-      summary: {
-        totalProducts: productStockMap.size,
-        totalRequired: Array.from(productStockMap.values()).reduce(
-          (sum, p) => sum + (p.totalRequired || 0),
-          0,
-        ),
-        totalAvailable: Array.from(productStockMap.values()).reduce(
-          (sum, p) => sum + (p.availableStock || 0),
-          0,
-        ),
-        totalInsufficient: insufficientCount,
-        missingProducts: missingCount,
-        lowStockProducts: insufficientCount,
-        hasCriticalIssues: stockIssues.some(issue => issue.type === "verification_error"),
-        hasInsufficientStock: insufficientCount > 0,
-        importBlocked: insufficientCount > 0, // Block only if insufficient stock
-      },
+      summary,
       insufficientStockIssues: stockIssues.filter(issue => issue.productExists && issue.insufficient),
       missingProductIssues: stockIssues.filter(issue => !issue.productExists),
       importBlocked: insufficientCount > 0,
       blockReason: insufficientCount > 0 ? "INSUFFICIENT_STOCK" : 
                    missingCount > 0 ? "MISSING_PRODUCTS_ONLY" : "NO_ISSUES",
       message: insufficientCount > 0 
-        ? `${insufficientCount} products have insufficient stock. Please update inventory.`
+        ? `${insufficientCount} product(s) have insufficient stock. Total shortage: ${stockIssues.reduce((sum, i) => sum + (i.insufficientQty || 0), 0)} units. Please update inventory.`
         : missingCount > 0
-          ? `${missingCount} products not found. They will be created during import.`
+          ? `${missingCount} product(s) not found. They will be created during import.`
           : "All products have sufficient stock."
     };
   } catch (error) {
@@ -940,15 +988,15 @@ const validateStockForImport = async (invoices) => {
         totalInsufficient: 0,
         missingProducts: 0,
         lowStockProducts: 0,
-        hasCriticalIssues: false,
+        hasCriticalIssues: true,
         hasInsufficientStock: false,
-        importBlocked: false,
+        importBlocked: true,
       },
       insufficientStockIssues: [],
       missingProductIssues: [],
-      importBlocked: false,
+      importBlocked: true,
       blockReason: "VALIDATION_ERROR",
-      message: "Stock validation failed"
+      message: `Stock validation failed: ${error.message}`
     };
   }
 };
@@ -959,8 +1007,6 @@ const validateStockForImport = async (invoices) => {
 
 router.post("/mrcash/sync-from-sales", async (req, res) => {
   try {
-    console.log("🔄 Starting MR Cash synchronization from all sales...");
-
     const salesByMR = await SaleSummary.aggregate([
       {
         $match: {
@@ -977,9 +1023,6 @@ router.post("/mrcash/sync-from-sales", async (req, res) => {
         },
       },
     ]);
-
-    console.log(`📊 Found ${salesByMR.length} MRs with sales data`);
-
     const results = [];
 
     for (const mrData of salesByMR) {
@@ -988,11 +1031,7 @@ router.post("/mrcash/sync-from-sales", async (req, res) => {
 
       try {
         const mrName = mrData._id;
-        const totalCash = fixPrecision(mrData.totalPaidAmount);
-
-        console.log(`\n📋 Processing MR: ${mrName}`);
-        console.log(`   Total from ${mrData.invoiceCount} invoices: ${totalCash}`);
-        
+        const totalCash = fixPrecision(mrData.totalPaidAmount);        
         const mr = await Staff.findOne({
           medicalRepName: { $regex: `^${mrName.trim()}$`, $options: "i" },
         }).session(session);
@@ -1041,9 +1080,6 @@ router.post("/mrcash/sync-from-sales", async (req, res) => {
           action: mrCash.isNew ? "created" : "updated",
         });
 
-        console.log(
-          `✅ Synced: ${mr.medicalRepName} = ₹${totalCash} (${mrData.invoiceCount} invoices)`
-        );
       } catch (error) {
         await session.abortTransaction();
         session.endSession();
@@ -1060,10 +1096,6 @@ router.post("/mrcash/sync-from-sales", async (req, res) => {
 
     const successCount = results.filter((r) => r.success).length;
     const failCount = results.filter((r) => !r.success).length;
-
-    console.log(
-      `\n✅ Sync complete: ${successCount} succeeded, ${failCount} failed`
-    );
 
     return res.json({
       success: true,
@@ -1323,7 +1355,7 @@ router.post("/validate-mr", async (req, res) => {
   }
 });
 
-// NEW: Validate MRs for import
+
 router.post("/validate-import-mrs", async (req, res) => {
   try {
     const { invoices } = req.body;
@@ -1335,19 +1367,25 @@ router.post("/validate-import-mrs", async (req, res) => {
       });
     }
 
-    const mrNames = new Set();
+    const mrNamesSet = new Set();
     const mrToInvoices = new Map();
     
-    // Collect all unique MR names and track their invoices
+    // Collect all unique MR names (case-insensitive) and track their invoices
     for (const invoice of invoices) {
       if (invoice.mrName && invoice.mrName.trim()) {
         const mrName = invoice.mrName.trim();
-        mrNames.add(mrName);
+        const mrNameLower = mrName.toLowerCase();
         
-        if (!mrToInvoices.has(mrName)) {
-          mrToInvoices.set(mrName, []);
+        // Use lowercase as key to prevent case-sensitive duplicates
+        if (!mrNamesSet.has(mrNameLower)) {
+          mrNamesSet.add(mrNameLower);
+          mrToInvoices.set(mrNameLower, {
+            originalName: mrName,
+            invoices: []
+          });
         }
-        mrToInvoices.get(mrName).push({
+        
+        mrToInvoices.get(mrNameLower).invoices.push({
           invoiceNumber: invoice.invoiceNumber,
           customerName: invoice.customerName,
           products: invoice.products?.length || 0,
@@ -1355,7 +1393,7 @@ router.post("/validate-import-mrs", async (req, res) => {
       }
     }
 
-    if (mrNames.size === 0) {
+    if (mrNamesSet.size === 0) {
       return res.json({
         success: true,
         mrIssues: [],
@@ -1370,19 +1408,28 @@ router.post("/validate-import-mrs", async (req, res) => {
     }
 
     const mrIssues = [];
+    let validCount = 0;
     
-    for (const mrName of mrNames) {
-      const validation = await validateMR(mrName);
+    for (const mrNameLower of mrNamesSet) {
+      const mrData = mrToInvoices.get(mrNameLower);
+      
+      // ✅ CHANGE: Skip validation for "Unknown" MR name
+      if (mrNameLower === "unknown") {
+        validCount++;
+        continue;
+      }
+      
+      const validation = await validateMR(mrData.originalName);
       
       if (!validation.success) {
-        const affectedInvoices = mrToInvoices.get(mrName) || [];
-        
         mrIssues.push({
-          mrName,
+          mrName: mrData.originalName,
           message: validation.message,
-          affectedInvoices: affectedInvoices,
-          affectedCount: affectedInvoices.length,
+          affectedInvoices: mrData.invoices,
+          affectedCount: mrData.invoices.length,
         });
+      } else {
+        validCount++;
       }
     }
 
@@ -1390,8 +1437,8 @@ router.post("/validate-import-mrs", async (req, res) => {
       mrIssues,
       totalInvoices: invoices.length,
       summary: {
-        totalMRs: mrNames.size,
-        validMRs: mrNames.size - mrIssues.length,
+        totalMRs: mrNamesSet.size,
+        validMRs: validCount,
         invalidMRs: mrIssues.length,
       },
       importBlocked: mrIssues.length > 0,
@@ -1546,16 +1593,11 @@ const processSingleInvoiceWithStockDeduction = async (invoiceData, index, skipDu
           },
         };
       } else if (mergeCheck.shouldMerge) {
-        console.log(`🔄 Merging products into existing invoice: ${invoiceData.invoiceNumber}`);
-        
         const mergeResult = await mergeInvoiceProducts(existingInvoice, invoiceData, session);
         
         if (mergeResult.success) {
           await session.commitTransaction();
           await session.endSession();
-          
-          console.log(`✅ MERGED - Invoice: ${invoiceData.invoiceNumber} | Added ${mergeResult.addedProducts} products | New Total: ${mergeResult.newTotalAmount} | Added Paid: ${mergeResult.addedPaidAmount}`);
-          
           return {
             success: true,
             invoiceNumber: invoiceData.invoiceNumber,
@@ -1611,8 +1653,6 @@ const processSingleInvoiceWithStockDeduction = async (invoiceData, index, skipDu
       
       if (!stockItem) {
         if (bypassStockCheck) {
-          console.log(`⚠️ Product "${productName}" not found but proceeding due to bypassStockCheck`);
-          // Create a placeholder for missing product
         } else {
           throw new Error(`Product "${productName}" not found in inventory`);
         }
@@ -1620,17 +1660,9 @@ const processSingleInvoiceWithStockDeduction = async (invoiceData, index, skipDu
         const currentAvailableStock = fixPrecision(
           Number(stockItem.totalBoxes || 0)
         );
-        
-        console.log(
-          `🔍 IMPORT - Invoice: ${invoiceData.invoiceNumber} | ` +
-            `Product: "${productName}" | ` +
-            `Available: ${currentAvailableStock} | ` +
-            `Required: ${totalQty}`
-        );
-        
+              
         if (currentAvailableStock < totalQty) {
           if (bypassStockCheck) {
-            console.log(`⚠️ Insufficient stock for "${productName}" but proceeding due to bypassStockCheck`);
           } else {
             const shortage = fixPrecision(totalQty - currentAvailableStock);
             throw new Error(
@@ -1706,10 +1738,7 @@ const processSingleInvoiceWithStockDeduction = async (invoiceData, index, skipDu
       paidAmount = 0;
     }
     
-    const dueAmount = fixPrecision(Math.max(0, totalAmount - paidAmount));
-    
-    console.log(`📋 NEW INVOICE - Invoice: ${invoiceData.invoiceNumber} | Total: ${totalAmount} | Paid: ${paidAmount} | Due: ${dueAmount} | Status: ${paymentStatus}`);
-    
+    const dueAmount = fixPrecision(Math.max(0, totalAmount - paidAmount)); 
     const saleRecord = new SaleSummary({
       recordingDate: invoiceData.recordingDate
         ? new Date(invoiceData.recordingDate)
@@ -1746,8 +1775,6 @@ const processSingleInvoiceWithStockDeduction = async (invoiceData, index, skipDu
     await saleRecord.save({ session });
     
     if (paidAmount > 0 && invoiceData.mrName && invoiceData.mrName.trim()) {
-      console.log(`💵 Updating MR Cash for invoice ${invoiceData.invoiceNumber}: Amount = ${paidAmount}`);
-      
       const mrCashUpdate = await updateMRCashes(
         invoiceData.mrName.trim(),
         paidAmount,
@@ -1759,20 +1786,12 @@ const processSingleInvoiceWithStockDeduction = async (invoiceData, index, skipDu
       
       if (!mrCashUpdate.success && !mrCashUpdate.skipped) {
         console.error(`⚠️ Failed to update MR Cash: ${mrCashUpdate.error}`);
-      } else if (mrCashUpdate.success) {
-        console.log(`✅ MR Cash updated successfully for ${invoiceData.mrName}`);
-      }
-    } else {
-      console.log(`⏭️ Skipping MR Cash update - PaidAmount: ${paidAmount}, MRName: ${invoiceData.mrName}`);
-    }
+      } 
+    } 
     
     await session.commitTransaction();
     await session.endSession();
-    
-    console.log(
-      `✅ CREATED - Invoice: ${invoiceData.invoiceNumber} created | Total: ${totalAmount} | Paid: ${paidAmount}`
-    );
-    
+
     return {
       success: true,
       invoiceNumber: invoiceData.invoiceNumber,
@@ -1845,8 +1864,6 @@ const processSingleInvoiceWithMRDistribution = async (invoiceData, index, skipDu
           },
         };
       } else if (mergeCheck.shouldMerge) {
-        console.log(`🔄 Merging products into existing invoice: ${invoiceData.invoiceNumber}`);
-        
         const mergeResult = await mergeInvoiceProducts(existingInvoice, invoiceData, session);
         
         if (mergeResult.success) {
@@ -1903,7 +1920,6 @@ const processSingleInvoiceWithMRDistribution = async (invoiceData, index, skipDu
       
       if (!stockItem) {
         if (bypassStockCheck) {
-          console.log(`⚠️ Product "${productName}" not found but proceeding due to bypassStockCheck`);
         } else {
           throw new Error(`Product "${productName}" not found in inventory`);
         }
@@ -1912,7 +1928,6 @@ const processSingleInvoiceWithMRDistribution = async (invoiceData, index, skipDu
         
         if (currentAvailableStock < totalQty) {
           if (bypassStockCheck) {
-            console.log(`⚠️ Insufficient stock for "${productName}" but proceeding due to bypassStockCheck`);
           } else {
             const shortage = fixPrecision(totalQty - currentAvailableStock);
             throw new Error(
@@ -2036,8 +2051,6 @@ const processSingleInvoiceWithMRDistribution = async (invoiceData, index, skipDu
     if (paidAmount > 0 && paymentStatus === "Cash") {
       for (const [mrName, mrAmount] of mrCashDistribution) {
         if (mrName && mrName.trim() && mrAmount > 0) {
-          console.log(`💵 Updating MR Cash for ${mrName}: ${mrAmount} (Invoice: ${invoiceData.invoiceNumber})`);
-          
           const mrCashUpdate = await updateMRCashes(
             mrName.trim(),
             mrAmount,
@@ -2049,7 +2062,6 @@ const processSingleInvoiceWithMRDistribution = async (invoiceData, index, skipDu
           
           if (mrCashUpdate.success) {
             mrCashUpdates[mrName] = mrAmount;
-            console.log(`✅ MR Cash updated for ${mrName}: +${mrAmount}`);
           } else if (!mrCashUpdate.skipped) {
             console.error(`⚠️ Failed to update MR Cash for ${mrName}: ${mrCashUpdate.error}`);
           }
@@ -2059,10 +2071,7 @@ const processSingleInvoiceWithMRDistribution = async (invoiceData, index, skipDu
     
     await session.commitTransaction();
     await session.endSession();
-    
-    console.log(`✅ CREATED - Invoice: ${invoiceData.invoiceNumber} | Total: ${totalAmount} | Paid: ${paidAmount}`);
     if (Object.keys(mrCashUpdates).length > 1) {
-      console.log(`  📊 MR Cash distributed to ${Object.keys(mrCashUpdates).length} MRs`);
     }
     
     return {
@@ -2125,11 +2134,7 @@ const processImportWithStockDeduction = async (
   progress.status = "processing";
   progress.startTime = Date.now();
   progress.lastUpdated = Date.now();
-  
-  console.log(`🚀 Starting import process - Total Invoices: ${invoices.length}`);
-  console.log(`🔧 Duplicate handling: ${skipDuplicates ? 'Skip exact duplicates, merge same invoice' : 'Allow all'}`);
-  console.log(`🔧 Bypass stock check: ${bypassStockCheck ? 'YES - Missing/insufficient stock will be ignored' : 'NO - Strict stock validation'}`);
-  
+    
   try {
     const groupedInvoices = new Map();
     
@@ -2234,10 +2239,8 @@ const processImportWithStockDeduction = async (
         }
       }
     }
-    
-    console.log(`📦 Grouped ${invoices.length} rows into ${groupedInvoices.size} unique invoices`);
+  
     if (progress.duplicateProductsSkipped > 0) {
-      console.log(`🗑️ Skipped ${progress.duplicateProductsSkipped} duplicate product entries`);
     }
     
     progress.totalInvoices = groupedInvoices.size;
@@ -2264,12 +2267,9 @@ const processImportWithStockDeduction = async (
         
         if (result.skipped) {
           skippedDuplicates++;
-          console.log(`⏭️ Skipped duplicate: ${invoiceNumber}`);
         } else if (result.success) {
           if (result.action === "merged") {
             mergedInvoices++;
-            console.log(`🔄 Merged: ${invoiceNumber}`);
-            
             if (result.mrCashUpdates) {
               for (const [mrName, amount] of Object.entries(result.mrCashUpdates)) {
                 totalMRCashAdded = fixPrecision(totalMRCashAdded + amount);
@@ -2277,8 +2277,6 @@ const processImportWithStockDeduction = async (
             }
           } else {
             successful++;
-            console.log(`✅ Created: ${invoiceNumber}`);
-            
             if (result.mrCashUpdates) {
               for (const [mrName, amount] of Object.entries(result.mrCashUpdates)) {
                 totalMRCashAdded = fixPrecision(totalMRCashAdded + amount);
@@ -2322,10 +2320,7 @@ const processImportWithStockDeduction = async (
     progress.status = "completed";
     progress.totalMRCashAdded = totalMRCashAdded;
     
-    console.log(`🎉 Import completed - Created: ${successful}, Merged: ${mergedInvoices}, Failed: ${failed}, Skipped: ${skippedDuplicates}`);
-    console.log(`💰 Total MR Cash Added: ${totalMRCashAdded}`);
     if (progress.duplicateProductsSkipped > 0) {
-      console.log(`🗑️ Duplicate products skipped: ${progress.duplicateProductsSkipped}`);
     }
     
   } catch (error) {
@@ -2350,11 +2345,7 @@ const updateMRCashes = async (
 ) => {
   try {
     const cleanAmount = fixPrecision(Number(amount) || 0);
-    
-    console.log(`🔄 MR Cash Update - MR: ${mrName}, Amount: ${cleanAmount}, Invoice: ${invoiceNumber}, IsRefund: ${isRefund}`);
-    
     if (cleanAmount === 0) {
-      console.log(`⏭️ Skipping MR Cash Update - Amount is 0 for invoice: ${invoiceNumber}`);
       return { success: true, skipped: true, reason: "Amount is zero" };
     }
     
@@ -2375,13 +2366,9 @@ const updateMRCashes = async (
       throw new Error(`MR not found with name "${mrName}"`);
     }
     
-    console.log(`✅ MR Found: ${mr.medicalRepName} (ID: ${mr._id})`);
-    
     let mrCash = await MRCash.findOne({ mrId: mr._id }).session(session);
     
     if (!mrCash) {
-      console.log(`📝 Creating NEW MRCash record for MR: ${mr.medicalRepName}`);
-      
       let initialCash = 0;
       if (!isRefund) {
         initialCash = cleanAmount;
@@ -2398,9 +2385,6 @@ const updateMRCashes = async (
       });
       
       await mrCash.save({ session });
-      
-      console.log(`✅ Created NEW MRCash | Initial Cash: ${initialCash}`);
-      
       return { 
         success: true, 
         mrCash, 
@@ -2415,10 +2399,8 @@ const updateMRCashes = async (
     
     if (isRefund) {
       newCashAmount = fixPrecision(previousAmount - cleanAmount);
-      console.log(`💰 REFUND: ${previousAmount} - ${cleanAmount} = ${newCashAmount}`);
     } else {
       newCashAmount = fixPrecision(previousAmount + cleanAmount);
-      console.log(`💰 ADDING: ${previousAmount} + ${cleanAmount} = ${newCashAmount}`);
     }
     
     mrCash.currentCash = newCashAmount;
@@ -2440,11 +2422,7 @@ const updateMRCashes = async (
     mrCash.updatedAt = new Date();
     
     await mrCash.save({ session });
-    
-    console.log(
-      `✅ MR Cash UPDATED | ${mr.medicalRepName} | Previous: ${previousAmount} | New: ${newCashAmount} | Change: ${isRefund ? '-' : '+'}${cleanAmount}`
-    );
-    
+      
     return {
       success: true,
       mrCash,
@@ -2461,7 +2439,6 @@ const updateMRCashes = async (
 
 router.post("/mrcash/fix-duplicates", async (req, res) => {
   try {
-    console.log("🔧 Starting one-time MR Cash duplicate fix...");
     
     const duplicateAdjustments = [
       { invoice: '995120', excess: 160.00 },
@@ -2475,9 +2452,6 @@ router.post("/mrcash/fix-duplicates", async (req, res) => {
     ];
     
     const totalExcess = duplicateAdjustments.reduce((sum, item) => sum + item.excess, 0);
-    
-    console.log(`Total excess to be removed: ₹${totalExcess.toFixed(2)}`);
-    
     const mrCash = await MRCash.findOne({ mrName: /Yav Phanda/i });
     
     if (!mrCash) {
@@ -2496,8 +2470,6 @@ router.post("/mrcash/fix-duplicates", async (req, res) => {
       : `One-time fix: Removed ₹${totalExcess.toFixed(2)} excess from duplicate products (${new Date().toISOString()})`;
     
     await mrCash.save();
-    
-    console.log(`✅ Fixed MR Cash for Yav Phanda: ${oldCash} → ${newCash}`);
     
     res.json({
       success: true,

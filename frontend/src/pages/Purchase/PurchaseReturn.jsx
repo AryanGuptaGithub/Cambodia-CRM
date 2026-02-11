@@ -280,10 +280,7 @@ const fetchSuppliers = async () => {
   setLoadingSuppliers(true);
   try {
     // Updated to use the correct endpoint that returns array or handle paginated response
-    const response = await axios.get(`${backendUrl}/api/suppliers/all`); // Or modify existing endpoint
-    console.log('values of response', response);
-    
-    // Check if response.data is an array or has suppliers property
+    const response = await axios.get(`${backendUrl}/api/suppliers/all`);     
     let suppliersData = [];
     
     if (Array.isArray(response.data)) {

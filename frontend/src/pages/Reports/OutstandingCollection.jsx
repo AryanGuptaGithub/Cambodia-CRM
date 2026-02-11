@@ -7,6 +7,7 @@ import {
   Phone,
   Mail,
   X,
+  Upload,
   Search,
 } from "lucide-react";
 import axios from "axios";
@@ -16,10 +17,13 @@ import ReactDOM from "react-dom";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { useVisiblePages } from "../../utils/useVisiblePages.jsx";
+import * as XLSX from "xlsx";
+import OutstandingCollectionSampleExcelDownload from "../../excels/OutstandingCollectionSampleExcelDownload.jsx";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
+const isSampleFile = import.meta.env.VITE_IS_SAMPLE_FILE === "true";
 
-// Customer Dropdown Component (keep this as is)
+// Customer Dropdown Component
 const CustomerDropdown = ({
   value,
   onChange,
@@ -27,10 +31,87 @@ const CustomerDropdown = ({
   placeholder = "Select customer...",
   disabled = false,
 }) => {
-  // ... (keep your existing CustomerDropdown component code) ...
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const dropdownRef = useRef(null);
+
+  const filteredOptions = options.filter(
+    (option) =>
+      option.label.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      option.code?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const selectedOption = options.find((opt) => opt.value === value);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   return (
-    <div className="relative w-full">
-      {/* Your existing CustomerDropdown JSX */}
+    <div className="relative w-full" ref={dropdownRef}>
+      <div
+        onClick={() => !disabled && setIsOpen(!isOpen)}
+        className={`w-full border rounded-lg px-3 py-2 cursor-pointer ${
+          disabled ? "bg-gray-100" : "bg-white hover:border-gray-400"
+        }`}
+      >
+        {selectedOption ? (
+          <div className="flex justify-between items-center">
+            <span className="text-sm">{selectedOption.label}</span>
+            <span className="text-xs text-gray-500">{selectedOption.code}</span>
+          </div>
+        ) : (
+          <span className="text-gray-400 text-sm">{placeholder}</span>
+        )}
+      </div>
+
+      {isOpen && (
+        <div className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-hidden">
+          <div className="p-2 border-b">
+            <input
+              type="text"
+              placeholder="Search customer..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+          <div className="overflow-y-auto max-h-48">
+            {filteredOptions.length > 0 ? (
+              filteredOptions.map((option) => (
+                <div
+                  key={option.value}
+                  onClick={() => {
+                    onChange(option.value);
+                    setIsOpen(false);
+                    setSearchTerm("");
+                  }}
+                  className={`px-3 py-2 cursor-pointer hover:bg-gray-100 ${
+                    value === option.value ? "bg-blue-50" : ""
+                  }`}
+                >
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm">{option.label}</span>
+                    <span className="text-xs text-gray-500">{option.code}</span>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="px-3 py-2 text-sm text-gray-500">
+                No customers found
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -41,7 +122,7 @@ const OutstandingCollection = () => {
       totalOutstandingAmount: 0,
       totalOverdueAmount: 0,
       totalCustomers: 0,
-      totalRecords: 0,
+      totalInvoices: 0,
     },
     records: [],
   });
@@ -65,7 +146,11 @@ const OutstandingCollection = () => {
     hasPrev: false,
   });
   const [exportLoading, setExportLoading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [parsedData, setParsedData] = useState([]);
   const inputRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   // Customer dropdown states
   const [customerOptions, setCustomerOptions] = useState([]);
@@ -213,12 +298,13 @@ const OutstandingCollection = () => {
           params.status = filter.status;
         }
       }
-      
+
       const response = await axios.get(
         `${backendUrl}/api/reports/outstanding-collections`,
         { params }
       );
 
+      console.log('valueso f response', response.data.data);
       setData(response.data.data || { summary: {}, records: [] });
       setPagination(
         response.data.pagination || {
@@ -269,7 +355,7 @@ const OutstandingCollection = () => {
 
   const handleClearSearch = () => {
     setSearchTerm("");
-    fetchOutstandingCollections(1);
+    fetchOutstandingCollections(1, "");
   };
 
   const handleCustomDateChange = (name, date) => {
@@ -289,7 +375,7 @@ const OutstandingCollection = () => {
   // Debounced search effect
   useEffect(() => {
     const delayDebounce = setTimeout(() => {
-      fetchOutstandingCollections(1);
+      fetchOutstandingCollections(1, searchTerm);
     }, 500);
 
     return () => clearTimeout(delayDebounce);
@@ -424,6 +510,137 @@ const OutstandingCollection = () => {
     }
   };
 
+  // Handle Import Click - Open modal without file selection
+  const handleImportClick = () => {
+    setShowImportModal(true);
+    // Reset file input when opening modal
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  // Handle Excel Upload - Parse file and set parsed data
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+
+    reader.onload = async (evt) => {
+      try {
+        const data = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(data, {
+          type: "array",
+          cellDates: true,
+          cellNF: false,
+          cellText: false,
+        });
+
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, {
+          header: 1,
+          defval: "",
+          blankrows: true,
+          raw: true,
+        });
+
+        if (!rows.length) {
+          showToast("warning", "Excel file is empty");
+          return;
+        }
+
+        // Find header row
+        let headerIdx = -1;
+        for (let i = 0; i < Math.min(rows.length, 10); i++) {
+          const firstCell = rows[i]?.[0]?.toString().trim().toLowerCase();
+          if (firstCell === "invoice number") {
+            headerIdx = i;
+            break;
+          }
+        }
+
+        if (headerIdx === -1) {
+          showToast("error", "Header row not found. Make sure first column is 'Invoice Number'");
+          return;
+        }
+
+        const headers = rows[headerIdx].map((h) => h?.toString().trim() || "");
+        const dataRows = rows.slice(headerIdx + 1);
+
+        const json = dataRows
+          .map((row) => {
+            const obj = {};
+            headers.forEach((h, i) => {
+              obj[h] = row[i] !== undefined ? row[i] : "";
+            });
+            return obj;
+          })
+          .filter((o) => o["Invoice Number"]?.toString().trim() !== "");
+
+        const validData = json.map((item) => ({
+          invoiceNumber: item["Invoice Number"]?.toString().trim() || "",
+          totalAmount: parseFloat(item["Total Amount"] || 0) || 0,
+          paidAmount: parseFloat(item["Paid Amount"] || 0) || 0,
+          creditDays: parseInt(item["Credit Days"] || 0) || 0,
+          remarks: item["Remarks"]?.toString().trim() || "",
+        })).filter(item => item.invoiceNumber && item.totalAmount > 0);
+
+        if (validData.length === 0) {
+          showToast("warning", "No valid records found in the Excel file");
+          return;
+        }
+
+        setParsedData(validData);
+      } catch (err) {
+        console.error("Error parsing file:", err);
+        showToast("error", "Failed to parse file: " + err.message);
+      }
+    };
+
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleImportSubmit = async () => {
+    if (!parsedData.length) {
+      showToast("warning", "Upload a valid file first");
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const response = await axios.post(
+        `${backendUrl}/api/reports/outstanding-collections/bulk-update`,
+        { updates: parsedData }
+      );
+
+      console.log('values of response', response.data);
+      if (response.data.success) {
+        showToast(
+          "success",
+          `Successfully updated ${response.data.successCount} sales. Failed: ${response.data.failedCount}`
+        );
+        setShowImportModal(false);
+        setParsedData([]);
+        fetchOutstandingCollections(1);
+      } else {
+        showToast("error", response.data.message || "Failed to update sales");
+      }
+    } catch (error) {
+      console.error("Error uploading file:", error);
+      let errorMsg = "Failed to upload file";
+      if (error.response?.data?.message) {
+        errorMsg = error.response.data.message;
+      }
+      showToast("error", errorMsg);
+    } finally {
+      setIsUploading(false);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
+
   const formatDateForDisplay = (date) => {
     return date ? formatDateToReadable(date) : "";
   };
@@ -470,54 +687,65 @@ const OutstandingCollection = () => {
   const renderPagination = () => {
     if (pagination.totalPages <= 1) return null;
 
+    const startItem = (pagination.currentPage - 1) * 7 + 1;
+    const endItem = Math.min(
+      pagination.currentPage * 7,
+      pagination.totalRecords
+    );
+
     return (
-      <div className="flex items-center justify-start gap-2 mt-6">
-        <button
-          onClick={() => handlePageChange(pagination.currentPage - 1)}
-          disabled={!pagination.hasPrev}
-          className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${
-            pagination.hasPrev
-              ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-              : "bg-gray-100 text-gray-400 cursor-not-allowed"
-          }`}
-        >
-          ← Prev
-        </button>
+      <div className="flex items-center justify-between mt-6">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => handlePageChange(pagination.currentPage - 1)}
+            disabled={!pagination.hasPrev}
+            className={`flex items-center gap-1 px-3 py-2 rounded-lg ${
+              pagination.hasPrev
+                ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer"
+                : "bg-gray-100 text-gray-400 cursor-not-allowed"
+            }`}
+          >
+            ← Prev
+          </button>
 
-        {/* Page Numbers */}
-        <div className="flex gap-1">
-          {visiblePages.map((page, index) => (
-            <button
-              key={index}
-              onClick={() =>
-                typeof page === "number" ? handlePageChange(page) : null
-              }
-              className={`min-w-[40px] px-3 py-2 rounded-lg cursor-pointer ${
-                page === pagination.currentPage
-                  ? "bg-indigo-600 text-white"
-                  : typeof page === "number"
-                  ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-                  : "bg-transparent text-gray-500 cursor-default"
-              }`}
-              disabled={typeof page !== "number"}
-            >
-              {page}
-            </button>
-          ))}
+          {/* Page Numbers */}
+          <div className="flex gap-1">
+            {visiblePages.map((page, index) => (
+              <button
+                key={index}
+                onClick={() =>
+                  typeof page === "number" ? handlePageChange(page) : null
+                }
+                className={`min-w-[40px] px-3 py-2 rounded-lg ${
+                  page === pagination.currentPage
+                    ? "bg-indigo-600 text-white cursor-default"
+                    : typeof page === "number"
+                    ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer"
+                    : "bg-transparent text-gray-500 cursor-default"
+                }`}
+                disabled={typeof page !== "number"}
+              >
+                {page}
+              </button>
+            ))}
+          </div>
+
+          {/* Next Button */}
+          <button
+            onClick={() => handlePageChange(pagination.currentPage + 1)}
+            disabled={!pagination.hasNext}
+            className={`flex items-center gap-1 px-3 py-2 rounded-lg ${
+              pagination.hasNext
+                ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-pointer"
+                : "bg-gray-100 text-gray-400 cursor-not-allowed"
+            }`}
+          >
+            Next →
+          </button>
         </div>
-
-        {/* Next Button */}
-        <button
-          onClick={() => handlePageChange(pagination.currentPage + 1)}
-          disabled={!pagination.hasNext}
-          className={`flex items-center gap-1 px-3 py-2 rounded-lg cursor-pointer ${
-            pagination.hasNext
-              ? "bg-gray-200 hover:bg-gray-300 text-gray-700"
-              : "bg-gray-100 text-gray-400 cursor-not-allowed"
-          }`}
-        >
-          Next →
-        </button>
+        <div className="text-sm text-gray-600">
+          Showing {startItem} to {endItem} of {pagination.totalRecords} records
+        </div>
       </div>
     );
   };
@@ -558,6 +786,26 @@ const OutstandingCollection = () => {
               </button>
             )}
           </div>
+
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileUpload}
+            accept=".xlsx,.xls"
+            className="hidden"
+          />
+          <button
+            onClick={handleImportClick}
+            disabled={isUploading}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg shadow-md cursor-pointer ${
+              isUploading
+                ? "bg-gray-400 text-gray-700 cursor-not-allowed"
+                : "bg-purple-600 hover:bg-purple-700 text-white"
+            }`}
+          >
+            <Upload size={18} />
+            {isUploading ? "Uploading..." : "Upload Excel"}
+          </button>
 
           <button
             onClick={exportToExcel}
@@ -683,7 +931,7 @@ const OutstandingCollection = () => {
         </div>
       </div>
 
-      {/* Data Table with Sr.No Column */}
+      {/* Data Table */}
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
@@ -702,13 +950,16 @@ const OutstandingCollection = () => {
             {loading ? (
               <tr>
                 <td colSpan="8" className="p-3 text-center">
-                  Loading...
+                  <div className="flex justify-center items-center">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600"></div>
+                    <span className="ml-2">Loading...</span>
+                  </div>
                 </td>
               </tr>
             ) : data.records.length > 0 ? (
               data.records.map((customer, index) => (
                 <tr
-                  key={index}
+                  key={customer._id || index}
                   className={`hover:bg-gray-50 ${
                     index === data.records.length - 1 ? "" : "border-b"
                   }`}
@@ -776,15 +1027,97 @@ const OutstandingCollection = () => {
 
       {renderPagination()}
 
+      {/* Import Modal - EXACTLY LIKE CUSTOMER COMPONENT */}
+      {showImportModal &&
+        ReactDOM.createPortal(
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
+            <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
+              <button
+                onClick={() => {
+                  setShowImportModal(false);
+                  setParsedData([]);
+                  if (fileInputRef.current) {
+                    fileInputRef.current.value = "";
+                  }
+                }}
+                disabled={isUploading}
+                className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+              <h2 className="text-lg font-semibold mb-4">Import Outstanding Collection</h2>
+              
+              {/* Sample Download - Inside Modal */}
+              {isSampleFile && <OutstandingCollectionSampleExcelDownload />}
+              
+              <div className="mb-6 mt-4">
+                <label className="block text-gray-700 mb-2 font-medium">File</label>
+                <input
+                  type="file"
+                  accept=".xlsx, .xls"
+                  ref={fileInputRef}
+                  onChange={handleFileUpload}
+                  className="block w-full border rounded-lg px-3 py-2"
+                />
+                <p className="text-xs text-gray-500 mt-2">
+                  Download the template above, fill in your data, and upload here.
+                </p>
+              </div>
+              
+              <div className="flex justify-between items-center mt-6">
+                <div className="text-gray-700">
+                  {parsedData.length > 0 ? (
+                    <>
+                      Rows to import:{" "}
+                      <span className="font-semibold text-blue-600">
+                        {parsedData.length}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-gray-500">No data to import</span>
+                  )}
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      setShowImportModal(false);
+                      setParsedData([]);
+                      if (fileInputRef.current) {
+                        fileInputRef.current.value = "";
+                      }
+                    }}
+                    disabled={isUploading}
+                    className={`px-5 py-2 rounded-lg cursor-pointer ${
+                      isUploading
+                        ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                        : "bg-gray-300 hover:bg-gray-400 text-gray-700"
+                    }`}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleImportSubmit}
+                    disabled={isUploading || parsedData.length === 0}
+                    className={`px-5 py-2 rounded-lg cursor-pointer ${
+                      isUploading || parsedData.length === 0
+                        ? "bg-blue-400 text-white cursor-not-allowed"
+                        : "bg-blue-600 hover:bg-blue-700 text-white"
+                    }`}
+                  >
+                    {isUploading ? "Uploading…" : `Upload (${parsedData.length})`}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
       {/* Custom Filter Modal */}
       {showCustomFilter &&
         ReactDOM.createPortal(
-          <div className="fixed inset-0 bg-transparent bg-opacity-40 flex justify-center items-center z-50">
-            <div
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setShowCustomFilter(false)}
-            />
-            <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative z-10">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50">
+            <div className="bg-white w-full max-w-md p-6 rounded-xl shadow-lg relative">
               <button
                 onClick={() => setShowCustomFilter(false)}
                 className="absolute top-3 right-3 text-gray-500 hover:text-gray-700 cursor-pointer"

@@ -454,7 +454,7 @@ const MRWiseSales = () => {
             <input
               ref={inputRef}
               type="text"
-              placeholder="Search by MR name or ID..."
+              placeholder="Search by MR name..."
               value={searchTerm}
               onChange={handleSearchChange}
               onKeyPress={handleSearch}
@@ -546,7 +546,7 @@ const MRWiseSales = () => {
             <div>
               <p className="text-sm text-gray-600">Total Sales</p>
               <p className="text-2xl font-bold text-gray-800">
-                ${data.summary.totalSalesAmount?.toLocaleString() || 0}
+                {data.summary.totalSalesAmount?.toLocaleString() || 0}
               </p>
             </div>
             <DollarSign className="w-8 h-8 text-green-500" />
@@ -579,7 +579,7 @@ const MRWiseSales = () => {
             <div>
               <p className="text-sm text-gray-600">Avg Order Value</p>
               <p className="text-2xl font-bold text-gray-800">
-                ${data.summary.averageOrderValue?.toLocaleString() || 0}
+                {data.summary.averageOrderValue?.toLocaleString() || 0}
               </p>
             </div>
             <User className="w-8 h-8 text-orange-500" />
@@ -593,18 +593,17 @@ const MRWiseSales = () => {
           <thead className="bg-gray-100 text-gray-700 border-b">
             <tr>
               <th className="p-3 text-sm font-medium">Sr.No</th>
-              <th className="p-3 text-sm font-medium">MR ID</th>
               <th className="p-3 text-sm font-medium">MR Name</th>
               <th className="p-3 text-sm font-medium">Region</th>
               <th className="p-3 text-sm font-medium">Total Orders</th>
-              <th className="p-3 text-sm font-medium">Total Sales ($)</th>
-              <th className="p-3 text-sm font-medium">Avg Order Value ($)</th>
+              <th className="p-3 text-sm font-medium">Total Sales</th>
+              <th className="p-3 text-sm font-medium">Avg Order Value</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan="7" className="p-3 text-center">
+                <td colSpan="6" className="p-3 text-center">
                   Loading...
                 </td>
               </tr>
@@ -619,11 +618,6 @@ const MRWiseSales = () => {
                   <td className="p-3">
                     <div className="text-sm text-gray-600 font-medium">
                       {getSerialNumber(index)}
-                    </div>
-                  </td>
-                  <td className="p-3">
-                    <div className="text-sm text-gray-600 font-medium">
-                      {mr.mrId || "N/A"}
                     </div>
                   </td>
                   <td className="p-3">
@@ -643,16 +637,16 @@ const MRWiseSales = () => {
                     {mr.totalOrders || 0}
                   </td>
                   <td className="p-3 text-sm font-semibold text-green-600">
-                    ${mr.totalSalesAmount?.toLocaleString() || 0}
+                    {mr.totalSalesAmount?.toLocaleString() || 0}
                   </td>
                   <td className="p-3 text-sm font-semibold text-orange-600">
-                    ${mr.averageOrderValue?.toLocaleString() || 0}
+                    {mr.averageOrderValue?.toLocaleString() || 0}
                   </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan="7" className="p-3 text-center text-gray-500">
+                <td colSpan="6" className="p-3 text-center text-gray-500">
                   {selectedTab === "custom" &&
                   (!customDateRange.startDate || !customDateRange.endDate)
                     ? "Please select start and end dates"

@@ -673,8 +673,6 @@ router.post('/transaction/import', upload.single('file'), async (req, res) => {
       });
     }
 
-    console.log(`Processing file: ${file.originalname}, Size: ${file.size} bytes, MIME type: ${file.mimetype}`);
-
     const workbook = new ExcelJS.Workbook();
     
     // Handle different file types
@@ -712,8 +710,6 @@ router.post('/transaction/import', upload.single('file'), async (req, res) => {
       const headerValue = getCellValue(cell)?.toString()?.trim() || `Column ${colNumber}`;
       headers[colNumber - 1] = headerValue;
     });
-
-    console.log('Detected headers:', headers);
 
     // Flexible header mapping to handle different column names
     const headerMapping = {
@@ -759,9 +755,7 @@ router.post('/transaction/import', upload.single('file'), async (req, res) => {
     
     // Process only first 1000 rows to avoid infinite loops
     const maxRowsToProcess = Math.min(worksheet.rowCount, 1000);
-    
-    console.log(`Processing up to ${maxRowsToProcess} rows`);
-    
+      
     while (rowNumber <= maxRowsToProcess) {
       const row = worksheet.getRow(rowNumber);
       
@@ -978,9 +972,6 @@ router.post('/transaction/import', upload.single('file'), async (req, res) => {
           amount,
           category: category.name
         });
-
-        console.log(`Successfully imported row ${rowNumber}: ${category.name} - $${amount}`);
-
       } catch (err) {
         console.error(`Error processing row ${rowNumber}:`, err);
         errors.push({
@@ -993,15 +984,9 @@ router.post('/transaction/import', upload.single('file'), async (req, res) => {
       rowNumber++;
     }
 
-    console.log(`Import summary: Processed ${dataRowsProcessed} data rows, skipped ${skippedRows} empty/template rows`);
-
     if (errors.length > 0) {
       await session.abortTransaction();
       session.endSession();
-
-      console.log(`Import completed with ${errors.length} errors`);
-      console.log('Errors:', errors);
-
       return res.status(400).json({
         success: false,
         message: 'Import failed with errors',
@@ -1017,9 +1002,6 @@ router.post('/transaction/import', upload.single('file'), async (req, res) => {
 
     await session.commitTransaction();
     session.endSession();
-
-    console.log(`Import successful: ${importedTransactions.length} transactions imported`);
-
     res.json({
       success: true,
       message: `Successfully imported ${importedTransactions.length} transaction(s)`,
@@ -1370,13 +1352,6 @@ router.post('/transaction/import/test', upload.single('file'), async (req, res) 
         message: 'No file uploaded'
       });
     }
-
-    console.log('Test upload received:', {
-      fileName: file.originalname,
-      fileSize: file.size,
-      fileType: file.mimetype,
-      bufferLength: file.buffer.length
-    });
 
     res.json({
       success: true,

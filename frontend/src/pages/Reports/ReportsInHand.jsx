@@ -20,7 +20,7 @@ const ReportsInHand = () => {
   const fetchReportsInHand = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`${backendUrl}/api/reports-in-hand`);
+      const response = await fetch(`${backendUrl}/api/reports/reports-in-hand`);
       if (!response.ok) {
         throw new Error("Failed to fetch data");
       }
@@ -37,8 +37,8 @@ const ReportsInHand = () => {
           return {
             id: product._id || index + 1,
             name: product.productName,
-            currentStock: product.totalBoxes || 0, // Use totalBoxes from API
-            boxes: product.totalBoxes || 0, // Use totalBoxes from API
+            currentStock: product.totalBoxes || 0, // ✅ Use totalBoxes from API
+            boxes: product.totalBoxes || 0, // ✅ Use totalBoxes from API
             piecesPerBox: 0, // Not available in API
             minStock: product.minStockLevel || 10,
             status: product.status || "Out of Stock",
@@ -152,13 +152,16 @@ const ReportsInHand = () => {
     );
   };
 
-  // Calculate summary statistics
+  // ✅ Calculate summary statistics using totalBoxes
   const inStockCount = products.filter((p) => p.status === "In Stock").length;
   const lowStockCount = products.filter((p) => p.status === "Low Stock").length;
   const criticalCount = products.filter((p) => p.status === "Critical").length;
   const outOfStockCount = products.filter(
     (p) => p.status === "Out of Stock"
   ).length;
+  
+  // ✅ Calculate total boxes across all products
+  const totalBoxesSum = products.reduce((sum, product) => sum + (product.boxes || 0), 0);
 
   if (loading) {
     return (
@@ -206,12 +209,12 @@ const ReportsInHand = () => {
 
   const exportToExcel = () => {
     try {
-      // Convert your data
+      // ✅ Convert your data with totalBoxes
       const excelData = products.map((item, index) => ({
         "Sr No.": index + 1,
         Product: item.name,
         Supplier: item.supplierName,
-        Boxes: item.boxes,
+        "Total Boxes": item.boxes, // ✅ Show totalBoxes
         "Min Stock": item.minStock,
         Status: item.status,
         "LC Price ($)": item.lc?.toFixed(2) || "0.00",
@@ -227,10 +230,10 @@ const ReportsInHand = () => {
 
       // Column widths
       const colWidths = [
-        { wch: 7 }, // Sr No
+        { wch: 7 },  // Sr No
         { wch: 20 }, // Product
         { wch: 20 }, // Supplier
-        { wch: 10 }, // Boxes
+        { wch: 12 }, // Total Boxes ✅
         { wch: 10 }, // Min Stock
         { wch: 12 }, // Status
         { wch: 15 }, // LC Price ($)
@@ -476,6 +479,41 @@ const ReportsInHand = () => {
         </div>
       </div>
 
+      {/* ✅ Optional: Add Total Boxes Summary Card */}
+      <div className="mb-6">
+        <div className="bg-gradient-to-r from-indigo-50 to-blue-50 rounded-lg p-4 shadow-sm border border-indigo-200">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <div className="bg-indigo-100 p-3 rounded-lg">
+                <svg
+                  className="w-6 h-6 text-indigo-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
+                  />
+                </svg>
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">Total Stock (All Products)</p>
+                <p className="text-3xl font-bold text-indigo-900">{totalBoxesSum.toLocaleString()} Boxes</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-gray-500">Across {products.length} products</p>
+              <p className="text-sm text-gray-600 mt-1">
+                Average: {products.length > 0 ? (totalBoxesSum / products.length).toFixed(2) : 0} boxes/product
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div className="overflow-x-auto shadow rounded-2xl border border-gray-200">
         <table className="w-full border-collapse bg-white rounded-2xl overflow-hidden text-center shadow-sm">
           <thead className="bg-gray-100 text-gray-700 border-b">
@@ -484,7 +522,7 @@ const ReportsInHand = () => {
               <th className="p-3 text-sm font-medium">Date</th>
               <th className="p-3 text-sm font-medium">Product</th>
               <th className="p-3 text-sm font-medium">Supplier</th>
-              <th className="p-3 text-sm font-medium">Boxes</th>
+              <th className="p-3 text-sm font-medium">Total Boxes</th>
               <th className="p-3 text-sm font-medium">Min Stock</th>
               <th className="p-3 text-sm font-medium">Status</th>
               <th className="p-3 text-sm font-medium">LC Price ($)</th>
@@ -524,8 +562,8 @@ const ReportsInHand = () => {
                     </div>
                   </td>
                   <td className="p-3">
-                    <div className="text-sm font-medium text-gray-900">
-                      {product.boxes}
+                    <div className="text-sm font-bold text-indigo-900 bg-indigo-50 px-3 py-1 rounded-full inline-block">
+                      {product.boxes.toLocaleString()}
                     </div>
                   </td>
 

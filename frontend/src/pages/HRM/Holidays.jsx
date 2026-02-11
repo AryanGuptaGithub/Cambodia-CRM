@@ -67,26 +67,16 @@ const Holidays = () => {
   }, []);
 
   const fetchHolidays = async () => {
-    console.log("📡 fetchHolidays called");
     setLoading(true);
     setError(null);
 
     try {
       const response = await axios.get(`${backendUrl}/api/holidays`);
-      console.log("📥 API response:", response);
-
       if (response.data && response.data.success !== false) {
         const holidaysData =
           response.data.holidays || response.data.data || response.data;
-        console.log("✅ Parsed holidays data:", holidaysData);
-
         if (Array.isArray(holidaysData)) {
           setHolidays(holidaysData);
-          console.log(
-            "📦 Holidays set in state:",
-            holidaysData.length,
-            "holidays",
-          );
         } else {
           console.warn("⚠️ Holidays data is not an array:", holidaysData);
           setHolidays([]);
@@ -525,7 +515,6 @@ const Holidays = () => {
           return;
         }
 
-        console.log("Parsed holidays data:", finalData);
         setParsedData(finalData);
       } catch (error) {
         console.error("Error reading file:", error);
@@ -1005,14 +994,6 @@ const Holidays = () => {
 
   // Debug: Log the current state
   useEffect(() => {
-    console.log("📊 Current state:", {
-      loading,
-      error,
-      holidaysCount: holidays.length,
-      currentYearHolidaysCount: currentYearHolidays.length,
-      filteredHolidaysCount: filteredHolidays.length,
-      currentYear: currentYearString,
-    });
   }, [holidays, currentYearHolidays, filteredHolidays, loading, error]);
 
   if (loading)

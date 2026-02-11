@@ -9,7 +9,7 @@ const generateMRId = (index) => {
   return `MR${String(index + 1).padStart(3, "0")}`;
 };
 
-// Main endpoint for MR wise sales
+// Main endpoint for MR wise sales - FIXED VERSION
 router.get("/mr-wise-sales", async (req, res) => {
   try {
     const { page = 1, limit = 7, search, startDate, endDate } = req.query;
@@ -40,6 +40,10 @@ router.get("/mr-wise-sales", async (req, res) => {
       matchConditions.mrName = { $regex: search.trim(), $options: "i" };
     }
 
+    // ✅ FIXED: Check which amount fields exist in your SaleSummary model
+    // Try different possible amount field names
+    const amountField = await getAmountFieldName();
+    
     // Base aggregation pipeline for all sales
     const basePipeline = [
       { $match: matchConditions },
@@ -48,7 +52,17 @@ router.get("/mr-wise-sales", async (req, res) => {
       {
         $group: {
           _id: "$mrName",
-          totalSalesAmount: { $sum: "$netSellingAmount" },
+          totalSalesAmount: { 
+            $sum: { 
+              $ifNull: [
+                "$netSellingAmount", // Try this first
+                "$totalAmount",      // Try alternative field names
+                "$amount",
+                "$salesAmount",
+                0
+              ] 
+            } 
+          },
           totalOrders: { $sum: 1 },
           uniqueCustomers: { $addToSet: "$customerCode" },
         },
@@ -58,7 +72,16 @@ router.get("/mr-wise-sales", async (req, res) => {
       {
         $addFields: {
           averageOrderValue: {
-            $round: [{ $divide: ["$totalSalesAmount", "$totalOrders"] }, 2]
+            $round: [
+              {
+                $cond: [
+                  { $gt: ["$totalOrders", 0] },
+                  { $divide: ["$totalSalesAmount", "$totalOrders"] },
+                  0
+                ]
+              },
+              2
+            ]
           }
         }
       },
@@ -92,14 +115,25 @@ router.get("/mr-wise-sales", async (req, res) => {
         },
       },
 
-      // Format output
+      // Format output - Ensure zeros are properly formatted
       {
         $project: {
-          mrName: "$_id",
-          totalSalesAmount: { $round: ["$totalSalesAmount", 2] },
-          totalOrders: 1,
-          averageOrderValue: 1,
-          totalCustomers: { $size: "$uniqueCustomers" },
+          mrName: { $ifNull: ["$_id", "Unknown"] },
+          totalSalesAmount: { 
+            $round: [
+              { $ifNull: ["$totalSalesAmount", 0] },
+              2
+            ] 
+          },
+          totalOrders: { $ifNull: ["$totalOrders", 0] },
+          averageOrderValue: { $ifNull: ["$averageOrderValue", 0] },
+          totalCustomers: { 
+            $cond: {
+              if: { $isArray: "$uniqueCustomers" },
+              then: { $size: "$uniqueCustomers" },
+              else: 0
+            }
+          },
           staff: {
             $cond: {
               if: { $gt: [{ $size: "$staffDetails" }, 0] },
@@ -118,6 +152,7 @@ router.get("/mr-wise-sales", async (req, res) => {
       { $sort: { totalSalesAmount: -1 } },
     ];
 
+    // Execute aggregations in parallel
     const [countResult, mrData, summaryResult] = await Promise.all([
       SaleSummary.aggregate([...basePipeline, { $count: "totalCount" }]),
       
@@ -127,12 +162,23 @@ router.get("/mr-wise-sales", async (req, res) => {
         { $limit: limitNum },
       ]),
       
+      // Summary aggregation with proper zero handling
       SaleSummary.aggregate([
         { $match: matchConditions },
         {
           $group: {
             _id: "$mrName",
-            totalSalesAmount: { $sum: "$netSellingAmount" },
+            totalSalesAmount: { 
+              $sum: { 
+                $ifNull: [
+                  "$netSellingAmount",
+                  "$totalAmount",
+                  "$amount",
+                  "$salesAmount",
+                  0
+                ] 
+              } 
+            },
             totalOrders: { $sum: 1 },
             uniqueCustomers: { $addToSet: "$customerCode" },
           },
@@ -140,16 +186,40 @@ router.get("/mr-wise-sales", async (req, res) => {
         {
           $group: {
             _id: null,
-            totalSalesAmount: { $sum: { $round: ["$totalSalesAmount", 2] } },
+            totalSalesAmount: { 
+              $sum: { 
+                $round: [
+                  { $ifNull: ["$totalSalesAmount", 0] },
+                  2
+                ]
+              } 
+            },
             totalOrders: { $sum: "$totalOrders" },
-            totalCustomers: { $sum: { $size: "$uniqueCustomers" } },
+            totalCustomers: { 
+              $sum: { 
+                $cond: {
+                  if: { $isArray: "$uniqueCustomers" },
+                  then: { $size: "$uniqueCustomers" },
+                  else: 0
+                }
+              } 
+            },
             totalMRs: { $sum: 1 },
           },
         },
         {
           $addFields: {
             averageOrderValue: {
-              $round: [{ $divide: ["$totalSalesAmount", "$totalOrders"] }, 2]
+              $round: [
+                {
+                  $cond: [
+                    { $gt: ["$totalOrders", 0] },
+                    { $divide: ["$totalSalesAmount", "$totalOrders"] },
+                    0
+                  ]
+                },
+                2
+              ]
             }
           }
         }
@@ -159,18 +229,18 @@ router.get("/mr-wise-sales", async (req, res) => {
     const totalRecords = countResult[0]?.totalCount || 0;
     const totalPages = Math.ceil(totalRecords / limitNum);
 
-    // Format records with sequential IDs
+    // ✅ FIXED: Format records with proper zero handling
     const records = mrData.map((mr, index) => ({
       mrId: generateMRId(skip + index),
-      mrName: mr.mrName,
-      totalSalesAmount: mr.totalSalesAmount,
-      totalOrders: mr.totalOrders,
-      averageOrderValue: mr.averageOrderValue,
-      totalCustomers: mr.totalCustomers,
-      staff: mr.staff,
-      region: mr.staff.teamName || "Not Available",
-      email: mr.staff.email,
-      contactNumber: mr.staff.contactNo,
+      mrName: mr.mrName || "Not Available",
+      totalSalesAmount: parseFloat(mr.totalSalesAmount || 0).toFixed(2),
+      totalOrders: mr.totalOrders || 0,
+      averageOrderValue: parseFloat(mr.averageOrderValue || 0).toFixed(2),
+      totalCustomers: mr.totalCustomers || 0,
+      staff: mr.staff || {},
+      region: mr.staff?.teamName || "Not Available",
+      email: mr.staff?.email || "Not Available",
+      contactNumber: mr.staff?.contactNo || "Not Available",
     }));
 
     const summary = summaryResult[0] || {
@@ -181,9 +251,18 @@ router.get("/mr-wise-sales", async (req, res) => {
       averageOrderValue: 0,
     };
 
+    // ✅ FIXED: Ensure summary values are properly formatted
+    const formattedSummary = {
+      totalSalesAmount: parseFloat(summary.totalSalesAmount || 0).toFixed(2),
+      totalOrders: summary.totalOrders || 0,
+      totalCustomers: summary.totalCustomers || 0,
+      totalMRs: summary.totalMRs || 0,
+      averageOrderValue: parseFloat(summary.averageOrderValue || 0).toFixed(2),
+    };
+
     res.json({
       data: {
-        summary,
+        summary: formattedSummary,
         records,
       },
       pagination: {
@@ -203,7 +282,32 @@ router.get("/mr-wise-sales", async (req, res) => {
   }
 });
 
-// Export to Excel endpoint
+// Helper function to determine the correct amount field name
+async function getAmountFieldName() {
+  try {
+    // Sample one document to see what fields exist
+    const sampleDoc = await SaleSummary.findOne({});
+    
+    if (sampleDoc) {
+      const doc = sampleDoc.toObject();
+      
+      // Check which amount field exists
+      if (doc.netSellingAmount !== undefined) return "$netSellingAmount";
+      if (doc.totalAmount !== undefined) return "$totalAmount";
+      if (doc.amount !== undefined) return "$amount";
+      if (doc.salesAmount !== undefined) return "$salesAmount";
+      if (doc.grandTotal !== undefined) return "$grandTotal";
+      if (doc.invoiceAmount !== undefined) return "$invoiceAmount";
+    }
+    
+    return "$netSellingAmount"; // Default
+  } catch (error) {
+    console.error("Error detecting amount field:", error);
+    return "$netSellingAmount"; // Default
+  }
+}
+
+// Export to Excel endpoint - FIXED VERSION
 router.get("/mr-wise-sales/export/excel", async (req, res) => {
   try {
     const { search, startDate, endDate } = req.query;
@@ -236,7 +340,17 @@ router.get("/mr-wise-sales/export/excel", async (req, res) => {
       {
         $group: {
           _id: "$mrName",
-          totalSalesAmount: { $sum: "$netSellingAmount" },
+          totalSalesAmount: { 
+            $sum: { 
+              $ifNull: [
+                "$netSellingAmount",
+                "$totalAmount",
+                "$amount",
+                "$salesAmount",
+                0
+              ] 
+            } 
+          },
           totalOrders: { $sum: 1 },
           uniqueCustomers: { $addToSet: "$customerCode" },
         },
@@ -245,7 +359,16 @@ router.get("/mr-wise-sales/export/excel", async (req, res) => {
       {
         $addFields: {
           averageOrderValue: {
-            $round: [{ $divide: ["$totalSalesAmount", "$totalOrders"] }, 2]
+            $round: [
+              {
+                $cond: [
+                  { $gt: ["$totalOrders", 0] },
+                  { $divide: ["$totalSalesAmount", "$totalOrders"] },
+                  0
+                ]
+              },
+              2
+            ]
           }
         }
       },
@@ -280,11 +403,22 @@ router.get("/mr-wise-sales/export/excel", async (req, res) => {
 
       {
         $project: {
-          mrName: "$_id",
-          totalSalesAmount: { $round: ["$totalSalesAmount", 2] },
-          totalOrders: 1,
-          averageOrderValue: 1,
-          totalCustomers: { $size: "$uniqueCustomers" },
+          mrName: { $ifNull: ["$_id", "Unknown"] },
+          totalSalesAmount: { 
+            $round: [
+              { $ifNull: ["$totalSalesAmount", 0] },
+              2
+            ] 
+          },
+          totalOrders: { $ifNull: ["$totalOrders", 0] },
+          averageOrderValue: { $ifNull: ["$averageOrderValue", 0] },
+          totalCustomers: { 
+            $cond: {
+              if: { $isArray: "$uniqueCustomers" },
+              then: { $size: "$uniqueCustomers" },
+              else: 0
+            }
+          },
           staff: {
             $cond: {
               if: { $gt: [{ $size: "$staffDetails" }, 0] },
@@ -303,6 +437,17 @@ router.get("/mr-wise-sales/export/excel", async (req, res) => {
       { $sort: { totalSalesAmount: -1 } },
     ]);
 
+    // ✅ FIXED: Calculate totals with proper zero handling
+    const totalSales = mrData.reduce((sum, mr) => {
+      return sum + parseFloat(mr.totalSalesAmount || 0);
+    }, 0);
+    
+    const totalOrders = mrData.reduce((sum, mr) => {
+      return sum + (mr.totalOrders || 0);
+    }, 0);
+    
+    const avgOrderValue = totalOrders > 0 ? totalSales / totalOrders : 0;
+
     // Create Excel workbook
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'MR Wise Sales System';
@@ -310,84 +455,90 @@ router.get("/mr-wise-sales/export/excel", async (req, res) => {
 
     const worksheet = workbook.addWorksheet('MR Wise Sales');
     
-    // Define columns
-    worksheet.columns = [
-      { header: 'Sr.No', key: 'serialNo', width: 10 },
-      { header: 'MR ID', key: 'mrId', width: 15 },
-      { header: 'MR Name', key: 'mrName', width: 25 },
-      { header: 'Region', key: 'region', width: 20 },
-      { header: 'Total Orders', key: 'totalOrders', width: 15 },
-      { header: 'Total Sales ($)', key: 'totalSales', width: 20 },
-      { header: 'Avg Order Value ($)', key: 'avgOrderValue', width: 20 }
-    ];
+    // ✅ FIXED: Add title row matching your screenshot
+    worksheet.mergeCells('A1:G1');
+    const titleRow = worksheet.getRow(1);
+    titleRow.getCell(1).value = 'MR Wise Sales Report';
+    titleRow.getCell(1).font = { bold: true, size: 16 };
+    titleRow.getCell(1).alignment = { horizontal: 'center' };
+    
+    // ✅ FIXED: Add summary statistics like your screenshot
+    worksheet.mergeCells('A3:C3');
+    worksheet.getCell('A3').value = `Total Sales: $${parseFloat(totalSales).toFixed(2)}`;
+    worksheet.getCell('A3').font = { bold: true, size: 12 };
+    
+    worksheet.mergeCells('A4:C4');
+    worksheet.getCell('A4').value = `Total Orders: ${totalOrders}`;
+    worksheet.getCell('A4').font = { bold: true, size: 12 };
+    
+    worksheet.mergeCells('A5:C5');
+    worksheet.getCell('A5').value = `Avg Order Value: $${parseFloat(avgOrderValue).toFixed(2)}`;
+    worksheet.getCell('A5').font = { bold: true, size: 12 };
+    
+    // Empty row for spacing
+    worksheet.addRow({});
+
+    // Define columns - matching your screenshot format
+    const headerRowNum = 7;
+    worksheet.getCell(`A${headerRowNum}`).value = 'Sr.No';
+    worksheet.getCell(`B${headerRowNum}`).value = 'MR Name';
+    worksheet.getCell(`C${headerRowNum}`).value = 'Region';
+    worksheet.getCell(`D${headerRowNum}`).value = 'Total Orders';
+    worksheet.getCell(`E${headerRowNum}`).value = 'Total Sales';
+    worksheet.getCell(`F${headerRowNum}`).value = 'Avg Order Value';
 
     // Style the header row
-    const headerRow = worksheet.getRow(1);
+    const headerRow = worksheet.getRow(headerRowNum);
     headerRow.font = { bold: true, size: 12 };
     headerRow.alignment = { 
       horizontal: 'center', 
       vertical: 'middle'
     };
     headerRow.height = 25;
+    
+    // Style header cells background
+    headerRow.eachCell((cell) => {
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFE0E0E0' }
+      };
+    });
 
     // Add data rows with serial numbers
     mrData.forEach((mr, index) => {
-      const row = worksheet.addRow({
-        serialNo: index + 1,
-        mrId: generateMRId(index),
-        mrName: mr.mrName || 'N/A',
-        region: mr.staff?.teamName || 'Not Available',
-        totalOrders: mr.totalOrders || 0,
-        totalSales: mr.totalSalesAmount || 0,
-        avgOrderValue: mr.averageOrderValue || 0
-      });
+      const rowNum = headerRowNum + index + 1;
+      const row = worksheet.getRow(rowNum);
 
-      // Style the row
-      row.font = { size: 11 };
-      row.alignment = { 
-        vertical: 'middle'
-      };
-      
-      // Format currency cells
-      const salesCell = row.getCell('totalSales');
-      salesCell.numFmt = '$#,##0.00';
-      
-      const avgCell = row.getCell('avgOrderValue');
-      avgCell.numFmt = '$#,##0.00';
+      row.getCell(1).value = index + 1; // Sr.No
+      row.getCell(2).value = mr.mrName || 'N/A';
+      row.getCell(3).value = mr.staff?.teamName || 'Not Available';
+      row.getCell(4).value = mr.totalOrders || 0;
+      row.getCell(5).value = parseFloat(mr.totalSalesAmount || 0);
+      row.getCell(5).numFmt = '$#,##0.00';
+      row.getCell(6).value = parseFloat(mr.averageOrderValue || 0);
+      row.getCell(6).numFmt = '$#,##0.00';
+
+      // Center align serial numbers and orders
+      row.getCell(1).alignment = { horizontal: 'center' };
+      row.getCell(4).alignment = { horizontal: 'center' };
     });
 
-    // Calculate totals
-    const totalSales = mrData.reduce((sum, mr) => sum + (mr.totalSalesAmount || 0), 0);
-    const totalOrders = mrData.reduce((sum, mr) => sum + (mr.totalOrders || 0), 0);
-    const avgOrderValue = totalOrders > 0 ? totalSales / totalOrders : 0;
-
-    // Add summary section only if there's data
-    if (mrData.length > 0) {
-      worksheet.addRow({}); // Empty row for spacing
-      
-      // Add summary row
-      const summaryRow = worksheet.addRow({});
-      
-      // Fill specific cells for summary
-      summaryRow.getCell('mrName').value = 'TOTAL SUMMARY';
-      summaryRow.getCell('totalOrders').value = totalOrders;
-      summaryRow.getCell('totalSales').value = totalSales;
-      summaryRow.getCell('avgOrderValue').value = avgOrderValue;
-
-      // Style the summary row
-      summaryRow.font = { bold: true, size: 12 };
-      
-      // Format summary currency cells
-      const summarySalesCell = summaryRow.getCell('totalSales');
-      summarySalesCell.numFmt = '$#,##0.00';
-      
-      const summaryAvgCell = summaryRow.getCell('avgOrderValue');
-      summaryAvgCell.numFmt = '$#,##0.00';
-    }
+    // Auto-fit columns
+    worksheet.columns = [
+      { key: 'serialNo', width: 10 },
+      { key: 'mrName', width: 25 },
+      { key: 'region', width: 20 },
+      { key: 'totalOrders', width: 15 },
+      { key: 'totalSales', width: 20 },
+      { key: 'avgOrderValue', width: 18 },
+    ];
 
     // Apply borders to all cells
-    worksheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
-      row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+    const dataEndRow = headerRowNum + mrData.length;
+    for (let i = headerRowNum; i <= dataEndRow; i++) {
+      const row = worksheet.getRow(i);
+      row.eachCell((cell) => {
         cell.border = {
           top: { style: 'thin' },
           left: { style: 'thin' },
@@ -395,7 +546,7 @@ router.get("/mr-wise-sales/export/excel", async (req, res) => {
           right: { style: 'thin' }
         };
       });
-    });
+    }
 
     // Generate filename
     const currentDate = new Date();
@@ -428,7 +579,44 @@ router.get("/mr-wise-sales/export/excel", async (req, res) => {
     res.status(500).json({
       error: "Failed to generate Excel export",
       message: err.message,
-      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
+  }
+});
+
+// ✅ NEW: Debug endpoint to check SaleSummary data structure
+router.get("/debug-sales-data", async (req, res) => {
+  try {
+    const sampleDocs = await SaleSummary.find({}).limit(5);
+    
+    // Check what fields exist in the documents
+    const fieldAnalysis = sampleDocs.map(doc => {
+      const docObj = doc.toObject();
+      return {
+        _id: doc._id,
+        mrName: doc.mrName,
+        fields: Object.keys(docObj).filter(key => 
+          key.toLowerCase().includes('amount') || 
+          key.toLowerCase().includes('total') ||
+          key.toLowerCase().includes('price')
+        ).map(key => ({
+          field: key,
+          value: docObj[key],
+          type: typeof docObj[key]
+        }))
+      };
+    });
+
+    res.json({
+      success: true,
+      sampleCount: sampleDocs.length,
+      fieldAnalysis,
+      allFields: sampleDocs.length > 0 ? Object.keys(sampleDocs[0].toObject()) : []
+    });
+  } catch (error) {
+    console.error("Debug error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });

@@ -624,9 +624,7 @@ const Supplier = () => {
         if (search && search.trim() !== "") {
           params.search = search.trim();
         }
-        
-        console.log('Fetching suppliers with params:', params);
-        
+                
         const response = await axios.get(`${backendUrl}/api/suppliers`, {
           params: params,
           headers: {
@@ -634,8 +632,6 @@ const Supplier = () => {
           },
           timeout: 10000, // 10 second timeout
         });
-        
-        console.log('API Response:', response.data);
         
         // Handle different response structures
         if (response.data) {

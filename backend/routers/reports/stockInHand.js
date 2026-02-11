@@ -11,12 +11,11 @@ const filterReportsWithBatches = (reports) => {
   );
 };
 
+// ✅ Main route - GET all reports with totalBoxes
+// ✅ Main route - GET ALL reports (for frontend client-side pagination)
 router.get("/reports/reports-in-hand", async (req, res) => {
   try {
-    const { page = 1, limit = 9, search } = req.query;
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
-    const skip = (pageNum - 1) * limitNum;
+    const { search } = req.query;
 
     // Build query based on search parameter
     let query = {};
@@ -24,44 +23,31 @@ router.get("/reports/reports-in-hand", async (req, res) => {
       query.productName = { $regex: search, $options: "i" };
     }
 
-    // Get all reports matching the query
+    // Get ALL reports matching the query
     const allReports = await ReportInHand.find(query).sort({ createdAt: -1 });
     const filteredReports = filterReportsWithBatches(allReports);
-    const totalCount = filteredReports.length;
 
-    // Calculate OVERALL average price for ALL products
-    let overallTotalAveragePrice = 0;
-    let overallValidReportsCount = 0;
-
-    filteredReports.forEach((report) => {
-      const avgPrice = report.averagePrice || 0;
-      if (avgPrice > 0) {
-        overallTotalAveragePrice += avgPrice;
-        overallValidReportsCount++;
-      }
-    });
-
-    const overallAveragePrice =
-      overallValidReportsCount > 0
-        ? overallTotalAveragePrice / overallValidReportsCount
-        : 0;
-
-    // Get paginated results
-    const rawReports = await ReportInHand.find(query)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limitNum);
-
-    const paginatedReports = filterReportsWithBatches(rawReports);
+    // Calculate summary statistics
+    const inStockCount = filteredReports.filter(r => r.status === "In Stock").length;
+    const lowStockCount = filteredReports.filter(r => r.status === "Low Stock").length;
+    const criticalCount = filteredReports.filter(r => r.status === "Critical").length;
+    const outOfStockCount = filteredReports.filter(r => r.status === "Out of Stock").length;
+    
+    // ✅ Calculate total boxes across all products
+    const totalBoxesSum = filteredReports.reduce((sum, report) => {
+      return sum + (report.totalBoxes || 0);
+    }, 0);
 
     res.status(200).json({
       success: true,
-      count: paginatedReports.length, // Current page count
-      total: totalCount, // Total across all pages
-      overallAveragePrice: overallAveragePrice, // Average for ALL products
-      totalPages: Math.ceil(totalCount / limitNum),
-      currentPage: pageNum,
-      reports: paginatedReports,
+      count: filteredReports.length,
+      total: filteredReports.length,
+      totalBoxes: totalBoxesSum,
+      inStockCount: inStockCount,
+      lowStockCount: lowStockCount,
+      criticalCount: criticalCount,
+      outOfStockCount: outOfStockCount,
+      reports: filteredReports,
     });
   } catch (error) {
     console.error("Error fetching reports in hand:", error);
@@ -73,7 +59,7 @@ router.get("/reports/reports-in-hand", async (req, res) => {
   }
 });
 
-// New route for exporting to Excel
+// ✅ New route for exporting to Excel with totalBoxes
 router.get("/reports/average-price/export", async (req, res) => {
   try {
     const { search } = req.query;
@@ -105,28 +91,41 @@ router.get("/reports/average-price/export", async (req, res) => {
         ? overallTotalAveragePrice / overallValidReportsCount
         : 0;
 
+    // ✅ Calculate total boxes
+    const totalBoxesSum = filteredReports.reduce((sum, report) => {
+      return sum + (report.totalBoxes || 0);
+    }, 0);
+
     // Create Excel workbook
     const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet("Average Price Report");
+    const worksheet = workbook.addWorksheet("Stock Report");
 
     // Add title
-    worksheet.mergeCells("A1:D1");
+    worksheet.mergeCells("A1:E1");
     const titleCell = worksheet.getCell("A1");
-    titleCell.value = "Average Price Per Product Report";
+    titleCell.value = "Stock In Hand Report";
     titleCell.font = { bold: true, size: 16 };
     titleCell.alignment = { horizontal: "center" };
 
     // Add summary information
-    let currentRow = 1;
-
-    currentRow++;
+    let currentRow = 2;
+    
+    // ✅ Add total boxes summary
+    worksheet.mergeCells(`A${currentRow}:B${currentRow}`);
+    const totalBoxesCell = worksheet.getCell(`A${currentRow}`);
+    totalBoxesCell.value = `Total Stock Across All Products: ${totalBoxesSum.toLocaleString()} Boxes`;
+    totalBoxesCell.font = { bold: true, size: 12 };
+    totalBoxesCell.alignment = { horizontal: "left" };
+    
+    currentRow += 2;
 
     // Add table headers
     const headerRowNum = currentRow;
     worksheet.getCell(`A${headerRowNum}`).value = "Sr.No";
     worksheet.getCell(`B${headerRowNum}`).value = "Product Name";
     worksheet.getCell(`C${headerRowNum}`).value = "Category";
-    worksheet.getCell(`D${headerRowNum}`).value = "Average Price ($)";
+    worksheet.getCell(`D${headerRowNum}`).value = "Total Boxes"; // ✅ Added
+    worksheet.getCell(`E${headerRowNum}`).value = "Average Price ($)";
 
     // Style headers
     const headerRow = worksheet.getRow(headerRowNum);
@@ -146,8 +145,9 @@ router.get("/reports/average-price/export", async (req, res) => {
       row.getCell(1).value = index + 1; // Sr.No
       row.getCell(2).value = report.productName || "N/A";
       row.getCell(3).value = report.type || "N/A";
-      row.getCell(4).value = report.averagePrice || 0;
-      row.getCell(4).numFmt = "$#,##0.00";
+      row.getCell(4).value = report.totalBoxes || 0; // ✅ Total Boxes
+      row.getCell(5).value = report.averagePrice || 0;
+      row.getCell(5).numFmt = "$#,##0.00";
     });
 
     // Auto-fit columns
@@ -155,7 +155,8 @@ router.get("/reports/average-price/export", async (req, res) => {
       { key: "srNo", width: 10 },
       { key: "productName", width: 40 },
       { key: "category", width: 20 },
-      { key: "averagePrice", width: 15 },
+      { key: "totalBoxes", width: 15 }, // ✅ Added
+      { key: "averagePrice", width: 18 },
     ];
 
     // Style borders for headers and data
@@ -172,16 +173,19 @@ router.get("/reports/average-price/export", async (req, res) => {
       });
     }
 
-    // Center align serial numbers
+    // Center align serial numbers and total boxes
     const serialNumberColumn = worksheet.getColumn(1);
     serialNumberColumn.alignment = { horizontal: "center" };
+    
+    const totalBoxesColumn = worksheet.getColumn(4); // ✅
+    totalBoxesColumn.alignment = { horizontal: "center" };
 
     // Set response headers
     const fileName = search
-      ? `average_price_report_${search.replace(/[^a-z0-9]/gi, "_")}_${new Date()
+      ? `stock_report_${search.replace(/[^a-z0-9]/gi, "_")}_${new Date()
           .toISOString()
           .slice(0, 10)}.xlsx`
-      : `average_price_report_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      : `stock_report_${new Date().toISOString().slice(0, 10)}.xlsx`;
 
     res.setHeader(
       "Content-Type",
@@ -202,7 +206,7 @@ router.get("/reports/average-price/export", async (req, res) => {
   }
 });
 
-// Alternative: More efficient database approach
+// ✅ Alternative: More efficient database approach with totalBoxes
 router.get("/reports-in-hand-efficient", async (req, res) => {
   try {
     const { page = 1, limit = 10 } = req.query;
@@ -224,19 +228,28 @@ router.get("/reports-in-hand-efficient", async (req, res) => {
       { $sort: { createdAt: -1 } },
       {
         $facet: {
-          metadata: [{ $count: "totalCount" }],
+          metadata: [
+            { $count: "totalCount" },
+            {
+              $addFields: {
+                totalBoxes: { $sum: "$totalBoxes" }, // ✅ Calculate total boxes
+              },
+            },
+          ],
           data: [{ $skip: skip }, { $limit: limitNum }],
         },
       },
     ]);
 
     const totalCount = reports[0]?.metadata[0]?.totalCount || 0;
+    const totalBoxes = reports[0]?.metadata[0]?.totalBoxes || 0; // ✅
     const paginatedReports = reports[0]?.data || [];
 
     res.status(200).json({
       success: true,
       count: paginatedReports.length,
       total: totalCount,
+      totalBoxes: totalBoxes, // ✅ Include total boxes
       totalPages: Math.ceil(totalCount / limitNum),
       currentPage: pageNum,
       reports: paginatedReports,
@@ -251,15 +264,21 @@ router.get("/reports-in-hand-efficient", async (req, res) => {
   }
 });
 
-// Keep existing routes for backward compatibility
+// ✅ Keep existing routes for backward compatibility
 router.get("/reports-in-hand/all", async (req, res) => {
   try {
     const reports = await ReportInHand.find().sort({ createdAt: -1 });
     const filteredReports = filterReportsWithBatches(reports);
 
+    // ✅ Calculate total boxes
+    const totalBoxesSum = filteredReports.reduce((sum, report) => {
+      return sum + (report.totalBoxes || 0);
+    }, 0);
+
     res.status(200).json({
       success: true,
       count: filteredReports.length,
+      totalBoxes: totalBoxesSum, // ✅ Include total boxes
       reports: filteredReports,
     });
   } catch (error) {
@@ -313,10 +332,16 @@ router.get("/reports-in-hand/search/:productName", async (req, res) => {
     const filteredReports = filterReportsWithBatches(reports);
     const paginatedReports = filteredReports.slice(skip, skip + limitNum);
 
+    // ✅ Calculate total boxes for search results
+    const totalBoxesSum = filteredReports.reduce((sum, report) => {
+      return sum + (report.totalBoxes || 0);
+    }, 0);
+
     res.status(200).json({
       success: true,
       count: paginatedReports.length,
       total: filteredReports.length,
+      totalBoxes: totalBoxesSum, // ✅ Include total boxes
       totalPages: Math.ceil(filteredReports.length / limitNum),
       currentPage: pageNum,
       reports: paginatedReports,
@@ -346,10 +371,16 @@ router.get("/reports-in-hand/supplier/:supplierName", async (req, res) => {
     const filteredReports = filterReportsWithBatches(reports);
     const paginatedReports = filteredReports.slice(skip, skip + limitNum);
 
+    // ✅ Calculate total boxes for supplier
+    const totalBoxesSum = filteredReports.reduce((sum, report) => {
+      return sum + (report.totalBoxes || 0);
+    }, 0);
+
     res.status(200).json({
       success: true,
       count: paginatedReports.length,
       total: filteredReports.length,
+      totalBoxes: totalBoxesSum, // ✅ Include total boxes
       totalPages: Math.ceil(filteredReports.length / limitNum),
       currentPage: pageNum,
       reports: paginatedReports,
@@ -359,6 +390,53 @@ router.get("/reports-in-hand/supplier/:supplierName", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to fetch supplier reports",
+      error: error.message,
+    });
+  }
+});
+
+// ✅ NEW: Get total boxes summary
+router.get("/reports-in-hand/summary/total-boxes", async (req, res) => {
+  try {
+    const allReports = await ReportInHand.find();
+    const filteredReports = filterReportsWithBatches(allReports);
+
+    const totalBoxesSum = filteredReports.reduce((sum, report) => {
+      return sum + (report.totalBoxes || 0);
+    }, 0);
+
+    const averageBoxesPerProduct =
+      filteredReports.length > 0 ? totalBoxesSum / filteredReports.length : 0;
+
+    // Group by status
+    const byStatus = {
+      "In Stock": 0,
+      "Low Stock": 0,
+      Critical: 0,
+      "Out of Stock": 0,
+    };
+
+    filteredReports.forEach((report) => {
+      const status = report.status || "Out of Stock";
+      if (byStatus.hasOwnProperty(status)) {
+        byStatus[status] += report.totalBoxes || 0;
+      }
+    });
+
+    res.status(200).json({
+      success: true,
+      summary: {
+        totalProducts: filteredReports.length,
+        totalBoxes: totalBoxesSum,
+        averageBoxesPerProduct: parseFloat(averageBoxesPerProduct.toFixed(2)),
+        byStatus: byStatus,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching total boxes summary:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch summary",
       error: error.message,
     });
   }

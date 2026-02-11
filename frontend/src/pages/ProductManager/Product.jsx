@@ -110,12 +110,6 @@ const Product = () => {
           [fetchProductTypes(), fetchSuppliers(), fetchProductPackingType()]
         );
 
-        console.log("Dropdown data fetched:", {
-          typesResult,
-          suppliersResult,
-          packingResult
-        });
-
         if (typesResult.success) {
           const transformedTypes = typesResult.data.map((item) => {
             const value = typeof item === "string" ? item : item.name || item.value;
@@ -128,7 +122,6 @@ const Product = () => {
         }
 
         if (suppliersResult.success && suppliersResult.data && suppliersResult.data.length > 0) {
-          console.log("Suppliers loaded:", suppliersResult.data.length, "items");
           const transformedSuppliers = suppliersResult.data.map((item) => {
             const value = typeof item === "string" ? item : item.name || item.value;
             return {
@@ -140,7 +133,6 @@ const Product = () => {
         } else {
           // Handle empty suppliers case
           setSuppliers([]);
-          console.log("No suppliers found or empty array returned");
           if (suppliersResult.error) {
             console.error("Suppliers fetch error:", suppliersResult.error);
           }
@@ -262,7 +254,6 @@ const Product = () => {
 
   // Import click handler with supplier validation
   const handleImportClick = () => {
-    console.log("Suppliers state:", suppliers);
     if (!suppliers || suppliers.length === 0) {
       showToast(
         "error",

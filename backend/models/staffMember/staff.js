@@ -23,6 +23,12 @@ const staffSchema = new mongoose.Schema(
       required: true,
       set: normalizeString // Auto-normalize on set
     },
+    // Add lowercase index for case-insensitive uniqueness
+    medicalRepNameLower: {
+      type: String,
+      unique: true,
+      select: false // Don't include in queries by default
+    },
     teamName: { 
       type: String, 
       required: true,
@@ -46,8 +52,14 @@ const staffSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Auto-increment MRId
+// Pre-save hook to set medicalRepNameLower and auto-increment MRId
 staffSchema.pre("save", async function (next) {
+  // Always set the lowercase version for uniqueness checking
+  if (this.medicalRepName) {
+    this.medicalRepNameLower = this.medicalRepName.toLowerCase();
+  }
+  
+  // Auto-increment MRId only for new documents
   if (this.isNew) {
     try {
       const counter = await Counter.findByIdAndUpdate(
@@ -64,6 +76,9 @@ staffSchema.pre("save", async function (next) {
     next();
   }
 });
+
+// Create compound index for case-insensitive uniqueness
+staffSchema.index({ medicalRepNameLower: 1 }, { unique: true });
 
 const Staff = mongoose.model("Staff", staffSchema);
 export default Staff;

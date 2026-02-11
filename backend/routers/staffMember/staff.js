@@ -77,9 +77,11 @@ router.post("/staffs", async (req, res) => {
       throw new Error("Staff name is required");
     }
 
-    // Duplicate Checks
-    const existingByName = await staffSchema.findOne({ medicalRepName: name }).session(session);
-    if (existingByName) throw new Error(`Staff name "${name}" already exists.`);
+    // Case-insensitive duplicate check for name
+    const existingByName = await staffSchema.findOne({ 
+      medicalRepNameLower: name.toLowerCase() 
+    }).session(session);
+    if (existingByName) throw new Error(`Staff name "${name}" already exists (case-insensitive).`);
 
     if (emailLower) {
       const existingByEmail = await User.findOne({ email: emailLower }).session(session);
@@ -151,6 +153,9 @@ router.post("/staffs", async (req, res) => {
 
 // UPDATE STAFF
 router.put("/staff/:id", async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  
   try {
     const { id } = req.params;
     const { medicalRepName, teamName, contactNo, email, date, isActive } = req.body;
@@ -160,6 +165,17 @@ router.put("/staff/:id", async (req, res) => {
     const normalizedTeam = normalizeString(teamName);
     const normalizedContact = contactNo ? normalizeString(contactNo.toString()) : "";
     const normalizedEmail = email ? normalizeString(email).toLowerCase() : "";
+
+    // Check for duplicate name (case-insensitive), excluding current record
+    if (normalizedName) {
+      const existingByName = await staffSchema.findOne({ 
+        medicalRepNameLower: normalizedName.toLowerCase(),
+        _id: { $ne: id }
+      }).session(session);
+      if (existingByName) {
+        throw new Error(`Staff name "${normalizedName}" already exists (case-insensitive).`);
+      }
+    }
 
     // Update staff
     const updatedStaff = await staffSchema.findByIdAndUpdate(
@@ -171,7 +187,7 @@ router.put("/staff/:id", async (req, res) => {
         email: normalizedEmail,
         date,
       },
-      { new: true }
+      { new: true, session }
     ).populate("userId", "name email isActive");
 
     // Update user's name and isActive status if changed
@@ -183,10 +199,12 @@ router.put("/staff/:id", async (req, res) => {
         await User.findByIdAndUpdate(
           updatedStaff.userId._id,
           updateData,
-          { new: true }
+          { new: true, session }
         );
       }
     }
+
+    await session.commitTransaction();
 
     // Re-populate to get updated user data
     const finalStaff = await staffSchema.findById(id).populate("userId");
@@ -196,11 +214,14 @@ router.put("/staff/:id", async (req, res) => {
       data: finalStaff
     });
   } catch (error) {
+    await session.abortTransaction();
     console.error("Error updating staff:", error);
     res.status(500).json({ 
       success: false, 
-      message: "Internal server error" 
+      message: error.message || "Internal server error" 
     });
+  } finally {
+    session.endSession();
   }
 });
 
@@ -269,6 +290,7 @@ router.post("/staffs/import", async (req, res) => {
     const duplicateEmails = [];
     const duplicateNames = [];
     const duplicateContacts = [];
+    const seenNames = new Map(); // Track normalized names to prevent duplicates in import batch
 
     // First pass: Check for duplicates
     for (let i = 0; i < list.length; i++) {
@@ -278,6 +300,7 @@ router.post("/staffs/import", async (req, res) => {
       const contactNo = row.contactNo || row.phone || row["Contact No"] || row["contact no"] || row["Contact"] || row["contact"];
 
       const name = normalizeString(medicalRepName);
+      const nameLower = name.toLowerCase();
       const emailLower = email ? normalizeString(email).toLowerCase() : null;
       const contact = contactNo ? normalizeString(contactNo.toString()) : null;
 
@@ -285,17 +308,35 @@ router.post("/staffs/import", async (req, res) => {
         throw new Error(`medicalRepName is required in row ${i + 1}`);
       }
 
-      const existingStaffByName = await staffSchema.findOne({ medicalRepName: name }).session(session);
-      if (existingStaffByName) duplicateNames.push(name);
+      // Check for duplicates within the import batch itself
+      if (seenNames.has(nameLower)) {
+        if (!duplicateNames.includes(name)) {
+          duplicateNames.push(name);
+        }
+      } else {
+        seenNames.set(nameLower, name);
+        
+        // Check for duplicates in database (case-insensitive)
+        const existingStaffByName = await staffSchema.findOne({ 
+          medicalRepNameLower: nameLower 
+        }).session(session);
+        if (existingStaffByName && !duplicateNames.includes(name)) {
+          duplicateNames.push(name);
+        }
+      }
 
       if (emailLower) {
         const existingUser = await User.findOne({ email: emailLower }).session(session);
-        if (existingUser) duplicateEmails.push(emailLower);
+        if (existingUser && !duplicateEmails.includes(emailLower)) {
+          duplicateEmails.push(emailLower);
+        }
       }
 
       if (contact) {
         const existingStaffByContact = await staffSchema.findOne({ contactNo: contact }).session(session);
-        if (existingStaffByContact) duplicateContacts.push(contact);
+        if (existingStaffByContact && !duplicateContacts.includes(contact)) {
+          duplicateContacts.push(contact);
+        }
       }
     }
 
@@ -303,7 +344,11 @@ router.post("/staffs/import", async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Duplicate entries found",
-        duplicates: { names: duplicateNames, emails: duplicateEmails, contacts: duplicateContacts },
+        duplicates: { 
+          names: [...new Set(duplicateNames)], 
+          emails: [...new Set(duplicateEmails)], 
+          contacts: [...new Set(duplicateContacts)] 
+        },
       });
     }
 

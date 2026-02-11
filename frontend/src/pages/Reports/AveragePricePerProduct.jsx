@@ -46,7 +46,7 @@ const AveragePricePerProduct = () => {
     return (pagination.currentPage - 1) * itemsPerPage + index + 1;
   };
 
-  const fetchAveragePriceData = async (page = 1, search = searchTerm) => {
+  const fetchAveragePriceData = async (page = 1, search = "") => {
     setLoading(true);
     try {
       let params = {
@@ -58,24 +58,27 @@ const AveragePricePerProduct = () => {
         params.search = search.trim();
       }
 
+      // Using the correct endpoint for average price data
       const response = await axios.get(
-        `${backendUrl}/api/reports/reports-in-hand`,
+        `${backendUrl}/api/reports/average-price`,
         {
           params,
         }
       );
 
+      console.log('values of response', response);
       const reports = response.data.reports || [];
 
-      // Process reports for table display
+      // Process reports for table display - CHANGED to match image format
       const processedReports = reports.map((report) => {
-        const avgPrice = report.averagePrice || 0;
         return {
-          productId: report._id,
-          productName: report.productName || "N/A",
-          category: report.type || "N/A",
-          averagePrice: avgPrice,
-          sku: report.batches?.[0]?.sku || "N/A",
+          _id: report._id,
+          mrName: report.mrName || "Office",
+          contact: report.contact || "Not Available",
+          credits: report.credits || 0,
+          cash: report.cash || 0,
+          totalSales: report.totalSales || (report.credits + report.cash) || 0,
+          date: report.date || new Date().toISOString().split('T')[0],
         };
       });
 
@@ -92,7 +95,7 @@ const AveragePricePerProduct = () => {
       });
 
       // Use pagination data from backend response
-      const currentPage = response.data.currentPage || 1;
+      const currentPage = response.data.currentPage || page;
       const totalPages = response.data.totalPages || 1;
 
       setPagination({
@@ -136,12 +139,12 @@ const AveragePricePerProduct = () => {
   };
 
   useEffect(() => {
-    fetchAveragePriceData(1);
+    fetchAveragePriceData(1, "");
   }, []);
 
   const handlePageChange = (page) => {
     if (page >= 1 && page <= pagination.totalPages) {
-      fetchAveragePriceData(page);
+      fetchAveragePriceData(page, searchTerm);
     }
   };
 
@@ -151,12 +154,14 @@ const AveragePricePerProduct = () => {
 
   const handleClearSearch = () => {
     setSearchTerm("");
-    fetchAveragePriceData(1);
+    fetchAveragePriceData(1, "");
   };
 
   useEffect(() => {
     const delayDebounce = setTimeout(() => {
-      fetchAveragePriceData(1, searchTerm);
+      if (searchTerm !== undefined) {
+        fetchAveragePriceData(1, searchTerm);
+      }
     }, 500);
 
     return () => clearTimeout(delayDebounce);
@@ -164,7 +169,7 @@ const AveragePricePerProduct = () => {
 
   const handleSearch = (e) => {
     if (e.key === "Enter") {
-      fetchAveragePriceData(1);
+      fetchAveragePriceData(1, searchTerm);
     }
   };
 
@@ -172,8 +177,8 @@ const AveragePricePerProduct = () => {
     setExportLoading(true);
     try {
       let url = `${backendUrl}/api/reports/average-price/export`;
-      if (searchTerm) {
-        url += `?search=${encodeURIComponent(searchTerm)}`;
+      if (searchTerm && searchTerm.trim() !== "") {
+        url += `?search=${encodeURIComponent(searchTerm.trim())}`;
       }
 
       // Make request to export endpoint
@@ -274,6 +279,9 @@ const AveragePricePerProduct = () => {
             Next →
           </button>
         </div>
+        <div className="text-sm text-gray-600">
+          Showing {startItem} to {endItem} of {pagination.totalRecords} records
+        </div>
       </div>
     );
   };
@@ -315,21 +323,25 @@ const AveragePricePerProduct = () => {
     </div>
   );
 
+  // CHANGED: Updated table headers to match image layout
   const renderTableHeaders = () => (
     <thead className="bg-gray-100 text-gray-700 border-b">
       <tr>
         <th className="p-3 text-sm font-medium">Sr.No</th>
-        <th className="p-3 text-sm font-medium">Product Name</th>
-        <th className="p-3 text-sm font-medium">Category</th>
-        <th className="p-3 text-sm font-medium">Average Price ($)</th>
+        <th className="p-3 text-sm font-medium">MR Name</th>
+        <th className="p-3 text-sm font-medium">Contact</th>
+        <th className="p-3 text-sm font-medium">Credits ($)</th>
+        <th className="p-3 text-sm font-medium">Cash ($)</th>
+        <th className="p-3 text-sm font-medium">Total Sales ($)</th>
+        <th className="p-3 text-sm font-medium">Date</th>
       </tr>
     </thead>
   );
 
-  // Render table row
-  const renderTableRow = (product, index) => (
+  // CHANGED: Updated table row to match image layout
+  const renderTableRow = (record, index) => (
     <tr
-      key={index}
+      key={record._id || index}
       className={`hover:bg-gray-50 ${
         index === data.records.length - 1 ? "" : "border-b"
       }`}
@@ -339,30 +351,50 @@ const AveragePricePerProduct = () => {
           {getSerialNumber(index)}
         </div>
       </td>
-
       <td className="p-3">
-        <div>
-          <div className="text-sm font-medium text-gray-900 capitalize">
-            {product.productName || product.name || "N/A"}
-          </div>
+        <div className="text-sm font-medium text-gray-900">
+          {record.mrName || "Office"}
         </div>
       </td>
       <td className="p-3">
-        <div className="text-sm text-gray-900 capitalize">
-          {product.category || "N/A"}
+        <div className="text-sm text-gray-600">
+          {record.contact || "Not Available"}
         </div>
       </td>
-      <td className="p-3 text-sm font-semibold text-blue-600">
-        $
-        {(product.averagePrice || 0)?.toLocaleString(undefined, {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        })}
+      <td className="p-3">
+        <div className="text-sm font-semibold text-red-600">
+          ${(record.credits || 0).toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })}
+        </div>
+      </td>
+      <td className="p-3">
+        <div className="text-sm font-semibold text-green-600">
+          ${(record.cash || 0).toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })}
+        </div>
+      </td>
+      <td className="p-3">
+        <div className="text-sm font-bold text-blue-600">
+          ${(record.totalSales || 0).toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })}
+        </div>
+      </td>
+      <td className="p-3">
+        <div className="text-sm text-gray-600">
+          {record.date || "N/A"}
+        </div>
       </td>
     </tr>
   );
 
-  const getColSpan = () => 4;
+  // CHANGED: Updated colSpan to 7 for 7 columns
+  const getColSpan = () => 7;
 
   return (
     <div className="p-6">
@@ -438,8 +470,8 @@ const AveragePricePerProduct = () => {
                 </td>
               </tr>
             ) : data.records.length > 0 ? (
-              data.records.map((product, index) =>
-                renderTableRow(product, index)
+              data.records.map((record, index) =>
+                renderTableRow(record, index)
               )
             ) : (
               <tr>
@@ -447,7 +479,7 @@ const AveragePricePerProduct = () => {
                   colSpan={getColSpan()}
                   className="p-3 text-center text-gray-500"
                 >
-                  No average price data found
+                  No sales data found
                 </td>
               </tr>
             )}

@@ -1,7 +1,7 @@
 // utils/db.js
 import mongoose from "mongoose";
-import SaleType from "../models/reports/saleType.js";
 import PaymentStatusType from "../models/paymentStatus.js";
+import SaleType from "../models/reports/saleType.js";
 
 mongoose.set("bufferTimeoutMS", 30000); // Optional
 
