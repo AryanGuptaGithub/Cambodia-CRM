@@ -20,19 +20,30 @@ export const fetchMRList = async () => {
 // Customers
 export const fetchCustomerList = async () => {
   try {
-    const response = await axios.get(`${backendUrl}/api/customers`);
-    const customers = response.data.customers || [];
-
+    
+    const response = await axios.get(`${backendUrl}/api/customers/dropdown`);
+    
+    // Handle different response formats
+    const customers = response.data.customers || response.data.data || [];
+    
+    console.log('✅ Customers loaded:', customers.length);
+    
     return {
       success: true,
       data: customers,
     };
   } catch (error) {
     console.error("❌ Error fetching customer list:", error);
+    
+    // Log more details for debugging
+    if (error.response) {
+      console.error("Response status:", error.response.status);
+      console.error("Response data:", error.response.data);
+    }
+    
     return { success: false, error: "Failed to load Customers" };
   }
 };
-
 export const fetchProductTypes = async () => {
   try {
     const response = await axios.get(`${backendUrl}/api/product-types`);

@@ -119,7 +119,6 @@ router.get("/dailyReports", async (req, res) => {
         const end = new Date(endDateStr);
         end.setHours(23, 59, 59, 999);
         
-        // USING invoiceDate FOR DATE FILTERING
         matchConditions.invoiceDate = {
           $gte: start,
           $lte: end,
@@ -167,30 +166,62 @@ router.get("/dailyReports", async (req, res) => {
           },
         },
         uniqueCustomers: { $addToSet: "$customerCode" },
-        // USING invoiceDate FOR DATE DISPLAY
         latestInvoiceDate: { $max: "$invoiceDate" },
         earliestInvoiceDate: { $min: "$invoiceDate" },
       },
     });
 
-    // Lookup staff details - SIMPLIFIED APPROACH
+    // IMPROVED: Lookup staff details by MR name with case-insensitive matching
     basePipeline.push({
       $lookup: {
         from: "staffs",
-        let: { searchMrId: "$_id.mrId" },
+        let: { 
+          mrName: "$_id.mrName",
+          mrId: "$_id.mrId" 
+        },
         pipeline: [
           {
             $match: {
               $expr: {
                 $or: [
-                  // Match by _id field (ObjectId to ObjectId)
-                  { $eq: ["$_id", { $toObjectId: "$$searchMrId" }] },
-                  // Match by MRId field (if mrId is string like "810")
-                  { $eq: ["$MRId", { $toString: "$$searchMrId" }] }
+                  // Match by MR name (case insensitive and trimmed)
+                  {
+                    $eq: [
+                      { $toLower: { $trim: { input: "$medicalRepName" } } },
+                      { $toLower: { $trim: { input: "$$mrName" } } }
+                    ]
+                  },
+                  // Match by _id if mrId is valid ObjectId
+                  {
+                    $and: [
+                      { $ne: ["$$mrId", null] },
+                      { $ne: ["$$mrId", ""] },
+                      {
+                        $eq: [
+                          { $toString: "$_id" },
+                          { $toString: "$$mrId" }
+                        ]
+                      }
+                    ]
+                  },
+                  // Match by MRId field (if it's a number/string)
+                  {
+                    $and: [
+                      { $ne: ["$$mrId", null] },
+                      { $ne: ["$$mrId", ""] },
+                      {
+                        $eq: [
+                          { $toString: "$MRId" },
+                          { $toString: "$$mrId" }
+                        ]
+                      }
+                    ]
+                  }
                 ]
               }
             }
-          }
+          },
+          { $limit: 1 }
         ],
         as: "staffDetails",
       },
@@ -212,7 +243,6 @@ router.get("/dailyReports", async (req, res) => {
         credits: { $round: ["$credits", 2] },
         cash: { $round: ["$cash", 2] },
         totalCustomers: { $size: "$uniqueCustomers" },
-        // USING invoiceDate FOR DATE DISPLAY
         date: {
           $dateToString: {
             format: "%Y-%m-%d",
@@ -221,33 +251,66 @@ router.get("/dailyReports", async (req, res) => {
           }
         },
         latestInvoiceDate: 1,
-        // Staff details
+        // Staff details - get contact number from staff collection
         mrContactNo: {
           $cond: {
             if: { $gt: [{ $size: "$staffDetails" }, 0] },
-            then: { $arrayElemAt: ["$staffDetails.contactNo", 0] },
+            then: { 
+              $ifNull: [
+                { $arrayElemAt: ["$staffDetails.contactNo", 0] },
+                "Not Available"
+              ]
+            },
             else: "Not Available"
           }
         },
         mrEmail: {
           $cond: {
             if: { $gt: [{ $size: "$staffDetails" }, 0] },
-            then: { $arrayElemAt: ["$staffDetails.email", 0] },
+            then: { 
+              $ifNull: [
+                { $arrayElemAt: ["$staffDetails.email", 0] },
+                "Not Available"
+              ]
+            },
             else: "Not Available"
           }
         },
         mrTeamName: {
           $cond: {
             if: { $gt: [{ $size: "$staffDetails" }, 0] },
-            then: { $arrayElemAt: ["$staffDetails.teamName", 0] },
+            then: { 
+              $ifNull: [
+                { $arrayElemAt: ["$staffDetails.teamName", 0] },
+                "Not Available"
+              ]
+            },
             else: "Not Available"
           }
         },
         mrMedicalRepName: {
           $cond: {
             if: { $gt: [{ $size: "$staffDetails" }, 0] },
-            then: { $arrayElemAt: ["$staffDetails.medicalRepName", 0] },
+            then: { 
+              $ifNull: [
+                { $arrayElemAt: ["$staffDetails.medicalRepName", 0] },
+                "Not Available"
+              ]
+            },
             else: "Not Available"
+          }
+        },
+        // Also include MRId from staff if available
+        mrStaffMRId: {
+          $cond: {
+            if: { $gt: [{ $size: "$staffDetails" }, 0] },
+            then: { 
+              $ifNull: [
+                { $arrayElemAt: ["$staffDetails.MRId", 0] },
+                null
+              ]
+            },
+            else: null
           }
         },
       },
@@ -283,7 +346,6 @@ router.get("/dailyReports", async (req, res) => {
         { $skip: skip },
         { $limit: limitNum },
       ]),
-      // Update summary pipeline to also use invoiceDate
       SaleSummary.aggregate([
         { $match: matchConditions },
         {
@@ -313,7 +375,6 @@ router.get("/dailyReports", async (req, res) => {
             },
             uniqueCustomers: { $addToSet: "$customerCode" },
             uniqueMRs: { $addToSet: "$mrName" },
-            // Also track invoiceDate range for summary
             latestInvoiceDate: { $max: "$invoiceDate" },
             earliestInvoiceDate: { $min: "$invoiceDate" },
           },
@@ -368,43 +429,84 @@ router.get("/dailyReports", async (req, res) => {
     const totalRecords = countResult[0]?.totalCount || 0;
     const totalPages = Math.ceil(totalRecords / limitNum);
 
-    // Check if staff lookup worked, if not, manually fetch staff details
+    // Enhanced fallback: manually fetch staff details for any records with missing contact info
     let enhancedRecords = [...reportsData];
     
-    // Find reports where staff details are missing
     const reportsMissingStaff = enhancedRecords.filter(
-      report => report.mrContactNo === "Not Available" && report.mrId
+      report => report.mrContactNo === "Not Available" && report.mrName
     );
 
     if (reportsMissingStaff.length > 0) {
-      // Collect all mrIds that need staff lookup
-      const mrIdsToLookup = reportsMissingStaff.map(report => report.mrId);
+      // Get all MR names that need lookup
+      const mrNamesToLookup = [...new Set(reportsMissingStaff.map(report => report.mrName))];
+      const mrIdsToLookup = reportsMissingStaff
+        .filter(report => report.mrId)
+        .map(report => report.mrId);
       
-      // Fetch staff details manually
-      const staffDetails = await mongoose.connection.db.collection("staffs").find({
-        $or: [
-          { _id: { $in: mrIdsToLookup.map(id => new mongoose.Types.ObjectId(id)) } },
-          { MRId: { $in: mrIdsToLookup } }
-        ]
-      }).toArray();
-
-      // Create a lookup map
-      const staffMap = {};
-      staffDetails.forEach(staff => {
-        // Map by _id
-        if (staff._id) {
-          staffMap[staff._id.toString()] = staff;
+      // Build query for staff lookup
+      const staffQuery = {
+        $or: []
+      };
+      
+      // Add name matching condition
+      if (mrNamesToLookup.length > 0) {
+        staffQuery.$or.push({
+          medicalRepName: { 
+            $in: mrNamesToLookup.map(name => new RegExp(`^${name}$`, 'i'))
+          }
+        });
+      }
+      
+      // Add ID matching conditions
+      if (mrIdsToLookup.length > 0) {
+        const objectIdConditions = mrIdsToLookup
+          .filter(id => mongoose.Types.ObjectId.isValid(id))
+          .map(id => new mongoose.Types.ObjectId(id));
+        
+        if (objectIdConditions.length > 0) {
+          staffQuery.$or.push({ _id: { $in: objectIdConditions } });
         }
-        // Map by MRId
+        
+        staffQuery.$or.push({ MRId: { $in: mrIdsToLookup } });
+      }
+
+      // Fetch staff details
+      const staffDetails = staffQuery.$or.length > 0 
+        ? await mongoose.connection.db.collection("staffs").find(staffQuery).toArray()
+        : [];
+
+      // Create lookup maps
+      const staffByNameMap = new Map();
+      const staffByIdMap = new Map();
+      const staffByMRIdMap = new Map();
+      
+      staffDetails.forEach(staff => {
+        if (staff.medicalRepName) {
+          staffByNameMap.set(staff.medicalRepName.toLowerCase().trim(), staff);
+        }
+        if (staff._id) {
+          staffByIdMap.set(staff._id.toString(), staff);
+        }
         if (staff.MRId) {
-          staffMap[staff.MRId] = staff;
+          staffByMRIdMap.set(staff.MRId.toString(), staff);
         }
       });
 
       // Enhance the records with staff details
       enhancedRecords = enhancedRecords.map(report => {
-        if (report.mrContactNo === "Not Available" && report.mrId) {
-          const staff = staffMap[report.mrId];
+        if (report.mrContactNo === "Not Available") {
+          let staff = null;
+          
+          // Try to find staff by name
+          if (report.mrName) {
+            staff = staffByNameMap.get(report.mrName.toLowerCase().trim());
+          }
+          
+          // Try to find by ID if not found by name
+          if (!staff && report.mrId) {
+            staff = staffByIdMap.get(report.mrId.toString()) || 
+                   staffByMRIdMap.get(report.mrId.toString());
+          }
           
           if (staff) {
             return {
@@ -412,7 +514,8 @@ router.get("/dailyReports", async (req, res) => {
               mrContactNo: staff.contactNo || "Not Available",
               mrEmail: staff.email || "Not Available",
               mrTeamName: staff.teamName || "Not Available",
-              mrMedicalRepName: staff.medicalRepName || "Not Available",
+              mrMedicalRepName: staff.medicalRepName || report.mrName,
+              mrStaffMRId: staff.MRId || null,
             };
           }
         }
@@ -435,14 +538,13 @@ router.get("/dailyReports", async (req, res) => {
       cash: report.cash,
       totalCustomers: report.totalCustomers,
       date: report.date,
-      // Staff details
+      // Staff details - now properly populated from staff collection
       mrContactNo: report.mrContactNo,
       mrEmail: report.mrEmail,
       mrTeamName: report.mrTeamName,
       mrMedicalRepName: report.mrMedicalRepName,
     }));
 
-    // Get the summary result and add date range info
     const summary = summaryResult[0] || {
       totalSalesAmount: 0,
       totalOrders: 0,
@@ -477,7 +579,7 @@ router.get("/dailyReports", async (req, res) => {
   }
 });
 
-// New route for Excel export
+// Route for Excel export with staff contact lookup
 router.get("/dailyReports/export", async (req, res) => {
   try {
     const {
@@ -488,10 +590,9 @@ router.get("/dailyReports/export", async (req, res) => {
       search,
     } = req.query;
 
-    // Build match conditions (same as regular endpoint but without pagination)
+    // Build match conditions
     const matchConditions = {};
 
-    // 1. Payment Status Condition based on active sale type tab
     if (saleType && saleType !== "Total sales") {
       if (saleType.toLowerCase().includes("cash")) {
         matchConditions.paymentStatus = "Cash";
@@ -500,15 +601,12 @@ router.get("/dailyReports/export", async (req, res) => {
       }
     }
 
-    // 2. Search Condition
     if (search?.trim()) {
       matchConditions.mrName = { $regex: search.trim(), $options: "i" };
     }
 
-    // 3. Date Condition
     if (dateFilter && dateFilter !== "all") {
       const today = new Date();
-      
       const todayStr = today.toISOString().split('T')[0];
       let startDateStr, endDateStr;
       
@@ -517,18 +615,15 @@ router.get("/dailyReports/export", async (req, res) => {
           startDateStr = todayStr;
           endDateStr = todayStr;
           break;
-
         case "currentMonth":
           const currentYear = today.getFullYear();
           const currentMonth = today.getMonth();
           startDateStr = new Date(currentYear, currentMonth, 1).toISOString().split('T')[0];
           endDateStr = new Date(currentYear, currentMonth + 1, 0).toISOString().split('T')[0];
           break;
-
         case "janToPreviousMonth":
           const year = today.getFullYear();
           const month = today.getMonth();
-          
           if (month === 0) {
             startDateStr = `${year - 1}-01-01`;
             endDateStr = `${year - 1}-12-31`;
@@ -538,14 +633,12 @@ router.get("/dailyReports/export", async (req, res) => {
             endDateStr = lastMonth.toISOString().split('T')[0];
           }
           break;
-
         case "custom":
           if (startDate && endDate) {
             startDateStr = startDate;
             endDateStr = endDate;
           }
           break;
-
         default:
           break;
       }
@@ -554,15 +647,11 @@ router.get("/dailyReports/export", async (req, res) => {
         const start = new Date(startDateStr);
         const end = new Date(endDateStr);
         end.setHours(23, 59, 59, 999);
-        
-        matchConditions.invoiceDate = {
-          $gte: start,
-          $lte: end,
-        };
+        matchConditions.invoiceDate = { $gte: start, $lte: end };
       }
     }
 
-    // Build export pipeline (get all records without pagination)
+    // Build export pipeline with staff lookup
     const exportPipeline = [];
     
     if (Object.keys(matchConditions).length > 0) {
@@ -599,22 +688,44 @@ router.get("/dailyReports/export", async (req, res) => {
       },
     });
 
-    // Lookup staff details
+    // Improved staff lookup
     exportPipeline.push({
       $lookup: {
         from: "staffs",
-        let: { searchMrId: "$_id.mrId" },
+        let: { 
+          mrName: "$_id.mrName",
+          mrId: "$_id.mrId" 
+        },
         pipeline: [
           {
             $match: {
               $expr: {
                 $or: [
-                  { $eq: ["$_id", { $toObjectId: "$$searchMrId" }] },
-                  { $eq: ["$MRId", { $toString: "$$searchMrId" }] }
+                  // Match by MR name (case insensitive)
+                  {
+                    $eq: [
+                      { $toLower: { $trim: { input: "$medicalRepName" } } },
+                      { $toLower: { $trim: { input: "$$mrName" } } }
+                    ]
+                  },
+                  // Match by ID fields
+                  {
+                    $and: [
+                      { $ne: ["$$mrId", null] },
+                      { $ne: ["$$mrId", ""] },
+                      {
+                        $or: [
+                          { $eq: [{ $toString: "$_id" }, { $toString: "$$mrId" }] },
+                          { $eq: [{ $toString: "$MRId" }, { $toString: "$$mrId" }] }
+                        ]
+                      }
+                    ]
+                  }
                 ]
               }
             }
-          }
+          },
+          { $limit: 1 }
         ],
         as: "staffDetails",
       },
@@ -639,7 +750,36 @@ router.get("/dailyReports/export", async (req, res) => {
         mrContactNo: {
           $cond: {
             if: { $gt: [{ $size: "$staffDetails" }, 0] },
-            then: { $arrayElemAt: ["$staffDetails.contactNo", 0] },
+            then: { 
+              $ifNull: [
+                { $arrayElemAt: ["$staffDetails.contactNo", 0] },
+                "Not Available"
+              ]
+            },
+            else: "Not Available"
+          }
+        },
+        mrEmail: {
+          $cond: {
+            if: { $gt: [{ $size: "$staffDetails" }, 0] },
+            then: { 
+              $ifNull: [
+                { $arrayElemAt: ["$staffDetails.email", 0] },
+                "Not Available"
+              ]
+            },
+            else: "Not Available"
+          }
+        },
+        mrTeamName: {
+          $cond: {
+            if: { $gt: [{ $size: "$staffDetails" }, 0] },
+            then: { 
+              $ifNull: [
+                { $arrayElemAt: ["$staffDetails.teamName", 0] },
+                "Not Available"
+              ]
+            },
             else: "Not Available"
           }
         },
@@ -648,10 +788,8 @@ router.get("/dailyReports/export", async (req, res) => {
 
     exportPipeline.push({ $sort: { totalSalesAmount: -1 } });
 
-    // Execute export query
     const exportData = await SaleSummary.aggregate(exportPipeline);
 
-    // Check if data exists
     if (!exportData || exportData.length === 0) {
       return res.status(404).json({
         success: false,
@@ -663,22 +801,18 @@ router.get("/dailyReports/export", async (req, res) => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Daily Report');
 
+    // Determine column count based on sale type
+    let columnCount = 7;
+    if (saleType === 'Cash Sales' || saleType === 'Credit Sales') {
+      columnCount = 6;
+    }
+
     // Add title row
     const titleRow = worksheet.getRow(1);
     titleRow.getCell(1).value = 'DAILY REPORTS';
     titleRow.getCell(1).font = { bold: true, size: 16 };
     titleRow.getCell(1).alignment = { horizontal: 'center' };
     titleRow.height = 25;
-
-    // Determine column count based on sale type
-    let columnCount = 7; // Default: Sr.No, MR Name, Contact, Credits, Cash, Total Sales, Date
-    if (saleType === 'Cash Sales') {
-      columnCount = 6; // Remove Credits column
-    } else if (saleType === 'Credit Sales') {
-      columnCount = 6; // Remove Cash column
-    }
-    
-    // Merge cells for title
     worksheet.mergeCells(1, 1, 1, columnCount);
 
     // Add filter info
@@ -696,7 +830,7 @@ router.get("/dailyReports/export", async (req, res) => {
     filterRow.getCell(1).alignment = { horizontal: 'center' };
     worksheet.mergeCells(2, 1, 2, columnCount);
 
-    // Add summary row
+    // Add summary
     const summaryPipeline = [
       { $match: matchConditions },
       {
@@ -755,21 +889,22 @@ router.get("/dailyReports/export", async (req, res) => {
     summaryRow.getCell(1).alignment = { horizontal: 'center' };
     worksheet.mergeCells(3, 1, 3, columnCount);
 
-    // Add empty row
-    worksheet.getRow(4);
+    worksheet.getRow(4); // Empty row
 
     // Define headers based on sale type
     let headers = [];
     if (saleType === 'Cash Sales') {
-      headers = ['Sr.No', 'MR Name', 'Contact', 'Cash ($)', 'Total Sales ($)', 'Date'];
+      headers = ['Sr.No', 'MR Name', 'Contact No.', 'Email', 'Team', 'Cash ($)', 'Total Sales ($)', 'Date'];
+      columnCount = 8;
     } else if (saleType === 'Credit Sales') {
-      headers = ['Sr.No', 'MR Name', 'Contact', 'Credits ($)', 'Total Sales ($)', 'Date'];
+      headers = ['Sr.No', 'MR Name', 'Contact No.', 'Email', 'Team', 'Credits ($)', 'Total Sales ($)', 'Date'];
+      columnCount = 8;
     } else {
-      // Total sales
-      headers = ['Sr.No', 'MR Name', 'Contact', 'Credits ($)', 'Cash ($)', 'Total Sales ($)', 'Date'];
+      headers = ['Sr.No', 'MR Name', 'Contact No.', 'Email', 'Team', 'Credits ($)', 'Cash ($)', 'Total Sales ($)', 'Date'];
+      columnCount = 9;
     }
 
-    // Add headers (row 5)
+    // Add headers
     const headerRow = worksheet.getRow(5);
     headers.forEach((header, index) => {
       const cell = headerRow.getCell(index + 1);
@@ -791,50 +926,36 @@ router.get("/dailyReports/export", async (req, res) => {
 
     // Add data rows
     exportData.forEach((record, index) => {
-      const rowNumber = 6 + index; // Start from row 6
+      const rowNumber = 6 + index;
       const row = worksheet.getRow(rowNumber);
       
+      let col = 1;
+      row.getCell(col++).value = index + 1; // Sr.No
+      row.getCell(col++).value = record.mrName; // MR Name
+      row.getCell(col++).value = record.mrContactNo; // Contact No.
+      row.getCell(col++).value = record.mrEmail; // Email
+      row.getCell(col++).value = record.mrTeamName; // Team
+      
       if (saleType === 'Cash Sales') {
-        // Cash Sales: Sr.No, MR Name, Contact, Cash, Total Sales, Date
-        row.getCell(1).value = index + 1; // Sr.No
-        row.getCell(2).value = record.mrName; // MR Name
-        row.getCell(3).value = record.mrContactNo; // Contact
-        row.getCell(4).value = record.cash; // Cash
-        row.getCell(5).value = record.totalSalesAmount; // Total Sales
-        row.getCell(6).value = record.date; // Date
-        
-        // Format currency cells
-        row.getCell(4).numFmt = '$#,##0.00'; // Cash
-        row.getCell(5).numFmt = '$#,##0.00'; // Total Sales
-        
+        row.getCell(col++).value = record.cash; // Cash
+        row.getCell(col++).value = record.totalSalesAmount; // Total Sales
+        row.getCell(col++).numFmt = '$#,##0.00'; // Cash
+        row.getCell(col++).numFmt = '$#,##0.00'; // Total Sales
       } else if (saleType === 'Credit Sales') {
-        // Credit Sales: Sr.No, MR Name, Contact, Credits, Total Sales, Date
-        row.getCell(1).value = index + 1; // Sr.No
-        row.getCell(2).value = record.mrName; // MR Name
-        row.getCell(3).value = record.mrContactNo; // Contact
-        row.getCell(4).value = record.credits; // Credits
-        row.getCell(5).value = record.totalSalesAmount; // Total Sales
-        row.getCell(6).value = record.date; // Date
-        
-        // Format currency cells
-        row.getCell(4).numFmt = '$#,##0.00'; // Credits
-        row.getCell(5).numFmt = '$#,##0.00'; // Total Sales
-        
+        row.getCell(col++).value = record.credits; // Credits
+        row.getCell(col++).value = record.totalSalesAmount; // Total Sales
+        row.getCell(col - 2).numFmt = '$#,##0.00'; // Credits
+        row.getCell(col - 1).numFmt = '$#,##0.00'; // Total Sales
       } else {
-        // Total Sales: Sr.No, MR Name, Contact, Credits, Cash, Total Sales, Date
-        row.getCell(1).value = index + 1; // Sr.No
-        row.getCell(2).value = record.mrName; // MR Name
-        row.getCell(3).value = record.mrContactNo; // Contact
-        row.getCell(4).value = record.credits; // Credits
-        row.getCell(5).value = record.cash; // Cash
-        row.getCell(6).value = record.totalSalesAmount; // Total Sales
-        row.getCell(7).value = record.date; // Date
-        
-        // Format currency cells
-        row.getCell(4).numFmt = '$#,##0.00'; // Credits
-        row.getCell(5).numFmt = '$#,##0.00'; // Cash
-        row.getCell(6).numFmt = '$#,##0.00'; // Total Sales
+        row.getCell(col++).value = record.credits; // Credits
+        row.getCell(col++).value = record.cash; // Cash
+        row.getCell(col++).value = record.totalSalesAmount; // Total Sales
+        row.getCell(col - 3).numFmt = '$#,##0.00'; // Credits
+        row.getCell(col - 2).numFmt = '$#,##0.00'; // Cash
+        row.getCell(col - 1).numFmt = '$#,##0.00'; // Total Sales
       }
+      
+      row.getCell(col).value = record.date; // Date
 
       // Add borders to all cells
       for (let i = 1; i <= columnCount; i++) {
@@ -845,6 +966,7 @@ router.get("/dailyReports/export", async (req, res) => {
           bottom: { style: 'thin' },
           right: { style: 'thin' }
         };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
       }
     });
 
@@ -880,7 +1002,6 @@ router.get("/dailyReports/export", async (req, res) => {
       `attachment; filename="${filename}"`
     );
 
-    // Send the Excel file
     await workbook.xlsx.write(res);
     res.end();
 

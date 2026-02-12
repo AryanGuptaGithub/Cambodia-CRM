@@ -1,9 +1,18 @@
 import express from "express";
+import mongoose from "mongoose";
 import Sale from "../../models/sale/saleSummary.js";
 import Customer from "../../models/master/customer.js";
+import MRCash from "../../models/accounts/MRCash.js";
+import Staff from "../../models/staffMember/staff.js";
 import ExcelJS from 'exceljs';
 
 const router = express.Router();
+
+// Helper function to fix precision
+const fixPrecision = (num) => {
+  if (typeof num !== "number") return num;
+  return Math.round(num * 100) / 100;
+};
 
 // Helper function to format customer code to 5 digits with leading zeros
 const formatCustomerCode = (code) => {
@@ -20,6 +29,114 @@ const normalizeCustomerCode = (code) => {
   return code.toString().replace(/^0+/, '');
 };
 
+// Helper function to update MR Cash
+const updateMRCash = async (mrName, amount, invoiceNumber, date, session, isRefund = false) => {
+  try {
+    const cleanAmount = fixPrecision(Number(amount) || 0);
+    if (cleanAmount === 0) {
+      return { success: true, skipped: true, reason: "Amount is zero" };
+    }
+    
+    if (!mrName || mrName.trim() === "") {
+      throw new Error("MR name is required to update MR Cash");
+    }
+    
+    const escapeForRegex = (text = "") => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    
+    // Find MR in Staff collection
+    const mr = await Staff.findOne({
+      medicalRepName: { 
+        $regex: `^${escapeForRegex(mrName.trim())}$`, 
+        $options: "i" 
+      },
+    }).session(session);
+    
+    if (!mr) {
+      console.warn(`⚠️ MR not found with name "${mrName}"`);
+      return { 
+        success: false, 
+        error: `MR not found with name "${mrName}"`,
+        skipped: true 
+      };
+    }
+    
+    // Find or create MR Cash record
+    let mrCash = await MRCash.findOne({ mrId: mr._id }).session(session);
+    
+    if (!mrCash) {
+      // Create new MR Cash record
+      let initialCash = 0;
+      if (!isRefund) {
+        initialCash = cleanAmount;
+      }
+      
+      mrCash = new MRCash({
+        mrId: mr._id,
+        mrName: mr.medicalRepName,
+        currentCash: initialCash,
+        cashTransferredToAdmin: 0,
+        lastTransferDate: null,
+        notes: `Initial creation with invoice: ${invoiceNumber} (${isRefund ? 'Due Increased' : 'Due Decreased'}: ${cleanAmount})`,
+        isActive: true,
+      });
+      
+      await mrCash.save({ session });
+      return { 
+        success: true, 
+        mrCash, 
+        action: "created_new",
+        previousAmount: 0,
+        newAmount: initialCash
+      };
+    }
+    
+    // Update existing MR Cash record
+    const previousAmount = fixPrecision(mrCash.currentCash || 0);
+    let newCashAmount = previousAmount;
+    
+    if (isRefund) {
+      // Due amount increased = subtract from MR cash
+      newCashAmount = fixPrecision(previousAmount - cleanAmount);
+    } else {
+      // Due amount decreased = add to MR cash
+      newCashAmount = fixPrecision(previousAmount + cleanAmount);
+    }
+    
+    mrCash.currentCash = newCashAmount;
+    
+    if (mrCash.currentCash < 0) {
+      console.warn(
+        `⚠️ Warning: MR ${mr.medicalRepName} cash balance went negative: ${mrCash.currentCash}`
+      );
+    }
+    
+    const transactionNote = isRefund
+      ? `Due amount increased for invoice ${invoiceNumber}: -${cleanAmount}`
+      : `Due amount decreased for invoice ${invoiceNumber}: +${cleanAmount}`;
+      
+    mrCash.notes = mrCash.notes
+      ? `${mrCash.notes}\n${transactionNote}`
+      : transactionNote;
+      
+    mrCash.updatedAt = new Date();
+    
+    await mrCash.save({ session });
+      
+    return {
+      success: true,
+      mrCash,
+      action: "updated_existing",
+      previousAmount: previousAmount,
+      newAmount: newCashAmount,
+      changeAmount: cleanAmount,
+    };
+  } catch (error) {
+    console.error("❌ Error updating MR Cash:", error.message);
+    return { success: false, error: error.message };
+  }
+};
+
+// Bulk Update Route with MR Cash Integration
 router.post("/reports/outstanding-collections/bulk-update", async (req, res) => {
   try {
     const { updates } = req.body;
@@ -35,17 +152,24 @@ router.post("/reports/outstanding-collections/bulk-update", async (req, res) => 
       successCount: 0,
       failedCount: 0,
       errors: [],
-      updated: []
+      updated: [],
+      mrCashUpdates: []
     };
 
     for (const update of updates) {
       const { invoiceNumber, totalAmount, paidAmount, creditDays, remarks } = update;
+      
+      const session = await mongoose.startSession();
+      session.startTransaction();
 
       try {
         // Find the sale by invoice number
-        const sale = await Sale.findOne({ invoiceNumber: invoiceNumber });
+        const sale = await Sale.findOne({ invoiceNumber: invoiceNumber }).session(session);
 
         if (!sale) {
+          await session.abortTransaction();
+          session.endSession();
+          
           results.failedCount++;
           results.errors.push({
             invoiceNumber,
@@ -56,6 +180,9 @@ router.post("/reports/outstanding-collections/bulk-update", async (req, res) => 
 
         // Validate amounts
         if (totalAmount <= 0) {
+          await session.abortTransaction();
+          session.endSession();
+          
           results.failedCount++;
           results.errors.push({
             invoiceNumber,
@@ -65,6 +192,9 @@ router.post("/reports/outstanding-collections/bulk-update", async (req, res) => 
         }
 
         if (paidAmount < 0) {
+          await session.abortTransaction();
+          session.endSession();
+          
           results.failedCount++;
           results.errors.push({
             invoiceNumber,
@@ -74,6 +204,9 @@ router.post("/reports/outstanding-collections/bulk-update", async (req, res) => 
         }
 
         if (paidAmount > totalAmount) {
+          await session.abortTransaction();
+          session.endSession();
+          
           results.failedCount++;
           results.errors.push({
             invoiceNumber,
@@ -82,15 +215,22 @@ router.post("/reports/outstanding-collections/bulk-update", async (req, res) => 
           continue;
         }
 
-        // Calculate due amount
-        const dueAmount = totalAmount - paidAmount;
+        // Calculate old and new due amounts
+        const oldDueAmount = fixPrecision(sale.dueAmount || 0);
+        const oldPaidAmount = fixPrecision(sale.paidAmount || 0);
+        const newDueAmount = fixPrecision(totalAmount - paidAmount);
+        const newPaidAmount = fixPrecision(paidAmount);
+        
+        // Calculate the change in due amount
+        const dueAmountChange = fixPrecision(newDueAmount - oldDueAmount);
+        const paidAmountChange = fixPrecision(newPaidAmount - oldPaidAmount);
 
         // Prepare update data
         const updateData = {
-          totalAmount: totalAmount,
-          paidAmount: paidAmount,
-          dueAmount: dueAmount,
-          paymentStatus: dueAmount > 0 ? "Credit" : "Cash",
+          totalAmount: fixPrecision(totalAmount),
+          paidAmount: newPaidAmount,
+          dueAmount: newDueAmount,
+          paymentStatus: newDueAmount > 0 ? "Credit" : "Cash",
           creditDays: creditDays || 0,
         };
 
@@ -100,30 +240,97 @@ router.post("/reports/outstanding-collections/bulk-update", async (req, res) => 
         }
 
         // Calculate due date based on invoice date + credit days
-        if (dueAmount > 0 && creditDays > 0) {
+        if (newDueAmount > 0 && creditDays > 0) {
           const invoiceDate = new Date(sale.invoiceDate);
           const dueDate = new Date(invoiceDate);
           dueDate.setDate(dueDate.getDate() + creditDays);
           updateData.dueDate = dueDate;
-        } else if (dueAmount > 0) {
+        } else if (newDueAmount > 0) {
           // If no credit days, due date is same as invoice date
           updateData.dueDate = sale.invoiceDate;
         }
 
+        // Update MR cash if MR is involved in the sale
+        let mrUpdated = false;
+        let mrDetails = null;
+
+        if (sale.mrName && sale.mrName.trim() !== "" && sale.mrName.toLowerCase() !== "unknown") {
+          // When due amount changes, we need to adjust MR cash
+          // If due amount INCREASES (customer owes more), SUBTRACT from MR cash
+          // If due amount DECREASES (customer paid more), ADD to MR cash
+          
+          if (Math.abs(dueAmountChange) > 0.01) {
+            // There's a change in due amount
+            const mrCashUpdate = await updateMRCash(
+              sale.mrName.trim(),
+              Math.abs(dueAmountChange),
+              invoiceNumber,
+              sale.invoiceDate || new Date(),
+              session,
+              dueAmountChange > 0 // isRefund = true if due amount increased (subtract from MR cash)
+            );
+
+            if (mrCashUpdate.success) {
+              mrUpdated = true;
+              mrDetails = {
+                mrName: sale.mrName,
+                previousCash: mrCashUpdate.previousAmount,
+                adjustment: -dueAmountChange, // Negative means subtract from MR, positive means add
+                newCash: mrCashUpdate.newAmount,
+                oldDueAmount: oldDueAmount,
+                newDueAmount: newDueAmount,
+                dueAmountChange: dueAmountChange,
+                oldPaidAmount: oldPaidAmount,
+                newPaidAmount: newPaidAmount,
+                paidAmountChange: paidAmountChange
+              };
+            } else if (!mrCashUpdate.skipped) {
+              // MR Cash update failed
+              console.error(`⚠️ Failed to update MR Cash for ${sale.mrName}: ${mrCashUpdate.error}`);
+            }
+          }
+        }
+
         // Update the sale
-        await Sale.findByIdAndUpdate(sale._id, updateData, { new: true });
+        await Sale.findByIdAndUpdate(sale._id, updateData, { new: true, session });
+
+        await session.commitTransaction();
+        session.endSession();
 
         results.successCount++;
         results.updated.push({
           invoiceNumber,
-          totalAmount,
-          paidAmount,
-          dueAmount,
-          paymentStatus: updateData.paymentStatus
+          totalAmount: fixPrecision(totalAmount),
+          paidAmount: newPaidAmount,
+          dueAmount: newDueAmount,
+          oldDueAmount,
+          dueAmountChange,
+          paymentStatus: updateData.paymentStatus,
+          mrUpdated
         });
+
+        if (mrDetails) {
+          results.mrCashUpdates.push({
+            invoiceNumber,
+            ...mrDetails
+          });
+        }
 
       } catch (error) {
         console.error(`Error updating invoice ${invoiceNumber}:`, error);
+        
+        try {
+          await session.abortTransaction();
+        } catch (abortError) {
+          console.error("Error aborting transaction:", abortError);
+        }
+        
+        try {
+          session.endSession();
+        } catch (endError) {
+          console.error("Error ending session:", endError);
+        }
+        
         results.failedCount++;
         results.errors.push({
           invoiceNumber,
@@ -138,6 +345,7 @@ router.post("/reports/outstanding-collections/bulk-update", async (req, res) => 
       successCount: results.successCount,
       failedCount: results.failedCount,
       updated: results.updated,
+      mrCashUpdates: results.mrCashUpdates,
       errors: results.errors
     });
 

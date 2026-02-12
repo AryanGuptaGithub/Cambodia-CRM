@@ -2091,8 +2091,7 @@ const AddSale = () => {
                           )
                         );
                       }}
-                      readOnly
-                      disabled={true}
+                      
                       error={errors[`sellingPrice_${index}`]}
                       required
                     />

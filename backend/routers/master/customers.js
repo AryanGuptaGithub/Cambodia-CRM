@@ -485,6 +485,41 @@ router.put("/customers/:id", async (req, res) => {
   }
 });
 
+// ✅ FIXED: Customers dropdown endpoint - MOVED TO TOP BEFORE OTHER ROUTES
+router.get("/customers/dropdown", async (req, res) => {
+  try {
+    const { search = "" } = req.query;
+
+    let query = {};
+    if (search && search.trim() !== "") {
+      query.$or = [
+        { name: { $regex: search, $options: "i" } },
+        { customerCode: { $regex: search, $options: "i" } },
+        { customerNumber: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    const customers = await Customer.find(query)
+      .select("_id name customerCode customerNumber")
+      .sort({ name: 1 })
+      .lean();
+
+    // Format names to title case for display
+    const formattedCustomers = customers.map(customer => ({
+      ...customer,
+      name: toTitleCase(customer.name)
+    }));
+
+    res.json({ 
+      customers: formattedCustomers, 
+      total: formattedCustomers.length, 
+      ok: true 
+    });
+  } catch (err) {
+    handleServerError(res, err, "Failed to fetch customers dropdown");
+  }
+});
+
 // 4. GET: All customers with pagination + next code
 router.get("/customers", async (req, res) => {
   try {
