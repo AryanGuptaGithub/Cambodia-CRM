@@ -441,7 +441,7 @@ const useStockTransferForm = () => {
   const generateStockTransferNumber = useCallback(async () => {
     try {
       const response = await axios.get(
-        `${backendUrl}/api/stock-transfers/next-number`
+        `${backendUrl}/api/stock-transfer/next-number`
       );
 
       if (response.data && response.data.nextNumber) {
@@ -750,7 +750,7 @@ const GeneralTransferForm = ({ navigate, products, productsLoading }) => {
 
     try {
       const response = await axios.post(
-        `${backendUrl}/api/stock-transfers`,
+        `${backendUrl}/api/stock-transfer`,
         payload
       );
 
@@ -1228,7 +1228,7 @@ const CreateStockTransfer = () => {
   const fetchMRs = useCallback(async () => {
     try {
       setMrListLoading(true);
-      const response = await axios.get(`${backendUrl}/api/staffs`);
+      const response = await axios.get(`${backendUrl}/api/staff`);
       const data = response.data || [];
 
       if (data && data.length > 0) {
@@ -1250,7 +1250,7 @@ const CreateStockTransfer = () => {
   const fetchProducts = useCallback(async () => {
     try {
       setProductsLoading(true);
-      const response = await axios.get(`${backendUrl}/api/dropdown-products`);
+      const response = await axios.get(`${backendUrl}/api/products/dropdown`);
       const productsData = response.data?.data || [];
 
       if (!Array.isArray(productsData)) {
@@ -1302,7 +1302,7 @@ const CreateStockTransfer = () => {
   const generateTransferNo = useCallback(async () => {
     try {
       const response = await axios.get(
-        `${backendUrl}/api/stock-transfers-mr/next-number`
+        `${backendUrl}/api/stock-transfer-to-mr/next-number`
       );
 
       if (response.data && response.data.nextNumber) {
@@ -1528,7 +1528,7 @@ const CreateStockTransfer = () => {
         grandTotal: totalExpensesFromItems,
       };
 
-      const response = await axios.post(`${backendUrl}/api/stock-transfers-to-mr`, payload);
+      const response = await axios.post(`${backendUrl}/api/stock-transfer-to-mr`, payload);
       showToast(
         "success",
         `Stock ${

@@ -2,7 +2,7 @@ import express from "express";
 import Payroll from "../../models/Hrm/Payroll.js";
 const router = express.Router();
 
-router.get("/hrm/dashboard", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     // ===== Get current + previous month =========
     const currentDate = new Date();
@@ -65,4 +65,3 @@ router.get("/hrm/dashboard", async (req, res) => {
 });
 
 export default router;
-

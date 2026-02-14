@@ -342,7 +342,12 @@ const getFinancialData = async (filters) => {
   return { allData, summary };
 };
 
-router.get("/reports/financial-summary", async (req, res) => {
+/**
+ * GET /
+ * Get financial summary report
+ * Accessible at: /api/reports/total-expense
+ */
+router.get("/", async (req, res) => {
   try {
     const {
       startDate,
@@ -390,8 +395,12 @@ router.get("/reports/financial-summary", async (req, res) => {
   }
 });
 
-// Add Excel export route
-router.get("/reports/financial-summary/export/excel", async (req, res) => {
+/**
+ * GET /export/excel
+ * Export financial summary to Excel
+ * Accessible at: /api/reports/total-expense/export/excel
+ */
+router.get("/export/excel", async (req, res) => {
   try {
     const { startDate, endDate, search, expenseType } = req.query;
 
@@ -410,7 +419,7 @@ router.get("/reports/financial-summary/export/excel", async (req, res) => {
 
     const worksheet = workbook.addWorksheet('Financial Summary Report');
     
-    // Define columns - REMOVED Description and Reference Number columns
+    // Define columns
     worksheet.columns = [
       { header: 'Sr.No', key: 'serialNo', width: 8 },
       { header: 'Date', key: 'date', width: 15 },
@@ -480,7 +489,7 @@ router.get("/reports/financial-summary/export/excel", async (req, res) => {
         pattern: 'solid',
         fgColor: { argb: 'FFD0D0D0' }
       };
-      worksheet.mergeCells(`A${summaryHeader.number}:D${summaryHeader.number}`); // Changed to D (4 columns)
+      worksheet.mergeCells(`A${summaryHeader.number}:D${summaryHeader.number}`);
 
       // Add summary data
       const summaryData = [
@@ -521,7 +530,7 @@ router.get("/reports/financial-summary/export/excel", async (req, res) => {
       noDataRow.font = { italic: true, color: { argb: 'FF666666' } };
       noDataRow.alignment = { horizontal: 'center' };
       noDataRow.height = 30;
-      worksheet.mergeCells(`A${noDataRow.number}:D${noDataRow.number}`); // Changed to D (4 columns)
+      worksheet.mergeCells(`A${noDataRow.number}:D${noDataRow.number}`);
     }
 
     // Apply borders to all cells
@@ -573,7 +582,7 @@ router.get("/reports/financial-summary/export/excel", async (req, res) => {
     res.send(buffer);
 
   } catch (error) {
-    console.error("Error in /reports/financial-summary/export/excel:", error);
+    console.error("Error in /export/excel:", error);
     res.status(500).json({
       success: false,
       message: "Failed to generate Excel export",

@@ -572,12 +572,17 @@ const fetchSalesSalaryData = async (params) => {
   }
 };
 
-router.get("/sales-salary-ratio", async (req, res) => {
+/**
+ * GET /
+ * Get sales salary ratio report
+ * Accessible at: /api/reports/sales-and-salary
+ */
+router.get("/", async (req, res) => {
   try {    
     const result = await fetchSalesSalaryData(req.query);
     res.status(200).json(result);
   } catch (error) {
-    console.error("❌ Error in /sales-salary-ratio:", error);
+    console.error("❌ Error in sales salary ratio:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch sales salary ratio data",
@@ -586,7 +591,12 @@ router.get("/sales-salary-ratio", async (req, res) => {
   }
 });
 
-router.get("/sales-salary-ratio/export", async (req, res) => {
+/**
+ * GET /export
+ * Export sales salary ratio to Excel
+ * Accessible at: /api/reports/sales-and-salary/export
+ */
+router.get("/export", async (req, res) => {
   try {    
     const result = await fetchSalesSalaryData({
       ...req.query,
@@ -735,6 +745,11 @@ router.get("/sales-salary-ratio/export", async (req, res) => {
   }
 });
 
+/**
+ * GET /mrs
+ * Get MR list
+ * Accessible at: /api/reports/sales-and-salary/mrs
+ */
 router.get("/mrs", async (req, res) => {
   try {
     const mrList = await stockinmrhands.aggregate([
@@ -762,7 +777,6 @@ router.get("/mrs", async (req, res) => {
       {
         $sort: { cleanedMrName: 1 }
       }
-
     ]);
 
     res.status(200).json({
@@ -779,6 +793,5 @@ router.get("/mrs", async (req, res) => {
     });
   }
 });
-
 
 export default router;

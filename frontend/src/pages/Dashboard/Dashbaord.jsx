@@ -458,7 +458,7 @@ const Dashboard = () => {
   const fetchPayrollWithCustomDates = async () => {
     try {
       setLoadingPayrollData(true);
-      const response = await axios.get(`${backendUrl}/api/payrolls`, {
+      const response = await axios.get(`${backendUrl}/api/hrm/payroll`, {
         params: {
           period: "custom",
           startDate: customStartDate,
@@ -483,7 +483,7 @@ const Dashboard = () => {
   const fetchStockTableData = async (period = "Today") => {
     try {
       setLoadingStockData(true);
-      const response = await axios.get(`${backendUrl}/api/reports-in-hand`, {
+      const response = await axios.get(`${backendUrl}/api/reports/stock-in-hand`, {
         params: { period },
       });
 
@@ -751,7 +751,7 @@ const Dashboard = () => {
         params.period = payrollPeriod;
       }
 
-      const response = await axios.get(`${backendUrl}/api/payrolls`, {
+      const response = await axios.get(`${backendUrl}/api/hrm/payroll`, {
         params,
       });
 

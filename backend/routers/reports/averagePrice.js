@@ -5,9 +5,9 @@ import ExcelJS from "exceljs";
 const router = express.Router();
 
 // ======================================================
-// GET /reports/average-price
+// GET / (base path is /api/reports/average-price)
 // ======================================================
-router.get("/reports/average-price", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const search = req.query.search || "";
     console.log("🔍 Search:", search || "NONE");
@@ -113,9 +113,9 @@ router.get("/reports/average-price", async (req, res) => {
 });
 
 // ======================================================
-// EXPORT EXCEL
+// EXPORT EXCEL (base path /api/reports/average-price/export)
 // ======================================================
-router.get("/reports/average-price/export", async (req, res) => {
+router.get("/export", async (req, res) => {
   try {
     const reports = await Sale.aggregate([
       { $unwind: "$products" },

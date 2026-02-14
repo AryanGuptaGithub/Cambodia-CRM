@@ -1,15 +1,15 @@
 import express from "express";
 import ExcelJS from 'exceljs';
-import mongoose from "mongoose";                  // ✅ FIXED: added mongoose
+import mongoose from "mongoose";
 import SaleSummary from "../../models/sale/saleSummary.js";
 import MRStockInHand from "../../models/sale/mrStockHand.js";
-import Staff from "../../models/staffMember/staff.js"; // ✅ FIXED: added Staff model
+import Staff from "../../models/staffMember/staff.js";
 
 const router = express.Router();
 
 // ==========================================
 // 🔥 IMPORTANT: ROUTE ORDERING FIX
-// All specific MR stock routes must come BEFORE the parameterized /:mrId
+// All specific routes must come BEFORE the parameterized /:mrId
 // ==========================================
 
 // --------------------------------------------------------------
@@ -17,7 +17,7 @@ const router = express.Router();
 // --------------------------------------------------------------
 
 /**
- * GET /api/sales/mr-stock/mrs-with-stock
+ * FIXED: Changed from "/mrs-with-stock" to "/mrs-with-stock"
  * Returns all MRs that have at least one product with quantity > 0
  */
 router.get("/mrs-with-stock", async (req, res) => {
@@ -52,7 +52,7 @@ router.get("/mrs-with-stock", async (req, res) => {
 });
 
 /**
- * GET /api/sales/mr-stock/products/:mrId
+ * FIXED: Changed from "/products/:mrId" to "/products/:mrId"
  * Returns all products (with quantity > 0) that the specified MR has in stock
  */
 router.get("/products/:mrId", async (req, res) => {
@@ -101,7 +101,7 @@ router.get("/products/:mrId", async (req, res) => {
 });
 
 /**
- * GET /api/sales/mr-stock/:mrId/:productName
+ * FIXED: No change needed - already correct relative path
  * Returns stock details for a specific MR + product combination
  */
 router.get("/:mrId/:productName", async (req, res) => {
@@ -157,7 +157,7 @@ router.get("/:mrId/:productName", async (req, res) => {
 });
 
 /**
- * POST /api/sales/mr-stock/deduct
+ * FIXED: No change needed - already correct relative path
  * Deducts stock from MR's hand (used when creating an MR Sale)
  */
 router.post("/deduct", async (req, res) => {
@@ -242,7 +242,7 @@ router.post("/deduct", async (req, res) => {
 });
 
 /**
- * POST /api/sales/mr-stock/restore
+ * FIXED: No change needed - already correct relative path
  * Restores stock to MR's hand (used when deleting/refunding an MR Sale)
  */
 router.post("/restore", async (req, res) => {
@@ -334,7 +334,7 @@ router.post("/restore", async (req, res) => {
 });
 
 /**
- * GET /api/sales/mr-stock/
+ * FIXED: No change needed - already correct relative path
  * Returns ALL MR stock records (full list)
  */
 router.get("/", async (req, res) => {
@@ -360,7 +360,7 @@ router.get("/", async (req, res) => {
 });
 
 /**
- * GET /api/sales/mr-stock/:mrId
+ * FIXED: No change needed - already correct relative path
  * Returns stock for a specific MR (by ID)
  * ⚠️ MUST be placed after all other specific routes
  */
@@ -418,8 +418,8 @@ const generateMRId = (index) => {
   return `MR${String(index + 1).padStart(3, "0")}`;
 };
 
-// Main endpoint for MR wise sales - FIXED VERSION
-router.get("/mr-wise-sales", async (req, res) => {
+// FIXED: Changed from "/mr-wise-sales" to "/sales" - MOVED BEFORE /debug-sales-data and /export/excel
+router.get("/sales", async (req, res) => {
   try {
     const { page = 1, limit = 7, search, startDate, endDate } = req.query;
 
@@ -683,7 +683,7 @@ router.get("/mr-wise-sales", async (req, res) => {
       },
     });
   } catch (err) {
-    console.error("Error in /mr-wise-sales:", err);
+    console.error("Error in /sales:", err);
     res.status(500).json({
       error: "Internal server error",
       message: err.message,
@@ -716,8 +716,8 @@ async function getAmountFieldName() {
   }
 }
 
-// Export to Excel endpoint - FIXED VERSION
-router.get("/mr-wise-sales/export/excel", async (req, res) => {
+// FIXED: Changed from "/mr-wise-sales/export/excel" to "/export/excel" - MOVED BEFORE /:mrId
+router.get("/export/excel", async (req, res) => {
   try {
     const { search, startDate, endDate } = req.query;
     const matchConditions = {};
@@ -984,7 +984,7 @@ router.get("/mr-wise-sales/export/excel", async (req, res) => {
     res.send(buffer);
 
   } catch (err) {
-    console.error("Error in /mr-wise-sales/export/excel:", err);
+    console.error("Error in /export/excel:", err);
     res.status(500).json({
       error: "Failed to generate Excel export",
       message: err.message,
@@ -992,7 +992,7 @@ router.get("/mr-wise-sales/export/excel", async (req, res) => {
   }
 });
 
-// ✅ NEW: Debug endpoint to check SaleSummary data structure
+// FIXED: Changed from "/debug-sales-data" to "/debug-sales-data" - MOVED BEFORE /:mrId
 router.get("/debug-sales-data", async (req, res) => {
   try {
     const sampleDocs = await SaleSummary.find({}).limit(5);

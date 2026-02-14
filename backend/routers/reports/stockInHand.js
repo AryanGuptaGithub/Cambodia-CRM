@@ -11,9 +11,10 @@ const filterReportsWithBatches = (reports) => {
   );
 };
 
+// FIXED: Changed from '/reports/reports-in-hand' to '/'
 // ✅ Main route - GET all reports with totalBoxes
 // ✅ Main route - GET ALL reports (for frontend client-side pagination)
-router.get("/reports/reports-in-hand", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const { search } = req.query;
 
@@ -59,8 +60,9 @@ router.get("/reports/reports-in-hand", async (req, res) => {
   }
 });
 
+// FIXED: Changed from '/reports/average-price/export' to '/average-price/export'
 // ✅ New route for exporting to Excel with totalBoxes
-router.get("/reports/average-price/export", async (req, res) => {
+router.get("/average-price/export", async (req, res) => {
   try {
     const { search } = req.query;
 
@@ -206,8 +208,9 @@ router.get("/reports/average-price/export", async (req, res) => {
   }
 });
 
+// FIXED: Changed from '/reports-in-hand-efficient' to '/efficient'
 // ✅ Alternative: More efficient database approach with totalBoxes
-router.get("/reports-in-hand-efficient", async (req, res) => {
+router.get("/efficient", async (req, res) => {
   try {
     const { page = 1, limit = 10 } = req.query;
     const pageNum = parseInt(page);
@@ -264,8 +267,9 @@ router.get("/reports-in-hand-efficient", async (req, res) => {
   }
 });
 
+// FIXED: Changed from '/reports-in-hand/all' to '/all'
 // ✅ Keep existing routes for backward compatibility
-router.get("/reports-in-hand/all", async (req, res) => {
+router.get("/all", async (req, res) => {
   try {
     const reports = await ReportInHand.find().sort({ createdAt: -1 });
     const filteredReports = filterReportsWithBatches(reports);
@@ -291,8 +295,9 @@ router.get("/reports-in-hand/all", async (req, res) => {
   }
 });
 
+// FIXED: Changed from '/reports-in-hand/:id' to '/:id'
 // The rest of your existing routes remain the same
-router.get("/reports-in-hand/:id", async (req, res) => {
+router.get("/:id", async (req, res) => {
   try {
     const report = await ReportInHand.findById(req.params.id);
 
@@ -317,7 +322,8 @@ router.get("/reports-in-hand/:id", async (req, res) => {
   }
 });
 
-router.get("/reports-in-hand/search/:productName", async (req, res) => {
+// FIXED: Changed from '/reports-in-hand/search/:productName' to '/search/:productName'
+router.get("/search/:productName", async (req, res) => {
   try {
     const { productName } = req.params;
     const { page = 1, limit = 10 } = req.query;
@@ -356,7 +362,8 @@ router.get("/reports-in-hand/search/:productName", async (req, res) => {
   }
 });
 
-router.get("/reports-in-hand/supplier/:supplierName", async (req, res) => {
+// FIXED: Changed from '/reports-in-hand/supplier/:supplierName' to '/supplier/:supplierName'
+router.get("/supplier/:supplierName", async (req, res) => {
   try {
     const { supplierName } = req.params;
     const { page = 1, limit = 10 } = req.query;
@@ -395,8 +402,9 @@ router.get("/reports-in-hand/supplier/:supplierName", async (req, res) => {
   }
 });
 
+// FIXED: Changed from '/reports-in-hand/summary/total-boxes' to '/summary/total-boxes'
 // ✅ NEW: Get total boxes summary
-router.get("/reports-in-hand/summary/total-boxes", async (req, res) => {
+router.get("/summary/total-boxes", async (req, res) => {
   try {
     const allReports = await ReportInHand.find();
     const filteredReports = filterReportsWithBatches(allReports);

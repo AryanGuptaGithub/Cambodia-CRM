@@ -5,7 +5,7 @@ import CompanyAccount from "../../models/accounts/Destination.js"; // Import Com
 const router = express.Router();
 
 // GET all payments out with bank names
-router.get("/payments-out", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const payments = await PaymentsOut.find().sort({ createdAt: -1 });
 
@@ -46,7 +46,7 @@ router.get("/payments-out", async (req, res) => {
 });
 
 // GET payment by ID with bank name
-router.get("/payments-out/:id", async (req, res) => {
+router.get("/:id", async (req, res) => {
   try {
     const payment = await PaymentsOut.findById(req.params.id);
 
@@ -84,7 +84,7 @@ router.get("/payments-out/:id", async (req, res) => {
 });
 
 // POST new payment out
-router.post("/payments-out", async (req, res) => {
+router.post("/", async (req, res) => {
   try {
     const {
       paymentDate,
@@ -106,7 +106,6 @@ router.post("/payments-out", async (req, res) => {
     }
 
     // Check if company account exists and has sufficient funds
-
     const companyAccount = await CompanyAccount.findById(bank);
 
     if (!companyAccount) {
@@ -135,7 +134,6 @@ router.post("/payments-out", async (req, res) => {
     const savedPayment = await newPayment.save();
 
     companyAccount.totalAmount -= parseFloat(amount);
-
     await companyAccount.save();
 
     const paymentWithBankName = {
@@ -151,13 +149,12 @@ router.post("/payments-out", async (req, res) => {
     });
   } catch (error) {
     console.error("26. Error in POST /payments-out:", error);
-
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
 // UPDATE payment
-router.put("/payments-out/:id", async (req, res) => {
+router.put("/:id", async (req, res) => {
   try {
     const {
       paymentDate,
@@ -178,7 +175,6 @@ router.put("/payments-out/:id", async (req, res) => {
 
     // Find the company account
     const targetBank = bank || existingPayment.bank;
-
     const companyAccount = await CompanyAccount.findById(targetBank);
 
     if (!companyAccount) {
@@ -199,7 +195,6 @@ router.put("/payments-out/:id", async (req, res) => {
     }
 
     // Update the payment
-
     const updatedPayment = await PaymentsOut.findByIdAndUpdate(
       req.params.id,
       {
@@ -236,7 +231,7 @@ router.put("/payments-out/:id", async (req, res) => {
 });
 
 // DELETE payment
-router.delete("/payments-out/:id", async (req, res) => {
+router.delete("/:id", async (req, res) => {
   try {
     const deletedPayment = await PaymentsOut.findById(req.params.id);
 
@@ -248,12 +243,10 @@ router.delete("/payments-out/:id", async (req, res) => {
 
     if (companyAccount) {
       companyAccount.totalAmount += deletedPayment.paidAmount;
-
       await companyAccount.save();
     }
 
     // Delete the payment
-
     await PaymentsOut.findByIdAndDelete(req.params.id);
 
     res.json({

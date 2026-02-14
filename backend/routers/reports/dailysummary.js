@@ -1,5 +1,3 @@
-// routes/dailySummary.js (example path)
-
 import express from "express";
 import mongoose from "mongoose";
 import Product from "../../models/projectManger/product.js";
@@ -7,7 +5,8 @@ import { DailySummary } from "../../models/reports/dailysummary.js";
 
 const router = express.Router();
 
-router.get("/dailysummary/unique-names", async (req, res) => {
+
+router.get("/unique-names", async (req, res) => {
   try {
     const uniqueNames = await Product.distinct("productName", {
       productName: { $ne: null },
@@ -22,7 +21,7 @@ router.get("/dailysummary/unique-names", async (req, res) => {
   }
 });
 
-router.post("/dailysummary/import", async (req, res) => {
+router.post("/import", async (req, res) => {
   try {
     const dailySummaries = req.body;
 
@@ -77,7 +76,7 @@ router.post("/dailysummary/import", async (req, res) => {
   }
 });
 
-router.get("/dailysummary", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const summaries = await DailySummary.find().sort({ date: -1 });
     res.status(200).json(summaries);
@@ -87,7 +86,159 @@ router.get("/dailysummary", async (req, res) => {
   }
 });
 
-router.put("/dailysummary/:summaryId/:productId", async (req, res) => {
+router.get("/byDate", async (req, res) => {
+  try {
+    const { start, end } = req.query;
+
+    const matchStage = {};
+
+    if (start && end) {
+      const startDate = new Date(start);
+      const endDate = new Date(end);
+      endDate.setHours(23, 59, 59, 999);
+
+      if (isNaN(startDate) || isNaN(endDate)) {
+        return res.status(400).json({ message: "Invalid date format." });
+      }
+
+      matchStage.date = {
+        $gte: startDate,
+        $lte: endDate,
+      };
+    }
+
+    const results = await DailySummary.aggregate([
+      { $match: matchStage },
+      { $unwind: "$products" },
+      {
+        $group: {
+          _id: "$products.productName",
+          salesQuantity: { $sum: "$products.salesQuantity" },
+          bonusQuantity: { $sum: "$products.bonusQuantity" },
+          totalQuantity: { $sum: "$products.totalQuantity" },
+          amount: { $sum: "$products.value" },
+          totalDayQuantity: { $max: "$totalDayQuantity" },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          productName: "$_id",
+          salesQuantity: 1,
+          bonusQuantity: 1,
+          totalQuantity: 1,
+          amount: 1,
+          totalDayQuantity: 1,
+        },
+      },
+      { $sort: { productName: 1 } },
+    ]);
+
+    res.status(200).json(results);
+  } catch (err) {
+    console.error("Error fetching aggregated daily summaries:", err);
+    res
+      .status(500)
+      .json({ message: "Failed to fetch aggregated daily summaries." });
+  }
+});
+
+router.post("/", async (req, res) => {
+  try {
+    const {
+      date,
+      productName,
+      salesQuantity,
+      bonusQuantity,
+      totalQty,
+      amount,
+    } = req.body;
+
+    if (!date || !productName) {
+      return res
+        .status(400)
+        .json({ message: "Date and product name are required." });
+    }
+
+    const parsedDate = new Date(date);
+
+    // Find existing document for the date
+    const startOfDay = new Date(parsedDate.setHours(0, 0, 0, 0));
+    const endOfDay = new Date(parsedDate.setHours(23, 59, 59, 999));
+
+    let summaryDoc = await DailySummary.findOne({
+      date: { $gte: startOfDay, $lte: endOfDay },
+    });
+
+    if (!summaryDoc) {
+      // Create new document
+      const newDoc = new DailySummary({
+        date: new Date(date),
+        totalDayQuantity: totalQty,
+        products: [
+          {
+            productName,
+            salesQuantity,
+            bonusQuantity,
+            totalQuantity: totalQty,
+            value: amount,
+          },
+        ],
+      });
+
+      const saved = await newDoc.save();
+      return res.status(201).json({
+        message: "New daily summary created.",
+        data: saved,
+      });
+    }
+
+    // Check if product already exists
+    const productIndex = summaryDoc.products.findIndex(
+      (p) => p.productName === productName
+    );
+
+    if (productIndex !== -1) {
+      // Update existing product
+      summaryDoc.products[productIndex].salesQuantity = salesQuantity;
+      summaryDoc.products[productIndex].bonusQuantity = bonusQuantity;
+      summaryDoc.products[productIndex].totalQuantity = totalQty;
+      summaryDoc.products[productIndex].value = amount;
+    } else {
+      // Add new product
+      summaryDoc.products.push({
+        productName,
+        salesQuantity,
+        bonusQuantity,
+        totalQuantity: totalQty,
+        value: amount,
+      });
+    }
+
+    // Update totalDayQuantity
+    summaryDoc.totalDayQuantity = summaryDoc.products.reduce(
+      (sum, p) => sum + (p.totalQuantity || 0),
+      0
+    );
+
+    const updated = await summaryDoc.save();
+
+    return res.status(200).json({
+      message:
+        productIndex !== -1
+          ? "Product updated in daily summary."
+          : "Product added to existing daily summary.",
+      data: updated,
+    });
+  } catch (err) {
+    console.error("Error in POST:", err);
+    return res.status(500).json({
+      message: "Server error while saving daily summary.",
+    });
+  }
+});
+
+router.put("/:summaryId/:productId", async (req, res) => {
   try {
     const { summaryId, productId } = req.params;
 
@@ -100,7 +251,6 @@ router.put("/dailysummary/:summaryId/:productId", async (req, res) => {
       date,
     } = req.body;
 
-    // Validate fields (optional but recommended)
     if (!summaryId || !productId) {
       return res
         .status(400)
@@ -119,7 +269,7 @@ router.put("/dailysummary/:summaryId/:productId", async (req, res) => {
           "products.$.date": date,
         },
       },
-      { new: true } // Return the updated document
+      { new: true }
     );
 
     if (!updatedReport) {
@@ -133,8 +283,7 @@ router.put("/dailysummary/:summaryId/:productId", async (req, res) => {
   }
 });
 
-// DELETE /api/dailysummary/:summaryId/:productId
-router.delete("/dailysummary/:summaryId/:productId", async (req, res) => {
+router.delete("/:summaryId/:productId", async (req, res) => {
   try {
     const { summaryId, productId } = req.params;
 
@@ -144,7 +293,6 @@ router.delete("/dailysummary/:summaryId/:productId", async (req, res) => {
         .json({ message: "Missing summaryId or productId" });
     }
 
-    // Find and update the DailySummary document by pulling the product from array
     const updatedSummary = await DailySummary.findByIdAndUpdate(
       summaryId,
       {
@@ -167,8 +315,9 @@ router.delete("/dailysummary/:summaryId/:productId", async (req, res) => {
   }
 });
 
-router.delete("/dailysummary", async (req, res) => {
+router.delete("/", async (req, res) => {
   const { ids } = req.body;
+  
   if (!Array.isArray(ids) || ids.length === 0) {
     return res.status(400).json({ error: "No data provided for deletion." });
   }
@@ -215,158 +364,6 @@ router.delete("/dailysummary", async (req, res) => {
   } catch (error) {
     console.error("Deletion error:", error);
     res.status(500).json({ error: "Failed to delete product entries." });
-  }
-});
-
-router.get("/dailysummary/byDate", async (req, res) => {
-  try {
-    const { start, end } = req.query;
-
-    const matchStage = {};
-
-    if (start && end) {
-      const startDate = new Date(start);
-      const endDate = new Date(end);
-      endDate.setHours(23, 59, 59, 999);
-
-      if (isNaN(startDate) || isNaN(endDate)) {
-        return res.status(400).json({ message: "Invalid date format." });
-      }
-
-      matchStage.date = {
-        $gte: startDate,
-        $lte: endDate,
-      };
-    }
-
-    const results = await DailySummary.aggregate([
-      { $match: matchStage }, // match by date range if available
-      { $unwind: "$products" },
-      {
-        $group: {
-          _id: "$products.productName",
-          salesQuantity: { $sum: "$products.salesQuantity" },
-          bonusQuantity: { $sum: "$products.bonusQuantity" },
-          totalQuantity: { $sum: "$products.totalQuantity" },
-          amount: { $sum: "$products.value" },
-          totalDayQuantity: { $max: "$totalDayQuantity" },
-        },
-      },
-      {
-        $project: {
-          _id: 0,
-          productName: "$_id",
-          salesQuantity: 1,
-          bonusQuantity: 1,
-          totalQuantity: 1,
-          amount: 1,
-          totalDayQuantity: 1,
-        },
-      },
-      { $sort: { productName: 1 } },
-    ]);
-
-    res.status(200).json(results);
-  } catch (err) {
-    console.error("Error fetching aggregated daily summaries:", err);
-    res
-      .status(500)
-      .json({ message: "Failed to fetch aggregated daily summaries." });
-  }
-});
-
-router.post("/dailysummary", async (req, res) => {
-  try {
-    const {
-      date,
-      productName,
-      salesQuantity,
-      bonusQuantity,
-      totalQty,
-      amount, // stored as `value` in schema
-    } = req.body;
-
-    if (!date || !productName) {
-      return res
-        .status(400)
-        .json({ message: "Date and product name are required." });
-    }
-
-    const parsedDate = new Date(date);
-
-    // Step 1: Try to find existing document for the date (match only on date part)
-    const startOfDay = new Date(parsedDate.setHours(0, 0, 0, 0));
-    const endOfDay = new Date(parsedDate.setHours(23, 59, 59, 999));
-
-    let summaryDoc = await DailySummary.findOne({
-      date: { $gte: startOfDay, $lte: endOfDay },
-    });
-
-    if (!summaryDoc) {
-      // Create new document if not found
-      const newDoc = new DailySummary({
-        date: new Date(date),
-        totalDayQuantity: totalQty,
-        products: [
-          {
-            productName,
-            salesQuantity,
-            bonusQuantity,
-            totalQuantity: totalQty,
-            value: amount,
-          },
-        ],
-      });
-
-      const saved = await newDoc.save();
-      return res.status(201).json({
-        message: "New daily summary created.",
-        data: saved,
-      });
-    }
-
-    // Step 2: Check if product already exists
-    const productIndex = summaryDoc.products.findIndex(
-      (p) => p.productName === productName
-    );
-
-    if (productIndex !== -1) {
-      // Update existing product
-      summaryDoc.products[productIndex].salesQuantity = salesQuantity;
-      summaryDoc.products[productIndex].bonusQuantity = bonusQuantity;
-      summaryDoc.products[productIndex].totalQuantity = totalQty;
-      summaryDoc.products[productIndex].value = amount;
-    } else {
-      // Push new product
-      summaryDoc.products.push({
-        productName,
-        salesQuantity,
-        bonusQuantity,
-        totalQuantity: totalQty,
-        value: amount,
-      });
-    }
-
-    // Update totalDayQuantity (optional: add, average, or recalculate from all products)
-    summaryDoc.totalDayQuantity = summaryDoc.products.reduce(
-      (sum, p) => sum + (p.totalQuantity || 0),
-      0
-    );
-
-    const updated = await summaryDoc.save();
-
-    return res.status(200).json({
-      message:
-        productIndex !== -1
-          ? "Product updated in daily summary."
-          : "Product added to existing daily summary.",
-      data: updated,
-    });
-  } catch (err) {
-    console.error("Error in /dailysummary POST:", err);
-    return res.status(500).json({
-      message: "Server error while saving daily summary.",
-    });
   }
 });
 

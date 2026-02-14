@@ -83,7 +83,7 @@ const usePayrollForm = (initialForm = {}) => {
   const fetchMRList = useCallback(async () => {
     try {
       setMrListLoading(true);
-      const response = await fetch(`${backendUrl}/api/staffs`);
+      const response = await fetch(`${backendUrl}/api/staff`);
       const data = await response.json();
 
       if (!response.ok) {
@@ -815,7 +815,7 @@ const Payroll = () => {
         formData.append('file', file);
 
         const response = await axios.post(
-          `${backendUrl}/api/payrolls/import/csv`,
+          `${backendUrl}/api/hrm/payroll/import/csv`,
           formData,
           {
             headers: {
@@ -845,7 +845,7 @@ const Payroll = () => {
     const downloadTemplate = async () => {
       try {
         const response = await axios.get(
-          `${backendUrl}/api/payrolls/import/template`,
+          `${backendUrl}/api/hrm/payroll/import/template`,
           {
             responseType: 'blob',
           }
@@ -1043,7 +1043,7 @@ const Payroll = () => {
   const exportToCSV = async () => {
     try {
       const response = await axios.get(
-        `${backendUrl}/api/payrolls/export/csv`,
+        `${backendUrl}/api/hrm/payroll/export/csv`,
         {
           responseType: 'blob',
         }
@@ -1074,14 +1074,12 @@ const Payroll = () => {
     fetchSourceOptions();
   }, []);
 
-  // Modified fetchPayrolls to store all data for client-side filtering
   const fetchPayrolls = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // ✅ FIXED: Changed from /api/payrolls to /api/payrolls
-      const url = `${backendUrl}/api/payrolls`;
+      const url = `${backendUrl}/api/hrm/payroll`;
       const response = await axios.get(url);
       
       if (response.data.success) {
@@ -1240,7 +1238,7 @@ const Payroll = () => {
 
     if (confirm.isConfirmed) {
       try {
-        const res = await axios.delete(`${backendUrl}/api/payrolls`, {
+        const res = await axios.delete(`${backendUrl}/api/hrm/payroll`, {
           data: { ids: selected.map((s) => s.id) },
         });
 
@@ -1273,7 +1271,7 @@ const Payroll = () => {
     if (confirmDelete.isConfirmed) {
       try {
         const res = await axios.delete(
-          `${backendUrl}/api/payrolls/${payroll._id}`
+          `${backendUrl}/api/hrm/payroll/${payroll._id}`
         );
 
         if (res.data.success) {
@@ -1477,7 +1475,7 @@ const Payroll = () => {
       };
 
       const res = await axios.put(
-        `${backendUrl}/api/payrolls/${form._id}`,
+        `${backendUrl}/api/hrm/payroll/${form._id}`,
         payload
       );
 

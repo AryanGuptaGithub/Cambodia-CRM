@@ -229,7 +229,7 @@ const LeaveAttendance = () => {
   const fetchMRList = async () => {
     try {
       setLoading(true);
-      const response = await axios.get(`${backendUrl}/api/staffs`);
+      const response = await axios.get(`${backendUrl}/api/staff`);
       setMrList(response.data || []);
     } catch (err) {
       setError(err.message || "Failed to fetch MR list");

@@ -64,8 +64,172 @@ const getDateRangeForPeriod = (period) => {
   };
 };
 
+// FIXED: Changed from '/expenses/statistics/summary' to '/statistics/summary' - MOVED BEFORE /:id to avoid conflicts
+// Get expense statistics
+router.get("/statistics/summary", async (req, res) => {
+  try {
+    const { startDate, endDate, period } = req.query;
+
+    let matchStage = {};
+
+    // Handle period-based filtering
+    if (period) {
+      const dateRange = getDateRangeForPeriod(period);
+      matchStage = { ...matchStage, ...dateRange };
+    }
+
+    // Date range filtering (for custom dates)
+    if (startDate || endDate) {
+      matchStage.date = matchStage.date || {};
+      if (startDate) matchStage.date.$gte = new Date(startDate);
+      if (endDate) matchStage.date.$lte = new Date(endDate);
+    }
+
+    const statistics = await Expense.aggregate([
+      { $match: matchStage },
+      {
+        $group: {
+          _id: null,
+          totalExpenses: { $sum: "$amount" },
+          averageExpense: { $avg: "$amount" },
+          expenseCount: { $sum: 1 },
+          minExpense: { $min: "$amount" },
+          maxExpense: { $max: "$amount" },
+        },
+      },
+    ]);
+
+    const categoryStats = await Expense.aggregate([
+      { $match: matchStage },
+      {
+        $lookup: {
+          from: "addexpensecategaries",
+          localField: "category",
+          foreignField: "_id",
+          as: "categoryInfo",
+        },
+      },
+      {
+        $unwind: "$categoryInfo",
+      },
+      {
+        $group: {
+          _id: "$category",
+          categoryName: { $first: "$categoryInfo.category" },
+          totalAmount: { $sum: "$amount" },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { totalAmount: -1 } },
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        summary: statistics[0] || {
+          totalExpenses: 0,
+          averageExpense: 0,
+          expenseCount: 0,
+          minExpense: 0,
+          maxExpense: 0,
+        },
+        byCategory: categoryStats,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching expense statistics:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch expense statistics",
+      error: error.message,
+    });
+  }
+});
+
+// FIXED: Changed from '/expense-categary' to '/categories' - MOVED BEFORE /:id to avoid conflicts
+// Get expense categories
+router.get("/categories", async (req, res) => {
+  try {
+    const currentDate = new Date();
+    const currentYear = currentDate.getFullYear();
+    const currentMonth = currentDate.getMonth();
+    const yearStart = new Date(currentYear, 0, 1);
+    const monthStart = new Date(currentYear, currentMonth, 1);
+    const monthEnd = new Date(currentYear, currentMonth + 1, 0);
+
+    const categories = await addExpenseCategary.find().sort({ category: 1 });
+
+    const ytdExpenses = await Expense.aggregate([
+      {
+        $match: {
+          date: {
+            $gte: yearStart,
+            $lt: monthStart,
+          },
+        },
+      },
+      {
+        $group: {
+          _id: "$category",
+          amountUntilYear: { $sum: "$amount" },
+        },
+      },
+    ]);
+
+    const monthlyExpenses = await Expense.aggregate([
+      {
+        $match: {
+          date: {
+            $gte: monthStart,
+            $lte: monthEnd,
+          },
+        },
+      },
+      {
+        $group: {
+          _id: "$category",
+          monthlyAmount: { $sum: "$amount" },
+        },
+      },
+    ]);
+
+    const ytdMap = new Map();
+    ytdExpenses.forEach((exp) => {
+      ytdMap.set(exp._id.toString(), exp.amountUntilYear);
+    });
+
+    const monthlyMap = new Map();
+    monthlyExpenses.forEach((exp) => {
+      monthlyMap.set(exp._id.toString(), exp.monthlyAmount);
+    });
+
+    const responseData = categories.map((category, index) => ({
+      Sr: index + 1,
+      _id: category._id,
+      Category: category.category,
+      Remarks: category.description,
+      "Amount Until Year ($)": ytdMap.get(category._id.toString()) || 0,
+      "Monthly Amount ($)": monthlyMap.get(category._id.toString()) || 0,
+    }));
+
+    res.json({
+      success: true,
+      data: responseData,
+      count: categories.length,
+    });
+  } catch (error) {
+    console.error("Error fetching categories with expenses:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch categories with expense data",
+      error: error.message,
+    });
+  }
+});
+
+// FIXED: Changed from '/expenses' to '/'
 // Get expenses with period filtering
-router.get("/expenses", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const { period } = req.query;
     let query = {};
@@ -124,8 +288,9 @@ router.get("/expenses", async (req, res) => {
   }
 });
 
+// FIXED: Changed from '/expenses/:id' to '/:id'
 // Get single expense by ID
-router.get("/expenses/:id", async (req, res) => {
+router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -169,8 +334,9 @@ router.get("/expenses/:id", async (req, res) => {
   }
 });
 
+// FIXED: Changed from '/expenses' to '/'
 // Create new expense - FIXED: REMOVED duplicate balance update
-router.post("/expenses", async (req, res) => {
+router.post("/", async (req, res) => {
   try {
     const expenseData = req.body;
 
@@ -329,88 +495,9 @@ router.post("/expenses", async (req, res) => {
   }
 });
 
-// Get expense categories
-router.get("/expense-categary", async (req, res) => {
-  try {
-    const currentDate = new Date();
-    const currentYear = currentDate.getFullYear();
-    const currentMonth = currentDate.getMonth();
-    const yearStart = new Date(currentYear, 0, 1);
-    const monthStart = new Date(currentYear, currentMonth, 1);
-    const monthEnd = new Date(currentYear, currentMonth + 1, 0);
-
-    const categories = await addExpenseCategary.find().sort({ category: 1 });
-
-    const ytdExpenses = await Expense.aggregate([
-      {
-        $match: {
-          date: {
-            $gte: yearStart,
-            $lt: monthStart,
-          },
-        },
-      },
-      {
-        $group: {
-          _id: "$category",
-          amountUntilYear: { $sum: "$amount" },
-        },
-      },
-    ]);
-
-    const monthlyExpenses = await Expense.aggregate([
-      {
-        $match: {
-          date: {
-            $gte: monthStart,
-            $lte: monthEnd,
-          },
-        },
-      },
-      {
-        $group: {
-          _id: "$category",
-          monthlyAmount: { $sum: "$amount" },
-        },
-      },
-    ]);
-
-    const ytdMap = new Map();
-    ytdExpenses.forEach((exp) => {
-      ytdMap.set(exp._id.toString(), exp.amountUntilYear);
-    });
-
-    const monthlyMap = new Map();
-    monthlyExpenses.forEach((exp) => {
-      monthlyMap.set(exp._id.toString(), exp.monthlyAmount);
-    });
-
-    const responseData = categories.map((category, index) => ({
-      Sr: index + 1,
-      _id: category._id,
-      Category: category.category,
-      Remarks: category.description,
-      "Amount Until Year ($)": ytdMap.get(category._id.toString()) || 0,
-      "Monthly Amount ($)": monthlyMap.get(category._id.toString()) || 0,
-    }));
-
-    res.json({
-      success: true,
-      data: responseData,
-      count: categories.length,
-    });
-  } catch (error) {
-    console.error("Error fetching categories with expenses:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch categories with expense data",
-      error: error.message,
-    });
-  }
-});
-
+// FIXED: Changed from '/expenses/:id' to '/:id'
 // UPDATE EXPENSE - FIXED
-router.put("/expenses/:id", async (req, res) => {
+router.put("/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -624,8 +711,9 @@ router.put("/expenses/:id", async (req, res) => {
   }
 });
 
+// FIXED: Changed from '/expenses/:id' to '/:id'
 // Delete expense
-router.delete("/expenses/:id", async (req, res) => {
+router.delete("/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -689,87 +777,6 @@ router.delete("/expenses/:id", async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to delete expense",
-      error: error.message,
-    });
-  }
-});
-
-// Get expense statistics
-router.get("/expenses/statistics/summary", async (req, res) => {
-  try {
-    const { startDate, endDate, period } = req.query;
-
-    let matchStage = {};
-
-    // Handle period-based filtering
-    if (period) {
-      const dateRange = getDateRangeForPeriod(period);
-      matchStage = { ...matchStage, ...dateRange };
-    }
-
-    // Date range filtering (for custom dates)
-    if (startDate || endDate) {
-      matchStage.date = matchStage.date || {};
-      if (startDate) matchStage.date.$gte = new Date(startDate);
-      if (endDate) matchStage.date.$lte = new Date(endDate);
-    }
-
-    const statistics = await Expense.aggregate([
-      { $match: matchStage },
-      {
-        $group: {
-          _id: null,
-          totalExpenses: { $sum: "$amount" },
-          averageExpense: { $avg: "$amount" },
-          expenseCount: { $sum: 1 },
-          minExpense: { $min: "$amount" },
-          maxExpense: { $max: "$amount" },
-        },
-      },
-    ]);
-
-    const categoryStats = await Expense.aggregate([
-      { $match: matchStage },
-      {
-        $lookup: {
-          from: "addexpensecategaries",
-          localField: "category",
-          foreignField: "_id",
-          as: "categoryInfo",
-        },
-      },
-      {
-        $unwind: "$categoryInfo",
-      },
-      {
-        $group: {
-          _id: "$category",
-          categoryName: { $first: "$categoryInfo.category" },
-          totalAmount: { $sum: "$amount" },
-          count: { $sum: 1 },
-        },
-      },
-      { $sort: { totalAmount: -1 } },
-    ]);
-
-    res.json({
-      success: true,
-      data: {
-        summary: statistics[0] || {
-          totalExpenses: 0,
-          averageExpense: 0,
-          expenseCount: 0,
-          minExpense: 0,
-          maxExpense: 0,
-        },
-        byCategory: categoryStats,
-      },
-    });
-  } catch (error) {
-    console.error("Error fetching expense statistics:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch expense statistics",
       error: error.message,
     });
   }

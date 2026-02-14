@@ -651,6 +651,7 @@ export const swapVirtualSequences = async (req, res) => {
     });
   }
 };
+
 export const getTabsGroupedByParentWithSequence = async (req, res) => {
   try {
     const tabs = await HTab.find({ isActive: true })
@@ -751,17 +752,18 @@ router.post("/reset-sequences", async (req, res) => {
   }
 });
 
-router.get("/h-tabs/visible", getVisibleTabs);
-router.get("/h-tabs/hierarchy", getTabHierarchy);
-router.put("/h-tabs/visibility", updateTabVisibility);
-router.put("/h-tabs/sequence", updateSequence);
-router.post("/h-tabs", createTab);
-router.get("/h-tabs:id", getTabById);
-router.put("/h-tabs:id", updateTab);
-router.delete("/h-tabs:id", deleteTab);
-router.get("/h-tabs", getHTabs);
-router.get("/h-tabs/virtual-sequences", getTabsGroupedByParentWithSequence);
-router.put("/h-tabs/virtual-sequence", updateVirtualSequence);
-router.post("/h-tabs/swap-sequences", swapVirtualSequences);
+// Corrected route mappings (base path is /api/h-tabs)
+router.get("/visible", getVisibleTabs);
+router.get("/hierarchy", getTabHierarchy);
+router.put("/visibility", updateTabVisibility);
+router.put("/sequence", updateSequence);
+router.post("/", createTab);
+router.get("/virtual-sequences", getTabsGroupedByParentWithSequence);
+router.put("/virtual-sequence", updateVirtualSequence);
+router.post("/swap-sequences", swapVirtualSequences);
+router.get("/:id", getTabById);
+router.put("/:id", updateTab);
+router.delete("/:id", deleteTab);
+router.get("/", getHTabs);
 
 export default router;

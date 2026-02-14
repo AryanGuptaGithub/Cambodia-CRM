@@ -65,29 +65,36 @@ const useDropdownOptions = () => {
       const categoryResponse = await axios.get(
         `${backendUrl}/api/accounts/category-type`
       );
-
-      const categories = categoryResponse.data.map((cat) => ({
-        value: cat._id,
-        label: cat.name,
-      }));
-      setCategoryOptions(categories);
+      // Access the 'data' property from the response
+      const categories = categoryResponse.data?.data || [];
+      if (!Array.isArray(categories)) {
+        throw new Error("Invalid category response format");
+      }
+      setCategoryOptions(
+        categories.map((cat) => ({
+          value: cat._id,
+          label: cat.name,
+        }))
+      );
 
       // Fetch destination options (used as source for payments out)
       const destinationResponse = await axios.get(
         `${backendUrl}/api/accounts/destinations`
       );
-
-      const destinations = destinationResponse.data.map((dest) => ({
+      const destinations = destinationResponse.data?.data || [];
+      if (!Array.isArray(destinations)) {
+        throw new Error("Invalid destination response format");
+      }
+      const destOptions = destinations.map((dest) => ({
         value: dest._id,
         label: dest.name,
         totalAmount: dest.totalAmount || 0,
       }));
-      setDestinationOptions(destinations);
-      setSourceOptions(destinations);
+      setDestinationOptions(destOptions);
+      setSourceOptions(destOptions);
 
       // Fetch supplier options
       const supplierResponse = await axios.get(`${backendUrl}/api/suppliers`);
-
       // Handle different possible response structures
       let suppliers = [];
       if (supplierResponse.data && Array.isArray(supplierResponse.data)) {
@@ -103,6 +110,8 @@ const useDropdownOptions = () => {
         Array.isArray(supplierResponse.data.suppliers)
       ) {
         suppliers = supplierResponse.data.suppliers;
+      } else {
+        throw new Error("Invalid supplier response format");
       }
 
       const supplierOptions = suppliers.map((supplier) => ({
@@ -192,7 +201,8 @@ const PurchaseOut = () => {
 
   const fetchPayments = async () => {
     try {
-      const response = await axios.get(`${backendUrl}/api/payments-out`);
+      const response = await axios.get(`${backendUrl}/api/purchase-out`);
+      // Assuming backend returns array directly; adjust if needed
       setPayments(response.data || []);
     } catch (error) {
       console.error("Error fetching payments:", error);
@@ -203,7 +213,14 @@ const PurchaseOut = () => {
   const fetchSuppliers = async () => {
     try {
       const response = await axios.get(`${backendUrl}/api/suppliers`);
-      setSuppliers(response.data || []);
+      // Handle nested data if present
+      let suppliersData = response.data;
+      if (response.data?.data && Array.isArray(response.data.data)) {
+        suppliersData = response.data.data;
+      } else if (response.data?.suppliers && Array.isArray(response.data.suppliers)) {
+        suppliersData = response.data.suppliers;
+      }
+      setSuppliers(suppliersData || []);
     } catch (error) {
       console.error("Error fetching suppliers:", error);
       showToast("error", "Failed to fetch suppliers");
@@ -213,8 +230,9 @@ const PurchaseOut = () => {
   const fetchInvoices = async () => {
     try {
       setInvoicesLoading(true);
-      const response = await axios.get(`${backendUrl}/api/purchase-invoice`);
-      const invoicesData = response.data || [];
+      const response = await axios.get(`${backendUrl}/api/purchase/invoice`);
+      // Assuming backend returns array directly; adjust if needed
+      const invoicesData = response.data?.data || response.data || [];
       setInvoices(invoicesData);
 
       if (invoicesData.length === 0) {
@@ -237,7 +255,7 @@ const PurchaseOut = () => {
       const response = await axios.get(
         `${backendUrl}/api/accounts/destinations`
       );
-      const freshBanks = response.data.map((bank) => ({
+      const freshBanks = (response.data?.data || []).map((bank) => ({
         value: bank._id,
         label: bank.name,
         totalAmount: bank.totalAmount || 0,
@@ -489,7 +507,7 @@ const PurchaseOut = () => {
         // Delete from backend
         await Promise.all(
           selected.map((id) =>
-            axios.delete(`${backendUrl}/api/payments-out/${id}`)
+            axios.delete(`${backendUrl}/api/purchase-out/${id}`)
           )
         );
         // Update local state
@@ -634,7 +652,7 @@ const PurchaseOut = () => {
       };
 
       const response = await axios.post(
-        `${backendUrl}/api/payments-out`,
+        `${backendUrl}/api/purchase-out`,
         paymentToAdd
       );
 
@@ -942,7 +960,7 @@ const PurchaseOut = () => {
                           if (confirm.isConfirmed) {
                             try {
                               await axios.delete(
-                                `${backendUrl}/api/payments-out/${
+                                `${backendUrl}/api/purchase-out/${
                                   payment._id || payment.id
                                 }`
                               );

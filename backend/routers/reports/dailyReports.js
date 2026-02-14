@@ -36,7 +36,8 @@ const generateFilename = (selectedTab, selectedSaleType, dateRange) => {
   return `${filename}.xlsx`;
 };
 
-router.get("/dailyReports", async (req, res) => {
+// FIXED: Changed from '/dailyReports' to '/'
+router.get("/", async (req, res) => {
   try {
     const {
       saleType,
@@ -579,8 +580,9 @@ router.get("/dailyReports", async (req, res) => {
   }
 });
 
+// FIXED: Changed from '/dailyReports/export' to '/export'
 // Route for Excel export with staff contact lookup
-router.get("/dailyReports/export", async (req, res) => {
+router.get("/export", async (req, res) => {
   try {
     const {
       saleType,
@@ -1015,7 +1017,8 @@ router.get("/dailyReports/export", async (req, res) => {
   }
 });
 
-router.get("/dailyReports/types", async (req, res) => {
+// FIXED: Changed from '/dailyReports/types' to '/types'
+router.get("/types", async (req, res) => {
   try {
     const types = await SaleType.find(
       {},

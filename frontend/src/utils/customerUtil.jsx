@@ -50,7 +50,7 @@ export const validateCustomerForm = (form) => {
 
 export const fetchMRList = async () => {
   try {
-    const response = await axios.get(`${backendUrl}/api/staffs`);
+    const response = await axios.get(`${backendUrl}/api/staff`);
     const mrData = response.data || [];
     return { success: true, data: mrData };
   } catch (error) {
@@ -73,28 +73,42 @@ export const fetchZones = async () => {
 export const fetchBusinessTypes = async () => {
   try {
     const response = await axios.get(`${backendUrl}/api/business-types`);
-    let businessTypesData = [];
-
-    if (response.data && Array.isArray(response.data)) {
-      businessTypesData = response.data;
-    } else if (
-      response.data &&
-      response.data.data &&
-      Array.isArray(response.data.data)
-    ) {
-      businessTypesData = response.data.data;
-    } else if (
-      response.data &&
-      response.data.success &&
-      Array.isArray(response.data.data)
-    ) {
-      businessTypesData = response.data.data;
+    
+    console.log('Business types response:', response.data);
+    
+    // Handle different response formats
+    if (response.data && response.data.success) {
+      return { 
+        success: true, 
+        data: response.data.data || [] 
+      };
+    }
+    
+    // Fallback for direct array response
+    if (Array.isArray(response.data)) {
+      return { 
+        success: true, 
+        data: response.data 
+      };
     }
 
-    return { success: true, data: businessTypesData };
+    return { 
+      success: false, 
+      error: "Invalid response format" 
+    };
   } catch (error) {
     console.error("Error fetching business types:", error);
-    return { success: false, error: "Failed to load business types" };
+    
+    // More detailed error logging
+    if (error.response) {
+      console.error("Response error:", error.response.data);
+      console.error("Status:", error.response.status);
+    }
+    
+    return { 
+      success: false, 
+      error: error.response?.data?.message || "Failed to load business types" 
+    };
   }
 };
 

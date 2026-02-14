@@ -574,7 +574,7 @@ const fetchOperationCostCOGSData = async (params) => {
 };
 
 // Main API endpoint
-router.get("/operation-cost-cogs-ratio", async (req, res) => {
+router.get("/", async (req, res) => {
   try {    
     const result = await fetchOperationCostCOGSData({
       ...req.query,
@@ -592,7 +592,7 @@ router.get("/operation-cost-cogs-ratio", async (req, res) => {
 });
 
 // Export endpoint - supports both calculation methods
-router.get("/operation-cost-cogs-ratio/export", async (req, res) => {
+router.get("/export", async (req, res) => {
   try {    
     const useSaleBasedCOGS = req.query.calculationMethod === 'sale_based';
     

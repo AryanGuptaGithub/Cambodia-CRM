@@ -4,8 +4,8 @@ import MRCreditSales from "../models/MRCreditSales.js"; // Import the MRCreditSa
 
 const router = express.Router();
 
-// GET /api/salesummaries/overdue
-router.get("/overdue", async (req, res) => {
+// GET /api/overdue   (changed from "/overdue" to "/")
+router.get("/", async (req, res) => {
   try {
     const { currentDate } = req.query;
     const referenceDate = currentDate ? new Date(currentDate) : new Date();

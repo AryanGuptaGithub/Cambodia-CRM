@@ -162,8 +162,8 @@ const calculateProfitsForReturns = async (returns) => {
   }
 };
 
-// GET /api/pl-report - Get combined Profit & Loss report
-router.get("/pl-report", async (req, res) => {
+// GET / - Main Profit & Loss report (was /pl-report)
+router.get("/", async (req, res) => {
   try {
     const {
       startDate,
@@ -528,8 +528,8 @@ router.get("/pl-report", async (req, res) => {
   }
 });
 
-// GET /api/pl-report/summary - Get summary statistics (Updated)
-router.get("/pl-report/summary", async (req, res) => {
+// GET /summary - Summary statistics (was /pl-report/summary)
+router.get("/summary", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
     let saleFilter = {};
@@ -667,8 +667,8 @@ router.get("/pl-report/summary", async (req, res) => {
   }
 });
 
-// GET /api/pl-report/orders - Get orders breakdown
-router.get("/pl-report/orders", async (req, res) => {
+// GET /orders - Orders breakdown (was /pl-report/orders)
+router.get("/orders", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
 
@@ -755,8 +755,8 @@ router.get("/pl-report/orders", async (req, res) => {
   }
 });
 
-// NEW: Route to update profit/loss for existing sales
-router.post("/pl-report/update-profits", async (req, res) => {
+// POST /update-profits - Update profit/loss for existing sales (was /pl-report/update-profits)
+router.post("/update-profits", async (req, res) => {
   try {
     const { startDate, endDate } = req.body;
     

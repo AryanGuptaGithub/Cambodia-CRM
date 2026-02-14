@@ -5,7 +5,8 @@ import ExcelJS from 'exceljs';
 
 const router = express.Router();
 
-router.get("/reports/cash-sales", async (req, res) => {
+
+router.get("/", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
 
@@ -89,7 +90,7 @@ router.get("/reports/cash-sales", async (req, res) => {
           salesQty: "$products.salesQty",
           bonusQty: "$products.bonusQty",
           totalQty: "$products.totalQty",
-          sellingPrice: "$products.sellingPrice", // Add sellingPrice
+          sellingPrice: "$products.sellingPrice",
           amount: "$products.amount",
           discount: "$products.discount",
           netSellingAmount: "$products.netSellingAmount",
@@ -114,7 +115,7 @@ router.get("/reports/cash-sales", async (req, res) => {
             salesQty: sale.salesQty,
             bonusQty: sale.bonusQty,
             totalQty: sale.totalQty,
-            sellingPrice: sale.sellingPrice, // Add sellingPrice
+            sellingPrice: sale.sellingPrice,
             amount: sale.amount,
             discount: sale.discount,
             netSellingAmount: sale.netSellingAmount
@@ -126,7 +127,7 @@ router.get("/reports/cash-sales", async (req, res) => {
         delete newSale.salesQty;
         delete newSale.bonusQty;
         delete newSale.totalQty;
-        delete newSale.sellingPrice; // Add this
+        delete newSale.sellingPrice;
         delete newSale.amount;
         delete newSale.discount;
         delete newSale.netSellingAmount;
@@ -140,7 +141,7 @@ router.get("/reports/cash-sales", async (req, res) => {
           salesQty: sale.salesQty,
           bonusQty: sale.bonusQty,
           totalQty: sale.totalQty,
-          sellingPrice: sale.sellingPrice, // Add sellingPrice
+          sellingPrice: sale.sellingPrice,
           amount: sale.amount,
           discount: sale.discount,
           netSellingAmount: sale.netSellingAmount
@@ -179,8 +180,12 @@ router.get("/reports/cash-sales", async (req, res) => {
   }
 });
 
-// Add this Excel export route for cash sales
-router.get("/reports/cash-sales/export/excel", async (req, res) => {
+/**
+ * GET /export/excel
+ * Export cash sales report to Excel
+ * Accessible at: /api/reports/cash-sales/export/excel
+ */
+router.get("/export/excel", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
     const matchStage = {
@@ -263,7 +268,7 @@ router.get("/reports/cash-sales/export/excel", async (req, res) => {
           salesQty: "$products.salesQty",
           bonusQty: "$products.bonusQty",
           totalQty: "$products.totalQty",
-          sellingPrice: "$products.sellingPrice", // Add sellingPrice
+          sellingPrice: "$products.sellingPrice",
           amount: "$products.amount",
           discount: "$products.discount",
           netSellingAmount: "$products.netSellingAmount",
@@ -279,7 +284,7 @@ router.get("/reports/cash-sales/export/excel", async (req, res) => {
 
     const worksheet = workbook.addWorksheet('Cash Sales Report');
     
-    // Define columns - Updated based on the image format
+    // Define columns
     worksheet.columns = [
       { header: 'S.r.No', key: 'serialNo', width: 8 },
       { header: 'Product Name', key: 'productName', width: 30 },
@@ -311,7 +316,7 @@ router.get("/reports/cash-sales/export/excel", async (req, res) => {
     let totalQty = 0;
     let totalAmount = 0;
     
-    // Group sales by invoice to match the screenshot format
+    // Group sales by invoice
     const invoiceGroups = {};
     
     // First group by invoice number
@@ -410,7 +415,7 @@ router.get("/reports/cash-sales/export/excel", async (req, res) => {
     });
 
     worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-      if (rowNumber <= rowIndex) { // Only apply to rows with data
+      if (rowNumber <= rowIndex) {
         row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
           cell.border = {
             top: { style: 'thin' },
@@ -449,7 +454,7 @@ router.get("/reports/cash-sales/export/excel", async (req, res) => {
     res.send(buffer);
 
   } catch (error) {
-    console.error("Error in /reports/cash-sales/export/excel:", error);
+    console.error("Error in /export/excel:", error);
     res.status(500).json({
       success: false,
       message: "Failed to generate Excel export",

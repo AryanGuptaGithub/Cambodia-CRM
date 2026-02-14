@@ -5,8 +5,12 @@ import ExcelJS from "exceljs";
 
 const router = express.Router();
 
-// Existing GET route for new-customers
-router.get("/new-customers", async (req, res) => {
+/**
+ * GET /
+ * Get new customers report
+ * Accessible at: /api/reports/new-customers
+ */
+router.get("/", async (req, res) => {
   try {
     const {
       page = 1,
@@ -293,11 +297,12 @@ router.get("/new-customers", async (req, res) => {
   }
 });
 
-// NEW: Excel Export Endpoint
-// ... (keep all the previous code the same until the export endpoint)
-
-// NEW: Excel Export Endpoint (Updated - Removed Contact No, kept only Contact MR)
-router.get("/new-customers/export", async (req, res) => {
+/**
+ * GET /export
+ * Excel Export Endpoint
+ * Accessible at: /api/reports/new-customers/export
+ */
+router.get("/export", async (req, res) => {
   try {
     const {
       search = "",
@@ -388,7 +393,7 @@ router.get("/new-customers/export", async (req, res) => {
           'Sr.No': index + 1,
           'MR ID': mrIdToUse,
           'MR Name': staffDetails?.originalName || mrName,
-          'Contact': staffDetails?.contactNo || "N/A", // Changed from 'Contact No' to 'Contact'
+          'Contact': staffDetails?.contactNo || "N/A",
           'Email': staffDetails?.email || "N/A",
           'Team Name': staffDetails?.teamName || "N/A",
           'Zone': item.zone || "N/A",
@@ -479,7 +484,7 @@ router.get("/new-customers/export", async (req, res) => {
           'Total MRs': item.totalMRs || 0,
           'New Customers': item.newCustomers || 0,
           'Average per MR': item.averagePerMR?.toFixed(1) || 0,
-          'Contact MR': contactMR, // Only this column for Zone Wise
+          'Contact MR': contactMR,
           'Date': item.latestDate
             ? new Date(item.latestDate).toLocaleDateString()
             : new Date().toLocaleDateString(),
@@ -567,7 +572,7 @@ router.get("/new-customers/export", async (req, res) => {
 
     worksheet.addRow([]);
 
-    // Add data headers - UPDATED to remove Contact No
+    // Add data headers
     if (reportType === "MR Wise") {
       const headers = ['Sr.No', 'MR ID', 'MR Name', 'Contact', 'Email', 'Team Name', 'Zone', 'New Customers', 'Date'];
       const headerRow = worksheet.addRow(headers);

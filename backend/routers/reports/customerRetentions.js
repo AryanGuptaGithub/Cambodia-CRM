@@ -5,8 +5,7 @@ import ExcelJS from "exceljs";
 
 const router = express.Router();
 
-// Customer Retention by Zone (updated to include _id in response)
-router.get("/customer-retention", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const { page = 1, limit = 7, search = "", period = "all" } = req.query;
     const pageNum = parseInt(page);
@@ -84,7 +83,7 @@ router.get("/customer-retention", async (req, res) => {
           paginated: [
             {
               $group: {
-                _id: "$zone", // This is the zone ID
+                _id: "$zone",
                 zoneName: { $first: "$zone" },
                 totalCustomers: { $sum: 1 },
                 retainedCustomers: {
@@ -197,13 +196,12 @@ router.get("/customer-retention", async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("❌ Error in /customer-retention:", error);
+    console.error("❌ Error in customer retention:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 });
 
-// NEW: Excel Export Endpoint for Customer Retention (updated)
-router.get("/customer-retention/export", async (req, res) => {
+router.get("/export", async (req, res) => {
   try {
     const { search = "", period = "all" } = req.query;
 
@@ -472,8 +470,6 @@ router.get("/customer-retention/export", async (req, res) => {
   }
 });
 
-// ... (keep the existing annual and monthly endpoints as they are - they remain unchanged)
-// Annual Customer Repeat Rate (individual customer records)
 router.get("/annual-customer-repeat-rate", async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -496,7 +492,7 @@ router.get("/annual-customer-repeat-rate", async (req, res) => {
       };
     }
 
-    // 🔍 Match filter for search and date
+    // Match filter for search and date
     const matchQuery = { ...dateFilter };
     if (search) {
       matchQuery.$or = [
@@ -506,7 +502,7 @@ router.get("/annual-customer-repeat-rate", async (req, res) => {
       ];
     }
 
-    // 🧮 Aggregation pipeline for annual repeat rate
+    // Aggregation pipeline for annual repeat rate
     const pipeline = [
       { $match: matchQuery },
       {
@@ -561,7 +557,7 @@ router.get("/annual-customer-repeat-rate", async (req, res) => {
 
     const records = await SaleSummary.aggregate(pipeline);
 
-    // 📊 Calculate summary statistics
+    // Calculate summary statistics
     const summaryPipeline = [
       { $match: matchQuery },
       {
@@ -625,7 +621,8 @@ router.get("/annual-customer-repeat-rate", async (req, res) => {
             newCustomers: 0,
             repeatRate: 0,
           };
-    // ✅ Format the response records
+    
+    // Format the response records
     const formattedRecords = records.map((record) => ({
       customerCode: record.customerCode,
       customerName: record.customerName || "N/A",
@@ -636,7 +633,7 @@ router.get("/annual-customer-repeat-rate", async (req, res) => {
       totalAmount: record.totalAmount || 0,
     }));
 
-    // ✅ Send response
+    // Send response
     res.status(200).json({
       success: true,
       data: {
@@ -666,7 +663,6 @@ router.get("/annual-customer-repeat-rate", async (req, res) => {
   }
 });
 
-// Monthly Customer Repeat Rate (similar to annual but for monthly period)
 router.get("/monthly-customer-repeat-rate", async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -689,7 +685,7 @@ router.get("/monthly-customer-repeat-rate", async (req, res) => {
       };
     }
 
-    // 🔍 Match filter for search and date
+    // Match filter for search and date
     const matchQuery = { ...dateFilter };
     if (search) {
       matchQuery.$or = [
@@ -699,7 +695,7 @@ router.get("/monthly-customer-repeat-rate", async (req, res) => {
       ];
     }
 
-    // 🧮 Aggregation pipeline for monthly repeat rate
+    // Aggregation pipeline for monthly repeat rate
     const pipeline = [
       { $match: matchQuery },
       {
@@ -754,7 +750,7 @@ router.get("/monthly-customer-repeat-rate", async (req, res) => {
 
     const records = await SaleSummary.aggregate(pipeline);
 
-    // 📊 Calculate summary statistics
+    // Calculate summary statistics
     const summaryPipeline = [
       { $match: matchQuery },
       {
@@ -819,7 +815,7 @@ router.get("/monthly-customer-repeat-rate", async (req, res) => {
             repeatRate: 0,
           };
 
-    // ✅ Format the response records
+    // Format the response records
     const formattedRecords = records.map((record) => ({
       customerCode: record.customerCode,
       customerName: record.customerName || "N/A",
@@ -830,7 +826,7 @@ router.get("/monthly-customer-repeat-rate", async (req, res) => {
       totalAmount: record.totalAmount || 0,
     }));
 
-    // ✅ Send response
+    // Send response
     res.status(200).json({
       success: true,
       data: {

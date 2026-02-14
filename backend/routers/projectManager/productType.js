@@ -1,7 +1,9 @@
 import ProductType from "../../models/projectManger/productType.js"
 import express from "express";
 const router = express.Router();
-router.get('/product-types', async (req, res) => {
+
+// GET ALL PRODUCT TYPES
+router.get('/', async (req, res) => {
   try {
     const productTypes = await ProductType.find().sort({ name: 1 });
     res.json({
@@ -19,8 +21,8 @@ router.get('/product-types', async (req, res) => {
   }
 });
 
-// GET /api/product-types/:id - Get single product type
-router.get('/product-types/:id', async (req, res) => {
+// GET SINGLE PRODUCT TYPE
+router.get('/:id', async (req, res) => {
   try {
     const productType = await ProductType.findById(req.params.id);
     

@@ -2857,7 +2857,7 @@ const Sales = () => {
   const checkPurchaseInventories = useCallback(async () => {
     try {
       setCheckingPurchaseInventories(true);
-      const response = await axios.get(`${backendUrl}/api/purchases/check`);
+      const response = await axios.get(`${backendUrl}/api/purchase/check`);
       setHasPurchaseInventories(
         response.data.exists || response.data.count > 0,
       );

@@ -386,7 +386,7 @@ const usePayrollForm = () => {
 
     try {
       setCalculatingSalary(true);
-      const endpoint = `${backendUrl}/api/payrolls/calculate/${employeeId}/${period}`;      
+      const endpoint = `${backendUrl}/api/hrm/payroll/calculate/${employeeId}/${period}`;      
       const response = await axios.get(endpoint);
       if (response.data.success && response.data.data) {
         const { salaryCalculation } = response.data.data;
@@ -598,7 +598,7 @@ const usePayrollForm = () => {
         netSalary: parseFloat(form.netSalary) || 0,
       };
 
-      const res = await axios.post(`${backendUrl}/api/payrolls`, payload, {
+      const res = await axios.post(`${backendUrl}/api/hrm/payroll`, payload, {
         headers: { "Content-Type": "application/json" },
       });
       

@@ -4,8 +4,9 @@ import ExcelJS from "exceljs";
 
 const router = express.Router();
 
+// FIXED: Changed from '/customer-product-acceptance-rate' to '/'
 // GET endpoint for paginated data
-router.get("/customer-product-acceptance-rate", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 7;
@@ -242,9 +243,9 @@ router.get("/customer-product-acceptance-rate", async (req, res) => {
   }
 });
 
+// FIXED: Changed from '/customer-product-acceptance-rate/export' to '/export'
 // Export to Excel endpoint
-// Export to Excel endpoint
-router.get("/customer-product-acceptance-rate/export", async (req, res) => {
+router.get("/export", async (req, res) => {
   try {
     const search = req.query.search?.trim() || "";
     const matchQuery = {};

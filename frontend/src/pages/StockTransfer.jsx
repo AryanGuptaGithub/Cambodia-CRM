@@ -131,7 +131,7 @@ const StockTransfer = () => {
   const fetchMRList = useCallback(async () => {
     try {
       setMrListLoading(true);
-      const response = await axios.get(`${backendUrl}/api/staffs`);
+      const response = await axios.get(`${backendUrl}/api/staff`);
       const data = response.data || [];
       if (data && data.length > 0) {
         setMrList(data);
@@ -218,7 +218,7 @@ const StockTransfer = () => {
   const getNextStockTransferNumber = useCallback(async () => {
     try {
       const response = await axios.get(
-        `${backendUrl}/api/stock-transfers/next-number`
+        `${backendUrl}/api/stock-transfer/next-number`
       );
       if (response.data.success) {
         return response.data.nextNumber;
@@ -244,7 +244,7 @@ const StockTransfer = () => {
   const fetchProducts = useCallback(async () => {
     try {
       // Fetch products with LC and stock information
-      const response = await axios.get(`${backendUrl}/api/dropdown-products`);
+      const response = await axios.get(`${backendUrl}/api/products/dropdown`);
       const productsData = response.data?.data || [];
 
       if (!Array.isArray(productsData)) {
@@ -334,7 +334,7 @@ const StockTransfer = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${backendUrl}/api/stock-transfers`);
+      const response = await fetch(`${backendUrl}/api/stock-transfer`);
       if (!response.ok) {
         throw new Error("Failed to fetch general transfers");
       }
@@ -352,7 +352,7 @@ const StockTransfer = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${backendUrl}/api/stock-transfers-to-mr`);
+      const response = await fetch(`${backendUrl}/api/stock-transfer-to-mr`);
       if (!response.ok) {
         throw new Error("Failed to fetch MR transfers");
       }
@@ -616,13 +616,13 @@ const StockTransfer = () => {
       let requestData = { ...formData };
 
       if (activeTab === "general") {
-        url = `${backendUrl}/api/stock-transfers/${formData._id}`;
+        url = `${backendUrl}/api/stock-transfer/${formData._id}`;
         delete requestData.stockTransferToMr;
         delete requestData.stockTransferFromMrToMain;
         delete requestData.mrName;
         delete requestData.mrId;
       } else {
-        url = `${backendUrl}/api/stock-transfers-to-mr/${formData._id}`;
+        url = `${backendUrl}/api/stock-transfer-to-mr/${formData._id}`;
         delete requestData.transferType;
         delete requestData.source;
         delete requestData.destination;
@@ -862,8 +862,8 @@ const StockTransfer = () => {
           selectedRows.map((id) => {
             const url =
               activeTab === "general"
-                ? `${backendUrl}/api/stock-transfers/${id}`
-                : `${backendUrl}/api/stock-transfers-to-mr/${id}`;
+                ? `${backendUrl}/api/stock-transfer/${id}`
+                : `${backendUrl}/api/stock-transfer-to-mr/${id}`;
             return fetch(url, {
               method: "DELETE",
             });
@@ -900,8 +900,8 @@ const StockTransfer = () => {
       try {
         const url =
           activeTab === "general"
-            ? `${backendUrl}/api/stock-transfers/${transferData._id}`
-            : `${backendUrl}/api/stock-transfers-to-mr/${transferData._id}`;
+            ? `${backendUrl}/api/stock-transfer/${transferData._id}`
+            : `${backendUrl}/api/stock-transfer-to-mr/${transferData._id}`;
 
         const res = await axios.delete(url);
         if (res.status === 200) {

@@ -1,14 +1,22 @@
-
 import express from "express";
-import BusinessType  from "../../models/master/businessTypes.js";
+import BusinessType from "../../models/master/businessTypes.js";
+
 const router = express.Router();
 
-// GET /api/business-types - Get all business types
-router.get("/business-types", async (req, res) => {
+// GET all business types
+router.get("/", async (req, res) => {
   try {
     const businessTypes = await BusinessType.find().sort({ name: 1 });
 
-    res.json({
+    if (!businessTypes || businessTypes.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: [],
+        message: "No business types found",
+      });
+    }
+
+    res.status(200).json({
       success: true,
       data: businessTypes,
       message: "Business types fetched successfully",
@@ -18,6 +26,7 @@ router.get("/business-types", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Server error while fetching business types",
+      error: error.message,
     });
   }
 });

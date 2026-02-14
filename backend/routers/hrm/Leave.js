@@ -231,8 +231,8 @@ router.get("/holidays", async (req, res) => {
   }
 });
 
-// Get all leaves with swapleave type
-router.get("/leaves", async (req, res) => {
+// Get all leaves with swapleave type (root endpoint)
+router.get("/", async (req, res) => {
   try {
     const { leaveType, status } = req.query;
     let filter = {};
@@ -253,8 +253,8 @@ router.get("/leaves", async (req, res) => {
   }
 });
 
-// Apply for leave with swapleave type
-router.post("/leaves", async (req, res) => {
+// Apply for leave with swapleave type (root endpoint)
+router.post("/", async (req, res) => {
   try {
     const { userId, leaveDate, reason, leaveType, status } = req.body;
 

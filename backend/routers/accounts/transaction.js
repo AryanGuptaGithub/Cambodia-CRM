@@ -529,8 +529,9 @@ const checkSourceAccountBalance = async (sourceAccountId, amount, transactionTyp
   return true;
 };
 
+// FIXED: Changed from '/transaction' to '/'
 // Create transaction
-router.post("/transaction", async (req, res) => {
+router.post("/", async (req, res) => {
   const session = await mongoose.startSession();
 
   try {
@@ -654,8 +655,9 @@ const isTemplateRow = (rowData) => {
   return true; // This is a template row
 };
 
+// FIXED: Changed from '/transaction/import' to '/import'
 // Enhanced Import Route with better formula handling
-router.post('/transaction/import', upload.single('file'), async (req, res) => {
+router.post('/import', upload.single('file'), async (req, res) => {
   const session = await mongoose.startSession();
 
   try {
@@ -1031,8 +1033,9 @@ router.post('/transaction/import', upload.single('file'), async (req, res) => {
   }
 });
 
+// FIXED: Changed from '/transaction' to '/'
 // Get all transactions with pagination and filtering
-router.get("/transaction", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const { 
       startDate, 
@@ -1096,8 +1099,9 @@ router.get("/transaction", async (req, res) => {
   }
 });
 
+// FIXED: Route remains '/:id' (correct as is)
 // Get single transaction by ID
-router.get("/transaction/:id", async (req, res) => {
+router.get("/:id", async (req, res) => {
   try {
     const transaction = await Transaction.findById(req.params.id)
       .populate("categoryType", "name")
@@ -1125,8 +1129,9 @@ router.get("/transaction/:id", async (req, res) => {
   }
 });
 
+// FIXED: Route remains '/:id' (correct as is)
 // Update transaction
-router.put("/transaction/:id", async (req, res) => {
+router.put("/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -1233,8 +1238,9 @@ router.put("/transaction/:id", async (req, res) => {
   }
 });
 
+// FIXED: Route remains '/:id' (correct as is)
 // Delete single transaction
-router.delete("/transaction/:id", async (req, res) => {
+router.delete("/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -1282,8 +1288,9 @@ router.delete("/transaction/:id", async (req, res) => {
   }
 });
 
+// FIXED: Changed from '/transactions' to '/bulk-delete'
 // Bulk delete transactions
-router.delete("/transactions", async (req, res) => {
+router.delete("/bulk-delete", async (req, res) => {
   const { ids } = req.body;
   if (!Array.isArray(ids) || ids.length === 0) {
     return res.status(400).json({
@@ -1341,8 +1348,9 @@ router.delete("/transactions", async (req, res) => {
   }
 });
 
+// FIXED: Changed from '/transaction/import/test' to '/import/test'
 // Test import endpoint for debugging
-router.post('/transaction/import/test', upload.single('file'), async (req, res) => {
+router.post('/import/test', upload.single('file'), async (req, res) => {
   try {
     const file = req.file;
     

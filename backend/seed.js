@@ -14,7 +14,7 @@ import ProductType from "./models/projectManger/productType.js";
 import ProductPackingType from "./models/projectManger/ProductPackingType.js";
 import AllowanceType from "./models/Hrm/AllowanceType.js";
 import MRCash from "./models/accounts/MRCash.js";
-import Staff from "./models/staffMember/staff.js"
+import Staff from "./models/staffMember/staff.js";
 
 dotenv.config();
 
@@ -23,6 +23,7 @@ const MONGO_URI = process.env.MONGODB_URI;
 async function connectDB() {
   try {
     await mongoose.connect(MONGO_URI);
+    console.log("✅ MongoDB connected successfully");
   } catch (err) {
     console.error("❌ MongoDB connection failed:", err);
     process.exit(1);
@@ -52,6 +53,7 @@ async function seedUsers() {
     const user = new User(u);
     await user.save();
   }
+  console.log("✅ Users seeded successfully");
 }
 
 async function seedDestinations() {
@@ -62,6 +64,7 @@ async function seedDestinations() {
     { name: "Company Account", code: "company_account", totalAmount: 0 },
   ];
   await Destination.insertMany(destinations);
+  console.log("✅ Destinations seeded successfully");
 }
 
 async function seedCategoryTypes() {
@@ -75,6 +78,7 @@ async function seedCategoryTypes() {
     { name: "Payment Inward", code: "payment_inward" },
   ];
   await CategoryType.insertMany(categoryTypes);
+  console.log("✅ Category types seeded successfully");
 }
 
 async function seedTransactionTypes() {
@@ -86,11 +90,21 @@ async function seedTransactionTypes() {
     { name: "Adjustment", code: "adjustment" },
   ];
   await TransactionType.insertMany(transactionTypes);
+  console.log("✅ Transaction types seeded successfully");
+}
+
+// seedCambodia.js
+
+// Assumes you already imported mongoose models:
+// const Province = require("./models/Province");
+// const Zone = require("./models/Zone");
+
+function slugify(text) {
+  return text.toLowerCase().trim().replace(/\s+/g, "_");
 }
 
 async function seedProvinces() {
   await Province.deleteMany({});
-
   const provinces = [
     { name: "Banteay Meanchey", code: "banteay_meanchey" },
     { name: "Battambang", code: "battambang" },
@@ -113,78 +127,304 @@ async function seedProvinces() {
     { name: "Ratanakiri", code: "ratanakiri" },
     { name: "Siem Reap", code: "siem_reap" },
     { name: "Sihanoukville", code: "sihanoukville" },
-    { name: "Stung Treng", code: "stung_treng" },
-    { name: "Svay Rieng", code: "svay_rieng" },
-    { name: "Takeo", code: "takeo" },
-    { name: "Tbong Khmum", code: "tbong_khmum" },
+    // { name: "Stung Treng", code: "stung_treng" },
+    // { name: "Svay Rieng", code: "svay_rieng" },
+    // { name: "Takeo", code: "takeo" },
+    // { name: "Tbong Khmum", code: "tbong_khmum" },
   ];
-
   await Province.insertMany(provinces);
+  console.log("✅ Provinces seeded successfully");
 }
 
 async function seedZones() {
   try {
     await Zone.deleteMany({});
 
-    // 1️⃣ Load all provinces
+    // Load all provinces
     const provinces = await Province.find({});
     const provinceMap = {};
-
     provinces.forEach((p) => {
       provinceMap[p.name.trim().toLowerCase()] = p._id;
     });
 
-    // 2️⃣ Zone list with CORRECT province names
+    // Complete list of zones (districts) for all provinces in Cambodia
     const zones = [
-      // Phnom Penh
-      { name: "7 Makara", province: "phnom penh" },
-      { name: "Toul Kork", province: "phnom penh" },
-      { name: "Chamkamon", province: "phnom penh" },
+      // Phnom Penh (14 districts)
+      { name: "Chamkar Mon", province: "phnom penh" },
+      { name: "Doun Penh", province: "phnom penh" },
+      { name: "Prampir Meakkakra", province: "phnom penh" },
+      { name: "Tuol Kouk", province: "phnom penh" },
+      { name: "Dangkao", province: "phnom penh" },
+      { name: "Mean Chey", province: "phnom penh" },
       { name: "Russey Keo", province: "phnom penh" },
+      { name: "Sen Sok", province: "phnom penh" },
+      { name: "Pou Senchey", province: "phnom penh" },
+      { name: "Chroy Changvar", province: "phnom penh" },
+      { name: "Prek Pnov", province: "phnom penh" },
+      { name: "Chbar Ampov", province: "phnom penh" },
+      { name: "Boeng Keng Kang", province: "phnom penh" },
+      { name: "Kamboul", province: "phnom penh" },
 
-      // Takeo
-      { name: "Angkor Borey", province: "takeo" },
-      { name: "Banan", province: "takeo" },
-      { name: "Doun Keo", province: "takeo" },
-      { name: "Prey Kabas", province: "takeo" },
-      { name: "Tram Kok", province: "takeo" },
+      // Banteay Meanchey (9 districts)
+      { name: "Mongkol Borei", province: "banteay meanchey" },
+      { name: "Phnum Srok", province: "banteay meanchey" },
+      { name: "Preah Netr Preah", province: "banteay meanchey" },
+      { name: "Ou Chrov", province: "banteay meanchey" },
+      { name: "Serei Saophoan", province: "banteay meanchey" },
+      { name: "Thma Puok", province: "banteay meanchey" },
+      { name: "Svay Chek", province: "banteay meanchey" },
+      { name: "Malai", province: "banteay meanchey" },
+      { name: "Paoy Paet", province: "banteay meanchey" },
 
-      // Siem Reap
-      { name: "Krong Siem Reap", province: "siem reap" },
-      { name: "Damdek", province: "siem reap" },
+      // Battambang (14 districts)
+      { name: "Banan", province: "battambang" },
+      { name: "Thma Koul", province: "battambang" },
+      { name: "Battambang", province: "battambang" },
+      { name: "Bavel", province: "battambang" },
+      { name: "Aek Phnum", province: "battambang" },
+      { name: "Moung Ruessei", province: "battambang" },
+      { name: "Rotanak Mondol", province: "battambang" },
+      { name: "Sangkae", province: "battambang" },
+      { name: "Samlout", province: "battambang" },
+      { name: "Sampov Lun", province: "battambang" },
+      { name: "Phnum Proek", province: "battambang" },
+      { name: "Kamrieng", province: "battambang" },
+      { name: "Koas Krala", province: "battambang" },
+      { name: "Rukhak Kiri", province: "battambang" },
 
-      // Banteay Meanchey
-      { name: "Poipet", province: "banteay meanchey" },
-      { name: "Mongkol Borey", province: "banteay meanchey" },
-
-      // Battambang
-      { name: "Krong Battambang", province: "battambang" },
-      { name: "Moung Russey", province: "battambang" },
-
-      // Kampong Cham
+      // Kampong Cham (10 districts)
+      { name: "Batheay", province: "kampong cham" },
+      { name: "Chamkar Leu", province: "kampong cham" },
+      { name: "Cheung Prey", province: "kampong cham" },
       { name: "Kampong Cham", province: "kampong cham" },
+      { name: "Kampong Siem", province: "kampong cham" },
+      { name: "Kang Meas", province: "kampong cham" },
+      { name: "Koh Sotin", province: "kampong cham" },
+      { name: "Prey Chhor", province: "kampong cham" },
+      { name: "Srey Santhor", province: "kampong cham" },
+      { name: "Stueng Trang", province: "kampong cham" },
 
-      // Tbong Khmum
-      { name: "Memot", province: "tbong khmum" },
+      // Kampong Chhnang (8 districts)
+      { name: "Baribour", province: "kampong chhnang" },
+      { name: "Chol Kiri", province: "kampong chhnang" },
+      { name: "Kampong Chhnang", province: "kampong chhnang" },
+      { name: "Kampong Leaeng", province: "kampong chhnang" },
+      { name: "Kampong Tralach", province: "kampong chhnang" },
+      { name: "Rolea B'ier", province: "kampong chhnang" },
+      { name: "Sameakki Mean Chey", province: "kampong chhnang" },
+      { name: "Tuek Phos", province: "kampong chhnang" },
 
-      // Oddar Meanchey
-      { name: "Samrong", province: "oddar meanchey" },
+      // Kampong Speu (8 districts)
+      { name: "Basedth", province: "kampong speu" },
+      { name: "Chbar Mon", province: "kampong speu" },
+      { name: "Kong Pisei", province: "kampong speu" },
+      { name: "Aoral", province: "kampong speu" },
+      { name: "Odongk", province: "kampong speu" },
+      { name: "Phnum Sruoch", province: "kampong speu" },
+      { name: "Samraong Tong", province: "kampong speu" },
+      { name: "Thpong", province: "kampong speu" },
 
-      // Stung Treng
-      { name: "Krong Stung Treng", province: "stung treng" },
+      // Kampong Thom (8 districts)
+      { name: "Baray", province: "kampong thom" },
+      { name: "Kampong Svay", province: "kampong thom" },
+      { name: "Stueng Saen", province: "kampong thom" },
+      { name: "Prasat Balangk", province: "kampong thom" },
+      { name: "Prasat Sambour", province: "kampong thom" },
+      { name: "Sandaan", province: "kampong thom" },
+      { name: "Stoung", province: "kampong thom" },
+      { name: "Kampong Thom", province: "kampong thom" },
 
-      // Sihanoukville
-      { name: "Sihanouk Ville", province: "sihanoukville" },
-      { name: "Veal Renh", province: "sihanoukville" },
+      // Kampot (8 districts)
+      { name: "Angkor Chey", province: "kampot" },
+      { name: "Banteay Meas", province: "kampot" },
+      { name: "Chhuk", province: "kampot" },
+      { name: "Chum Kiri", province: "kampot" },
+      { name: "Dang Tong", province: "kampot" },
+      { name: "Kampong Trach", province: "kampot" },
+      { name: "Tuek Chhou", province: "kampot" },
+      { name: "Kampot", province: "kampot" },
+
+      // Kandal (11 districts)
+      { name: "Kandal Stueng", province: "kandal" },
+      { name: "Kien Svay", province: "kandal" },
+      { name: "Khsach Kandal", province: "kandal" },
+      { name: "Kaoh Thum", province: "kandal" },
+      { name: "Leuk Daek", province: "kandal" },
+      { name: "Lvea Aem", province: "kandal" },
+      { name: "Mukh Kampul", province: "kandal" },
+      { name: "Angk Snuol", province: "kandal" },
+      { name: "Ponhea Lueu", province: "kandal" },
+      { name: "S'ang", province: "kandal" },
+      { name: "Ta Khmau", province: "kandal" },
+
+      // Kep (2 districts)
+      { name: "Damnak Chang'aeur", province: "kep" },
+      { name: "Kep", province: "kep" },
+
+      // Koh Kong (8 districts)
+      { name: "Botum Sakor", province: "koh kong" },
+      { name: "Kiri Sakor", province: "koh kong" },
+      { name: "Koh Kong", province: "koh kong" },
+      { name: "Smach Mean Chey", province: "koh kong" },
+      { name: "Mondol Seima", province: "koh kong" },
+      { name: "Srae Ambel", province: "koh kong" },
+      { name: "Thma Bang", province: "koh kong" },
+      { name: "Kampong Seila", province: "koh kong" },
+
+      // Kratie (6 districts)
+      { name: "Chhloung", province: "kratie" },
+      { name: "Kratie", province: "kratie" },
+      { name: "Preaek Prasab", province: "kratie" },
+      { name: "Sambour", province: "kratie" },
+      { name: "Snuol", province: "kratie" },
+      { name: "Chitr Borie", province: "kratie" },
+
+      // Mondulkiri (5 districts)
+      { name: "Kaev Seima", province: "mondulkiri" },
+      { name: "Kaoh Nheaek", province: "mondulkiri" },
+      { name: "Ou Reang", province: "mondulkiri" },
+      { name: "Pechr Chenda", province: "mondulkiri" },
+      { name: "Senmonorom", province: "mondulkiri" },
+
+      // Oddar Meanchey (5 districts)
+      { name: "Anlong Veaeng", province: "oddar meanchey" },
+      { name: "Banteay Ampil", province: "oddar meanchey" },
+      { name: "Chong Kal", province: "oddar meanchey" },
+      { name: "Samraong", province: "oddar meanchey" },
+      { name: "Trapeang Prasat", province: "oddar meanchey" },
+
+      // Pailin (2 districts)
+      { name: "Pailin", province: "pailin" },
+      { name: "Sala Krau", province: "pailin" },
+
+      // Preah Vihear (7 districts)
+      { name: "Chey Saen", province: "preah vihear" },
+      { name: "Chhaeb", province: "preah vihear" },
+      { name: "Choam Khsant", province: "preah vihear" },
+      { name: "Kuleaen", province: "preah vihear" },
+      { name: "Rovieng", province: "preah vihear" },
+      { name: "Sangkum Thmei", province: "preah vihear" },
+      { name: "Tbaeng Mean Chey", province: "preah vihear" },
+
+      // Prey Veng (13 districts)
+      { name: "Ba Phnum", province: "prey veng" },
+      { name: "Kamchay Mear", province: "prey veng" },
+      { name: "Kampong Trabaek", province: "prey veng" },
+      { name: "Kanhchriech", province: "prey veng" },
+      { name: "Me Sang", province: "prey veng" },
+      { name: "Peam Chor", province: "prey veng" },
+      { name: "Peam Ro", province: "prey veng" },
+      { name: "Pea Reang", province: "prey veng" },
+      { name: "Prey Veaeng", province: "prey veng" },
+      { name: "Preah Sdach", province: "prey veng" },
+      { name: "Sithor Kandal", province: "prey veng" },
+      { name: "Svay Antor", province: "prey veng" },
+      { name: "Kampong Leav", province: "prey veng" },
+
+      // Pursat (6 districts)
+      { name: "Bakan", province: "pursat" },
+      { name: "Kandieng", province: "pursat" },
+      { name: "Krakor", province: "pursat" },
+      { name: "Phnum Kravanh", province: "pursat" },
+      { name: "Pursat", province: "pursat" },
+      { name: "Veal Veaeng", province: "pursat" },
+
+      // Ratanakiri (9 districts)
+      { name: "Andoung Meas", province: "ratanakiri" },
+      { name: "Banlung", province: "ratanakiri" },
+      { name: "Bar Kaev", province: "ratanakiri" },
+      { name: "Koun Mom", province: "ratanakiri" },
+      { name: "Lumphat", province: "ratanakiri" },
+      { name: "Ou Chum", province: "ratanakiri" },
+      { name: "Ou Ya Dav", province: "ratanakiri" },
+      { name: "Ta Veaeng", province: "ratanakiri" },
+      { name: "Veun Sai", province: "ratanakiri" },
+
+      // Siem Reap (12 districts)
+      { name: "Angkor Chum", province: "siem reap" },
+      { name: "Angkor Thum", province: "siem reap" },
+      { name: "Banteay Srei", province: "siem reap" },
+      { name: "Chi Kraeng", province: "siem reap" },
+      { name: "Kralanh", province: "siem reap" },
+      { name: "Puok", province: "siem reap" },
+      { name: "Prasat Bakong", province: "siem reap" },
+      { name: "Siem Reap", province: "siem reap" },
+      { name: "Soutr Nikom", province: "siem reap" },
+      { name: "Srei Snam", province: "siem reap" },
+      { name: "Svay Leu", province: "siem reap" },
+      { name: "Varin", province: "siem reap" },
+
+      // Sihanoukville (4 districts)
+      { name: "Mittapheap", province: "sihanoukville" },
+      { name: "Prey Nob", province: "sihanoukville" },
+      { name: "Stueng Hav", province: "sihanoukville" },
+      { name: "Kampong Seila", province: "sihanoukville" },
+
+      // Stung Treng (5 districts) - UNCOMMENTED
+      // { name: "Sesan", province: "stung treng" },
+      // { name: "Siem Bouk", province: "stung treng" },
+      // { name: "Siem Pang", province: "stung treng" },
+      // { name: "Stueng Traeng", province: "stung treng" },
+      // { name: "Thala Barivat", province: "stung treng" },
+
+      // Svay Rieng (7 districts) - UNCOMMENTED
+      // { name: "Chantrea", province: "svay rieng" },
+      // { name: "Kampong Rou", province: "svay rieng" },
+      // { name: "Rumduol", province: "svay rieng" },
+      // { name: "Romeas Haek", province: "svay rieng" },
+      // { name: "Svay Chrum", province: "svay rieng" },
+      // { name: "Svay Rieng", province: "svay rieng" },
+      // { name: "Svay Teab", province: "svay rieng" },
+
+      // // Takeo (10 districts) - UNCOMMENTED
+      // { name: "Angkor Borei", province: "takeo" },
+      // { name: "Bati", province: "takeo" },
+      // { name: "Bourei Cholsar", province: "takeo" },
+      // { name: "Kiri Vong", province: "takeo" },
+      // { name: "Kaoh Andaet", province: "takeo" },
+      // { name: "Prey Kabbas", province: "takeo" },
+      // { name: "Samraong", province: "takeo" },
+      // { name: "Doun Kaev", province: "takeo" },
+      // { name: "Tram Kak", province: "takeo" },
+      // { name: "Treang", province: "takeo" },
+
+      // // Tbong Khmum (6 districts) - UNCOMMENTED
+      // { name: "Dambae", province: "tbong khmum" },
+      // { name: "Krouch Chhmar", province: "tbong khmum" },
+      // { name: "Memot", province: "tbong khmum" },
+      // { name: "Ou Reang Ov", province: "tbong khmum" },
+      // { name: "Ponhea Kraek", province: "tbong khmum" },
+      // { name: "Tboung Khmum", province: "tbong khmum" },
     ];
 
-    // 3️⃣ Attach provinceId WITH validation
+    // Track which provinces have zones defined
+    const provincesWithZones = new Set(
+      zones.map((z) => z.province.trim().toLowerCase())
+    );
+
+    // Add province name as zone for provinces without specific districts
+    provinces.forEach((province) => {
+      const provinceKey = province.name.trim().toLowerCase();
+      if (!provincesWithZones.has(provinceKey)) {
+        zones.push({
+          name: province.name,
+          province: provinceKey,
+        });
+        console.log(
+          `ℹ️  Added ${province.name} as its own zone (no districts defined)`
+        );
+      }
+    });
+
+    // Attach provinceId with validation
     const formattedZones = zones.map((z) => {
       const provinceKey = z.province.trim().toLowerCase();
       const provinceId = provinceMap[provinceKey];
 
       if (!provinceId) {
-        throw new Error(`❌ Province not found for zone: ${z.name} (${z.province})`);
+        throw new Error(
+          `❌ Province not found for zone: ${z.name} (${z.province})`
+        );
       }
 
       return {
@@ -192,11 +432,15 @@ async function seedZones() {
         provinceId,
       };
     });
+
     await Zone.insertMany(formattedZones);
+    console.log(`✅ ${formattedZones.length} zones seeded successfully`);
   } catch (error) {
     console.error("❌ Error seeding zones:", error.message);
+    throw error;
   }
 }
+
 
 async function seedSaleTypes() {
   await SaleType.deleteMany({});
@@ -207,6 +451,7 @@ async function seedSaleTypes() {
   ];
 
   await SaleType.insertMany(saleTypes);
+  console.log("✅ Sale types seeded successfully");
 }
 
 async function seedOrderStatuses() {
@@ -235,6 +480,7 @@ async function seedOrderStatuses() {
   ];
 
   await OrderStatus.insertMany(orderStatuses);
+  console.log("✅ Order statuses seeded successfully");
 }
 
 async function seedBusinessTypes() {
@@ -256,6 +502,7 @@ async function seedBusinessTypes() {
   ];
 
   await BusinessType.insertMany(businessTypes);
+  console.log("✅ Business types seeded successfully");
 }
 
 async function seedProductTypes() {
@@ -271,6 +518,7 @@ async function seedProductTypes() {
     ];
 
     await ProductType.insertMany(productTypes);
+    console.log("✅ Product types seeded successfully");
   } catch (error) {
     console.error("❌ Error seeding product types:", error);
   }
@@ -294,6 +542,7 @@ async function seedProductPackingTypes() {
     ];
 
     await ProductPackingType.insertMany(packingTypes);
+    console.log("✅ Product packing types seeded successfully");
   } catch (error) {
     console.error("❌ Error seeding product packing types:", error);
   }
@@ -317,6 +566,7 @@ async function seedAllowanceTypes() {
     ];
 
     await AllowanceType.insertMany(allowanceTypes);
+    console.log("✅ Allowance types seeded successfully");
   } catch (error) {
     console.error("❌ Error seeding allowance types:", error);
   }
@@ -403,7 +653,6 @@ async function seedHTabs() {
       category: "main",
       reportType: "Hide/Show Tabs",
     },
-    // ADDED: MR Carry Stock main tab
     {
       tabId: "mrCarryStock",
       name: "MR Carry Stock",
@@ -673,7 +922,7 @@ async function seedHTabs() {
       reportType: "Hide/Show Tabs",
     },
 
-    // ADDED: MR Carry Stock Sub-tabs (Level 1)
+    // MR Carry Stock Sub-tabs (Level 1)
     {
       tabId: "mrCarryStock_carrystockview",
       name: "Carry Stock View",
@@ -699,7 +948,7 @@ async function seedHTabs() {
       reportType: "Hide/Show Tabs",
     },
 
-    // ADDED: Accounts Sub-tabs (Level 1) - Three tabs
+    // Accounts Sub-tabs (Level 1)
     {
       tabId: "accounts_cashbank",
       name: "Cash & Bank",
@@ -1141,7 +1390,7 @@ async function seedHTabs() {
       reportType: "Hide/Show Tabs",
     },
 
-    // HRM Sub-tabs (Level 1) - UPDATED with MR Basic Payroll
+    // HRM Sub-tabs (Level 1)
     {
       tabId: "hrm_dashboard",
       name: "Dashboard",
@@ -1202,30 +1451,33 @@ async function seedHTabs() {
       category: "hrm",
       reportType: "Hide/Show Tabs",
     },
-    {
-      tabId: "hrm_settings",
-      name: "HRM Settings",
-      description: "HRM system settings",
-      path: "/hrmlayout/hrmsetting",
-      icon: "Settings",
-      parentTabId: "hrm",
-      level: 1,
-      sequence: 6,
-      category: "hrm",
-      reportType: "Hide/Show Tabs",
-    },
+    // {
+    //   tabId: "hrm_settings",
+    //   name: "HRM Settings",
+    //   description: "HRM system settings",
+    //   path: "/hrmlayout/hrmsetting",
+    //   icon: "Settings",
+    //   parentTabId: "hrm",
+    //   level: 1,
+    //   sequence: 6,
+    //   category: "hrm",
+    //   reportType: "Hide/Show Tabs",
+    // },
   ];
 
   await HTab.insertMany(sampleTabs);
   const count = await HTab.countDocuments();
+  console.log(`✅ ${count} tabs seeded successfully`);
 }
 
 async function seedMRCash() {
   try {
     const deleteResult = await MRCash.deleteMany({});
+    console.log(`🗑️  Deleted ${deleteResult.deletedCount} existing MRCash records`);
+
     const staffList = await Staff.find({});
 
-    const mrStaffList = staffList.filter((staff) => {
+    let mrStaffList = staffList.filter((staff) => {
       const role = staff.role || staff.staffRole || staff.position;
       return !role || role.toLowerCase().includes("mr") || role === "";
     });
@@ -1254,12 +1506,14 @@ async function seedMRCash() {
         notes: `Team: ${staff.teamName || "N/A"}, MR ID: ${
           staff.MRId || "N/A"
         }`,
-        isActive: staff.isActive !== false, // Default to true if not set
+        isActive: staff.isActive !== false,
         createdBy: createdById,
         updatedBy: createdById,
       };
     });
+
     const result = await MRCash.insertMany(mrCashDocs);
+    console.log(`✅ ${result.length} MRCash records seeded successfully`);
   } catch (error) {
     console.error("❌ Error seeding MRCash:", error.message);
   }
@@ -1270,6 +1524,8 @@ async function runSeeders() {
   await connectDB();
 
   try {
+    console.log("🌱 Starting seeding process...\n");
+
     await seedUsers();
     await seedSaleTypes();
     await seedOrderStatuses();
@@ -1281,13 +1537,16 @@ async function runSeeders() {
     await seedBusinessTypes();
     await seedProductTypes();
     await seedProductPackingTypes();
-    await seedAllowanceTypes(); // Add allowance types seeding
+    await seedAllowanceTypes();
     await seedHTabs();
     await seedMRCash();
+
+    console.log("\n✅ All seeding completed successfully!");
   } catch (error) {
-    console.error("❌ Seeding error:", error);
+    console.error("\n❌ Seeding error:", error);
   } finally {
     await mongoose.disconnect();
+    console.log("🔌 Database disconnected");
     process.exit(0);
   }
 }

@@ -9,8 +9,7 @@ const generateMRId = (index) => {
   return `MR${String(index + 1).padStart(3, "0")}`;
 };
 
-// Main endpoint for MR wise outstanding
-router.get("/mr-wise-outstanding", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const { page = 1, limit = 7, search, startDate, endDate } = req.query;
 
@@ -165,7 +164,7 @@ router.get("/mr-wise-outstanding", async (req, res) => {
       },
     });
   } catch (err) {
-    console.error("Error in /mr-wise-outstanding:", err);
+    console.error("Error in MR wise outstanding:", err);
     res.status(500).json({
       error: "Internal server error",
       message: err.message,
@@ -173,8 +172,7 @@ router.get("/mr-wise-outstanding", async (req, res) => {
   }
 });
 
-// Export to Excel endpoint
-router.get("/mr-wise-outstanding/export/excel", async (req, res) => {
+router.get("/export/excel", async (req, res) => {
   try {
     const { search, startDate, endDate } = req.query;
     const matchConditions = { dueAmount: { $gt: 0 } };
@@ -270,7 +268,7 @@ router.get("/mr-wise-outstanding/export/excel", async (req, res) => {
 
     const worksheet = workbook.addWorksheet('MR Wise Outstanding');
     
-    // Define columns - SIMPLE HEADERS WITHOUT EXTRA STYLING
+    // Define columns
     worksheet.columns = [
       { header: 'Sr.No', key: 'serialNo', width: 10 },
       { header: 'MR ID', key: 'mrId', width: 15 },
@@ -280,7 +278,7 @@ router.get("/mr-wise-outstanding/export/excel", async (req, res) => {
       { header: 'Total Outstanding ($)', key: 'totalOutstanding', width: 20 }
     ];
 
-    // Style the header row - SIMPLE BOLD TEXT ONLY
+    // Style the header row
     const headerRow = worksheet.getRow(1);
     headerRow.font = { bold: true, size: 12 };
     headerRow.alignment = { 
@@ -291,7 +289,7 @@ router.get("/mr-wise-outstanding/export/excel", async (req, res) => {
 
     // Add data rows with serial numbers
     mrData.forEach((mr, index) => {
-      const rowNumber = index + 2; // +2 because row 1 is header
+      const rowNumber = index + 2;
       const row = worksheet.addRow({
         serialNo: index + 1,
         mrId: generateMRId(index),
@@ -318,9 +316,9 @@ router.get("/mr-wise-outstanding/export/excel", async (req, res) => {
 
     // Add summary section only if there's data
     if (mrData.length > 0) {
-      worksheet.addRow({}); // Empty row for spacing
+      worksheet.addRow({});
       
-      // Add summary row - CORRECTED: Only fill cells that have data
+      // Add summary row
       const summaryRow = worksheet.addRow({});
       
       // Fill specific cells for summary
@@ -328,7 +326,7 @@ router.get("/mr-wise-outstanding/export/excel", async (req, res) => {
       summaryRow.getCell('totalCustomers').value = totalCustomers;
       summaryRow.getCell('totalOutstanding').value = totalOutstanding;
 
-      // Style the summary row - SIMPLE BOLD TEXT ONLY
+      // Style the summary row
       summaryRow.font = { bold: true, size: 12 };
       
       // Format summary outstanding amount as currency
@@ -336,7 +334,7 @@ router.get("/mr-wise-outstanding/export/excel", async (req, res) => {
       summaryOutstandingCell.numFmt = '$#,##0.00';
     }
 
-    // Apply simple borders to all cells
+    // Apply borders to all cells
     worksheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
       row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
         cell.border = {
@@ -375,7 +373,7 @@ router.get("/mr-wise-outstanding/export/excel", async (req, res) => {
     res.send(buffer);
 
   } catch (err) {
-    console.error("Error in /mr-wise-outstanding/export/excel:", err);
+    console.error("Error in Excel export:", err);
     res.status(500).json({
       error: "Failed to generate Excel export",
       message: err.message,

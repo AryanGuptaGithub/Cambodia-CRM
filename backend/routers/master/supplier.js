@@ -19,8 +19,6 @@ const handleDuplicateError = (res, err, entity = "supplier") => {
   });
 };
 
-
-  
 // Helper to convert to title case for display
 const toTitleCase = (str) => {
   if (!str) return "";
@@ -108,7 +106,8 @@ const formatSupplierResponse = (supplier) => {
   };
 };
 
-router.get("/suppliers/all", async (req, res) => {
+/* ------------------------------- GET All without Pagination (for dropdowns) ------------------------------- */
+router.get("/all", async (req, res) => {
   try {
     const { search = "" } = req.query;
     
@@ -145,7 +144,7 @@ router.get("/suppliers/all", async (req, res) => {
 });
 
 /* ------------------------------- GET All with Pagination ------------------------------- */
-router.get("/suppliers", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const { page = 1, limit = 10, search = "" } = req.query;
     const pageNum = parseInt(page);
@@ -189,7 +188,7 @@ router.get("/suppliers", async (req, res) => {
 });
 
 /* ------------------------------- GET by ID ------------------------------ */
-router.get("/suppliers/:id", async (req, res) => {
+router.get("/:id", async (req, res) => {
   try {
     const supplier = await Supplier.findById(req.params.id);
     
@@ -210,7 +209,7 @@ router.get("/suppliers/:id", async (req, res) => {
 });
 
 /* ----------------------------- CREATE Supplier ----------------------------- */
-router.post("/suppliers", async (req, res) => {
+router.post("/", async (req, res) => {
   try {
     const { name, supplierName, address, contact, email, gstNumber, panNumber } = req.body;
 
@@ -254,7 +253,7 @@ router.post("/suppliers", async (req, res) => {
 });
 
 /* ----------------------------- UPDATE Supplier ----------------------------- */
-router.put("/suppliers/:id", async (req, res) => {
+router.put("/:id", async (req, res) => {
   try {
     const { name, supplierName, address, contact, email, gstNumber, panNumber } = req.body;
 
@@ -293,7 +292,7 @@ router.put("/suppliers/:id", async (req, res) => {
 });
 
 /* ----------------------------- DELETE Supplier ----------------------------- */
-router.delete("/suppliers/:id", async (req, res) => {
+router.delete("/:id", async (req, res) => {
   try {
     const supplier = await Supplier.findById(req.params.id);
     
@@ -315,7 +314,8 @@ router.delete("/suppliers/:id", async (req, res) => {
   }
 });
 
-router.delete("/suppliers", async (req, res) => {
+/* ----------------------------- DELETE Multiple Suppliers ----------------------------- */
+router.delete("/", async (req, res) => {
   try {
     const { ids } = req.body;
 
@@ -338,7 +338,7 @@ router.delete("/suppliers", async (req, res) => {
 });
 
 /* ----------------------------- EXCEL Import ----------------------------- */
-router.post("/suppliers/import", async (req, res) => {
+router.post("/import", async (req, res) => {
   try {
     const suppliers = req.body;
 

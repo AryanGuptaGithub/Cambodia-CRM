@@ -5,9 +5,9 @@ import { body, validationResult } from "express-validator";
 const router = express.Router();
 
 /** =========================
- *   GET /api/holidays
+ *   GET / (all holidays)
  * ========================= */
-router.get("/holidays", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const holidays = await Holiday.find().sort({ startDate: 1 }).lean();
     res.json({ success: true, holidays });
@@ -18,10 +18,10 @@ router.get("/holidays", async (req, res) => {
 });
 
 /** =========================
- *   POST /api/holidays
+ *   POST / (create holiday)
  * ========================= */
 router.post(
-  "/holidays",
+  "/",
   [
     body("name").notEmpty().withMessage("Holiday name is required"),
     body("startDate").isISO8601().withMessage("Valid start date is required"),
@@ -87,10 +87,10 @@ router.post(
 );
 
 /** =========================
- *   PUT /api/holidays/:id
+ *   PUT /:id
  * ========================= */
 router.put(
-  "/holidays/:id",
+  "/:id",
   [
     body("name").notEmpty().withMessage("Holiday name is required"),
     body("startDate").isISO8601().withMessage("Valid start date is required"),
@@ -147,9 +147,9 @@ router.put(
 );
 
 /** =========================
- *   DELETE /api/holidays/:id
+ *   DELETE /:id
  * ========================= */
-router.delete("/holidays/:id", async (req, res) => {
+router.delete("/:id", async (req, res) => {
   try {
     const deleted = await Holiday.findByIdAndDelete(req.params.id);
     if (!deleted) {
@@ -164,9 +164,9 @@ router.delete("/holidays/:id", async (req, res) => {
 });
 
 /** =========================
- *   DELETE /api/holidays (bulk)
+ *   DELETE / (bulk delete)
  * ========================= */
-router.delete("/holidays", async (req, res) => {
+router.delete("/", async (req, res) => {
   try {
     const { ids } = req.body;
     if (!Array.isArray(ids) || ids.length === 0) {
@@ -184,8 +184,10 @@ router.delete("/holidays", async (req, res) => {
   }
 });
 
-// CORRECTED BACKEND IMPORT ROUTE
-router.post("/holidays/import", async (req, res) => {
+/** =========================
+ *   POST /import
+ * ========================= */
+router.post("/import", async (req, res) => {
   try {
     const holidaysData = req.body;
     if (!Array.isArray(holidaysData) || holidaysData.length === 0) {
@@ -313,6 +315,5 @@ router.post("/holidays/import", async (req, res) => {
     });
   }
 });
-
 
 export default router;

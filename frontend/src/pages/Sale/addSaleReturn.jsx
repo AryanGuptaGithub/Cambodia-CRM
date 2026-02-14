@@ -719,7 +719,7 @@ const AddReturnSale = () => {
   const fetchSaleReturn = async () => {
     setLoadingSaleReturns(true);
     try {
-      const res = await fetch(`${backendUrl}/api/salesreturn`);
+      const res = await fetch(`${backendUrl}/api/sales-return`);
       if (!res.ok) throw new Error("Failed to fetch sale returns");
       const data = await res.json();
       setSaleReturns(data.data || []);
@@ -809,7 +809,7 @@ const AddReturnSale = () => {
     };
 
     try {
-      const res = await fetch(`${backendUrl}/api/salesreturn`, {
+      const res = await fetch(`${backendUrl}/api/sales-return`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

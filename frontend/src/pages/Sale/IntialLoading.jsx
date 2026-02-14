@@ -7,6 +7,7 @@ const backendUrl = import.meta.env.VITE_BACKEND_URL;
 export const useApi = () => {
   const fetchData = useCallback(async (endpoint, options = {}) => {
     try {
+      console.log('values of ${backendUrl}${endpoint}', `${backendUrl}${endpoint}`);
       const response = await fetch(`${backendUrl}${endpoint}`, {
         headers: { "Content-Type": "application/json" },
         ...options,
@@ -38,7 +39,7 @@ export const useInitialSaleData = () => {
       try {
         const [statusesData, productsData] = await Promise.all([
           fetchData("/api/sales/payment-status"),
-          fetchData("/api/products-with-in-stock"),
+          fetchData("/api/products/in-stock"),
         ]);
 
         setStatuses(statusesData);

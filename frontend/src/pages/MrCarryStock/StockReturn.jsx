@@ -14,7 +14,7 @@ import {
   Package,
   CheckCircle,
 } from "lucide-react";
-import { toast } from "react-hot-toast";
+import { showToast } from "../../utils/toast";
 import ReactDOM from "react-dom";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
@@ -80,71 +80,73 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
     }
   };
 
-  // Get MR stock directly from mrList
-  const getMrStockFromList = useCallback(
-    (mrName) => {
-      try {
-        setLoading(true);
-        setMrStock([]);
-        setSelectedProduct(null);
-        setSelectedMrId("");
+  // Fetch MR stock from backend
+  const fetchMrStock = async (mrName) => {
+    try {
+      setLoading(true);
+      setMrStock([]);
+      setSelectedProduct(null);
+      setSelectedMrId("");
 
-        // Find MR in the list
-        const selectedMrObj = mrList.find(
-          (mr) => mr.mrName === mrName || mr.mrCode === mrName
-        );
+      const response = await axios.get(
+        `${backendUrl}/api/stock-transfer-to-mr/mr-hand-admin`,
+        { params: { mrName } }
+      );
 
-        if (!selectedMrObj) {
-          toast.error("Selected MR not found");
-          return;
-        }
-
-        setSelectedMrId(selectedMrObj.mrId || selectedMrObj._id);
-
-        // Check if productsInHand exists
-        if (!selectedMrObj.productsInHand || !Array.isArray(selectedMrObj.productsInHand) || selectedMrObj.productsInHand.length === 0) {
-          toast.info("No stock found for this MR");
-          setMrStock([]);
-          return;
-        }
-
-        // Transform the productsInHand data to match our expected format
-        const transformedData = selectedMrObj.productsInHand.map((product) => ({
-          // Create a unique identifier for the stock record
-          stockRecordId: `${selectedMrObj.mrId || selectedMrObj._id}_${product.productId}`,
-          mrId: selectedMrObj.mrId || selectedMrObj._id,
-          productId: product.productId,
-          productName: product.productName || "Unknown Product",
-          remainingQty: product.quantity || 0,
-          costPrice: product.lc || 0,
-          unit: "box",
-          lastUpdated: product.lastUpdated || new Date(),
-          // Store the original product data for reference
-          originalProductData: product
+      if (response.data.success) {
+        const stockItems = response.data.data || [];
+        // Transform to the format needed by the component
+        const transformed = stockItems.map((item) => ({
+          stockRecordId: `${item.mrId || item.mrName}_${item.productId}`,
+          mrId: item.mrId || item.mrName,
+          productId: item.productId,
+          productName: item.productName,
+          remainingQty: item.remainingQty || item.boxQuantity || 0,
+          costPrice: item.lc || item.costPrice || 0,
+          unit: item.unit || "box",
+          lastUpdated: item.lastUpdated || new Date(),
+          originalProductData: item,
         }));
+        setMrStock(transformed);
 
-        setMrStock(transformedData);
-      } catch (error) {
-        console.error("Error getting MR stock from list:", error);
-        toast.error("Failed to load MR stock");
-        setMrStock([]);
-        setSelectedMrId("");
-      } finally {
-        setLoading(false);
+        if (transformed.length > 0) {
+          setSelectedMrId(transformed[0].mrId);
+        } else {
+          setSelectedMrId("");
+          showToast("default", "No stock found for this MR");
+        }
+      } else {
+        showToast("error", response.data.message || "Failed to load MR stock");
       }
-    },
-    [mrList]
-  );
+    } catch (error) {
+      console.error("Error fetching MR stock:", error);
+      showToast("error", "Failed to load MR stock");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Handle MR selection
   const handleMrChange = (value) => {
-    setSelectedMr(value);
+    let mrValue;
+    if (typeof value === "string") {
+      mrValue = value;
+    } else if (value && typeof value === "object") {
+      mrValue = value.value || value.label;
+    } else {
+      mrValue = "";
+    }
+
+    setSelectedMr(mrValue);
     setSelectedProduct(null);
     setMrStock([]);
     setReturnItems([]);
     setReturnQty("1");
     setSelectedMrId("");
-    if (value) getMrStockFromList(value);
+
+    if (mrValue) {
+      fetchMrStock(mrValue);
+    }
   };
 
   // Handle product selection
@@ -162,7 +164,7 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
   // Add item to return list
   const handleAddItem = () => {
     if (!selectedProduct) {
-      toast.error("Select a product");
+      showToast("error", "Select a product");
       return;
     }
 
@@ -173,14 +175,15 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
       parsedQty < 1 ||
       parsedQty > selectedProduct.remainingQty
     ) {
-      toast.error(
+      showToast(
+        "error",
         `Invalid quantity. Must be between 1 and ${selectedProduct.remainingQty}`
       );
       return;
     }
 
     if (!returnDate) {
-      toast.error("Select return date");
+      showToast("error", "Select return date");
       return;
     }
 
@@ -195,7 +198,8 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
       const newQty = updatedItems[existingItemIndex].returnQty + parsedQty;
 
       if (newQty > selectedProduct.remainingQty) {
-        toast.error(
+        showToast(
+          "error",
           `Total quantity exceeds available stock: ${selectedProduct.remainingQty}`
         );
         return;
@@ -203,13 +207,13 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
 
       updatedItems[existingItemIndex].returnQty = newQty;
       setReturnItems(updatedItems);
-      toast.success(
+      showToast(
+        "success",
         `Updated ${selectedProduct.productName} quantity to ${newQty}`
       );
     } else {
       // Add new item
       const item = {
-        // Send both mrId and productId for backend to find the correct stock
         mrId: selectedProduct.mrId,
         productId: selectedProduct.productId,
         productName: selectedProduct.productName,
@@ -217,11 +221,13 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
         returnDate: returnDate.toISOString().split("T")[0],
         remarks: "",
         costPrice: selectedProduct.costPrice,
-        // Optional: Include the original product data if needed by backend
-        originalProductData: selectedProduct.originalProductData
+        originalProductData: selectedProduct.originalProductData,
       };
       setReturnItems([...returnItems, item]);
-      toast.success(`${selectedProduct.productName} added to return list`);
+      showToast(
+        "success",
+        `${selectedProduct.productName} added to return list`
+      );
     }
 
     // Reset form for next item
@@ -238,7 +244,7 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
     }).then((res) => {
       if (res.isConfirmed) {
         setReturnItems((prev) => prev.filter((_, i) => i !== index));
-        toast.success("Item removed");
+        showToast("success", "Item removed");
       }
     });
   };
@@ -246,17 +252,17 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
   // Submit return to backend
   const handleSubmit = async () => {
     if (!selectedMr) {
-      toast.error("Select an MR");
+      showToast("error", "Select an MR");
       return;
     }
 
     if (returnItems.length === 0) {
-      toast.error("Add at least one item");
+      showToast("error", "Add at least one item");
       return;
     }
 
     if (!selectedMrId) {
-      toast.error("MR ID not found. Please select MR again.");
+      showToast("error", "MR ID not found. Please select MR again.");
       return;
     }
 
@@ -266,7 +272,7 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
     );
 
     if (!selectedMrObj) {
-      toast.error("MR not found");
+      showToast("error", "MR not found");
       return;
     }
 
@@ -286,14 +292,14 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
           returnQty: parseInt(item.returnQty),
           returnDate: item.returnDate,
           remarks: item.remarks || "",
-          costPrice: item.costPrice || 0
+          costPrice: item.costPrice || 0,
         })),
         remarks: remarks,
         returnDate: returnDate.toISOString().split("T")[0],
       };
 
       const response = await axios.post(
-        `${backendUrl}/api/stock-returns`,
+        `${backendUrl}/api/stock-return`,
         returnData,
         {
           headers: {
@@ -304,23 +310,23 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
       );
 
       if (response.data.success) {
-        toast.success("Stock return created successfully!");
+        showToast("success", "Stock return created successfully!");
         onSuccess();
         onClose();
       } else {
-        toast.error(response.data.message || "Failed to create return");
+        showToast("error", response.data.message || "Failed to create return");
       }
     } catch (error) {
       console.error("Submit error:", error);
-      // Log the exact error response
       if (error.response) {
         console.error("Error response data:", error.response.data);
         console.error("Error response status:", error.response.status);
       }
-      toast.error(
+      showToast(
+        "error",
         error.response?.data?.message ||
-        error.response?.data?.error ||
-        "Failed to create stock return"
+          error.response?.data?.error ||
+          "Failed to create stock return"
       );
     } finally {
       setSubmitting(false);
@@ -333,7 +339,7 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
     0
   );
   const totalValue = returnItems.reduce(
-    (sum, item) => sum + (item.returnQty * (item.costPrice || 0)),
+    (sum, item) => sum + item.returnQty * (item.costPrice || 0),
     0
   );
 
@@ -347,7 +353,9 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
     .filter((item) => item.remainingQty > 0)
     .map((p) => ({
       value: p.stockRecordId,
-      label: `${p.productName || "Unknown"} - Avail: ${p.remainingQty} ${p.unit || "box"}`,
+      label: `${p.productName || "Unknown"} - Avail: ${p.remainingQty} ${
+        p.unit || "box"
+      }`,
       disabled: p.remainingQty <= 0,
     }));
 
@@ -448,9 +456,7 @@ const CreateStockReturn = ({ onClose, onSuccess, mrList }) => {
                   {returnItems.map((item, index) => (
                     <tr key={index} className="border-b">
                       <td className="p-3">{item.productName}</td>
-                      <td className="p-3">
-                        {item.returnQty} box(es)
-                      </td>
+                      <td className="p-3">{item.returnQty} box(es)</td>
                       <td className="p-3">
                         {formatDateToReadable(item.returnDate)}
                       </td>
@@ -530,21 +536,24 @@ const StockReturn = () => {
   // Fetch MR list
   const fetchMRList = useCallback(async () => {
     try {
-      const response = await axios.get(`${backendUrl}/api/mrs`, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
-        },
-      });
+      const response = await axios.get(
+        `${backendUrl}/api/stock-transfer-to-mr/mrs`,
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("token")}`,
+          },
+        }
+      );
 
       if (response.data.success) {
-        const mrData = response.data.data || [];    
+        const mrData = response.data.data || [];
         setMrList(mrData);
       } else {
-        toast.error("Failed to load MR list");
+        showToast("error", "Failed to load MR list");
       }
     } catch (error) {
       console.error("Error fetching MR list:", error);
-      toast.error("Failed to load MR list");
+      showToast("error", "Failed to load MR list");
     }
   }, []);
 
@@ -552,7 +561,7 @@ const StockReturn = () => {
   const fetchReturnsHistory = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await axios.get(`${backendUrl}/api/stock-returns`, {
+      const response = await axios.get(`${backendUrl}/api/stock-return`, {
         params: {
           page: currentPage,
           limit: returnsPerPage,
@@ -566,11 +575,12 @@ const StockReturn = () => {
         const data = response.data.data || [];
         setReturnsHistory(data);
       } else {
-        toast.error(response.data.message || "Failed to load returns history");
+        showToast("error", response.data.message || "Failed to load returns history");
         setReturnsHistory([]);
       }
     } catch (error) {
-      toast.error(
+      showToast(
+        "error",
         error.response?.data?.message || "Failed to load returns history"
       );
       setReturnsHistory([]);
@@ -643,7 +653,7 @@ const StockReturn = () => {
   // Delete selected returns
   const handleDeleteSelected = async () => {
     if (selected.length === 0) {
-      toast.error("Please select returns to delete");
+      showToast("error", "Please select returns to delete");
       return;
     }
 
@@ -654,7 +664,7 @@ const StockReturn = () => {
     });
 
     if (pendingReturns.length !== selected.length) {
-      toast.error("Only pending returns can be deleted");
+      showToast("error", "Only pending returns can be deleted");
       return;
     }
 
@@ -668,7 +678,7 @@ const StockReturn = () => {
     if (confirm.isConfirmed) {
       try {
         const response = await axios.delete(
-          `${backendUrl}/api/stock-returns/bulk`,
+          `${backendUrl}/api/stock-return/bulk`,
           {
             data: { ids: selected.map((s) => s.id) },
             headers: {
@@ -678,12 +688,13 @@ const StockReturn = () => {
         );
 
         if (response.data.success) {
-          toast.success(response.data.message);
+          showToast("success", response.data.message);
           fetchReturnsHistory();
           setSelected([]);
         }
       } catch (error) {
-        toast.error(
+        showToast(
+          "error",
           error.response?.data?.message || "Failed to delete selected returns."
         );
       }
@@ -693,7 +704,7 @@ const StockReturn = () => {
   // Delete single return
   const deleteReturn = async (returnItem) => {
     if (returnItem.status !== "Pending") {
-      toast.error("Only pending returns can be deleted");
+      showToast("error", "Only pending returns can be deleted");
       return;
     }
 
@@ -707,7 +718,7 @@ const StockReturn = () => {
     if (confirm.isConfirmed) {
       try {
         const response = await axios.delete(
-          `${backendUrl}/api/stock-returns/${returnItem._id}`,
+          `${backendUrl}/api/stock-return/${returnItem._id}`,
           {
             headers: {
               Authorization: `Bearer ${localStorage.getItem("token")}`,
@@ -716,11 +727,12 @@ const StockReturn = () => {
         );
 
         if (response.data.success) {
-          toast.success(response.data.message);
+          showToast("success", response.data.message);
           fetchReturnsHistory();
         }
       } catch (error) {
-        toast.error(
+        showToast(
+          "error",
           error.response?.data?.message || "Failed to delete return."
         );
       }
@@ -739,7 +751,7 @@ const StockReturn = () => {
 
     try {
       const response = await axios.put(
-        `${backendUrl}/api/stock-returns/${selectedReturn._id}/status`,
+        `${backendUrl}/api/stock-return/${selectedReturn._id}/status`,
         { status, rejectedReason },
         {
           headers: {
@@ -749,12 +761,12 @@ const StockReturn = () => {
       );
 
       if (response.data.success) {
-        toast.success(response.data.message);
+        showToast("success", response.data.message);
         fetchReturnsHistory();
         setIsViewModalOpen(false);
       }
     } catch (error) {
-      toast.error(error.response?.data?.message || "Failed to update status");
+      showToast("error", error.response?.data?.message || "Failed to update status");
     }
   };
 
@@ -800,11 +812,6 @@ const StockReturn = () => {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     });
-  };
-
-  // Helper to get currentCash value from return item
-  const getCurrentCash = (returnItem) => {
-    return returnItem.currentCash || 0;
   };
 
   if (loading) {

@@ -59,7 +59,8 @@ const searchItems = (items, searchTerm) => {
   });
 };
 
-router.get('/expiry-stock-report', async (req, res) => {
+// Main report endpoint – now mounted at "/"
+router.get('/', async (req, res) => {
   try {
     const { page = 1, limit = 10, filter = 'all', search = '' } = req.query;
     const pageNum = parseInt(page);
@@ -285,8 +286,8 @@ router.get('/expiry-stock-report', async (req, res) => {
   }
 });
 
-// Separate endpoint for export data
-router.get('/expiry-stock-report/export', async (req, res) => {
+// Export endpoint – now mounted at "/export"
+router.get('/export', async (req, res) => {
   try {
     const { filter = 'all', search = '' } = req.query;
     const searchTerm = search || '';

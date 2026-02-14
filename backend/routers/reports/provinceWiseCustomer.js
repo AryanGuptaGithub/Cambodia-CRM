@@ -4,7 +4,12 @@ import SaleSummary from "../../models/sale/saleSummary.js";
 
 const router = express.Router();
 
-router.get("/province-wise-customer", async (req, res) => {
+/**
+ * GET /
+ * Get province wise customers report
+ * Accessible at: /api/reports/province-wise-customers
+ */
+router.get("/", async (req, res) => {
   try {
     const { page = 1, limit = 6, search = "", period = "all" } = req.query;
     const pageNum = parseInt(page);
@@ -352,8 +357,12 @@ router.get("/province-wise-customer", async (req, res) => {
   }
 });
 
-// Also update the export endpoint to search only by province
-router.get("/province-wise-customer/export", async (req, res) => {
+/**
+ * GET /export
+ * Export province wise customers to CSV
+ * Accessible at: /api/reports/province-wise-customers/export
+ */
+router.get("/export", async (req, res) => {
   try {
     const { search = "", period = "all" } = req.query;
 
@@ -513,7 +522,7 @@ router.get("/province-wise-customer/export", async (req, res) => {
 
     // Format CSV rows
     const csvRows = data.map((row) => [
-      `"${(row.Province || "").replace(/"/g, '""')}"`, // Escape quotes in province names
+      `"${(row.Province || "").replace(/"/g, '""')}"`,
       row["Total Customers"] || 0,
       row["Active Customers"] || 0,
       row["Inactive Customers"] || 0,

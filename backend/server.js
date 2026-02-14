@@ -63,15 +63,18 @@ import operationCostCOGSRatio from "./routers/reports/operationCostCOGSRatio.js"
 import operationCostSalesRatio from "./routers/reports/operationCostSalesRatio.js";
 import tourExpenseSales from "./routers/reports/tourExpenseSales.js";
 import SaleSummaryReport from "./routers/reports/SaleSummary.js";
-import mrBasicPayrollRoutes from "./routers/hrm/mrBasicPayrollRoutes.js"; 
+import mrBasicPayrollRoutes from "./routers/hrm/mrBasicPayrollRoutes.js";
 import outstanding from "./routers/sale/outstanding.js";
 import averagePrice from "./routers/reports/averagePrice.js";
+
 dotenv.config();
 
 const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Middleware
 app.use(bodyParser.json({ limit: "10mb" }));
 app.use(bodyParser.urlencoded({ extended: true, limit: "10mb" }));
-const PORT = process.env.PORT || 3000;
 
 const allowedOrigins = [
   "http://localhost:5173",
@@ -97,69 +100,122 @@ app.use(
 connectDB(process.env.MONGODB_URI);
 app.use(express.json());
 
-// Register all routes
-app.use("/api", customerRoutes);
-app.use("/api", suppilerRoutes);
-app.use("/api", product);
+// Debugging middleware (optional - remove in production)
+app.use((req, res, next) => {
+  console.log(`📍 ${req.method} ${req.path}`);
+  next();
+});
+
+// ============================================
+// ROUTES REGISTRATION
+// ============================================
+// NOTE: Order matters! More specific routes should come BEFORE generic ones
+
+// Auth Routes (no prefix needed, already has /auth in router)
 app.use("/api", authRoutes);
-app.use("/api", staff);
-app.use("/api", priceList);
-app.use("/api/sales", sales);
-app.use("/api", payments);
-app.use("/api", dailySample);
-app.use("/api", purcharse);
-app.use("/api", dailySummary);
-app.use("/api", dailyReports);
-app.use("/api", SalesReturn);
-app.use("/api", stockAdjustment);
-app.use("/api", orderStatus);
-app.use("/api", purchaseReturn);
-app.use("/api", PurchaseOut);
-app.use("/api", Accounts);
-app.use("/api", Transaction);
-app.use("/api", addExpenseCategary);
-app.use("/api", addExpense);
-app.use("/api", cashSaleReports);
-app.use("/api", remittance);
-app.use("/api", totalExpense);
-app.use("/api", mrWiseOutStanding);
-app.use("/api", mrWiseSale);
-app.use("/api", newCustomer);
-app.use("/api", zoneWiseCustomer);
-app.use("/api", customerRetention);
-app.use("/api", customerExpentationRatio);
-app.use("/api", provinceWiseSaleRoutes);
-app.use("/api", provinceWiseCustomerRoutes);
-app.use("/api", stockInHand);
-app.use("/api", companyProfile);
-app.use("/api", hTabsRoutes);
-app.use("/api", Holiday);
-app.use("/api", Payroll);
+
+// Master Data Routes
+app.use("/api/customers", customerRoutes);
+app.use("/api/suppliers", suppilerRoutes);
 app.use("/api/zones", zone);
-app.use("/api", businessTypes);
-app.use("/api", productType);
-app.use("/api", productPackingType);
-app.use("/api", saleAndSalary);
-app.use("/api", profitAndLoss);
-app.use("/api", expiryStockReport);
-app.use("/api", hrmDashboard);
-app.use("/api", payrollExport);
-app.use("/api", leaves);
-app.use("/api", stockTransferToMR);
-app.use("/api", stockTransfer);
-app.use("/api", StockReturn);
-app.use("/api", mrCash);
-app.use("/api", overdue);
-app.use("/api", productReport);
-app.use("/api", outstandingCollections);
-app.use("/api", salaryCogsRatio);
-app.use("/api", operationCostCOGSRatio);
-app.use("/api", operationCostSalesRatio);
-app.use("/api", tourExpenseSales);
+app.use("/api/business-types", businessTypes);
+
+// Staff Routes
+app.use("/api/staff", staff);
+
+// Product Management Routes
+app.use("/api/products", product);
+app.use("/api/price-lists", priceList);
+app.use("/api/product-types", productType);
+app.use("/api/product-packing-types", productPackingType);
+
+// Sales Routes
+app.use("/api/sales", sales);
+app.use("/api/sales-return", SalesReturn);
 app.use("/api/sales-summary", SaleSummaryReport);
-app.use("/api/mr-basic-payrolls", mrBasicPayrollRoutes);  
-app.use("/api", outstanding);
-app.use("/api", averagePrice);
+app.use("/api/outstanding", outstanding);
+
+// Purchase Routes
+app.use("/api/purchase", purcharse);
+app.use("/api/purchase-return", purchaseReturn);
+app.use("/api/purchase-out", PurchaseOut);
+
+// Stock Management Routes
+app.use("/api/stock-adjustment", stockAdjustment);
+app.use("/api/stock-transfer", stockTransfer);
+app.use("/api/stock-transfer-to-mr", stockTransferToMR);
+app.use("/api/stock-return", StockReturn);
+app.use("/api/order-status", orderStatus);
+
+// Accounts Routes
+app.use("/api/accounts", Accounts);
+app.use("/api/transactions", Transaction);
+app.use("/api/mr-cash", mrCash);
+
+// Expense Routes
+app.use("/api/expense-categories", addExpenseCategary);
+app.use("/api/expenses", addExpense);
+
+// Reports Routes
+app.use("/api/reports/payments", payments);
+app.use("/api/reports/daily-sample", dailySample);
+app.use("/api/reports/daily-summary", dailySummary);
+app.use("/api/reports/daily-reports", dailyReports);
+app.use("/api/reports/cash-sales", cashSaleReports);
+app.use("/api/reports/remittance", remittance);
+app.use("/api/reports/total-expense", totalExpense);
+app.use("/api/reports/mr-wise-outstanding", mrWiseOutStanding);
+app.use("/api/reports/mr-wise-sales", mrWiseSale);
+app.use("/api/reports/new-customers", newCustomer);
+app.use("/api/reports/customer-retention", customerRetention);
+app.use("/api/reports/zone-wise-customers", zoneWiseCustomer);
+app.use("/api/reports/province-wise-sales", provinceWiseSaleRoutes);
+app.use("/api/reports/customer-expectation-ratio", customerExpentationRatio);
+app.use("/api/reports/stock-in-hand", stockInHand);
+app.use("/api/reports/province-wise-customers", provinceWiseCustomerRoutes);
+app.use("/api/reports/sales-and-salary", saleAndSalary);
+app.use("/api/reports/profit-and-loss", profitAndLoss);
+app.use("/api/reports/expiry-stock", expiryStockReport);
+app.use("/api/reports/product-report", productReport);
+app.use("/api/reports/outstanding-collections", outstandingCollections);
+app.use("/api/reports/salary-cogs-ratio", salaryCogsRatio);
+app.use("/api/reports/operation-cost-sales-ratio", operationCostSalesRatio);
+app.use("/api/reports/operation-cost-cogs-ratio", operationCostCOGSRatio);
+app.use("/api/reports/tour-expense-sales", tourExpenseSales);
+app.use("/api/reports/average-price", averagePrice);
+
+// Settings Routes
+app.use("/api/company-profile", companyProfile);
+app.use("/api/h-tabs", hTabsRoutes);
+
+// HRM Routes
+app.use("/api/hrm/holidays", Holiday);
+app.use("/api/hrm/payroll-export", payrollExport);
+app.use("/api/hrm/payroll", Payroll);
+app.use("/api/hrm/dashboard", hrmDashboard);
+
+app.use("/api/hrm/leaves", leaves);
+app.use("/api/hrm/mr-basic-payrolls", mrBasicPayrollRoutes);
+
+// Other Routes
+app.use("/api/overdue", overdue);
+
+// 404 Handler - This should be LAST
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: `Route ${req.method} ${req.path} not found`,
+  });
+});
+
+// Error Handler
+app.use((err, req, res, next) => {
+  console.error("❌ Error:", err);
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || "Internal server error",
+  });
+});
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);

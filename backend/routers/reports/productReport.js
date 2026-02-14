@@ -20,7 +20,8 @@ const normalizeProductName = (name) => {
 };
 
 // Get product report with profit margin calculation
-router.get("/product-report/report", async (req, res) => {
+// CHANGED: removed duplicate "/product-report" prefix
+router.get("/report", async (req, res) => {
   try {
     const { period, month, year, searchTerm, category } = req.query;
     const products = await Product.find({}).lean();

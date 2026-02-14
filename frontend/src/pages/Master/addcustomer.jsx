@@ -35,7 +35,7 @@ const useCustomerForm = (initialCustomerCode = "") => {
   const [loading, setLoading] = useState(false);
   const [provincesLoading, setProvincesLoading] = useState(true);
   const [mrListLoading, setMrListLoading] = useState(true);
-  const [zonesLoading, setZonesLoading] = useState(true);
+  const [zonesLoading, setZonesLoading] = useState(false);
   const [businessTypesLoading, setBusinessTypesLoading] = useState(true);
   const [isMrListEmpty, setIsMrListEmpty] = useState(false);
   const navigate = useNavigate();
@@ -264,20 +264,27 @@ const useCustomerForm = (initialCustomerCode = "") => {
 
         // Ensure zonesData is an array
         if (Array.isArray(zonesData)) {
-          setZones(zonesData);
+          // If no zones returned, use the province name as the zone
+          if (zonesData.length === 0) {
+            console.log(`No zones found for ${provinceName}, using province as zone`);
+            setZones([{ name: provinceName, _id: provinceName }]);
+          } else {
+            setZones(zonesData);
+          }
         } else {
           console.error("Zones data is not an array:", zonesData);
-          setZones([]);
-          showToast("error", "Zones data format is incorrect");
+          // Fallback to province name as zone
+          setZones([{ name: provinceName, _id: provinceName }]);
         }
       } else {
-        setZones([]);
-        // Don't show toast for this as it might be expected if no zones exist
+        // If fetch failed, use province name as zone
+        console.log(`Failed to fetch zones for ${provinceName}, using province as zone`);
+        setZones([{ name: provinceName, _id: provinceName }]);
       }
     } catch (error) {
       console.error("Error in loadZones:", error);
-      setZones([]);
-      // Don't show toast for this as it might be expected
+      // On error, use province name as zone
+      setZones([{ name: provinceName, _id: provinceName }]);
     } finally {
       setZonesLoading(false);
     }
@@ -852,7 +859,11 @@ const AddCustomer = () => {
               onChange={handleZoneChange}
               options={zoneOptions}
               placeholder={
-                form.province ? "Select Zone" : "Select a province first"
+                form.province 
+                  ? zonesLoading 
+                    ? "Loading zones..." 
+                    : "Select Zone"
+                  : "Select a province first"
               }
               required={true}
               loading={zonesLoading && form.province !== ""}
@@ -861,9 +872,7 @@ const AddCustomer = () => {
               disabled={isFormDisabled || !form.province || zonesLoading}
               emptyMessage={
                 form.province
-                  ? zones.length === 0
-                    ? "No zones available for this province"
-                    : "Select Zone"
+                  ? "Select Zone"
                   : "Select a province first"
               }
             />
@@ -922,7 +931,7 @@ const AddCustomer = () => {
                 Adding...
               </span>
             ) : (
-              `Add Customer (${form.customerCode})`
+              `Add Customer`
             )}
           </button>
           <button

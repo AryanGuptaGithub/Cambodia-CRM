@@ -43,7 +43,7 @@ const AddStaffMember = () => {
     if (!validate()) return;
 
     try {
-      const response = await fetch(`${backendUrl}/api/staffs`, {
+      const response = await fetch(`${backendUrl}/api/staff`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),

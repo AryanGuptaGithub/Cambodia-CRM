@@ -81,10 +81,8 @@ const updateReportInHandAfterStockTransfer = async (
   }
 };
 
-/* ==========================================================================
-   🔹 POST: Create New Stock Transfer
-   ========================================================================== */
-router.post("/stock-transfers", async (req, res) => {
+
+router.post("/", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -325,10 +323,7 @@ const restoreReportInHandAfterStockTransferDeletion = async (
   }
 };
 
-/* ==========================================================================
-   🔹 GET: Next Stock Transfer Number
-   ========================================================================== */
-router.get("/stock-transfers/next-number", async (req, res) => {
+router.get("/next-number", async (req, res) => {
   try {
     const lastGeneralTransfer = await StockTransfer.findOne()
       .sort({ invoiceNo: -1 })
@@ -366,10 +361,7 @@ router.get("/stock-transfers/next-number", async (req, res) => {
   }
 });
 
-/* ==========================================================================
-   🔹 GET: All Stock Transfers
-   ========================================================================== */
-router.get("/stock-transfers", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const { type, page = 1, limit = 10, search, status } = req.query;
     const filter = {};
@@ -421,10 +413,7 @@ router.get("/stock-transfers", async (req, res) => {
   }
 });
 
-/* ==========================================================================
-   🔹 GET: Single Stock Transfer by ID
-   ========================================================================== */
-router.get("/stock-transfers/:id", async (req, res) => {
+router.get("/:id", async (req, res) => {
   const { id } = req.params;
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return res
@@ -453,10 +442,7 @@ router.get("/stock-transfers/:id", async (req, res) => {
   }
 });
 
-/* ==========================================================================
-   🔹 PUT: Update Existing Stock Transfer
-   ========================================================================== */
-router.put("/stock-transfers/:id", async (req, res) => {
+router.put("/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -464,6 +450,7 @@ router.put("/stock-transfers/:id", async (req, res) => {
     const { id } = req.params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
       await session.abortTransaction();
+      session.endSession();
       return res
         .status(400)
         .json({ success: false, message: "Invalid stock transfer ID" });
@@ -472,6 +459,7 @@ router.put("/stock-transfers/:id", async (req, res) => {
     const transfer = await StockTransfer.findById(id);
     if (!transfer) {
       await session.abortTransaction();
+      session.endSession();
       return res
         .status(404)
         .json({ success: false, message: "Stock transfer not found" });
@@ -481,6 +469,7 @@ router.put("/stock-transfers/:id", async (req, res) => {
 
     if (updateData.transferType === "send" && !updateData.destination) {
       await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({
         success: false,
         message: "Destination is required for send transfers",
@@ -489,6 +478,7 @@ router.put("/stock-transfers/:id", async (req, res) => {
 
     if (updateData.transferType === "receive" && !updateData.source) {
       await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({
         success: false,
         message: "Source is required for receive transfers",
@@ -510,7 +500,8 @@ router.put("/stock-transfers/:id", async (req, res) => {
         await updateReportInHandAfterStockTransfer(
           newItem.productName,
           parseFloat(newItem.boxQuantity),
-          updateData.transferType
+          updateData.transferType,
+          session
         );
       }
     }
@@ -557,10 +548,7 @@ router.put("/stock-transfers/:id", async (req, res) => {
   }
 });
 
-/* ==========================================================================
-   🔹 DELETE: Single Stock Transfer
-   ========================================================================== */
-router.delete("/stock-transfers/:id", async (req, res) => {
+router.delete("/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -568,6 +556,7 @@ router.delete("/stock-transfers/:id", async (req, res) => {
     const { id } = req.params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
       await session.abortTransaction();
+      session.endSession();
       return res
         .status(400)
         .json({ success: false, message: "Invalid stock transfer ID" });
@@ -576,6 +565,7 @@ router.delete("/stock-transfers/:id", async (req, res) => {
     const transfer = await StockTransfer.findById(id);
     if (!transfer) {
       await session.abortTransaction();
+      session.endSession();
       return res
         .status(404)
         .json({ success: false, message: "Stock transfer not found" });
@@ -613,10 +603,7 @@ router.delete("/stock-transfers/:id", async (req, res) => {
   }
 });
 
-/* ==========================================================================
-   🔹 GET: Stock Transfer Summary/Stats
-   ========================================================================== */
-router.get("/stock-transfers/summary", async (req, res) => {
+router.get("/summary/stats", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
 

@@ -2,8 +2,9 @@ import express from "express";
 import Company from "../../models/settings/company.js";
 import mongoose from "mongoose";
 const router = express.Router();
+
 // Get all companies
-router.get('/company-profile', async (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const companies = await Company.find().sort({ createdAt: -1 });
     res.json({ 
@@ -20,7 +21,7 @@ router.get('/company-profile', async (req, res) => {
 });
 
 // Get company by ID
-router.get('/company-profile/:id', async (req, res) => { // Added missing slash before :id
+router.get('/:id', async (req, res) => {
   try {
     const company = await Company.findById(req.params.id);
     if (!company) {
@@ -43,7 +44,7 @@ router.get('/company-profile/:id', async (req, res) => { // Added missing slash 
 });
 
 // Create new company
-router.post('/company-profile', async (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const {
       companyCode,
@@ -98,7 +99,7 @@ router.post('/company-profile', async (req, res) => {
 });
 
 // Update company
-router.put('/company-profile/:id', async (req, res) => { // Added missing slash before :id
+router.put('/:id', async (req, res) => {
   try {
     const {
       companyName,
@@ -152,7 +153,7 @@ router.put('/company-profile/:id', async (req, res) => { // Added missing slash 
 });
 
 // Delete company
-router.delete('/company-profile/:id', async (req, res) => { // Added missing slash before :id
+router.delete('/:id', async (req, res) => {
   try {
     const deletedCompany = await Company.findByIdAndDelete(req.params.id);
     
@@ -177,7 +178,7 @@ router.delete('/company-profile/:id', async (req, res) => { // Added missing sla
 });
 
 // Delete multiple companies
-router.delete('/company-profile', async (req, res) => {
+router.delete('/', async (req, res) => {
   try {
     const { ids } = req.body;
     

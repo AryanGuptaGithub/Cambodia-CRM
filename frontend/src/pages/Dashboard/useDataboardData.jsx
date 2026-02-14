@@ -423,7 +423,7 @@ export const useDashboardData = () => {
       const period = `${previousMonth.getFullYear()}-${String(
         previousMonth.getMonth() + 1
       ).padStart(2, "0")}`;
-      const response = await axios.get(`${backendUrl}/api/payrolls`, {
+      const response = await axios.get(`${backendUrl}/api/hrm/payroll`, {
         params: { period },
       });
 
@@ -455,7 +455,7 @@ export const useDashboardData = () => {
 
   const fetchStockData = async () => {
     try {
-      const response = await axios.get(`${backendUrl}/api/reports-in-hand`);
+      const response = await axios.get(`${backendUrl}/api/reports/stock-in-hand`);
 
       const stockItems = Array.isArray(response.data.reports)
         ? response.data.reports

@@ -20,7 +20,7 @@ const ReportsInHand = () => {
   const fetchReportsInHand = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`${backendUrl}/api/reports/reports-in-hand`);
+      const response = await fetch(`${backendUrl}/api/reports/stock-in-hand`);
       if (!response.ok) {
         throw new Error("Failed to fetch data");
       }

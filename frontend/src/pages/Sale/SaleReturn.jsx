@@ -230,7 +230,7 @@ const SaleReturn = () => {
   // Fetch sale returns
   const fetchSaleReturn = async () => {
     try {
-      const res = await fetch(`${backendUrl}/api/salesreturn`);
+      const res = await fetch(`${backendUrl}/api/sales-return`);
       if (!res.ok) throw new Error("Failed to fetch sale returns");
       const data = await res.json();
       setSaleReturns(data.data || []);
@@ -319,7 +319,7 @@ const SaleReturn = () => {
     e.preventDefault();
     try {
       const response = await fetch(
-        `${backendUrl}/api/salesreturn/${form._id}`,
+        `${backendUrl}/api/sales-return/${form._id}`,
         {
           method: "PUT",
           headers: {
@@ -385,7 +385,7 @@ const SaleReturn = () => {
 
     if (confirm.isConfirmed) {
       try {
-        const res = await axios.delete(`${backendUrl}/api/salesreturn`, {
+        const res = await axios.delete(`${backendUrl}/api/sales-return`, {
           data: { ids: selected },
         });
 
@@ -413,7 +413,7 @@ const SaleReturn = () => {
 
     if (confirm.isConfirmed) {
       try {
-        const res = await axios.delete(`${backendUrl}/api/salesreturn/${id}`);
+        const res = await axios.delete(`${backendUrl}/api/sales-return/${id}`);
         if (res.status === 200) {
           showToast(
             "success",

@@ -82,7 +82,7 @@ const usePayrollForm = (initialForm = {}) => {
   const fetchMRList = useCallback(async () => {
     try {
       setMrListLoading(true);
-      const response = await fetch(`${backendUrl}/api/staffs`);
+      const response = await fetch(`${backendUrl}/api/staff`);
       const data = await response.json();
 
       if (!response.ok) {
@@ -845,7 +845,7 @@ const Payroll = () => {
       setLoading(true);
       setError(null);
       
-      let url = `${backendUrl}/api/payrolls`;
+      let url = `${backendUrl}/api/hrm/payroll`;
       
       // If period range is provided, add it as query parameters
       if (periodRange) {
@@ -972,7 +972,7 @@ const Payroll = () => {
 
     if (confirm.isConfirmed) {
       try {
-        const res = await axios.delete(`${backendUrl}/api/payrolls`, {
+        const res = await axios.delete(`${backendUrl}/api/hrm/payroll`, {
           data: { ids: selected.map((s) => s.id) },
         });
 
@@ -1132,7 +1132,7 @@ const Payroll = () => {
     if (confirmDelete.isConfirmed) {
       try {
         const res = await axios.delete(
-          `${backendUrl}/api/payrolls/${payroll._id}`
+          `${backendUrl}/api/hrm/payroll/${payroll._id}`
         );
 
         if (res.status === 200) {
@@ -1323,7 +1323,7 @@ const Payroll = () => {
 
     try {
       const res = await axios.post(
-        `${backendUrl}/api/payrolls/import`,
+        `${backendUrl}/api/hrm/payroll/import`,
         parsedData
       );
 
@@ -1362,7 +1362,7 @@ const Payroll = () => {
       };
 
       const res = await axios.put(
-        `${backendUrl}/api/payrolls/${form._id}`,
+        `${backendUrl}/api/hrm/payroll/${form._id}`,
         payload
       );
 

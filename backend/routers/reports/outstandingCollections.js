@@ -137,7 +137,8 @@ const updateMRCash = async (mrName, amount, invoiceNumber, date, session, isRefu
 };
 
 // Bulk Update Route with MR Cash Integration
-router.post("/reports/outstanding-collections/bulk-update", async (req, res) => {
+// ✅ CHANGED: removed "/reports/outstanding-collections" prefix
+router.post("/bulk-update", async (req, res) => {
   try {
     const { updates } = req.body;
 
@@ -360,29 +361,34 @@ router.post("/reports/outstanding-collections/bulk-update", async (req, res) => 
 });
 
 // Outstanding Collections Report
-router.get("/reports/outstanding-collections", async (req, res) => {
+// ✅ CHANGED: removed "/reports/outstanding-collections" prefix
+router.get("/", async (req, res) => {
   try {
-    const { 
-      startDate, 
-      endDate, 
-      page = 1, 
-      limit = 7, 
+    console.log("\n========== OUTSTANDING COLLECTIONS REPORT ==========");
+    console.log("Received query params:", req.query);
+
+    const {
+      startDate,
+      endDate,
+      page = 1,
+      limit = 7,
       search,
       customerCode,
-      status 
+      status,
     } = req.query;
 
+    // ---------- 1. BUILD MATCH STAGE ----------
     const matchStage = {
       paymentStatus: { $regex: /^credit$/i },
       isReturn: false,
       isExchange: false,
-      dueAmount: { $gt: 0 }
+      dueAmount: { $gt: 0 },
     };
+    console.log("Initial matchStage:", matchStage);
 
-    // Handle date filtering
+    // Date filtering
     if (startDate || endDate) {
       matchStage.deliveryDate = {};
-
       if (startDate) {
         const start = new Date(startDate);
         if (isNaN(start.getTime())) {
@@ -392,8 +398,8 @@ router.get("/reports/outstanding-collections", async (req, res) => {
           });
         }
         matchStage.deliveryDate.$gte = start;
+        console.log("Start date filter:", start);
       }
-
       if (endDate) {
         const end = new Date(endDate);
         if (isNaN(end.getTime())) {
@@ -404,95 +410,93 @@ router.get("/reports/outstanding-collections", async (req, res) => {
         }
         end.setHours(23, 59, 59, 999);
         matchStage.deliveryDate.$lte = end;
+        console.log("End date filter:", end);
       }
     }
 
-    // Handle customer code filter - format to 5 digits
+    // Customer code filter (5‑digit format)
     if (customerCode) {
       matchStage.customerCode = formatCustomerCode(customerCode);
+      console.log("CustomerCode filter:", matchStage.customerCode);
     }
 
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
     const now = new Date();
+    console.log(`Pagination: page=${pageNum}, limit=${limitNum}, skip=${skip}`);
 
-    // First, get all sales that match the criteria
+    // ---------- 2. FETCH CREDIT SALES ----------
+    console.log("Fetching sales with matchStage:", JSON.stringify(matchStage, null, 2));
     const sales = await Sale.find(matchStage).lean();
-    
+    console.log(`Found ${sales.length} credit sales.`);
+
+    // Log total dueAmount from raw sales (should be close to expected total if filters are correct)
+    const rawTotalDue = sales.reduce((sum, s) => sum + (s.dueAmount || 0), 0);
+    console.log(`Raw total dueAmount from sales: ${rawTotalDue.toFixed(2)}`);
+
     if (sales.length === 0) {
+      console.log("No sales found – returning empty report.");
       return res.json({
         success: true,
-        data: {
-          summary: {
-            totalOutstandingAmount: 0,
-            totalDueAmount: 0,
-            totalOverdueAmount: 0,
-            totalCustomers: 0,
-            totalInvoices: 0,
-            totalOverdueInvoices: 0,
-            totalRecords: 0
-          },
-          records: []
-        },
-        pagination: {
-          currentPage: pageNum,
-          totalPages: 0,
-          totalRecords: 0,
-          hasNext: false,
-          hasPrev: false
-        },
-        count: 0
+        data: { summary: { /* ... zeros */ }, records: [] },
+        pagination: { /* ... zeros */ },
+        count: 0,
       });
     }
 
-    // Format all sale customer codes to 5 digits
-    const formattedSales = sales.map(sale => ({
+    // ---------- 3. FORMAT CUSTOMER CODES ----------
+    const formattedSales = sales.map((sale) => ({
       ...sale,
-      formattedCustomerCode: formatCustomerCode(sale.customerCode)
+      formattedCustomerCode: formatCustomerCode(sale.customerCode),
     }));
+    const uniqueFormattedCodes = [
+      ...new Set(formattedSales.map((s) => s.formattedCustomerCode)),
+    ];
+    console.log(`Unique formatted customer codes: ${uniqueFormattedCodes.length}`);
+    console.log("Sample codes:", uniqueFormattedCodes.slice(0, 5));
 
-    // Get unique formatted customer codes from sales
-    const customerCodes = [...new Set(formattedSales.map(sale => sale.formattedCustomerCode))];
-    
-    // Find customers with flexible matching
-    const customerPromises = customerCodes.map(async (code) => {
-      // Try exact match first with formatted code
+    // ---------- 4. LOOKUP CUSTOMERS ----------
+    console.log("Looking up customers for each code...");
+    const customerPromises = uniqueFormattedCodes.map(async (code) => {
+      // exact match
       let customer = await Customer.findOne({ customerCode: code }).lean();
-      
-      // If not found, try without leading zeros
       if (!customer) {
         const normalizedCode = normalizeCustomerCode(code);
-        customer = await Customer.findOne({ 
+        customer = await Customer.findOne({
           $or: [
             { customerCode: normalizedCode },
             { customerCode: formatCustomerCode(normalizedCode) },
-            { customerCode: { $regex: new RegExp(`${normalizedCode}$`) } }
-          ]
+            { customerCode: { $regex: new RegExp(`${normalizedCode}$`) } },
+          ],
         }).lean();
+        if (customer) {
+          console.log(`  Matched code ${code} → customer ${customer.customerCode} (normalised)`);
+        }
+      } else {
+        console.log(`  Exact match for ${code}`);
       }
-      
       return { saleCode: code, customer };
     });
 
     const customerResults = await Promise.all(customerPromises);
-    
-    // Create a map of sale customer code to customer data
     const customerMap = {};
     customerResults.forEach(({ saleCode, customer }) => {
       customerMap[saleCode] = customer;
     });
+    console.log(`Customers mapped: ${Object.keys(customerMap).length}`);
 
-    // Group sales by formatted customer code
+    // ---------- 5. GROUP SALES BY CUSTOMER CODE ----------
+    console.log("Grouping sales by formatted customer code...");
     const customerGroups = {};
-    
-    formattedSales.forEach(sale => {
-      const customerCode = sale.formattedCustomerCode;
-      const customer = customerMap[customerCode];
-      
-      if (!customerGroups[customerCode]) {
-        customerGroups[customerCode] = {
-          customerCode: customerCode, // Always return 5-digit format
+
+    formattedSales.forEach((sale) => {
+      const custCode = sale.formattedCustomerCode;
+      const customer = customerMap[custCode];
+
+      if (!customerGroups[custCode]) {
+        customerGroups[custCode] = {
+          customerCode: custCode,
           customerName: customer?.name || null,
           customerPhone: customer?.customerNumber || null,
           customerEmail: customer?.email || null,
@@ -504,126 +508,142 @@ router.get("/reports/outstanding-collections", async (req, res) => {
           latestDeliveryDate: null,
           invoiceCount: 0,
           overdueInvoices: 0,
-          invoices: []
+          invoices: [],
         };
       }
-      
-      // Calculate overdue date
+
+      // overdue calculation
       let overdueDate = sale.dueDate;
       if (!overdueDate && sale.creditDays) {
         overdueDate = new Date(sale.deliveryDate);
         overdueDate.setDate(overdueDate.getDate() + sale.creditDays);
       }
-      
       const isOverdue = overdueDate && new Date(overdueDate) < now && sale.dueAmount > 0;
-      
-      customerGroups[customerCode].totalNetSellingAmount += sale.netSellingAmount || 0;
-      customerGroups[customerCode].totalDueAmount += sale.dueAmount || 0;
-      customerGroups[customerCode].totalPaidAmount += sale.paidAmount || 0;
-      
+
+      const group = customerGroups[custCode];
+      group.totalNetSellingAmount += sale.netSellingAmount || 0;
+      group.totalDueAmount += sale.dueAmount || 0;
+      group.totalPaidAmount += sale.paidAmount || 0;
       if (isOverdue) {
-        customerGroups[customerCode].overdueAmount += sale.dueAmount || 0;
-        customerGroups[customerCode].overdueInvoices += 1;
+        group.overdueAmount += sale.dueAmount || 0;
+        group.overdueInvoices += 1;
       }
-      
-      if (!customerGroups[customerCode].latestDeliveryDate || 
-          new Date(sale.deliveryDate) > new Date(customerGroups[customerCode].latestDeliveryDate)) {
-        customerGroups[customerCode].latestDeliveryDate = sale.deliveryDate;
+      if (
+        !group.latestDeliveryDate ||
+        new Date(sale.deliveryDate) > new Date(group.latestDeliveryDate)
+      ) {
+        group.latestDeliveryDate = sale.deliveryDate;
       }
-      
-      customerGroups[customerCode].invoiceCount += 1;
-      customerGroups[customerCode].invoices.push(sale);
+      group.invoiceCount += 1;
+      group.invoices.push(sale);
     });
 
-    // Convert to array and add calculated fields
-    let customerList = Object.values(customerGroups).map(group => ({
+    console.log(`Created groups for ${Object.keys(customerGroups).length} customers.`);
+
+    // ---------- 6. CALCULATE DERIVED FIELDS ----------
+    let customerList = Object.values(customerGroups).map((group) => ({
       ...group,
       outstandingAmount: group.totalDueAmount,
-      overdueDays: group.overdueAmount > 0 ? 
-        Math.floor((now - new Date(group.latestDeliveryDate)) / (1000 * 60 * 60 * 24)) : 0
+      overdueDays:
+        group.overdueAmount > 0
+          ? Math.floor((now - new Date(group.latestDeliveryDate)) / (1000 * 60 * 60 * 24))
+          : 0,
     }));
 
-    // Apply search filter
+    // ---------- 7. SEARCH FILTER ----------
     if (search && search.trim() !== "") {
       const searchTerm = search.trim().toLowerCase();
-      customerList = customerList.filter(customer => {
-        const customerName = (customer.customerName || '').toLowerCase();
-        const customerCode = (customer.customerCode || '').toLowerCase();
-        const customerPhone = (customer.customerPhone || '').toLowerCase();
-        const customerEmail = (customer.customerEmail || '').toLowerCase();
-        const customerAddress = (customer.customerAddress || '').toLowerCase();
-        
-        return customerName.includes(searchTerm) ||
-               customerCode.includes(searchTerm) ||
-               customerPhone.includes(searchTerm) ||
-               customerEmail.includes(searchTerm) ||
-               customerAddress.includes(searchTerm);
+      const beforeCount = customerList.length;
+      customerList = customerList.filter((cust) => {
+        const name = (cust.customerName || "").toLowerCase();
+        const code = (cust.customerCode || "").toLowerCase();
+        const phone = (cust.customerPhone || "").toLowerCase();
+        const email = (cust.customerEmail || "").toLowerCase();
+        const addr = (cust.customerAddress || "").toLowerCase();
+        return (
+          name.includes(searchTerm) ||
+          code.includes(searchTerm) ||
+          phone.includes(searchTerm) ||
+          email.includes(searchTerm) ||
+          addr.includes(searchTerm)
+        );
       });
+      console.log(`Search filter "${searchTerm}": ${beforeCount} → ${customerList.length} customers`);
     }
 
-    // Sort by overdue amount
+    // ---------- 8. SORT BY OVERDUE AMOUNT ----------
     customerList.sort((a, b) => b.overdueAmount - a.overdueAmount);
 
-    // Calculate totals
-    const totals = customerList.reduce((acc, curr) => {
-      acc.totalOutstandingAmount += curr.outstandingAmount || 0;
-      acc.totalDueAmount += curr.totalDueAmount || 0;
-      acc.totalOverdueAmount += curr.overdueAmount || 0;
-      acc.totalCustomers += 1;
-      acc.totalInvoices += curr.invoiceCount || 0;
-      acc.totalOverdueInvoices += curr.overdueInvoices || 0;
-      return acc;
-    }, {
-      totalOutstandingAmount: 0,
-      totalDueAmount: 0,
-      totalOverdueAmount: 0,
-      totalCustomers: 0,
-      totalInvoices: 0,
-      totalOverdueInvoices: 0
-    });
+    // ---------- 9. AGGREGATE TOTALS ----------
+    const totals = customerList.reduce(
+      (acc, curr) => {
+        acc.totalOutstandingAmount += curr.outstandingAmount || 0;
+        acc.totalDueAmount += curr.totalDueAmount || 0;
+        acc.totalOverdueAmount += curr.overdueAmount || 0;
+        acc.totalCustomers += 1;
+        acc.totalInvoices += curr.invoiceCount || 0;
+        acc.totalOverdueInvoices += curr.overdueInvoices || 0;
+        return acc;
+      },
+      {
+        totalOutstandingAmount: 0,
+        totalDueAmount: 0,
+        totalOverdueAmount: 0,
+        totalCustomers: 0,
+        totalInvoices: 0,
+        totalOverdueInvoices: 0,
+      }
+    );
+    totals.totalRecords = customerList.length;
 
-    // Pagination
+    console.log("\n========== FINAL SUMMARY ==========");
+    console.log(`Total customers: ${totals.totalCustomers}`);
+    console.log(`Total invoices: ${totals.totalInvoices}`);
+    console.log(`Total outstanding amount: ${totals.totalOutstandingAmount.toFixed(2)}`);
+    console.log(`Total overdue amount: ${totals.totalOverdueAmount.toFixed(2)}`);
+    console.log(`Total overdue invoices: ${totals.totalOverdueInvoices}`);
+    console.log("=====================================\n");
+
+    // ---------- 10. PAGINATION ----------
     const totalCount = customerList.length;
     const totalPages = Math.ceil(totalCount / limitNum);
     const paginatedCustomers = customerList.slice(skip, skip + limitNum);
+    console.log(`Pagination: showing ${paginatedCustomers.length} of ${totalCount} customers`);
 
-    // Format records for response
-    const records = paginatedCustomers.map(customer => ({
-      customerCode: customer.customerCode, // Already in 5-digit format
-      customerName: customer.customerName || 'N/A',
-      phone: customer.customerPhone || 'N/A',
-      email: customer.customerEmail || 'N/A',
-      address: customer.customerAddress || 'N/A',
-      totalOutstandingAmount: customer.outstandingAmount || 0,
-      dueAmount: customer.totalDueAmount || 0,
-      overdueAmount: customer.overdueAmount || 0,
-      lastTransactionDate: customer.latestDeliveryDate,
-      invoiceCount: customer.invoiceCount || 0,
-      overdueInvoices: customer.overdueInvoices || 0,
-      overdueDays: customer.overdueDays || 0
+    // ---------- 11. FORMAT RESPONSE RECORDS ----------
+    const records = paginatedCustomers.map((cust) => ({
+      customerCode: cust.customerCode,
+      customerName: cust.customerName || "N/A",
+      phone: cust.customerPhone || "N/A",
+      email: cust.customerEmail || "N/A",
+      address: cust.customerAddress || "N/A",
+      totalOutstandingAmount: cust.outstandingAmount || 0,
+      dueAmount: cust.totalDueAmount || 0,
+      overdueAmount: cust.overdueAmount || 0,
+      lastTransactionDate: cust.latestDeliveryDate,
+      invoiceCount: cust.invoiceCount || 0,
+      overdueInvoices: cust.overdueInvoices || 0,
+      overdueDays: cust.overdueDays || 0,
     }));
 
+    // ---------- 12. SEND RESPONSE ----------
     return res.json({
       success: true,
       data: {
-        summary: {
-          ...totals,
-          totalRecords: totalCount
-        },
-        records: records,
+        summary: totals,
+        records,
       },
       pagination: {
         currentPage: pageNum,
-        totalPages: totalPages,
+        totalPages,
         totalRecords: totalCount,
         hasNext: pageNum < totalPages,
         hasPrev: pageNum > 1,
       },
       count: records.length,
     });
-
   } catch (error) {
-    console.error("Error in outstanding-collections report:", error);
+    console.error("ERROR in outstanding-collections report:", error);
     return res.status(500).json({
       success: false,
       message: "Server error fetching outstanding collections",
@@ -633,7 +653,8 @@ router.get("/reports/outstanding-collections", async (req, res) => {
 });
 
 // Excel Export for Outstanding Collections
-router.get("/reports/outstanding-collections/export/excel", async (req, res) => {
+// ✅ CHANGED: removed "/reports/outstanding-collections" prefix
+router.get("/export/excel", async (req, res) => {
   try {
     const { startDate, endDate, search, customerCode } = req.query;
     const matchStage = {
@@ -935,7 +956,7 @@ router.get("/reports/outstanding-collections/export/excel", async (req, res) => 
     res.send(buffer);
 
   } catch (error) {
-    console.error("Error in /reports/outstanding-collections/export/excel:", error);
+    console.error("Error in /export/excel:", error);
     res.status(500).json({
       success: false,
       message: "Failed to generate Excel export",

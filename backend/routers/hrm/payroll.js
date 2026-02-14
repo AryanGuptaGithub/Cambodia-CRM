@@ -313,7 +313,8 @@ router.get("/basic-payroll/employee/:employeeId", async (req, res) => {
   }
 });
 
-router.get("/payrolls", async (req, res) => {
+// GET all payrolls (root)
+router.get("/", async (req, res) => {
   try {
     const {
       page = 1,
@@ -447,7 +448,8 @@ router.get("/payrolls", async (req, res) => {
   }
 });
 
-router.get("/payrolls/export/csv", async (req, res) => {
+// GET export CSV
+router.get("/export/csv", async (req, res) => {
   try {
     const {
       search = "",
@@ -583,7 +585,8 @@ router.get("/payrolls/export/csv", async (req, res) => {
   }
 });
 
-router.get("/payrolls/:id", async (req, res) => {
+// GET single payroll by ID
+router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -631,6 +634,7 @@ router.get("/payrolls/:id", async (req, res) => {
   }
 });
 
+// GET list of employees from basic payroll
 router.get("/mrs/from-basic-payroll", async (req, res) => {
   try {
     // Fetch all basic payroll records with employee details
@@ -683,7 +687,8 @@ router.get("/mrs/from-basic-payroll", async (req, res) => {
   }
 });
 
-router.get("/payrolls/calculate/:employeeId/:period", async (req, res) => {
+// GET calculate salary for period
+router.get("/calculate/:employeeId/:period", async (req, res) => {
   try {
     const { employeeId, period } = req.params;
 
@@ -717,7 +722,8 @@ router.get("/payrolls/calculate/:employeeId/:period", async (req, res) => {
   }
 });
 
-router.post("/payrolls", async (req, res) => {
+// POST create new payroll
+router.post("/", async (req, res) => {
   const session = await mongoose.startSession();
 
   try {
@@ -945,7 +951,8 @@ router.post("/payrolls", async (req, res) => {
   }
 });
 
-router.put("/payrolls/:id", async (req, res) => {
+// PUT update payroll
+router.put("/:id", async (req, res) => {
   const session = await mongoose.startSession();
 
   try {
@@ -1088,7 +1095,8 @@ router.put("/payrolls/:id", async (req, res) => {
   }
 });
 
-router.delete("/payrolls/:id", async (req, res) => {
+// DELETE single payroll
+router.delete("/:id", async (req, res) => {
   const session = await mongoose.startSession();
 
   try {
@@ -1149,7 +1157,8 @@ router.delete("/payrolls/:id", async (req, res) => {
   }
 });
 
-router.delete("/payrolls", async (req, res) => {
+// DELETE multiple payrolls
+router.delete("/", async (req, res) => {
   const session = await mongoose.startSession();
 
   try {

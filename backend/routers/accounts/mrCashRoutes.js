@@ -16,8 +16,9 @@ const formatCurrency = (value) => {
   }).format(value);
 };
 
+// FIXED: Changed from '/mrcash' to '/'
 // GET all MR Cash records with totals
-router.get("/mrcash", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const {
       search = "",
@@ -122,8 +123,9 @@ router.get("/mrcash", async (req, res) => {
   }
 });
 
+// FIXED: Changed from '/mrcash' to '/'
 // POST create new MR Cash record
-router.post("/mrcash", async (req, res) => {
+router.post("/", async (req, res) => {
   try {
     const {
       mrId,
@@ -177,8 +179,283 @@ router.post("/mrcash", async (req, res) => {
   }
 });
 
+// FIXED: Changed from '/mrcash/summary' to '/summary' - MOVED BEFORE /:id to avoid conflicts
+// GET summary statistics for MR Cash
+router.get("/summary", async (req, res) => {
+  try {
+    // Get basic totals
+    const totals = await MRCash.aggregate([
+      { $match: { isActive: true } },
+      {
+        $group: {
+          _id: null,
+          totalCurrentCash: { $sum: "$currentCash" },
+          totalTransferred: { $sum: "$cashTransferredToAdmin" },
+          totalRecords: { $sum: 1 },
+          avgCurrentCash: { $avg: "$currentCash" },
+          maxCurrentCash: { $max: "$currentCash" },
+          minCurrentCash: { $min: "$currentCash" },
+        },
+      },
+    ]);
+
+    // Get MRs with positive cash count
+    const positiveCashCount = await MRCash.countDocuments({
+      isActive: true,
+      currentCash: { $gt: 0 },
+    });
+
+    // Get MRs with no cash count
+    const zeroCashCount = await MRCash.countDocuments({
+      isActive: true,
+      currentCash: { $eq: 0 },
+    });
+
+    // Get recent transfers
+    const recentTransfers = await MRCash.find({
+      isActive: true,
+      lastTransferDate: { $exists: true, $ne: null },
+    })
+      .sort({ lastTransferDate: -1 })
+      .limit(5)
+      .select("mrName currentCash cashTransferredToAdmin lastTransferDate")
+      .lean();
+
+    // Get destination account balances
+    const destinationAccounts = await Account.find({
+      code: { $in: ["cash_balance"] },
+    }).select("name code totalAmount");
+
+    const summary = {
+      ...(totals[0] || {
+        totalCurrentCash: 0,
+        totalTransferred: 0,
+        totalRecords: 0,
+        avgCurrentCash: 0,
+        maxCurrentCash: 0,
+        minCurrentCash: 0,
+      }),
+      positiveCashCount,
+      zeroCashCount,
+      recentTransfers,
+      destinationAccounts,
+    };
+
+    res.status(200).json({
+      success: true,
+      data: summary,
+    });
+  } catch (error) {
+    console.error("Error fetching MR Cash summary:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+});
+
+// FIXED: Changed from '/mrcash/destination-accounts' to '/destination-accounts' - MOVED BEFORE /:id
+// GET destination accounts list
+router.get("/destination-accounts", async (req, res) => {
+  try {
+    const accounts = await Account.find({
+      code: { $in: ["cash_balance"] },
+    })
+      .select("name code totalAmount")
+      .sort({ name: 1 });
+
+    res.status(200).json({
+      success: true,
+      data: accounts,
+      count: accounts.length,
+    });
+  } catch (error) {
+    console.error("Error fetching destination accounts:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+});
+
+// FIXED: Changed from '/mrcash/mr-list' to '/mr-list' - MOVED BEFORE /:id
+// GET MR list for dropdown (only MRs with current cash > 0)
+router.get("/mr-list", async (req, res) => {
+  try {
+    // Find MRs from MRCash collection where currentCash > 0
+    const mrsWithCash = await MRCash.find({
+      isActive: true,
+      currentCash: { $gt: 0 },
+    })
+      .populate("mrId", "medicalRepName contactNo email MRId teamName")
+      .select(
+        "mrId mrName currentCash cashTransferredToAdmin lastTransferDate notes"
+      )
+      .sort({ currentCash: -1 });
+
+    // Format the response
+    const formattedMRs = mrsWithCash.map((mr) => ({
+      value: mr._id, // MRCash record ID
+      label: `${mr.mrName} - ${formatCurrency(mr.currentCash)}`,
+      mrName: mr.mrName,
+      currentCash: mr.currentCash,
+      cashTransferredToAdmin: mr.cashTransferredToAdmin,
+      lastTransferDate: mr.lastTransferDate,
+      notes: mr.notes,
+      // Include staff details if available
+      ...(mr.mrId && {
+        staffId: mr.mrId._id,
+        phone: mr.mrId.contactNo,
+        email: mr.mrId.email,
+        MRId: mr.mrId.MRId,
+        teamName: mr.mrId.teamName,
+      }),
+    }));
+
+    res.status(200).json({
+      success: true,
+      data: formattedMRs,
+      count: formattedMRs.length,
+      message: `Found ${formattedMRs.length} MRs with positive cash balance`,
+    });
+  } catch (error) {
+    console.error("Error fetching MR list from MRCash:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+});
+
+// FIXED: Changed from '/mrcash/mr-list-with-cash' to '/mr-list-with-cash' - MOVED BEFORE /:id
+// GET MRs with positive current cash (for transfer operations)
+router.get("/mr-list-with-cash", async (req, res) => {
+  try {
+    const { minCash = 0 } = req.query; // Optional: minimum cash amount
+
+    // Build query - only MRs with currentCash > 0
+    const query = {
+      isActive: true,
+      currentCash: { $gt: 0 }, // Greater than 0
+    };
+
+    // Add minimum cash filter if provided
+    if (parseFloat(minCash) > 0) {
+      query.currentCash = { $gte: parseFloat(minCash) };
+    }
+
+    // Find MRs from MRCash collection with positive cash
+    const mrsWithCash = await MRCash.find(query)
+      .populate("mrId", "medicalRepName contactNo email MRId teamName")
+      .select(
+        "mrId mrName currentCash cashTransferredToAdmin lastTransferDate notes"
+      )
+      .sort({ currentCash: -1 }); // Sort by highest cash first
+
+    // Format the response
+    const formattedMRs = mrsWithCash.map((mr) => ({
+      value: mr._id, // MRCash record ID
+      label: `${mr.mrName} - Available: ${formatCurrency(mr.currentCash)}`,
+      mrName: mr.mrName,
+      currentCash: mr.currentCash,
+      cashTransferredToAdmin: mr.cashTransferredToAdmin,
+      lastTransferDate: mr.lastTransferDate,
+      notes: mr.notes,
+      // Include staff details if available
+      ...(mr.mrId && {
+        staffId: mr.mrId._id,
+        phone: mr.mrId.contactNo,
+        email: mr.mrId.email,
+        MRId: mr.mrId.MRId,
+        teamName: mr.mrId.teamName,
+      }),
+    }));
+
+    res.status(200).json({
+      success: true,
+      data: formattedMRs,
+      count: formattedMRs.length,
+      message: `Found ${formattedMRs.length} MRs with positive cash balance`,
+      filter: {
+        minCash: parseFloat(minCash) || 0,
+        description:
+          minCash > 0
+            ? `MRs with cash ≥ ${formatCurrency(minCash)}`
+            : "MRs with positive cash balance",
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching MR list with cash:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+});
+
+// FIXED: Changed from '/mrcash/mr/:mrId' to '/mr/:mrId' - MOVED BEFORE /:id
+// GET specific MR's cash details
+router.get("/mr/:mrId", async (req, res) => {
+  try {
+    const { mrId } = req.params;
+
+    const mrCash = await MRCash.findOne({
+      mrId: mrId,
+      isActive: true,
+    }).populate("mrId", "medicalRepName contactNo email MRId teamName");
+
+    if (!mrCash) {
+      return res.status(404).json({
+        success: false,
+        message: "MR Cash record not found for this MR",
+      });
+    }
+
+    // Format the response
+    const response = {
+      _id: mrCash._id,
+      mrId: mrCash.mrId?._id || mrCash.mrId,
+      mrName: mrCash.mrName,
+      currentCash: mrCash.currentCash,
+      cashTransferredToAdmin: mrCash.cashTransferredToAdmin,
+      totalCash: mrCash.currentCash + mrCash.cashTransferredToAdmin,
+      lastTransferDate: mrCash.lastTransferDate,
+      notes: mrCash.notes,
+      isActive: mrCash.isActive,
+      createdAt: mrCash.createdAt,
+      updatedAt: mrCash.updatedAt,
+      ...(mrCash.mrId && {
+        mrDetails: {
+          name: mrCash.mrId.medicalRepName,
+          phone: mrCash.mrId.contactNo,
+          email: mrCash.mrId.email,
+          MRId: mrCash.mrId.MRId,
+          teamName: mrCash.mrId.teamName,
+        },
+      }),
+    };
+
+    res.status(200).json({
+      success: true,
+      data: response,
+    });
+  } catch (error) {
+    console.error("Error fetching MR cash details:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+});
+
+// FIXED: Changed from '/mrcash/:id' to '/:id'
 // PUT update MR Cash record
-router.put("/mrcash/:id", async (req, res) => {
+router.put("/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const updateData = req.body;
@@ -225,8 +502,9 @@ router.put("/mrcash/:id", async (req, res) => {
   }
 });
 
+// FIXED: Changed from '/mrcash/:mrCashId/transfer' to '/:mrCashId/transfer'
 // POST transfer cash to admin/company account - UPDATED TO HANDLE BOTH ACCOUNTS
-router.post("/mrcash/:mrCashId/transfer", async (req, res) => {
+router.post("/:mrCashId/transfer", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -367,9 +645,10 @@ router.post("/mrcash/:mrCashId/transfer", async (req, res) => {
   }
 });
 
-// NEW: Transfer cash to specific destination (explicit endpoint)
+// FIXED: Changed from '/mrcash/:mrCashId/transfer-to/:destinationCode' to '/:mrCashId/transfer-to/:destinationCode'
+// Transfer cash to specific destination (explicit endpoint)
 router.post(
-  "/mrcash/:mrCashId/transfer-to/:destinationCode",
+  "/:mrCashId/transfer-to/:destinationCode",
   async (req, res) => {
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -510,8 +789,9 @@ router.post(
   }
 );
 
+// FIXED: Changed from '/mrcash/:mrCashId/transfers' to '/:mrCashId/transfers'
 // GET transfer history for an MR
-router.get("/mrcash/:mrCashId/transfers", async (req, res) => {
+router.get("/:mrCashId/transfers", async (req, res) => {
   try {
     const { mrCashId } = req.params;
     const { limit = 30, page = 1, destinationCode } = req.query;
@@ -565,32 +845,9 @@ router.get("/mrcash/:mrCashId/transfers", async (req, res) => {
   }
 });
 
-// GET destination accounts list
-router.get("/mrcash/destination-accounts", async (req, res) => {
-  try {
-    const accounts = await Account.find({
-      code: { $in: ["cash_balance"] },
-    })
-      .select("name code totalAmount")
-      .sort({ name: 1 });
-
-    res.status(200).json({
-      success: true,
-      data: accounts,
-      count: accounts.length,
-    });
-  } catch (error) {
-    console.error("Error fetching destination accounts:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-      error: error.message,
-    });
-  }
-});
-
+// FIXED: Changed from '/mrcash/:id' to '/:id'
 // DELETE (deactivate) MR Cash record
-router.delete("/mrcash/:id", async (req, res) => {
+router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -612,251 +869,6 @@ router.delete("/mrcash/:id", async (req, res) => {
     });
   } catch (error) {
     console.error("Error deleting MR Cash:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-      error: error.message,
-    });
-  }
-});
-
-// GET MR list for dropdown (only MRs with current cash > 0)
-router.get("/mrcash/mr-list", async (req, res) => {
-  try {
-    // Find MRs from MRCash collection where currentCash > 0
-    const mrsWithCash = await MRCash.find({
-      isActive: true,
-      currentCash: { $gt: 0 },
-    })
-      .populate("mrId", "medicalRepName contactNo email MRId teamName")
-      .select(
-        "mrId mrName currentCash cashTransferredToAdmin lastTransferDate notes"
-      )
-      .sort({ currentCash: -1 });
-
-    // Format the response
-    const formattedMRs = mrsWithCash.map((mr) => ({
-      value: mr._id, // MRCash record ID
-      label: `${mr.mrName} - ${formatCurrency(mr.currentCash)}`,
-      mrName: mr.mrName,
-      currentCash: mr.currentCash,
-      cashTransferredToAdmin: mr.cashTransferredToAdmin,
-      lastTransferDate: mr.lastTransferDate,
-      notes: mr.notes,
-      // Include staff details if available
-      ...(mr.mrId && {
-        staffId: mr.mrId._id,
-        phone: mr.mrId.contactNo,
-        email: mr.mrId.email,
-        MRId: mr.mrId.MRId,
-        teamName: mr.mrId.teamName,
-      }),
-    }));
-
-    res.status(200).json({
-      success: true,
-      data: formattedMRs,
-      count: formattedMRs.length,
-      message: `Found ${formattedMRs.length} MRs with positive cash balance`,
-    });
-  } catch (error) {
-    console.error("Error fetching MR list from MRCash:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-      error: error.message,
-    });
-  }
-});
-
-// NEW: GET MRs with positive current cash (for transfer operations)
-router.get("/mrcash/mr-list-with-cash", async (req, res) => {
-  try {
-    const { minCash = 0 } = req.query; // Optional: minimum cash amount
-
-    // Build query - only MRs with currentCash > 0
-    const query = {
-      isActive: true,
-      currentCash: { $gt: 0 }, // Greater than 0
-    };
-
-    // Add minimum cash filter if provided
-    if (parseFloat(minCash) > 0) {
-      query.currentCash = { $gte: parseFloat(minCash) };
-    }
-
-    // Find MRs from MRCash collection with positive cash
-    const mrsWithCash = await MRCash.find(query)
-      .populate("mrId", "medicalRepName contactNo email MRId teamName")
-      .select(
-        "mrId mrName currentCash cashTransferredToAdmin lastTransferDate notes"
-      )
-      .sort({ currentCash: -1 }); // Sort by highest cash first
-
-    // Format the response
-    const formattedMRs = mrsWithCash.map((mr) => ({
-      value: mr._id, // MRCash record ID
-      label: `${mr.mrName} - Available: ${formatCurrency(mr.currentCash)}`,
-      mrName: mr.mrName,
-      currentCash: mr.currentCash,
-      cashTransferredToAdmin: mr.cashTransferredToAdmin,
-      lastTransferDate: mr.lastTransferDate,
-      notes: mr.notes,
-      // Include staff details if available
-      ...(mr.mrId && {
-        staffId: mr.mrId._id,
-        phone: mr.mrId.contactNo,
-        email: mr.mrId.email,
-        MRId: mr.mrId.MRId,
-        teamName: mr.mrId.teamName,
-      }),
-    }));
-
-    res.status(200).json({
-      success: true,
-      data: formattedMRs,
-      count: formattedMRs.length,
-      message: `Found ${formattedMRs.length} MRs with positive cash balance`,
-      filter: {
-        minCash: parseFloat(minCash) || 0,
-        description:
-          minCash > 0
-            ? `MRs with cash ≥ ${formatCurrency(minCash)}`
-            : "MRs with positive cash balance",
-      },
-    });
-  } catch (error) {
-    console.error("Error fetching MR list with cash:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-      error: error.message,
-    });
-  }
-});
-
-// NEW: GET specific MR's cash details
-router.get("/mrcash/mr/:mrId", async (req, res) => {
-  try {
-    const { mrId } = req.params;
-
-    const mrCash = await MRCash.findOne({
-      mrId: mrId,
-      isActive: true,
-    }).populate("mrId", "medicalRepName contactNo email MRId teamName");
-
-    if (!mrCash) {
-      return res.status(404).json({
-        success: false,
-        message: "MR Cash record not found for this MR",
-      });
-    }
-
-    // Format the response
-    const response = {
-      _id: mrCash._id,
-      mrId: mrCash.mrId?._id || mrCash.mrId,
-      mrName: mrCash.mrName,
-      currentCash: mrCash.currentCash,
-      cashTransferredToAdmin: mrCash.cashTransferredToAdmin,
-      totalCash: mrCash.currentCash + mrCash.cashTransferredToAdmin,
-      lastTransferDate: mrCash.lastTransferDate,
-      notes: mrCash.notes,
-      isActive: mrCash.isActive,
-      createdAt: mrCash.createdAt,
-      updatedAt: mrCash.updatedAt,
-      ...(mrCash.mrId && {
-        mrDetails: {
-          name: mrCash.mrId.medicalRepName,
-          phone: mrCash.mrId.contactNo,
-          email: mrCash.mrId.email,
-          MRId: mrCash.mrId.MRId,
-          teamName: mrCash.mrId.teamName,
-        },
-      }),
-    };
-
-    res.status(200).json({
-      success: true,
-      data: response,
-    });
-  } catch (error) {
-    console.error("Error fetching MR cash details:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-      error: error.message,
-    });
-  }
-});
-
-// NEW: GET summary statistics for MR Cash
-router.get("/mrcash/summary", async (req, res) => {
-  try {
-    // Get basic totals
-    const totals = await MRCash.aggregate([
-      { $match: { isActive: true } },
-      {
-        $group: {
-          _id: null,
-          totalCurrentCash: { $sum: "$currentCash" },
-          totalTransferred: { $sum: "$cashTransferredToAdmin" },
-          totalRecords: { $sum: 1 },
-          avgCurrentCash: { $avg: "$currentCash" },
-          maxCurrentCash: { $max: "$currentCash" },
-          minCurrentCash: { $min: "$currentCash" },
-        },
-      },
-    ]);
-
-    // Get MRs with positive cash count
-    const positiveCashCount = await MRCash.countDocuments({
-      isActive: true,
-      currentCash: { $gt: 0 },
-    });
-
-    // Get MRs with no cash count
-    const zeroCashCount = await MRCash.countDocuments({
-      isActive: true,
-      currentCash: { $eq: 0 },
-    });
-
-    // Get recent transfers
-    const recentTransfers = await MRCash.find({
-      isActive: true,
-      lastTransferDate: { $exists: true, $ne: null },
-    })
-      .sort({ lastTransferDate: -1 })
-      .limit(5)
-      .select("mrName currentCash cashTransferredToAdmin lastTransferDate")
-      .lean();
-
-    // Get destination account balances
-    const destinationAccounts = await Account.find({
-      code: { $in: ["cash_balance"] },
-    }).select("name code totalAmount");
-
-    const summary = {
-      ...(totals[0] || {
-        totalCurrentCash: 0,
-        totalTransferred: 0,
-        totalRecords: 0,
-        avgCurrentCash: 0,
-        maxCurrentCash: 0,
-        minCurrentCash: 0,
-      }),
-      positiveCashCount,
-      zeroCashCount,
-      recentTransfers,
-      destinationAccounts,
-    };
-
-    res.status(200).json({
-      success: true,
-      data: summary,
-    });
-  } catch (error) {
-    console.error("Error fetching MR Cash summary:", error);
     res.status(500).json({
       success: false,
       message: "Server error",

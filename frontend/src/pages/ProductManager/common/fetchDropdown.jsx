@@ -4,7 +4,7 @@ const backendUrl = import.meta.env.VITE_BACKEND_URL;
 // Medical Representatives
 export const fetchMRList = async () => {
   try {
-    const response = await axios.get(`${backendUrl}/api/staffs`);
+    const response = await axios.get(`${backendUrl}/api/staff`);
     const mrList = response.data || [];
 
     return {
@@ -112,7 +112,7 @@ export const fetchSuppliers = async () => {
 
 export const fetchProducts = async () => {
   try {
-    const response = await axios.get(`${backendUrl}/api/dropdown-products`);
+    const response = await axios.get(`${backendUrl}/api/products/dropdown`);
 
     // Get data from API
     const products = response.data?.data || [];

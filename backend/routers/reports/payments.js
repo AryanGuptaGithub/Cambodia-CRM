@@ -16,18 +16,29 @@ const parseDate = (val) => {
   return isNaN(date.getTime()) ? null : date;
 };
 
-router.post("/payments-reports/import", async (req, res) => {
+// FIXED: Changed from '/payments-reports/import' to '/import'
+router.post("/import", async (req, res) => {
   try {
     const data = req.body;
 
     if (!Array.isArray(data) || data.length === 0) {
-      return res.status(400).json({ message: "No data to import." });
+      return res.status(400).json({ 
+        success: false,
+        message: "No data to import." 
+      });
     }
 
     // Filter only valid rows
     const validRows = data.filter(
       (item) => item.customerCode && item.invoiceNumber
     );
+
+    if (validRows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No valid rows found. Each row must have customerCode and invoiceNumber."
+      });
+    }
 
     const sanitizedData = validRows.map((item) => ({
       recordingDate: parseDate(item.recordingDate),
@@ -49,15 +60,26 @@ router.post("/payments-reports/import", async (req, res) => {
     const inserted = await PaymentReport.insertMany(sanitizedData);
 
     res.status(200).json({
+      success: true,
       message: `${inserted.length} payment reports imported successfully.`,
+      data: {
+        totalRows: data.length,
+        validRows: validRows.length,
+        imported: inserted.length
+      }
     });
   } catch (err) {
     console.error("Error importing payment reports:", err);
-    res.status(500).json({ message: "Failed to import payment reports." });
+    res.status(500).json({ 
+      success: false,
+      message: "Failed to import payment reports.",
+      error: err.message
+    });
   }
 });
 
-router.get("/payments-reports", async (req, res) => {
+// FIXED: Changed from '/payments-reports' to '/'
+router.get("/", async (req, res) => {
   try {
     const reports = await PaymentReport.aggregate([
       {
@@ -73,7 +95,7 @@ router.get("/payments-reports", async (req, res) => {
       },
       {
         $unwind: {
-          path: "$customerDetails",  // <-- fix here
+          path: "$customerDetails",
           preserveNullAndEmptyArrays: true
         }
       },
@@ -96,17 +118,24 @@ router.get("/payments-reports", async (req, res) => {
           remark: 1,
           createdAt: 1,
           updatedAt: 1,
-          customerName: "$customerDetails.name" // <-- and here
+          customerName: "$customerDetails.name"
         }
       }
     ]);
 
-    res.status(200).json(reports);
+    res.status(200).json({
+      success: true,
+      data: reports,
+      count: reports.length
+    });
   } catch (error) {
     console.error("❌ Error fetching payment reports:", error);
-    res.status(500).json({ message: "Failed to fetch payment reports" });
+    res.status(500).json({ 
+      success: false,
+      message: "Failed to fetch payment reports",
+      error: error.message
+    });
   }
 });
-
 
 export default router;

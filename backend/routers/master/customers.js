@@ -146,8 +146,60 @@ const generateNextCustomerCode = async () => {
   }
 };
 
-// 1. POST: Import customers
-router.post("/customers/import", async (req, res) => {
+// ============================================
+// SPECIFIC ROUTES FIRST (BEFORE PARAMETERIZED ROUTES)
+// ============================================
+
+// 1. GET: Customers dropdown endpoint
+// Route: GET /api/customers/dropdown
+router.get("/dropdown", async (req, res) => {
+  try {
+    const { search = "" } = req.query;
+
+    let query = {};
+    if (search && search.trim() !== "") {
+      query.$or = [
+        { name: { $regex: search, $options: "i" } },
+        { customerCode: { $regex: search, $options: "i" } },
+        { customerNumber: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    const customers = await Customer.find(query)
+      .select("_id name customerCode customerNumber")
+      .sort({ name: 1 })
+      .lean();
+
+    // Format names to title case for display
+    const formattedCustomers = customers.map(customer => ({
+      ...customer,
+      name: toTitleCase(customer.name)
+    }));
+
+    res.json({ 
+      customers: formattedCustomers, 
+      total: formattedCustomers.length, 
+      ok: true 
+    });
+  } catch (err) {
+    handleServerError(res, err, "Failed to fetch customers dropdown");
+  }
+});
+
+// 2. GET: Provinces
+// Route: GET /api/customers/provinces
+router.get("/provinces", async (req, res) => {
+  try {
+    const provinces = await Province.find({ isActive: true }).sort({ name: 1 });
+    res.json({ success: true, data: provinces });
+  } catch (err) {
+    handleServerError(res, err, "Failed to fetch provinces");
+  }
+});
+
+// 3. POST: Import customers
+// Route: POST /api/customers/import
+router.post("/import", async (req, res) => {
   try {
     const customers = req.body;
 
@@ -331,8 +383,89 @@ router.post("/customers/import", async (req, res) => {
   }
 });
 
-// 2. POST: Create new customer
-router.post("/customers", async (req, res) => {
+// 4. GET: By province
+// Route: GET /api/customers/province/:province
+router.get("/province/:province", async (req, res) => {
+  try {
+    const { province } = req.params;
+    const customers = await Customer.find({
+      province: new RegExp(province, "i"),
+    });
+
+    // Format customers with title case
+    const formattedCustomers = customers.map(customer => formatCustomerResponse(customer));
+
+    res.json({
+      success: true,
+      data: formattedCustomers,
+      count: customers.length,
+    });
+  } catch (err) {
+    handleServerError(res, err, "Failed to fetch customers by province");
+  }
+});
+
+// ============================================
+// GENERAL ROUTES (CAN INCLUDE PARAMETERS)
+// ============================================
+
+// 5. GET: All customers with pagination + next code
+// Route: GET /api/customers
+router.get("/", async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search = "" } = req.query;
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Build search query
+    const searchQuery = {};
+    if (search && search.trim() !== "") {
+      const searchLower = search.trim().toLowerCase();
+      searchQuery.$or = [
+        { name: { $regex: searchLower, $options: "i" } },
+        { typeOfBusiness: { $regex: searchLower, $options: "i" } },
+        { medicalRepName: { $regex: searchLower, $options: "i" } },
+        { address: { $regex: searchLower, $options: "i" } },
+        { zone: { $regex: searchLower, $options: "i" } },
+        { province: { $regex: searchLower, $options: "i" } },
+        { customerCode: { $regex: search.trim(), $options: "i" } },
+        { customerNumber: { $regex: search.trim(), $options: "i" } },
+        { remark: { $regex: searchLower, $options: "i" } }
+      ];
+    }
+
+    // Get total count for pagination
+    const total = await Customer.countDocuments(searchQuery);
+
+    // Get paginated customers
+    const customers = await Customer.find(searchQuery)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum);
+
+    // Format customers with title case for display
+    const formattedCustomers = customers.map(customer => formatCustomerResponse(customer));
+
+    // Generate next customer code
+    const nextCustomerCode = await generateNextCustomerCode();
+
+    res.json({
+      customers: formattedCustomers,
+      total,
+      page: pageNum,
+      totalPages: Math.ceil(total / limitNum),
+      nextCustomerCode: nextCustomerCode,
+      ok: true,
+    });
+  } catch (err) {
+    handleServerError(res, err);
+  }
+});
+
+// 6. POST: Create new customer
+// Route: POST /api/customers
+router.post("/", async (req, res) => {
   try {
     const { customerNumber, date, ...data } = req.body;
 
@@ -409,8 +542,36 @@ router.post("/customers", async (req, res) => {
   }
 });
 
-// 3. PUT: Update customer
-router.put("/customers/:id", async (req, res) => {
+// ============================================
+// PARAMETERIZED ROUTES (MUST BE LAST)
+// ============================================
+
+// 7. GET: By ID
+// Route: GET /api/customers/:id
+router.get("/:id", async (req, res) => {
+  try {
+    const customer = await Customer.findById(req.params.id);
+    if (!customer) {
+      return res.status(404).json({ message: "Customer not found", ok: false });
+    }
+    
+    // Format response with title case
+    const responseCustomer = formatCustomerResponse(customer);
+    
+    res.json({ customer: responseCustomer, ok: true });
+  } catch (err) {
+    if (err.name === "CastError") {
+      return res
+        .status(400)
+        .json({ message: "Invalid customer ID", ok: false });
+    }
+    handleServerError(res, err);
+  }
+});
+
+// 8. PUT: Update customer
+// Route: PUT /api/customers/:id
+router.put("/:id", async (req, res) => {
   try {
     const { customerNumber, date, customerCode, ...updateData } = req.body;
     const cleanNumber = customerNumber ? safeStr(customerNumber) : "";
@@ -485,149 +646,9 @@ router.put("/customers/:id", async (req, res) => {
   }
 });
 
-// ✅ FIXED: Customers dropdown endpoint - MOVED TO TOP BEFORE OTHER ROUTES
-router.get("/customers/dropdown", async (req, res) => {
-  try {
-    const { search = "" } = req.query;
-
-    let query = {};
-    if (search && search.trim() !== "") {
-      query.$or = [
-        { name: { $regex: search, $options: "i" } },
-        { customerCode: { $regex: search, $options: "i" } },
-        { customerNumber: { $regex: search, $options: "i" } },
-      ];
-    }
-
-    const customers = await Customer.find(query)
-      .select("_id name customerCode customerNumber")
-      .sort({ name: 1 })
-      .lean();
-
-    // Format names to title case for display
-    const formattedCustomers = customers.map(customer => ({
-      ...customer,
-      name: toTitleCase(customer.name)
-    }));
-
-    res.json({ 
-      customers: formattedCustomers, 
-      total: formattedCustomers.length, 
-      ok: true 
-    });
-  } catch (err) {
-    handleServerError(res, err, "Failed to fetch customers dropdown");
-  }
-});
-
-// 4. GET: All customers with pagination + next code
-router.get("/customers", async (req, res) => {
-  try {
-    const { page = 1, limit = 10, search = "" } = req.query;
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
-    const skip = (pageNum - 1) * limitNum;
-
-    // Build search query
-    const searchQuery = {};
-    if (search && search.trim() !== "") {
-      const searchLower = search.trim().toLowerCase();
-      searchQuery.$or = [
-        { name: { $regex: searchLower, $options: "i" } },
-        { typeOfBusiness: { $regex: searchLower, $options: "i" } },
-        { medicalRepName: { $regex: searchLower, $options: "i" } },
-        { address: { $regex: searchLower, $options: "i" } },
-        { zone: { $regex: searchLower, $options: "i" } },
-        { province: { $regex: searchLower, $options: "i" } },
-        { customerCode: { $regex: search.trim(), $options: "i" } },
-        { customerNumber: { $regex: search.trim(), $options: "i" } },
-        { remark: { $regex: searchLower, $options: "i" } }
-      ];
-    }
-
-    // Get total count for pagination
-    const total = await Customer.countDocuments(searchQuery);
-
-    // Get paginated customers
-    const customers = await Customer.find(searchQuery)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limitNum);
-
-    // Format customers with title case for display
-    const formattedCustomers = customers.map(customer => formatCustomerResponse(customer));
-
-    // Generate next customer code
-    const nextCustomerCode = await generateNextCustomerCode();
-
-    res.json({
-      customers: formattedCustomers,
-      total,
-      page: pageNum,
-      totalPages: Math.ceil(total / limitNum),
-      nextCustomerCode: nextCustomerCode,
-      ok: true,
-    });
-  } catch (err) {
-    handleServerError(res, err);
-  }
-});
-
-// 5. GET: Provinces
-router.get("/customers/provinces", async (req, res) => {
-  try {
-    const provinces = await Province.find({ isActive: true }).sort({ name: 1 });
-    res.json({ success: true, data: provinces });
-  } catch (err) {
-    handleServerError(res, err, "Failed to fetch provinces");
-  }
-});
-
-// 6. GET: By province
-router.get("/customers/province/:province", async (req, res) => {
-  try {
-    const { province } = req.params;
-    const customers = await Customer.find({
-      province: new RegExp(province, "i"),
-    });
-
-    // Format customers with title case
-    const formattedCustomers = customers.map(customer => formatCustomerResponse(customer));
-
-    res.json({
-      success: true,
-      data: formattedCustomers,
-      count: customers.length,
-    });
-  } catch (err) {
-    handleServerError(res, err, "Failed to fetch customers by province");
-  }
-});
-
-// 7. GET: By ID
-router.get("/customers/:id", async (req, res) => {
-  try {
-    const customer = await Customer.findById(req.params.id);
-    if (!customer) {
-      return res.status(404).json({ message: "Customer not found", ok: false });
-    }
-    
-    // Format response with title case
-    const responseCustomer = formatCustomerResponse(customer);
-    
-    res.json({ customer: responseCustomer, ok: true });
-  } catch (err) {
-    if (err.name === "CastError") {
-      return res
-        .status(400)
-        .json({ message: "Invalid customer ID", ok: false });
-    }
-    handleServerError(res, err);
-  }
-});
-
-// 8. DELETE: Single
-router.delete("/customers/:id", async (req, res) => {
+// 9. DELETE: Single
+// Route: DELETE /api/customers/:id
+router.delete("/:id", async (req, res) => {
   try {
     const deleted = await Customer.findByIdAndDelete(req.params.id);
     if (!deleted) {
@@ -639,8 +660,9 @@ router.delete("/customers/:id", async (req, res) => {
   }
 });
 
-// 9. DELETE: Multiple
-router.delete("/customers", async (req, res) => {
+// 10. DELETE: Multiple (uses request body, not URL params)
+// Route: DELETE /api/customers
+router.delete("/", async (req, res) => {
   try {
     const { ids } = req.body;
     if (!Array.isArray(ids) || ids.length === 0) {

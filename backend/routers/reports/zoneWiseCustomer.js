@@ -4,8 +4,7 @@ import ExcelJS from "exceljs";
 
 const router = express.Router();
 
-// GET endpoint for paginated zone-wise customers
-router.get("/zone-wise-customers", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const {
       page = 1,
@@ -183,8 +182,7 @@ router.get("/zone-wise-customers", async (req, res) => {
   }
 });
 
-// Export complete zone-wise report to Excel
-router.get("/zone-wise-customers/export", async (req, res) => {
+router.get("/export", async (req, res) => {
   try {
     const search = req.query.search?.trim() || "";
     
@@ -550,8 +548,7 @@ router.get("/zone-wise-customers/export", async (req, res) => {
   }
 });
 
-// Export customer list only
-router.get("/zone-wise-customers/export-customers", async (req, res) => {
+router.get("/export-customers", async (req, res) => {
   try {
     const search = req.query.search?.trim() || "";
     

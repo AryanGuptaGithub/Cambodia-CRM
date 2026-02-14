@@ -299,7 +299,7 @@ const Dashboard = () => {
       const month = String(previousMonth.getMonth() + 1).padStart(2, "0");
       const period = `${year}-${month}`;
 
-      const response = await axios.get(`${backendUrl}/api/payrolls`, {
+      const response = await axios.get(`${backendUrl}/api/hrm/payroll`, {
         params: { period },
       });
       if (response.data && response.data.success) {
@@ -566,7 +566,7 @@ const Dashboard = () => {
 
     try {
       const endpoint = isBulk
-        ? `${backendUrl}/api/staffs`
+        ? `${backendUrl}/api/staff`
         : `${backendUrl}/api/staff/${mrIds[0]}`;
 
       const config = isBulk ? { data: mrIds } : undefined;
@@ -865,7 +865,7 @@ const Dashboard = () => {
 
       // Send as direct array (not wrapped in data property)
       const res = await axios.post(
-        `${backendUrl}/api/staffs/import`,
+        `${backendUrl}/api/staff/import`,
         validData, // Direct array
         {
           headers: {

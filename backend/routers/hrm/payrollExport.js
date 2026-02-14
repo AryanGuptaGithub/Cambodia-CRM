@@ -26,8 +26,8 @@ function formatPeriod(periodString) {
   return `${monthNames[parseInt(month) - 1]} ${year}`;
 }
 
-// GET /api/export-mr-data
-router.get("/export-mr-data", async (req, res) => {
+// GET / (base path: /api/hrm/payroll-export)
+router.get("/", async (req, res) => {
   try {
     const { year, month } = req.query;
 

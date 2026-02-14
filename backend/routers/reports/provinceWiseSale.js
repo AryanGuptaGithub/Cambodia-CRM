@@ -5,7 +5,7 @@ import ExcelJS from "exceljs";
 
 const router = express.Router();
 
-router.get("/province-wise-sale", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const { page = 1, limit = 9, search = "", period = "all" } = req.query;
     const pageNum = parseInt(page);
@@ -277,7 +277,7 @@ router.get("/province-wise-sale", async (req, res) => {
         summary,
         records: paginatedRecords,
         uniqueProvincesCount: uniqueProvincesCount,
-        allRecords: records, // Include all records for export
+        allRecords: records,
       },
       pagination: {
         currentPage: pageNum,
@@ -289,7 +289,7 @@ router.get("/province-wise-sale", async (req, res) => {
     });
     
   } catch (error) {
-    console.error("❌ Error in /province-wise-sale:", error);
+    console.error("❌ Error in province-wise-sale:", error);
     console.timeEnd("⏱️ province-wise-sale-query");
     
     res.status(500).json({
@@ -300,8 +300,7 @@ router.get("/province-wise-sale", async (req, res) => {
   }
 });
 
-// Export to Excel endpoint
-router.get("/province-wise-sale/export", async (req, res) => {
+router.get("/export", async (req, res) => {
   try {
     const { search = "", period = "all" } = req.query;
     

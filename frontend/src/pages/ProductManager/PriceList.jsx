@@ -41,7 +41,7 @@ function PriceList() {
   const fetchPriceList = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${backendUrl}/api/pricelist`);
+      const response = await fetch(`${backendUrl}/api/price-lists`);
       if (!response.ok) throw new Error("Failed to fetch products");
       const data = await response.json();
       const uniqueTypes = Array.from(
@@ -124,7 +124,7 @@ function PriceList() {
 
     try {
       const res = await axios.put(
-        `${backendUrl}/api/pricelist/${form._id}`,
+        `${backendUrl}/api/price-lists/${form._id}`,
         form
       );
 

@@ -14,7 +14,7 @@ import {
   X,
   Calendar,
 } from "lucide-react";
-import { toast } from "react-hot-toast";
+import { showToast } from "../../utils/toast";   // <-- Replaced react-hot-toast with custom toast
 import ReactDOM from "react-dom";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
@@ -47,16 +47,16 @@ const CarryStockView = () => {
   const fetchMRList = useCallback(async () => {
     try {
       setMrListLoading(true);
-      const response = await axios.get(`${backendUrl}/api/mrs`);
+      const response = await axios.get(`${backendUrl}/api/stock-transfer-to-mr/mrs`);
 
       if (response.data.success) {
         setMrList(response.data.data || []);
       } else {
-        toast.error("Failed to load MR list");
+        showToast("error", "Failed to load MR list");
       }
     } catch (error) {
       console.error("Error fetching MR list:", error);
-      toast.error("Failed to load MR list");
+      showToast("error", "Failed to load MR list");
     } finally {
       setMrListLoading(false);
     }
@@ -83,7 +83,7 @@ const CarryStockView = () => {
       }
 
       const response = await axios.get(
-        `${backendUrl}/api/stock-in-mr-hand-admin`,
+        `${backendUrl}/api/stock-transfer-to-mr/mr-hand-admin`,
         { params }
       );
 
@@ -135,7 +135,7 @@ const CarryStockView = () => {
         const paginatedData = filtered.slice(startIndex, endIndex);
         setStockData(paginatedData);
       } else {
-        toast.error(response.data.message || "Failed to load carry stock data");
+        showToast("error", response.data.message || "Failed to load carry stock data");
         setAllStockData([]);
         setFilteredData([]);
         setStockData([]);
@@ -143,11 +143,11 @@ const CarryStockView = () => {
       }
     } catch (error) {
       console.error("Error fetching stock data:", error);
-      toast.error("Failed to load carry stock data");
+      showToast("error", "Failed to load carry stock data");
       setAllStockData([]);
-        setFilteredData([]);
-        setStockData([]);
-        setTotalCount(0);
+      setFilteredData([]);
+      setStockData([]);
+      setTotalCount(0);
     } finally {
       setLoading(false);
     }
@@ -450,7 +450,7 @@ const CarryStockView = () => {
       }
 
       const response = await axios.get(
-        `${backendUrl}/api/stock-in-mr-hand-admin`,
+        `${backendUrl}/api/stock-transfer-to-mr/mr-hand-admin`,
         {
           params,
           responseType: "blob",
@@ -468,10 +468,10 @@ const CarryStockView = () => {
       link.click();
       link.remove();
 
-      toast.success("Export started successfully!");
+      showToast("success", "Export started successfully!");
     } catch (error) {
       console.error("Error exporting data:", error);
-      toast.error("Failed to export data");
+      showToast("error", "Failed to export data");
     }
   };
 

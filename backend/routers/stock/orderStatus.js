@@ -1,10 +1,9 @@
 import express from "express";
-import OrderStatus from "../../models/stock/orderStatus.js"; // ✅ Import OrderStatus model
+import OrderStatus from "../../models/stock/orderStatus.js";
 
 const router = express.Router();
 
-// ✅ Get all order statuses
-router.get("/order-statuses", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const orderStatuses = await OrderStatus.find({})
       .sort({ name: 1 }) // Sort alphabetically by name

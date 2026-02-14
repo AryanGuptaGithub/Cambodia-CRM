@@ -184,7 +184,8 @@ const normalizeString = (str) => {
   return str.toString().trim().toLowerCase();
 };
 
-router.post("/product/import", async (req, res) => {
+// IMPORT PRODUCTS
+router.post("/import", async (req, res) => {
   try {
     const products = req.body;
 
@@ -480,7 +481,8 @@ router.post("/product/import", async (req, res) => {
   }
 });
 
-router.get("/dropdown-products", async (req, res) => {
+// GET DROPDOWN PRODUCTS
+router.get("/dropdown", async (req, res) => {
   try {
     // Get all product master data
     const products = await Product.find();
@@ -547,7 +549,9 @@ router.get("/dropdown-products", async (req, res) => {
       .json({ success: false, message: "Failed to fetch products." });
   }
 });
-router.get("/products", async (req, res) => {
+
+// GET ALL PRODUCTS
+router.get("/", async (req, res) => {
   try {
     const products = await Product.find().sort({ productName: 1 });
     
@@ -579,7 +583,8 @@ router.get("/products", async (req, res) => {
   }
 });
 
-router.get("/products-with-in-stock", async (req, res) => {
+// GET PRODUCTS WITH IN-STOCK INFO
+router.get("/in-stock", async (req, res) => {
   try {
     const stockByProduct = await ReportInHand.aggregate([
       {
@@ -628,7 +633,112 @@ router.get("/products-with-in-stock", async (req, res) => {
   }
 });
 
-router.put("/products/:id", async (req, res) => {
+// GET PAGINATED PRODUCTS
+router.get("/paginated", async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 9;
+    const search = req.query.search || "";
+    const type = req.query.type || "";
+    
+    const skip = (page - 1) * limit;
+    
+    // Build query
+    const query = {};
+    
+    if (search) {
+      query.$or = [
+        { productName: { $regex: search, $options: "i" } },
+        { supplierName: { $regex: search, $options: "i" } },
+        { drugLicense: { $regex: search, $options: "i" } },
+        { type: { $regex: search, $options: "i" } }
+      ];
+    }
+    
+    if (type && type.toLowerCase() !== "all") {
+      query.type = { $regex: new RegExp(`^${type}$`, "i") };
+    }
+    
+    // Get total count
+    const total = await Product.countDocuments(query);
+    
+    // Get paginated products
+    const products = await Product.find(query)
+      .sort({ productName: 1 })
+      .skip(skip)
+      .limit(limit);
+    
+    // Format products for display (capitalize first letter of each word)
+    const formattedProducts = products.map(product => ({
+      ...product.toObject(),
+      productName: product.productName
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' '),
+      type: product.type
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' '),
+      supplierName: product.supplierName
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' '),
+      drugLicense: product.drugLicense
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ')
+    }));
+    
+    res.status(200).json({
+      success: true,
+      data: formattedProducts,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(total / limit),
+        totalItems: total,
+        itemsPerPage: limit
+      }
+    });
+  } catch (err) {
+    console.error("Error fetching paginated products:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: "Failed to fetch products." 
+    });
+  }
+});
+
+// GET PRODUCT TYPES
+router.get("/types", async (req, res) => {
+  try {
+    const types = await Product.distinct("type");
+    
+    // Format types for display
+    const formattedTypes = types
+      .filter(type => type && type.trim() !== "")
+      .map(type => 
+        type
+          .split(' ')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' ')
+      )
+      .sort();
+    
+    res.status(200).json({ 
+      success: true, 
+      data: formattedTypes 
+    });
+  } catch (err) {
+    console.error("Error fetching product types:", err);
+    res.status(500).json({ 
+      success: false, 
+      message: "Failed to fetch product types." 
+    });
+  }
+});
+
+// UPDATE PRODUCT
+router.put("/:id", async (req, res) => {
   try {
     const { id } = req.params;
     let updatedData = req.body;
@@ -690,7 +800,8 @@ router.put("/products/:id", async (req, res) => {
   }
 });
 
-router.delete("/product/:id", async (req, res) => {
+// DELETE SINGLE PRODUCT
+router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -709,7 +820,8 @@ router.delete("/product/:id", async (req, res) => {
   }
 });
 
-router.delete("/products", async (req, res) => {
+// DELETE MULTIPLE PRODUCTS
+router.delete("/", async (req, res) => {
   try {
     let { ids } = req.body;
 
@@ -741,7 +853,8 @@ router.delete("/products", async (req, res) => {
   }
 });
 
-router.post("/product/add", async (req, res) => {
+// ADD NEW PRODUCT
+router.post("/add", async (req, res) => {
   try {
     const {
       productName,
@@ -829,108 +942,6 @@ router.post("/product/add", async (req, res) => {
 
     return res.status(500).json({
       message: "Server error while adding product",
-    });
-  }
-});
-
-router.get("/products/paginated", async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 9;
-    const search = req.query.search || "";
-    const type = req.query.type || "";
-    
-    const skip = (page - 1) * limit;
-    
-    // Build query
-    const query = {};
-    
-    if (search) {
-      query.$or = [
-        { productName: { $regex: search, $options: "i" } },
-        { supplierName: { $regex: search, $options: "i" } },
-        { drugLicense: { $regex: search, $options: "i" } },
-        { type: { $regex: search, $options: "i" } }
-      ];
-    }
-    
-    if (type && type.toLowerCase() !== "all") {
-      query.type = { $regex: new RegExp(`^${type}$`, "i") };
-    }
-    
-    // Get total count
-    const total = await Product.countDocuments(query);
-    
-    // Get paginated products
-    const products = await Product.find(query)
-      .sort({ productName: 1 })
-      .skip(skip)
-      .limit(limit);
-    
-    // Format products for display (capitalize first letter of each word)
-    const formattedProducts = products.map(product => ({
-      ...product.toObject(),
-      productName: product.productName
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' '),
-      type: product.type
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' '),
-      supplierName: product.supplierName
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' '),
-      drugLicense: product.drugLicense
-        .split(' ')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ')
-    }));
-    
-    res.status(200).json({
-      success: true,
-      data: formattedProducts,
-      pagination: {
-        currentPage: page,
-        totalPages: Math.ceil(total / limit),
-        totalItems: total,
-        itemsPerPage: limit
-      }
-    });
-  } catch (err) {
-    console.error("Error fetching paginated products:", err);
-    res.status(500).json({ 
-      success: false, 
-      message: "Failed to fetch products." 
-    });
-  }
-});
-
-router.get("/products/types", async (req, res) => {
-  try {
-    const types = await Product.distinct("type");
-    
-    // Format types for display
-    const formattedTypes = types
-      .filter(type => type && type.trim() !== "")
-      .map(type => 
-        type
-          .split(' ')
-          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(' ')
-      )
-      .sort();
-    
-    res.status(200).json({ 
-      success: true, 
-      data: formattedTypes 
-    });
-  } catch (err) {
-    console.error("Error fetching product types:", err);
-    res.status(500).json({ 
-      success: false, 
-      message: "Failed to fetch product types." 
     });
   }
 });

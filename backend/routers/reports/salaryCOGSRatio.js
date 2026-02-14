@@ -735,8 +735,8 @@ const fetchSalaryCOGSData = async (params) => {
   }
 };
 
-// Main API endpoint for Salary/COGS Ratio
-router.get("/salary-cogs-ratio", async (req, res) => {
+// Main API endpoint for Salary/COGS Ratio (mounted at /api/reports/salary-cogs-ratio)
+router.get("/", async (req, res) => {
   try {    
     const result = await fetchSalaryCOGSData(req.query);
     res.status(200).json(result);
@@ -750,8 +750,8 @@ router.get("/salary-cogs-ratio", async (req, res) => {
   }
 });
 
-// Export endpoint for Salary/COGS Ratio
-router.get("/salary-cogs-ratio/export", async (req, res) => {
+// Export endpoint for Salary/COGS Ratio (mounted at /api/reports/salary-cogs-ratio/export)
+router.get("/export", async (req, res) => {
   try {    
     const result = await fetchSalaryCOGSData({
       ...req.query,

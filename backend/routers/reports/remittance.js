@@ -136,8 +136,8 @@ const getRemittanceData = async (filters) => {
   return { records, summary };
 };
 
-// Existing API route
-router.get("/reports/remittance", async (req, res) => {
+// FIXED: Changed from '/reports/remittance' to '/'
+router.get("/", async (req, res) => {
   try {
     const {
       startDate,
@@ -227,8 +227,8 @@ router.get("/reports/remittance", async (req, res) => {
   }
 });
 
-// Add Excel export route
-router.get("/reports/remittance/export/excel", async (req, res) => {
+// FIXED: Changed from '/reports/remittance/export/excel' to '/export/excel'
+router.get("/export/excel", async (req, res) => {
   try {
     const { startDate, endDate, search, supplierId } = req.query;
     // Validate date parameters for export
@@ -451,7 +451,7 @@ router.get("/reports/remittance/export/excel", async (req, res) => {
     res.send(buffer);
 
   } catch (error) {
-    console.error("Error in /reports/remittance/export/excel:", error);
+    console.error("Error in /export/excel:", error);
     res.status(500).json({
       success: false,
       message: "Failed to generate Excel export",

@@ -1,8 +1,8 @@
-import express from "express";
 import mongoose from "mongoose";
+import express from "express";
 import Expense from "../../models/expenses/addExpense.js";
 import SaleSummary from "../../models/sale/saleSummary.js";
-import ExpenseCategory from "../../models/expenses/addExpenseCategary.js"; 
+import ExpenseCategory from "../../models/expenses/addExpenseCategary.js";
 import ExcelJS from "exceljs";
 
 const router = express.Router();
@@ -623,7 +623,8 @@ const exportTourExpenseSalesRatio = async (req, res) => {
   }
 };
 
-router.get("/tour-expense-sales-ratio", getTourExpenseSalesRatio);
-router.get("/tour-expense-sales-ratio/export", exportTourExpenseSalesRatio);
+// Corrected router mappings to match the base path "/api/reports/tour-expense-sales"
+router.get("/", getTourExpenseSalesRatio);
+router.get("/export", exportTourExpenseSalesRatio);
 
 export default router;

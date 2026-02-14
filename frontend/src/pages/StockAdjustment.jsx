@@ -78,7 +78,7 @@ const StockAdjustment = () => {
   const fetchAdjustments = async () => {
     setLoading(true);
     try {
-      const response = await axios.get(`${backendUrl}/api/stock-adjustments`);
+      const response = await axios.get(`${backendUrl}/api/stock-adjustment`);
       if (response.data && response.data.success) {
         setAdjustments(response.data.data);
       } else {
@@ -104,7 +104,7 @@ const StockAdjustment = () => {
 
   const fetchStockTransfers = async () => {
     try {
-      const response = await axios.get(`${backendUrl}/api/stock-transfers`);
+      const response = await axios.get(`${backendUrl}/api/stock-transfer`);
       if (response.data && response.data.success) {
         setStockTransfers(response.data.data);
       }
@@ -277,7 +277,7 @@ const StockAdjustment = () => {
         setLoading(true);
 
         const response = await axios.delete(
-          `${backendUrl}/api/stock-adjustments/bulk`,
+          `${backendUrl}/api/stock-adjustment/bulk`,
           {
             data: { ids: selectedIds },
             headers: {
@@ -328,7 +328,7 @@ const StockAdjustment = () => {
 
     if (confirmDelete.isConfirmed) {
       try {
-        await axios.delete(`${backendUrl}/api/stock-adjustments/${id}`);
+        await axios.delete(`${backendUrl}/api/stock-adjustment/${id}`);
 
         // Update local state immediately
         setAdjustments((prev) => prev.filter((adj) => adj._id !== id));
@@ -499,7 +499,7 @@ const StockAdjustment = () => {
       if (editingAdjustment) {
         // Update existing adjustment
         const response = await axios.put(
-          `${backendUrl}/api/stock-adjustments/${editingAdjustment._id}`,
+          `${backendUrl}/api/stock-adjustment/${editingAdjustment._id}`,
           adjustmentData
         );
 
@@ -517,7 +517,7 @@ const StockAdjustment = () => {
       } else {
         // Create new adjustment
         const response = await axios.post(
-          `${backendUrl}/api/stock-adjustments`,
+          `${backendUrl}/api/stock-adjustment`,
           adjustmentData
         );
 

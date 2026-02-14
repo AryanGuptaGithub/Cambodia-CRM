@@ -1,5 +1,5 @@
 import express from "express";
-import mongoose from "mongoose"; // Add mongoose import
+import mongoose from "mongoose";
 import purchaseInventory from "../../models/purcharsing/purchaseInventory.js";
 import ReportInHand from "../../models/reports/reportsInHand.js";
 import Product from "../../models/projectManger/product.js";
@@ -315,6 +315,8 @@ const filterReportsWithBatches = (reports) => {
 };
 
 // 🔥 NEW: Cleanup duplicates endpoint for all products
+// Changed from: router.post("/reports-in-hand/cleanup-duplicates", ...)
+// To: router.post("/reports-in-hand/cleanup-duplicates", ...)
 router.post("/reports-in-hand/cleanup-duplicates", async (req, res) => {
   try {
     const allReports = await ReportInHand.find({}).lean();
@@ -658,7 +660,9 @@ router.get("/debug/product/:productName", async (req, res) => {
   }
 });
 
-router.get("/purchase-invoice", async (req, res) => {
+// Changed from: router.get("/purchase-invoice", ...)
+// To: router.get("/invoice", ...)
+router.get("/invoice", async (req, res) => {
   try {
     const invoices = await purchaseInventory
       .find()
@@ -672,7 +676,9 @@ router.get("/purchase-invoice", async (req, res) => {
   }
 });
 
-router.get("/purchase", async (req, res) => {
+// Changed from: router.get("/purchase", ...)
+// To: router.get("/", ...)
+router.get("/", async (req, res) => {
   try {
     const purchases = await purchaseInventory
       .find()
@@ -747,7 +753,9 @@ router.get("/purchase", async (req, res) => {
   }
 });
 
-router.put("/purchase/:id", async (req, res) => {
+// Changed from: router.put("/purchase/:id", ...)
+// To: router.put("/:id", ...)
+router.put("/:id", async (req, res) => {
   try {
     const id = req.params.id;
 
@@ -871,7 +879,9 @@ router.put("/purchase/:id", async (req, res) => {
   }
 });
 
-router.delete("/purchase/:id", async (req, res) => {
+// Changed from: router.delete("/purchase/:id", ...)
+// To: router.delete("/:id", ...)
+router.delete("/:id", async (req, res) => {
   try {
     const invoice = await purchaseInventory.findById(req.params.id).lean();
     if (!invoice) return res.status(404).json({ error: "Not found" });
@@ -902,7 +912,9 @@ router.delete("/purchase/:id", async (req, res) => {
   }
 });
 
-router.delete("/purchase", async (req, res) => {
+// Changed from: router.delete("/purchase", ...)
+// To: router.delete("/", ...)
+router.delete("/", async (req, res) => {
   try {
     const { ids } = req.body;
 
@@ -960,7 +972,9 @@ router.delete("/purchase", async (req, res) => {
   }
 });
 
-router.post("/purchase", async (req, res) => {
+// Changed from: router.post("/purchase", ...)
+// To: router.post("/", ...)
+router.post("/", async (req, res) => {
   try {
     const data = req.body;
     if (
@@ -1195,7 +1209,9 @@ router.post("/reports-in-hand/merge-decimal-variations", async (req, res) => {
   }
 });
 
-router.post("/purchase/import", async (req, res) => {
+// Changed from: router.post("/purchase/import", ...)
+// To: router.post("/import", ...)
+router.post("/import", async (req, res) => {
   try {
     const rows = req.body;
 
@@ -1726,6 +1742,7 @@ router.get("/reports-in-hand", async (req, res) => {
     });
   }
 });
+
 router.put("/reports-in-hand/:id/adjust-stock", async (req, res) => {
   try {
     const { id } = req.params;
@@ -1774,6 +1791,7 @@ router.put("/reports-in-hand/:id/adjust-stock", async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 router.post("/reports-in-hand/fix-totals", async (req, res) => {
   try {
     const allReports = await ReportInHand.find({}).lean();
@@ -2101,7 +2119,9 @@ router.post("/reports-in-hand/download-excel", async (req, res) => {
 });
 
 // Download purchase excel - FIXED VERSION
-router.post("/purchases/download-excel", async (req, res) => {
+// Changed from: router.post("/purchases/download-excel", ...)
+// To: router.post("/download-excel", ...)
+router.post("/download-excel", async (req, res) => {
   try {
     const { startDate, endDate } = req.body;
     if (!startDate || !endDate) {
@@ -2298,7 +2318,9 @@ router.get("/debug/purchase-product-match/:productName", async (req, res) => {
   }
 });
 
-router.get("/purchases/check", async (req, res) => {
+// Changed from: router.get("/purchases/check", ...)
+// To: router.get("/check", ...)
+router.get("/check", async (req, res) => {
   try {
     const count = await purchaseInventory.countDocuments();
 

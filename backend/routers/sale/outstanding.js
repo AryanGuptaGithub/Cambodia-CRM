@@ -5,8 +5,10 @@ const router = express.Router();
 
 /**
  * OUTSTANDING TABLE DATA
+ * Changed from: router.get("/outstanding/table-data", ...)
+ * To: router.get("/table-data", ...)
  */
-router.get("/outstanding/table-data", async (req, res) => {
+router.get("/table-data", async (req, res) => {
   try {
     const { period, startDate, endDate } = req.query;
     let matchFilter = {};
@@ -73,8 +75,10 @@ router.get("/outstanding/table-data", async (req, res) => {
 
 /**
  * CUSTOM RANGE OUTSTANDING (Optional – can be removed if unused)
+ * Changed from: router.get("/outstanding/custom-range", ...)
+ * To: router.get("/custom-range", ...)
  */
-router.get("/outstanding/custom-range", async (req, res) => {
+router.get("/custom-range", async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
 

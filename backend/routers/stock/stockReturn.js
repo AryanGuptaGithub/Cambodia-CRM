@@ -7,6 +7,9 @@ import MR from "../../models/staffMember/staff.js";
 
 const router = express.Router();
 
+/**
+ * Generate unique return ID with format: SR + YY + MM + 0001
+ */
 const generateReturnId = async () => {
   const prefix = "SR";
   const year = new Date().getFullYear().toString().slice(-2);
@@ -25,7 +28,9 @@ const generateReturnId = async () => {
   return `${prefix}${year}${month}${sequence.toString().padStart(4, "0")}`;
 };
 
-// Clean string helper
+/**
+ * Clean string helper - removes extra spaces and special characters
+ */
 const cleanString = (str) => {
   if (!str) return "";
   return str
@@ -35,7 +40,9 @@ const cleanString = (str) => {
     .toLowerCase();
 };
 
-// Find MR data with fallback logic
+/**
+ * Find MR data with fallback logic
+ */
 const findMR = async (returnItem) => {
   const mrName = returnItem.mrName?.trim();
 
@@ -53,14 +60,14 @@ const findMR = async (returnItem) => {
       .select("currentCash mrCode mrName")
       .lean();
   } catch (err) {
-    console.error("Try 1 Error:", err);
+    console.error("Error finding MR cash data:", err);
   }
 
   return mrCashData;
 };
 
-// Get all stock returns
-router.get("/stock-returns", async (req, res) => {
+// ==================== GET / ====================
+router.get("/", async (req, res) => {
   try {
     const {
       page = 1,
@@ -115,7 +122,6 @@ router.get("/stock-returns", async (req, res) => {
       stockReturns.map(async (item) => {
         try {
           const mrCashData = await findMR(item);
-
           return {
             ...item,
             currentCash: mrCashData?.currentCash || 0,
@@ -154,8 +160,102 @@ router.get("/stock-returns", async (req, res) => {
   }
 });
 
-// Get single stock return
-router.get("/stock-returns/:id", async (req, res) => {
+// ==================== GET /statistics ====================
+router.get("/statistics", async (req, res) => {
+  try {
+    const { mrCode, startDate, endDate } = req.query;
+
+    const matchStage = { isDeleted: false };
+
+    if (mrCode) {
+      matchStage.mrCode = mrCode;
+    }
+
+    if (startDate || endDate) {
+      matchStage.returnDate = {};
+      if (startDate) matchStage.returnDate.$gte = new Date(startDate);
+      if (endDate) matchStage.returnDate.$lte = new Date(endDate);
+    }
+
+    const stats = await StockReturn.aggregate([
+      { $match: matchStage },
+      {
+        $group: {
+          _id: null,
+          totalReturns: { $sum: 1 },
+          totalQuantity: { $sum: "$totalQuantity" },
+          totalValue: { $sum: "$totalValue" },
+          pendingReturns: {
+            $sum: { $cond: [{ $eq: ["$status", "Pending"] }, 1, 0] },
+          },
+          approvedReturns: {
+            $sum: { $cond: [{ $eq: ["$status", "Approved"] }, 1, 0] },
+          },
+          rejectedReturns: {
+            $sum: { $cond: [{ $eq: ["$status", "Rejected"] }, 1, 0] },
+          },
+        },
+      },
+    ]);
+
+    const monthlyStats = await StockReturn.aggregate([
+      { $match: matchStage },
+      {
+        $group: {
+          _id: {
+            year: { $year: "$returnDate" },
+            month: { $month: "$returnDate" },
+          },
+          count: { $sum: 1 },
+          totalQuantity: { $sum: "$totalQuantity" },
+          totalValue: { $sum: "$totalValue" },
+        },
+      },
+      { $sort: { "_id.year": -1, "_id.month": -1 } },
+      { $limit: 6 },
+    ]);
+
+    const mrStats = await StockReturn.aggregate([
+      { $match: matchStage },
+      {
+        $group: {
+          _id: "$mrCode",
+          mrName: { $first: "$mrName" },
+          count: { $sum: 1 },
+          totalQuantity: { $sum: "$totalQuantity" },
+        },
+      },
+      { $sort: { count: -1 } },
+      { $limit: 5 },
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        summary: stats[0] || {
+          totalReturns: 0,
+          totalQuantity: 0,
+          totalValue: 0,
+          pendingReturns: 0,
+          approvedReturns: 0,
+          rejectedReturns: 0,
+        },
+        monthlyStats,
+        topMRs: mrStats,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching statistics:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch statistics",
+      error: error.message,
+    });
+  }
+});
+
+// ==================== GET /:id ====================
+router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -203,8 +303,247 @@ router.get("/stock-returns/:id", async (req, res) => {
   }
 });
 
-// Update stock return status
-router.put("/stock-returns/:id/status", async (req, res) => {
+// ==================== POST / ====================
+router.post("/", async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { mrId, mrName, items, remarks, returnDate } = req.body;
+
+    if (!mrId || !items || !Array.isArray(items) || items.length === 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Medical Representative ID and items are required",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(mrId)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Invalid Medical Representative ID format",
+      });
+    }
+
+    let mrInfo = null;
+    let mrNameToUse = mrName;
+
+    if (mrId) {
+      mrInfo = await MR.findOne({ _id: mrId }).session(session);
+      if (mrInfo) {
+        mrNameToUse = mrInfo.mrName || mrName;
+      }
+    }
+
+    if (!mrNameToUse) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Medical Representative name is required",
+      });
+    }
+
+    let mrStock = await StockInMrHand.findOne({ mrId: mrId }).session(session);
+
+    if (!mrStock) {
+      mrStock = await StockInMrHand.findOne({ mrName: mrNameToUse }).session(
+        session
+      );
+    }
+
+    if (!mrStock) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        success: false,
+        message: `No stock found for Medical Representative: ${mrNameToUse}`,
+      });
+    }
+
+    const returnItems = [];
+    const stockInMrUpdates = [];
+    let totalQuantity = 0;
+    let totalValue = 0;
+
+    for (const [index, item] of items.entries()) {
+      if (!item.productId || !item.returnQty || item.returnQty <= 0) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          success: false,
+          message: `Invalid item data at position ${
+            index + 1
+          }. Product ID and positive return quantity are required`,
+        });
+      }
+
+      const productInMr = mrStock.productsInHand?.find((p) => {
+        const productIdStr = p.productId?.toString();
+        const itemProductIdStr = item.productId?.toString();
+        return productIdStr === itemProductIdStr;
+      });
+
+      if (!productInMr) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(404).json({
+          success: false,
+          message: `Product "${
+            item.productName || item.productId
+          }" not found in stock for MR: ${mrNameToUse}`,
+        });
+      }
+
+      const availableQuantity = productInMr.quantity || 0;
+
+      if (availableQuantity < item.returnQty) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          success: false,
+          message: `Insufficient stock for "${
+            item.productName || productInMr.productName
+          }". Available: ${availableQuantity}, Requested: ${item.returnQty}`,
+        });
+      }
+
+      const returnItem = {
+        productId: productInMr.productId,
+        stockRecordId: productInMr._id,
+        productCode:
+          item.productCode ||
+          productInMr.productCode ||
+          `PROD-${productInMr.productId.toString().slice(-6)}`,
+        productName: item.productName || productInMr.productName,
+        batch: item.batch || productInMr.batch || "N/A",
+        expiry: item.expiry || productInMr.expiry || null,
+        returnQty: Number(item.returnQty),
+        returnDate: item.returnDate || new Date(),
+        remarks: item.remarks || "",
+        costPrice: item.costPrice || productInMr.costPrice || 0,
+        unit: productInMr.unit || item.unit || "box",
+      };
+
+      returnItems.push(returnItem);
+      totalQuantity += returnItem.returnQty;
+      totalValue += returnItem.returnQty * returnItem.costPrice;
+
+      stockInMrUpdates.push({
+        updateOne: {
+          filter: {
+            _id: mrStock._id,
+            "productsInHand._id": productInMr._id,
+          },
+          update: {
+            $inc: { "productsInHand.$.quantity": -item.returnQty },
+            $set: {
+              "productsInHand.$.lastUpdated": new Date(),
+              updatedAt: new Date(),
+            },
+          },
+        },
+      });
+    }
+
+    const returnId = await generateReturnId();
+
+    let createdById;
+    if (req.user?._id) {
+      createdById = req.user._id;
+    } else if (
+      req.body.createdBy &&
+      mongoose.Types.ObjectId.isValid(req.body.createdBy)
+    ) {
+      createdById = new mongoose.Types.ObjectId(req.body.createdBy);
+    } else {
+      createdById = new mongoose.Types.ObjectId("000000000000000000000001");
+    }
+
+    let mrCodeValue = "";
+    if (mrInfo) {
+      mrCodeValue =
+        mrInfo.mrCode || `MR-${mrNameToUse.toUpperCase().slice(0, 4)}`;
+    } else {
+      mrCodeValue = `MR-${mrNameToUse.toUpperCase().slice(0, 4)}`;
+    }
+
+    const stockReturn = new StockReturn({
+      returnId: returnId,
+      mrId: new mongoose.Types.ObjectId(mrId),
+      mrCode: mrCodeValue,
+      mrName: mrNameToUse,
+      returnDate: returnDate || new Date(),
+      items: returnItems,
+      totalItems: returnItems.length,
+      totalQuantity: totalQuantity,
+      totalValue: totalValue,
+      remarks: remarks || "",
+      status: "Pending",
+      createdBy: createdById,
+    });
+
+    if (stockInMrUpdates.length > 0) {
+      await StockInMrHand.bulkWrite(stockInMrUpdates, { session });
+    }
+
+    await stockReturn.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    const populatedReturn = await StockReturn.findById(stockReturn._id)
+      .populate("createdBy", "name email")
+      .lean();
+
+    return res.status(201).json({
+      success: true,
+      message: "Stock return created successfully",
+      data: populatedReturn,
+    });
+  } catch (error) {
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
+    session.endSession();
+
+    console.error("Error creating stock return:", error);
+
+    if (error.name === "ValidationError") {
+      const validationErrors = {};
+      if (error.errors) {
+        for (const field in error.errors) {
+          validationErrors[field] = error.errors[field].message;
+        }
+      }
+      return res.status(400).json({
+        success: false,
+        message: "Validation failed",
+        errors: validationErrors,
+      });
+    }
+
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: "Duplicate return ID. Please try again.",
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to create stock return",
+      error: error.message,
+    });
+  }
+});
+
+// ==================== PUT /:id/status ====================
+router.put("/:id/status", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -245,12 +584,8 @@ router.put("/stock-returns/:id/status", async (req, res) => {
     }
 
     const previousStatus = stockReturn.status;
-
-    const stockUpdates = [];
     const stockInMrUpdates = [];
-    const mrCashUpdates = [];
 
-    // Handle Rejected status
     if (status === "Rejected" && previousStatus !== "Rejected") {
       for (const item of stockReturn.items) {
         stockInMrUpdates.push({
@@ -268,15 +603,9 @@ router.put("/stock-returns/:id/status", async (req, res) => {
             },
           },
         });
-
-        if (previousStatus === "Approved") {
-          // If you have a Stock model, you would update it here
-          // For now, only update StockInMrHand
-        }
       }
     }
 
-    // Handle Approved status
     if (status === "Approved" && previousStatus === "Pending") {
       for (const item of stockReturn.items) {
         stockInMrUpdates.push({
@@ -294,23 +623,9 @@ router.put("/stock-returns/:id/status", async (req, res) => {
             },
           },
         });
-
-        // If you have a Stock model for warehouse stock, update it here
-        if (item.stockRecordId) {
-          stockUpdates.push({
-            updateOne: {
-              filter: { _id: item.stockRecordId },
-              update: {
-                $inc: { remainingQty: item.returnQty },
-                $set: { updatedAt: new Date() },
-              },
-            },
-          });
-        }
       }
     }
 
-    // Handle Approved after Rejected
     if (status === "Approved" && previousStatus === "Rejected") {
       for (const item of stockReturn.items) {
         stockInMrUpdates.push({
@@ -328,26 +643,11 @@ router.put("/stock-returns/:id/status", async (req, res) => {
             },
           },
         });
-
-        if (item.stockRecordId) {
-          stockUpdates.push({
-            updateOne: {
-              filter: { _id: item.stockRecordId },
-              update: {
-                $inc: { remainingQty: item.returnQty },
-                $set: { updatedAt: new Date() },
-              },
-            },
-          });
-        }
       }
     }
 
-    // Only execute if we have updates
     if (stockInMrUpdates.length > 0) {
-      const bulkWriteResult = await StockInMrHand.bulkWrite(stockInMrUpdates, {
-        session,
-      });
+      await StockInMrHand.bulkWrite(stockInMrUpdates, { session });
     }
 
     stockReturn.status = status;
@@ -360,6 +660,8 @@ router.put("/stock-returns/:id/status", async (req, res) => {
 
     if (status === "Rejected") {
       stockReturn.rejectedReason = rejectedReason || "No reason provided";
+      stockReturn.approvedBy = undefined;
+      stockReturn.approvedAt = undefined;
     }
 
     await stockReturn.save({ session });
@@ -384,7 +686,9 @@ router.put("/stock-returns/:id/status", async (req, res) => {
       },
     });
   } catch (error) {
-    await session.abortTransaction();
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
     session.endSession();
 
     console.error("Error updating stock return status:", error);
@@ -397,8 +701,8 @@ router.put("/stock-returns/:id/status", async (req, res) => {
   }
 });
 
-// Delete stock return
-router.delete("/stock-returns/:id", async (req, res) => {
+// ==================== DELETE /:id ====================
+router.delete("/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -471,7 +775,9 @@ router.delete("/stock-returns/:id", async (req, res) => {
       message: "Stock return deleted successfully",
     });
   } catch (error) {
-    await session.abortTransaction();
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
     session.endSession();
 
     console.error("Error deleting stock return:", error);
@@ -483,8 +789,8 @@ router.delete("/stock-returns/:id", async (req, res) => {
   }
 });
 
-// Bulk delete stock returns
-router.delete("/stock-returns/bulk", async (req, res) => {
+// ==================== DELETE /bulk ====================
+router.delete("/bulk", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -583,338 +889,7 @@ router.delete("/stock-returns/bulk", async (req, res) => {
     return res.status(200).json({
       success: true,
       message: `${stockReturns.length} stock return(s) deleted successfully`,
-    });
-  } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-
-    console.error("Error bulk deleting stock returns:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to delete stock returns",
-      error: error.message,
-    });
-  }
-});
-
-// Get statistics
-router.get("/stock-returns/statistics", async (req, res) => {
-  try {
-    const { mrCode, startDate, endDate } = req.query;
-
-    const matchStage = { isDeleted: false };
-
-    if (mrCode) {
-      matchStage.mrCode = mrCode;
-    }
-
-    if (startDate || endDate) {
-      matchStage.returnDate = {};
-      if (startDate) matchStage.returnDate.$gte = new Date(startDate);
-      if (endDate) matchStage.returnDate.$lte = new Date(endDate);
-    }
-
-    const stats = await StockReturn.aggregate([
-      { $match: matchStage },
-      {
-        $group: {
-          _id: null,
-          totalReturns: { $sum: 1 },
-          totalQuantity: { $sum: "$totalQuantity" },
-          totalValue: { $sum: "$totalValue" },
-          pendingReturns: {
-            $sum: { $cond: [{ $eq: ["$status", "Pending"] }, 1, 0] },
-          },
-          approvedReturns: {
-            $sum: { $cond: [{ $eq: ["$status", "Approved"] }, 1, 0] },
-          },
-          rejectedReturns: {
-            $sum: { $cond: [{ $eq: ["$status", "Rejected"] }, 1, 0] },
-          },
-        },
-      },
-    ]);
-
-    const monthlyStats = await StockReturn.aggregate([
-      { $match: matchStage },
-      {
-        $group: {
-          _id: {
-            year: { $year: "$returnDate" },
-            month: { $month: "$returnDate" },
-          },
-          count: { $sum: 1 },
-          totalQuantity: { $sum: "$totalQuantity" },
-          totalValue: { $sum: "$totalValue" },
-        },
-      },
-      { $sort: { "_id.year": -1, "_id.month": -1 } },
-      { $limit: 6 },
-    ]);
-
-    const mrStats = await StockReturn.aggregate([
-      { $match: matchStage },
-      {
-        $group: {
-          _id: "$mrCode",
-          mrName: { $first: "$mrName" },
-          count: { $sum: 1 },
-          totalQuantity: { $sum: "$totalQuantity" },
-        },
-      },
-      { $sort: { count: -1 } },
-      { $limit: 5 },
-    ]);
-
-    return res.status(200).json({
-      success: true,
-      data: {
-        summary: stats[0] || {
-          totalReturns: 0,
-          totalQuantity: 0,
-          totalValue: 0,
-          pendingReturns: 0,
-          approvedReturns: 0,
-          rejectedReturns: 0,
-        },
-        monthlyStats,
-        topMRs: mrStats,
-      },
-    });
-  } catch (error) {
-    console.error("Error fetching statistics:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch statistics",
-      error: error.message,
-    });
-  }
-});
-
-// Create stock return - FIXED VERSION
-router.post("/stock-returns", async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  try {
-    const { mrId, mrName, items, remarks, returnDate } = req.body;
-    if (!mrId || !items || !Array.isArray(items) || items.length === 0) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Medical Representative ID and items are required",
-      });
-    }
-
-    // Validate mrId
-    if (!mongoose.Types.ObjectId.isValid(mrId)) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Invalid Medical Representative ID format",
-      });
-    }
-
-    // Get MR info first
-    let mrInfo = null;
-    let mrNameToUse = mrName;
-
-    if (mrId) {
-      mrInfo = await MR.findOne({ _id: mrId }).session(session);
-      if (mrInfo) {
-        mrNameToUse = mrInfo.mrName || mrName;
-      }
-    }
-
-    if (!mrNameToUse) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Medical Representative name is required",
-      });
-    }
-
-    // Get MR stock using mrId (primary) and mrName (fallback)
-    let mrStock = await StockInMrHand.findOne({ mrId: mrId }).session(session);
-
-    // If not found by mrId, try by mrName
-    if (!mrStock) {
-      mrStock = await StockInMrHand.findOne({ mrName: mrNameToUse }).session(
-        session
-      );
-    }
-
-    if (!mrStock) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({
-        success: false,
-        message: "No stock found for this Medical Representative",
-      });
-    }
-
-    const returnItems = [];
-    const stockInMrUpdates = [];
-    let totalQuantity = 0;
-    let totalValue = 0;
-
-    // Validate and process each item
-    for (const [index, item] of items.entries()) {
-
-      // Check for required fields
-      if (!item.productId || !item.returnQty || item.returnQty <= 0) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({
-          success: false,
-          message: `Invalid item data at position ${
-            index + 1
-          }. Product ID and positive return quantity are required`,
-        });
-      }
-
-      const productInMr = mrStock.productsInHand?.find((p) => {
-        const productIdStr = p.productId?.toString();
-        const itemProductIdStr = item.productId?.toString();
-        return productIdStr === itemProductIdStr;
-      });
-
-
-      if (!productInMr) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(404).json({
-          success: false,
-          message: `Product "${
-            item.productName || item.productId
-          }" not found in stock for MR: ${mrNameToUse}`,
-        });
-      }
-
-      // Check available quantity
-      const availableQuantity = productInMr.quantity || 0;
-
-      if (availableQuantity < item.returnQty) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({
-          success: false,
-          message: `Insufficient stock for "${
-            item.productName || productInMr.productName
-          }". Available: ${availableQuantity}, Requested: ${item.returnQty}`,
-        });
-      }
-
-      const returnItem = {
-        productId: productInMr.productId,
-        stockRecordId: productInMr._id, // Use the _id from productsInHand
-        productCode:
-          item.productCode ||
-          productInMr.productCode ||
-          `PROD-${productInMr.productId.toString().slice(-6)}`,
-        productName: item.productName || productInMr.productName,
-        batch: item.batch || productInMr.batch || "N/A",
-        expiry: item.expiry || productInMr.expiry || null,
-        returnQty: Number(item.returnQty),
-        returnDate: item.returnDate || new Date(),
-        remarks: item.remarks || "",
-        costPrice: item.costPrice || productInMr.costPrice || 0,
-        unit: productInMr.unit || item.unit || "box",
-      };
-
-      returnItems.push(returnItem);
-      totalQuantity += returnItem.returnQty;
-      totalValue += returnItem.returnQty * returnItem.costPrice;
-
-      // Prepare update - decrement the MR's stock in productsInHand
-      stockInMrUpdates.push({
-        updateOne: {
-          filter: {
-            _id: mrStock._id,
-            "productsInHand._id": productInMr._id,
-          },
-          update: {
-            $inc: { "productsInHand.$.quantity": -item.returnQty },
-            $set: {
-              "productsInHand.$.lastUpdated": new Date(),
-              updatedAt: new Date(),
-            },
-          },
-        },
-      });
-    }
-
-    const returnId = await generateReturnId();
-
-    let createdById;
-    if (req.user?._id) {
-      createdById = req.user._id;
-    } else if (
-      req.body.createdBy &&
-      mongoose.Types.ObjectId.isValid(req.body.createdBy)
-    ) {
-      createdById = new mongoose.Types.ObjectId(req.body.createdBy);
-    } else {
-      createdById = new mongoose.Types.ObjectId("000000000000000000000001");
-    }
-
-    // Get MR details from MR model if available
-    let mrDetails = null;
-    let mrCodeValue = "";
-
-    if (mrId && mongoose.Types.ObjectId.isValid(mrId)) {
-      const mrDoc = await MR.findOne({ _id: mrId }).session(session);
-      if (mrDoc) {
-        mrDetails = mrDoc;
-        mrCodeValue =
-          mrDoc.mrCode || `MR-${mrNameToUse.toUpperCase().slice(0, 4)}`;
-      }
-    }
-
-    // Fallback if still no MR code
-    if (!mrCodeValue) {
-      mrCodeValue = `MR-${mrNameToUse.toUpperCase().slice(0, 4)}`;
-    }
-
-    const stockReturn = new StockReturn({
-      returnId: returnId,
-      mrId: new mongoose.Types.ObjectId(mrId),
-      mrCode: mrCodeValue,
-      mrName: mrNameToUse,
-      returnDate: returnDate || new Date(),
-      items: returnItems,
-      totalItems: returnItems.length,
-      totalQuantity: totalQuantity,
-      totalValue: totalValue,
-      remarks: remarks || "",
-      status: "Pending",
-      createdBy: createdById,
-    });
-
-    // Execute stock updates
-    if (stockInMrUpdates.length > 0) {
-      const bulkResult = await StockInMrHand.bulkWrite(stockInMrUpdates, {
-        session,
-      });
-    }
-
-    // Save stock return
-    await stockReturn.save({ session });
-
-    await session.commitTransaction();
-    session.endSession();
-
-    const populatedReturn = await StockReturn.findById(stockReturn._id)
-      .populate("createdBy", "name email")
-      .lean();
-
-    return res.status(201).json({
-      success: true,
-      message: "Stock return created successfully",
-      data: populatedReturn,
+      deletedCount: stockReturns.length,
     });
   } catch (error) {
     if (session.inTransaction()) {
@@ -922,33 +897,10 @@ router.post("/stock-returns", async (req, res) => {
     }
     session.endSession();
 
-    console.error("Error creating stock return:", error);
-
-    if (error.name === "ValidationError") {
-      const validationErrors = {};
-      if (error.errors) {
-        for (const field in error.errors) {
-          validationErrors[field] = error.errors[field].message;
-        }
-      }
-
-      return res.status(400).json({
-        success: false,
-        message: "Validation failed",
-        errors: validationErrors,
-      });
-    }
-
-    if (error.code === 11000) {
-      return res.status(400).json({
-        success: false,
-        message: "Duplicate return ID. Please try again.",
-      });
-    }
-
+    console.error("Error bulk deleting stock returns:", error);
     return res.status(500).json({
       success: false,
-      message: "Failed to create stock return",
+      message: "Failed to delete stock returns",
       error: error.message,
     });
   }

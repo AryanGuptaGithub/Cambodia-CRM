@@ -23,7 +23,7 @@ const sendError = (res, error, code = 400) => {
 };
 
 // GET ALL STAFF
-router.get("/staffs", async (_, res) => {
+router.get("/", async (_, res) => {
   try {
     const staff = await staffSchema
       .find()
@@ -35,7 +35,8 @@ router.get("/staffs", async (_, res) => {
   }
 });
 
-router.get("/staff/teams", async (_, res) => {
+// GET TEAMS
+router.get("/teams", async (_, res) => {
   try {
     const staff = await staffSchema.find({}, "teamName");
     const teams = [...new Set(staff.map((i) => normalizeString(i.teamName)).filter(Boolean))];
@@ -46,7 +47,7 @@ router.get("/staff/teams", async (_, res) => {
 });
 
 // GET SINGLE STAFF
-router.get("/staffs/:id", async (req, res) => {
+router.get("/:id", async (req, res) => {
   try {
     const staff = await staffSchema
       .findById(req.params.id)
@@ -61,7 +62,7 @@ router.get("/staffs/:id", async (req, res) => {
 });
 
 // CREATE NEW STAFF
-router.post("/staffs", async (req, res) => {
+router.post("/", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
@@ -152,7 +153,7 @@ router.post("/staffs", async (req, res) => {
 });
 
 // UPDATE STAFF
-router.put("/staff/:id", async (req, res) => {
+router.put("/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   
@@ -226,7 +227,7 @@ router.put("/staff/:id", async (req, res) => {
 });
 
 // DELETE MULTIPLE STAFF
-router.delete("/staffs", async (req, res) => {
+router.delete("/", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
@@ -249,7 +250,7 @@ router.delete("/staffs", async (req, res) => {
 });
 
 // DELETE SINGLE STAFF
-router.delete("/staff/:id", async (req, res) => {
+router.delete("/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
@@ -271,7 +272,7 @@ router.delete("/staff/:id", async (req, res) => {
 });
 
 // IMPORT STAFF
-router.post("/staffs/import", async (req, res) => {
+router.post("/import", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
@@ -452,7 +453,7 @@ router.post("/staffs/import", async (req, res) => {
 });
 
 // UPDATE STAFF STATUS
-router.put("/staff/status/:id", async (req, res) => {
+router.put("/status/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { isActive } = req.body;

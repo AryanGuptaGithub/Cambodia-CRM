@@ -197,7 +197,7 @@ const updateExistingAdjustmentInReport = async (
 };
 
 // GET all stock adjustments
-router.get("/stock-adjustments", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const adjustments = await StockAdjustment.find()
       .populate({
@@ -221,7 +221,7 @@ router.get("/stock-adjustments", async (req, res) => {
 });
 
 // POST create new stock adjustment
-router.post("/stock-adjustments", async (req, res) => {
+router.post("/", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -343,7 +343,7 @@ router.post("/stock-adjustments", async (req, res) => {
 });
 
 // PUT update stock adjustment
-router.put("/stock-adjustments/:id", async (req, res) => {
+router.put("/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -483,7 +483,7 @@ router.put("/stock-adjustments/:id", async (req, res) => {
 });
 
 // DELETE stock adjustment
-router.delete("/stock-adjustments/:id", async (req, res) => {
+router.delete("/:id", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -557,7 +557,7 @@ router.delete("/stock-adjustments/:id", async (req, res) => {
 });
 
 // Bulk delete (similar structure, needs ReportInHand update)
-router.delete("/stock-adjustments/bulk", async (req, res) => {
+router.delete("/bulk", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
@@ -657,7 +657,7 @@ router.delete("/stock-adjustments/bulk", async (req, res) => {
 });
 
 // GET single adjustment
-router.get("/stock-adjustments/:id", async (req, res) => {
+router.get("/:id", async (req, res) => {
   const { id } = req.params;
 
   if (!mongoose.Types.ObjectId.isValid(id)) {

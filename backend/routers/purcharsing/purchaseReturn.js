@@ -338,7 +338,9 @@ const processPurchaseReturnProducts = async (
   }
 };
 
-router.get("/purchase-return", async (req, res) => {
+// Changed from: router.get("/purchase-return", ...)
+// To: router.get("/", ...)
+router.get("/", async (req, res) => {
   try {
     const {
       page = 1,
@@ -402,7 +404,9 @@ router.get("/purchase-return", async (req, res) => {
 });
 
 /** ✅ POST create purchase return - UPDATED WITH AVERAGE PRICE AND STOCK VALIDATION */
-router.post("/purchase-return", async (req, res) => {
+// Changed from: router.post("/purchase-return", ...)
+// To: router.post("/", ...)
+router.post("/", async (req, res) => {
   try {
     const data = req.body;
     const { invoiceNumber, products, supplierName } = data;
@@ -572,7 +576,9 @@ router.post("/purchase-return", async (req, res) => {
 });
 
 /** ✅ PUT update purchase return - UPDATED WITH AVERAGE PRICE */
-router.put("/purchase-return/:id", async (req, res) => {
+// Changed from: router.put("/purchase-return/:id", ...)
+// To: router.put("/:id", ...)
+router.put("/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const updatedData = req.body;
@@ -647,7 +653,9 @@ router.put("/purchase-return/:id", async (req, res) => {
 });
 
 /** ✅ DELETE single purchase return - UPDATED WITH AVERAGE PRICE */
-router.delete("/purchase-return/:id", async (req, res) => {
+// Changed from: router.delete("/purchase-return/:id", ...)
+// To: router.delete("/:id", ...)
+router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const purchaseReturn = await PurchaseReturn.findById(id);
@@ -676,7 +684,9 @@ router.delete("/purchase-return/:id", async (req, res) => {
 });
 
 /** ✅ BULK DELETE */
-router.delete("/purchase-return", async (req, res) => {
+// Changed from: router.delete("/purchase-return", ...)
+// To: router.delete("/", ...)
+router.delete("/", async (req, res) => {
   try {
     const { ids } = req.body;
     if (!Array.isArray(ids) || ids.length === 0) {
@@ -706,7 +716,9 @@ router.delete("/purchase-return", async (req, res) => {
 });
 
 /** ✅ GET by invoice */
-router.get("/purchase-return/invoice/:invoiceNumber", async (req, res) => {
+// Changed from: router.get("/purchase-return/invoice/:invoiceNumber", ...)
+// To: router.get("/invoice/:invoiceNumber", ...)
+router.get("/invoice/:invoiceNumber", async (req, res) => {
   try {
     const { invoiceNumber } = req.params;
     const results = await PurchaseReturn.find({
@@ -722,7 +734,9 @@ router.get("/purchase-return/invoice/:invoiceNumber", async (req, res) => {
 });
 
 /** ✅ Stats summary */
-router.get("/purchase-return/stats/summary", async (req, res) => {
+// Changed from: router.get("/purchase-return/stats/summary", ...)
+// To: router.get("/stats/summary", ...)
+router.get("/stats/summary", async (req, res) => {
   try {
     const totalReturns = await PurchaseReturn.countDocuments();
     const pendingReturns = await PurchaseReturn.countDocuments({
@@ -767,7 +781,9 @@ router.get("/purchase-return/stats/summary", async (req, res) => {
 });
 
 /** ✅ PATCH update status */
-router.patch("/purchase-return/:id/status", async (req, res) => {
+// Changed from: router.patch("/purchase-return/:id/status", ...)
+// To: router.patch("/:id/status", ...)
+router.patch("/:id/status", async (req, res) => {
   try {
     const { status } = req.body;
     if (!["pending", "approved", "rejected", "completed"].includes(status)) {

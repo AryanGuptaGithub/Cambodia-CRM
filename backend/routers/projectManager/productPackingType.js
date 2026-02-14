@@ -3,8 +3,8 @@ import ProductPackingType from "../../models/projectManger/ProductPackingType.js
 
 const router = express.Router();
 
-// GET /api/product-packing-types - fetch all
-router.get("/product-packing-types", async (req, res) => {
+// GET ALL PRODUCT PACKING TYPES
+router.get("/", async (req, res) => {
   try {
     const packingTypes = await ProductPackingType.find().sort({ name: 1 });
     res.json({
@@ -22,8 +22,8 @@ router.get("/product-packing-types", async (req, res) => {
   }
 });
 
-// GET /api/product-packing-types/:id - fetch single
-router.get("/product-packing-types/:id", async (req, res) => {
+// GET SINGLE PRODUCT PACKING TYPE
+router.get("/:id", async (req, res) => {
   try {
     const packingType = await ProductPackingType.findById(req.params.id);
 

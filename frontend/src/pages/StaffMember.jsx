@@ -62,7 +62,7 @@ const StaffMember = () => {
     const fetchStaffs = async () => {
       try {
         setLoading(true);
-        const response = await fetch(`${backendUrl}/api/staffs`);
+        const response = await fetch(`${backendUrl}/api/staff`);
         if (!response.ok) throw new Error("Failed to fetch staff");
         const data = await response.json();
         setStaff(data);
@@ -186,7 +186,7 @@ const StaffMember = () => {
   // ⏬ Common fetch function to refresh staff data
   const refreshStaffList = async () => {
     try {
-      const res = await fetch(`${backendUrl}/api/staffs`);
+      const res = await fetch(`${backendUrl}/api/staff`);
       const data = await res.json();
       setStaff(data);
       setSelected([]);
@@ -218,7 +218,7 @@ const StaffMember = () => {
 
     try {
       const endpoint = isBulk
-        ? `${backendUrl}/api/staffs`
+        ? `${backendUrl}/api/staff`
         : `${backendUrl}/api/staff/${staffIds[0]}`;
 
       const config = isBulk ? { data: staffIds } : undefined;
@@ -364,7 +364,7 @@ const StaffMember = () => {
     setIsUploading(true);
     try {
       const res = await axios.post(
-        `${backendUrl}/api/staffs/import`,
+        `${backendUrl}/api/staff/import`,
         parsedData
       );
 

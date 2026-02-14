@@ -33,7 +33,7 @@ const SampleExcelDownloadMRBasicPayroll = () => {
       } catch (err) {
 
         try {
-          response = await axios.get(`${backendUrl}/api/staffs`);
+          response = await axios.get(`${backendUrl}/api/staff`);
 
           // Extract staff data based on the structure
           let staffs = [];

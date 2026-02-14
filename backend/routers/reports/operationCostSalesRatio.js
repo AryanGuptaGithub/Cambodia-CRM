@@ -619,7 +619,7 @@ const exportOperationCostSalesRatio = async (req, res) => {
   }
 };
 
-router.get("/operation-cost-sales-ratio", getOperationCostSalesRatio);
-router.get("/operation-cost-sales-ratio/export", exportOperationCostSalesRatio);
+router.get("/", getOperationCostSalesRatio);
+router.get("/export", exportOperationCostSalesRatio);
 
 export default router;
